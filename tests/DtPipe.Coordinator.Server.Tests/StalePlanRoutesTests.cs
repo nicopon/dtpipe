@@ -19,7 +19,7 @@ public sealed class StalePlanRoutesTests : IDisposable
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    private readonly CoordinatorHost _host = new();
+    private readonly CoordinatorHost _host = new(check: _ => new DesignCheck(true, null));
     private readonly HttpClient _admin;
 
     public StalePlanRoutesTests()
@@ -136,7 +136,7 @@ public sealed class StalePlanRoutesTests : IDisposable
         var (registry, inventory) = await NodeAAndARunnerAsync();
         var library = _host.Services.GetRequiredService<PipelineLibrary>();
         await library.SaveAsync("orders", "a:\n  input: sqlite:${{LAB_DB}}\nb:\n  from: a\n  output: csv:out.csv\n", "create", Ct);
-        await library.SavePlacementAsync("orders", new Dictionary<string, string> { ["a"] = "node-a" }, "place", Ct);
+        await library.SaveBindingsAsync("orders", new Dictionary<string, Binding> { ["a"] = new Binding("node-a") }, "bind", Ct);
 
         using var first = await _admin.PostAsJsonAsync("/api/library/orders/distribute", new { save = true }, Web, Ct);
         Assert.Equal(HttpStatusCode.OK, first.StatusCode);
@@ -156,11 +156,11 @@ public sealed class StalePlanRoutesTests : IDisposable
     }
 
     /// <summary>
-    /// A brick branch with no node cannot be saved as a plan, and says which nodes offer it; once the placement names the node,
-    /// the plan is saved. A node the placement names that does not exist is listed as a problem, and the deployment is refused.
+    /// A brick branch with no node cannot be saved as a plan, and says which nodes offer it; once a binding names the node,
+    /// the plan is saved. A node a binding names that does not exist is listed as a problem, and the deployment is refused.
     /// </summary>
     [Fact]
-    public async Task ABrickNeedsItsNode_AndAPlacementOnAnAbsentNodeIsListedAndRefusesDeployment()
+    public async Task ABrickNeedsItsNode_AndABindingOnAnAbsentNodeIsListedAndRefusesDeployment()
     {
         await NodeAAndARunnerAsync();
         var library = _host.Services.GetRequiredService<PipelineLibrary>();
@@ -174,19 +174,19 @@ public sealed class StalePlanRoutesTests : IDisposable
         Assert.Equal(HttpStatusCode.Conflict, unplaced.StatusCode);
         Assert.Contains("node-a", await unplaced.Content.ReadAsStringAsync(Ct));
 
-        using var placed = await _admin.PutAsJsonAsync("/api/library/orders/placement", new { placement = new Dictionary<string, string> { ["a"] = "node-a" } }, Web, Ct);
+        using var placed = await _admin.PutAsJsonAsync("/api/library/orders/bindings", new { bindings = new Dictionary<string, Binding> { ["a"] = new Binding("node-a") } }, Web, Ct);
         placed.EnsureSuccessStatusCode();
         using var saved = await _admin.PostAsJsonAsync("/api/library/orders/distribute", new { save = true }, Web, Ct);
         Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
 
-        using var moved = await _admin.PutAsJsonAsync("/api/library/orders/placement", new { placement = new Dictionary<string, string> { ["a"] = "node-gone" } }, Web, Ct);
+        using var moved = await _admin.PutAsJsonAsync("/api/library/orders/bindings", new { bindings = new Dictionary<string, Binding> { ["a"] = new Binding("node-gone") } }, Web, Ct);
         moved.EnsureSuccessStatusCode();
         var problems = (await moved.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("problems");
         Assert.Equal("unknown-node", Assert.Single(problems.EnumerateArray()).GetProperty("cause").GetString());
         var listed = (await _admin.GetFromJsonAsync<JsonElement[]>("/api/library", Web, Ct))!.Single();
-        Assert.Single(listed.GetProperty("placementProblems").EnumerateArray());
+        Assert.Single(listed.GetProperty("bindingProblems").EnumerateArray());
         using var deploy = await _admin.PostAsync("/api/library/orders/deploy", null, Ct);
         Assert.Equal(HttpStatusCode.Conflict, deploy.StatusCode);
-        Assert.Contains("does not hold", await deploy.Content.ReadAsStringAsync(Ct));
+        Assert.Contains("do not hold", await deploy.Content.ReadAsStringAsync(Ct));
     }
 }

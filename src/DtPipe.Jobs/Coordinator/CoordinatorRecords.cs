@@ -49,20 +49,33 @@ public sealed record Recognition(string? Match, string? Source, string? Sink, IR
 /// <summary>What each top-level branch of the job is, by alias.</summary>
 public sealed record RecognizeResponse(IReadOnlyDictionary<string, Recognition> Branches);
 
+/// <summary>The one binding mode: the branch must still be, word for word, the brick it is bound to.</summary>
+public static class BindingModes
+{
+    public const string Strict = "strict";
+}
+
 /// <summary>
-/// A job saved into the library, with the message of its commit. <see cref="Placement"/> names the node of the brick branches
-/// the publisher knows, by alias: each is set, the entries the library already keeps for other aliases stay, and none leaves the
-/// placement as it was.
+/// How a brick branch of a pipeline is bound: <see cref="Node"/> is the node it runs on, <see cref="Brick"/> the id of the
+/// brick it is on that node (the coordinator resolves it from the job's text when a save leaves it out) and <see cref="Mode"/>
+/// how the binding is held to it (<see cref="BindingModes.Strict"/> when absent).
 /// </summary>
-public sealed record LibrarySave(string Yaml, string? Message, IReadOnlyDictionary<string, string>? Placement = null);
+public sealed record Binding(string Node, string? Brick = null, string? Mode = null);
+
+/// <summary>
+/// A job saved into the library, with the message of its commit. <see cref="Bindings"/> binds the brick branches
+/// the publisher knows, by alias: each is set, the entries the library already keeps for other aliases stay, and none leaves the
+/// bindings as they were.
+/// </summary>
+public sealed record LibrarySave(string Yaml, string? Message, IReadOnlyDictionary<string, Binding>? Bindings = null);
 
 /// <summary>
 /// A save's outcome. <see cref="Commit"/> is the last commit of the pipeline's job, the version a later
 /// <c>If-Match</c> names: a plan saved beside it does not change it. <see cref="Redistribute"/>: the plan saved for it no longer matches its job.
-/// <see cref="Deployed"/>: a deployment still runs the version before. <see cref="PlacementProblems"/>: why the pipeline's placement
-/// does not hold now, as the library words it.
+/// <see cref="Deployed"/>: a deployment still runs the version before. <see cref="BindingProblems"/>: why the pipeline's bindings
+/// do not hold now, as the library words it.
 /// </summary>
-public sealed record LibrarySaved(string Id, string? Commit, bool Redistribute, bool Deployed, IReadOnlyList<string>? PlacementProblems = null);
+public sealed record LibrarySaved(string Id, string? Commit, bool Redistribute, bool Deployed, IReadOnlyList<string>? BindingProblems = null);
 
 /// <summary>A save refused by its precondition (412), with the pipeline's commit in place, if any.</summary>
 public sealed record LibraryConflict(string Error, string? Commit);

@@ -1,0 +1,17 @@
+{
+  "current": {
+    "node": "node-2",
+    "brick": "orders-history",
+    "mode": "strict"
+  },
+  "legacy": {
+    "node": "node-3",
+    "brick": "legacy-orders",
+    "mode": "strict"
+  },
+  "load": {
+    "node": "node-4",
+    "brick": "fact-orders",
+    "mode": "strict"
+  }
+}

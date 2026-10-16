@@ -17,22 +17,16 @@ internal static class LibraryEndpoints
         designer.MapPut(CoordinatorApi.LibraryRoute, async (string id, LibrarySave request, HttpRequest http, PipelineLibrary library,
             DesignValidator validator, DeploymentManager deployments, EventBus bus, CancellationToken ct) =>
         {
-            // The check samples each brick on the node the placement names: the one this save carries over the one kept.
-            var placed = new Dictionary<string, string>((await library.GetAsync(id, ct))?.Placement ?? new Dictionary<string, string>());
-            foreach (var (alias, node) in request.Placement ?? new Dictionary<string, string>()) placed[alias] = node;
-            DesignCheck check;
-            try { check = await validator.ValidateAsync(request.Yaml, placed, ct); }
-            catch (Exception ex) when (ex is not OperationCanceledException) { check = new DesignCheck(false, $"The job is not readable: {ex.Message}"); }
-            if (!check.Ok)
-                return Results.Json(new LibraryRefused("The designer's check refused this job: nothing was saved.", check.Report),
-                    statusCode: StatusCodes.Status422UnprocessableEntity);
-            if (request.Placement?.Any(p => string.IsNullOrWhiteSpace(p.Key) || string.IsNullOrWhiteSpace(p.Value)) == true)
-                return Results.BadRequest(new { error = "A placement names a node for each branch: no empty alias, no empty node." });
+            if (Refusal(request.Bindings) is { } malformed) return Results.BadRequest(new { error = malformed });
+            // The check samples each brick on the node its binding names: the one this save carries over the one kept.
+            var bound = new Dictionary<string, Binding>((await library.GetAsync(id, ct))?.Bindings ?? new Dictionary<string, Binding>());
+            foreach (var (alias, binding) in request.Bindings ?? new Dictionary<string, Binding>()) bound[alias] = binding;
+            if (await CheckedAsync(validator, request.Yaml, bound, ct) is { } refused) return refused;
             var absent = http.Headers.IfNoneMatch.ToString().Trim() == "*";
             var expected = http.Headers.IfMatch.ToString().Trim() is { Length: > 0 } tag ? (tag.StartsWith("W/") ? tag[2..] : tag).Trim('"') : null;
             var precondition = absent || expected is not null ? new SavePrecondition(absent, expected) : null;
             SaveOutcome saved;
-            try { saved = await library.SaveAsync(id, request.Yaml, request.Message ?? "", ct, precondition, request.Placement); }
+            try { saved = await library.SaveAsync(id, request.Yaml, request.Message ?? "", ct, precondition, request.Bindings); }
             catch (PreconditionFailedException ex)
             {
                 return Results.Json(new LibraryConflict(ex.Message, ex.Commit), statusCode: StatusCodes.Status412PreconditionFailed);
@@ -41,7 +35,7 @@ internal static class LibraryEndpoints
             // A deployment runs the text it was planned from: only the saved plan, still current, is this text.
             var deployed = deployments.DeployedPlanId(id) is { } deployedPlan
                 && (saved.PlanStale || saved.PlanId is null || deployedPlan != saved.PlanId);
-            var problems = (await library.GetAsync(id, ct))?.PlacementProblems.Select(p => p.Message).ToList() ?? [];
+            var problems = (await library.GetAsync(id, ct))?.BindingProblems.Select(p => p.Message).ToList() ?? [];
             return Results.Ok(new LibrarySaved(id, saved.Commit, saved.PlanStale, deployed, problems));
         });
         designer.MapDelete("/library/{id}", async (string id, PipelineLibrary library, EventBus bus, CancellationToken ct) =>
@@ -57,16 +51,18 @@ internal static class LibraryEndpoints
             return new { yaml, diff };
         });
 
-        // The node of each brick branch of a job, kept beside it. What it names is saved as given, an absent node included:
-        // the pipeline then lists it as a problem, which a deployment refuses.
-        designer.MapPut("/library/{id}/placement", async (string id, PlacementRequest request, PipelineLibrary library, EventBus bus, CancellationToken ct) =>
+        // The binding of each brick branch of a job, kept beside it. What it names is saved as given, an absent node included:
+        // the pipeline then lists it as a problem, which a deployment refuses. Like a save, it is checked first.
+        designer.MapPut("/library/{id}/bindings", async (string id, BindingsRequest request, PipelineLibrary library,
+            DesignValidator validator, EventBus bus, CancellationToken ct) =>
         {
-            var placement = request.Placement ?? new Dictionary<string, string>();
-            if (placement.Any(p => string.IsNullOrWhiteSpace(p.Key) || string.IsNullOrWhiteSpace(p.Value)))
-                return Results.BadRequest(new { error = "A placement names a node for each branch: no empty alias, no empty node." });
-            var saved = await library.SavePlacementAsync(id, placement, request.Message ?? "", ct);
+            var bindings = request.Bindings ?? new Dictionary<string, Binding>();
+            if (Refusal(bindings) is { } malformed) return Results.BadRequest(new { error = malformed });
+            var doc = await library.GetAsync(id, ct) ?? throw new ConflictException($"'{id}' is not in the library.");
+            if (await CheckedAsync(validator, doc.Yaml, bindings, ct) is { } refused) return refused;
+            var saved = await library.SaveBindingsAsync(id, bindings, request.Message ?? "", ct);
             bus.Publish("library", new { id, commit = saved.Commit });
-            var problems = (await library.GetAsync(id, ct))?.PlacementProblems ?? [];
+            var problems = (await library.GetAsync(id, ct))?.BindingProblems ?? [];
             return Results.Ok(new { id, commit = saved.Commit, redistribute = saved.PlanStale, problems });
         });
 
@@ -75,7 +71,7 @@ internal static class LibraryEndpoints
         {
             var doc = await library.GetAsync(id, ct);
             if (doc is null) return Results.NotFound(new { error = $"'{id}' is not in the library." });
-            var plan = await placer.PlanAsync(id, doc.Yaml, doc.Placement, ct);
+            var plan = await placer.PlanAsync(id, doc.Yaml, doc.Bindings, ct);
             string? commit = null;
             if (request?.Save == true)
             {
@@ -83,21 +79,21 @@ internal static class LibraryEndpoints
                 commit = await library.SavePlanAsync(id, plan, request.Message ?? "", ct);
                 bus.Publish("library", new { id, commit });
             }
-            return Results.Ok(new { plan, commit, bricks = placer.BrickAliases(doc.Yaml, doc.Placement), offers = placer.Offers(doc.Yaml) });
+            return Results.Ok(new { plan, commit, bricks = placer.BrickAliases(doc.Yaml, doc.Bindings), offers = placer.Offers(doc.Yaml) });
         });
         designer.MapPost("/library/{id}/deploy", async (string id, PipelineLibrary library, DeploymentManager deployments, CancellationToken ct) =>
         {
             var doc = await library.GetAsync(id, ct);
             if (doc?.Plan is null) return Results.Conflict(new { error = $"'{id}' has no saved distributed plan: distribute it first." });
-            if (doc.PlacementProblems.Where(p => p.Blocking).Select(p => p.Message).ToList() is { Count: > 0 } refused)
-                return Results.Conflict(new { error = $"The placement of '{id}' does not hold: " + string.Join(" ", refused) });
+            if (doc.BindingProblems.Where(p => p.Blocking).Select(p => p.Message).ToList() is { Count: > 0 } refused)
+                return Results.Conflict(new { error = $"The bindings of '{id}' do not hold: " + string.Join(" ", refused) });
             if (!doc.PlanCurrent)
                 return Results.Conflict(new
                 {
                     error = doc.PlanStaleCause switch
                     {
                         PlanStaleCauses.Job => $"'{id}' changed since its plan was saved: distribute it again.",
-                        PlanStaleCauses.Placement => $"The placement of '{id}' changed since its plan was saved: distribute it again.",
+                        PlanStaleCauses.Bindings => $"The bindings of '{id}' changed since its plan was saved: distribute it again.",
                         _ => $"A node of '{id}' holds other groups than its plan names, or has no enabled identity: distribute it again.",
                     },
                 });
@@ -105,8 +101,29 @@ internal static class LibraryEndpoints
             return Results.Ok(doc.Plan.Plan);
         });
     }
+
+    /// <summary>Why bindings cannot be written at all: an empty alias or node, or a mode other than strict. Null when they can.</summary>
+    private static string? Refusal(IReadOnlyDictionary<string, Binding>? bindings)
+    {
+        if (bindings is null) return null;
+        if (bindings.Any(b => string.IsNullOrWhiteSpace(b.Key) || string.IsNullOrWhiteSpace(b.Value?.Node)))
+            return "A binding names a node for each branch: no empty alias, no empty node.";
+        return bindings.Where(b => Bindings.ModeOf(b.Value) != BindingModes.Strict)
+            .Select(b => $"'{b.Key}' is bound in mode '{Bindings.ModeOf(b.Value)}': the only mode is {BindingModes.Strict}.").FirstOrDefault();
+    }
+
+    /// <summary>The designer's check of <paramref name="yaml"/> under <paramref name="bindings"/>: the 422 that refuses it, or null when it passes.</summary>
+    private static async Task<IResult?> CheckedAsync(DesignValidator validator, string yaml, IReadOnlyDictionary<string, Binding> bindings, CancellationToken ct)
+    {
+        DesignCheck check;
+        try { check = await validator.ValidateAsync(yaml, bindings, ct); }
+        catch (Exception ex) when (ex is not OperationCanceledException) { check = new DesignCheck(false, $"The job is not readable: {ex.Message}"); }
+        return check.Ok ? null
+            : Results.Json(new LibraryRefused("The designer's check refused this job: nothing was saved.", check.Report),
+                statusCode: StatusCodes.Status422UnprocessableEntity);
+    }
 }
 
 internal sealed record DistributeRequest(bool Save = false, string? Message = null);
 
-internal sealed record PlacementRequest(IReadOnlyDictionary<string, string>? Placement, string? Message = null);
+internal sealed record BindingsRequest(IReadOnlyDictionary<string, Binding>? Bindings, string? Message = null);

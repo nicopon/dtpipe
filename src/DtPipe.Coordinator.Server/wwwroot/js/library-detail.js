@@ -1,7 +1,7 @@
 // A library pipeline's page: the plan the coordinator computes with no help from the user (every
 // brick on its node, every other step on the runner), drawn in lanes, its refusals, its fragments'
 // jobs, the job's text read only, and its last run. The node of each source and sink branch is chosen here, among the nodes
-// that offer its brick; the runner is never named. The placement, the plan, the deployment and the run are saved from here.
+// that offer its brick; the runner is never named. The bindings, the plan, the deployment and the run are saved from here.
 import { $, api, deploymentOf, duration, esc, isActive, lastRunOf, shortNode, toast } from "./core.js";
 import { drawLanes, fragmentJobs, legend, planProblems } from "./placement.js";
 
@@ -35,7 +35,7 @@ async function load() {
     plan = answer.plan;
     brickOfUnit = answer.bricks || {};
     offers = answer.offers || {};
-    draft = { ...(doc.placement || {}) };
+    draft = nodesOf(doc.bindings);
   } catch (e) {
     host.innerHTML = `<p class="mismatch">${esc(e.message)}</p>`;
     return;
@@ -48,22 +48,25 @@ const fragmentKey = (f) => [f.name, f.version, [...f.groups].sort().join("+")];
 const sameFragments = (a, b) => !!a && !!b &&
   JSON.stringify(a.fragments.map(fragmentKey).sort()) === JSON.stringify(b.fragments.map(fragmentKey).sort());
 
-const sorted = (o) => JSON.stringify(Object.entries(o).filter(([, v]) => v).sort(([a], [b]) => (a < b ? -1 : 1)));
-const placementDirty = () => sorted(draft) !== sorted(doc.placement || {});
+// A binding is kept with its brick and mode; the page chooses only the node, and the server resolves the brick.
+const nodesOf = (bindings) => Object.fromEntries(Object.entries(bindings || {}).map(([alias, b]) => [alias, b.node]));
 
-function placementChip() {
-  const problems = doc.placementProblems || [];
+const sorted = (o) => JSON.stringify(Object.entries(o).filter(([, v]) => v).sort(([a], [b]) => (a < b ? -1 : 1)));
+const bindingsDirty = () => sorted(draft) !== sorted(nodesOf(doc.bindings));
+
+function bindingsChip() {
+  const problems = doc.bindingProblems || [];
   if (!problems.length) return "";
   const blocking = problems.some((p) => p.blocking);
-  return `<span class="chip ${blocking ? "bad" : "warn"}" title="${esc(problems.map((p) => p.message).join(" "))}">placement: ${problems.length} problem${problems.length > 1 ? "s" : ""}</span>`;
+  return `<span class="chip ${blocking ? "bad" : "warn"}" title="${esc(problems.map((p) => p.message).join(" "))}>bindings: ${problems.length} problem${problems.length > 1 ? "s" : ""}</span>`;
 }
 
-// One row per brick branch of the job, and one per entry the placement keeps for a branch that is none, so it can be dropped.
-function placementCard() {
+// One row per brick branch of the job, and one per binding kept for a branch that is none, so it can be dropped.
+function bindingsCard() {
   const aliases = Object.keys(offers).sort();
   const stray = Object.keys(draft).filter((a) => !offers[a]).sort();
   if (!aliases.length && !stray.length) return "";
-  const problems = doc.placementProblems || [];
+  const problems = doc.bindingProblems || [];
   const problemOf = (a) => problems.filter((p) => p.alias === a).map((p) => `<div class="mismatch">${esc(p.message)}</div>`).join("");
   const rows = aliases.map((a) => {
     const chosen = draft[a] || "";
@@ -76,8 +79,8 @@ function placementCard() {
   }).join("");
   const strays = stray.map((a) => `<tr><td class="mono">${esc(a)}</td><td>${problemOf(a) || `<span class="hint">no brick branch of this job</span>`}
       <button class="small ghost" data-drop="${esc(a)}" ${busy ? "disabled" : ""}>Remove</button></td></tr>`).join("");
-  return `<section class="card"><div class="card-head"><h2>Placement</h2>
-      <span class="actions"><button id="x-place" class="primary" ${placementDirty() && !busy ? "" : "disabled"}>Save placement</button></span></div>
+  return `<section class="card"><div class="card-head"><h2>Bindings</h2>
+      <span class="actions"><button id="x-bind" class="primary" ${bindingsDirty() && !busy ? "" : "disabled"}>Save bindings</button></span></div>
     <p class="hint">The node each source and sink runs on. Every other step runs on the runner, which is never named.</p>
     <table class="library">${rows}${strays}</table></section>`;
 }
@@ -107,7 +110,7 @@ function render() {
   const status = [
     saved ? (savedCurrent ? `<span class="chip ok">plan saved</span>` : `<span class="chip warn">saved plan is stale</span>`) : `<span class="chip">plan not saved</span>`,
     deployment ? `<span class="chip ${deployment.state === "ready" ? "ok" : deployment.state === "failed" ? "bad" : "warn"}">${deployedPlanMatches ? "deployed" : "an older plan is deployed"}: ${esc(deployment.state)}</span>` : `<span class="chip">not deployed</span>`,
-    placementChip(),
+    bindingsChip(),
   ].join(" ");
 
   host.innerHTML = `
@@ -117,14 +120,14 @@ function render() {
       <div class="row">${status}
         <span class="actions">
           <a class="button" href="#/library">← Library</a>
-          <button id="x-save" ${plan.deployable && !savedCurrent && !busy && !placementDirty() ? "" : "disabled"} title="${placementDirty() ? "Save the placement first" : ""}">Save plan</button>
+          <button id="x-save" ${plan.deployable && !savedCurrent && !busy && !bindingsDirty() ? "" : "disabled"} title="${bindingsDirty() ? "Save the bindings first" : ""}">Save plan</button>
           <button id="x-deploy" ${canDeploy && !busy ? "" : "disabled"} title="${savedCurrent ? "" : "Save the plan first"}">${deployedPlanMatches ? "Redeploy" : "Deploy"}</button>
           <button id="x-run" class="primary" ${canRun && !busy ? "" : "disabled"}>Run</button>
           ${deployment ? `<button id="x-undeploy" class="ghost danger" ${isActive(run) || busy ? "disabled" : ""}>Undeploy</button>` : ""}
         </span>
       </div>
     </div>
-    ${placementCard()}
+    ${bindingsCard()}
     ${planProblems(plan).length ? `<section class="card"><ul class="msgs errors">${planProblems(plan).map((e) => `<li>${esc(e)}</li>`).join("")}</ul></section>` : ""}
     <section class="card">
       <div class="card-head"><h2>Fragments and edges</h2>
@@ -157,12 +160,12 @@ async function onClick(e) {
   busy = true;
   render();
   try {
-    if (b.id === "x-place" || b.dataset.drop) {
+    if (b.id === "x-bind" || b.dataset.drop) {
       if (b.dataset.drop) delete draft[b.dataset.drop];
-      const placement = Object.fromEntries(Object.entries(draft).filter(([, v]) => v));
-      const saved = await api(`/api/library/${encodeURIComponent(id)}/placement`, { placement, message: `Place ${id}` }, "PUT");
+      const bindings = Object.fromEntries(Object.entries(draft).filter(([, v]) => v).map(([alias, node]) => [alias, { node }]));
+      const saved = await api(`/api/library/${encodeURIComponent(id)}/bindings`, { bindings, message: `Bind ${id}` }, "PUT");
       await load();
-      toast(saved.redistribute ? "Placement saved: its plan must be saved again." : "Placement saved.", "info");
+      toast(saved.redistribute ? "Bindings saved: its plan must be saved again." : "Bindings saved.", "info");
     } else if (b.id === "x-save") {
       const message = prompt("Describe this plan (the commit message):", `Distribute ${id}`);
       if (message !== null) {

@@ -1,0 +1,12 @@
+{
+  "customers": {
+    "node": "node-1",
+    "brick": "customers",
+    "mode": "strict"
+  },
+  "load": {
+    "node": "node-4",
+    "brick": "dim-customers",
+    "mode": "strict"
+  }
+}

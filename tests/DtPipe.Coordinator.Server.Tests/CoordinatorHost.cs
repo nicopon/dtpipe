@@ -1,3 +1,4 @@
+using DtPipe.Jobs.Coordinator;
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
@@ -99,5 +100,5 @@ public sealed class CoordinatorHost(string? studioClientId = CoordinatorHost.Stu
 /// <summary>The designer's check answered by a function, for tests that exercise what is around it.</summary>
 internal sealed class StubValidator(Func<string, DesignCheck> check) : DesignValidator(null!, null!)
 {
-    public override Task<DesignCheck> ValidateAsync(string yaml, IReadOnlyDictionary<string, string> placement, CancellationToken ct) => Task.FromResult(check(yaml));
+    public override Task<DesignCheck> ValidateAsync(string yaml, IReadOnlyDictionary<string, Binding> bindings, CancellationToken ct) => Task.FromResult(check(yaml));
 }

@@ -96,9 +96,9 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   `PUT /api/library/{id}` passes the text as received to `DesignValidator`, after the rights and the
   CSRF header and before `SaveAsync`: a job it refuses answers 422 with `LibraryRefused` (its report),
   and with no runner or no brick node online the check cannot run, so it refuses by name; never a
-  commit that was not checked. It covers the studio and the pages alike; `SavePlanAsync`, `DeleteAsync`
-  and the seeds loaded at start check nothing. `[local: StudioRoutesTests, the lab's smoke.py bricks —
-  a library save's check, a sink that refuses]`
+  commit that was not checked. It covers the studio and the pages alike, and `PUT /api/library/{id}/bindings`, which
+  checks the job the library holds under the bindings it receives; `SavePlanAsync`, `DeleteAsync` and the seeds loaded at
+  start check nothing. `[local: StudioRoutesTests, the lab's smoke.py bricks — a library save's check, a sink that refuses]`
 - **A save may say which version it read.** `PUT /api/library/{id}` with `If-None-Match: *` creates
   only, with `If-Match: "<commit>"` replaces only that version: 412 otherwise, with the commit in
   place. The check runs under the library's lock. The version is the last commit of the job file,
@@ -107,29 +107,36 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   as the pages do. The answer says when the saved plan no longer matches (`redistribute`) and when a
   deployment still runs another version (`deployed`). `[local: StudioRoutesTests, the lab's smoke.py
   library — a studio publishes]`
-- **A save may carry the placement it knows, and a studio names only what is unambiguous.** `LibrarySave.Placement` sets
-  the nodes it names into the placement the library keeps, entry by entry, in the same commit as the job; an alias it does
-  not name keeps its node, and none leaves the placement as it was. `POST /api/bricks/recognize` answers, with each branch
-  that is a brick, `Nodes`: every node that offers it. The studio publishes the node of a brick one node offers and of each
-  brick the person chose; a brick two nodes offer that nobody chose stays unnamed, which the answer's `placementProblems`
-  says and the pipeline's page then lets a person choose. `[local: PlacementTests, StudioRoutesTests, StudioPublishTests]`
-- **The library keeps a job, its placement and its plan, nothing a designer drew.** `pipelines/<id>/` holds
-  `pipeline.yaml`, `placement.json` and `distributed/`; a library that still tracks a `layout.json` drops them all in
+- **A save may carry the bindings it knows, and a studio names only what is unambiguous.** `LibrarySave.Bindings` sets the
+  bindings it names into the ones the library keeps, entry by entry, in the same commit as the job; an alias it does not name
+  keeps its node, and none leaves the bindings as they were. A binding is a node, a brick (its id on that node) and a mode.
+  The save resolves every brick it was not given, inside the library's lock, from the text it now holds: the brick the branch
+  designates on the bound node (`AutoPlacer.Resolve`, over `BrickCatalog.MatchAll`), so a binding never keeps the brick of a
+  text that was edited. A request that names a brick keeps it, and `AutoPlacer.Check` reports it when it is not the one the text
+  designates there. The only mode is `strict`; a request for another is refused (400) naming it, and an absent mode is `strict`.
+  `POST /api/bricks/recognize` answers, with each branch that is a brick, `Nodes`: every node that offers it. The studio binds
+  the node of a brick one node offers and of each brick the person chose; a brick two nodes offer that nobody chose stays
+  unbound, which the answer's `bindingProblems` says and the pipeline's page then lets a person choose.
+  `[local: BindingTests, StudioRoutesTests, StudioPublishTests]`
+- **The library keeps a job, its bindings and its plan, nothing a designer drew.** `pipelines/<id>/` holds
+  `pipeline.yaml`, `bindings.json` and `distributed/`; a library that still tracks a `layout.json` drops them all in
   one commit when it first opens. `[local: the lab's smoke.py library — no layouts]`
-- **A brick branch runs on the node its placement names, and the placement never names the runner.** `placement.json`
-  maps the alias of each source or sink branch of the job to a node; every other branch goes to the runner, which is
-  stateless. `AutoPlacer.Check` is the one function that says why a placement does not hold: a brick branch with no
-  node (`unassigned`), a node with no identity (`unknown-node`), a node that does not offer the brick (`not-offered`),
-  an entry for a branch that is no brick or not in the job (`not-a-brick`, `no-branch`), all blocking, and a node with no
-  connected replica (`offline`), which is not. `BrickCatalog.Match` is first-match and so unfit to choose a node: placing
-  goes through `MatchAll`. The placement lives beside the job so a pipeline stays a plain dtpipe job. It is saved as given,
-  an absent node included, through `PUT /api/library/{id}/placement`, and a seed brings its own as `<id>.placement.json`.
-  The list and the document carry the problems, the planner refuses a plan that has a blocking one, and a deployment is
-  refused naming them. A saved plan keeps the hash of the placement it was made from, so a new placement makes it stale
-  (`placement`), without changing the job's commit.
-  The designer's check (`DesignValidator`) samples each brick on the node the save's placement names, the library's entries
-  with the request's over them; a brick the placement does not place is sampled on the first node that offers it.
-  `[local: PlacementTests, StalePlanRoutesTests]`
+- **The binding decides where a brick branch runs, and a bound branch never runs on the runner.** `bindings.json` maps the
+  alias of each source or sink branch of the job to `{node, brick, mode}`; every branch that is neither bound nor a brick goes
+  to the runner, which is stateless and never named. `AutoPlacer.PlanAsync` places a bound alias on its node or refuses the
+  plan, never anywhere else: a bound branch whose text is no longer its brick is an error naming the alias, the node and the
+  brick. `AutoPlacer.Check` is the one function that says why bindings do not hold: a brick branch bound to no node
+  (`unassigned`), a node with no identity (`unknown-node`), a node that does not offer the brick (`not-offered`), a brick that is
+  not the one the text designates on that node (`brick-mismatch`), a mode other than `strict` (`unsupported-mode`), a binding for
+  a branch that is no brick or not in the job (`not-a-brick`, `no-branch`), all blocking, and a node with no connected replica
+  (`offline`), which is not. `BrickCatalog.Match` is first-match and so unfit to choose a node: placing goes through `MatchAll`.
+  The bindings live beside the job so a pipeline stays a plain dtpipe job. They are saved as given, an absent node included,
+  through `PUT /api/library/{id}/bindings`, and a seed brings its own as `<id>.bindings.json`. The list and the document carry
+  the problems, the planner refuses a plan that has a blocking one, and a deployment is refused naming them. A saved plan keeps
+  the hash of the bindings it was made from, so new bindings make it stale (`bindings`), without changing the job's commit.
+  The designer's check (`DesignValidator`) samples each brick on the node the save's bindings name, the library's entries
+  with the request's over them; a brick no binding places is sampled on the first node that offers it.
+  `[local: BindingTests, StalePlanRoutesTests]`
 - **A new state directory starts from the seeds, or empty.** `Coordinator:LibrarySeed` (one
   `.yaml` per pipeline) and `Coordinator:RightsSeed`; with neither, the library has no pipeline
   and the rights no identity and an empty matrix: nobody may send anything until an administrator
@@ -146,9 +153,10 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   every other caller plans in `Library`, where a request that carries cuts is refused before any node
   is asked. `[local: PlanModeTests; the lab's smoke.py lab (a cut through /api/deploy), sandbox (a cut
   through /api/plan)]` `[unchecked: a new route that plans in Manual]`
-- **A brick is matched by content, never by name.** A branch is a brick when its canonical form
-  (`BrickRules.Canonical`) equals the one its node declares; a pipeline stays a plain dtpipe job with
-  no reference to a brick in it. `dtpipe studio` may take an imported branch apart around the bricks
+- **A brick is matched by content, never by name, and the binding decides the placement.** A branch is a brick when its
+  canonical form (`BrickRules.Canonical`) equals the one its node declares; a pipeline stays a plain dtpipe job with
+  no reference to a brick in it. The content is what `strict` checks of a binding, never what places it: a bound alias
+  whose content stopped matching is refused, not run elsewhere. `dtpipe studio` may take an imported branch apart around the bricks
   it contains (authoring, before anything is saved, through the recognition this server answers); the
   planner never does. `BrickCatalog` keeps what it reads of each announced brick (its branch, canonical form, version
   and text) and reads a brick announced again anew; the node's name and whether it is online are read at every call, so
@@ -161,7 +169,7 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   `[local: the lab's smoke.py lab]`
 - **The server designs nothing.** A pipeline reaches the library by a save that is checked
   (`PUT /api/library/{id}`) from `dtpipe studio`, whose designer is `DtPipe.Jobs`' (rule in the root
-  `CLAUDE.md`); the pages list, read, restore, place and run it, and show its job read only. A
+  `CLAUDE.md`); the pages list, read, restore, bind and run it, and show its job read only. A
   brick's canonical form and version are pinned by `BrickFormTests`: changing either gives every
   brick a new version. `HashValueTests` pins the values of the hashes the server compares or shows (a saved
   plan's job, a brick's version, a replica's bricks), and `Hosting.Tests FragmentJobTests` a fragment's version;
@@ -232,14 +240,14 @@ automatic distribution, deployments and the run queue, rights, and the pages. It
   node in several groups sends only if every one of its groups may send to every group of the
   receiver, on both sides, and an edge carries the groups of both ends. Never add a second matrix.
   `[local: FlowMatrixEvaluationTests, the lab's smoke.py rights]`
-- **A saved plan is current only while its job, its placement and its nodes' groups are those it was made from.** The library
+- **A saved plan is current only while its job, its bindings and its nodes' groups are those it was made from.** The library
   lists it, and `GET /api/library/{id}` shows it, as current when it was made from the job as it is and each of
   its fragments sits on a node that holds, now, the groups the plan names, compared as sets (the server gives
   the library `RightsStore.ActiveGroupsOf`, null for a node with no identity or a disabled one). A new plan
   names the groups the rights give each node now, never those of the node's last announcement, and refuses a
   unit placed on a node with no identity or a disabled one, so that distributing again repairs a plan whose
   node changed groups while it was offline. One function
-  of the library decides why a plan is not current, `planStaleCause` (`job`, `placement` or `groups`), which the list, the
+  of the library decides why a plan is not current, `planStaleCause` (`job`, `bindings` or `groups`), which the list, the
   document, the page's chip and the refusal of a deployment from the library all read. The studio does not read
   it: the `redistribute` of a save's answer, which it does read, measures only the edit of the job.
   `[local: SavedPlanTests, StalePlanRoutesTests, PlanRightsTests, RightsStoreTests, the lab's smoke.py rights - several groups]`

@@ -187,6 +187,66 @@ public sealed class StudioRoutesTests : IDisposable
         Assert.Equal("a:\n  input: z\n", _checked);
     }
 
+    private const string Orders = "a:\n  input: duck:shop.db\n  provider-options:\n    duck:\n      query: SELECT 1\n";
+
+    [Fact]
+    public async Task A_Save_Binds_The_Branches_It_Names_And_The_Server_Resolves_Their_Bricks()
+    {
+        Announce();
+        using var request = new HttpRequestMessage(HttpMethod.Put, CoordinatorApi.Library("orders"))
+        {
+            Content = JsonContent.Create(new LibrarySave(Orders, "m", new Dictionary<string, Binding> { ["a"] = new Binding("n1") })),
+        };
+        using var saved = await As(CoordinatorHost.Designer).SendAsync(request, Ct);
+        Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+
+        var doc = await _host.Services.GetRequiredService<PipelineLibrary>().GetAsync("orders", Ct);
+        Assert.Equal(new Binding("n1", "orders", "strict"), doc!.Bindings["a"]);
+        Assert.Empty(doc.BindingProblems);
+    }
+
+    [Fact]
+    public async Task A_Mode_Other_Than_Strict_Is_Refused_And_Nothing_Is_Written()
+    {
+        Announce();
+        using var request = new HttpRequestMessage(HttpMethod.Put, CoordinatorApi.Library("orders"))
+        {
+            Content = JsonContent.Create(new LibrarySave(Orders, "m", new Dictionary<string, Binding> { ["a"] = new Binding("n1", "orders", "tolerant") })),
+        };
+        using var refused = await As(CoordinatorHost.Designer).SendAsync(request, Ct);
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Contains("tolerant", await refused.Content.ReadAsStringAsync(Ct));
+
+        using var bound = await As(CoordinatorHost.Designer).PutAsJsonAsync(
+            "/api/library/orders/bindings", new { bindings = new Dictionary<string, Binding> { ["a"] = new Binding("n1", "orders", "contract") } }, Ct);
+        Assert.Equal(HttpStatusCode.BadRequest, bound.StatusCode);
+        Assert.Contains("contract", await bound.Content.ReadAsStringAsync(Ct));
+        Assert.Null(await _host.Services.GetRequiredService<PipelineLibrary>().GetAsync("orders", Ct));
+    }
+
+    [Fact]
+    public async Task New_Bindings_Go_Through_The_Check_Like_A_Save_And_A_Refused_One_Writes_Nothing()
+    {
+        Announce();
+        Assert.Equal(HttpStatusCode.OK, (await Save("orders", Orders)).Status);
+        var library = _host.Services.GetRequiredService<PipelineLibrary>();
+        _verdict = new DesignCheck(false, "'a': n1/orders does not accept what reaches it");
+
+        using var refused = await As(CoordinatorHost.Designer).PutAsJsonAsync(
+            "/api/library/orders/bindings", new { bindings = new Dictionary<string, Binding> { ["a"] = new Binding("n1") } }, Ct);
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, refused.StatusCode);
+        Assert.Equal("'a': n1/orders does not accept what reaches it", (await refused.Content.ReadFromJsonAsync<LibraryRefused>(Ct))!.Report);
+        Assert.Empty((await library.GetAsync("orders", Ct))!.Bindings);
+        Assert.Equal(Orders, _checked);
+
+        _verdict = new DesignCheck(true, null);
+        using var accepted = await As(CoordinatorHost.Designer).PutAsJsonAsync(
+            "/api/library/orders/bindings", new { bindings = new Dictionary<string, Binding> { ["a"] = new Binding("n1") } }, Ct);
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+        Assert.Equal("orders", (await library.GetAsync("orders", Ct))!.Bindings["a"].Brick);
+    }
+
     [Fact]
     public async Task The_Check_Reads_The_Job_As_It_Was_Sent()
     {

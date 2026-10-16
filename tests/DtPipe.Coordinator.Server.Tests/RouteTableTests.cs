@@ -81,7 +81,7 @@ public sealed class RouteTableTests
         "POST api/stream/{transferId}/abort [default]",
         "POST api/stream/{transferId}/send [default]",
         "PUT /api/library/{id} [reader > designer]",
-        "PUT /api/library/{id}/placement [reader > designer]",
+        "PUT /api/library/{id}/bindings [reader > designer]",
         "PUT /api/rights/identities/{id} [reader > admin]",
         "PUT /api/rights/matrix [reader > admin]",
         "PUT api/client/{clientId:guid}/token [default]",

@@ -224,7 +224,7 @@ public sealed class StudioPublishTests : IAsyncLifetime
         var (status, _) = await PublishAsync(await HashAsync());
 
         Assert.Equal(HttpStatusCode.OK, status);
-        Assert.Equal("n1", LastSave().Placement!["main"]);
+        Assert.Equal(new Binding("n1"), LastSave().Bindings!["main"]);
     }
 
     [Fact]
@@ -236,7 +236,7 @@ public sealed class StudioPublishTests : IAsyncLifetime
         var (status, _) = await PublishAsync(await HashAsync());
 
         Assert.Equal(HttpStatusCode.OK, status);
-        Assert.Empty(LastSave().Placement ?? new Dictionary<string, string>());
+        Assert.Empty(LastSave().Bindings ?? new Dictionary<string, Binding>());
     }
 
     [Fact]
@@ -246,7 +246,7 @@ public sealed class StudioPublishTests : IAsyncLifetime
         _fakes.Answers["main"] = new Recognition("n1/orders", null, null, ["n1", "n2"]);
         _fakes.Answers["other"] = new Recognition(null, null, null);
 
-        var (status, body) = await CallAsync(HttpMethod.Get, "/api/placement?path=orders.yaml");
+        var (status, body) = await CallAsync(HttpMethod.Get, "/api/bindings?path=orders.yaml");
 
         Assert.Equal(HttpStatusCode.OK, status);
         var branch = Assert.Single(body.GetProperty("branches").EnumerateArray());
@@ -261,10 +261,10 @@ public sealed class StudioPublishTests : IAsyncLifetime
         _fakes.Answers["main"] = new Recognition("n1/orders", null, null, ["n1", "n2"]);
 
         var (status, _) = await CallAsync(HttpMethod.Post, "/api/publish",
-            new { path = "orders.yaml", hash = await HashAsync(), id = "orders", message = "m", placement = new { main = "n2" } });
+            new { path = "orders.yaml", hash = await HashAsync(), id = "orders", message = "m", bindings = new { main = "n2" } });
 
         Assert.Equal(HttpStatusCode.OK, status);
-        Assert.Equal("n2", LastSave().Placement!["main"]);
+        Assert.Equal(new Binding("n2"), LastSave().Bindings!["main"]);
     }
 
     [Fact]
@@ -274,7 +274,7 @@ public sealed class StudioPublishTests : IAsyncLifetime
         _fakes.Answers["main"] = new Recognition("n1/orders", null, null, ["n1", "n2"]);
 
         var (status, _) = await CallAsync(HttpMethod.Post, "/api/publish",
-            new { path = "orders.yaml", hash = await HashAsync(), id = "orders", message = "m", placement = new { main = "n3" } });
+            new { path = "orders.yaml", hash = await HashAsync(), id = "orders", message = "m", bindings = new { main = "n3" } });
 
         Assert.Equal(HttpStatusCode.BadRequest, status);
         Assert.Null(_fakes.LastSaveBody);

@@ -37,9 +37,9 @@ export async function publish(replace) {
     const message = prompt("Describe this version (the commit message):", `Publish ${job.path} from dtpipe studio`);
     if (message === null) return;
     publication.request = { id, message };
-    publication.placement = {};
+    publication.bindings = {};
     let branches = [];
-    try { branches = (await api(`/api/placement?path=${encodeURIComponent(job.path)}`)).branches; } catch { /* the coordinator names what it can */ }
+    try { branches = (await api(`/api/bindings?path=${encodeURIComponent(job.path)}`)).branches; } catch { /* the coordinator names what it can */ }
     if (branches.some((b) => b.nodes.length > 1)) {
       publication.outcome = { id, choosing: branches };
       status("choose the node of each brick, then publish", "warn");
@@ -55,8 +55,8 @@ async function send(replace) {
   const job = state.job;
   const request = publication.request;
   try {
-    const placement = Object.fromEntries(Object.entries(publication.placement).filter(([, node]) => node));
-    const saved = await api("/api/publish", { path: job.path, hash: job.hash, id: request.id, message: request.message, replace, placement });
+    const bindings = Object.fromEntries(Object.entries(publication.bindings).filter(([, node]) => node));
+    const saved = await api("/api/publish", { path: job.path, hash: job.hash, id: request.id, message: request.message, replace, bindings });
     publication.outcome = { id: request.id, saved };
     status(`published at ${short(saved.commit)}`, "good");
   } catch (e) {
@@ -81,11 +81,11 @@ async function send(replace) {
 }
 
 // One selector per brick branch: the node that runs it, among the nodes that offer the brick. Left empty, the branch is
-// published unnamed, and the coordinator keeps the node it already holds for it, or lists it as a problem to settle there.
+// published unbound, and the coordinator keeps the binding it already holds for it, or lists it as a problem to settle there.
 function choosingView({ id, choosing }) {
-  const chosen = publication.placement;
+  const chosen = publication.bindings;
   return [
-    el("p", {}, `Which node runs each brick of ${id}? The runner is never named.`),
+    el("p", {}, `Which node runs each brick of ${id}? The runner is never bound.`),
     el("table", {}, choosing.map(({ alias, nodes }) => el("tr", {},
       el("td", {}, el("code", {}, alias)),
       el("td", {}, el("select", {

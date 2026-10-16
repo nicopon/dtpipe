@@ -48,7 +48,7 @@
  * The last publication's outcome ({ id, saved }, { id, conflict }, { id, refused } or, while the person chooses the
  * node of the bricks several nodes offer, { id, choosing }); the id and message being published; the node chosen for
  * each brick branch, by alias.
- * @typedef {{ outcome: any, request: { id: string, message: string } | null, placement: Record<string, string> }} Publication
+ * @typedef {{ outcome: any, request: { id: string, message: string } | null, bindings: Record<string, string> }} Publication
  */
 
 /** @returns {Preview} */
@@ -70,7 +70,7 @@ export const state = {
   /** @type {Writing} */
   writing: { review: false },
   /** @type {Publication} */
-  publication: { outcome: null, request: null, placement: {} },
+  publication: { outcome: null, request: null, bindings: {} },
   /** The variables of the composed job, by name, and the keyring's aliases: never a value the person did not type. @type {{ variables: any[], aliases: string[], error?: string }} */
   vars: { variables: [], aliases: [] },
   /** The components the palette offers. */

@@ -1,41 +1,47 @@
 using DtPipe.Coordinator.Contracts;
 using DtPipe.Jobs;
+using DtPipe.Jobs.Coordinator;
 
 namespace DtPipe.Coordinator.Server;
 
 /// <summary>
-/// Places a job with the help of its placement: a branch that is a brick runs on the node the placement names for it,
-/// every other branch on the runner, which the placement never names. It only chooses a placement;
-/// <see cref="PlanBuilder"/> builds the fragments from it exactly as for a placement the user picked, and cuts nothing.
-/// A source brick wired straight into a sink brick therefore crosses no runner.
+/// Places a job with the help of its bindings: a branch that is bound runs on the node its binding names, every branch that is
+/// neither bound nor a brick on the runner, which a binding never names. A bound branch is never sent to the runner: it is
+/// placed on its node or the plan is refused. It only chooses a placement; <see cref="PlanBuilder"/> builds the fragments from
+/// it exactly as for a placement the user picked, and cuts nothing. A source brick wired straight into a sink brick therefore
+/// crosses no runner.
 /// </summary>
 public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, PlanBuilder planner)
 {
-    private static readonly IReadOnlyDictionary<string, string> NoPlacement = new Dictionary<string, string>();
+    private static readonly IReadOnlyDictionary<string, Binding> NoBindings = new Dictionary<string, Binding>();
 
     /// <summary>Why a branch that reaches <paramref name="nodes"/>' data without being one of their bricks is refused.</summary>
     public static string NotABrick(string alias, IEnumerable<string> nodes) =>
         $"'{alias}' reads or writes {string.Join(", ", nodes)} without being one of its bricks. Rebuild it from the node's bricks.";
 
+    /// <summary>A binding as the messages name it: its brick, when it has one, and its node.</summary>
+    private static string Bound(Binding binding) =>
+        binding.Brick is { } brick ? $"brick '{brick}' on {binding.Node}" : $"a brick on {binding.Node}";
+
     /// <summary>
-    /// Which brick each branch of <paramref name="yaml"/> is, by alias, on the node <paramref name="placement"/> names for it:
+    /// Which brick each branch of <paramref name="yaml"/> is, by alias, on the node <paramref name="bindings"/> names for it:
     /// what a page needs to name a placed unit. Empty for a job that is not readable.
     /// </summary>
-    public IReadOnlyDictionary<string, string> BrickAliases(string yaml, IReadOnlyDictionary<string, string>? placement = null)
+    public IReadOnlyDictionary<string, string> BrickAliases(string yaml, IReadOnlyDictionary<string, Binding>? bindings = null)
     {
-        placement ??= NoPlacement;
+        bindings ??= NoBindings;
         var brickOf = new Dictionary<string, string>(StringComparer.Ordinal);
         try
         {
             foreach (var (alias, branch) in JobYaml.Branches(JobYaml.Parse(yaml)))
-                if (placement.TryGetValue(alias, out var node) && bricks.MatchAll(branch).FirstOrDefault(b => b.Node == node) is { } brick)
+                if (bindings.TryGetValue(alias, out var binding) && bricks.MatchAll(branch).FirstOrDefault(b => b.Node == binding.Node) is { } brick)
                     brickOf[alias] = brick.Key;
         }
         catch (Exception) { }
         return brickOf;
     }
 
-    /// <summary>The nodes that offer each brick branch of <paramref name="yaml"/>, by alias: the choice a placement makes. Empty for a job that is not readable.</summary>
+    /// <summary>The nodes that offer each brick branch of <paramref name="yaml"/>, by alias: the choice a binding makes. Empty for a job that is not readable.</summary>
     public IReadOnlyDictionary<string, IReadOnlyList<string>> Offers(string yaml)
     {
         var offers = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
@@ -50,12 +56,32 @@ public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, Pla
     }
 
     /// <summary>
-    /// Whether <paramref name="placement"/> holds for <paramref name="yaml"/> now: every branch that is a brick is placed on a node
-    /// that exists and offers it, and the placement names nothing else. Empty for a job that is not readable, which planning reports.
+    /// <paramref name="bindings"/> with the brick each one lacks filled in: the brick the branch's text designates on the bound
+    /// node. A binding that names a brick is kept as it is, and so is one whose node does not offer the branch: both are
+    /// <see cref="Check"/>'s to report.
     /// </summary>
-    public IReadOnlyList<PlacementProblem> Check(string yaml, IReadOnlyDictionary<string, string> placement)
+    public IReadOnlyDictionary<string, Binding> Resolve(string yaml, IReadOnlyDictionary<string, Binding> bindings)
     {
-        var problems = new List<PlacementProblem>();
+        var resolved = new Dictionary<string, Binding>(bindings, StringComparer.Ordinal);
+        try
+        {
+            foreach (var (alias, branch) in JobYaml.Branches(JobYaml.Parse(yaml)))
+                if (resolved.TryGetValue(alias, out var binding) && binding.Brick is null
+                    && bricks.MatchAll(branch).FirstOrDefault(b => b.Node == binding.Node) is { } brick)
+                    resolved[alias] = binding with { Brick = brick.Id };
+        }
+        catch (Exception) { }
+        return resolved;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="bindings"/> hold for <paramref name="yaml"/> now: every branch that is a brick is bound to a node that
+    /// exists and offers it, the brick a binding names is the one the branch's text designates there, and the bindings name nothing
+    /// else. Empty for a job that is not readable, which planning reports.
+    /// </summary>
+    public IReadOnlyList<BindingProblem> Check(string yaml, IReadOnlyDictionary<string, Binding> bindings)
+    {
+        var problems = new List<BindingProblem>();
         var nodes = inventory.Snapshot().ToDictionary(n => n.Name, StringComparer.Ordinal);
         var aliases = new HashSet<string>(StringComparer.Ordinal);
         try
@@ -64,41 +90,50 @@ public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, Pla
             {
                 aliases.Add(alias);
                 var offered = bricks.MatchAll(branch);
-                var named = placement.TryGetValue(alias, out var node);
-                if (offered.Count == 0)
+                if (!bindings.TryGetValue(alias, out var binding))
                 {
-                    if (named)
-                        problems.Add(new(alias, PlacementCauses.NotABrick, $"'{alias}' is no brick: it runs on the runner, which a placement never names.", true));
+                    if (offered.Count > 0)
+                        problems.Add(new(alias, BindingCauses.Unassigned,
+                            $"'{alias}' is a brick of {string.Join(", ", offered.Select(b => b.Node).Distinct())}: bind it to the node it runs on.", true));
+                    continue;
                 }
-                else if (!named)
-                    problems.Add(new(alias, PlacementCauses.Unassigned,
-                        $"'{alias}' is a brick of {string.Join(", ", offered.Select(b => b.Node).Distinct())}: name the node it runs on.", true));
-                else if (!nodes.TryGetValue(node!, out var view))
-                    problems.Add(new(alias, PlacementCauses.UnknownNode, $"'{alias}' is placed on {node}, which is no node of this coordinator.", true));
-                else if (offered.All(b => b.Node != node))
-                    problems.Add(new(alias, PlacementCauses.NotOffered,
-                        $"'{alias}' is placed on {node}, which does not offer this brick (offered by {string.Join(", ", offered.Select(b => b.Node).Distinct())}).", true));
+                var bound = Bound(binding);
+                var here = offered.Where(b => b.Node == binding.Node).ToList();
+                if (Bindings.ModeOf(binding) != BindingModes.Strict)
+                    problems.Add(new(alias, BindingCauses.UnsupportedMode,
+                        $"'{alias}' is bound to {bound} in mode '{Bindings.ModeOf(binding)}': the only mode is {BindingModes.Strict}.", true));
+                else if (offered.Count == 0)
+                    problems.Add(new(alias, BindingCauses.NotABrick,
+                        $"'{alias}' is bound to {bound}, but its text is no longer that brick: a bound branch never runs on the runner.", true));
+                else if (!nodes.TryGetValue(binding.Node, out var view))
+                    problems.Add(new(alias, BindingCauses.UnknownNode, $"'{alias}' is bound to {bound}, which is no node of this coordinator.", true));
+                else if (here.Count == 0)
+                    problems.Add(new(alias, BindingCauses.NotOffered,
+                        $"'{alias}' is bound to {bound}, which does not offer this brick (offered by {string.Join(", ", offered.Select(b => b.Node).Distinct())}).", true));
+                else if (here.All(b => b.Id != binding.Brick))
+                    problems.Add(new(alias, BindingCauses.BrickMismatch,
+                        $"'{alias}' is bound to {bound}, but its text is {string.Join(" or ", here.Select(b => $"brick '{b.Id}'"))} there.", true));
                 else if (!view.Online)
-                    problems.Add(new(alias, PlacementCauses.Offline, $"'{alias}' is placed on {node}, which has no connected replica.", false));
+                    problems.Add(new(alias, BindingCauses.Offline, $"'{alias}' is bound to {bound}, which has no connected replica.", false));
             }
         }
         catch (Exception)
         {
             return [];
         }
-        problems.AddRange(placement.Keys.Where(a => !aliases.Contains(a)).Order(StringComparer.Ordinal)
-            .Select(a => new PlacementProblem(a, PlacementCauses.NoBranch, $"The placement names '{a}', which is no branch of the job.", true)));
+        problems.AddRange(bindings.Keys.Where(a => !aliases.Contains(a)).Order(StringComparer.Ordinal)
+            .Select(a => new BindingProblem(a, BindingCauses.NoBranch, $"The bindings name '{a}', which is no branch of the job.", true)));
         return problems;
     }
 
-    public async Task<DistributionPlan> PlanAsync(string pipelineId, string yaml, IReadOnlyDictionary<string, string> placement, CancellationToken ct)
+    public async Task<DistributionPlan> PlanAsync(string pipelineId, string yaml, IReadOnlyDictionary<string, Binding> bindings, CancellationToken ct)
     {
         var errors = new List<string>();
         var placed = new Dictionary<string, string>(StringComparer.Ordinal);
         var nodes = inventory.Snapshot();
         var runner = inventory.PreferredRunner();
         var hostOf = nodes.SelectMany(n => n.Datasets.Select(d => (d.Variable, n.Name))).ToDictionary(x => x.Variable, x => x.Name, StringComparer.Ordinal);
-        var problems = Check(yaml, placement);
+        var problems = Check(yaml, bindings);
         var refused = problems.Where(p => p.Blocking).Select(p => p.Alias).ToHashSet(StringComparer.Ordinal);
         errors.AddRange(problems.Where(p => p.Blocking).Select(p => p.Message));
 
@@ -106,9 +141,11 @@ public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, Pla
         {
             foreach (var (alias, branch) in JobYaml.Branches(JobYaml.Parse(yaml)))
             {
-                if (bricks.MatchAll(branch).Count > 0)
+                // A bound alias is placed on its node or not at all, and so is a brick nobody bound: neither is the runner's.
+                var bound = bindings.TryGetValue(alias, out var binding);
+                if (bound || bricks.MatchAll(branch).Count > 0)
                 {
-                    if (!refused.Contains(alias)) placed[alias] = placement[alias];
+                    if (bound && !refused.Contains(alias)) placed[alias] = binding!.Node;
                     continue;
                 }
                 // A node's database is reached only through a brick its owner declared.

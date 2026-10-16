@@ -1,5 +1,6 @@
 using DtPipe.Coordinator.Contracts;
 using DtPipe.Jobs;
+using DtPipe.Jobs.Coordinator;
 using YamlDotNet.RepresentationModel;
 
 namespace DtPipe.Coordinator.Server;
@@ -23,17 +24,17 @@ public class DesignValidator(BrickCatalog bricks, NodeRequests nodes)
     private sealed record Placed(string Alias, BrickView Brick);
 
     /// <summary>
-    /// The brick a branch is, on the node <paramref name="placement"/> names for it. A branch the placement does not place (or
+    /// The brick a branch is, on the node <paramref name="bindings"/> name for it. A branch no binding places (or
     /// places on a node that does not offer it) takes the first node that offers the brick: the check judges the job's form,
-    /// and the placement's own problems are listed apart.
+    /// and the bindings' own problems are listed apart.
     /// </summary>
-    public BrickView? BrickOf(string alias, YamlMappingNode branch, IReadOnlyDictionary<string, string> placement)
+    public BrickView? BrickOf(string alias, YamlMappingNode branch, IReadOnlyDictionary<string, Binding> bindings)
     {
         var offered = bricks.MatchAll(branch);
-        return placement.TryGetValue(alias, out var node) && offered.FirstOrDefault(b => b.Node == node) is { } placed ? placed : offered.FirstOrDefault();
+        return bindings.TryGetValue(alias, out var binding) && offered.FirstOrDefault(b => b.Node == binding.Node) is { } placed ? placed : offered.FirstOrDefault();
     }
 
-    public virtual async Task<DesignCheck> ValidateAsync(string yaml, IReadOnlyDictionary<string, string> placement, CancellationToken ct)
+    public virtual async Task<DesignCheck> ValidateAsync(string yaml, IReadOnlyDictionary<string, Binding> bindings, CancellationToken ct)
     {
         var rewritten = new YamlMappingNode();
         var sources = new List<Placed>();
@@ -41,7 +42,7 @@ public class DesignValidator(BrickCatalog bricks, NodeRequests nodes)
         var refusals = new List<string>();
         foreach (var (alias, branch) in JobYaml.Branches(JobYaml.Parse(yaml)))
         {
-            switch (BrickOf(alias, branch, placement))
+            switch (BrickOf(alias, branch, bindings))
             {
                 case { Kind: BrickKind.Source } source:
                     rewritten.Add(alias, new YamlMappingNode { { "input", BrickRules.ArrowEndpoint } });

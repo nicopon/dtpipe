@@ -224,8 +224,8 @@ reader or writer. The switch belongs to the host's own environment, and only the
 planning ever sends a job as written.
 
 **The library** is a git repository under `.state/library`, started from `library-seed/`: each
-save and each saved plan is a commit. A seed `<id>.yaml` brings its `<id>.placement.json`, which names the
-node of each source and sink branch; the runner is never named. Several pipelines may be deployed at once. Their runs are in
+save and each saved plan is a commit. A seed `<id>.yaml` brings its `<id>.bindings.json`, which binds each source and sink branch to a
+node and a brick (`strict`: the branch must stay that brick, word for word); the runner is never bound. Several pipelines may be deployed at once. Their runs are in
 flight together when they share no data node; otherwise they wait their turn in the order they came
 (the runner never counts). Finished runs are kept in `.state/runs/`.
 
@@ -328,6 +328,7 @@ sign a person in and out.
 | `POST /api/bricks/{node}/{id}/preview` | a few rows, read by the node that owns the brick |
 | `GET /api/library` · `GET`/`PUT`/`DELETE /api/library/{id}` | pipelines; `PUT {yaml, message}` commits what a check accepted: `dtpipe --dry-run 1` over one row per source brick sent by its node, then each sink brick's node checks its target (422 and nothing written otherwise) |
 | `GET /api/library/{id}/history`, `/at/{commit}` | commits; the job and the diff at one |
+| `PUT /api/library/{id}/bindings` | `{bindings: {alias: {node, brick?, mode?}}, message?}` → binds the bricks of the job; a check like a save's runs first (422 with its report); the server resolves a missing `brick` from the job's text, and only `strict` is accepted |
 | `POST /api/library/{id}/distribute` | `{save?, message?}` → the automatic plan, saved as a commit on request |
 | `POST /api/library/{id}/deploy` | deploys the saved plan (409 if the job changed since) |
 | `POST /api/plan` | Lab view: `{pipelineId, yaml, cuts, placement}` → units, fragments, edges, errors |

@@ -264,13 +264,13 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   `.dtpipe/studio/samples/`, created owner-only, deleted when the sample ends and purged when the
   studio starts, never reached through a link. A brick's branch is out of the Variables tab: its node
   resolves those.
-- **A publication names the node of a brick only when one node offers it or the person chose it.** `/api/publish` asks the
-  coordinator to recognise the saved job (`CoordinatorLink.RecognizeAsync`) and sends `LibrarySave.Placement` with the alias of
-  each branch that is a brick offered by exactly one node, then the nodes the page sends as `placement`, each of which must offer
-  that brick (400 otherwise). A brick several nodes offer and nobody chose is left unnamed, since the studio never picks a node for
-  a person, and the coordinator's answer lists it. `GET /api/placement?path=` gives the page the nodes that offer each brick branch
-  of the saved job; the publish tab shows one selector per brick when some brick has several. `[CI: StudioPublishTests]`
-  `[unchecked: the page's selector]`
+- **A publication binds a brick to a node only when one node offers it or the person chose it.** `/api/publish` asks the
+  coordinator to recognise the saved job (`CoordinatorLink.RecognizeAsync`) and sends `LibrarySave.Bindings`, a `Binding` that
+  names only the node (the brick is the coordinator's to resolve from the job's text), for each branch that is a brick offered
+  by exactly one node, then the nodes the page sends as `bindings`, each of which must offer that brick (400 otherwise). A brick
+  several nodes offer and nobody chose is left unbound, since the studio never picks a node for a person, and the coordinator's
+  answer lists it. `GET /api/bindings?path=` gives the page the nodes that offer each brick branch of the saved job; the publish
+  tab shows one selector per brick when some brick has several. `[CI: StudioPublishTests]` `[unchecked: the page's selector]`
 - **A publication sends the job saved in the folder, nothing beside it.** `/api/publish` reads the
   file again and refuses one whose hash is not the one the page saved; the layout and the launch
   file stay on this machine. The first publication of an id creates only (`If-None-Match: *`); a
