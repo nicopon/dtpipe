@@ -223,7 +223,8 @@ replicas' checks stay at arming and launching.
 **A scheduler launches; the coordinator calls nothing.** It keeps no calendar and no trigger of its own: a cron, a CI or an
 enterprise scheduler holds the token of a `launcher` identity and asks `POST /service/runs {"pipelineId": …}`. The identity lists
 the pipelines it may launch (an empty list launches none; a `monitor` still reads every pipeline), the pipeline must be armed, and
-the answer is the `runId` (202): the scheduler asks `GET /service/runs/{id}` until the state is over. An `Idempotency-Key` header
+the answer is the `runId` (202): the scheduler asks `GET /service/runs/{id}` until the state is over, and may cancel a run it started
+(`POST /service/runs/{id}/cancel`; a run of another identity or of a person is not its to cancel). An `Idempotency-Key` header
 (1 to 128 letters, digits, `.`, `_`, `:` or `-`) makes a retry safe: a second request of the same identity with the same key
 answers the first run (200) and queues none, whatever became of it, and the same key for another pipeline is a 409. The key lives
 with the run in the journal, which keeps the latest 200 runs, so a run still in flight when the server stops is not journaled and
@@ -349,13 +350,14 @@ Every route below needs the session cookie of a person with a role (reader for a
 change a pipeline, deploy or run, admin for the rights and the lab-mode routes) and, unless it is a
 `GET`, the header `X-Dtpipe-Csrf`. `/healthz` is anonymous; `/account/login` and `/account/logout`
 sign a person in and out. `/health` is not under `/api` and takes a service's token instead: the one of a
-`monitor` identity, which reaches nothing else (the first two rows below). `/service` is outside `/api` too, and takes the token of a `launcher` identity (the next two rows).
+`monitor` identity, which reaches nothing else (the first two rows below). `/service` is outside `/api` too, and takes the token of a `launcher` identity (the next three rows).
 
 | Endpoint | |
 |---|---|
 | `GET /health/pipelines` | a monitor's token (`Authorization: Bearer`, no CSRF header): `{status, at, pipelines: [{id, status, commit, libraryCommit, causes: [{code, message, severity}], fragments}]}`, HTTP 200 whenever the caller is admitted |
 | `GET /health/pipelines/{id}` | the same for one pipeline; an id that is not armed answers `critical` (`not-armed`), so that a disarming alerts |
 | `POST /service/runs` | a launcher's token (no CSRF header; optional `Idempotency-Key`): `{pipelineId}`; 202 `{runId, pipelineId, state, …}`, or 200 with the first run for a retry of a key; 400 no pipeline or a key out of bounds; 403 a pipeline off the identity's list; 409 not armed, or the key started another pipeline |
+| `POST /service/runs/{id}/cancel` | the same token: cancels a run this identity started (a waiting run is cancelled when the call answers; a running one ends through its token); 202 with the run, 200 when it is over already, 404 for a run it did not start |
 | `GET /service/runs/{id}` | the same token: `{runId, pipelineId, state, queuedAt, startedAt, finishedAt, description, refusal, launchedBy}`; 404 for a run off the identity's list or none |
 | `GET /api/me`, `/api/info` | who is signed in and with which roles; whether the server runs in lab mode |
 | `GET /api/nodes`, `/api/bricks`, `/api/flow-matrix`, `/api/pipelines`, `/api/state` | what the pages draw |

@@ -4,8 +4,8 @@ using System.Text.Json.Serialization;
 namespace DtPipe.Coordinator.Server;
 
 /// <summary>
-/// What a scheduler asks (<c>/service</c>, a launcher's token): start the run of an armed pipeline its identity lists, and read the
-/// state of the runs it can start. Outside <c>/api</c>, like <c>/health</c>: a service's token is bearer only, so no cookie and no
+/// What a scheduler asks (<c>/service</c>, a launcher's token): start the run of an armed pipeline its identity lists, read the
+/// state of the runs it can start, and cancel one it started. Outside <c>/api</c>, like <c>/health</c>: a service's token is bearer only, so no cookie and no
 /// CSRF header apply, and the contract <c>dtpipe studio</c> reads is untouched. The coordinator answers the run's id and is asked
 /// again for its state; it calls nothing back.
 /// </summary>
@@ -46,13 +46,25 @@ internal static partial class ServiceEndpoints
 
         // A run outside the identity's list is not told apart from a run that does not exist.
         service.MapGet("/runs/{id}", (string id, HttpContext http, RightsStore rights, DeploymentManager deployments) =>
-        {
-            var identity = rights.Find(TrustedIdp.SubjectOf(http.User));
-            return deployments.FindRun(id) is { PipelineId: { } pipelineId } run && identity is not null && identity.Launches(pipelineId)
+            ReadableRun(id, http, rights, deployments) is { } run
                 ? Results.Ok(ServiceRun.Of(run))
-                : Results.NotFound(new { error = $"'{id}' is not a run this identity may read." });
+                : Results.NotFound(new { error = $"'{id}' is not a run this identity may read." }));
+
+        // A launcher cancels the runs it started, not another's: a run another identity or a person started is told apart from none by
+        // nothing. A run already over answers its state (200); otherwise the cancellation is asked (202) and the state read again.
+        service.MapPost("/runs/{id}/cancel", (string id, HttpContext http, RightsStore rights, DeploymentManager deployments) =>
+        {
+            if (ReadableRun(id, http, rights, deployments) is not { } run || run.LaunchedBy != TrustedIdp.SubjectOf(http.User))
+                return Results.NotFound(new { error = $"'{id}' is not a run this identity started." });
+            if (run.IsOver) return Results.Ok(ServiceRun.Of(run));
+            deployments.Cancel(id);
+            return Results.Json(ServiceRun.Of(deployments.FindRun(id) ?? run), statusCode: StatusCodes.Status202Accepted);
         });
     }
+
+    private static RunView? ReadableRun(string id, HttpContext http, RightsStore rights, DeploymentManager deployments) =>
+        deployments.FindRun(id) is { PipelineId: { } pipelineId } run && rights.Find(TrustedIdp.SubjectOf(http.User)) is { } identity
+            && identity.Launches(pipelineId) ? run : null;
 
     // A scheduler reads state now: no intermediary keeps an answer.
     private static async ValueTask<object?> NoStore(EndpointFilterInvocationContext context, EndpointFilterDelegate next)

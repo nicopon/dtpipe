@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using System.Text;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -97,5 +98,39 @@ public sealed class ServiceRoutesTests : IDisposable
         using var response = await Launcher().GetAsync("/service/runs/run-1", Ct);
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+    private static RunView Over(string runId, string pipeline, string? by) => new(
+        runId, "plan", RunState.Succeeded, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, null, "ok", null, pipeline, DateTimeOffset.UtcNow, LaunchedBy: by);
+
+    [Fact]
+    public async Task A_Launcher_Reads_And_Cancels_Its_Own_Run_And_Is_Told_Of_A_Run_Over_As_It_Is()
+    {
+        var launcher = Launcher();
+        _host.Services.GetRequiredService<RunJournal>().Record(Over("run-1", "sales", "cron"));
+
+        var read = await launcher.GetFromJsonAsync<System.Text.Json.JsonElement>("/service/runs/run-1", Ct);
+        using var cancel = await launcher.PostAsync("/service/runs/run-1/cancel", null, Ct);
+        var body = System.Text.Json.JsonDocument.Parse(await cancel.Content.ReadAsStringAsync(Ct)).RootElement;
+
+        Assert.Equal(("succeeded", "cron"), (read.GetProperty("state").GetString(), read.GetProperty("launchedBy").GetString()));
+        Assert.Equal((HttpStatusCode.OK, "succeeded"), (cancel.StatusCode, body.GetProperty("state").GetString()));
+    }
+
+    [Theory]
+    [InlineData("other", "sales")]
+    [InlineData("ann@x.test", "sales")]
+    [InlineData(null, "sales")]
+    [InlineData("cron", "crm")]
+    public async Task A_Launcher_Reads_Nothing_And_Cancels_Nothing_That_Another_Or_A_Pipeline_Off_Its_List_Owns(string? by, string pipeline)
+    {
+        var launcher = Launcher();
+        _host.Services.GetRequiredService<RunJournal>().Record(Over("run-1", pipeline, by));
+
+        using var cancel = await launcher.PostAsync("/service/runs/run-1/cancel", null, Ct);
+        using var read = await launcher.GetAsync("/service/runs/run-1", Ct);
+
+        // Another's run on a listed pipeline is readable, never cancellable; a pipeline off the list is neither.
+        Assert.Equal(HttpStatusCode.NotFound, cancel.StatusCode);
+        Assert.Equal(pipeline == "sales" ? HttpStatusCode.OK : HttpStatusCode.NotFound, read.StatusCode);
     }
 }

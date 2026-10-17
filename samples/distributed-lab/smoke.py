@@ -1140,10 +1140,22 @@ def bricks_pass():
             code_again, again = service("/service/runs", body={"pipelineId": pid}, key=key)
             if (code, code_again) != (202, 200) or again["runId"] != first["runId"]:
                 raise RuntimeError(f"one key, two requests: {code} {first}, {code_again} {again}")
+            # Behind the first run on the same data nodes, a second one of the launcher waits and is cancelled by it (the cancellation of a
+            # waiting run is complete when the call answers); a run a person started is not the launcher's to cancel.
+            code_b, second = service("/service/runs", body={"pipelineId": pid}, key=key + "-b")
+            third = call("/api/runs", {"pipelineId": pid})
+            code_cancel, cancelled = service(f"/service/runs/{second['runId']}/cancel", body={})
+            code_foreign, _ = service(f"/service/runs/{third['runId']}/cancel", body={})
+            call("/api/runs/cancel", {"runId": third["runId"]})
+            if (code_b, code_cancel, code_foreign) != (202, 202, 404) or cancelled["state"] != "cancelled":
+                raise RuntimeError(f"cancel: queued {code_b}, own {code_cancel} {cancelled}, a person's {code_foreign}")
             final = until(lambda: (lambda r: r if r[1].get("state") in ("succeeded", "failed", "refused", "error", "cancelled") else None)(
                 service(f"/service/runs/{first['runId']}")), RUN_TIMEOUT, f"{first['runId']} to finish")[1]
             if final["state"] != "succeeded" or final["launchedBy"] != "launcher-1":
                 raise RuntimeError(f"the launched run: {final}")
+            code_over, over = service(f"/service/runs/{first['runId']}/cancel", body={})
+            if code_over != 200 or over["state"] != "succeeded":
+                raise RuntimeError(f"cancelling a run that is over: {code_over} {over}")
             journaled = [r for r in call("/api/runs") if r.get("idempotencyKey") == key]
             if [(r["runId"], r["launchedBy"]) for r in journaled] != [(first["runId"], "launcher-1")]:
                 raise RuntimeError(f"the journal holds {[(r['runId'], r.get('launchedBy')) for r in journaled]} for one key")
@@ -1152,11 +1164,12 @@ def bricks_pass():
                 ("POST", "/service/runs", "monitor-1", pid): 403,
                 ("POST", "/service/runs", "node-1", pid): 403,
                 ("GET", "/service/runs/" + first["runId"], "monitor-1", None): 403,
+                ("POST", "/service/runs/" + first["runId"] + "/cancel", "monitor-1", None): 403,
                 ("GET", "/health/pipelines", "launcher-1", None): 403,
                 ("GET", "/api/me", "launcher-1", None): 401,
                 ("GET", "/api/runs", "launcher-1", None): 401,
             }
-            got = {k: bearer(tokens[k[2]], k[1], {"pipelineId": k[3]} if k[0] == "POST" else None, k[0], csrf=False)[0] for k in expected}
+            got = {k: bearer(tokens[k[2]], k[1], {"pipelineId": k[3]} if k[0] == "POST" and k[3] else {} if k[0] == "POST" else None, k[0], csrf=False)[0] for k in expected}
             if got != expected:
                 raise RuntimeError(f"a launcher reaches only its own routes, and only its pipelines: {got}")
         finally:
@@ -1166,7 +1179,7 @@ def bricks_pass():
         code_replay, replay = service("/service/runs", body={"pipelineId": pid}, key=key)
         if (code_gone, code_replay) != (409, 200) or replay["runId"] != first["runId"]:
             raise RuntimeError(f"after undeploy: {code_gone}; the key again: {code_replay} {replay}")
-        return f"{first['runId']} launched by launcher-1, once for two requests of one key, succeeded; refused for a pipeline off its list, a monitor, a node; 409 once undeployed"
+        return f"{first['runId']} launched by launcher-1, once for two requests of one key, succeeded; cancelled a waiting run of its own, not a person\'s; refused for a pipeline off its list, a monitor, a node; 409 once undeployed"
 
     def studio_routes():
         # dtpipe studio's view of the bricks, through a person's bearer token: the catalog, what a library

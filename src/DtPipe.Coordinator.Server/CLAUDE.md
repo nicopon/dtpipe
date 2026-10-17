@@ -54,7 +54,8 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   reads the kind the policy asks), so a node, a monitor, a stranger and a disabled launcher are refused 403 with a valid token,
   and a person's, a session cookie's or an anonymous request 401. Which pipelines it may launch is not the policy's, which
   cannot see the body: `ServiceEndpoints` checks the identity's list once the request is well-formed and before it says whether
-  the pipeline exists or is armed, so a launcher learns nothing of a pipeline off its list; a run off the list is read as no run (404).
+  the pipeline exists or is armed, so a launcher learns nothing of a pipeline off its list; a run off the list is read as no run (404). It cancels only a run it started (`RunView.LaunchedBy` is its client id), a run of
+  another identity or of a person being no run to it as well; a person's `/api/runs/cancel` is unchanged.
   `[local: DtPipe.Coordinator.Server.Tests TrustedIdpTests, ServiceRoutesTests, NodeChannelHubTests, the lab's smoke.py rights, bricks - health, a service launches a run]`
 - **A refused page gives a way out.** A person with no role who opens a page is signed out here
   and at the provider and lands on `/account/denied`: keeping the provider's session would sign

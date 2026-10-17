@@ -258,6 +258,8 @@ public sealed class TrustedIdpTests : IDisposable
             Assert.Equal(HttpStatusCode.Conflict, launched.StatusCode);
         using (var read = await launcher.GetAsync("/service/runs/run-1", Ct))
             Assert.Equal(HttpStatusCode.NotFound, read.StatusCode);
+        using (var cancel = await launcher.PostAsync("/service/runs/run-1/cancel", null, Ct))
+            Assert.Equal(HttpStatusCode.NotFound, cancel.StatusCode);
 
         foreach (var path in new[] { "/api/me", "/api/health", "/api/runs" })
         {
@@ -282,8 +284,9 @@ public sealed class TrustedIdpTests : IDisposable
 
         using var launched = await caller.PostAsync("/service/runs", Launch(), Ct);
         using var read = await caller.GetAsync("/service/runs/run-1", Ct);
+        using var cancel = await caller.PostAsync("/service/runs/run-1/cancel", null, Ct);
 
-        Assert.Equal((HttpStatusCode.Forbidden, HttpStatusCode.Forbidden), (launched.StatusCode, read.StatusCode));
+        Assert.Equal((HttpStatusCode.Forbidden, HttpStatusCode.Forbidden, HttpStatusCode.Forbidden), (launched.StatusCode, read.StatusCode, cancel.StatusCode));
         Assert.Empty(_host.Services.GetRequiredService<EnrollmentQueue>().List());
     }
 
@@ -298,8 +301,9 @@ public sealed class TrustedIdpTests : IDisposable
         using var anonymous = await _host.Anonymous().PostAsync("/service/runs", Launch(), Ct);
         using var session = await _host.Anonymous().SendAsync(cookie, Ct);
         using var read = await _host.Bearer(CoordinatorHost.Person(CoordinatorHost.Admin)).GetAsync("/service/runs/run-1", Ct);
+        using var cancel = await _host.Bearer(CoordinatorHost.Person(CoordinatorHost.Admin)).PostAsync("/service/runs/run-1/cancel", null, Ct);
 
-        Assert.All(new[] { person, anonymous, session, read }, r => Assert.Equal(HttpStatusCode.Unauthorized, r.StatusCode));
+        Assert.All(new[] { person, anonymous, session, read, cancel }, r => Assert.Equal(HttpStatusCode.Unauthorized, r.StatusCode));
     }
 
     [Fact]

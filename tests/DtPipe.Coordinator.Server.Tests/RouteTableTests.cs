@@ -83,6 +83,7 @@ public sealed class RouteTableTests
         "POST /api/runs [reader > designer]",
         "POST /api/runs/cancel [reader > designer]",
         "POST /service/runs [launcher]",
+        "POST /service/runs/{id}/cancel [launcher]",
         "POST api/stream/{transferId}/abort [default]",
         "POST api/stream/{transferId}/send [default]",
         "PUT /api/library/{id} [reader > designer]",
