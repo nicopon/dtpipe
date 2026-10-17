@@ -51,8 +51,10 @@ builder.Services.AddSingleton(services => new PipelineLibrary(
     services.GetRequiredService<CoordinatorServerOptions>(),
     services.GetRequiredService<AutoPlacer>().Check, services.GetRequiredService<AutoPlacer>().Resolve));
 builder.Services.AddSingleton<IJobSource>(services => services.GetRequiredService<PipelineLibrary>());
+builder.Services.AddSingleton<ILibraryHeads>(services => services.GetRequiredService<PipelineLibrary>());
 builder.Services.AddSingleton<RunJournal>();
 builder.Services.AddSingleton<DeploymentManager>();
+builder.Services.AddSingleton<PipelineHealth>();
 
 var app = builder.Build();
 app.Services.GetRequiredService<DeploymentManager>();
@@ -157,6 +159,7 @@ api.MapNodes(designer);
 api.MapLibrary(designer);
 api.MapRights(admin);
 api.MapRuns(designer);
+app.MapHealth(api);
 
 if (server.LabMode) admin.MapLabMode();
 

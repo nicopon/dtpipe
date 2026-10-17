@@ -1066,6 +1066,51 @@ def bricks_pass():
                 pass
         return "a save pins each brick's contract from the node's own read; no mode keeps the mode; tolerant keeps the version; strict none"
 
+    def health():
+        # A supervisor reads /health with a service token whose identity the rights grant the kind monitor, and nothing else. The
+        # identity is added here when the rights predate the seed (a stack keeps rights.json across restarts); the IdP client is in
+        # idp-clients.json. The pipeline is armed for the check and undone after it.
+        if not any(i["clientId"] == "monitor-1" for i in call("/api/rights")["identities"]):
+            call("/api/rights/identities", {"clientId": "monitor-1", "name": "monitor-1", "description": "Supervisor", "kind": "monitor"})
+        issuer = call("/api/rights")["idp"]["issuer"]
+        status, monitor = sec.token_for(issuer, "monitor-1", "monitor-1-lab-secret")
+        status_node, node = sec.token_for(issuer, "node-1", "node-1-lab-secret")
+        if status != 200 or status_node != 200:
+            raise RuntimeError(f"the IdP gave no token: monitor {status}, node {status_node}")
+        pid = "customers-mirror"
+
+        def read(path, token=monitor):
+            code, body, _ = bearer(token, path, csrf=False)
+            return code, (json.loads(body) if code == 200 else body[:200])
+
+        call(f"/api/library/{pid}/deploy", {})
+        try:
+            code, report = read("/health/pipelines")
+            armed = next((p for p in report["pipelines"] if p["id"] == pid), None) if code == 200 else None
+            if armed is None or armed["status"] != "ok":
+                raise RuntimeError(f"/health/pipelines {code}: {report if armed is None else (armed['status'], [c['code'] for c in armed['causes']])}")
+            code_one, one = read(f"/health/pipelines/{pid}")
+            if code_one != 200 or one["pipelines"][0]["status"] != "ok" or len(one["pipelines"][0]["fragments"]) < 2:
+                raise RuntimeError(f"/health/pipelines/{pid} {code_one}: {one}")
+            pages = call("/api/health")
+            if next(p for p in pages["pipelines"] if p["id"] == pid)["status"] != "ok":
+                raise RuntimeError(f"/api/health disagrees with /health: {pages}")
+            tokens = {"monitor": monitor, "node": node, "forged": "not-a-token"}
+            expected = {("/api/me", "monitor"): 401, ("/api/health", "monitor"): 401, ("/health/pipelines", "node"): 403, ("/health/pipelines", "forged"): 401}
+            got = {k: bearer(tokens[k[1]], k[0], csrf=False)[0] for k in expected}
+            if got != expected:
+                raise RuntimeError(f"a monitor reaches /api, a node /health or a forgery /health: {got}")
+        finally:
+            try:
+                call(f"/api/deployments/{pid}", None, "DELETE")
+            except ApiError:
+                pass
+        code_gone, gone = read(f"/health/pipelines/{pid}")
+        cause = gone["pipelines"][0]["causes"][0]["code"] if code_gone == 200 else None
+        if code_gone != 200 or gone["status"] != "critical" or cause != "not-armed":
+            raise RuntimeError(f"a pipeline no longer armed: {code_gone} {gone}")
+        return f"armed {pid}: ok, {len(one['pipelines'][0]['fragments'])} fragments; the monitor reaches /health alone; undeployed: critical, not armed"
+
     def studio_routes():
         # dtpipe studio's view of the bricks, through a person's bearer token: the catalog, what a library
         # job's branches are (the coordinator decides), and a source brick's sample as Arrow, which dtpipe reads.
@@ -1148,6 +1193,7 @@ def bricks_pass():
     check("a library save's check", library_save_check)
     check("a sink that refuses", sink_refuses)
     check("binding modes", binding_modes)
+    check("health", health)
     return failures[0]
 
 

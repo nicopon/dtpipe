@@ -150,7 +150,7 @@ started from `rights-seed.json` and edited in the **Access** view:
 
 | | Enforced |
 |---|---|
-| **Who**: identities, each a client of the IdP with a node name and one or more groups | by the coordinator (no group for an unknown or disabled client, from its next connection or token renewal) and by the control channel (a host is filed under its identity's node name, whatever it proposes; a disabled identity is refused) |
+| **Who**: identities, each a client of the IdP with a node name and one or more groups, or a *monitor*, which has none and reads `/health` only | by the coordinator (no group for an unknown or disabled client, from its next connection or token renewal) and by the control channel (a host is filed under its identity's node name, whatever it proposes; a disabled identity is refused) |
 | **To whom**: the flow matrix between groups | by the hub on **every transfer**, live, and on every plan |
 
 Every change is audited. A node host gives its pipeline node a token provider
@@ -171,7 +171,7 @@ survive its restart.
 
 | Caller | Flow | Token |
 |---|---|---|
-| a service (node, runner) | `client_credentials`, client id and secret from `idp-clients.json` | `sub` = client id, `aud` = `Idp:Audience` |
+| a service (node, runner, monitor) | `client_credentials`, client id and secret from `idp-clients.json` | `sub` = client id, `aud` = `Idp:Audience` |
 | a front end (`coordinator-ui`) | `authorization_code` + PKCE, through the IdP's login form | `sub`, `name`, `email` = `<user>@Idp:EmailDomain` |
 
 Any user name of letters, digits, `.`, `_` or `-` signs in with that name followed by `pwd`
@@ -195,10 +195,9 @@ python3 tools/idp_check.py          # discovery, both flows, and the refusals th
 | View | Does |
 |---|---|
 | Nodes | every node, its bricks (schema, version, preview), the fragments it hosts, the flow matrix |
-| Library | the pipelines kept, their plan and deployment state, last run, git history, diff, restore; a pipeline's page shows its plan, its fragments and its job, read only. A pipeline is written with `dtpipe studio --coordinator` and published here |
-| Distribution | the plan placed automatically, drawn in lanes (sources, runner, sinks); save it, deploy, run |
+| Library | the pipelines kept, their deployment, **health** (whether the armed version can be launched, and why not), last run, git history, diff, restore; a pipeline's page shows its health, its bindings, the plan a launch would make now drawn in lanes (sources, runner, sinks), its fragments and its job, read only. A pipeline is written with `dtpipe studio --coordinator` and published here |
 | Runs | deployments, the runs in flight and the queue, the journal with each run's report, node events, a query on any database |
-| Access | the trusted IdP, the hosts waiting for approval, identities (node name, groups, enabled, reconnect), the editable flow matrix, the audit |
+| Access | the trusted IdP, the hosts waiting for approval, identities (node or monitor, name, groups, enabled, reconnect), the editable flow matrix, the audit |
 
 **A pipeline is a plain dtpipe job**, one branch per card, that also runs whole on one machine
 (`smoke.py` uses it as the witness). A branch *is* a brick when its content equals the brick's:
@@ -211,6 +210,15 @@ goes directly, without the runner. `PlanBuilder` then builds the fragments exact
 chosen by hand. Nothing of the plan is saved: deploying a pipeline arms it at the commit the library
 holds, with its bindings, and each run plans from that job and those bindings against the rights and
 the nodes as they are then. The run's journal records the plan it ran.
+
+**Health is asked, never pushed.** The coordinator runs no check of its own and plans no run: a supervisor
+(Centreon, Nagios, a script) reads `GET /health/pipelines` with the token of a `monitor` identity and gets, for
+each armed pipeline, `ok`, `warning` or `critical` and the causes: a binding that does not hold, a brick changed
+beyond its mode, no runner, an edge the matrix forbids, a fragment no replica could run, a node with a replica
+that cannot run it while another can. It is read from the armed job and bindings, asks no node (a mode's verdict
+that is not known yet is a `warning` while it is asked once, in the background), and is kept until something it
+depends on moves or `Coordinator:Health:MaxAge` (5 minutes) has passed. Launchable is not successful: the
+replicas' checks stay at arming and launching.
 
 **A binding is held to its brick by a mode.** `strict` needs the branch to be the brick, word for word.
 In `contract`, `compatible` and `tolerant` the brick's owner may change it: saving the pipeline (or its
@@ -330,10 +338,13 @@ replica ran each fragment.
 Every route below needs the session cookie of a person with a role (reader for a `GET`, designer to
 change a pipeline, deploy or run, admin for the rights and the lab-mode routes) and, unless it is a
 `GET`, the header `X-Dtpipe-Csrf`. `/healthz` is anonymous; `/account/login` and `/account/logout`
-sign a person in and out.
+sign a person in and out. `/health` is not under `/api` and takes a service's token instead: the one of a
+`monitor` identity, which reaches nothing else (the first two rows below).
 
 | Endpoint | |
 |---|---|
+| `GET /health/pipelines` | a monitor's token (`Authorization: Bearer`, no CSRF header): `{status, at, pipelines: [{id, status, commit, libraryCommit, causes: [{code, message, severity}], fragments}]}`, HTTP 200 whenever the caller is admitted |
+| `GET /health/pipelines/{id}` | the same for one pipeline; an id that is not armed answers `critical` (`not-armed`), so that a disarming alerts |
 | `GET /api/me`, `/api/info` | who is signed in and with which roles; whether the server runs in lab mode |
 | `GET /api/nodes`, `/api/bricks`, `/api/flow-matrix`, `/api/pipelines`, `/api/state` | what the pages draw |
 | `POST /api/bricks/{node}/{id}/preview` | a few rows, read by the node that owns the brick |
@@ -352,3 +363,4 @@ sign a person in and out.
 | `POST /api/runs/cancel` | `{runId?}`: a run in flight or queued; with no id, the one in flight (409 when several are) |
 | `POST /api/fragments/{name}/kill` | fault injection: ends the fragment's child on every replica of its node whose host enabled it (every lab host does) |
 | `GET /api/events` | server-sent events: nodes, deployments, logs, bytes, runs |
+| `GET /api/health` | the health of every armed pipeline, as the pages read it (reader) |

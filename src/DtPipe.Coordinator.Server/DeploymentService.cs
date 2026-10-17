@@ -84,6 +84,13 @@ internal sealed class DeploymentService
         lock (_ledger.Lock) return _ledger.Deployments.GetValueOrDefault(pipelineId)?.Plan;
     }
 
+    /// <summary>Every library pipeline that is armed, with where its deployment stands.</summary>
+    public IReadOnlyList<(ArmedDeployment Armed, DeploymentState State, string? Message)> ArmedDeployments()
+    {
+        lock (_ledger.Lock)
+            return _ledger.Deployments.Values.Where(d => d.Armed is not null).Select(d => (d.Armed!, d.State, d.Message)).ToList();
+    }
+
     /// <summary>What a library pipeline is armed with, or null when it is not armed.</summary>
     public ArmedDeployment? ArmedOf(string pipelineId)
     {

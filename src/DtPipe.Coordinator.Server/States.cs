@@ -21,4 +21,6 @@ public sealed class WireEnumConverter<T>() : JsonStringEnumConverter<T>(JsonNami
 public static class StateWords
 {
     public static string Word(this DeploymentState state) => JsonNamingPolicy.CamelCase.ConvertName(state.ToString());
+
+    public static string Word(this RunState state) => JsonNamingPolicy.CamelCase.ConvertName(state.ToString());
 }

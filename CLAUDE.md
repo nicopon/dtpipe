@@ -315,7 +315,9 @@ the control plane, over each replica's node channel; TransportR carries the data
 - **A person never reaches the data plane, a service never `/api`**: told apart by the token's own
   claims (a service's `sub` is its `client_id`), each scheme failing the other's tokens. `dtpipe
   studio` reaches `/api` with a person's token, through the routes and records of
-  `DtPipe.Jobs/Coordinator`, whose contract number both sides check.
+  `DtPipe.Jobs/Coordinator`, whose contract number both sides check. A service has a kind the rights
+  give it: a node announces on the node channel, a **monitor** (a supervisor) reads `/health` and nothing
+  else, with no group and no node, so its valid token is refused at the announcement and on `/api`.
 - **The CLI hosts neither a node nor a hub.** `dtpipe` is the child a node drives, reached through `arrow:`;
   it references no TransportR assembly and no project of the family, maps no SignalR hub, and `dtpipe
   studio` is a client of the coordinator's `/api`, only when it is given `--coordinator`.

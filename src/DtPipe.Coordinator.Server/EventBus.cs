@@ -16,12 +16,20 @@ public sealed class EventBus
     private readonly object _lock = new();
     private readonly LinkedList<ServerEvent> _backlog = new();
     private readonly List<Channel<ServerEvent>> _subscribers = new();
+    private readonly Dictionary<string, long> _published = new(StringComparer.Ordinal);
     private long _seq;
+
+    /// <summary>How many events of these types were published since the server started: it moves whenever one of them is, which is all a cache that depends on them needs to know.</summary>
+    public long CountOf(IEnumerable<string> types)
+    {
+        lock (_lock) return types.Sum(t => _published.GetValueOrDefault(t));
+    }
 
     public void Publish(string type, object data)
     {
         lock (_lock)
         {
+            _published[type] = _published.GetValueOrDefault(type) + 1;
             var evt = new ServerEvent(++_seq, type, data, DateTimeOffset.UtcNow);
             _backlog.AddLast(evt);
             if (_backlog.Count > BacklogSize) _backlog.RemoveFirst();

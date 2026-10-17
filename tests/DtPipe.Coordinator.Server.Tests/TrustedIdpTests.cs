@@ -148,4 +148,91 @@ public sealed class TrustedIdpTests : IDisposable
         Assert.StartsWith("Bearer error=", challenge);
         Assert.EndsWith(", " + metadata, challenge);
     }
+
+    // ---- the third kind of caller: a monitor reads /health and nothing else ----
+
+    private RightsStore Rights => _host.Services.GetRequiredService<RightsStore>();
+
+    private void Provision()
+    {
+        Rights.AddIdentity(new Identity("watch", "supervisor", "", [], Kind: IdentityKinds.Monitor));
+        Rights.AddIdentity(new Identity("node-1", "node-1", "", ["crm"]));
+    }
+
+    [Fact]
+    public async Task A_Monitor_Reads_Health_With_The_Status_In_The_Body_And_A_Disarmed_Pipeline_Is_Critical()
+    {
+        Provision();
+        var monitor = _host.Bearer(CoordinatorHost.Service("watch"));
+
+        var all = await monitor.GetFromJsonAsync<JsonElement>("/health/pipelines", Ct);
+        Assert.Equal("ok", all.GetProperty("status").GetString());
+        Assert.Equal(0, all.GetProperty("pipelines").GetArrayLength());
+
+        using var one = await monitor.GetAsync("/health/pipelines/ghost", Ct);
+        Assert.Equal(HttpStatusCode.OK, one.StatusCode);
+        Assert.Equal("no-store", one.Headers.CacheControl!.ToString());
+        var body = JsonDocument.Parse(await one.Content.ReadAsStringAsync(Ct)).RootElement;
+        Assert.Equal("critical", body.GetProperty("status").GetString());
+        var pipeline = body.GetProperty("pipelines")[0];
+        Assert.Equal(("ghost", "critical", "not-armed"),
+            (pipeline.GetProperty("id").GetString(), pipeline.GetProperty("status").GetString(), pipeline.GetProperty("causes")[0].GetProperty("code").GetString()));
+    }
+
+    [Theory]
+    [InlineData("/api/me")]
+    [InlineData("/api/health")]
+    [InlineData("/api/nodes")]
+    public async Task A_Monitor_Never_Reaches_Api(string path)
+    {
+        Provision();
+        using var response = await _host.Bearer(CoordinatorHost.Service("watch")).GetAsync(path, Ct);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task A_Node_A_Stranger_And_A_Disabled_Monitor_Never_Reach_Health()
+    {
+        Provision();
+        Rights.AddIdentity(new Identity("off", "sleeping", "", [], false, IdentityKinds.Monitor));
+
+        foreach (var subject in new[] { "node-1", "stranger", "off" })
+        {
+            using var response = await _host.Bearer(CoordinatorHost.Service(subject)).GetAsync("/health/pipelines", Ct);
+            Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        }
+        Assert.Empty(_host.Services.GetRequiredService<EnrollmentQueue>().List());
+    }
+
+    [Fact]
+    public async Task A_Person_And_An_Anonymous_Caller_Never_Reach_Health()
+    {
+        Provision();
+        using (var person = await _host.Bearer(CoordinatorHost.Person(CoordinatorHost.Admin)).GetAsync("/health/pipelines", Ct))
+            Assert.Equal(HttpStatusCode.Unauthorized, person.StatusCode);
+        using (var anonymous = await _host.Anonymous().GetAsync("/health/pipelines", Ct))
+            Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+    }
+
+    [Fact]
+    public async Task The_Pages_Read_The_Same_Health_As_A_Reader()
+    {
+        var reader = await _host.Bearer(CoordinatorHost.Person(CoordinatorHost.Reader)).GetFromJsonAsync<JsonElement>("/api/health", Ct);
+        Assert.Equal("ok", reader.GetProperty("status").GetString());
+        using var unlisted = await _host.Bearer(CoordinatorHost.Person("zed@x.test")).GetAsync("/api/health", Ct);
+        Assert.Equal(HttpStatusCode.Forbidden, unlisted.StatusCode);
+    }
+
+    [Fact]
+    public async Task A_Monitors_Token_Reaches_The_Node_Channel_Only_To_Be_Refused_At_The_Announcement()
+    {
+        Provision();
+        using var negotiated = await _host.Bearer(CoordinatorHost.Service("watch")).PostAsync("/node-channel/negotiate?negotiateVersion=1", null, Ct);
+
+        // The transport opens for any service's token, as it does for a host no identity knows: what it may do there is the rights'
+        // (NodeChannelHubTests), and a monitor is neither queued nor admitted to the data plane's groups.
+        Assert.Equal(HttpStatusCode.OK, negotiated.StatusCode);
+        Assert.Empty(_host.Services.GetRequiredService<EnrollmentQueue>().List());
+        Assert.Empty(Rights.Find("watch")!.Groups);
+    }
 }

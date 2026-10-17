@@ -52,7 +52,7 @@ public sealed class PreconditionFailedException(string message, string? commit) 
 /// Every save is a commit.
 /// The repository starts from the job files under <c>library-seed/</c>, each with the <c>.bindings.json</c> beside it, if any.
 /// </summary>
-public sealed partial class PipelineLibrary : IJobSource
+public sealed partial class PipelineLibrary : IJobSource, ILibraryHeads
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     {
@@ -206,6 +206,10 @@ public sealed partial class PipelineLibrary : IJobSource
         if (!CommitPattern().IsMatch(commit)) return null;
         return await TryGitAsync(["show", $"{commit}:pipelines/{PipelineName(id)}/pipeline.yaml"], ct);
     }, ct);
+
+    /// <summary>What the library holds of a pipeline now, by content; null when it holds none.</summary>
+    public async Task<LibraryHead?> HeadAsync(string id, CancellationToken ct) =>
+        await GetAsync(id, ct) is { } doc ? new LibraryHead(doc.Commit, Sha(doc.Yaml), Bindings.Sha(doc.Bindings)) : null;
 
     private const string BindingsFile = "bindings.json";
 

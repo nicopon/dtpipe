@@ -66,6 +66,12 @@ public sealed class DeploymentManager
     public Task<Launch> PlanLaunchAsync(string pipelineId, string yaml, IReadOnlyDictionary<string, DtPipe.Jobs.Coordinator.Binding> bindings, CancellationToken ct) =>
         _planner.ChooseAsync(pipelineId, yaml, bindings, ct);
 
+    /// <summary>Every library pipeline that is armed, with where its deployment stands.</summary>
+    public IReadOnlyList<(ArmedDeployment Armed, DeploymentState State, string? Message)> Armed() => _deployments.ArmedDeployments();
+
+    /// <summary>For each fragment of <paramref name="plan"/>, the replicas that could run it now; null when a node of the plan has no usable identity. Reserves nothing.</summary>
+    public Task<IReadOnlyDictionary<string, FragmentEligibility>?> EligibilityOfAsync(DistributionPlan plan) => _planner.EligibilityOfAsync(plan);
+
     /// <summary>What a library pipeline is armed with, or null when it is not armed.</summary>
     public ArmedDeployment? ArmedOf(string pipelineId) => _deployments.ArmedOf(pipelineId);
 

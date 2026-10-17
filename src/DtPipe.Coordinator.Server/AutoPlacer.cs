@@ -11,13 +11,16 @@ namespace DtPipe.Coordinator.Server;
 /// it exactly as for a placement the user picked, and cuts nothing. A source brick wired straight into a sink brick therefore
 /// crosses no runner.
 /// </summary>
-public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, PlanBuilder planner)
+public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, PlanBuilder planner, RightsStore rights)
 {
     private static readonly IReadOnlyDictionary<string, Binding> NoBindings = new Dictionary<string, Binding>();
 
     /// <summary>Why a branch that reaches <paramref name="nodes"/>' data without being one of their bricks is refused.</summary>
     public static string NotABrick(string alias, IEnumerable<string> nodes) =>
         $"'{alias}' reads or writes {string.Join(", ", nodes)} without being one of its bricks. Rebuild it from the node's bricks.";
+
+    /// <summary>Why a branch that is neither bound nor a brick is refused when no runner is connected to take it.</summary>
+    public static string NeedsRunner(string alias) => $"'{alias}' needs a runner, and none is connected.";
 
     /// <summary>A binding as the messages name it: its brick, when it has one, and its node.</summary>
     private static string Bound(Binding binding) =>
@@ -104,27 +107,33 @@ public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, Pla
                 var bound = Bound(binding);
                 var here = offered.Where(b => b.Node == binding.Node).ToList();
                 var mode = Bindings.ModeOf(binding);
+                // Who a node is, the rights say; whether it is here, the inventory says. A node lists once a replica has announced it,
+                // so after a restart, and until then, it has an identity and no entry: its bricks are not known, only that it is absent.
+                var identity = rights.NodeIdentity(binding.Node);
                 if (!BindingModes.All.Contains(mode))
                     problems.Add(new(alias, BindingCauses.UnsupportedMode,
                         $"'{alias}' is bound to {bound} in mode '{mode}': the modes are {string.Join(", ", BindingModes.All)}.", true));
+                else if (identity is null)
+                    problems.Add(new(alias, BindingCauses.UnknownNode, $"'{alias}' is bound to {bound}, which is no node of this coordinator.", true));
+                else if (!identity.Enabled)
+                    problems.Add(new(alias, BindingCauses.UnknownNode, $"'{alias}' is bound to {bound}, whose identity is disabled.", true));
+                else if (!nodes.TryGetValue(binding.Node, out var view))
+                    problems.Add(new(alias, BindingCauses.Offline, $"'{alias}' is bound to {bound}, which has no connected replica.", false));
                 else if (mode != BindingModes.Strict)
                 {
                     // The brick is held by its id: the branch's text is whatever it was when the binding was checked.
-                    nodes.TryGetValue(binding.Node, out var view);
                     if (CheckHeld(alias, binding, bound, mode, view) is { } held) problems.Add(held);
                 }
                 else if (offered.Count == 0)
                     problems.Add(new(alias, BindingCauses.NotABrick,
                         $"'{alias}' is bound to {bound}, but its text is no longer that brick: a bound branch never runs on the runner.", true));
-                else if (!nodes.TryGetValue(binding.Node, out var strictView))
-                    problems.Add(new(alias, BindingCauses.UnknownNode, $"'{alias}' is bound to {bound}, which is no node of this coordinator.", true));
                 else if (here.Count == 0)
                     problems.Add(new(alias, BindingCauses.NotOffered,
                         $"'{alias}' is bound to {bound}, which does not offer this brick (offered by {string.Join(", ", offered.Select(b => b.Node).Distinct())}).", true));
                 else if (here.All(b => b.Id != binding.Brick))
                     problems.Add(new(alias, BindingCauses.BrickMismatch,
                         $"'{alias}' is bound to {bound}, but its text is {string.Join(" or ", here.Select(b => $"brick '{b.Id}'"))} there.", true));
-                else if (!strictView.Online)
+                else if (!view.Online)
                     problems.Add(new(alias, BindingCauses.Offline, $"'{alias}' is bound to {bound}, which has no connected replica.", false));
             }
         }
@@ -138,14 +147,11 @@ public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, Pla
     }
 
     /// <summary>
-    /// Why a binding in a mode other than strict does not hold, or null when it does. It needs a node that exists, a brick that node
-    /// offers and a pin a check wrote that holds what the mode compares. The inventory lists a node once a replica has announced it:
-    /// until then, after a restart, the cause is <see cref="BindingCauses.UnknownNode"/>, whatever the rights say.
+    /// Why a binding in a mode other than strict does not hold on a node that has an identity and has announced itself, or null when it
+    /// does. It needs a brick that node offers and a pin a check wrote that holds what the mode compares.
     /// </summary>
-    private BindingProblem? CheckHeld(string alias, Binding binding, string bound, string mode, NodeView? node)
+    private BindingProblem? CheckHeld(string alias, Binding binding, string bound, string mode, NodeView node)
     {
-        if (node is null)
-            return new(alias, BindingCauses.UnknownNode, $"'{alias}' is bound to {bound}, which is no node of this coordinator.", true);
         if (binding.Brick is null)
             return new(alias, BindingCauses.NotABrick,
                 $"'{alias}' is bound to {bound} in mode '{mode}', which names no brick: save it again while its text is a brick of that node.", true);
@@ -161,10 +167,12 @@ public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, Pla
 
     /// <summary>
     /// The plan of <paramref name="yaml"/> under <paramref name="bindings"/>, with every branch that is neither bound nor a brick on
-    /// <paramref name="runner"/> (null: none is available, and such a branch is an error). Which runner is <see cref="LaunchPlanner"/>'s.
+    /// <paramref name="runner"/> (null: none is available, and such a branch is an error, whose alias is added to
+    /// <paramref name="unplaced"/>). Which runner is <see cref="LaunchPlanner"/>'s.
     /// </summary>
     public async Task<DistributionPlan> PlanAsync(
-        string pipelineId, string yaml, IReadOnlyDictionary<string, Binding> bindings, NodeView? runner, CancellationToken ct)
+        string pipelineId, string yaml, IReadOnlyDictionary<string, Binding> bindings, NodeView? runner, CancellationToken ct,
+        ICollection<string>? unplaced = null)
     {
         var errors = new List<string>();
         var placed = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -185,6 +193,13 @@ public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, Pla
                 {
                     if (bound && !refused.Contains(alias))
                     {
+                        // A node with an identity that no replica has announced yet has no bricks to compose: the launch says why.
+                        if (nodes.All(n => n.Name != binding!.Node))
+                        {
+                            errors.Add(problems.FirstOrDefault(p => p.Alias == alias && p.Cause == BindingCauses.Offline)?.Message
+                                ?? $"'{alias}' is bound to {Bound(binding!)}, which has no connected replica.");
+                            continue;
+                        }
                         placed[alias] = binding!.Node;
                         // Its brick is the one the binding names. The text says it only for a strict binding, which Check judged.
                         if (binding.Brick is { } id) named[alias] = id;
@@ -198,7 +213,11 @@ public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, Pla
                     errors.Add(NotABrick(alias, variables.Select(v => hostOf[v]).Distinct()));
                     continue;
                 }
-                if (runner is null) errors.Add($"'{alias}' needs a runner, and none is connected.");
+                if (runner is null)
+                {
+                    errors.Add(NeedsRunner(alias));
+                    unplaced?.Add(alias);
+                }
                 else placed[alias] = runner.Name;
             }
         }

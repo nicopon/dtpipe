@@ -41,6 +41,9 @@ public sealed class StudioRoutesTests : IDisposable
             DtpipeVersion: "9.9.9+abc");
         registry.Announce("c1", "n1", announcement, ["g"], () => { });
         inventory.Announced("n1", "n1", announcement, ["g"]);
+        // The rights say who a node is: a host that announced itself has an identity there.
+        var rights = _host.Services.GetRequiredService<RightsStore>();
+        if (rights.Find("n1") is null) rights.AddIdentity(new Identity("n1", "n1", "", ["g"]));
         if (!online) registry.Disconnected("c1");
         return inventory;
     }

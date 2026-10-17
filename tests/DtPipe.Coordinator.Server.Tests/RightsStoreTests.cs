@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Xunit;
 
 namespace DtPipe.Coordinator.Server.Tests;
@@ -151,5 +152,71 @@ public sealed class RightsStoreTests : IDisposable
         Assert.True(flow.CanSendTo(Set("crm"), Set("runner")));
         store.SetMatrix(new() { ["crm"] = ["audit"] });
         Assert.False(flow.CanSendTo(Set("crm"), Set("runner")));
+    }
+
+    private const string WithMonitor = """
+        {
+          "identities": [
+            { "clientId": "a", "name": "node-a", "description": "A", "groups": ["crm"] },
+            { "clientId": "watch", "name": "supervisor", "description": "Reads /health", "kind": "monitor" }
+          ],
+          "matrix": {}
+        }
+        """;
+
+    [Fact]
+    public void An_Identity_Names_No_Kind_Is_A_Node()
+    {
+        var store = StoreOf(Document);
+
+        Assert.All(store.Snapshot().Identities, i => Assert.Equal((IdentityKinds.Node, true), (i.Kind, i.IsNode)));
+    }
+
+    [Fact]
+    public void A_Monitor_Belongs_To_No_Group_And_Its_Name_Is_No_Nodes()
+    {
+        var store = StoreOf(WithMonitor);
+
+        var monitor = store.Find("watch")!;
+        Assert.Equal((IdentityKinds.Monitor, false), (monitor.Kind, monitor.IsNode));
+        Assert.Empty(monitor.Groups);
+        Assert.Null(store.NodeIdentity("supervisor"));
+        Assert.Equal("a", store.NodeIdentity("node-a")!.ClientId);
+        Assert.Throws<ConflictException>(() => store.SubjectOf("supervisor"));
+        Assert.Throws<ConflictException>(() => store.GroupsOf("supervisor"));
+    }
+
+    [Fact]
+    public void A_Monitor_Keeps_No_Group_It_Is_Given_And_A_Node_Still_Needs_One()
+    {
+        var store = StoreOf(Document);
+
+        store.AddIdentity(new Identity("watch", "supervisor", "", ["crm"], Kind: IdentityKinds.Monitor));
+
+        Assert.Empty(store.Find("watch")!.Groups);
+        Assert.Throws<ConflictException>(() => store.AddIdentity(new Identity("c", "node-c", "", [])));
+    }
+
+    [Fact]
+    public void A_Name_Belongs_To_One_Identity_Whatever_Its_Kind_And_A_Kind_Is_One_Of_The_Two()
+    {
+        var store = StoreOf(WithMonitor);
+
+        Assert.Throws<ConflictException>(() => store.AddIdentity(new Identity("c", "supervisor", "", ["crm"])));
+        Assert.Throws<ConflictException>(() => store.AddIdentity(new Identity("d", "node-d", "", ["crm"], Kind: "launcher")));
+    }
+
+    [Fact]
+    public void A_Monitor_Is_Granted_No_Group_To_The_Data_Plane()
+    {
+        var store = StoreOf(WithMonitor);
+        var provider = new RightsIdentityProvider(store);
+        var now = DateTimeOffset.UtcNow.AddMinutes(5).ToUnixTimeSeconds().ToString();
+
+        ClaimsPrincipal Token(string client) => new(new ClaimsIdentity(
+            [new Claim("sub", client), new Claim("client_id", client), new Claim("exp", now), new Claim("scope", "crm")], "test"));
+
+        Assert.Equal(["crm"], provider.ResolveIdentity(Token("a"), null, null)!.Groups);
+        Assert.Empty(provider.ResolveIdentity(Token("watch"), null, null)!.Groups);
     }
 }

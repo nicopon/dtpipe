@@ -10,6 +10,7 @@ export const store = {
   queue: [],         // the runs in flight, then the queued ones
   logs: [],
   bytes: { total: 0, activeTransfers: 0 },
+  health: { status: "ok", pipelines: [] }, // whether each armed pipeline can be launched: /api/health, read again when its inputs move
   connected: false,
   labMode: false, // the server's own word: the Lab view and the query panel exist only then
   me: null,       // { name, email, roles }: who is signed in, and what the server lets them do
@@ -110,6 +111,24 @@ export function deploymentOf(pipelineId) { return store.deployments.find((d) => 
 export function lastRunOf(pipelineId) {
   return store.queue.find((r) => r.pipelineId === pipelineId) || store.runs.find((r) => r.pipelineId === pipelineId) || null;
 }
+export const healthOf = (pipelineId) => store.health.pipelines.find((p) => p.id === pipelineId) || null;
+
+// Whether an armed pipeline can be launched, as the coordinator's health read says it (what a supervisor reads at /health).
+export function healthChip(pipelineId) {
+  const h = healthOf(pipelineId);
+  if (!h) return "";
+  const told = h.causes.filter((c) => c.severity !== "info").map((c) => c.message);
+  return `<span class="chip ${h.status === "ok" ? "ok" : h.status === "warning" ? "warn" : "bad"}" title="${esc(told.join(" ") || "Nothing to report.")}">health: ${esc(h.status)}</span>`;
+}
+
+let healthTimer = null;
+export function refreshHealth() {
+  clearTimeout(healthTimer);
+  healthTimer = setTimeout(async () => {
+    try { store.health = await api("/api/health"); emit("health"); } catch { /* the next event reads it again */ }
+  }, 300);
+}
+
 export const isActive = (run) => run && ["queued", "running"].includes(run.state);
 
 // ---------------------------------------------------------------- live store
@@ -138,6 +157,7 @@ export async function start() {
   ]);
   Object.assign(store, { me, labMode: info.labMode, nodes, bricks, matrix: matrix.groups, deployments, runs, queue });
   emit("all");
+  refreshHealth();
   // ?static renders once without the live stream (a headless browser waits on it forever).
   if (new URLSearchParams(location.search).has("static")) return;
 
@@ -152,17 +172,20 @@ export async function start() {
         clearTimeout(bricksTimer);
         bricksTimer = setTimeout(refreshBricks, 300);
         emit("nodes");
+        refreshHealth();
         break;
-      case "deployments": store.deployments = data; emit("deployments"); break;
+      case "deployments": store.deployments = data; emit("deployments"); refreshHealth(); break;
       case "run": onRun(data); break;
       case "deploy":
         if (data.state === "failed") addLog({ node: "coordinator", level: "Error", message: `${data.pipelineId}: deployment failed: ${data.message}` });
+        refreshHealth();
         break;
       case "log": addLog({ node: data.node, fragment: data.fragment, level: data.level, message: data.message }); break;
       case "bytes": store.bytes = data; emit("bytes"); break;
-      case "library": emit("library"); break;
+      case "library": emit("library"); refreshHealth(); break;
       case "rights":
         api("/api/flow-matrix").then((m) => { store.matrix = m.groups; emit("rights"); }).catch(() => emit("rights"));
+        refreshHealth();
         break;
     }
   };

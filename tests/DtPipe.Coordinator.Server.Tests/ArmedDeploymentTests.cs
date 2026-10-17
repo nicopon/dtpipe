@@ -13,7 +13,7 @@ namespace DtPipe.Coordinator.Server.Tests;
 /// journaled with it, and what is armed is kept on disk and read back. Two data nodes (<c>n</c>, <c>m</c>) and two runners
 /// (<c>r1</c>, <c>r2</c>) share one state directory across the "restart" the tests make.
 /// </summary>
-public sealed class ArmedDeploymentTests : IDisposable
+public sealed partial class ArmedDeploymentTests : IDisposable
 {
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(10);
     private const string Job = "src:\n  input: sqlite:a\nout:\n  from: src\n  output: csv:out.csv\n";
@@ -21,7 +21,14 @@ public sealed class ArmedDeploymentTests : IDisposable
 
     private sealed class Replicas : INodeLink
     {
-        public Task<FragmentCheck> CheckAsync(ReplicaKey replica, FragmentSpec spec, CancellationToken ct) => Task.FromResult(new FragmentCheck(true));
+        /// <summary>When set, the replicas answer <c>Check</c> only once it completes: an arming stays under way until then.</summary>
+        public Task? Hold { get; set; }
+
+        public async Task<FragmentCheck> CheckAsync(ReplicaKey replica, FragmentSpec spec, CancellationToken ct)
+        {
+            if (Hold is not null) await Hold;
+            return new FragmentCheck(true);
+        }
         public Task<int> KillAsync(ReplicaKey replica, string fragment, CancellationToken ct) => Task.FromResult(1);
         public Task<LaunchResult> LaunchAsync(ReplicaKey replica, LaunchRequest request, CancellationToken ct) => throw new NotSupportedException();
         public Task<bool> WireAsync(ReplicaKey replica, string runId, string fragment, string alias, string transferId, CancellationToken ct) => throw new NotSupportedException();
@@ -55,6 +62,10 @@ public sealed class ArmedDeploymentTests : IDisposable
     private DeploymentManager _deployments;
     private int _connections;
     private Func<BrickCatalog, NodeRequests, BindingVerifier>? _verifier;
+    private EventBus _bus = new();
+    private PipelineHealth _health = null!;
+    private readonly FakeHeads _heads = new();
+    private readonly Microsoft.Extensions.Time.Testing.FakeTimeProvider _time = new();
 
     public ArmedDeploymentTests()
     {
@@ -98,8 +109,19 @@ public sealed class ArmedDeploymentTests : IDisposable
         var rights = new RightsStore(_options);
         var inventory = new NodeInventory(registry);
         var journal = new RunJournal(_options, NullLogger<RunJournal>.Instance);
+        _bus = new EventBus();
+        BrickCatalog? bricks = null;
+        BindingVerifier? verifier = null;
         var deployments = TestDeployments.Create(
-            inventory, _link, _runs, new ReplicaAdmission(registry, _state), new RightsFlowControl(rights), rights, new EventBus(), journal, _options, _jobs, _verifier);
+            inventory, _link, _runs, new ReplicaAdmission(registry, _state), new RightsFlowControl(rights), rights, _bus, journal, _options, _jobs,
+            (b, requests) =>
+            {
+                bricks = b;
+                return verifier = _verifier?.Invoke(b, requests) ?? new BindingVerifier(b, requests);
+            });
+        _health = new PipelineHealth(
+            deployments, _jobs, _heads, new AutoPlacer(bricks!, inventory, null!, rights), verifier!, bricks!, inventory, journal, _bus, _options,
+            NullLogger<PipelineHealth>.Instance, _time);
         return (rights, inventory, journal, deployments);
     }
 
@@ -231,8 +253,9 @@ public sealed class ArmedDeploymentTests : IDisposable
         await RanAsync(run);
         var refused = Journaled(run.RunId);
         Assert.Equal(RunState.Refused, refused.State);
-        // The refusal names the alias and the node of the binding. Its cause is that of a catalog with no brick yet.
-        Assert.Contains("'src' is bound to brick 'src' on n", refused.Refusal);
+        // The node has an identity and has not announced: it is absent, not a text that stopped being its brick.
+        Assert.Contains("'src' is bound to brick 'src' on n, which has no connected replica", refused.Refusal);
+        Assert.DoesNotContain("no longer that brick", refused.Refusal);
         Assert.Empty(_runs.Specs);
 
         // The nodes come back: the same deployment runs.
@@ -486,22 +509,26 @@ public sealed class ArmedDeploymentTests : IDisposable
     }
 
     [Fact]
-    public async Task After_A_Restart_Before_Any_Node_Announces_Every_Mode_Is_Refused_Naming_The_Alias_And_The_Node()
+    public async Task After_A_Restart_Before_Any_Node_Announces_Every_Mode_Is_Refused_For_The_Node_Being_Absent()
     {
         await NodeAsync("n", "crm", NodeRole.Data);
         await NodeAsync("r1", "crm", NodeRole.Runner);
         var strict = new Dictionary<string, Binding> { ["src"] = new Binding("n", "src", "strict") };
         var tolerant = new Dictionary<string, Binding> { ["src"] = new Binding("n", "src", "tolerant", new BindingPin("v")) };
         Restart();
+        var placer = new AutoPlacer(new BrickCatalog(_inventory), _inventory, null!, _rights);
 
         var strictLaunch = await _deployments.PlanLaunchAsync("p", Job, strict, CancellationToken.None);
         var tolerantLaunch = await _deployments.PlanLaunchAsync("p", Job, tolerant, CancellationToken.None);
 
-        // The cause is that of an inventory with no node yet (`not-a-brick` for a strict binding, `unknown-node` for another), not
-        // of the node's absence: the refusal is right and names the binding, its cause is not yet.
-        Assert.False(strictLaunch.Ok);
-        Assert.Contains("'src' is bound to brick 'src' on n", strictLaunch.Refusal);
-        Assert.False(tolerantLaunch.Ok);
-        Assert.Contains("'src' is bound to brick 'src' on n", tolerantLaunch.Refusal);
+        // The rights know the node and the inventory does not yet: the cause is its absence, in every mode, and not a text that stopped
+        // being a brick (strict) or a node nobody knows (another mode).
+        foreach (var (bindings, launch) in new[] { (strict, strictLaunch), (tolerant, tolerantLaunch) })
+        {
+            var problem = Assert.Single(placer.Check(Job, bindings));
+            Assert.Equal((BindingCauses.Offline, false), (problem.Cause, problem.Blocking));
+            Assert.False(launch.Ok);
+            Assert.Contains("'src' is bound to brick 'src' on n, which has no connected replica", launch.Refusal);
+        }
     }
 }

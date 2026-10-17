@@ -20,7 +20,12 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   untrusted text, cut here and escaped by the page. A disabled identity is refused when its host
   announces, and by `RightsStore.SubjectOf` and `GroupsOf` as an unknown one is, so no run is placed
   on its node. A node whose identity is gone leaves the inventory with its last replica; one that is
-  renamed is the same node under its new name, once its host announces again.
+  renamed is the same node under its new name, once its host announces again. An identity has a **kind**,
+  which the rights give and the token never does: a `node` (the default) hosts fragments and belongs to
+  groups; a `monitor` belongs to none and its name is a label, not a node's (`RightsStore.NodeIdentity`,
+  `SubjectOf` and `GroupsOf` ignore it). A monitor's host is refused when it announces, as a known identity
+  that is no node, never queued, and `RightsIdentityProvider` gives it no group, so the data plane never
+  admits it. Every sort of service reads its permission from here: add a sort as a kind, never as a claim.
   `[local: DtPipe.Coordinator.Server.Tests, the lab's smoke.py rights]`
 - **A person's rights are the server's configuration, never the token's.** People sign in through
   the provider (`Coordinator:Ui:ClientId`, a confidential authorization-code client, PKCE, the code
@@ -39,7 +44,12 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   other kind of token in `OnTokenValidated`, so the refusal holds whatever endpoint reads it, and an
   empty `Studio:ClientId` lets no bearer reach `/api`. **Limit, fail-closed**: a provider whose
   service tokens carry a `sub` other than their `client_id` has its services refused here.
-  `[local: DtPipe.Coordinator.Server.Tests TrustedIdpTests, the lab's smoke.py rights]`
+  A supervisor is the third caller and a service's token like a node's: the `monitor` policy
+  (`/health` only) takes the service scheme and then asks the rights whether the subject is an enabled
+  `monitor`, so a node, a stranger and a disabled monitor are refused 403 with a valid token, and a
+  person's or an anonymous request 401. A monitor reaches `/api` never (the person scheme fails its token)
+  and the node channel only to be refused at the announcement.
+  `[local: DtPipe.Coordinator.Server.Tests TrustedIdpTests, NodeChannelHubTests, the lab's smoke.py rights, bricks - health]`
 - **A refused page gives a way out.** A person with no role who opens a page is signed out here
   and at the provider and lands on `/account/denied`: keeping the provider's session would sign
   the same person in again on the next try. A person who lacks only the admin role gets a 403 page
@@ -53,7 +63,8 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
 - **A route's authorization is the group it is mapped on, and `Program.cs` declares the groups.** The reader, designer and
   admin groups of `/api` (their roles, and the CSRF filter they inherit) are built once there. `NodeEndpoints`,
   `LibraryEndpoints`, `RightsEndpoints` and `RunEndpoints` each map their domain on the reader group they extend and on
-  the designer or admin group they receive, as `LabModeEndpoints` maps the bench on the admin group; `Program.cs` keeps
+  the designer or admin group they receive, as `LabModeEndpoints` maps the bench on the admin group; `HealthEndpoints`
+  maps `/health` on its own group, outside `/api`, for a monitor, and `/api/health` on the reader group; `Program.cs` keeps
   the `account` group, `/healthz`, the metadata document, `/account/*` and the hubs. `[local: RouteTableTests]`
 - **Every rights change names its author** (`AuditEntry.By`, the signed-in email). The session
   cookie's keys live in `keys/` in the state directory, so a restart signs nobody out.
@@ -79,7 +90,8 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
 - **The coordinator manages flows and nothing around them.** It never does a schedule or a trigger (only a
   person starts a run: a service never reaches `/api`), a dependency between pipelines, an automatic retry or
   a backfill, a priority in the queue (`RunDispatch` stays a first-come admission check), or a transformation
-  (it runs no dtpipe: see "The server never opens a node's data"). A distribution plan is a placement, not a
+  (it runs no dtpipe: see "The server never opens a node's data"). A supervisor asks it whether a pipeline can be
+  launched and it answers (`PipelineHealth`); it checks nothing on its own account. A distribution plan is a placement, not a
   calendar. `[local: RunDispatchTests — the order of the queue, TrustedIdpTests — a service never reaches /api]`
   `[unchecked: the rest; nothing fails when a scheduler, a trigger or a retry is added]`
 - **What `dtpipe studio` calls is a contract** (`DtPipe.Jobs/Coordinator`: `CoordinatorApi`, the
@@ -135,9 +147,10 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   in another mode that no check pinned, or pinned without the contract its mode compares (`unchecked`), a binding for a branch
   that is no brick or not in the job (`not-a-brick`, `no-branch`), all blocking, and a node with no connected replica
   (`offline`), which is not. A binding in a mode other than `strict` is judged by its node and its brick's id alone: the branch's
-  text is whatever it was when the binding was checked. The inventory lists a node once a replica has announced it, so after a
-  restart, and until then, `Check` gives a strict binding `not-a-brick` and another `unknown-node`: the run is refused naming the
-  binding, with a wrong cause. `BrickCatalog.Match` is first-match and so unfit to choose a node: placing goes through `MatchAll`.
+  text is whatever it was when the binding was checked. **Who a node is, the rights say; whether it is here, the inventory says.**
+  `unknown-node` is a name no enabled node identity carries (a monitor's name is no node's); a node with an identity that
+  no replica has announced yet (after a restart, until its host announces) is `offline`, in every mode, and its bricks are
+  not known: `AutoPlacer.PlanAsync` does not place the alias and the launch says the node has no connected replica. `BrickCatalog.Match` is first-match and so unfit to choose a node: placing goes through `MatchAll`.
   The bindings live beside the job so a pipeline stays a plain dtpipe job. They are saved as given, an absent node included,
   through `PUT /api/library/{id}/bindings`, and a seed brings its own as `<id>.bindings.json`. The list and the document carry
   the problems, the planner refuses a plan that has a blocking one, and a deployment is refused naming them. A deployment keeps
@@ -160,6 +173,25 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   hash (a bindings save moves no commit but re-pins); `unread` is never kept; `StateOf` says known, in flight or absent without
   asking a node. Limit: a `tolerant` source that changed upstream leaves the sink's pinned contract mute on the new schema. A pin
   moves only by a check a person triggers, never by a verdict. `[local: ArmedDeploymentTests, BindingTests, Hosting.Tests BrickCheckTests]`
+- **Health is read, never acted on, and a read is kept.** `PipelineHealth` says whether each armed pipeline can be launched, from
+  the job at its armed commit (`IJobSource`, never the library as it is now) and its armed bindings: `AutoPlacer.Check`, the plan
+  `LaunchPlanner.ChooseAsync` makes (`Launch.Causes`: no runner, no admissible runner, an edge the matrix forbids, a fragment with
+  no eligible replica, anything else the planner refused) and the verdict of each binding in another mode. It asks no node and
+  writes nothing (`PlanForRunAsync` is the launch's, not its). A verdict `StateOf` does not know starts once, in the background,
+  on no request's token, and the pipeline is a `warning` until it ends (its end drops the kept read); a verdict the node could
+  not give is remembered here for `Coordinator:Health:MaxAge`, since the verifier keeps none, so a silent node is asked once per
+  age and not once per read. Every cause is `critical` (a binding that does not hold, a node absent, a brick changed beyond its
+  mode, a verdict that breaks or is unread, no runner, a rejected edge, a fragment with no eligible replica, an unreadable job,
+  a failed arming, a read that failed, a pipeline not armed), `warning` (a node with a connected replica that cannot run the fragment while another
+  can, `ReplicasDisagree`, a verdict in flight, an arming under way) or `info`, which changes no status (a tolerant brick that
+  changed, a later version in the library or none, the last run); the status is the worst. Never a `warning` for a single replica:
+  nothing records how many are expected. One computation runs at a time, and its result is read again until the count of `nodes`,
+  `rights`, `library`, `deploy` and `deployments` events moves or it is `MaxAge` old (5 minutes: TransportR's registrations move
+  with no event). `GET /health/pipelines[/{id}]` (a monitor) and `GET /api/health` (the pages) answer 200 whenever the caller is
+  admitted, with the status in the body; an id that is not armed is `critical`, so that a disarming alerts. "Launchable" is a
+  plan that holds and a replica that could run each fragment, not that the run will succeed: the replicas' `Check` and `CheckSink`
+  stay at arming and launching. `[local: ArmedDeploymentTests (Health), TrustedIdpTests, RouteTableTests, the lab's smoke.py bricks - health, ui_check.py]`
+  `[unchecked: that a status is right for a state no test builds]`
 - **A new state directory starts from the seeds, or empty.** `Coordinator:LibrarySeed` (one
   `.yaml` per pipeline) and `Coordinator:RightsSeed`; with neither, the library has no pipeline
   and the rights no identity and an empty matrix: nobody may send anything until an administrator
@@ -295,5 +327,5 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   + `js/` (the coordinator's views, ES modules, no build) and `lab/` (the Lab view, lab mode only).
   `window.lab.store` exists for the lab's `tools/ui_check.py`. `/healthz` and the protected resource
   metadata (`CoordinatorApi.Metadata`, RFC 9728: the provider, the contract, the studio's client) are
-  the only anonymous routes. Verify a change with the lab's `./lab.sh smoke`, and a page change with
+  the only anonymous routes; `/health` is a monitor's. Verify a change with the lab's `./lab.sh smoke`, and a page change with
   `./lab.sh ui` too.

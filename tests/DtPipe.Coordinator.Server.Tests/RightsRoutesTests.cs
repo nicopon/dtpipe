@@ -72,6 +72,23 @@ public sealed class RightsRoutesTests : IDisposable
         Assert.Equal(0, _aborts);
     }
 
+    [Fact]
+    public async Task An_Admin_Adds_A_Monitor_Which_Has_No_Group_And_Is_Never_Connected()
+    {
+        using var created = await _admin.PostAsJsonAsync("/api/rights/identities",
+            new { clientId = "watch", name = "supervisor", description = "Reads /health", groups = new[] { "crm" }, kind = "monitor" }, Web, Ct);
+        created.EnsureSuccessStatusCode();
+        using var refused = await _admin.PostAsJsonAsync("/api/rights/identities", new { clientId = "odd", name = "odd", groups = new[] { "crm" }, kind = "launcher" }, Web, Ct);
+
+        var rights = await _admin.GetFromJsonAsync<JsonElement>("/api/rights", Web, Ct);
+        var monitor = rights.GetProperty("identities").EnumerateArray().Single(i => i.GetProperty("clientId").GetString() == "watch");
+
+        Assert.Equal("monitor", monitor.GetProperty("kind").GetString());
+        Assert.Equal(0, monitor.GetProperty("groups").GetArrayLength());
+        Assert.False(monitor.GetProperty("connected").GetBoolean());
+        Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+    }
+
     /// <summary>The identity <c>a</c> as the rights hold it now, read back through the route the page reads.</summary>
     private async Task<JsonElement> StoredAsync()
     {

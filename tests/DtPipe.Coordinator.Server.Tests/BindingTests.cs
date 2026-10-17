@@ -21,11 +21,27 @@ public sealed class BindingTests : IDisposable
     private readonly ReplicaRegistry _registry = new(new ReplicaRegistryOptions { DisconnectGracePeriod = TimeSpan.FromHours(1) });
     private readonly NodeInventory _inventory;
     private readonly AutoPlacer _placer;
+    private readonly RightsStore _rights;
 
     public BindingTests()
     {
         _inventory = new NodeInventory(_registry);
-        _placer = new AutoPlacer(new BrickCatalog(_inventory), _inventory, null!);
+        Directory.CreateDirectory(_dir);
+        var seed = Path.Combine(_dir, "rights.json");
+        File.WriteAllText(seed, """
+            { "identities": [
+              { "clientId": "node-a", "name": "node-a", "description": "", "groups": ["crm"] },
+              { "clientId": "node-b", "name": "node-b", "description": "", "groups": ["crm"] },
+              { "clientId": "runner-1", "name": "runner-1", "description": "", "groups": ["crm"] },
+              { "clientId": "node-c", "name": "node-c", "description": "", "groups": ["crm"] },
+              { "clientId": "node-off", "name": "node-off", "description": "", "groups": ["crm"], "enabled": false },
+              { "clientId": "watch", "name": "watch", "description": "", "kind": "monitor" } ], "matrix": {} }
+            """);
+        _rights = new RightsStore(new CoordinatorServerOptions
+        {
+            StateDir = Path.Combine(_dir, "state"), Authority = "http://idp", Audience = "test", UiClientId = "ui", UiClientSecret = "secret", RightsSeed = seed,
+        });
+        _placer = new AutoPlacer(new BrickCatalog(_inventory), _inventory, null!, _rights);
     }
 
     public void Dispose()
@@ -88,6 +104,31 @@ public sealed class BindingTests : IDisposable
         Assert.Equal((BindingCauses.UnknownNode, true), (problem.Cause, problem.Blocking));
     }
 
+    [Theory]
+    [InlineData("strict")]
+    [InlineData("tolerant")]
+    public void A_Node_With_An_Identity_That_Has_Not_Announced_Is_Absent_Whatever_The_Mode(string mode)
+    {
+        var pin = mode == "strict" ? null : new BindingPin("v");
+        var bindings = new Dictionary<string, Binding> { ["customers"] = new Binding("node-c", "customers", mode, pin) };
+
+        var problem = Assert.Single(Check(bindings));
+
+        Assert.Equal((BindingCauses.Offline, false), (problem.Cause, problem.Blocking));
+    }
+
+    [Theory]
+    [InlineData("node-off")]
+    [InlineData("watch")]
+    public void A_Disabled_Identity_And_A_Monitors_Name_Are_No_Node(string name)
+    {
+        Announce("node-a", SourceBrick());
+
+        var problem = Assert.Single(Check(On(name)));
+
+        Assert.Equal((BindingCauses.UnknownNode, true), (problem.Cause, problem.Blocking));
+    }
+
     [Fact]
     public void A_Node_That_Does_Not_Offer_The_Brick_Is_Refused_By_Name()
     {
@@ -115,8 +156,11 @@ public sealed class BindingTests : IDisposable
     public void The_Runner_Is_Never_Named_And_A_Branch_The_Job_Lacks_Is_Refused()
     {
         Announce("node-a", SourceBrick());
+        var runner = new NodeAnnouncement("runner-1", "", [], NodeRole.Runner, [], InstanceId: Guid.NewGuid());
+        _registry.Announce("c-runner-1", "runner-1", runner, ["crm"], () => { });
+        _inventory.Announced("runner-1", "runner-1", runner, ["crm"]);
         var bindings = On("node-a");
-        bindings["sink"] = new Binding("runner", "sink");
+        bindings["sink"] = new Binding("runner-1", "sink");
         bindings["ghost"] = new Binding("node-a", "ghost");
 
         var problems = Check(bindings);
@@ -127,22 +171,8 @@ public sealed class BindingTests : IDisposable
         Assert.All(problems, p => Assert.True(p.Blocking));
     }
 
-    private PlanBuilder Planner()
-    {
-        Directory.CreateDirectory(_dir);
-        var seed = Path.Combine(_dir, "rights.json");
-        File.WriteAllText(seed, """
-            { "identities": [
-              { "clientId": "node-a", "name": "node-a", "description": "", "groups": ["crm"] },
-              { "clientId": "runner-1", "name": "runner-1", "description": "", "groups": ["crm"] } ], "matrix": {} }
-            """);
-        var rights = new RightsStore(new CoordinatorServerOptions
-        {
-            StateDir = Path.Combine(_dir, "state"), Authority = "http://idp", Audience = "test", UiClientId = "ui", UiClientSecret = "secret", RightsSeed = seed,
-        });
-        return new PlanBuilder(_inventory, new NodeRequests(_inventory, null!), new BrickCatalog(_inventory),
-            new PlanRegistry(new DefaultFlowControlService(new FlowControlOptions())), rights);
-    }
+    private PlanBuilder Planner() => new(_inventory, new NodeRequests(_inventory, null!), new BrickCatalog(_inventory),
+        new PlanRegistry(new DefaultFlowControlService(new FlowControlOptions())), _rights);
 
     [Fact]
     public async Task A_Placed_Branch_Whose_Text_Is_No_Longer_A_Brick_Is_Never_Sent_To_The_Runner()
@@ -151,7 +181,7 @@ public sealed class BindingTests : IDisposable
         var announcement = new NodeAnnouncement("runner-1", "", [], NodeRole.Runner, [], InstanceId: Guid.NewGuid());
         _registry.Announce("c-runner-1", "runner-1", announcement, ["crm"], () => { });
         _inventory.Announced("runner-1", "runner-1", announcement, ["crm"]);
-        var placer = new AutoPlacer(new BrickCatalog(_inventory), _inventory, Planner());
+        var placer = new AutoPlacer(new BrickCatalog(_inventory), _inventory, Planner(), _rights);
 
         var plan = await placer.PlanAsync("p", Job.Replace("sqlite:a", "sqlite:b"), On("node-a"), _inventory.Snapshot().Single(n => n.Name == "runner-1"), Ct);
 

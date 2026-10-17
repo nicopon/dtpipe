@@ -9,8 +9,11 @@ internal sealed class FakeJobs : IJobSource
 {
     public Dictionary<(string Pipeline, string Commit), string> Jobs { get; } = [];
 
+    /// <summary>When set, every read fails with it: the library cannot be reached.</summary>
+    public Exception? Fault { get; set; }
+
     public Task<string?> JobAtAsync(string pipelineId, string commit, CancellationToken ct) =>
-        Task.FromResult(Jobs.TryGetValue((pipelineId, commit), out var job) ? job : null);
+        Fault is { } fault ? Task.FromException<string?>(fault) : Task.FromResult(Jobs.TryGetValue((pipelineId, commit), out var job) ? job : null);
 }
 
 /// <summary>Builds a <see cref="DeploymentManager"/> over the parts a test already holds, planning with the real planner.</summary>
@@ -31,7 +34,7 @@ internal static class TestDeployments
         var requests = new NodeRequests(inventory, new NoHub());
         var planner = new PlanBuilder(inventory, requests, bricks, new PlanRegistry(flow), rights);
         return new DeploymentManager(
-            inventory, link, runs, admission, flow, rights, bus, journal, new AutoPlacer(bricks, inventory, planner), bricks,
+            inventory, link, runs, admission, flow, rights, bus, journal, new AutoPlacer(bricks, inventory, planner, rights), bricks,
             verifier?.Invoke(bricks, requests) ?? new BindingVerifier(bricks, requests), jobs ?? new FakeJobs(), options, NullLogger<DeploymentManager>.Instance);
     }
 }

@@ -140,6 +140,13 @@ public sealed class NodeChannelHub(
             Context.Abort();
             return;
         }
+        // A service of another kind is no host: it is known, so it never waits for approval, and it is let in nowhere here.
+        if (!identity.IsNode)
+        {
+            Refuse(identity.Name, $"'{clientId}' is a {identity.Kind}, not a node");
+            Context.Abort();
+            return;
+        }
         // Where a host runs is its own word, shown to people: cut here and escaped by the page.
         var origin = announcement.Origin is null ? null : EnrollmentQueue.Clean(announcement.Origin, EnrollmentQueue.MaxOrigin);
         var named = announcement with { Name = identity.Name, Origin = origin };

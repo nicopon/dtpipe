@@ -8,9 +8,26 @@ namespace DtPipe.Coordinator.Server;
 /// What the coordinator grants a client of the trusted IdP, named by the <c>sub</c> of its tokens.
 /// <see cref="Name"/> is the one node name it may announce itself as, and belongs to the rights: a host
 /// only proposes one. <see cref="Groups"/> are the TransportR groups it belongs to. Its secret is the
-/// IdP's business, never stored here.
+/// IdP's business, never stored here. <see cref="Kind"/> says what the coordinator grants it: a node (the default) hosts fragments
+/// and belongs to groups; a monitor only reads <c>/health</c>, belongs to none, and its name is a label that no node may carry.
 /// </summary>
-public sealed record Identity(string ClientId, string Name, string Description, IReadOnlyList<string> Groups, bool Enabled = true);
+public sealed record Identity(
+    string ClientId, string Name, string Description, IReadOnlyList<string> Groups, bool Enabled = true, string Kind = IdentityKinds.Node)
+{
+    public bool IsNode => Kind == IdentityKinds.Node;
+}
+
+/// <summary>What an identity of the trusted IdP is granted: the sort of service it is. A node is the only sort the node channel and the data plane know.</summary>
+public static class IdentityKinds
+{
+    /// <summary>A host of fragments: it announces on the node channel and belongs to groups.</summary>
+    public const string Node = "node";
+
+    /// <summary>A supervisor: it reads <c>/health</c> and nothing else, with no group and no node.</summary>
+    public const string Monitor = "monitor";
+
+    public static readonly IReadOnlyList<string> All = [Node, Monitor];
+}
 
 /// <summary>One change to the rights, and who made it (the email of the person signed in), when known.</summary>
 public sealed record AuditEntry(DateTimeOffset At, string Change, string? By = null);
@@ -86,7 +103,13 @@ public sealed class RightsStore
         lock (_lock) return ActiveHostLocked(node, "which groups it holds").Groups;
     }
 
-    private Identity? IdentityNamedLocked(string node) => _doc.Identities.FirstOrDefault(i => i.Name == node);
+    /// <summary>The identity that carries the node name <paramref name="node"/>, enabled or not; a name that a monitor carries is no node's.</summary>
+    public Identity? NodeIdentity(string node)
+    {
+        lock (_lock) return IdentityNamedLocked(node);
+    }
+
+    private Identity? IdentityNamedLocked(string node) => _doc.Identities.FirstOrDefault(i => i.IsNode && i.Name == node);
 
     /// <summary>The identity that can host <paramref name="node"/> now: the one that carries the name, if it is enabled.</summary>
     private Identity ActiveHostLocked(string node, string nothingSays)
@@ -142,7 +165,9 @@ public sealed class RightsStore
             var added = Normalized(identity);
             CheckUnique([.. _doc.Identities, added]);
             _doc.Identities.Add(added);
-            Save($"Identity {added.ClientId} added (node {added.Name}, groups {string.Join(", ", added.Groups)})", by);
+            Save(added.IsNode
+                ? $"Identity {added.ClientId} added (node {added.Name}, groups {string.Join(", ", added.Groups)})"
+                : $"Identity {added.ClientId} added ({added.Kind} {added.Name})", by);
         }
     }
 
@@ -185,11 +210,16 @@ public sealed class RightsStore
     /// <summary>The identity with its name and groups trimmed, its groups sorted and distinct; refused when its name or groups are unusable.</summary>
     private static Identity Normalized(Identity identity)
     {
+        var kind = string.IsNullOrWhiteSpace(identity.Kind) ? IdentityKinds.Node : identity.Kind.Trim();
+        if (!IdentityKinds.All.Contains(kind))
+            throw new ConflictException($"'{identity.ClientId}' is of kind '{kind}': the kinds are {string.Join(", ", IdentityKinds.All)}.");
         var name = identity.Name?.Trim() ?? "";
-        if (!PipelineLibrary.IsValidId(name)) throw new ConflictException($"'{name}' is not a node name: lowercase letters, digits and '-'.");
+        if (!PipelineLibrary.IsValidId(name)) throw new ConflictException($"'{name}' is not a {(kind == IdentityKinds.Node ? "node name" : "name")}: lowercase letters, digits and '-'.");
         var groups = (identity.Groups ?? []).Select(g => g.Trim()).Where(g => g.Length > 0).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
-        if (groups.Count == 0) throw new ConflictException($"'{identity.ClientId}' belongs to no group: an identity belongs to at least one.");
-        return identity with { Name = name, Description = identity.Description ?? "", Groups = groups };
+        // Only a node belongs to groups: they are what the data plane admits it with, and a monitor is never admitted there.
+        if (kind != IdentityKinds.Node) groups = [];
+        else if (groups.Count == 0) throw new ConflictException($"'{identity.ClientId}' belongs to no group: an identity belongs to at least one.");
+        return identity with { Name = name, Description = identity.Description ?? "", Groups = groups, Kind = kind };
     }
 
     private static void CheckUnique(IReadOnlyList<Identity> identities)

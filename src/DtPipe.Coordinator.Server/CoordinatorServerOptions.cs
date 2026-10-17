@@ -45,6 +45,12 @@ public sealed class CoordinatorServerOptions
     /// </summary>
     public bool LabMode { get; init; }
 
+    /// <summary>
+    /// How long a health read is kept while nothing the server publishes moves (<c>Coordinator:Health:MaxAge</c>, a time span). The state of
+    /// TransportR's registrations changes without an event, so a read is never kept longer than this.
+    /// </summary>
+    public TimeSpan HealthMaxAge { get; init; } = TimeSpan.FromMinutes(5);
+
     /// <summary>The Lab view's scenarios, one job file each; read only in <see cref="LabMode"/>.</summary>
     public string? Scenarios { get; init; }
 
@@ -65,6 +71,7 @@ public sealed class CoordinatorServerOptions
             IdentityLabelClaims = section.GetSection("Identity:LabelClaims").Get<string[]>() ?? [],
             LabMode = section.GetValue<bool>("LabMode"),
             Scenarios = PathOf("Scenarios"),
+            HealthMaxAge = section.GetValue<TimeSpan?>("Health:MaxAge") is { } age && age > TimeSpan.Zero ? age : TimeSpan.FromMinutes(5),
         };
     }
 }

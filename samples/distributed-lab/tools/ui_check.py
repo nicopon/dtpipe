@@ -97,6 +97,28 @@ def library_page(browser):
             wrong.append(f"{e['id']} deploy disabled={deploy_off}")
         if run_off != (not deployment or deployment["state"] == "failed"):
             wrong.append(f"{e['id']} run disabled={run_off}")
+    # An armed pipeline's row carries the health chip, with the status /api/health gives; a pipeline not armed carries none.
+    probe = entries[0]["id"]
+    armed_here = probe not in deployments
+    if armed_here:
+        SESSION.call(f"/api/library/{probe}/deploy", {})
+    try:
+        armed = {h["id"]: h["status"] for h in SESSION.call("/api/health")["pipelines"]}
+        chips = ("Object.fromEntries([...document.querySelectorAll('table.library tr')].filter(r => r.querySelector('a.strong'))"
+                 ".map(r => [r.querySelector('td .hint.mono').textContent, ([...r.querySelectorAll('.chip')].find(c => c.textContent.startsWith('health:'))?.textContent ?? '').slice(8) || null]))")
+        browser.js("location.hash = '#/library'")
+        shown = {}
+        for _ in range(60):
+            shown = browser.js(chips) or {}
+            if probe in armed and shown.get(probe) == armed[probe]:
+                break
+            time.sleep(0.5)
+        wrong += [f"{i} health chip {shown.get(i)!r}, health {armed.get(i)!r}" for i in shown if shown[i] != armed.get(i)]
+        if probe not in armed:
+            wrong.append(f"{probe} was armed and /api/health does not list it")
+    finally:
+        if armed_here:
+            SESSION.call(f"/api/deployments/{probe}", None, "DELETE")
     pid = entries[0]["id"]
     browser.js(f"document.querySelector('table.library a[href=\"#/library/{pid}\"]').click()")
     opened = browser.wait_for("document.querySelectorAll('.xbox').length > 0 && !!document.getElementById('x-deploy') && !!document.getElementById('x-run')", 20)

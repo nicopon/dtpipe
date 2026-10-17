@@ -24,6 +24,10 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   environment registers a fragment gate that accepts any reader or writer, the Lab view's mode; `lab.sh nodes
   strict|sandbox` restarts the hosts in a mode, and `lab.sh smoke` does so per pass. The runner
   runs any fragment in both. `[local: smoke.py bricks, sandbox]`
+- **`monitor-1` is the lab's supervisor**: a client of `idp-clients.json` and an identity of kind `monitor` in
+  `rights-seed.json`, which reads `/health` and nothing else. A stack keeps `rights.json` across restarts, so
+  `smoke.py bricks` adds the identity through `POST /api/rights/identities` when the rights predate the seed.
+  It arms `customers-mirror` for the check and undeploys it. `[local: smoke.py bricks - health, ui_check.py]`
 - **Lab nodes are disposable hosts of `DtPipe.PipelineNode.Hosting`.** `Lab.NodeHost` reads
   `nodes/<node>.json` into `AddDtPipeNode`; a node file whose `role` is `runner` starts the official
   `DtPipe.PipelineNode.Runner` instead, configured through its environment. `lab.sh exec-node` is

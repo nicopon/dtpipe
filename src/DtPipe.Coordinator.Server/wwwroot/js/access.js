@@ -43,9 +43,9 @@ function render() {
 
   const identities = rights.identities.map((i) => `
     <tr data-identity="${esc(i.clientId)}">
-      <td><code>${esc(i.clientId)}</code></td>
-      <td><input class="mono narrow" data-field="name" value="${esc(i.name)}" aria-label="Node name of ${esc(i.clientId)}"></td>
-      <td><input class="mono" data-field="groups" value="${esc(i.groups.join(", "))}" list="groups-list" aria-label="Groups of ${esc(i.clientId)}, separated by commas"></td>
+      <td><code>${esc(i.clientId)}</code>${i.kind === "monitor" ? ` <span class="chip" title="A supervisor: it reads /health and nothing else">monitor</span>` : ""}</td>
+      <td><input class="mono narrow" data-field="name" value="${esc(i.name)}" aria-label="${i.kind === "monitor" ? "Name" : "Node name"} of ${esc(i.clientId)}"></td>
+      <td><input class="mono" data-field="groups" value="${esc(i.groups.join(", "))}" list="groups-list" aria-label="Groups of ${esc(i.clientId)}, separated by commas" ${i.kind === "monitor" ? `disabled placeholder="none"` : ""}></td>
       <td><input data-field="description" value="${esc(i.description)}" aria-label="Description of ${esc(i.clientId)}"></td>
       <td><label class="check"><input type="checkbox" data-field="enabled" ${i.enabled ? "checked" : ""}> enabled</label></td>
       <td>${i.connected ? `<span class="chip ok">connected</span>` : `<span class="chip">offline</span>`}</td>
@@ -95,11 +95,12 @@ function render() {
       <div class="card-head"><h2>Identities <span class="hint">who</span></h2><button data-add>${adding ? "Cancel" : "Add an identity"}</button></div>
       ${adding ? `<div class="row add-identity">
         <input id="a-id" class="mono" placeholder="client id"><input id="a-name" class="mono" placeholder="node name (the client id by default)">
-        <input id="a-groups" class="mono" placeholder="groups, separated by commas" list="groups-list"><input id="a-description" placeholder="description">
+        <select id="a-kind" aria-label="Kind"><option value="node">node</option><option value="monitor">monitor (reads /health)</option></select>
+        <input id="a-groups" class="mono" placeholder="groups, separated by commas (a node's)" list="groups-list"><input id="a-description" placeholder="description">
         <button class="primary" data-create>Create</button></div>` : ""}
       <datalist id="groups-list">${groups.map((g) => `<option>${esc(g)}</option>`).join("")}</datalist>
       <table><tr><th>client</th><th>node name</th><th>groups</th><th>description</th><th></th><th>state</th><th></th></tr>${identities}</table>
-      <p class="hint">An identity is a client the IdP already knows, by its client id: its secret lives in the IdP. A node sends to another only if every one of its groups may send to every group of the receiver, in the matrix below. A change of name or groups, or disabling an identity, drops the control connections of its node's hosts, which connect again under the new rights. A disabled identity is refused when its hosts announce again and holds no group: the runs placed on them end. Reconnect drops the connections without changing anything.</p>
+      <p class="hint">An identity is a client the IdP already knows, by its client id: its secret lives in the IdP. A monitor is the identity of a supervisor: it reads <code>/health</code> and nothing else, belongs to no group and hosts nothing. A node sends to another only if every one of its groups may send to every group of the receiver, in the matrix below. A change of name or groups, or disabling an identity, drops the control connections of its node's hosts, which connect again under the new rights. A disabled identity is refused when its hosts announce again and holds no group: the runs placed on them end. Reconnect drops the connections without changing anything.</p>
     </section>
 
     <section class="card">
@@ -144,7 +145,7 @@ async function onClick(e) {
     } else if (b.dataset.add !== undefined) { adding = !adding; render(); }
     else if (b.dataset.create !== undefined) {
       const v = (id) => document.getElementById(id).value.trim();
-      await api("/api/rights/identities", { clientId: v("a-id"), name: v("a-name") || null, description: v("a-description"), groups: groupsOf(v("a-groups")) });
+      await api("/api/rights/identities", { clientId: v("a-id"), name: v("a-name") || null, description: v("a-description"), groups: groupsOf(v("a-groups")), kind: v("a-kind") });
       adding = false;
       toast(`${v("a-id")} created: it can obtain tokens now.`, "info");
     } else if (b.dataset.saveIdentity !== undefined) {

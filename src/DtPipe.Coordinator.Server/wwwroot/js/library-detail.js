@@ -3,7 +3,7 @@
 // jobs, the job's text read only, and its last run with the plan that run ran. The node of each source and sink branch is
 // chosen here, among the nodes that offer its brick; the runner is never named. The bindings are saved from here, and the
 // pipeline is deployed (armed at the commit the library holds) and run.
-import { $, api, deploymentOf, duration, esc, isActive, lastRunOf, ranPlan, shortNode, toast } from "./core.js";
+import { $, api, deploymentOf, duration, esc, healthChip, healthOf, isActive, lastRunOf, ranPlan, shortNode, toast } from "./core.js";
 import { drawLanes, fragmentJobs, legend, planProblems } from "./placement.js";
 
 let host = null;
@@ -27,7 +27,7 @@ export function mount(el, params) {
 
 export function update(kind) {
   if (kind === "library") load();
-  else if (["deployments", "runs", "nodes", "all"].includes(kind)) render();
+  else if (["deployments", "runs", "nodes", "all", "health"].includes(kind)) render();
 }
 
 async function load() {
@@ -133,14 +133,14 @@ function render() {
 
   const status = [
     deployment ? `<span class="chip ${deployment.state === "ready" ? "ok" : deployment.state === "failed" ? "bad" : "warn"}">${current ? "deployed" : "an older version is deployed"}: ${esc(deployment.state)} @ ${esc((deployment.commit || "").slice(0, 8))}</span>` : `<span class="chip">not deployed</span>`,
-    plan.deployable ? `<span class="chip ok">a launch would run${runner ? ` on ${esc(runner)}` : ""}</span>` : `<span class="chip bad">a launch would be refused</span>`,
+    healthChip(id),
     bindingsChip(),
   ].join(" ");
 
   host.innerHTML = `
     <div class="view-head">
       <h1>${esc(doc.yaml.split("\n")[0].replace(/^#\s*/, ""))} <span class="mono muted">${esc(id)}</span></h1>
-      <p class="hint">Planned at each launch: every brick on the node it is bound to, every other step on a runner chosen then. A source wired straight into a sink crosses no runner.</p>
+      <p class="hint">Planned at each launch: every brick on the node it is bound to, every other step on a runner chosen then. A source wired straight into a sink crosses no runner. A launch of the version the library holds ${plan.deployable ? `would run${runner ? ` on ${esc(runner)}` : ""} now` : "would be refused now"}.</p>
       <div class="row">${status}
         <span class="actions">
           <a class="button" href="#/library">← Library</a>
@@ -150,6 +150,7 @@ function render() {
         </span>
       </div>
     </div>
+    ${healthCard()}
     ${bindingsCard()}
     ${planProblems(plan).length ? `<section class="card"><ul class="msgs errors">${planProblems(plan).map((e) => `<li>${esc(e)}</li>`).join("")}</ul></section>` : ""}
     <section class="card">
@@ -163,6 +164,15 @@ function render() {
     <section class="card"><div class="card-head"><h2>Job</h2><span class="hint">Read only: write it with <code>dtpipe studio</code> and publish it.</span></div>
       <pre id="x-job">${esc(doc.yaml)}</pre></section>`;
   drawLanes($("x-lanes"), plan, brickOfUnit, { run, running, current: runMatches });
+}
+
+// What the health read found of the armed version, the findings that matter first. The plan below is the one the library's version would make.
+function healthCard() {
+  const h = healthOf(id);
+  if (!h || !h.causes.length) return "";
+  const rows = h.causes.map((c) => `<li class="${c.severity === "critical" ? "bad" : c.severity === "warning" ? "warn" : "hint"}"><span class="mono">${esc(c.code)}</span> ${esc(c.message)}</li>`).join("");
+  return `<section class="card"><div class="card-head"><h2>Health</h2><span class="hint">the version armed at ${esc((h.commit || "").slice(0, 8))}</span></div>
+    <ul class="msgs">${rows}</ul></section>`;
 }
 
 function runPanel(run, current) {

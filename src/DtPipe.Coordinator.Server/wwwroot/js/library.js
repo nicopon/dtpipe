@@ -1,6 +1,6 @@
 // Library: the pipelines kept in the coordinator's git repository, their plan and deployment
 // state and their history. A pipeline is written with dtpipe studio and published into it.
-import { ago, api, deploymentOf, esc, isActive, lastRunOf, toast } from "./core.js";
+import { ago, api, deploymentOf, esc, healthChip, isActive, lastRunOf, toast } from "./core.js";
 import * as detail from "./library-detail.js";
 
 let host = null;
@@ -21,7 +21,7 @@ export function mount(el, params) {
 export function update(kind) {
   if (page) { page.update(kind); return; }
   if (kind === "library") load();
-  else if (["all", "deployments", "runs"].includes(kind)) render();
+  else if (["all", "deployments", "runs", "health"].includes(kind)) render();
 }
 
 async function load() {
@@ -73,7 +73,7 @@ function render() {
     <tr>
       <td><a href="#/library/${encodeURIComponent(e.id)}" class="strong">${esc(e.title)}</a><div class="hint mono">${esc(e.id)}</div></td>
       <td class="wrap hint">${esc(e.description || "")}</td>
-      <td>${deploymentChip(e)} ${bindingsChip(e)}</td>
+      <td>${deploymentChip(e)} ${healthChip(e.id)} ${bindingsChip(e)}</td>
       <td>${runCell(e.id)}</td>
       <td class="hint">${esc(e.message || "")}<div>${esc(ago(e.updatedAt))}</div></td>
       <td class="actions-cell">

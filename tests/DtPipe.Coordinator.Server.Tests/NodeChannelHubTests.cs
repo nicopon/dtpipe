@@ -135,6 +135,20 @@ public sealed class NodeChannelHubTests : IDisposable
     }
 
     [Fact]
+    public async Task A_Monitor_Is_Refused_At_The_Announcement_And_Is_Neither_Queued_Nor_A_Node()
+    {
+        _rights.AddIdentity(new Identity("watch", "supervisor", "", [], Kind: IdentityKinds.Monitor));
+        var (hub, caller) = Connect("c1", "watch");
+
+        await hub.Announce(Proposing("supervisor"));
+
+        Assert.True(caller.Aborted);
+        Assert.Empty(_inventory.Snapshot());
+        Assert.Empty(_enrollment.List());
+        Assert.Contains("a monitor, not a node", Assert.Single(LogLines()).Message);
+    }
+
+    [Fact]
     public async Task A_Node_Whose_Identity_Is_Removed_Leaves_The_Inventory_When_Its_Host_Goes()
     {
         var (hub, _) = Connect("c1", "known");

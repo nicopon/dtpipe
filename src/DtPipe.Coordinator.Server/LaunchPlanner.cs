@@ -9,12 +9,34 @@ namespace DtPipe.Coordinator.Server;
 /// does, the first candidate's with <see cref="Refusals"/> added to its errors. <see cref="Runner"/> is the runner it uses, null
 /// when no branch of the job needs one.
 /// </summary>
-public sealed record Launch(DistributionPlan Plan, string? Runner, IReadOnlyList<string> Refusals)
+public sealed record Launch(DistributionPlan Plan, string? Runner, IReadOnlyList<string> Refusals, IReadOnlyList<LaunchCause>? Causes = null)
 {
     public bool Ok => Plan.Deployable;
 
     /// <summary>Why the launch is refused, in one sentence per candidate; empty when it is not.</summary>
     public string Refusal => string.Join(" ", Plan.Errors.Append(Plan.FlowRejection ?? "").Where(s => s.Length > 0));
+}
+
+/// <summary>Why a launch is refused, which codes are <see cref="LaunchCauses"/>: <paramref name="Fragment"/> and <paramref name="Node"/> say where, when it is somewhere.</summary>
+public sealed record LaunchCause(string Code, string Message, string? Node = null, string? Fragment = null);
+
+/// <summary>What keeps a launch from being made, as a code a health read reports. The binding problems are <see cref="BindingCauses"/>'.</summary>
+public static class LaunchCauses
+{
+    /// <summary>A branch needs a runner and none is online.</summary>
+    public const string NoRunner = "no-runner";
+
+    /// <summary>The runners online were tried and none can take the launch: a runner's own fragment has no replica that could run it.</summary>
+    public const string NoAdmissibleRunner = "no-admissible-runner";
+
+    /// <summary>The flow matrix forbids an edge of the plan.</summary>
+    public const string FlowRejected = "flow-rejected";
+
+    /// <summary>A fragment of a data node has no replica that could run it now.</summary>
+    public const string NoEligibleReplica = "no-eligible-replica";
+
+    /// <summary>The planner refused the plan for a reason none of the others names.</summary>
+    public const string PlanRefused = "plan-refused";
 }
 
 /// <summary>
@@ -43,27 +65,54 @@ internal sealed class LaunchPlanner(AutoPlacer placer, BrickCatalog bricks, Node
     public async Task<Launch> ChooseAsync(string pipelineId, string yaml, IReadOnlyDictionary<string, Binding> bindings, CancellationToken ct)
     {
         var candidates = Runners();
+        var own = placer.Check(yaml, bindings).Select(p => p.Message).ToHashSet(StringComparer.Ordinal);
         if (candidates.Count == 0)
         {
             // No runner is online: a job that needs none still launches, and one that needs it says so.
-            var plan = await placer.PlanAsync(pipelineId, yaml, bindings, null, ct);
-            return new Launch(plan.Deployable ? await WithEligibilityAsync(plan) : plan, null, []);
+            var unplaced = new List<string>();
+            var plan = await placer.PlanAsync(pipelineId, yaml, bindings, null, ct, unplaced);
+            var causes = plan.Deployable ? [] : CausesOfPlan(plan, own, unplaced);
+            if (plan.Deployable)
+            {
+                var (refusal, found) = await EligibilityAsync(plan);
+                if (refusal is not null) (plan, causes) = (Refused(plan, [refusal]), found);
+            }
+            return new Launch(plan, null, [], causes);
         }
 
         DistributionPlan? first = null;
         var refusals = new List<string>();
+        var reasons = new List<LaunchCause>();
         foreach (var runner in candidates)
         {
             var plan = await placer.PlanAsync(pipelineId, yaml, bindings, runner, ct);
             first ??= plan;
             var uses = plan.Fragments.Any(f => f.Node == runner.Name);
-            var why = plan.Deployable ? await EligibilityRefusalAsync(plan) : Reasons(plan);
-            if (why is null) return new Launch(plan, uses ? runner.Name : null, []);
+            var (refusal, found) = plan.Deployable ? await EligibilityAsync(plan) : (null, []);
+            var why = plan.Deployable ? refusal : Reasons(plan);
+            if (why is null) return new Launch(plan, uses ? runner.Name : null, [], []);
+            var causes = plan.Deployable ? found : CausesOfPlan(plan, own, []);
             // A plan that does not use the runner fails whichever runner is chosen: the others would only repeat it.
-            if (!uses) return new Launch(plan.Deployable ? Refused(plan, [why]) : plan, null, plan.Deployable ? [why] : []);
+            if (!uses) return new Launch(plan.Deployable ? Refused(plan, [why]) : plan, null, plan.Deployable ? [why] : [], causes);
             refusals.Add($"Runner {runner.Name}: {why}");
+            reasons.AddRange(causes);
         }
-        return new Launch(Refused(first!, refusals), null, refusals);
+        return new Launch(Refused(first!, refusals), null, refusals, [.. reasons.DistinctBy(c => (c.Code, c.Fragment, c.Message))]);
+    }
+
+    /// <summary>
+    /// The causes a plan that is not deployable gives, other than the binding problems <paramref name="own"/> already names: a flow
+    /// rejection, a branch no runner took, and whatever else the planner said.
+    /// </summary>
+    private static List<LaunchCause> CausesOfPlan(DistributionPlan plan, IReadOnlySet<string> own, IReadOnlyList<string> unplaced)
+    {
+        var causes = new List<LaunchCause>();
+        if (plan.FlowRejection is { Length: > 0 } rejection) causes.Add(new(LaunchCauses.FlowRejected, rejection));
+        var needing = unplaced.Select(AutoPlacer.NeedsRunner).ToHashSet(StringComparer.Ordinal);
+        if (unplaced.Count > 0)
+            causes.Add(new(LaunchCauses.NoRunner, $"No runner is connected, and {string.Join(", ", unplaced.Select(a => $"'{a}'"))} need{(unplaced.Count == 1 ? "s" : "")} one."));
+        causes.AddRange(plan.Errors.Where(e => !own.Contains(e) && !needing.Contains(e)).Select(e => new LaunchCause(LaunchCauses.PlanRefused, e)));
+        return causes;
     }
 
     /// <summary>
@@ -84,17 +133,26 @@ internal sealed class LaunchPlanner(AutoPlacer placer, BrickCatalog bricks, Node
     private static string Reasons(DistributionPlan plan) =>
         string.Join(" ", plan.Errors.Append(plan.FlowRejection ?? "").Where(s => s.Length > 0));
 
-    private async Task<DistributionPlan> WithEligibilityAsync(DistributionPlan plan) =>
-        await EligibilityRefusalAsync(plan) is { } why ? Refused(plan, [why]) : plan;
+    /// <summary>For each fragment of the plan, the replicas that could run it now; null when a node of the plan has no usable identity.</summary>
+    public async Task<IReadOnlyDictionary<string, FragmentEligibility>?> EligibilityOfAsync(DistributionPlan plan)
+    {
+        try { return await admission.EvaluateAsync(RunFragmentsOf(plan)); }
+        catch (ConflictException) { return null; }
+    }
 
-    /// <summary>Why a fragment of the plan has no replica that could run it now, or null when each has one.</summary>
-    private async Task<string?> EligibilityRefusalAsync(DistributionPlan plan)
+    /// <summary>The fragments of a plan with no replica that could run them now: why in a sentence, and as causes. Null when each has one.</summary>
+    private async Task<(string? Refusal, List<LaunchCause> Causes)> EligibilityAsync(DistributionPlan plan)
     {
         IReadOnlyDictionary<string, FragmentEligibility> eligibility;
         try { eligibility = await admission.EvaluateAsync(RunFragmentsOf(plan)); }
-        catch (ConflictException ex) { return ex.Message; }
+        catch (ConflictException ex) { return (ex.Message, [new(LaunchCauses.PlanRefused, ex.Message)]); }
         var missing = plan.Fragments.Where(f => eligibility[f.Name].Eligible.Count == 0).ToList();
-        return missing.Count == 0 ? null
-            : string.Join(" ", missing.Select(f => $"{f.Name} has no replica that could run it ({eligibility[f.Name].Reason ?? "none is eligible"})."));
+        if (missing.Count == 0) return (null, []);
+        var runners = inventory.Snapshot().Where(n => n.Role == NodeRole.Runner).Select(n => n.Name).ToHashSet(StringComparer.Ordinal);
+        var refusal = string.Join(" ", missing.Select(f => $"{f.Name} has no replica that could run it ({eligibility[f.Name].Reason ?? "none is eligible"})."));
+        var causes = missing.Select(f => new LaunchCause(
+            runners.Contains(f.Node) ? LaunchCauses.NoAdmissibleRunner : LaunchCauses.NoEligibleReplica,
+            $"{f.Name} has no replica that could run it ({eligibility[f.Name].Reason ?? "none is eligible"}).", f.Node, f.Name)).ToList();
+        return (refusal, causes);
     }
 }

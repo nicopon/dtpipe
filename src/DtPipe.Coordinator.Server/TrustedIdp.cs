@@ -160,7 +160,9 @@ public static class TrustedIdp
             foreach (var role in CoordinatorRoles.All)
                 o.AddPolicy(role, p => p.AddAuthenticationSchemes(ApiScheme).RequireRole(role));
             o.AddPolicy(SignedIn, p => p.AddAuthenticationSchemes(ApiScheme).RequireAuthenticatedUser());
+            o.AddPolicy(Monitor, p => p.AddAuthenticationSchemes(ServiceScheme).RequireAuthenticatedUser().AddRequirements(new MonitorRequirement()));
         });
+        services.AddSingleton<IAuthorizationHandler, MonitorHandler>();
         services.AddSingleton<IClaimsTransformation, CoordinatorRoles>();
         // The session cookie is encrypted with keys kept in the state directory, so a restart does
         // not sign every person out.
@@ -169,6 +171,13 @@ public static class TrustedIdp
 
     /// <summary>A person signed in, whatever their role: who they are is all <c>/api/me</c> needs.</summary>
     public const string SignedIn = "signed-in";
+
+    /// <summary>
+    /// A service the rights grant <see cref="IdentityKinds.Monitor"/> to: the only caller of <c>/health</c>. It is a service's token
+    /// (<see cref="ServiceScheme"/>), and what it may do is the rights', so a node, an identity of another kind, an unknown or a
+    /// disabled one is refused with its valid token.
+    /// </summary>
+    public const string Monitor = "monitor";
 
     /// <summary>The email claim of the signed-in person, or null when there is none.</summary>
     public static string? EmailOf(HttpContext context) => context.User.FindFirst("email")?.Value;
@@ -240,6 +249,19 @@ public sealed class CoordinatorRoles(IConfiguration configuration) : IClaimsTran
     }
 }
 
+/// <summary>The caller's identity in the rights is an enabled <see cref="IdentityKinds.Monitor"/>.</summary>
+public sealed class MonitorRequirement : IAuthorizationRequirement;
+
+/// <summary>Grants <see cref="MonitorRequirement"/> by what the rights say of the token's subject, never by anything the token carries.</summary>
+public sealed class MonitorHandler(RightsStore rights) : AuthorizationHandler<MonitorRequirement>
+{
+    protected override Task HandleRequirementAsync(AuthorizationHandlerContext context, MonitorRequirement requirement)
+    {
+        if (rights.Find(TrustedIdp.SubjectOf(context.User)) is { Enabled: true, Kind: IdentityKinds.Monitor }) context.Succeed(requirement);
+        return Task.CompletedTask;
+    }
+}
+
 /// <summary>
 /// TransportR's identity, with the groups the rights document gives the token's subject instead of
 /// the token's own scopes. TransportR reads them at <c>Connect</c>, on every stream and at each token
@@ -255,7 +277,8 @@ public sealed class RightsIdentityProvider(RightsStore rights) : IClientIdentity
     {
         var identity = _token.ResolveIdentity(user, providedClientId, providedGroups);
         if (identity is null) return null;
-        var granted = rights.Find(identity.Subject) is { Enabled: true } known ? known.Groups.ToHashSet() : [];
+        // Only a node belongs to groups: any other kind of identity is never admitted to the data plane.
+        var granted = rights.Find(identity.Subject) is { Enabled: true, IsNode: true } known ? known.Groups.ToHashSet() : [];
         return identity with { Groups = granted };
     }
 }
