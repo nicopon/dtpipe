@@ -238,7 +238,9 @@ def ctrl_c():
     folder = tempfile.mkdtemp(prefix="studio-ctrlc-")
     with open(os.path.join(folder, "long.yaml"), "w") as f:
         f.write('main:\n  input: "generate:2000000000"\n  output: "null:"\n')
-    proc = subprocess.Popen([DTPIPE, "studio", folder], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=folder)
+    # A job started in the background has SIGINT ignored, and the child inherits that: the studio would never see the Ctrl+C.
+    proc = subprocess.Popen([DTPIPE, "studio", folder], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=folder,
+                            preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL))
     try:
         address = proc.stdout.readline().strip()
         base, token = address.split("#")[0].rstrip("/"), address.split("#")[1]
