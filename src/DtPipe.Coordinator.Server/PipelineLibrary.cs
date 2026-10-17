@@ -114,7 +114,7 @@ public sealed partial class PipelineLibrary : IJobSource
     /// Writes the job and commits
     /// it. A <paramref name="precondition"/> is checked under the library's lock, so no other save
     /// slips between the check and the write. The <paramref name="bindings"/> are set into the ones the library keeps, entry by
-    /// entry, in the same commit; null leaves them as they are. Every binding the save does not carry a brick for has it
+    /// entry, in the same commit (an entry with no mode keeps the library's); null leaves them as they are. Every binding the save does not carry a brick for has it
     /// resolved from the job it now holds, under the same lock, so a binding never keeps the brick of a text that was edited.
     /// </summary>
     public async Task<SaveOutcome> SaveAsync(string id, string yaml, string message, CancellationToken ct,
@@ -136,8 +136,10 @@ public sealed partial class PipelineLibrary : IJobSource
         Directory.CreateDirectory(dir);
         await File.WriteAllTextAsync(yamlPath, yaml, ct);
         var kept = ReadBindings(id);
-        var merged = kept.ToDictionary(b => b.Key, b => b.Value with { Brick = null }, StringComparer.Ordinal);
-        foreach (var (alias, binding) in bindings ?? new Dictionary<string, Binding>()) merged[alias] = binding;
+        // A strict binding re-reads its brick from the text it now holds; one in another mode keeps its brick by id.
+        var merged = kept.ToDictionary(b => b.Key, b => Bindings.IsStrict(b.Value) ? b.Value with { Brick = null } : b.Value, StringComparer.Ordinal);
+        foreach (var (alias, binding) in bindings ?? new Dictionary<string, Binding>())
+            merged[alias] = binding with { Mode = binding.Mode ?? kept.GetValueOrDefault(alias)?.Mode };
         var resolved = new Dictionary<string, Binding>(_resolveBricks(yaml, merged), StringComparer.Ordinal);
         foreach (var (alias, old) in kept)
             if (resolved.TryGetValue(alias, out var binding) && binding.Brick is null) resolved[alias] = binding with { Brick = old.Brick };

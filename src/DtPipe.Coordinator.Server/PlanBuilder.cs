@@ -9,8 +9,13 @@ namespace DtPipe.Coordinator.Server;
 
 public sealed record CutRequest(string Branch, int At);
 
+/// <param name="Bricks">
+/// The brick (its id on the node the alias is placed on) a binding names, by alias. An alias in it is composed from that brick as the
+/// catalog holds it now, whatever its text says; any other is the brick its text is on its node.
+/// </param>
 public sealed record PlanRequest(
-    string PipelineId, string Yaml, IReadOnlyList<CutRequest>? Cuts, IReadOnlyDictionary<string, string>? Placement);
+    string PipelineId, string Yaml, IReadOnlyList<CutRequest>? Cuts, IReadOnlyDictionary<string, string>? Placement,
+    IReadOnlyDictionary<string, string>? Bricks = null);
 
 /// <summary>
 /// A placeable piece of the pipeline: a branch, or the head of a branch a cut separated from it
@@ -266,7 +271,7 @@ public sealed class PlanBuilder(
             var node = nodes[draft.Node];
             if (node.Role != NodeRole.Runner)
             {
-                if (UnitsOf(draft) is { } pieces && FragmentJob.Compose(pieces, (id, kind) => BranchOf(draft.Node, id, kind)) is { Yaml: { } composed })
+                if (UnitsOf(draft, request.Bricks) is { } pieces && FragmentJob.Compose(pieces, (id, kind) => BranchOf(draft.Node, id, kind)) is { Yaml: { } composed })
                 {
                     (yaml, form, composition) = (composed, FragmentForm.Bricks, pieces);
                 }
@@ -303,13 +308,14 @@ public sealed class PlanBuilder(
     }
 
     /// <summary>The pieces of a data node's fragment in the closed vocabulary of ids, or <c>null</c> when a branch is no brick of that node.</summary>
-    private List<FragmentUnit>? UnitsOf(FragmentDraft draft)
+    private List<FragmentUnit>? UnitsOf(FragmentDraft draft, IReadOnlyDictionary<string, string>? named)
     {
         var units = new List<FragmentUnit>();
         foreach (var (key, _) in draft.Inbound) units.Add(new FragmentUnit(key, FragmentUnitKind.Inbound));
         foreach (var (key, branch) in draft.Owned)
         {
-            if (bricks.Match(branch) is not { } brick || brick.Node != draft.Node) return null;
+            var brick = named?.TryGetValue(key, out var id) == true ? bricks.Find($"{draft.Node}/{id}") : bricks.MatchAll(branch).FirstOrDefault(b => b.Node == draft.Node);
+            if (brick is null) return null;
             if (brick.Kind == BrickKind.Source)
             {
                 var sends = JobYaml.Scalar(branch, "output") == ArrowEndpoint;

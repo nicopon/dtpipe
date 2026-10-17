@@ -46,6 +46,7 @@ builder.Services.AddSingleton<PipelineCatalog>();
 builder.Services.AddSingleton<PlanBuilder>();
 builder.Services.AddSingleton<AutoPlacer>();
 builder.Services.AddSingleton<DesignValidator>();
+builder.Services.AddSingleton<BindingVerifier>();
 builder.Services.AddSingleton(services => new PipelineLibrary(
     services.GetRequiredService<CoordinatorServerOptions>(),
     services.GetRequiredService<AutoPlacer>().Check, services.GetRequiredService<AutoPlacer>().Resolve));

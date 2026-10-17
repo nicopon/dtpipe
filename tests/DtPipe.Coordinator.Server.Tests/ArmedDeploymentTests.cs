@@ -54,6 +54,7 @@ public sealed class ArmedDeploymentTests : IDisposable
     private RunJournal _journal;
     private DeploymentManager _deployments;
     private int _connections;
+    private Func<BrickCatalog, NodeRequests, BindingVerifier>? _verifier;
 
     public ArmedDeploymentTests()
     {
@@ -98,7 +99,7 @@ public sealed class ArmedDeploymentTests : IDisposable
         var inventory = new NodeInventory(registry);
         var journal = new RunJournal(_options, NullLogger<RunJournal>.Instance);
         var deployments = TestDeployments.Create(
-            inventory, _link, _runs, new ReplicaAdmission(registry, _state), new RightsFlowControl(rights), rights, new EventBus(), journal, _options, _jobs);
+            inventory, _link, _runs, new ReplicaAdmission(registry, _state), new RightsFlowControl(rights), rights, new EventBus(), journal, _options, _jobs, _verifier);
         return (rights, inventory, journal, deployments);
     }
 
@@ -111,13 +112,13 @@ public sealed class ArmedDeploymentTests : IDisposable
 
     private static BrickInfo Brick() => new("src", BrickKind.Source, "source", "", """{"input":"sqlite:a"}""", null, null);
 
-    private async Task NodeAsync(string name, string group, NodeRole role)
+    private async Task NodeAsync(string name, string group, NodeRole role, BrickInfo? brick = null)
     {
         var client = Guid.NewGuid();
         var subject = "node-" + name;
         await _state.SaveClientAsync(new ClientRegistration(client, "data-" + name, [group], null, null, DateTime.UtcNow, Subject: subject));
         var announcement = new NodeAnnouncement(
-            name, "", [], role, role == NodeRole.Data ? [Brick()] : [], Capabilities: [NodeAnnouncement.LaunchToken],
+            name, "", [], role, role == NodeRole.Data ? [brick ?? Brick()] : [], Capabilities: [NodeAnnouncement.LaunchToken],
             InstanceId: Guid.NewGuid(), DataPlaneClientId: client);
         var connection = $"c-{name}-{Interlocked.Increment(ref _connections)}";
         _registry.Announce(connection, subject, announcement, [group], () => { });
@@ -296,5 +297,211 @@ public sealed class ArmedDeploymentTests : IDisposable
         await _deployments.DeployAsync(fixedPlan, "lab", CancellationToken.None);
         Assert.False(File.Exists(file));
         Assert.Null(_deployments.ArmedOf("p"));
+    }
+
+    // ---- Bindings in a mode other than strict ----
+
+    /// <summary>The brick as its owner changed it since the binding was checked: the job still holds the old text.</summary>
+    private static BrickInfo Changed(string input = "sqlite:b") => new("src", BrickKind.Source, "source", "", $$"""{"input":"{{input}}"}""", null, null);
+
+    private static string VersionOf(BrickInfo brick) =>
+        ContentHash.Of(BrickRules.Declared(brick.Kind, FragmentJob.Declared(brick)!).Canonical, 12);
+
+    private static ArmedDeployment ArmedWith(Binding binding) => new(
+        "p", Commit, PipelineLibrary.Sha(Job), null, new Dictionary<string, Binding> { ["src"] = binding }, DateTimeOffset.UtcNow, "ann@x.test");
+
+    /// <summary>A verifier that answers a node's question itself and counts how often it was asked.</summary>
+    private sealed class Asked(BrickCatalog bricks, NodeRequests nodes, Func<BindingVerdict> answer) : BindingVerifier(bricks, nodes)
+    {
+        public int Count;
+
+        protected override Task<BindingVerdict> AskAsync(BrickView brick, BindingPin pin, string mode)
+        {
+            Interlocked.Increment(ref Count);
+            return Task.FromResult(answer());
+        }
+    }
+
+    private Asked UseVerifier(Func<BindingVerdict> answer)
+    {
+        Asked? made = null;
+        _verifier = (bricks, nodes) => made = new Asked(bricks, nodes, answer);
+        Restart();
+        return made!;
+    }
+
+    [Fact]
+    public async Task A_Tolerant_Binding_Whose_Brick_Changed_Runs_And_Asks_No_Node()
+    {
+        // The default verifier reaches a node through a hub that does not exist: any question would refuse the run.
+        await NodeAsync("n", "crm", NodeRole.Data, Changed());
+        await NodeAsync("r1", "crm", NodeRole.Runner);
+        await _deployments.ArmAsync(ArmedWith(new Binding("n", "src", "tolerant", new BindingPin("an-older-version"))), Job, CancellationToken.None);
+
+        var run = _deployments.Enqueue("p");
+        await RanAsync(run);
+
+        var done = Journaled(run.RunId);
+        Assert.Equal(RunState.Succeeded, done.State);
+        var binding = Assert.Single(done.Plan!.Bindings);
+        Assert.Equal(("tolerant", BindingVerdicts.Tolerated, VersionOf(Changed())), (binding.Mode, binding.Verdict, binding.BrickVersion));
+        // The fragment is the brick as it is now, not the text the job holds.
+        var fragment = Assert.Single(_runs.Specs.Single().Fragments, f => f.Name == "p@n");
+        Assert.Equal("src", Assert.Single(fragment.Spec.Units!, u => u.Key == "src").Brick);
+    }
+
+    [Fact]
+    public async Task A_Brick_At_The_Version_Its_Binding_Was_Checked_At_Is_Unchanged()
+    {
+        await NodeAsync("n", "crm", NodeRole.Data);
+        await NodeAsync("r1", "crm", NodeRole.Runner);
+        await _deployments.ArmAsync(ArmedWith(new Binding("n", "src", "contract", new BindingPin(VersionOf(Brick()), "{}"))), Job, CancellationToken.None);
+
+        var run = _deployments.Enqueue("p");
+        await RanAsync(run);
+
+        Assert.Equal(BindingVerdicts.Unchanged, Assert.Single(Journaled(run.RunId).Plan!.Bindings).Verdict);
+    }
+
+    [Fact]
+    public async Task A_Binding_In_Another_Mode_With_No_Pin_Blocks_The_Plan_By_Name()
+    {
+        await NodeAsync("n", "crm", NodeRole.Data);
+        await NodeAsync("r1", "crm", NodeRole.Runner);
+
+        var none = await _deployments.PlanLaunchAsync("p", Job, new Dictionary<string, Binding> { ["src"] = new Binding("n", "src", "tolerant") }, CancellationToken.None);
+        var noContract = await _deployments.PlanLaunchAsync("p", Job, new Dictionary<string, Binding> { ["src"] = new Binding("n", "src", "compatible", new BindingPin("v")) }, CancellationToken.None);
+
+        Assert.False(none.Ok);
+        Assert.Contains("'src'", none.Refusal);
+        Assert.Contains("no check has pinned it", none.Refusal);
+        Assert.False(noContract.Ok);
+        await Assert.ThrowsAsync<ConflictException>(() => _deployments.ArmAsync(ArmedWith(new Binding("n", "src", "contract")), Job, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task A_Breaking_Verdict_Refuses_The_Run_Naming_The_Binding_And_Is_Kept_For_The_Version()
+    {
+        var node = UseVerifier(() => new BindingVerdict(BindingVerdicts.Breaking, "id: int64 → int32"));
+        await NodeAsync("n", "crm", NodeRole.Data, Changed());
+        await NodeAsync("r1", "crm", NodeRole.Runner);
+        await _deployments.ArmAsync(ArmedWith(new Binding("n", "src", "contract", new BindingPin("an-older-version", "{}"))), Job, CancellationToken.None);
+
+        var first = _deployments.Enqueue("p");
+        await RanAsync(first);
+        var second = _deployments.Enqueue("p");
+        await RanAsync(second);
+
+        var refused = Journaled(first.RunId);
+        Assert.Equal(RunState.Refused, refused.State);
+        Assert.Contains("'src' is bound to brick 'src' on n in mode 'contract'", refused.Refusal);
+        Assert.Contains("id: int64 → int32", refused.Refusal);
+        Assert.Empty(_runs.Specs);
+        // One brick version, one verdict: the second run does not ask again.
+        Assert.Equal(RunState.Refused, Journaled(second.RunId).State);
+        Assert.Equal(1, node.Count);
+    }
+
+    [Fact]
+    public async Task A_Compatible_Verdict_Lets_The_Run_Through_And_Is_Journaled()
+    {
+        var node = UseVerifier(() => new BindingVerdict(BindingVerdicts.Compatible, "id: int32 → int64, wider"));
+        await NodeAsync("n", "crm", NodeRole.Data, Changed());
+        await NodeAsync("r1", "crm", NodeRole.Runner);
+        await _deployments.ArmAsync(ArmedWith(new Binding("n", "src", "compatible", new BindingPin("an-older-version", "{}"))), Job, CancellationToken.None);
+
+        var run = _deployments.Enqueue("p");
+        await RanAsync(run);
+        var again = _deployments.Enqueue("p");
+        await RanAsync(again);
+
+        Assert.Equal(BindingVerdicts.Compatible, Assert.Single(Journaled(run.RunId).Plan!.Bindings).Verdict);
+        Assert.Equal(RunState.Succeeded, Journaled(again.RunId).State);
+        Assert.Equal(1, node.Count);
+    }
+
+    [Fact]
+    public async Task A_Node_That_Cannot_Tell_Refuses_The_Run_And_The_Question_Is_Asked_Again()
+    {
+        var node = UseVerifier(() => new BindingVerdict(BindingVerdicts.Unread, "n is offline."));
+        await NodeAsync("n", "crm", NodeRole.Data, Changed());
+        await NodeAsync("r1", "crm", NodeRole.Runner);
+        await _deployments.ArmAsync(ArmedWith(new Binding("n", "src", "compatible", new BindingPin("an-older-version", "{}"))), Job, CancellationToken.None);
+
+        var first = _deployments.Enqueue("p");
+        await RanAsync(first);
+        var second = _deployments.Enqueue("p");
+        await RanAsync(second);
+
+        Assert.Contains("could not be checked: n is offline.", Journaled(first.RunId).Refusal);
+        Assert.Equal(RunState.Refused, Journaled(second.RunId).State);
+        Assert.Equal(2, node.Count);
+    }
+
+    [Fact]
+    public async Task A_Binding_Names_The_Node_That_Hosts_Its_Brick_Even_When_An_Earlier_Node_Offers_The_Same_One()
+    {
+        await NodeAsync("n", "crm", NodeRole.Data);
+        await NodeAsync("m", "crm", NodeRole.Data);
+        await NodeAsync("r1", "crm", NodeRole.Runner);
+
+        var launch = await _deployments.PlanLaunchAsync("p", Job, new Dictionary<string, Binding> { ["src"] = new Binding("n", "src", "strict") }, CancellationToken.None);
+
+        Assert.True(launch.Ok, launch.Refusal);
+        Assert.Contains(launch.Plan.Fragments, f => f.Node == "n");
+        Assert.DoesNotContain(launch.Plan.Fragments, f => f.Node == "m");
+    }
+
+    [Fact]
+    public async Task An_Armed_Pin_Is_Read_Back_With_Its_Contract_After_A_Restart()
+    {
+        await NodeAsync("n", "crm", NodeRole.Data);
+        await NodeAsync("r1", "crm", NodeRole.Runner);
+        var armed = ArmedWith(new Binding("n", "src", "compatible", new BindingPin("a-version", "{\"hash\":\"abcdef0123456789\"}")));
+        await _deployments.ArmAsync(armed, Job, CancellationToken.None);
+
+        Restart();
+
+        Assert.Equal(armed.Bindings, _deployments.ArmedOf("p")!.Bindings);
+    }
+
+    [Fact]
+    public async Task A_Verdict_Is_Absent_Until_Asked_Then_Known_Without_Asking_A_Node_Again()
+    {
+        var node = UseVerifier(() => new BindingVerdict(BindingVerdicts.Compatible));
+        await NodeAsync("n", "crm", NodeRole.Data, Changed());
+        await NodeAsync("r1", "crm", NodeRole.Runner);
+        var binding = new Binding("n", "src", "compatible", new BindingPin("an-older-version", "{}"));
+        await _deployments.ArmAsync(ArmedWith(binding), Job, CancellationToken.None);
+        Assert.Equal(VerdictState.Absent, node.StateOf("p", Commit, "src", binding));
+
+        var run = _deployments.Enqueue("p");
+        await RanAsync(run);
+
+        Assert.Equal(VerdictState.Known, node.StateOf("p", Commit, "src", binding));
+        Assert.Equal(1, node.Count);
+        // A strict binding, a brick at its pin and a tolerant one need no node: known at once.
+        Assert.Equal(VerdictState.Known, node.StateOf("p", Commit, "src", new Binding("n", "src", "strict")));
+        Assert.Equal(VerdictState.Known, node.StateOf("p", Commit, "src", binding with { Mode = "tolerant" }));
+    }
+
+    [Fact]
+    public async Task After_A_Restart_Before_Any_Node_Announces_Every_Mode_Is_Refused_Naming_The_Alias_And_The_Node()
+    {
+        await NodeAsync("n", "crm", NodeRole.Data);
+        await NodeAsync("r1", "crm", NodeRole.Runner);
+        var strict = new Dictionary<string, Binding> { ["src"] = new Binding("n", "src", "strict") };
+        var tolerant = new Dictionary<string, Binding> { ["src"] = new Binding("n", "src", "tolerant", new BindingPin("v")) };
+        Restart();
+
+        var strictLaunch = await _deployments.PlanLaunchAsync("p", Job, strict, CancellationToken.None);
+        var tolerantLaunch = await _deployments.PlanLaunchAsync("p", Job, tolerant, CancellationToken.None);
+
+        // The cause is that of an inventory with no node yet (`not-a-brick` for a strict binding, `unknown-node` for another), not
+        // of the node's absence: the refusal is right and names the binding, its cause is not yet.
+        Assert.False(strictLaunch.Ok);
+        Assert.Contains("'src' is bound to brick 'src' on n", strictLaunch.Refusal);
+        Assert.False(tolerantLaunch.Ok);
+        Assert.Contains("'src' is bound to brick 'src' on n", tolerantLaunch.Refusal);
     }
 }

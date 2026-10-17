@@ -9,15 +9,37 @@ public sealed record RunPlanFragment(string Name, string Node, string Version);
 
 /// <summary>
 /// A binding as a run met it: the brick it names and that brick's version then, the mode it is held to and what that mode found
-/// (<see cref="BindingVerdicts.Exact"/> for <see cref="BindingModes.Strict"/>: the branch's text is the brick's).
+/// (<see cref="BindingVerdicts.Exact"/> for <see cref="BindingModes.Strict"/>: the branch's text is the brick's; the others are
+/// <see cref="BindingVerifier"/>'s).
 /// </summary>
 public sealed record RunPlanBinding(string Alias, string Node, string Brick, string BrickVersion, string Mode, string Verdict);
 
 /// <summary>Verdicts of a binding's mode, as <see cref="RunPlanBinding.Verdict"/>.</summary>
 public static class BindingVerdicts
 {
-    /// <summary>The branch's canonical form equals the brick's: nothing can have changed.</summary>
+    /// <summary>The branch's canonical form equals the brick's: nothing can have changed (<see cref="BindingModes.Strict"/>).</summary>
     public const string Exact = "exact";
+
+    /// <summary>The brick is at the version its binding was checked at.</summary>
+    public const string Unchanged = "unchanged";
+
+    /// <summary>The brick changed and its binding is <see cref="BindingModes.Tolerant"/>: no node was asked.</summary>
+    public const string Tolerated = "tolerated";
+
+    /// <summary>A source changed and still produces the schema it was pinned with.</summary>
+    public const string Same = "same";
+
+    /// <summary>A source changed and what it produces still satisfies the consumers of the pinned schema.</summary>
+    public const string Compatible = "compatible";
+
+    /// <summary>A sink changed and its target still accepts the pinned contract.</summary>
+    public const string Accepted = "accepted";
+
+    /// <summary>The brick changed beyond what its mode accepts: the run is refused.</summary>
+    public const string Breaking = "breaking";
+
+    /// <summary>The node could not tell, so the run is refused; it says nothing about the brick and is not kept.</summary>
+    public const string Unread = "unread";
 }
 
 /// <summary>

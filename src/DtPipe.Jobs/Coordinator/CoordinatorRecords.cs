@@ -49,18 +49,36 @@ public sealed record Recognition(string? Match, string? Source, string? Sink, IR
 /// <summary>What each top-level branch of the job is, by alias.</summary>
 public sealed record RecognizeResponse(IReadOnlyDictionary<string, Recognition> Branches);
 
-/// <summary>The one binding mode: the branch must still be, word for word, the brick it is bound to.</summary>
+/// <summary>
+/// How a binding holds a brick: <see cref="Strict"/> the branch must still be, word for word, the brick it is bound to; the other
+/// three let the brick's definition evolve and judge the change against the <see cref="BindingPin"/> a check wrote.
+/// <see cref="Contract"/> accepts a change that leaves the schema it produces (or accepts) the same, <see cref="Compatible"/> one that
+/// still satisfies its consumers, <see cref="Tolerant"/> any.
+/// </summary>
 public static class BindingModes
 {
     public const string Strict = "strict";
+    public const string Contract = "contract";
+    public const string Compatible = "compatible";
+    public const string Tolerant = "tolerant";
+
+    public static readonly IReadOnlyList<string> All = [Strict, Contract, Compatible, Tolerant];
 }
 
 /// <summary>
-/// How a brick branch of a pipeline is bound: <see cref="Node"/> is the node it runs on, <see cref="Brick"/> the id of the
-/// brick it is on that node (the coordinator resolves it from the job's text when a save leaves it out) and <see cref="Mode"/>
-/// how the binding is held to it (<see cref="BindingModes.Strict"/> when absent).
+/// What a check of a non-strict binding saw of its brick: <see cref="Version"/> is the brick's version then and
+/// <see cref="Contract"/> the schema contract (JSON of <c>contract-save</c>) its source produced, or its sink was handed. Only a
+/// check writes it; a pin a request carries is replaced by the check's.
 /// </summary>
-public sealed record Binding(string Node, string? Brick = null, string? Mode = null);
+public sealed record BindingPin(string Version, string? Contract = null);
+
+/// <summary>
+/// How a brick branch of a pipeline is bound: <see cref="Node"/> is the node it runs on, <see cref="Brick"/> the id of the
+/// brick it is on that node (the coordinator resolves it from the job's text when a save leaves it out), <see cref="Mode"/>
+/// how the binding is held to it (<see cref="BindingModes.Strict"/> when absent, and a save that names none keeps the one the
+/// library holds) and <see cref="Pin"/>, written by the check for a mode other than strict.
+/// </summary>
+public sealed record Binding(string Node, string? Brick = null, string? Mode = null, BindingPin? Pin = null);
 
 /// <summary>
 /// A job saved into the library, with the message of its commit. <see cref="Bindings"/> binds the brick branches

@@ -23,6 +23,7 @@ internal sealed class DeploymentService
     private readonly ReplicaAdmission _admission;
     private readonly IPlanRegistry _planRegistry;
     private readonly LaunchPlanner _planner;
+    private readonly BindingVerifier _verifier;
     private readonly DeploymentStore _store;
     private readonly IJobSource _jobs;
     private readonly EventBus _bus;
@@ -30,10 +31,10 @@ internal sealed class DeploymentService
 
     public DeploymentService(
         DeploymentLedger ledger, NodeInventory inventory, INodeLink link, ReplicaAdmission admission,
-        IPlanRegistry planRegistry, LaunchPlanner planner, DeploymentStore store, IJobSource jobs, EventBus bus, ILogger logger)
+        IPlanRegistry planRegistry, LaunchPlanner planner, BindingVerifier verifier, DeploymentStore store, IJobSource jobs, EventBus bus, ILogger logger)
     {
-        (_ledger, _inventory, _link, _admission, _planRegistry, _planner, _store, _jobs, _bus, _logger) =
-            (ledger, inventory, link, admission, planRegistry, planner, store, jobs, bus, logger);
+        (_ledger, _inventory, _link, _admission, _planRegistry, _planner, _verifier, _store, _jobs, _bus, _logger) =
+            (ledger, inventory, link, admission, planRegistry, planner, verifier, store, jobs, bus, logger);
         // An armed deployment is an intention: it is ready as it comes back, and a run decides at admission whether it can go.
         foreach (var armed in _store.Load().OrderBy(a => a.ArmedAt))
         {
@@ -164,17 +165,34 @@ internal sealed class DeploymentService
 
     /// <summary>
     /// The plan a launch of <paramref name="deployment"/> runs: the fixed plan, or, for an armed deployment, the one computed now
-    /// from its job and its bindings at the armed commit. <c>Bindings</c> are those the plan was made under.
+    /// from its job and its bindings at the armed commit. <c>Bindings</c> are those the plan was made under and <c>Verdicts</c> what
+    /// each non-strict one found of its brick (<see cref="BindingVerifier"/>): a plan that is deployable is refused, naming the binding,
+    /// when one of them is breaking or could not be read.
     /// </summary>
-    public async Task<(Launch Launch, IReadOnlyDictionary<string, Binding> Bindings)> PlanForRunAsync(Deployment deployment, CancellationToken ct)
+    public async Task<(Launch Launch, IReadOnlyDictionary<string, Binding> Bindings, IReadOnlyDictionary<string, BindingVerdict> Verdicts)> PlanForRunAsync(
+        Deployment deployment, CancellationToken ct)
     {
-        if (deployment.Armed is not { } armed) return (new Launch(deployment.Plan!, null, []), new Dictionary<string, Binding>());
+        var none = new Dictionary<string, BindingVerdict>();
+        if (deployment.Armed is not { } armed) return (new Launch(deployment.Plan!, null, []), new Dictionary<string, Binding>(), none);
         var job = deployment.Job ??= await _jobs.JobAtAsync(armed.PipelineId, armed.Commit, ct)
             ?? throw new ConflictException($"The job of '{armed.PipelineId}' cannot be read at {armed.Commit[..Math.Min(8, armed.Commit.Length)]}.");
         var launch = await _planner.ChooseAsync(armed.PipelineId, job, armed.Bindings, ct);
-        if (launch.Ok) deployment.Plan = launch.Plan;
-        return (launch, armed.Bindings);
+        if (!launch.Ok) return (launch, armed.Bindings, none);
+
+        var held = armed.Bindings.Where(b => !Bindings.IsStrict(b.Value)).ToList();
+        var found = await Task.WhenAll(held.Select(async b => (b.Key, Verdict: await _verifier.VerdictAsync(armed.PipelineId, armed.Commit, b.Key, b.Value, ct))));
+        var verdicts = found.ToDictionary(f => f.Key, f => f.Verdict, StringComparer.Ordinal);
+        var refusals = held.Where(b => verdicts[b.Key].Blocking).Select(b => Refusal(b.Key, b.Value, verdicts[b.Key])).ToList();
+        if (refusals.Count > 0) return (launch with { Plan = launch.Plan with { Errors = [.. launch.Plan.Errors, .. refusals] } }, armed.Bindings, verdicts);
+
+        deployment.Plan = launch.Plan;
+        return (launch, armed.Bindings, verdicts);
     }
+
+    /// <summary>Why a run is refused for a binding: the alias, what it is bound to, its mode, and what the mode found.</summary>
+    private static string Refusal(string alias, Binding binding, BindingVerdict verdict) => verdict.Verdict == BindingVerdicts.Unread
+        ? $"'{alias}' is bound to brick '{binding.Brick}' on {binding.Node} in mode '{Bindings.ModeOf(binding)}', and its brick could not be checked: {verdict.Report}".TrimEnd()
+        : $"'{alias}' is bound to brick '{binding.Brick}' on {binding.Node} in mode '{Bindings.ModeOf(binding)}', and its brick changed beyond it: {verdict.Report}".TrimEnd();
 
     /// <summary>The nodes a run of <paramref name="deployment"/> holds, runners excepted: those its bindings name, or its fixed plan's.</summary>
     public IReadOnlySet<string> HeldNodes(Deployment deployment, IReadOnlyDictionary<string, NodeRole> roles) =>

@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using DtPipe.Coordinator.Contracts;
 using DtPipe.Jobs;
+using DtPipe.Jobs.Coordinator;
 using Microsoft.Extensions.Logging;
 using YamlDotNet.RepresentationModel;
 
@@ -10,7 +11,8 @@ namespace DtPipe.PipelineNode.Hosting;
 /// <summary>
 /// The bricks this node offers. It reads its own databases through the dtpipe binary, with the
 /// environment its fragments inherit: a source's schema comes from <c>dtpipe inspect</c>, a preview
-/// and a sample from a bounded read, a sink's verdict on a contract from <c>dtpipe contract check</c>.
+/// and a sample from a bounded read, a source's verdict on its pinned contract from that read and
+/// <c>dtpipe contract diff</c>, a sink's verdict on a contract from <c>dtpipe contract check</c>.
 /// The coordinator never opens a brick's database for this.
 /// </summary>
 internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> declared, DtPipeCommand dtpipe, ILogger logger)
@@ -117,7 +119,8 @@ internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> dec
     /// A source brick's first rows, read by the brick's own branch sent to <c>arrow:-</c>, exactly as
     /// its fragment sends the runner: the same reader and writer, so the coordinator checks a job
     /// against the schema the runner will receive. A real read bounded by <c>--limit</c>, like a
-    /// preview, not a sample run: the source-side guarantees of <c>--dry-run</c> do not apply.
+    /// preview, not a sample run: the source-side guarantees of <c>--dry-run</c> do not apply. The schema
+    /// contract that read produced comes with it.
     /// </summary>
     public async Task<BrickSample> SampleAsync(string id, int rows)
     {
@@ -125,16 +128,104 @@ internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> dec
         if (brick is null) return new BrickSample(null, $"{node} offers no source brick '{id}'.");
         try
         {
-            var result = await RunBranchAsync(brick, "output", new Dictionary<string, string>(),
-                job => ["--job", job, "--limit", rows.ToString(), "--no-stats"]);
+            var (result, contract) = await RunBranchAsync(brick, "output", new Dictionary<string, string>(),
+                job => ["--job", job, "--limit", rows.ToString(), "--no-stats"], saveContract: true);
             if (!result.Succeeded) return new BrickSample(null, result.Diagnostic);
             return result.Output.Length > MaxSampleBytes
                 ? new BrickSample(null, $"{node}: the first {rows} row(s) of '{id}' take {result.Output.Length:N0} bytes, over the {MaxSampleBytes:N0} a sample may.")
-                : new BrickSample(result.Output, null);
+                : new BrickSample(result.Output, null, contract);
         }
         catch (Exception ex)
         {
             return new BrickSample(null, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Whether a source brick still produces what a binding was checked against: its sample is read as <see cref="SampleAsync"/>
+    /// reads it, and the contract it produces is judged against <paramref name="pinnedContract"/>. <c>contract</c> accepts the
+    /// same schema (the hash); <c>compatible</c> also a different one that still satisfies the pinned one's consumers
+    /// (<c>dtpipe contract diff</c>). A sample or a comparison that fails is <see cref="SourceVerdicts.Unread"/>, never a verdict.
+    /// </summary>
+    public async Task<SourceCheck> CheckSourceAsync(string id, string pinnedContract, string mode)
+    {
+        if (mode is not (BindingModes.Contract or BindingModes.Compatible))
+            return new SourceCheck(SourceVerdicts.Unread, $"A source is checked in mode '{BindingModes.Contract}' or '{BindingModes.Compatible}', not '{mode}'.");
+        try
+        {
+            var sample = await SampleAsync(id, 1);
+            if (sample.Arrow is null) return new SourceCheck(SourceVerdicts.Unread, sample.Error ?? $"{node} sent no sample of '{id}'.");
+            if (sample.Contract is null) return new SourceCheck(SourceVerdicts.Unread, $"{node} captured no contract of '{id}'.");
+            var (pinned, now) = (HashOf(pinnedContract), HashOf(sample.Contract));
+            if (pinned is null || now is null) return new SourceCheck(SourceVerdicts.Unread, "A contract has no hash.");
+            if (pinned == now) return new SourceCheck(SourceVerdicts.Same, "");
+
+            var (compatible, report) = await DiffAsync(pinnedContract, sample.Contract);
+            if (mode == BindingModes.Contract)
+                return new SourceCheck(SourceVerdicts.Breaking, $"Its contract is no longer the pinned one ({pinned[..12]} → {now[..12]}).{(report.Length > 0 ? "\n" + report : "")}");
+            return compatible switch
+            {
+                true => new SourceCheck(SourceVerdicts.Compatible, report),
+                false => new SourceCheck(SourceVerdicts.Breaking, report),
+                null => new SourceCheck(SourceVerdicts.Unread, report),
+            };
+        }
+        catch (Exception ex)
+        {
+            return new SourceCheck(SourceVerdicts.Unread, ex.Message);
+        }
+    }
+
+    private static string? HashOf(string contract)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(contract);
+            var hash = document.RootElement.TryGetProperty("hash", out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+            return hash is { Length: >= 12 } ? hash : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// <c>dtpipe contract diff --json</c>: whether <paramref name="now"/> still satisfies the consumers of <paramref name="pinned"/>
+    /// and the changes that say why, or <c>null</c> when dtpipe answered nothing readable. Its exit code is not read: a command that
+    /// fails exits as one that finds a break.
+    /// </summary>
+    private async Task<(bool? Compatible, string Report)> DiffAsync(string pinned, string now)
+    {
+        var dir = Path.Combine(dtpipe.WorkingDirectory, "bricks", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var (old, current) = (Path.Combine(dir, "pinned.contract.json"), Path.Combine(dir, "now.contract.json"));
+            await File.WriteAllTextAsync(old, pinned);
+            await File.WriteAllTextAsync(current, now);
+            var result = await dtpipe.RunAsync(["contract", "diff", "--json", old, current], CancellationToken.None);
+            try
+            {
+                using var document = JsonDocument.Parse(result.Stdout);
+                var root = document.RootElement;
+                if (!root.TryGetProperty("compatible", out var compatible) || compatible.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                    return (null, result.Diagnostic);
+                var changes = root.TryGetProperty("changes", out var list) && list.ValueKind == JsonValueKind.Array ? list.EnumerateArray().ToList() : [];
+                var breaking = changes.Where(c => c.TryGetProperty("breaking", out var b) && b.ValueKind == JsonValueKind.True).ToList();
+                var shown = breaking.Count > 0 ? breaking : changes;
+                var report = string.Join('\n', shown.Select(c =>
+                    $"{(c.TryGetProperty("column", out var column) ? column.GetString() : "?")}: {(c.TryGetProperty("detail", out var detail) ? detail.GetString() : "changed")}"));
+                return (compatible.GetBoolean(), report);
+            }
+            catch (JsonException)
+            {
+                return (null, result.Diagnostic);
+            }
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch (IOException) { }
         }
     }
 
@@ -148,7 +239,7 @@ internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> dec
         if (brick is null) return new SinkCheck(false, $"{node} offers no sink brick '{id}'.");
         try
         {
-            var result = await RunBranchAsync(brick, "input", new Dictionary<string, string> { ["contract.json"] = contractJson },
+            var (result, _) = await RunBranchAsync(brick, "input", new Dictionary<string, string> { ["contract.json"] = contractJson },
                 job => ["contract", "check", "--job", job, "--contract", Path.Combine(Path.GetDirectoryName(job)!, "contract.json")]);
             return new SinkCheck(result.Succeeded, Findings(result.Stderr) ?? result.Tail(12));
         }
@@ -171,21 +262,26 @@ internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> dec
 
     /// <summary>
     /// Runs dtpipe on a job holding the brick's branch alone, its <paramref name="endpoint"/> set to
-    /// <c>arrow:-</c>, in a directory of its own with <paramref name="files"/> beside the job.
+    /// <c>arrow:-</c>, in a directory of its own with <paramref name="files"/> beside the job. With <paramref name="saveContract"/>
+    /// the branch saves the contract it produces there, by an absolute path (a job's relative path is read against the process's
+    /// directory, which a concurrent run shares), and it is read back before the directory goes.
     /// </summary>
-    private async Task<DtPipeCommandResult> RunBranchAsync(
-        BrickInfo brick, string endpoint, IReadOnlyDictionary<string, string> files, Func<string, string[]> args)
+    private async Task<(DtPipeCommandResult Result, string? Contract)> RunBranchAsync(
+        BrickInfo brick, string endpoint, IReadOnlyDictionary<string, string> files, Func<string, string[]> args, bool saveContract = false)
     {
-        var dir = Path.Combine(dtpipe.WorkingDirectory, "bricks", Guid.NewGuid().ToString("N"));
+        var dir = Path.GetFullPath(Path.Combine(dtpipe.WorkingDirectory, "bricks", Guid.NewGuid().ToString("N")));
         Directory.CreateDirectory(dir);
         try
         {
             var branch = FragmentJob.Declared(brick) ?? throw new InvalidOperationException($"The brick '{brick.Id}' declares no branch.");
             JobYaml.Set(branch, endpoint, BrickRules.ArrowEndpoint);
+            var saved = Path.Combine(dir, "saved.contract.json");
+            if (saveContract) JobYaml.Set(branch, "contract-save", saved);
             var job = Path.Combine(dir, "job.yaml");
             await File.WriteAllTextAsync(job, JobYaml.Serialize(new YamlMappingNode { { "brick", branch } }));
             foreach (var (name, content) in files) await File.WriteAllTextAsync(Path.Combine(dir, name), content);
-            return await dtpipe.RunAsync(args(job), CancellationToken.None);
+            var result = await dtpipe.RunAsync(args(job), CancellationToken.None);
+            return (result, saveContract && File.Exists(saved) ? await File.ReadAllTextAsync(saved) : null);
         }
         finally
         {

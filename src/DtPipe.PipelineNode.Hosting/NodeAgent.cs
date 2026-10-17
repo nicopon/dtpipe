@@ -97,6 +97,7 @@ internal sealed class NodeAgent : BackgroundService
 
         hub.On<string, int, BrickPreview>(NodeChannel.PreviewBrick, (id, rows) => _bricks.PreviewAsync(id, rows));
         hub.On<string, int, BrickSample>(NodeChannel.SampleBrick, (id, rows) => _bricks.SampleAsync(id, rows));
+        hub.On<string, string, string, SourceCheck>(NodeChannel.CheckSource, (id, contract, mode) => _bricks.CheckSourceAsync(id, contract, mode));
         hub.On<string, string, SinkCheck>(NodeChannel.CheckSink, (id, contract) => _bricks.CheckSinkAsync(id, contract));
         hub.On<string, string, NodeResponse>(NodeChannel.Request, (name, payload) => AnswerAsync(name, payload));
         hub.On<JobCheck, JobCheckResult>(NodeChannel.ValidateJob, check => _jobs.ValidateAsync(check));

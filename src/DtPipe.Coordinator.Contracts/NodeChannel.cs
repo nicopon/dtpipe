@@ -40,6 +40,10 @@ public static class NodeChannel
     public const string SampleBrick = nameof(SampleBrick);
     public const string CheckSink = nameof(CheckSink);
 
+    // Coordinator -> node host, answered: whether a source brick still produces what a binding was checked against. The
+    // node reads its sample as SampleBrick does and judges the contract it produces against the pinned one.
+    public const string CheckSource = nameof(CheckSource);
+
     // Coordinator -> node host, answered: a request a host registered under a name of its own (it
     // announces the names in NodeAnnouncement.Capabilities). The coordinator's lab mode asks a lab host to
     // query a dataset and to cut a branch this way; a host that registered nothing answers that it does not.
@@ -119,8 +123,29 @@ public sealed record BrickPreview(string? Csv, string? Error, IReadOnlyList<Bric
 /// <summary>
 /// What <c>SampleBrick</c> answers: the source brick's first rows as an Arrow IPC stream, written by
 /// the same <c>arrow:-</c> writer its fragment sends the runner, or why the node could not read them.
+/// <see cref="Contract"/> is the schema contract that read produced (the JSON of <c>contract-save</c>), absent from a node that
+/// does not capture it.
 /// </summary>
-public sealed record BrickSample(byte[]? Arrow, string? Error);
+public sealed record BrickSample(byte[]? Arrow, string? Error, string? Contract = null);
+
+/// <summary>What <c>CheckSource</c> answers: <see cref="SourceVerdicts"/> (<c>same</c>, <c>compatible</c>, <c>breaking</c> or <c>unread</c>) and dtpipe's report.</summary>
+public sealed record SourceCheck(string Verdict, string Report);
+
+/// <summary>The verdicts a node gives a source brick against its pinned contract.</summary>
+public static class SourceVerdicts
+{
+    /// <summary>The contract it produces now hashes as the pinned one.</summary>
+    public const string Same = "same";
+
+    /// <summary>It differs, and still satisfies the consumers of the pinned one (<c>dtpipe contract diff</c>).</summary>
+    public const string Compatible = "compatible";
+
+    /// <summary>It differs and breaks them, or differs when the mode accepts no change.</summary>
+    public const string Breaking = "breaking";
+
+    /// <summary>The node could not tell: the sample or the comparison failed. Never a verdict on the brick.</summary>
+    public const string Unread = "unread";
+}
 
 /// <summary>What <c>CheckSink</c> answers: whether the sink brick's target accepts a contract, and dtpipe's report.</summary>
 public sealed record SinkCheck(bool Accepted, string Report);

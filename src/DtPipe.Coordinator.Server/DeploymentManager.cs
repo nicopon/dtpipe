@@ -34,13 +34,13 @@ public sealed class DeploymentManager
     public DeploymentManager(
         NodeInventory inventory, INodeLink link, IRunOrchestrator orchestrator, ReplicaAdmission admission,
         IFlowControlService flowControl, RightsStore rights, EventBus bus, RunJournal journal,
-        AutoPlacer placer, BrickCatalog bricks, IJobSource jobs, CoordinatorServerOptions options, ILogger<DeploymentManager> logger)
+        AutoPlacer placer, BrickCatalog bricks, BindingVerifier verifier, IJobSource jobs, CoordinatorServerOptions options, ILogger<DeploymentManager> logger)
     {
         var ledger = new DeploymentLedger();
         var planner = new LaunchPlanner(placer, bricks, inventory, admission, rights);
         _planner = planner;
         _deployments = new DeploymentService(
-            ledger, inventory, link, admission, new PlanRegistry(flowControl), planner, new DeploymentStore(options.StateDir, logger), jobs, bus, logger);
+            ledger, inventory, link, admission, new PlanRegistry(flowControl), planner, verifier, new DeploymentStore(options.StateDir, logger), jobs, bus, logger);
         _runs = new RunQueue(ledger, _deployments, planner, inventory, orchestrator, bus, journal, logger);
         _lab = new LabFaults(ledger, inventory, link);
     }

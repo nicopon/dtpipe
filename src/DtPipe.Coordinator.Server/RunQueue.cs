@@ -165,14 +165,14 @@ internal sealed class RunQueue
             {
                 deployment.Gate.Release();
             }
-            var (launch, bindings) = await _deployments.PlanForRunAsync(deployment, ticket.Cancel.Token);
+            var (launch, bindings, verdicts) = await _deployments.PlanForRunAsync(deployment, ticket.Cancel.Token);
             if (!launch.Ok) throw new ConflictException(launch.Refusal);
             plan = launch.Plan;
             var roles = new Dictionary<string, NodeRole>(StringComparer.Ordinal);
             foreach (var node in _inventory.Snapshot()) roles[node.Name] = node.Role;
             if (RunDispatch.Unheld(plan, ticket.Held, roles) is { Count: > 0 } unheld)
                 throw new ConflictException($"The plan of '{pipelineId}' reaches {string.Join(", ", unheld)}, which the run does not hold: it is not run.");
-            journaled = _planner.Describe(plan, launch.Runner, bindings);
+            journaled = _planner.Describe(plan, launch.Runner, bindings, verdicts);
             fragments = _deployments.RunFragmentsOf(plan);
         }
         catch (Exception ex)

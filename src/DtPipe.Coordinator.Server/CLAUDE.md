@@ -69,9 +69,9 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
 - **The server never opens a node's data.** What reads it asks the node that hosts it, through
   `NodeRequests`: a brick preview and a cut (the named request `lab.split`, which only a lab host registers), and a
   library save's check (`DesignValidator`): each source brick's node sends its first row as Arrow IPC
-  (`SampleBrick`, written by the `arrow:-` writer its fragment uses), a runner dry-runs the job as
-  the runner will see it (`ValidateJob`), and each sink brick's node checks its target against the contract that
-  reaches it (`CheckSink`). A branch that reaches a node's data without being its brick is refused
+  (`SampleBrick`, written by the `arrow:-` writer its fragment uses, with the contract that read produced), a runner dry-runs the
+  job as the runner will see it (`ValidateJob`), and each sink brick's node checks its target against the contract that
+  reaches it (`CheckSink`); a binding's verdict is the same two questions (`CheckSource`, `CheckSink`) asked against a pin. A branch that reaches a node's data without being its brick is refused
   before anything runs. **The server runs no dtpipe**: a library save's check goes to a runner,
   and with none online it refuses. A node announces a
   variable's name, never its value. `[local: the lab's smoke.py bricks — a library save's check, a sink that refuses;
@@ -109,11 +109,15 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   library — a studio publishes]`
 - **A save may carry the bindings it knows, and a studio names only what is unambiguous.** `LibrarySave.Bindings` sets the
   bindings it names into the ones the library keeps, entry by entry, in the same commit as the job; an alias it does not name
-  keeps its node, and none leaves the bindings as they were. A binding is a node, a brick (its id on that node) and a mode.
-  The save resolves every brick it was not given, inside the library's lock, from the text it now holds: the brick the branch
-  designates on the bound node (`AutoPlacer.Resolve`, over `BrickCatalog.MatchAll`), so a binding never keeps the brick of a
-  text that was edited. A request that names a brick keeps it, and `AutoPlacer.Check` reports it when it is not the one the text
-  designates there. The only mode is `strict`; a request for another is refused (400) naming it, and an absent mode is `strict`.
+  keeps its node, and none leaves the bindings as they were. A binding is a node, a brick (its id on that node), a mode and,
+  for a mode other than `strict`, a pin. **An entry that names no mode keeps the mode the library holds** (`Bindings.Merge`): a
+  studio knows no mode and reads no pin, and must not turn a `tolerant` binding back into `strict`: that is what keeps the
+  contract number. The modes are `strict`, `contract`, `compatible` and `tolerant`; a request for another is refused (400),
+  and **a pin a request brings is never read**: the check writes it. The save resolves every brick of a strict binding it was not
+  given, inside the library's lock, from the text it now holds: the brick the branch designates on the bound node
+  (`AutoPlacer.Resolve`, over `BrickCatalog.MatchAll`), so a strict binding never keeps the brick of a text that was edited. A
+  binding in another mode keeps its brick by id. A request that names a brick keeps it, and `AutoPlacer.Check` reports it when a
+  strict binding's text is not that brick there.
   `POST /api/bricks/recognize` answers, with each branch that is a brick, `Nodes`: every node that offers it. The studio binds
   the node of a brick one node offers and of each brick the person chose; a brick two nodes offer that nobody chose stays
   unbound, which the answer's `bindingProblems` says and the pipeline's page then lets a person choose.
@@ -127,16 +131,35 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   plan, never anywhere else: a bound branch whose text is no longer its brick is an error naming the alias, the node and the
   brick. `AutoPlacer.Check` is the one function that says why bindings do not hold: a brick branch bound to no node
   (`unassigned`), a node with no identity (`unknown-node`), a node that does not offer the brick (`not-offered`), a brick that is
-  not the one the text designates on that node (`brick-mismatch`), a mode other than `strict` (`unsupported-mode`), a binding for
-  a branch that is no brick or not in the job (`not-a-brick`, `no-branch`), all blocking, and a node with no connected replica
-  (`offline`), which is not. `BrickCatalog.Match` is first-match and so unfit to choose a node: placing goes through `MatchAll`.
+  not the one the text designates on that node (`brick-mismatch`), a mode that is none of the four (`unsupported-mode`), a binding
+  in another mode that no check pinned, or pinned without the contract its mode compares (`unchecked`), a binding for a branch
+  that is no brick or not in the job (`not-a-brick`, `no-branch`), all blocking, and a node with no connected replica
+  (`offline`), which is not. A binding in a mode other than `strict` is judged by its node and its brick's id alone: the branch's
+  text is whatever it was when the binding was checked. The inventory lists a node once a replica has announced it, so after a
+  restart, and until then, `Check` gives a strict binding `not-a-brick` and another `unknown-node`: the run is refused naming the
+  binding, with a wrong cause. `BrickCatalog.Match` is first-match and so unfit to choose a node: placing goes through `MatchAll`.
   The bindings live beside the job so a pipeline stays a plain dtpipe job. They are saved as given, an absent node included,
   through `PUT /api/library/{id}/bindings`, and a seed brings its own as `<id>.bindings.json`. The list and the document carry
   the problems, the planner refuses a plan that has a blocking one, and a deployment is refused naming them. A deployment keeps
   the bindings it was armed with, so new bindings change nothing that runs until it is armed again.
   The designer's check (`DesignValidator`) samples each brick on the node the save's bindings name, the library's entries
-  with the request's over them; a brick no binding places is sampled on the first node that offers it.
-  `[local: BindingTests, LaunchRoutesTests]`
+  with the request's over them; a brick no binding places is sampled on the first node that offers it. A binding in another mode
+  names its brick by id, and that is the brick sampled. **A check writes the pins**: each source's, from the sample its node read
+  (the brick's version and the contract that read produced), each sink's, from the contract that reaches it in the runner's dry-run
+  (`Bindings.Pinned`, in the same commit as the job); a strict binding gets none, its text being the pin. A contract the node did
+  not send leaves a `contract` or `compatible` binding unpinned, so `unchecked`, never pinned to something that passes.
+  `[local: BindingTests, LaunchRoutesTests, StudioRoutesTests]`
+- **A brick that changed since its binding was checked is judged once per version, by the node that hosts it, and a verdict that
+  breaks refuses the run by name.** `BindingVerifier` gives, per non-strict binding of a launch: `unchanged` when the brick is at the
+  pin's version; `tolerated` for `tolerant` with no node asked; otherwise the node's answer: a source's `CheckSource` (its own sample
+  against the pinned contract, by hash in `contract`, by `dtpipe contract diff` in `compatible`: `same`, `compatible`, `breaking`),
+  a sink's `CheckSink` with the pinned contract (`accepted`, `breaking`; `contract` and `compatible` are one there). The server runs
+  no dtpipe. `RunQueue` asks after the plan is deployable, outside the ledger's lock, and refuses the run naming the alias, the
+  node, the brick, the mode and the node's report for `breaking` and for `unread` (the node could not tell: offline, too slow, a
+  version that does not know the request). A verdict is kept by pipeline, armed commit, alias, brick version and the binding's own
+  hash (a bindings save moves no commit but re-pins); `unread` is never kept; `StateOf` says known, in flight or absent without
+  asking a node. Limit: a `tolerant` source that changed upstream leaves the sink's pinned contract mute on the new schema. A pin
+  moves only by a check a person triggers, never by a verdict. `[local: ArmedDeploymentTests, BindingTests, Hosting.Tests BrickCheckTests]`
 - **A new state directory starts from the seeds, or empty.** `Coordinator:LibrarySeed` (one
   `.yaml` per pipeline) and `Coordinator:RightsSeed`; with neither, the library has no pipeline
   and the rights no identity and an empty matrix: nobody may send anything until an administrator

@@ -33,7 +33,7 @@ none. One node per process, which is one replica of its node's identity; a secon
   the child of a run only on a host that enabled it. Any other host answers `0` and logs a warning that
   names the setting, with or without a run of the fragment in flight, and its handler stays bound.
   `[local: PipelineNode.Tests FaultInjectionTests, Hosting.Tests FaultInjectionOptionTests; the lab's tools/campaign.py F12, for the environment form]`
-- **A node reads its bricks for a library save's check or a studio's sample, never more.**
+- **A node reads its bricks for a library save's check, a studio's sample or a binding's verdict, never more.**
   `BrickHost.SampleAsync` reads a source brick it announced, with `output: arrow:-` and `--limit`,
   the bytes its fragment would send; a real bounded read, so `--dry-run`'s source-side guarantees do
   not apply. A source brick's preview is that sample (`PreviewSourceAsync`): its types come from
@@ -42,8 +42,13 @@ none. One node per process, which is one replica of its node's identity; a secon
   reads its table. It refuses by name a sample over `MaxSampleBytes` before
   sending, so an answer stays under the coordinator's channel message limit.
   `CheckSinkAsync` runs `dtpipe contract check` on a sink brick fed from `arrow:-`, which inspects
-  the target and writes nothing. Checking a save is the product's, so neither is a registered request.
-  `[local: Hosting.Tests BrickPreviewTests; the lab's smoke.py bricks — a library save's check, a brick's preview]`
+  the target and writes nothing. The sample also saves the contract it produced, by the job key `contract-save` set to an absolute path
+  in the run's own directory (the command-line flag is not read under `--job`; a relative path is read against the process's
+  directory, which concurrent runs share). `CheckSourceAsync` is a binding's verdict on a source: that sample's contract against the
+  pinned one, by hash for `contract`, by `dtpipe contract diff --json` for `compatible`, read from the JSON and never from the exit
+  code (a command that fails exits as one that finds a break); a sample or a comparison that fails is `unread`, never `breaking`.
+  Checking a save and judging a binding are the product's, so none is a registered request.
+  `[local: Hosting.Tests BrickPreviewTests, BrickCheckTests; the lab's smoke.py bricks — a library save's check, a brick's preview]`
 - **A node announces its dtpipe's version**, what `dtpipe --version` says once at start
   (`DtPipeCommand.VersionAsync`), or none when the binary does not answer: a version is shown beside
   a studio's, never a reason to stop the host. `[local: Hosting.Tests DtPipeVersionTests; the lab's

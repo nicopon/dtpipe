@@ -18,15 +18,21 @@ internal static class LibraryEndpoints
             DesignValidator validator, DeploymentManager deployments, EventBus bus, CancellationToken ct) =>
         {
             if (Refusal(request.Bindings) is { } malformed) return Results.BadRequest(new { error = malformed });
-            // The check samples each brick on the node its binding names: the one this save carries over the one kept.
-            var bound = new Dictionary<string, Binding>((await library.GetAsync(id, ct))?.Bindings ?? new Dictionary<string, Binding>());
-            foreach (var (alias, binding) in request.Bindings ?? new Dictionary<string, Binding>()) bound[alias] = binding;
-            if (await CheckedAsync(validator, request.Yaml, bound, ct) is { } refused) return refused;
+            // The check samples each brick on the node its binding names: the one this save carries over the one kept. What a check
+            // pins is written with them; a pin the request brings is not read.
+            var held = (await library.GetAsync(id, ct))?.Bindings ?? new Dictionary<string, Binding>();
+            var bound = Bindings.Merge(held, request.Bindings);
+            var (refused, check) = await CheckedAsync(validator, request.Yaml, bound, ct);
+            if (refused is not null) return refused;
+            // The entries to write: those the request names, and those the check re-pinned, which have a mode other than strict.
+            var pinned = Bindings.Pinned(bound, check!.Pins);
+            var written = pinned.Where(b => request.Bindings?.ContainsKey(b.Key) == true || !Bindings.IsStrict(b.Value))
+                .ToDictionary(b => b.Key, b => b.Value, StringComparer.Ordinal);
             var absent = http.Headers.IfNoneMatch.ToString().Trim() == "*";
             var expected = http.Headers.IfMatch.ToString().Trim() is { Length: > 0 } tag ? (tag.StartsWith("W/") ? tag[2..] : tag).Trim('"') : null;
             var precondition = absent || expected is not null ? new SavePrecondition(absent, expected) : null;
             SaveOutcome saved;
-            try { saved = await library.SaveAsync(id, request.Yaml, request.Message ?? "", ct, precondition, request.Bindings); }
+            try { saved = await library.SaveAsync(id, request.Yaml, request.Message ?? "", ct, precondition, written); }
             catch (PreconditionFailedException ex)
             {
                 return Results.Json(new LibraryConflict(ex.Message, ex.Commit), statusCode: StatusCodes.Status412PreconditionFailed);
@@ -60,8 +66,10 @@ internal static class LibraryEndpoints
             var bindings = request.Bindings ?? new Dictionary<string, Binding>();
             if (Refusal(bindings) is { } malformed) return Results.BadRequest(new { error = malformed });
             var doc = await library.GetAsync(id, ct) ?? throw new ConflictException($"'{id}' is not in the library.");
-            if (await CheckedAsync(validator, doc.Yaml, bindings, ct) is { } refused) return refused;
-            var saved = await library.SaveBindingsAsync(id, bindings, request.Message ?? "", ct);
+            var stripped = bindings.ToDictionary(b => b.Key, b => b.Value with { Pin = null }, StringComparer.Ordinal);
+            var (refused, check) = await CheckedAsync(validator, doc.Yaml, stripped, ct);
+            if (refused is not null) return refused;
+            var saved = await library.SaveBindingsAsync(id, Bindings.Pinned(stripped, check!.Pins), request.Message ?? "", ct);
             bus.Publish("library", new { id, commit = saved.Commit });
             var problems = (await library.GetAsync(id, ct))?.BindingProblems ?? [];
             return Results.Ok(new { id, commit = saved.Commit, problems });
@@ -93,25 +101,26 @@ internal static class LibraryEndpoints
         });
     }
 
-    /// <summary>Why bindings cannot be written at all: an empty alias or node, or a mode other than strict. Null when they can.</summary>
+    /// <summary>Why bindings cannot be written at all: an empty alias or node, or a mode that is none of the four. Null when they can.</summary>
     private static string? Refusal(IReadOnlyDictionary<string, Binding>? bindings)
     {
         if (bindings is null) return null;
         if (bindings.Any(b => string.IsNullOrWhiteSpace(b.Key) || string.IsNullOrWhiteSpace(b.Value?.Node)))
             return "A binding names a node for each branch: no empty alias, no empty node.";
-        return bindings.Where(b => Bindings.ModeOf(b.Value) != BindingModes.Strict)
-            .Select(b => $"'{b.Key}' is bound in mode '{Bindings.ModeOf(b.Value)}': the only mode is {BindingModes.Strict}.").FirstOrDefault();
+        return bindings.Where(b => b.Value.Mode is not null && !BindingModes.All.Contains(b.Value.Mode))
+            .Select(b => $"'{b.Key}' is bound in mode '{b.Value.Mode}': the modes are {string.Join(", ", BindingModes.All)}.").FirstOrDefault();
     }
 
-    /// <summary>The designer's check of <paramref name="yaml"/> under <paramref name="bindings"/>: the 422 that refuses it, or null when it passes.</summary>
-    private static async Task<IResult?> CheckedAsync(DesignValidator validator, string yaml, IReadOnlyDictionary<string, Binding> bindings, CancellationToken ct)
+    /// <summary>The designer's check of <paramref name="yaml"/> under <paramref name="bindings"/>: the 422 that refuses it, or the check that passed.</summary>
+    private static async Task<(IResult? Refused, DesignCheck? Check)> CheckedAsync(
+        DesignValidator validator, string yaml, IReadOnlyDictionary<string, Binding> bindings, CancellationToken ct)
     {
         DesignCheck check;
         try { check = await validator.ValidateAsync(yaml, bindings, ct); }
         catch (Exception ex) when (ex is not OperationCanceledException) { check = new DesignCheck(false, $"The job is not readable: {ex.Message}"); }
-        return check.Ok ? null
-            : Results.Json(new LibraryRefused("The designer's check refused this job: nothing was saved.", check.Report),
-                statusCode: StatusCodes.Status422UnprocessableEntity);
+        return check.Ok ? (null, check)
+            : (Results.Json(new LibraryRefused("The designer's check refused this job: nothing was saved.", check.Report),
+                statusCode: StatusCodes.Status422UnprocessableEntity), null);
     }
 }
 

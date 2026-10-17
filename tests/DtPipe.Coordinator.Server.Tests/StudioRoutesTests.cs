@@ -200,22 +200,108 @@ public sealed class StudioRoutesTests : IDisposable
     }
 
     [Fact]
-    public async Task A_Mode_Other_Than_Strict_Is_Refused_And_Nothing_Is_Written()
+    public async Task A_Mode_That_Is_None_Of_The_Four_Is_Refused_And_Nothing_Is_Written()
     {
         Announce();
         using var request = new HttpRequestMessage(HttpMethod.Put, CoordinatorApi.Library("orders"))
         {
-            Content = JsonContent.Create(new LibrarySave(Orders, "m", new Dictionary<string, Binding> { ["a"] = new Binding("n1", "orders", "tolerant") })),
+            Content = JsonContent.Create(new LibrarySave(Orders, "m", new Dictionary<string, Binding> { ["a"] = new Binding("n1", "orders", "loose") })),
         };
         using var refused = await As(CoordinatorHost.Designer).SendAsync(request, Ct);
         Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
-        Assert.Contains("tolerant", await refused.Content.ReadAsStringAsync(Ct));
+        Assert.Contains("loose", await refused.Content.ReadAsStringAsync(Ct));
 
         using var bound = await As(CoordinatorHost.Designer).PutAsJsonAsync(
-            "/api/library/orders/bindings", new { bindings = new Dictionary<string, Binding> { ["a"] = new Binding("n1", "orders", "contract") } }, Ct);
+            "/api/library/orders/bindings", new { bindings = new Dictionary<string, Binding> { ["a"] = new Binding("n1", "orders", "sloppy") } }, Ct);
         Assert.Equal(HttpStatusCode.BadRequest, bound.StatusCode);
-        Assert.Contains("contract", await bound.Content.ReadAsStringAsync(Ct));
+        Assert.Contains("sloppy", await bound.Content.ReadAsStringAsync(Ct));
         Assert.Null(await _host.Services.GetRequiredService<PipelineLibrary>().GetAsync("orders", Ct));
+    }
+
+    private static DesignCheck Pinned(string version, string? contract) =>
+        new(true, null, new Dictionary<string, CheckedPin> { ["a"] = new CheckedPin("orders", new BindingPin(version, contract)) });
+
+    private async Task<HttpStatusCode> Put(Binding binding)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Put, CoordinatorApi.Library("orders"))
+        {
+            Content = JsonContent.Create(new LibrarySave(Orders, "m", new Dictionary<string, Binding> { ["a"] = binding })),
+        };
+        using var response = await As(CoordinatorHost.Designer).SendAsync(request, Ct);
+        return response.StatusCode;
+    }
+
+    private async Task<Binding> HeldAsync() =>
+        (await _host.Services.GetRequiredService<PipelineLibrary>().GetAsync("orders", Ct))!.Bindings["a"];
+
+    [Fact]
+    public async Task A_Pin_Is_Written_By_The_Check_Never_By_The_Request()
+    {
+        Announce();
+        _verdict = Pinned("v1", "{\"hash\":\"checked\"}");
+
+        Assert.Equal(HttpStatusCode.OK, await Put(new Binding("n1", "orders", "contract", new BindingPin("forged", "{\"hash\":\"forged\"}"))));
+
+        var held = await HeldAsync();
+        Assert.Equal(new Binding("n1", "orders", "contract", new BindingPin("v1", "{\"hash\":\"checked\"}")), held);
+        // The check judged the binding without the pin the request brought.
+        Assert.Null(_host.CheckedBindings!["a"].Pin);
+    }
+
+    [Fact]
+    public async Task A_Binding_The_Check_Gave_No_Contract_Stays_Unpinned_And_So_Unchecked()
+    {
+        Announce();
+        _verdict = Pinned("v1", null);
+
+        Assert.Equal(HttpStatusCode.OK, await Put(new Binding("n1", "orders", "compatible")));
+
+        var doc = (await _host.Services.GetRequiredService<PipelineLibrary>().GetAsync("orders", Ct))!;
+        Assert.Null(doc.Bindings["a"].Pin);
+        Assert.Equal(BindingCauses.Unchecked, Assert.Single(doc.BindingProblems).Cause);
+    }
+
+    [Fact]
+    public async Task A_Strict_Binding_Keeps_No_Pin()
+    {
+        Announce();
+        _verdict = Pinned("v1", "{}");
+
+        Assert.Equal(HttpStatusCode.OK, await Put(new Binding("n1", "orders", "strict", new BindingPin("forged"))));
+
+        Assert.Null((await HeldAsync()).Pin);
+    }
+
+    [Fact]
+    public async Task A_Save_That_Names_No_Mode_Keeps_The_One_The_Library_Holds_And_Pins_It_Again()
+    {
+        Announce();
+        _verdict = Pinned("v1", "{}");
+        Assert.Equal(HttpStatusCode.OK, await Put(new Binding("n1", "orders", "tolerant")));
+        _verdict = Pinned("v2", "{}");
+
+        // A studio knows no mode: it publishes the node alone.
+        Assert.Equal(HttpStatusCode.OK, await Put(new Binding("n1")));
+
+        var held = await HeldAsync();
+        Assert.Equal(("tolerant", "orders", "v2"), (held.Mode, held.Brick, held.Pin!.Version));
+        Assert.Null(held.Pin.Contract);
+    }
+
+    [Fact]
+    public async Task A_Save_Pins_Again_The_Bindings_It_Does_Not_Name_That_Are_Not_Strict()
+    {
+        Announce();
+        _verdict = Pinned("v1", "{}");
+        Assert.Equal(HttpStatusCode.OK, await Put(new Binding("n1", "orders", "contract")));
+        _verdict = Pinned("v2", "{\"hash\":\"later\"}");
+
+        // The new text names no binding: the one kept is still checked, so it is pinned again.
+        using var request = new HttpRequestMessage(HttpMethod.Put, CoordinatorApi.Library("orders")) { Content = JsonContent.Create(new LibrarySave(Orders, "again")) };
+        using var response = await As(CoordinatorHost.Designer).SendAsync(request, Ct);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        Assert.Equal(new BindingPin("v2", "{\"hash\":\"later\"}"), (await HeldAsync()).Pin);
     }
 
     [Fact]

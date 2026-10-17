@@ -212,6 +212,15 @@ chosen by hand. Nothing of the plan is saved: deploying a pipeline arms it at th
 holds, with its bindings, and each run plans from that job and those bindings against the rights and
 the nodes as they are then. The run's journal records the plan it ran.
 
+**A binding is held to its brick by a mode.** `strict` needs the branch to be the brick, word for word.
+In `contract`, `compatible` and `tolerant` the brick's owner may change it: saving the pipeline (or its
+bindings) runs the designer's check and pins what it saw of each brick, its version and the contract it
+produces or is handed. At the next launch, a brick still at its pinned version is `unchanged`; a changed
+one is `tolerated` in `tolerant`, and otherwise its node judges it against the pinned contract
+(`contract`: the same schema; `compatible`: a schema that still satisfies its consumers). A breaking
+verdict, or a node that cannot tell, refuses the run and names the binding; a verdict is computed once
+per version of the brick, and the run's journal keeps it.
+
 **A data node only reads and writes, and runs only its bricks.** The coordinator sends a data node
 the ids of its bricks, in order, and the version of the job they make; the node composes the job
 from what its owner declared and refuses the fragment, at once and by name, when a brick changed
@@ -227,7 +236,7 @@ planning ever sends a job as written.
 
 **The library** is a git repository under `.state/library`, started from `library-seed/`: each
 save and each save of bindings is a commit. Armed deployments are kept apart, in `.state/deployments`. A seed `<id>.yaml` brings its `<id>.bindings.json`, which binds each source and sink branch to a
-node and a brick (`strict`: the branch must stay that brick, word for word); the runner is never bound. Several pipelines may be deployed at once. Their runs are in
+node and a brick and a mode (`strict`: the branch must stay that brick, word for word; `contract`, `compatible`, `tolerant`: the brick may change, judged against what the last check pinned); the runner is never bound. Several pipelines may be deployed at once. Their runs are in
 flight together when they share no data node; otherwise they wait their turn in the order they came
 (the runner never counts). Finished runs are kept in `.state/runs/`.
 
@@ -330,7 +339,7 @@ sign a person in and out.
 | `POST /api/bricks/{node}/{id}/preview` | a few rows, read by the node that owns the brick |
 | `GET /api/library` · `GET`/`PUT`/`DELETE /api/library/{id}` | pipelines; `PUT {yaml, message}` commits what a check accepted: `dtpipe --dry-run 1` over one row per source brick sent by its node, then each sink brick's node checks its target (422 and nothing written otherwise) |
 | `GET /api/library/{id}/history`, `/at/{commit}` | commits; the job and the diff at one |
-| `PUT /api/library/{id}/bindings` | `{bindings: {alias: {node, brick?, mode?}}, message?}` → binds the bricks of the job; a check like a save's runs first (422 with its report); the server resolves a missing `brick` from the job's text, and only `strict` is accepted |
+| `PUT /api/library/{id}/bindings` | `{bindings: {alias: {node, brick?, mode?}}, message?}` → binds the bricks of the job; a check like a save's runs first (422 with its report); the server resolves a missing `brick` of a strict binding from the job's text; `mode` is `strict`, `contract`, `compatible` or `tolerant`, and the check writes the pins |
 | `GET /api/library/{id}/plan` | the plan a launch would make now, with the runner it would use; nothing is written |
 | `POST /api/library/{id}/deploy` | arms the pipeline at the commit the library holds, with its bindings (409 if the bindings do not hold or no node could run the plan) |
 | `POST /api/plan` | Lab view: `{pipelineId, yaml, cuts, placement}` → units, fragments, edges, errors |

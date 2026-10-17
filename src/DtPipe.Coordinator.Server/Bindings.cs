@@ -27,9 +27,15 @@ public static class BindingCauses
     /// <summary>The brick a binding names is not the one the branch's text designates on the bound node.</summary>
     public const string BrickMismatch = "brick-mismatch";
 
-    /// <summary>A binding asks for a mode other than <see cref="BindingModes.Strict"/>.</summary>
+    /// <summary>A binding asks for a mode that is none of <see cref="BindingModes.All"/>.</summary>
     public const string UnsupportedMode = "unsupported-mode";
+
+    /// <summary>A binding in a mode other than <see cref="BindingModes.Strict"/> has no pin yet, or none that holds what its mode compares: a check writes it.</summary>
+    public const string Unchecked = "unchecked";
 }
+
+/// <summary>What a designer's check pinned for an alias: the brick it sampled (by id on the bound node) and what it saw of it.</summary>
+public sealed record CheckedPin(string Brick, BindingPin Pin);
 
 /// <summary>
 /// One reason a pipeline's bindings do not hold for a job. <see cref="Blocking"/>: the job cannot be deployed
@@ -52,6 +58,43 @@ public static class Bindings
 
     /// <summary>The mode of a binding: <see cref="BindingModes.Strict"/> when it names none.</summary>
     public static string ModeOf(Binding binding) => string.IsNullOrWhiteSpace(binding.Mode) ? BindingModes.Strict : binding.Mode;
+
+    public static bool IsStrict(Binding binding) => ModeOf(binding) == BindingModes.Strict;
+
+    /// <summary>
+    /// <paramref name="requested"/> set into <paramref name="held"/>, entry by entry: an alias the request does not name is kept, and
+    /// one it names without a mode keeps the mode the library holds for it (a publisher that knows no mode must not turn a
+    /// <c>tolerant</c> binding back into <c>strict</c>). A request never brings a pin: only a check writes one.
+    /// </summary>
+    public static Dictionary<string, Binding> Merge(IReadOnlyDictionary<string, Binding> held, IReadOnlyDictionary<string, Binding>? requested)
+    {
+        var merged = new Dictionary<string, Binding>(held, StringComparer.Ordinal);
+        foreach (var (alias, binding) in requested ?? new Dictionary<string, Binding>())
+            merged[alias] = binding with { Mode = binding.Mode ?? held.GetValueOrDefault(alias)?.Mode, Pin = null };
+        return merged;
+    }
+
+    /// <summary>
+    /// <paramref name="bindings"/> as a check leaves them: a strict one has no pin (its text is the pin), and one in another mode
+    /// has the pin of the brick the check sampled, which it then names. A pin that does not hold what its mode compares (a contract
+    /// the node did not send) is left out, so the binding stays <see cref="BindingCauses.Unchecked"/> rather than pass for ever.
+    /// </summary>
+    public static Dictionary<string, Binding> Pinned(IReadOnlyDictionary<string, Binding> bindings, IReadOnlyDictionary<string, CheckedPin>? pins)
+    {
+        var pinned = new Dictionary<string, Binding>(StringComparer.Ordinal);
+        foreach (var (alias, binding) in bindings)
+        {
+            var mode = ModeOf(binding);
+            if (mode == BindingModes.Strict) pinned[alias] = binding with { Pin = null };
+            else if (pins?.GetValueOrDefault(alias) is { } seen && (mode == BindingModes.Tolerant || seen.Pin.Contract is not null))
+                pinned[alias] = binding with { Brick = seen.Brick, Pin = mode == BindingModes.Tolerant ? seen.Pin with { Contract = null } : seen.Pin };
+            else pinned[alias] = binding with { Pin = null };
+        }
+        return pinned;
+    }
+
+    /// <summary>The hash of one binding as it is kept, which a verdict cached for it is keyed by.</summary>
+    public static string ShaOf(Binding binding) => PipelineLibrary.Sha(JsonSerializer.Serialize(binding with { Mode = ModeOf(binding) }, Json));
 
     public static string Serialize(IReadOnlyDictionary<string, Binding> bindings) =>
         JsonSerializer.Serialize(

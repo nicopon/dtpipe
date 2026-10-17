@@ -5,7 +5,11 @@ using YamlDotNet.RepresentationModel;
 
 namespace DtPipe.Coordinator.Server;
 
-public sealed record DesignCheck(bool Ok, string? Report);
+/// <summary>
+/// What a check found. <see cref="Pins"/>: for every brick it sampled (a source) or whose target it judged (a sink), by alias, the
+/// brick and the pin a binding in a mode other than strict keeps (<see cref="Bindings.Pinned"/>); only a passing check has any.
+/// </summary>
+public sealed record DesignCheck(bool Ok, string? Report, IReadOnlyDictionary<string, CheckedPin>? Pins = null);
 
 /// <summary>
 /// Checks a designer's job through the real engine without the server opening a node's database or
@@ -24,12 +28,14 @@ public class DesignValidator(BrickCatalog bricks, NodeRequests nodes)
     private sealed record Placed(string Alias, BrickView Brick);
 
     /// <summary>
-    /// The brick a branch is, on the node <paramref name="bindings"/> name for it. A branch no binding places (or
-    /// places on a node that does not offer it) takes the first node that offers the brick: the check judges the job's form,
-    /// and the bindings' own problems are listed apart.
+    /// The brick a branch is, on the node <paramref name="bindings"/> name for it. A binding in a mode other than strict names its
+    /// brick, whatever the branch's text is now. A branch no binding places (or places on a node that does not offer it) takes the
+    /// first node that offers the brick: the check judges the job's form, and the bindings' own problems are listed apart.
     /// </summary>
     public BrickView? BrickOf(string alias, YamlMappingNode branch, IReadOnlyDictionary<string, Binding> bindings)
     {
+        if (bindings.TryGetValue(alias, out var held) && !Bindings.IsStrict(held) && held.Brick is { } id && bricks.Find($"{held.Node}/{id}") is { } named)
+            return named;
         var offered = bricks.MatchAll(branch);
         return bindings.TryGetValue(alias, out var binding) && offered.FirstOrDefault(b => b.Node == binding.Node) is { } placed ? placed : offered.FirstOrDefault();
     }
@@ -73,6 +79,9 @@ public class DesignValidator(BrickCatalog bricks, NodeRequests nodes)
             .Select(x => $"'{x.s.Alias}': {x.s.Brick.Key} sent no sample: {x.Answer.Error}").ToList();
         if (unread.Count > 0) return new DesignCheck(false, string.Join('\n', unread));
 
+        var pins = new Dictionary<string, CheckedPin>(StringComparer.Ordinal);
+        foreach (var x in samples)
+            pins[x.s.Alias] = new CheckedPin(x.s.Brick.Id, new BindingPin(x.s.Brick.Version, x.Answer.Contract));
         var check = new JobCheck(
             JobYaml.Serialize(rewritten),
             samples.ToDictionary(x => x.s.Alias, x => x.Answer.Arrow!, StringComparer.Ordinal),
@@ -100,7 +109,8 @@ public class DesignValidator(BrickCatalog bricks, NodeRequests nodes)
         }));
         var refused = checks.Where(x => !x.Answer.Accepted)
             .Select(x => $"'{x.s.Alias}': {x.s.Brick.Key} does not accept what reaches it:\n{x.Answer.Report}").ToList();
-        return refused.Count == 0 ? new DesignCheck(true, null) : new DesignCheck(false, string.Join("\n\n", refused));
+        foreach (var s in sinks) pins[s.Alias] = new CheckedPin(s.Brick.Id, new BindingPin(s.Brick.Version, dryRun.Contracts[s.Alias]));
+        return refused.Count == 0 ? new DesignCheck(true, null, pins) : new DesignCheck(false, string.Join("\n\n", refused));
     }
 
     /// <summary>A node's answer, or <paramref name="failed"/> with why it never came.</summary>

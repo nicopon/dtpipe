@@ -1024,6 +1024,48 @@ def bricks_pass():
             raise RuntimeError("a refused save was written into the library")
         return "node-4 refuses revenue rows for customers_mirror: 422, and nothing is saved"
 
+    def binding_modes():
+        # The check pins what it saw of each brick, by the nodes' own reads: a source's contract is the one its sample produced
+        # (dtpipe's `contract-save`), a sink's the one the runner's dry-run hands it. A mode other than strict is pinned by a save
+        # and by a bindings save alike; `tolerant` keeps the version alone, and a strict binding keeps no pin.
+        token = studio_tokens(URL, "labdesigner")["access_token"]
+        yaml = open(os.path.join(LIBRARY_SEED, "customers-mirror.yaml")).read()
+        seeded = json.load(open(os.path.join(LIBRARY_SEED, "customers-mirror.bindings.json")))
+        pid = "smoke-modes-probe"
+        wanted = {a: {**b, "mode": "compatible"} for a, b in seeded.items()}
+        try:
+            status, body, _ = bearer(token, f"/api/library/{pid}", {"yaml": yaml, "message": "smoke: modes", "bindings": wanted}, "PUT")
+            if status != 200:
+                raise RuntimeError(f"a save in mode compatible: HTTP {status} {body[:300]!r}")
+            held = json.loads(bearer(token, f"/api/library/{pid}")[1])
+            for alias, binding in held["bindings"].items():
+                pin = binding.get("pin") or {}
+                if binding["mode"] != "compatible" or not pin.get("version") or '"hash"' not in (pin.get("contract") or ""):
+                    raise RuntimeError(f"'{alias}' was not pinned with its contract: {binding}")
+            if any(p["cause"] == "unchecked" for p in held["bindingProblems"]):
+                raise RuntimeError(f"a pinned binding is still unchecked: {held['bindingProblems']}")
+            # A save that names no mode keeps the library's, as a studio's does.
+            plain = {a: {"node": b["node"]} for a, b in seeded.items()}
+            status, body, _ = bearer(token, f"/api/library/{pid}", {"yaml": yaml, "message": "smoke: no mode", "bindings": plain}, "PUT")
+            again = json.loads(bearer(token, f"/api/library/{pid}")[1])
+            if status != 200 or any(b["mode"] != "compatible" for b in again["bindings"].values()):
+                raise RuntimeError(f"a save with no mode changed the modes: {status} {again['bindings']}")
+            loose = {a: {**b, "mode": "tolerant"} for a, b in seeded.items()}
+            status, body, _ = bearer(token, f"/api/library/{pid}/bindings", {"bindings": loose, "message": "smoke: tolerant"}, "PUT")
+            tolerant = json.loads(bearer(token, f"/api/library/{pid}")[1])
+            if status != 200 or any(b["mode"] != "tolerant" or not (b.get("pin") or {}).get("version") or (b["pin"].get("contract")) for b in tolerant["bindings"].values()):
+                raise RuntimeError(f"tolerant bindings: {status} {tolerant['bindings']}")
+            status, body, _ = bearer(token, f"/api/library/{pid}/bindings", {"bindings": seeded, "message": "smoke: strict"}, "PUT")
+            strict = json.loads(bearer(token, f"/api/library/{pid}")[1])
+            if status != 200 or any(b["mode"] != "strict" or b.get("pin") for b in strict["bindings"].values()):
+                raise RuntimeError(f"strict bindings: {status} {strict['bindings']}")
+        finally:
+            try:
+                call(f"/api/library/{pid}", None, "DELETE")
+            except ApiError:
+                pass
+        return "a save pins each brick's contract from the node's own read; no mode keeps the mode; tolerant keeps the version; strict none"
+
     def studio_routes():
         # dtpipe studio's view of the bricks, through a person's bearer token: the catalog, what a library
         # job's branches are (the coordinator decides), and a source brick's sample as Arrow, which dtpipe reads.
@@ -1105,6 +1147,7 @@ def bricks_pass():
     check("relays", relays)
     check("a library save's check", library_save_check)
     check("a sink that refuses", sink_refuses)
+    check("binding modes", binding_modes)
     return failures[0]
 
 

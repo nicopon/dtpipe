@@ -34,8 +34,12 @@ public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, Pla
         try
         {
             foreach (var (alias, branch) in JobYaml.Branches(JobYaml.Parse(yaml)))
-                if (bindings.TryGetValue(alias, out var binding) && bricks.MatchAll(branch).FirstOrDefault(b => b.Node == binding.Node) is { } brick)
-                    brickOf[alias] = brick.Key;
+            {
+                if (!bindings.TryGetValue(alias, out var binding)) continue;
+                // A binding that is not strict names its brick, whatever the branch's text is now.
+                if (!Bindings.IsStrict(binding) && binding.Brick is { } id && bricks.Find($"{binding.Node}/{id}") is { } named) brickOf[alias] = named.Key;
+                else if (bricks.MatchAll(branch).FirstOrDefault(b => b.Node == binding.Node) is { } brick) brickOf[alias] = brick.Key;
+            }
         }
         catch (Exception) { }
         return brickOf;
@@ -99,13 +103,20 @@ public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, Pla
                 }
                 var bound = Bound(binding);
                 var here = offered.Where(b => b.Node == binding.Node).ToList();
-                if (Bindings.ModeOf(binding) != BindingModes.Strict)
+                var mode = Bindings.ModeOf(binding);
+                if (!BindingModes.All.Contains(mode))
                     problems.Add(new(alias, BindingCauses.UnsupportedMode,
-                        $"'{alias}' is bound to {bound} in mode '{Bindings.ModeOf(binding)}': the only mode is {BindingModes.Strict}.", true));
+                        $"'{alias}' is bound to {bound} in mode '{mode}': the modes are {string.Join(", ", BindingModes.All)}.", true));
+                else if (mode != BindingModes.Strict)
+                {
+                    // The brick is held by its id: the branch's text is whatever it was when the binding was checked.
+                    nodes.TryGetValue(binding.Node, out var view);
+                    if (CheckHeld(alias, binding, bound, mode, view) is { } held) problems.Add(held);
+                }
                 else if (offered.Count == 0)
                     problems.Add(new(alias, BindingCauses.NotABrick,
                         $"'{alias}' is bound to {bound}, but its text is no longer that brick: a bound branch never runs on the runner.", true));
-                else if (!nodes.TryGetValue(binding.Node, out var view))
+                else if (!nodes.TryGetValue(binding.Node, out var strictView))
                     problems.Add(new(alias, BindingCauses.UnknownNode, $"'{alias}' is bound to {bound}, which is no node of this coordinator.", true));
                 else if (here.Count == 0)
                     problems.Add(new(alias, BindingCauses.NotOffered,
@@ -113,7 +124,7 @@ public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, Pla
                 else if (here.All(b => b.Id != binding.Brick))
                     problems.Add(new(alias, BindingCauses.BrickMismatch,
                         $"'{alias}' is bound to {bound}, but its text is {string.Join(" or ", here.Select(b => $"brick '{b.Id}'"))} there.", true));
-                else if (!view.Online)
+                else if (!strictView.Online)
                     problems.Add(new(alias, BindingCauses.Offline, $"'{alias}' is bound to {bound}, which has no connected replica.", false));
             }
         }
@@ -127,6 +138,28 @@ public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, Pla
     }
 
     /// <summary>
+    /// Why a binding in a mode other than strict does not hold, or null when it does. It needs a node that exists, a brick that node
+    /// offers and a pin a check wrote that holds what the mode compares. The inventory lists a node once a replica has announced it:
+    /// until then, after a restart, the cause is <see cref="BindingCauses.UnknownNode"/>, whatever the rights say.
+    /// </summary>
+    private BindingProblem? CheckHeld(string alias, Binding binding, string bound, string mode, NodeView? node)
+    {
+        if (node is null)
+            return new(alias, BindingCauses.UnknownNode, $"'{alias}' is bound to {bound}, which is no node of this coordinator.", true);
+        if (binding.Brick is null)
+            return new(alias, BindingCauses.NotABrick,
+                $"'{alias}' is bound to {bound} in mode '{mode}', which names no brick: save it again while its text is a brick of that node.", true);
+        if (bricks.Find($"{binding.Node}/{binding.Brick}") is null)
+            return node.Online
+                ? new(alias, BindingCauses.NotOffered, $"'{alias}' is bound to {bound}, which that node does not offer.", true)
+                : new(alias, BindingCauses.Offline, $"'{alias}' is bound to {bound}, which has no connected replica.", false);
+        if (binding.Pin is not { } pin || (mode != BindingModes.Tolerant && pin.Contract is null))
+            return new(alias, BindingCauses.Unchecked,
+                $"'{alias}' is bound to {bound} in mode '{mode}' and no check has pinned it: save the pipeline or its bindings again.", true);
+        return node.Online ? null : new(alias, BindingCauses.Offline, $"'{alias}' is bound to {bound}, which has no connected replica.", false);
+    }
+
+    /// <summary>
     /// The plan of <paramref name="yaml"/> under <paramref name="bindings"/>, with every branch that is neither bound nor a brick on
     /// <paramref name="runner"/> (null: none is available, and such a branch is an error). Which runner is <see cref="LaunchPlanner"/>'s.
     /// </summary>
@@ -135,6 +168,7 @@ public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, Pla
     {
         var errors = new List<string>();
         var placed = new Dictionary<string, string>(StringComparer.Ordinal);
+        var named = new Dictionary<string, string>(StringComparer.Ordinal);
         var nodes = inventory.Snapshot();
         var hostOf = nodes.SelectMany(n => n.Datasets.Select(d => (d.Variable, n.Name))).ToDictionary(x => x.Variable, x => x.Name, StringComparer.Ordinal);
         var problems = Check(yaml, bindings);
@@ -149,7 +183,12 @@ public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, Pla
                 var bound = bindings.TryGetValue(alias, out var binding);
                 if (bound || bricks.MatchAll(branch).Count > 0)
                 {
-                    if (bound && !refused.Contains(alias)) placed[alias] = binding!.Node;
+                    if (bound && !refused.Contains(alias))
+                    {
+                        placed[alias] = binding!.Node;
+                        // Its brick is the one the binding names. The text says it only for a strict binding, which Check judged.
+                        if (binding.Brick is { } id) named[alias] = id;
+                    }
                     continue;
                 }
                 // A node's database is reached only through a brick its owner declared.
@@ -168,7 +207,7 @@ public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, Pla
             errors.Add($"The job is not readable: {ex.Message}");
         }
 
-        var plan = await planner.BuildAsync(new PlanRequest(pipelineId, yaml, [], placed), PlanMode.Library, ct);
+        var plan = await planner.BuildAsync(new PlanRequest(pipelineId, yaml, [], placed, named), PlanMode.Library, ct);
         var warnings = problems.Where(p => !p.Blocking).Select(p => p.Message).ToList();
         return plan with { Errors = [.. errors, .. plan.Errors], Warnings = [.. warnings, .. plan.Warnings] };
     }

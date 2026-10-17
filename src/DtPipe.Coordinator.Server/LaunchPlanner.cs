@@ -66,13 +66,17 @@ internal sealed class LaunchPlanner(AutoPlacer placer, BrickCatalog bricks, Node
         return new Launch(Refused(first!, refusals), null, refusals);
     }
 
-    /// <summary>The binding and fragment versions of a plan that is about to run, as the run journals them.</summary>
-    public RunPlan Describe(DistributionPlan plan, string? runner, IReadOnlyDictionary<string, Binding> bindings) => new(
+    /// <summary>
+    /// The binding and fragment versions of a plan that is about to run, as the run journals them. <paramref name="verdicts"/> are the
+    /// modes' findings by alias; a binding with none is strict, which found its text equal to the brick's.
+    /// </summary>
+    public RunPlan Describe(
+        DistributionPlan plan, string? runner, IReadOnlyDictionary<string, Binding> bindings, IReadOnlyDictionary<string, BindingVerdict> verdicts) => new(
         plan.Id, runner,
         plan.Fragments.Select(f => new RunPlanFragment(f.Name, f.Node, f.Version)).ToList(),
         bindings.OrderBy(b => b.Key, StringComparer.Ordinal).Select(b =>
             new RunPlanBinding(b.Key, b.Value.Node, b.Value.Brick ?? "", bricks.Find($"{b.Value.Node}/{b.Value.Brick}")?.Version ?? "",
-                Bindings.ModeOf(b.Value), BindingVerdicts.Exact)).ToList());
+                Bindings.ModeOf(b.Value), verdicts.GetValueOrDefault(b.Key)?.Verdict ?? BindingVerdicts.Exact)).ToList());
 
     private static DistributionPlan Refused(DistributionPlan plan, IEnumerable<string> refusals) =>
         plan with { Errors = [.. plan.Errors, .. refusals] };

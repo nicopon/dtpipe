@@ -24,12 +24,14 @@ internal static class TestDeployments
 
     public static DeploymentManager Create(
         NodeInventory inventory, INodeLink link, IRunOrchestrator runs, ReplicaAdmission admission, IFlowControlService flow,
-        RightsStore rights, EventBus bus, RunJournal journal, CoordinatorServerOptions options, IJobSource? jobs = null)
+        RightsStore rights, EventBus bus, RunJournal journal, CoordinatorServerOptions options, IJobSource? jobs = null,
+        Func<BrickCatalog, NodeRequests, BindingVerifier>? verifier = null)
     {
         var bricks = new BrickCatalog(inventory);
-        var planner = new PlanBuilder(inventory, new NodeRequests(inventory, new NoHub()), bricks, new PlanRegistry(flow), rights);
+        var requests = new NodeRequests(inventory, new NoHub());
+        var planner = new PlanBuilder(inventory, requests, bricks, new PlanRegistry(flow), rights);
         return new DeploymentManager(
             inventory, link, runs, admission, flow, rights, bus, journal, new AutoPlacer(bricks, inventory, planner), bricks,
-            jobs ?? new FakeJobs(), options, NullLogger<DeploymentManager>.Instance);
+            verifier?.Invoke(bricks, requests) ?? new BindingVerifier(bricks, requests), jobs ?? new FakeJobs(), options, NullLogger<DeploymentManager>.Instance);
     }
 }

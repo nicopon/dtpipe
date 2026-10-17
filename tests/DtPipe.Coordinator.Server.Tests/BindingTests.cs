@@ -183,15 +183,64 @@ public sealed class BindingTests : IDisposable
     }
 
     [Fact]
-    public void A_Mode_Other_Than_Strict_Is_Refused_By_Name()
+    public void A_Mode_That_Is_None_Of_The_Four_Is_Refused_By_Name()
     {
         Announce("node-a", SourceBrick());
-        var bindings = new Dictionary<string, Binding> { ["customers"] = new Binding("node-a", "customers", "tolerant") };
+        var bindings = new Dictionary<string, Binding> { ["customers"] = new Binding("node-a", "customers", "loose") };
 
         var problem = Assert.Single(Check(bindings));
 
         Assert.Equal((BindingCauses.UnsupportedMode, true), (problem.Cause, problem.Blocking));
+        Assert.Contains("loose", problem.Message);
         Assert.Contains("tolerant", problem.Message);
+    }
+
+    [Theory]
+    [InlineData("contract")]
+    [InlineData("compatible")]
+    [InlineData("tolerant")]
+    public void A_Binding_In_A_Mode_Other_Than_Strict_Is_Unchecked_Until_A_Check_Pins_It(string mode)
+    {
+        Announce("node-a", SourceBrick());
+
+        var unpinned = Assert.Single(Check(new() { ["customers"] = new Binding("node-a", "customers", mode) }));
+        var pinned = Check(new() { ["customers"] = new Binding("node-a", "customers", mode, new BindingPin("v", "{}")) });
+
+        Assert.Equal((BindingCauses.Unchecked, true), (unpinned.Cause, unpinned.Blocking));
+        Assert.Empty(pinned);
+    }
+
+    [Fact]
+    public void A_Pin_Without_The_Contract_Its_Mode_Compares_Is_Unchecked_But_A_Tolerant_One_Needs_None()
+    {
+        Announce("node-a", SourceBrick());
+
+        Assert.Equal(BindingCauses.Unchecked, Assert.Single(Check(new() { ["customers"] = new Binding("node-a", "customers", "compatible", new BindingPin("v")) })).Cause);
+        Assert.Empty(Check(new() { ["customers"] = new Binding("node-a", "customers", "tolerant", new BindingPin("v")) }));
+    }
+
+    [Fact]
+    public void A_Binding_In_Another_Mode_Holds_Its_Brick_By_Id_Whatever_The_Branch_Text_Is_Now()
+    {
+        // The node offers the brick as its owner changed it; the job still holds the old text.
+        Announce("node-a", new BrickInfo("customers", BrickKind.Source, "t", "", """{"input":"sqlite:other"}""", null, null));
+        var tolerant = new Dictionary<string, Binding> { ["customers"] = new Binding("node-a", "customers", "tolerant", new BindingPin("v")) };
+        var strict = new Dictionary<string, Binding> { ["customers"] = new Binding("node-a", "customers") };
+
+        Assert.Empty(Check(tolerant));
+        Assert.Equal("node-a/customers", _placer.BrickAliases(Job, tolerant)["customers"]);
+        Assert.Equal(BindingCauses.NotABrick, Assert.Single(Check(strict)).Cause);
+    }
+
+    [Fact]
+    public void A_Binding_In_Another_Mode_Names_The_Node_Or_The_Brick_That_Is_Missing()
+    {
+        Announce("node-a", SourceBrick());
+        Binding Held(string node, string? brick) => new(node, brick, "tolerant", new BindingPin("v"));
+
+        Assert.Equal(BindingCauses.UnknownNode, Assert.Single(Check(new() { ["customers"] = Held("node-z", "customers") })).Cause);
+        Assert.Equal(BindingCauses.NotABrick, Assert.Single(Check(new() { ["customers"] = Held("node-a", null) })).Cause);
+        Assert.Equal(BindingCauses.NotOffered, Assert.Single(Check(new() { ["customers"] = Held("node-a", "gone") })).Cause);
     }
 
     [Fact]

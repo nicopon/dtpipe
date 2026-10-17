@@ -38,7 +38,7 @@ async function load() {
     runner = answer.runner;
     brickOfUnit = answer.bricks || {};
     offers = answer.offers || {};
-    draft = nodesOf(doc.bindings);
+    draft = draftOf(doc.bindings);
   } catch (e) {
     host.innerHTML = `<p class="mismatch">${esc(e.message)}</p>`;
     return;
@@ -46,17 +46,31 @@ async function load() {
   render();
 }
 
-// A binding is kept with its brick and mode; the page chooses only the node, and the server resolves the brick.
-const nodesOf = (bindings) => Object.fromEntries(Object.entries(bindings || {}).map(([alias, b]) => [alias, b.node]));
+// The page chooses a binding's node and mode. A strict binding's brick is resolved by the server from the job's text; one in
+// another mode keeps its brick by id, so it is sent back while its node is the same. A pin is the server's: a check writes it.
+const MODES = [
+  ["strict", "the branch must stay word for word the brick"],
+  ["contract", "the brick may change while the schema it produces or accepts stays the same"],
+  ["compatible", "the brick may change while its consumers still work"],
+  ["tolerant", "the brick may change as it likes"],
+];
+const draftOf = (bindings) => Object.fromEntries(Object.entries(bindings || {}).map(([alias, b]) => [alias, { node: b.node, mode: b.mode || "strict" }]));
 
-const sorted = (o) => JSON.stringify(Object.entries(o).filter(([, v]) => v).sort(([a], [b]) => (a < b ? -1 : 1)));
-const bindingsDirty = () => sorted(draft) !== sorted(nodesOf(doc.bindings));
+const sorted = (o) => JSON.stringify(Object.entries(o).filter(([, v]) => v?.node).map(([a, v]) => [a, v.node, v.mode]).sort(([a], [b]) => (a < b ? -1 : 1)));
+const bindingsDirty = () => sorted(draft) !== sorted(draftOf(doc.bindings));
+
+// What the server keeps of a draft binding: its node and mode, and for a non-strict mode the brick it already holds on that node.
+function bindingOf(alias, { node, mode }) {
+  const kept = doc.bindings?.[alias];
+  const brick = mode !== "strict" && kept?.node === node ? kept.brick : undefined;
+  return { node, mode, ...(brick ? { brick } : {}) };
+}
 
 function bindingsChip() {
   const problems = doc.bindingProblems || [];
   if (!problems.length) return "";
   const blocking = problems.some((p) => p.blocking);
-  return `<span class="chip ${blocking ? "bad" : "warn"}" title="${esc(problems.map((p) => p.message).join(" "))}>bindings: ${problems.length} problem${problems.length > 1 ? "s" : ""}</span>`;
+  return `<span class="chip ${blocking ? "bad" : "warn"}" title="${esc(problems.map((p) => p.message).join(" "))}">bindings: ${problems.length} problem${problems.length > 1 ? "s" : ""}</span>`;
 }
 
 // One row per brick branch of the job, and one per binding kept for a branch that is none, so it can be dropped.
@@ -67,26 +81,39 @@ function bindingsCard() {
   const problems = doc.bindingProblems || [];
   const problemOf = (a) => problems.filter((p) => p.alias === a).map((p) => `<div class="mismatch">${esc(p.message)}</div>`).join("");
   const rows = aliases.map((a) => {
-    const chosen = draft[a] || "";
+    const chosen = draft[a]?.node || "";
+    const mode = draft[a]?.mode || "strict";
     const nodes = offers[a].includes(chosen) || !chosen ? offers[a] : [...offers[a], chosen];
+    const pin = doc.bindings?.[a]?.pin;
     return `<tr><td class="mono">${esc(a)}</td><td>
       <select data-alias="${esc(a)}" ${busy ? "disabled" : ""}>
         <option value="" ${chosen ? "" : "selected"}>choose a node</option>
         ${nodes.map((n) => `<option value="${esc(n)}" ${n === chosen ? "selected" : ""}>${esc(n)}${offers[a].includes(n) ? "" : " (does not offer it)"}</option>`).join("")}
-      </select>${problemOf(a)}</td></tr>`;
+      </select>
+      <select data-mode-alias="${esc(a)}" title="${esc(MODES.find(([m]) => m === mode)?.[1] || "")}" ${busy || !chosen ? "disabled" : ""}>
+        ${MODES.map(([m, why]) => `<option value="${m}" title="${esc(why)}" ${m === mode ? "selected" : ""}>${m}</option>`).join("")}
+      </select>
+      ${pin ? `<span class="hint">checked at brick ${esc(pin.version.slice(0, 12))}</span>` : ""}${problemOf(a)}</td></tr>`;
   }).join("");
   const strays = stray.map((a) => `<tr><td class="mono">${esc(a)}</td><td>${problemOf(a) || `<span class="hint">no brick branch of this job</span>`}
       <button class="small ghost" data-drop="${esc(a)}" ${busy ? "disabled" : ""}>Remove</button></td></tr>`).join("");
   return `<section class="card"><div class="card-head"><h2>Bindings</h2>
       <span class="actions"><button id="x-bind" class="primary" ${bindingsDirty() && !busy ? "" : "disabled"}>Save bindings</button></span></div>
-    <p class="hint">The node each source and sink runs on. Every other step runs on the runner, which is never named.</p>
+    <p class="hint">The node each source and sink runs on, and how its brick may change. Saving checks the bindings against the nodes and pins what
+      the check saw. Every other step runs on the runner, which is never named.</p>
     <table class="library">${rows}${strays}</table></section>`;
 }
 
 function onChange(e) {
   const alias = e.target?.dataset?.alias;
-  if (alias === undefined) return;
-  draft[alias] = e.target.value;
+  if (alias !== undefined) {
+    draft[alias] = { node: e.target.value, mode: draft[alias]?.mode || "strict" };
+    render();
+    return;
+  }
+  const modeAlias = e.target?.dataset?.modeAlias;
+  if (modeAlias === undefined) return;
+  draft[modeAlias] = { ...draft[modeAlias], mode: e.target.value };
   render();
 }
 
@@ -159,7 +186,7 @@ async function onClick(e) {
   try {
     if (b.id === "x-bind" || b.dataset.drop) {
       if (b.dataset.drop) delete draft[b.dataset.drop];
-      const bindings = Object.fromEntries(Object.entries(draft).filter(([, v]) => v).map(([alias, node]) => [alias, { node }]));
+      const bindings = Object.fromEntries(Object.entries(draft).filter(([, v]) => v?.node).map(([alias, v]) => [alias, bindingOf(alias, v)]));
       const saved = await api(`/api/library/${encodeURIComponent(id)}/bindings`, { bindings, message: `Bind ${id}` }, "PUT");
       await load();
       toast(saved.problems?.length ? "Bindings saved: some do not hold yet." : "Bindings saved.", "info");

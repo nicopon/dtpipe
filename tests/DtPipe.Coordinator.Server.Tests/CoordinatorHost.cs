@@ -21,6 +21,9 @@ namespace DtPipe.Coordinator.Server.Tests;
 public sealed class CoordinatorHost(string? studioClientId = CoordinatorHost.StudioClient, Func<string, DesignCheck>? check = null, bool labMode = false)
     : WebApplicationFactory<Program>
 {
+    /// <summary>The bindings the stand-in check was last asked to judge, as the route merged them.</summary>
+    public IReadOnlyDictionary<string, Binding>? CheckedBindings { get; private set; }
+
     public const string Issuer = "http://idp.test/";
     public const string Audience = "dtpipe-coordinator";
     public const string StudioClient = "studio";
@@ -47,7 +50,7 @@ public sealed class CoordinatorHost(string? studioClientId = CoordinatorHost.Stu
         builder.UseSetting("Coordinator:LabMode", labMode ? "true" : "false");
         builder.ConfigureTestServices(services =>
         {
-            if (check is not null) services.AddSingleton<DesignValidator>(new StubValidator(check));
+            if (check is not null) services.AddSingleton<DesignValidator>(new StubValidator(check, bindings => CheckedBindings = bindings));
             var configuration = new OpenIdConnectConfiguration
             {
                 Issuer = Issuer,
@@ -101,7 +104,11 @@ public sealed class CoordinatorHost(string? studioClientId = CoordinatorHost.Stu
 }
 
 /// <summary>The designer's check answered by a function, for tests that exercise what is around it.</summary>
-internal sealed class StubValidator(Func<string, DesignCheck> check) : DesignValidator(null!, null!)
+internal sealed class StubValidator(Func<string, DesignCheck> check, Action<IReadOnlyDictionary<string, Binding>> seen) : DesignValidator(null!, null!)
 {
-    public override Task<DesignCheck> ValidateAsync(string yaml, IReadOnlyDictionary<string, Binding> bindings, CancellationToken ct) => Task.FromResult(check(yaml));
+    public override Task<DesignCheck> ValidateAsync(string yaml, IReadOnlyDictionary<string, Binding> bindings, CancellationToken ct)
+    {
+        seen(bindings);
+        return Task.FromResult(check(yaml));
+    }
 }
