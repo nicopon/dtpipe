@@ -30,6 +30,10 @@ async function load() {
 }
 
 const setOf = (list) => new Set(list || []);
+const KIND_CHIPS = {
+  monitor: `<span class="chip" title="A supervisor: it reads /health and nothing else">monitor</span>`,
+  launcher: `<span class="chip" title="A scheduler: it starts the runs of the pipelines listed and reads them, nothing else">launcher</span>`,
+};
 const groupsOf = (text) => text.split(",").map((g) => g.trim()).filter(Boolean);
 
 function matrixCell(from, to) {
@@ -43,9 +47,11 @@ function render() {
 
   const identities = rights.identities.map((i) => `
     <tr data-identity="${esc(i.clientId)}">
-      <td><code>${esc(i.clientId)}</code>${i.kind === "monitor" ? ` <span class="chip" title="A supervisor: it reads /health and nothing else">monitor</span>` : ""}</td>
-      <td><input class="mono narrow" data-field="name" value="${esc(i.name)}" aria-label="${i.kind === "monitor" ? "Name" : "Node name"} of ${esc(i.clientId)}"></td>
-      <td><input class="mono" data-field="groups" value="${esc(i.groups.join(", "))}" list="groups-list" aria-label="Groups of ${esc(i.clientId)}, separated by commas" ${i.kind === "monitor" ? `disabled placeholder="none"` : ""}></td>
+      <td><code>${esc(i.clientId)}</code>${KIND_CHIPS[i.kind] ?? ""}</td>
+      <td><input class="mono narrow" data-field="name" value="${esc(i.name)}" aria-label="${i.kind === "node" ? "Node name" : "Name"} of ${esc(i.clientId)}"></td>
+      <td>${i.kind === "launcher"
+        ? `<input class="mono" data-field="pipelines" value="${esc((i.pipelines ?? []).join(", "))}" placeholder="none: it launches nothing" aria-label="Pipelines ${esc(i.clientId)} may launch, separated by commas">`
+        : `<input class="mono" data-field="groups" value="${esc(i.groups.join(", "))}" list="groups-list" aria-label="Groups of ${esc(i.clientId)}, separated by commas" ${i.kind === "monitor" ? `disabled placeholder="none"` : ""}>`}</td>
       <td><input data-field="description" value="${esc(i.description)}" aria-label="Description of ${esc(i.clientId)}"></td>
       <td><label class="check"><input type="checkbox" data-field="enabled" ${i.enabled ? "checked" : ""}> enabled</label></td>
       <td>${i.connected ? `<span class="chip ok">connected</span>` : `<span class="chip">offline</span>`}</td>
@@ -95,12 +101,13 @@ function render() {
       <div class="card-head"><h2>Identities <span class="hint">who</span></h2><button data-add>${adding ? "Cancel" : "Add an identity"}</button></div>
       ${adding ? `<div class="row add-identity">
         <input id="a-id" class="mono" placeholder="client id"><input id="a-name" class="mono" placeholder="node name (the client id by default)">
-        <select id="a-kind" aria-label="Kind"><option value="node">node</option><option value="monitor">monitor (reads /health)</option></select>
-        <input id="a-groups" class="mono" placeholder="groups, separated by commas (a node's)" list="groups-list"><input id="a-description" placeholder="description">
+        <select id="a-kind" aria-label="Kind"><option value="node">node</option><option value="monitor">monitor (reads /health)</option><option value="launcher">launcher (starts runs)</option></select>
+        <input id="a-groups" class="mono" placeholder="groups, separated by commas (a node's)" list="groups-list">
+        <input id="a-pipelines" class="mono" placeholder="pipelines, separated by commas (a launcher's)"><input id="a-description" placeholder="description">
         <button class="primary" data-create>Create</button></div>` : ""}
       <datalist id="groups-list">${groups.map((g) => `<option>${esc(g)}</option>`).join("")}</datalist>
-      <table><tr><th>client</th><th>node name</th><th>groups</th><th>description</th><th></th><th>state</th><th></th></tr>${identities}</table>
-      <p class="hint">An identity is a client the IdP already knows, by its client id: its secret lives in the IdP. A monitor is the identity of a supervisor: it reads <code>/health</code> and nothing else, belongs to no group and hosts nothing. A node sends to another only if every one of its groups may send to every group of the receiver, in the matrix below. A change of name or groups, or disabling an identity, drops the control connections of its node's hosts, which connect again under the new rights. A disabled identity is refused when its hosts announce again and holds no group: the runs placed on them end. Reconnect drops the connections without changing anything.</p>
+      <table><tr><th>client</th><th>node name</th><th>groups / pipelines</th><th>description</th><th></th><th>state</th><th></th></tr>${identities}</table>
+      <p class="hint">An identity is a client the IdP already knows, by its client id: its secret lives in the IdP. A monitor is the identity of a supervisor: it reads <code>/health</code> and nothing else, belongs to no group and hosts nothing. A launcher is the identity of a scheduler: it starts the runs of the pipelines listed on its row, reads them, and nothing else; with no pipeline listed it launches none. A node sends to another only if every one of its groups may send to every group of the receiver, in the matrix below. A change of name or groups, or disabling an identity, drops the control connections of its node's hosts, which connect again under the new rights. A disabled identity is refused when its hosts announce again and holds no group: the runs placed on them end. Reconnect drops the connections without changing anything.</p>
     </section>
 
     <section class="card">
@@ -145,7 +152,7 @@ async function onClick(e) {
     } else if (b.dataset.add !== undefined) { adding = !adding; render(); }
     else if (b.dataset.create !== undefined) {
       const v = (id) => document.getElementById(id).value.trim();
-      await api("/api/rights/identities", { clientId: v("a-id"), name: v("a-name") || null, description: v("a-description"), groups: groupsOf(v("a-groups")), kind: v("a-kind") });
+      await api("/api/rights/identities", { clientId: v("a-id"), name: v("a-name") || null, description: v("a-description"), groups: groupsOf(v("a-groups")), pipelines: groupsOf(v("a-pipelines")), kind: v("a-kind") });
       adding = false;
       toast(`${v("a-id")} created: it can obtain tokens now.`, "info");
     } else if (b.dataset.saveIdentity !== undefined) {
@@ -154,7 +161,8 @@ async function onClick(e) {
         clientId: id,
         name: row.querySelector('[data-field="name"]').value.trim(),
         description: row.querySelector('[data-field="description"]').value,
-        groups: groupsOf(row.querySelector('[data-field="groups"]').value),
+        groups: groupsOf(row.querySelector('[data-field="groups"]')?.value ?? ""),
+        pipelines: groupsOf(row.querySelector('[data-field="pipelines"]')?.value ?? ""),
         enabled: row.querySelector('[data-field="enabled"]').checked,
       }, "PUT");
       toast(`${id} saved.`, "info");

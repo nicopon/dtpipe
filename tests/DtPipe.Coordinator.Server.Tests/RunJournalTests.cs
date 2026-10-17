@@ -54,6 +54,55 @@ public sealed class RunJournalTests : IDisposable
     }
 
     [Fact]
+    public void Who_Launched_A_Run_And_The_Key_It_Came_With_Are_Kept_With_The_Run()
+    {
+        var options = new CoordinatorServerOptions { StateDir = _dir, Authority = "http://idp", Audience = "test", UiClientId = "ui", UiClientSecret = "secret" };
+        var journal = new RunJournal(options, NullLogger<RunJournal>.Instance);
+        journal.Record(new RunView("run-1", "plan-1", RunState.Succeeded, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, null, "ok", null, "p",
+            DateTimeOffset.UtcNow, LaunchedBy: "cron", IdempotencyKey: "night-1"));
+
+        var again = new RunJournal(options, NullLogger<RunJournal>.Instance);
+
+        Assert.Equal("run-1", again.Find(r => r.LaunchedBy == "cron" && r.IdempotencyKey == "night-1")?.RunId);
+        Assert.Null(again.Find(r => r.LaunchedBy == "other" && r.IdempotencyKey == "night-1"));
+    }
+
+    [Fact]
+    public void The_Journal_Keeps_The_Same_Window_At_Start_As_When_It_Records()
+    {
+        var options = new CoordinatorServerOptions { StateDir = _dir, Authority = "http://idp", Audience = "test", UiClientId = "ui", UiClientSecret = "secret" };
+        var journal = new RunJournal(options, NullLogger<RunJournal>.Instance);
+        var start = DateTimeOffset.UtcNow;
+        for (var i = 1; i <= 205; i++)
+            journal.Record(new RunView($"run-{i}", "plan", RunState.Succeeded, start.AddSeconds(i), start.AddSeconds(i), null, null, null, "p", start));
+
+        var again = new RunJournal(options, NullLogger<RunJournal>.Instance);
+
+        Assert.Equal(200, again.List(limit: 1000).Count);
+        Assert.Equal(200, journal.List(limit: 1000).Count);
+        Assert.Null(again.Find(r => r.RunId == "run-5"));
+        Assert.Equal("run-205", again.List(limit: 1).Single().RunId);
+        Assert.Equal(206, int.Parse(again.NextRunId().Split('-').Last()));
+    }
+
+    [Fact]
+    public void The_Next_Id_Is_Past_Every_Run_Loaded_Even_One_That_Fell_Out_Of_The_Window()
+    {
+        var options = new CoordinatorServerOptions { StateDir = _dir, Authority = "http://idp", Audience = "test", UiClientId = "ui", UiClientSecret = "secret" };
+        var journal = new RunJournal(options, NullLogger<RunJournal>.Instance);
+        var start = DateTimeOffset.UtcNow;
+        // The highest id started first: it is the oldest by start time, and the one the window drops.
+        journal.Record(new RunView("run-999", "plan", RunState.Succeeded, start, start, null, null, null, "p", start));
+        for (var i = 1; i <= 200; i++)
+            journal.Record(new RunView($"run-{i}", "plan", RunState.Succeeded, start.AddSeconds(i), start.AddSeconds(i), null, null, null, "p", start));
+
+        var again = new RunJournal(options, NullLogger<RunJournal>.Instance);
+
+        Assert.Null(again.Find(r => r.RunId == "run-999"));
+        Assert.Equal("run-1000", again.NextRunId());
+    }
+
+    [Fact]
     public void The_Plan_A_Run_Ran_Is_Kept_With_The_Run()
     {
         var options = new CoordinatorServerOptions { StateDir = _dir, Authority = "http://idp", Audience = "test", UiClientId = "ui", UiClientSecret = "secret" };

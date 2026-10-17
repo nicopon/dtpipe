@@ -160,6 +160,7 @@ api.MapLibrary(designer);
 api.MapRights(admin);
 api.MapRuns(designer);
 app.MapHealth(api);
+app.MapService();
 
 if (server.LabMode) admin.MapLabMode();
 

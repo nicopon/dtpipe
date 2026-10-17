@@ -2,6 +2,9 @@ using DtPipe.Coordinator.Contracts;
 
 namespace DtPipe.Coordinator.Server;
 
+/// <summary>A run <see cref="RunQueue.Launch"/> answered, and whether an earlier request had already made it.</summary>
+public sealed record LaunchedRun(RunView Run, bool Replayed);
+
 /// <summary>
 /// The runs: queued, sent to the coordinator's own <see cref="IRunOrchestrator"/>, which places, launches, wires and
 /// judges, and journaled when they finish; this class only asks. A run is sent once no run already sent, and no older run
@@ -41,24 +44,52 @@ internal sealed class RunQueue
         get { lock (_ledger.Lock) return _ledger.Active().Select(t => t.View).ToList(); }
     }
 
-    /// <summary>Queues a run of <paramref name="pipelineId"/>, or of the plan deployed last when it is null.</summary>
-    public RunView Enqueue(string? pipelineId)
+    /// <summary>The run <paramref name="runId"/>: in flight or waiting, else journaled.</summary>
+    public RunView? Find(string runId)
+    {
+        lock (_ledger.Lock)
+            return _ledger.Active().FirstOrDefault(t => t.View.RunId == runId)?.View ?? _journal.Find(r => r.RunId == runId);
+    }
+
+    /// <summary>Queues a run of <paramref name="pipelineId"/>, or of the plan deployed last when it is null, launched by <paramref name="by"/>.</summary>
+    public RunView Enqueue(string? pipelineId, string? by = null) => Launch(pipelineId, by, null).Run;
+
+    /// <summary>
+    /// <see cref="Enqueue"/> for a caller that may ask twice: a second request from <paramref name="by"/> with the same
+    /// <paramref name="idempotencyKey"/> answers the run the first one made, whatever became of it, and queues none. The same
+    /// key for another pipeline is refused. The key is looked up where the run is queued, under the ledger's lock, among the runs
+    /// in flight and the journaled ones: a run is journaled before it leaves the ledger, so none is missed between the two.
+    /// </summary>
+    public LaunchedRun Launch(string? pipelineId, string? by, string? idempotencyKey)
     {
         Ticket ticket;
         lock (_ledger.Lock)
         {
             pipelineId ??= _ledger.LastDeployed ?? throw new ConflictException("Deploy a plan first.");
+            if (idempotencyKey is not null && EarlierRun(by, idempotencyKey) is { } earlier)
+            {
+                if (earlier.PipelineId != pipelineId)
+                    throw new ConflictException($"The key '{idempotencyKey}' started a run of '{earlier.PipelineId}', not of '{pipelineId}'.");
+                return new LaunchedRun(earlier, true);
+            }
             var deployment = _ledger.Deployments.GetValueOrDefault(pipelineId) ?? throw new ConflictException($"'{pipelineId}' is not deployed.");
             if (deployment.State == DeploymentState.Failed) throw new ConflictException($"The deployment of '{pipelineId}' failed: {deployment.Message}");
             var now = DateTimeOffset.UtcNow;
-            ticket = new Ticket(new RunView(_journal.NextRunId(), deployment.PlanId, RunState.Queued, now, null, null, null, null, pipelineId, now));
+            ticket = new Ticket(new RunView(
+                _journal.NextRunId(), deployment.PlanId, RunState.Queued, now, null, null, null, null, pipelineId, now, LaunchedBy: by, IdempotencyKey: idempotencyKey));
             _ledger.Queued.Add(ticket);
         }
         var view = ticket.View;
         _bus.Publish("run", view);
         _deployments.PublishDeployments();
         Dispatch();
-        return view;
+        return new LaunchedRun(view, false);
+    }
+
+    private RunView? EarlierRun(string? by, string key)
+    {
+        bool Matches(RunView r) => r.IdempotencyKey == key && r.LaunchedBy == by;
+        return _ledger.Active().Select(t => t.View).FirstOrDefault(Matches) ?? _journal.Find(Matches);
     }
 
     /// <summary>
@@ -68,6 +99,7 @@ internal sealed class RunQueue
     public void Cancel(string? runId = null)
     {
         Ticket? waiting;
+        RunView? cancelled = null;
         lock (_ledger.Lock)
         {
             if (runId is null)
@@ -87,10 +119,15 @@ internal sealed class RunQueue
             }
             // Out of the queue under the lock, so the dispatcher can no longer send it.
             waiting = _ledger.Queued.FirstOrDefault(t => t.View.RunId == runId);
-            if (waiting is not null) _ledger.Queued.Remove(waiting);
+            if (waiting is not null)
+            {
+                // Journaled before it leaves the ledger, as Finish does, so a retry of its key finds it in one or the other.
+                cancelled = waiting.View with { State = RunState.Cancelled, StartedAt = DateTimeOffset.UtcNow, FinishedAt = DateTimeOffset.UtcNow, Refusal = "Cancelled while queued." };
+                _journal.Record(cancelled);
+                _ledger.Queued.Remove(waiting);
+            }
         }
-        if (waiting is not null)
-            Finish(waiting, waiting.View with { State = RunState.Cancelled, StartedAt = DateTimeOffset.UtcNow, Refusal = "Cancelled while queued." });
+        if (waiting is not null && cancelled is not null) Finish(waiting, cancelled);
     }
 
     /// <summary>

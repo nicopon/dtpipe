@@ -5,7 +5,8 @@
     { "clientId": "node-3", "name": "node-3", "description": "Catalog node", "groups": ["catalog"] },
     { "clientId": "node-4", "name": "node-4", "description": "Warehouse node", "groups": ["warehouse"] },
     { "clientId": "runner-1", "name": "runner-1", "description": "Runner", "groups": ["runner"] },
-    { "clientId": "monitor-1", "name": "monitor-1", "description": "Supervisor", "kind": "monitor" }
+    { "clientId": "monitor-1", "name": "monitor-1", "description": "Supervisor", "kind": "monitor" },
+    { "clientId": "launcher-1", "name": "launcher-1", "description": "Scheduler", "kind": "launcher", "pipelines": ["customers-mirror"] }
   ],
   "matrix": {
     "crm": ["catalog", "warehouse", "runner"],

@@ -83,8 +83,12 @@ public sealed class DeploymentManager
 
     public Task UndeployAsync(string pipelineId, CancellationToken ct) => _deployments.UndeployAsync(pipelineId, ct);
 
-    /// <summary>Queues a run of <paramref name="pipelineId"/>, or of the plan deployed last when it is null.</summary>
-    public RunView Enqueue(string? pipelineId) => _runs.Enqueue(pipelineId);
+    /// <summary>Queues a run of <paramref name="pipelineId"/>, or of the plan deployed last when it is null, launched by <paramref name="by"/>.</summary>
+    public RunView Enqueue(string? pipelineId, string? by = null) => _runs.Enqueue(pipelineId, by);
+    /// <summary>Queues a run for a caller that may ask twice (see <see cref="RunQueue.Launch"/>).</summary>
+    public LaunchedRun Launch(string pipelineId, string by, string? idempotencyKey) => _runs.Launch(pipelineId, by, idempotencyKey);
+    /// <summary>The run <paramref name="runId"/>, in flight, waiting or journaled, or null.</summary>
+    public RunView? FindRun(string runId) => _runs.Find(runId);
 
     /// <summary>
     /// Cancels a run in flight or still waiting. With no id, the one in flight: several in flight must

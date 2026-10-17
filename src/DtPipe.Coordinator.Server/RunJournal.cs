@@ -49,19 +49,24 @@ public static class BindingVerdicts
 public sealed record RunPlan(
     string PlanId, string? Runner, IReadOnlyList<RunPlanFragment> Fragments, IReadOnlyList<RunPlanBinding> Bindings);
 
-/// <summary><see cref="Plan"/> is the plan the run ran, journaled with it.</summary>
+/// <summary>
+/// <see cref="Plan"/> is the plan the run ran, journaled with it. <see cref="LaunchedBy"/> names who started it: a person's email,
+/// or a service's client id (an id never holds an <c>@</c>). <see cref="IdempotencyKey"/> is the key a service sent with the
+/// request, when it sent one; it means something only together with <see cref="LaunchedBy"/>.
+/// </summary>
 public sealed record RunView(
     string RunId, string PlanId, [property: JsonConverter(typeof(WireEnumConverter<RunState>))] RunState State, DateTimeOffset StartedAt,
     DateTimeOffset? FinishedAt,
     RunResult? Result, string? Description, string? Refusal,
-    string? PipelineId = null, DateTimeOffset? QueuedAt = null, RunPlan? Plan = null)
+    string? PipelineId = null, DateTimeOffset? QueuedAt = null, RunPlan? Plan = null, string? LaunchedBy = null, string? IdempotencyKey = null)
 {
     [JsonIgnore] public bool IsOver => State is not (RunState.Queued or RunState.Running);
 }
 
 /// <summary>
 /// Every finished run, one JSON file each under <c>runs/&lt;pipeline&gt;/</c> in the state directory, read back at
-/// start. Runs are what happened, not what was designed: the library's git history never holds them.
+/// start. Runs are what happened, not what was designed: the library's git history never holds them. A run is journaled when it
+/// finishes, so the journal holds none in flight, and keeps the latest <see cref="Kept"/>, at start as when it records.
 /// </summary>
 public sealed class RunJournal
 {
@@ -92,8 +97,10 @@ public sealed class RunJournal
                 logger.LogWarning("Run journal entry {File} skipped: {Error}", file, ex.Message);
             }
         }
-        _runs.Sort((a, b) => b.StartedAt.CompareTo(a.StartedAt));
+        // The next id is read from every run loaded, before the window: a run's id and its start time do not follow one order.
         _seq = _runs.Select(r => int.TryParse(r.RunId.Split('-').Last(), out var n) ? n : 0).DefaultIfEmpty(0).Max();
+        _runs.Sort((a, b) => b.StartedAt.CompareTo(a.StartedAt));
+        if (_runs.Count > Kept) _runs.RemoveRange(Kept, _runs.Count - Kept);
     }
 
     public string NextRunId() => $"run-{Interlocked.Increment(ref _seq)}";
@@ -114,6 +121,12 @@ public sealed class RunJournal
     public IReadOnlyList<RunView> List(string? pipelineId = null, int limit = 50)
     {
         lock (_lock) return _runs.Where(r => pipelineId is null || r.PipelineId == pipelineId).Take(limit).ToList();
+    }
+
+    /// <summary>The latest run kept that <paramref name="match"/> accepts, however far back it is.</summary>
+    public RunView? Find(Func<RunView, bool> match)
+    {
+        lock (_lock) return _runs.FirstOrDefault(match);
     }
 
     private static string DirectoryName(string name) =>

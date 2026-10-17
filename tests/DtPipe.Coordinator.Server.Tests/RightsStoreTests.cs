@@ -198,12 +198,79 @@ public sealed class RightsStoreTests : IDisposable
     }
 
     [Fact]
-    public void A_Name_Belongs_To_One_Identity_Whatever_Its_Kind_And_A_Kind_Is_One_Of_The_Two()
+    public void A_Name_Belongs_To_One_Identity_Whatever_Its_Kind_And_A_Kind_Is_One_Of_The_Known()
     {
         var store = StoreOf(WithMonitor);
 
         Assert.Throws<ConflictException>(() => store.AddIdentity(new Identity("c", "supervisor", "", ["crm"])));
-        Assert.Throws<ConflictException>(() => store.AddIdentity(new Identity("d", "node-d", "", ["crm"], Kind: "launcher")));
+        Assert.Throws<ConflictException>(() => store.AddIdentity(new Identity("d", "node-d", "", ["crm"], Kind: "scheduler")));
+    }
+
+    private const string WithLauncher = """
+        {
+          "identities": [
+            { "clientId": "a", "name": "node-a", "description": "A", "groups": ["crm"] },
+            { "clientId": "cron", "name": "scheduler", "description": "Nightly", "kind": "launcher", "pipelines": ["sales", "crm-copy", "sales"] },
+            { "clientId": "idle", "name": "idle", "description": "Lists none", "kind": "launcher" }
+          ],
+          "matrix": {}
+        }
+        """;
+
+    [Fact]
+    public void A_Launcher_Belongs_To_No_Group_Lists_Its_Pipelines_Sorted_And_Is_No_Node()
+    {
+        var store = StoreOf(WithLauncher);
+
+        var cron = store.Find("cron")!;
+        Assert.Equal((IdentityKinds.Launcher, false), (cron.Kind, cron.IsNode));
+        Assert.Empty(cron.Groups);
+        Assert.Equal(["crm-copy", "sales"], cron.Pipelines);
+        Assert.Null(store.NodeIdentity("scheduler"));
+        Assert.Throws<ConflictException>(() => store.GroupsOf("scheduler"));
+    }
+
+    [Fact]
+    public void A_Launcher_Launches_Only_The_Pipelines_It_Lists_And_One_That_Lists_None_Launches_None()
+    {
+        var store = StoreOf(WithLauncher);
+
+        Assert.True(store.Find("cron")!.Launches("sales"));
+        Assert.False(store.Find("cron")!.Launches("other"));
+        Assert.Empty(store.Find("idle")!.Pipelines!);
+        Assert.False(store.Find("idle")!.Launches("sales"));
+        Assert.False(store.Find("a")!.Launches("sales"));
+        store.UpdateIdentity("cron", null, null, null, enabled: false);
+        Assert.False(store.Find("cron")!.Launches("sales"));
+    }
+
+    [Fact]
+    public void Only_A_Launcher_Keeps_A_List_Of_Pipelines_And_An_Edit_That_Omits_It_Leaves_It()
+    {
+        var store = StoreOf(WithLauncher);
+
+        store.AddIdentity(new Identity("watch", "supervisor", "", [], Kind: IdentityKinds.Monitor, Pipelines: ["sales"]));
+        Assert.Empty(store.Find("watch")!.Pipelines!);
+        store.UpdateIdentity("cron", null, "Weekly", null, null);
+        Assert.Equal(["crm-copy", "sales"], store.Find("cron")!.Pipelines);
+        store.UpdateIdentity("cron", null, null, null, null, "root@x.test", ["zeta", "alpha"]);
+        Assert.Equal(["alpha", "zeta"], store.Find("cron")!.Pipelines);
+        Assert.Contains("pipelines crm-copy+sales → alpha+zeta", store.Snapshot().Audit![0].Change);
+        Assert.Throws<ConflictException>(() => store.UpdateIdentity("cron", null, null, null, null, null, ["Not A Pipeline"]));
+        Assert.Throws<ConflictException>(() => store.AddIdentity(new Identity("bad", "bad", "", [], Kind: IdentityKinds.Launcher, Pipelines: ["x y"])));
+    }
+
+    [Fact]
+    public void A_Launcher_Is_Granted_No_Group_To_The_Data_Plane()
+    {
+        var store = StoreOf(WithLauncher);
+        var provider = new RightsIdentityProvider(store);
+        var now = DateTimeOffset.UtcNow.AddMinutes(5).ToUnixTimeSeconds().ToString();
+
+        var token = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim("sub", "cron"), new Claim("client_id", "cron"), new Claim("exp", now), new Claim("scope", "crm")], "test"));
+
+        Assert.Empty(provider.ResolveIdentity(token, null, null)!.Groups);
     }
 
     [Fact]

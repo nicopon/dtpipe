@@ -13,7 +13,8 @@ internal static class RunEndpoints
             var plan = deployments.ActivePlan;
             return new { plan, run = deployments.CurrentRun(plan?.PipelineId), history = journal.List(limit: 20) };
         });
-        designer.MapPost("/runs", (RunRequest? request, DeploymentManager deployments) => deployments.Enqueue(request?.PipelineId));
+        designer.MapPost("/runs", (RunRequest? request, DeploymentManager deployments, HttpContext http) =>
+            deployments.Enqueue(request?.PipelineId, TrustedIdp.CallerOf(http)));
         api.MapGet("/runs", (string? pipeline, RunJournal journal) => journal.List(pipeline));
         api.MapGet("/runs/queue", (DeploymentManager deployments) => deployments.Queue);
         designer.MapPost("/runs/cancel", (CancelRequest? request, DeploymentManager deployments) =>

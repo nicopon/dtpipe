@@ -95,7 +95,7 @@ internal static class LibraryEndpoints
                 return Results.Conflict(new { error = $"The bindings of '{id}' do not hold: " + string.Join(" ", refused) });
             var armed = new ArmedDeployment(
                 id, doc.Commit, PipelineLibrary.Sha(doc.Yaml), Bindings.Sha(doc.Bindings), doc.Bindings, DateTimeOffset.UtcNow,
-                TrustedIdp.EmailOf(http) ?? http.User.Identity?.Name ?? "unknown");
+                TrustedIdp.CallerOf(http));
             await deployments.ArmAsync(armed, doc.Yaml, ct);
             return Results.Ok(armed);
         });

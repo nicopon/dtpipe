@@ -9,12 +9,17 @@ namespace DtPipe.Coordinator.Server;
 /// <see cref="Name"/> is the one node name it may announce itself as, and belongs to the rights: a host
 /// only proposes one. <see cref="Groups"/> are the TransportR groups it belongs to. Its secret is the
 /// IdP's business, never stored here. <see cref="Kind"/> says what the coordinator grants it: a node (the default) hosts fragments
-/// and belongs to groups; a monitor only reads <c>/health</c>, belongs to none, and its name is a label that no node may carry.
+/// and belongs to groups; a monitor only reads <c>/health</c>, belongs to none, and its name is a label that no node may carry; a
+/// launcher starts the runs of <see cref="Pipelines"/> and reads them, belongs to no group, and its name is a label too.
 /// </summary>
 public sealed record Identity(
-    string ClientId, string Name, string Description, IReadOnlyList<string> Groups, bool Enabled = true, string Kind = IdentityKinds.Node)
+    string ClientId, string Name, string Description, IReadOnlyList<string> Groups, bool Enabled = true, string Kind = IdentityKinds.Node,
+    IReadOnlyList<string>? Pipelines = null)
 {
     public bool IsNode => Kind == IdentityKinds.Node;
+
+    /// <summary>The identity is an enabled launcher of <paramref name="pipelineId"/>; a list that names none lets it launch none.</summary>
+    public bool Launches(string pipelineId) => Enabled && Kind == IdentityKinds.Launcher && Pipelines is { } list && list.Contains(pipelineId);
 }
 
 /// <summary>What an identity of the trusted IdP is granted: the sort of service it is. A node is the only sort the node channel and the data plane know.</summary>
@@ -26,7 +31,10 @@ public static class IdentityKinds
     /// <summary>A supervisor: it reads <c>/health</c> and nothing else, with no group and no node.</summary>
     public const string Monitor = "monitor";
 
-    public static readonly IReadOnlyList<string> All = [Node, Monitor];
+    /// <summary>A scheduler or a CI: it starts the runs of the pipelines its identity lists and reads them, with no group and no node.</summary>
+    public const string Launcher = "launcher";
+
+    public static readonly IReadOnlyList<string> All = [Node, Monitor, Launcher];
 }
 
 /// <summary>One change to the rights, and who made it (the email of the person signed in), when known.</summary>
@@ -167,7 +175,9 @@ public sealed class RightsStore
             _doc.Identities.Add(added);
             Save(added.IsNode
                 ? $"Identity {added.ClientId} added (node {added.Name}, groups {string.Join(", ", added.Groups)})"
-                : $"Identity {added.ClientId} added ({added.Kind} {added.Name})", by);
+                : added.Kind == IdentityKinds.Launcher
+                    ? $"Identity {added.ClientId} added ({added.Kind} {added.Name}, pipelines {string.Join(", ", added.Pipelines!)})"
+                    : $"Identity {added.ClientId} added ({added.Kind} {added.Name})", by);
         }
     }
 
@@ -175,7 +185,7 @@ public sealed class RightsStore
     /// Edits an identity. An argument that is null is left as the identity has it: an edit says what it changes, and a field it
     /// leaves out is neither emptied, renamed nor enabled by the omission. The identity is read and written under one lock.
     /// </summary>
-    public void UpdateIdentity(string clientId, string? name, string? description, IReadOnlyList<string>? groups, bool? enabled, string? by = null)
+    public void UpdateIdentity(string clientId, string? name, string? description, IReadOnlyList<string>? groups, bool? enabled, string? by = null, IReadOnlyList<string>? pipelines = null)
     {
         lock (_lock)
         {
@@ -185,12 +195,13 @@ public sealed class RightsStore
             var after = Normalized(before with
             {
                 Name = name ?? before.Name, Description = description ?? before.Description,
-                Groups = groups ?? before.Groups, Enabled = enabled ?? before.Enabled,
+                Groups = groups ?? before.Groups, Enabled = enabled ?? before.Enabled, Pipelines = pipelines ?? before.Pipelines,
             });
             CheckUnique(_doc.Identities.Select((i, at) => at == index ? after : i).ToList());
             _doc.Identities[index] = after;
             var changes = new List<string>();
             if (!before.Groups.SequenceEqual(after.Groups)) changes.Add($"groups {string.Join("+", before.Groups)} → {string.Join("+", after.Groups)}");
+            if (!(before.Pipelines ?? []).SequenceEqual(after.Pipelines!)) changes.Add($"pipelines {string.Join("+", before.Pipelines ?? [])} → {string.Join("+", after.Pipelines!)}");
             if (before.Name != after.Name) changes.Add($"node {before.Name} → {after.Name}");
             if (before.Enabled != after.Enabled) changes.Add(after.Enabled ? "enabled" : "disabled");
             if (before.Description != after.Description) changes.Add("described again");
@@ -207,7 +218,7 @@ public sealed class RightsStore
         }
     }
 
-    /// <summary>The identity with its name and groups trimmed, its groups sorted and distinct; refused when its name or groups are unusable.</summary>
+    /// <summary>The identity with its name, groups and pipelines trimmed, sorted and distinct; refused when its name, groups or pipelines are unusable.</summary>
     private static Identity Normalized(Identity identity)
     {
         var kind = string.IsNullOrWhiteSpace(identity.Kind) ? IdentityKinds.Node : identity.Kind.Trim();
@@ -216,10 +227,15 @@ public sealed class RightsStore
         var name = identity.Name?.Trim() ?? "";
         if (!PipelineLibrary.IsValidId(name)) throw new ConflictException($"'{name}' is not a {(kind == IdentityKinds.Node ? "node name" : "name")}: lowercase letters, digits and '-'.");
         var groups = (identity.Groups ?? []).Select(g => g.Trim()).Where(g => g.Length > 0).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
-        // Only a node belongs to groups: they are what the data plane admits it with, and a monitor is never admitted there.
+        // Only a node belongs to groups: they are what the data plane admits it with, and a service of another kind is never admitted there.
         if (kind != IdentityKinds.Node) groups = [];
         else if (groups.Count == 0) throw new ConflictException($"'{identity.ClientId}' belongs to no group: an identity belongs to at least one.");
-        return identity with { Name = name, Description = identity.Description ?? "", Groups = groups, Kind = kind };
+        // Only a launcher lists pipelines: a monitor reads them all, and a list on any other kind would grant nothing.
+        var pipelines = (identity.Pipelines ?? []).Select(p => p.Trim()).Where(p => p.Length > 0).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
+        if (kind != IdentityKinds.Launcher) pipelines = [];
+        else if (pipelines.FirstOrDefault(p => !PipelineLibrary.IsValidId(p)) is { } bad)
+            throw new ConflictException($"'{bad}' is not a pipeline id: lowercase letters, digits and '-'.");
+        return identity with { Name = name, Description = identity.Description ?? "", Groups = groups, Kind = kind, Pipelines = pipelines };
     }
 
     private static void CheckUnique(IReadOnlyList<Identity> identities)

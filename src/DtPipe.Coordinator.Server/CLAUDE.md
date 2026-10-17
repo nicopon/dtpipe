@@ -22,10 +22,11 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   on its node. A node whose identity is gone leaves the inventory with its last replica; one that is
   renamed is the same node under its new name, once its host announces again. An identity has a **kind**,
   which the rights give and the token never does: a `node` (the default) hosts fragments and belongs to
-  groups; a `monitor` belongs to none and its name is a label, not a node's (`RightsStore.NodeIdentity`,
-  `SubjectOf` and `GroupsOf` ignore it). A monitor's host is refused when it announces, as a known identity
-  that is no node, never queued, and `RightsIdentityProvider` gives it no group, so the data plane never
-  admits it. Every sort of service reads its permission from here: add a sort as a kind, never as a claim.
+  groups; a `monitor` and a `launcher` belong to none and their names are labels, not a node's
+  (`RightsStore.NodeIdentity`, `SubjectOf` and `GroupsOf` ignore them). A launcher lists the **pipelines** it may launch
+  (`Identity.Pipelines`, `Launches`): empty means none, and no other kind keeps a list (a monitor reads every pipeline). The
+  host of such a service is refused when it announces, as a known identity that is no node, never queued, and
+  `RightsIdentityProvider` gives it no group, so the data plane never admits it. Every sort of service reads its permission from here: add a sort as a kind, never as a claim.
   `[local: DtPipe.Coordinator.Server.Tests, the lab's smoke.py rights]`
 - **A person's rights are the server's configuration, never the token's.** People sign in through
   the provider (`Coordinator:Ui:ClientId`, a confidential authorization-code client, PKCE, the code
@@ -49,7 +50,12 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   `monitor`, so a node, a stranger and a disabled monitor are refused 403 with a valid token, and a
   person's or an anonymous request 401. A monitor reaches `/api` never (the person scheme fails its token)
   and the node channel only to be refused at the announcement.
-  `[local: DtPipe.Coordinator.Server.Tests TrustedIdpTests, NodeChannelHubTests, the lab's smoke.py rights, bricks - health]`
+  A scheduler is the fourth: the `launcher` policy (`/service` only) is the same check under the same scheme (`ServiceKindHandler`
+  reads the kind the policy asks), so a node, a monitor, a stranger and a disabled launcher are refused 403 with a valid token,
+  and a person's, a session cookie's or an anonymous request 401. Which pipelines it may launch is not the policy's, which
+  cannot see the body: `ServiceEndpoints` checks the identity's list once the request is well-formed and before it says whether
+  the pipeline exists or is armed, so a launcher learns nothing of a pipeline off its list; a run off the list is read as no run (404).
+  `[local: DtPipe.Coordinator.Server.Tests TrustedIdpTests, ServiceRoutesTests, NodeChannelHubTests, the lab's smoke.py rights, bricks - health, a service launches a run]`
 - **A refused page gives a way out.** A person with no role who opens a page is signed out here
   and at the provider and lands on `/account/denied`: keeping the provider's session would sign
   the same person in again on the next try. A person who lacks only the admin role gets a 403 page
@@ -64,7 +70,8 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   admin groups of `/api` (their roles, and the CSRF filter they inherit) are built once there. `NodeEndpoints`,
   `LibraryEndpoints`, `RightsEndpoints` and `RunEndpoints` each map their domain on the reader group they extend and on
   the designer or admin group they receive, as `LabModeEndpoints` maps the bench on the admin group; `HealthEndpoints`
-  maps `/health` on its own group, outside `/api`, for a monitor, and `/api/health` on the reader group; `Program.cs` keeps
+  maps `/health` on its own group, outside `/api`, for a monitor, and `/api/health` on the reader group; `ServiceEndpoints` maps `/service`
+  on its own group, outside `/api`, for a launcher, with no CSRF filter since a service's token is bearer only; `Program.cs` keeps
   the `account` group, `/healthz`, the metadata document, `/account/*` and the hubs. `[local: RouteTableTests]`
 - **Every rights change names its author** (`AuditEntry.By`, the signed-in email). The session
   cookie's keys live in `keys/` in the state directory, so a restart signs nobody out.
@@ -87,8 +94,8 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   and with none online it refuses. A node announces a
   variable's name, never its value. `[local: the lab's smoke.py bricks — a library save's check, a sink that refuses;
   sandbox — a cut on its node]`
-- **The coordinator manages flows and nothing around them.** It never does a schedule or a trigger (only a
-  person starts a run: a service never reaches `/api`), a dependency between pipelines, an automatic retry or
+- **The coordinator manages flows and nothing around them.** It never does a schedule or a trigger (a run is started by a person, or by a service the rights
+  grant `launcher`, which asks and is answered with the run's id: nothing is called back), a dependency between pipelines, an automatic retry or
   a backfill, a priority in the queue (`RunDispatch` stays a first-come admission check), or a transformation
   (it runs no dtpipe: see "The server never opens a node's data"). A supervisor asks it whether a pipeline can be
   launched and it answers (`PipelineHealth`); it checks nothing on its own account. A distribution plan is a placement, not a
@@ -275,6 +282,15 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   nor empties. `Origin`, where a replica says it runs, is untrusted
   text: cut at `Announce`, the ground of no decision.
   `[local: NodeChannelHubTests, RightsRoutesTests; the lab's smoke.py rights - identity, disabled; tools/campaign.py F3, S7]`
+- **A run names who launched it, and a service may launch it only once.** `RunView.LaunchedBy` is a person's email or a service's
+  client id (an id holds no `@`); `RunQueue.Launch` takes the author and an optional `Idempotency-Key`, which means something only
+  with its author: the lookup is `(LaunchedBy, key)` among the runs queued or in flight and the journaled ones, taken under the
+  ledger's lock where the run is queued, and a run is journaled before it leaves the ledger, so a retry that races the end of the
+  first finds it in one or the other. A repeat answers the first run whatever became of it (a new attempt takes a new key), the same
+  key for another pipeline is a conflict, and a request with no key is never a repeat. The key lives as long as its run is
+  journaled (`RunJournal.Kept`, applied at start as when recording); a run in flight when the server stops is not journaled, and
+  its key goes with it. `RunJournal.Find` scans every kept run, `List`'s limit being a page.
+  `[local: RunQueueTests, RunJournalTests, ServiceRoutesTests, the lab's smoke.py bricks - a service launches a run]`
 - **A state is written as a lowercase word, by the converter on the property that carries it.** `RunView.State` and
   `DeploymentView.State` are a `RunState` and a `DeploymentState`; the pages, the event stream and the journal's files
   carry the name of the value in lowercase, never as declared. Where no property carries a deployment's state (the
@@ -327,5 +343,5 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   + `js/` (the coordinator's views, ES modules, no build) and `lab/` (the Lab view, lab mode only).
   `window.lab.store` exists for the lab's `tools/ui_check.py`. `/healthz` and the protected resource
   metadata (`CoordinatorApi.Metadata`, RFC 9728: the provider, the contract, the studio's client) are
-  the only anonymous routes; `/health` is a monitor's. Verify a change with the lab's `./lab.sh smoke`, and a page change with
+  the only anonymous routes; `/health` is a monitor's and `/service` a launcher's. Verify a change with the lab's `./lab.sh smoke`, and a page change with
   `./lab.sh ui` too.

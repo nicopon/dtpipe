@@ -317,7 +317,9 @@ the control plane, over each replica's node channel; TransportR carries the data
   studio` reaches `/api` with a person's token, through the routes and records of
   `DtPipe.Jobs/Coordinator`, whose contract number both sides check. A service has a kind the rights
   give it: a node announces on the node channel, a **monitor** (a supervisor) reads `/health` and nothing
-  else, with no group and no node, so its valid token is refused at the announcement and on `/api`.
+  else, a **launcher** (a scheduler) starts the runs of the pipelines its identity lists and reads them, on
+  `/service` and nowhere else; the last two have no group and no node, so a valid token of theirs is refused at
+  the announcement and on `/api`, and neither reaches the other's route.
 - **The CLI hosts neither a node nor a hub.** `dtpipe` is the child a node drives, reached through `arrow:`;
   it references no TransportR assembly and no project of the family, maps no SignalR hub, and `dtpipe
   studio` is a client of the coordinator's `/api`, only when it is given `--coordinator`.

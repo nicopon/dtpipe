@@ -23,6 +23,7 @@
     { "clientId": "node-4", "grant": "client_credentials", "secret": "node-4-lab-secret", "displayName": "Warehouse node" },
     { "clientId": "runner-1", "grant": "client_credentials", "secret": "runner-1-lab-secret", "displayName": "Runner" },
     { "clientId": "monitor-1", "grant": "client_credentials", "secret": "monitor-1-lab-secret", "displayName": "Supervisor" },
+    { "clientId": "launcher-1", "grant": "client_credentials", "secret": "launcher-1-lab-secret", "displayName": "Scheduler" },
     { "clientId": "node-enroll", "grant": "client_credentials", "secret": "node-enroll-lab-secret", "displayName": "A host no identity knows" }
   ]
 }

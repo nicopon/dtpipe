@@ -149,6 +149,20 @@ public sealed class NodeChannelHubTests : IDisposable
     }
 
     [Fact]
+    public async Task A_Launcher_Is_Refused_At_The_Announcement_And_Is_Neither_Queued_Nor_A_Node()
+    {
+        _rights.AddIdentity(new Identity("cron", "scheduler", "", [], Kind: IdentityKinds.Launcher, Pipelines: ["sales"]));
+        var (hub, caller) = Connect("c1", "cron");
+
+        await hub.Announce(Proposing("scheduler"));
+
+        Assert.True(caller.Aborted);
+        Assert.Empty(_inventory.Snapshot());
+        Assert.Empty(_enrollment.List());
+        Assert.Contains("a launcher, not a node", Assert.Single(LogLines()).Message);
+    }
+
+    [Fact]
     public async Task A_Node_Whose_Identity_Is_Removed_Leaves_The_Inventory_When_Its_Host_Goes()
     {
         var (hub, _) = Connect("c1", "known");

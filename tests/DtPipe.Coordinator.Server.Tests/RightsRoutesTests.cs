@@ -78,7 +78,7 @@ public sealed class RightsRoutesTests : IDisposable
         using var created = await _admin.PostAsJsonAsync("/api/rights/identities",
             new { clientId = "watch", name = "supervisor", description = "Reads /health", groups = new[] { "crm" }, kind = "monitor" }, Web, Ct);
         created.EnsureSuccessStatusCode();
-        using var refused = await _admin.PostAsJsonAsync("/api/rights/identities", new { clientId = "odd", name = "odd", groups = new[] { "crm" }, kind = "launcher" }, Web, Ct);
+        using var refused = await _admin.PostAsJsonAsync("/api/rights/identities", new { clientId = "odd", name = "odd", groups = new[] { "crm" }, kind = "scheduler" }, Web, Ct);
 
         var rights = await _admin.GetFromJsonAsync<JsonElement>("/api/rights", Web, Ct);
         var monitor = rights.GetProperty("identities").EnumerateArray().Single(i => i.GetProperty("clientId").GetString() == "watch");
@@ -86,6 +86,26 @@ public sealed class RightsRoutesTests : IDisposable
         Assert.Equal("monitor", monitor.GetProperty("kind").GetString());
         Assert.Equal(0, monitor.GetProperty("groups").GetArrayLength());
         Assert.False(monitor.GetProperty("connected").GetBoolean());
+        Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+    }
+
+    [Fact]
+    public async Task An_Admin_Adds_A_Launcher_With_Its_Pipelines_And_Edits_Them()
+    {
+        using var created = await _admin.PostAsJsonAsync("/api/rights/identities",
+            new { clientId = "cron", name = "scheduler", groups = new[] { "crm" }, kind = "launcher", pipelines = new[] { "sales", "crm-copy" } }, Web, Ct);
+        created.EnsureSuccessStatusCode();
+        using var edited = await _admin.PutAsJsonAsync("/api/rights/identities/cron", new { pipelines = new[] { "sales" } }, Web, Ct);
+        edited.EnsureSuccessStatusCode();
+        using var refused = await _admin.PutAsJsonAsync("/api/rights/identities/cron", new { pipelines = new[] { "Not A Pipeline" } }, Web, Ct);
+
+        var rights = await _admin.GetFromJsonAsync<JsonElement>("/api/rights", Web, Ct);
+        var cron = rights.GetProperty("identities").EnumerateArray().Single(i => i.GetProperty("clientId").GetString() == "cron");
+
+        Assert.Equal("launcher", cron.GetProperty("kind").GetString());
+        Assert.Equal(0, cron.GetProperty("groups").GetArrayLength());
+        Assert.Equal(["sales"], cron.GetProperty("pipelines").EnumerateArray().Select(p => p.GetString()));
+        Assert.False(cron.GetProperty("connected").GetBoolean());
         Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
     }
 

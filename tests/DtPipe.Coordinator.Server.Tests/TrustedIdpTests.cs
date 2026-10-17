@@ -235,4 +235,81 @@ public sealed class TrustedIdpTests : IDisposable
         Assert.Empty(_host.Services.GetRequiredService<EnrollmentQueue>().List());
         Assert.Empty(Rights.Find("watch")!.Groups);
     }
+    // ---- the fourth kind of caller: a launcher starts the runs its identity lists, and reads them ----
+
+    private void ProvisionLaunchers()
+    {
+        Provision();
+        Rights.AddIdentity(new Identity("cron", "scheduler", "", [], Kind: IdentityKinds.Launcher, Pipelines: ["sales"]));
+        Rights.AddIdentity(new Identity("sleeping", "sleeper", "", [], false, IdentityKinds.Launcher, ["sales"]));
+    }
+
+    private static StringContent Launch(string pipeline = "sales") =>
+        new($$"""{"pipelineId":"{{pipeline}}"}""", System.Text.Encoding.UTF8, "application/json");
+
+    [Fact]
+    public async Task A_Launcher_Reaches_Its_Routes_And_Nothing_Else()
+    {
+        ProvisionLaunchers();
+        var launcher = _host.Bearer(CoordinatorHost.Service("cron"));
+
+        // It is admitted to both routes: what answers is the queue's refusal and the run's absence, not the authorization.
+        using (var launched = await launcher.PostAsync("/service/runs", Launch(), Ct))
+            Assert.Equal(HttpStatusCode.Conflict, launched.StatusCode);
+        using (var read = await launcher.GetAsync("/service/runs/run-1", Ct))
+            Assert.Equal(HttpStatusCode.NotFound, read.StatusCode);
+
+        foreach (var path in new[] { "/api/me", "/api/health", "/api/runs" })
+        {
+            using var api = await launcher.GetAsync(path, Ct);
+            Assert.Equal(HttpStatusCode.Unauthorized, api.StatusCode);
+        }
+        using (var runs = await launcher.PostAsync("/api/runs", Launch(), Ct))
+            Assert.Equal(HttpStatusCode.Unauthorized, runs.StatusCode);
+        using var health = await launcher.GetAsync("/health/pipelines", Ct);
+        Assert.Equal(HttpStatusCode.Forbidden, health.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("node-1")]
+    [InlineData("watch")]
+    [InlineData("stranger")]
+    [InlineData("sleeping")]
+    public async Task A_Node_A_Monitor_A_Stranger_And_A_Disabled_Launcher_Never_Reach_The_Service_Routes(string subject)
+    {
+        ProvisionLaunchers();
+        var caller = _host.Bearer(CoordinatorHost.Service(subject));
+
+        using var launched = await caller.PostAsync("/service/runs", Launch(), Ct);
+        using var read = await caller.GetAsync("/service/runs/run-1", Ct);
+
+        Assert.Equal((HttpStatusCode.Forbidden, HttpStatusCode.Forbidden), (launched.StatusCode, read.StatusCode));
+        Assert.Empty(_host.Services.GetRequiredService<EnrollmentQueue>().List());
+    }
+
+    [Fact]
+    public async Task A_Person_A_Session_Cookie_And_An_Anonymous_Caller_Never_Reach_The_Service_Routes()
+    {
+        ProvisionLaunchers();
+        using var cookie = new HttpRequestMessage(HttpMethod.Post, "/service/runs") { Content = Launch() };
+        cookie.Headers.Add("Cookie", "dtpipe-coordinator=session");
+
+        using var person = await _host.Bearer(CoordinatorHost.Person(CoordinatorHost.Admin)).PostAsync("/service/runs", Launch(), Ct);
+        using var anonymous = await _host.Anonymous().PostAsync("/service/runs", Launch(), Ct);
+        using var session = await _host.Anonymous().SendAsync(cookie, Ct);
+        using var read = await _host.Bearer(CoordinatorHost.Person(CoordinatorHost.Admin)).GetAsync("/service/runs/run-1", Ct);
+
+        Assert.All(new[] { person, anonymous, session, read }, r => Assert.Equal(HttpStatusCode.Unauthorized, r.StatusCode));
+    }
+
+    [Fact]
+    public async Task A_Launchers_Token_Reaches_The_Node_Channel_Only_To_Be_Refused_At_The_Announcement()
+    {
+        ProvisionLaunchers();
+        using var negotiated = await _host.Bearer(CoordinatorHost.Service("cron")).PostAsync("/node-channel/negotiate?negotiateVersion=1", null, Ct);
+
+        Assert.Equal(HttpStatusCode.OK, negotiated.StatusCode);
+        Assert.Empty(_host.Services.GetRequiredService<EnrollmentQueue>().List());
+        Assert.Empty(Rights.Find("cron")!.Groups);
+    }
 }

@@ -150,7 +150,7 @@ started from `rights-seed.json` and edited in the **Access** view:
 
 | | Enforced |
 |---|---|
-| **Who**: identities, each a client of the IdP with a node name and one or more groups, or a *monitor*, which has none and reads `/health` only | by the coordinator (no group for an unknown or disabled client, from its next connection or token renewal) and by the control channel (a host is filed under its identity's node name, whatever it proposes; a disabled identity is refused) |
+| **Who**: identities, each a client of the IdP with a node name and one or more groups, a *monitor*, which has none and reads `/health` only, or a *launcher*, which has none and starts the runs of the pipelines it lists | by the coordinator (no group for an unknown or disabled client, from its next connection or token renewal) and by the control channel (a host is filed under its identity's node name, whatever it proposes; a disabled identity is refused) |
 | **To whom**: the flow matrix between groups | by the hub on **every transfer**, live, and on every plan |
 
 Every change is audited. A node host gives its pipeline node a token provider
@@ -171,7 +171,7 @@ survive its restart.
 
 | Caller | Flow | Token |
 |---|---|---|
-| a service (node, runner, monitor) | `client_credentials`, client id and secret from `idp-clients.json` | `sub` = client id, `aud` = `Idp:Audience` |
+| a service (node, runner, monitor, launcher) | `client_credentials`, client id and secret from `idp-clients.json` | `sub` = client id, `aud` = `Idp:Audience` |
 | a front end (`coordinator-ui`) | `authorization_code` + PKCE, through the IdP's login form | `sub`, `name`, `email` = `<user>@Idp:EmailDomain` |
 
 Any user name of letters, digits, `.`, `_` or `-` signs in with that name followed by `pwd`
@@ -197,7 +197,7 @@ python3 tools/idp_check.py          # discovery, both flows, and the refusals th
 | Nodes | every node, its bricks (schema, version, preview), the fragments it hosts, the flow matrix |
 | Library | the pipelines kept, their deployment, **health** (whether the armed version can be launched, and why not), last run, git history, diff, restore; a pipeline's page shows its health, its bindings, the plan a launch would make now drawn in lanes (sources, runner, sinks), its fragments and its job, read only. A pipeline is written with `dtpipe studio --coordinator` and published here |
 | Runs | deployments, the runs in flight and the queue, the journal with each run's report, node events, a query on any database |
-| Access | the trusted IdP, the hosts waiting for approval, identities (node or monitor, name, groups, enabled, reconnect), the editable flow matrix, the audit |
+| Access | the trusted IdP, the hosts waiting for approval, identities (node, monitor or launcher; name, groups or pipelines, enabled, reconnect), the editable flow matrix, the audit |
 
 **A pipeline is a plain dtpipe job**, one branch per card, that also runs whole on one machine
 (`smoke.py` uses it as the witness). A branch *is* a brick when its content equals the brick's:
@@ -219,6 +219,16 @@ that cannot run it while another can. It is read from the armed job and bindings
 that is not known yet is a `warning` while it is asked once, in the background), and is kept until something it
 depends on moves or `Coordinator:Health:MaxAge` (5 minutes) has passed. Launchable is not successful: the
 replicas' checks stay at arming and launching.
+
+**A scheduler launches; the coordinator calls nothing.** It keeps no calendar and no trigger of its own: a cron, a CI or an
+enterprise scheduler holds the token of a `launcher` identity and asks `POST /service/runs {"pipelineId": …}`. The identity lists
+the pipelines it may launch (an empty list launches none; a `monitor` still reads every pipeline), the pipeline must be armed, and
+the answer is the `runId` (202): the scheduler asks `GET /service/runs/{id}` until the state is over. An `Idempotency-Key` header
+(1 to 128 letters, digits, `.`, `_`, `:` or `-`) makes a retry safe: a second request of the same identity with the same key
+answers the first run (200) and queues none, whatever became of it, and the same key for another pipeline is a 409. The key lives
+with the run in the journal, which keeps the latest 200 runs, so a run still in flight when the server stops is not journaled and
+its key is not known again. A run names who started it (`launchedBy`: a person's email, a service's client id) and the pages show
+it. A launcher reaches nothing else: not `/api`, not `/health`, not the node channel.
 
 **A binding is held to its brick by a mode.** `strict` needs the branch to be the brick, word for word.
 In `contract`, `compatible` and `tolerant` the brick's owner may change it: saving the pipeline (or its
@@ -339,12 +349,14 @@ Every route below needs the session cookie of a person with a role (reader for a
 change a pipeline, deploy or run, admin for the rights and the lab-mode routes) and, unless it is a
 `GET`, the header `X-Dtpipe-Csrf`. `/healthz` is anonymous; `/account/login` and `/account/logout`
 sign a person in and out. `/health` is not under `/api` and takes a service's token instead: the one of a
-`monitor` identity, which reaches nothing else (the first two rows below).
+`monitor` identity, which reaches nothing else (the first two rows below). `/service` is outside `/api` too, and takes the token of a `launcher` identity (the next two rows).
 
 | Endpoint | |
 |---|---|
 | `GET /health/pipelines` | a monitor's token (`Authorization: Bearer`, no CSRF header): `{status, at, pipelines: [{id, status, commit, libraryCommit, causes: [{code, message, severity}], fragments}]}`, HTTP 200 whenever the caller is admitted |
 | `GET /health/pipelines/{id}` | the same for one pipeline; an id that is not armed answers `critical` (`not-armed`), so that a disarming alerts |
+| `POST /service/runs` | a launcher's token (no CSRF header; optional `Idempotency-Key`): `{pipelineId}`; 202 `{runId, pipelineId, state, …}`, or 200 with the first run for a retry of a key; 400 no pipeline or a key out of bounds; 403 a pipeline off the identity's list; 409 not armed, or the key started another pipeline |
+| `GET /service/runs/{id}` | the same token: `{runId, pipelineId, state, queuedAt, startedAt, finishedAt, description, refusal, launchedBy}`; 404 for a run off the identity's list or none |
 | `GET /api/me`, `/api/info` | who is signed in and with which roles; whether the server runs in lab mode |
 | `GET /api/nodes`, `/api/bricks`, `/api/flow-matrix`, `/api/pipelines`, `/api/state` | what the pages draw |
 | `POST /api/bricks/{node}/{id}/preview` | a few rows, read by the node that owns the brick |

@@ -28,6 +28,10 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   `rights-seed.json`, which reads `/health` and nothing else. A stack keeps `rights.json` across restarts, so
   `smoke.py bricks` adds the identity through `POST /api/rights/identities` when the rights predate the seed.
   It arms `customers-mirror` for the check and undeploys it. `[local: smoke.py bricks - health, ui_check.py]`
+- **`launcher-1` is the lab's scheduler**: a client of `idp-clients.json` and an identity of kind `launcher` in
+  `rights-seed.json` that lists `customers-mirror`, which starts its runs through `POST /service/runs` and reads them, and nothing
+  else. `smoke.py bricks` creates the identity, or completes its list, when the rights predate the seed; it launches twice with one
+  key and expects one run. `[local: smoke.py bricks - a service launches a run]`
 - **Lab nodes are disposable hosts of `DtPipe.PipelineNode.Hosting`.** `Lab.NodeHost` reads
   `nodes/<node>.json` into `AddDtPipeNode`; a node file whose `role` is `runner` starts the official
   `DtPipe.PipelineNode.Runner` instead, configured through its environment. `lab.sh exec-node` is

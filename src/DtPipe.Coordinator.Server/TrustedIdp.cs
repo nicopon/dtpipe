@@ -160,9 +160,10 @@ public static class TrustedIdp
             foreach (var role in CoordinatorRoles.All)
                 o.AddPolicy(role, p => p.AddAuthenticationSchemes(ApiScheme).RequireRole(role));
             o.AddPolicy(SignedIn, p => p.AddAuthenticationSchemes(ApiScheme).RequireAuthenticatedUser());
-            o.AddPolicy(Monitor, p => p.AddAuthenticationSchemes(ServiceScheme).RequireAuthenticatedUser().AddRequirements(new MonitorRequirement()));
+            o.AddPolicy(Monitor, p => p.AddAuthenticationSchemes(ServiceScheme).RequireAuthenticatedUser().AddRequirements(new ServiceKindRequirement(IdentityKinds.Monitor)));
+            o.AddPolicy(Launcher, p => p.AddAuthenticationSchemes(ServiceScheme).RequireAuthenticatedUser().AddRequirements(new ServiceKindRequirement(IdentityKinds.Launcher)));
         });
-        services.AddSingleton<IAuthorizationHandler, MonitorHandler>();
+        services.AddSingleton<IAuthorizationHandler, ServiceKindHandler>();
         services.AddSingleton<IClaimsTransformation, CoordinatorRoles>();
         // The session cookie is encrypted with keys kept in the state directory, so a restart does
         // not sign every person out.
@@ -179,8 +180,17 @@ public static class TrustedIdp
     /// </summary>
     public const string Monitor = "monitor";
 
+    /// <summary>
+    /// A service the rights grant <see cref="IdentityKinds.Launcher"/> to: the only caller of <c>/service</c>. It is a service's token
+    /// like a monitor's, and which pipelines it may launch is its identity's list, checked where the pipeline is named.
+    /// </summary>
+    public const string Launcher = "launcher";
+
     /// <summary>The email claim of the signed-in person, or null when there is none.</summary>
     public static string? EmailOf(HttpContext context) => context.User.FindFirst("email")?.Value;
+
+    /// <summary>Who the request is from, as a run or an arming names its author: a person's email, a service's client.</summary>
+    public static string CallerOf(HttpContext context) => EmailOf(context) ?? context.User.Identity?.Name ?? "unknown";
 
     /// <summary>A page a browser opens: the only requests a missing session sends to the provider.</summary>
     public static bool IsPageNavigation(HttpRequest request) =>
@@ -249,15 +259,18 @@ public sealed class CoordinatorRoles(IConfiguration configuration) : IClaimsTran
     }
 }
 
-/// <summary>The caller's identity in the rights is an enabled <see cref="IdentityKinds.Monitor"/>.</summary>
-public sealed class MonitorRequirement : IAuthorizationRequirement;
-
-/// <summary>Grants <see cref="MonitorRequirement"/> by what the rights say of the token's subject, never by anything the token carries.</summary>
-public sealed class MonitorHandler(RightsStore rights) : AuthorizationHandler<MonitorRequirement>
+/// <summary>The caller's identity in the rights is an enabled service of <see cref="Kind"/>.</summary>
+public sealed class ServiceKindRequirement(string kind) : IAuthorizationRequirement
 {
-    protected override Task HandleRequirementAsync(AuthorizationHandlerContext context, MonitorRequirement requirement)
+    public string Kind { get; } = kind;
+}
+
+/// <summary>Grants <see cref="ServiceKindRequirement"/> by what the rights say of the token's subject, never by anything the token carries.</summary>
+public sealed class ServiceKindHandler(RightsStore rights) : AuthorizationHandler<ServiceKindRequirement>
+{
+    protected override Task HandleRequirementAsync(AuthorizationHandlerContext context, ServiceKindRequirement requirement)
     {
-        if (rights.Find(TrustedIdp.SubjectOf(context.User)) is { Enabled: true, Kind: IdentityKinds.Monitor }) context.Succeed(requirement);
+        if (rights.Find(TrustedIdp.SubjectOf(context.User)) is { Enabled: true } identity && identity.Kind == requirement.Kind) context.Succeed(requirement);
         return Task.CompletedTask;
     }
 }

@@ -73,6 +73,7 @@ public sealed class RunQueueTests : IDisposable
     private readonly Replicas _link = new();
     private readonly ScriptedRuns _runs = new();
     private readonly FakeJobs _jobs = new();
+    private readonly CoordinatorServerOptions _options;
     private readonly RunJournal _journal;
     private readonly EventBus _bus = new();
     private readonly DeploymentManager _deployments;
@@ -89,7 +90,7 @@ public sealed class RunQueueTests : IDisposable
               { "clientId": "node-m", "name": "m", "description": "", "groups": ["crm"] },
               { "clientId": "node-r", "name": "r", "description": "", "groups": ["crm"] } ] }
             """);
-        var options = new CoordinatorServerOptions
+        var options = _options = new CoordinatorServerOptions
         {
             StateDir = Path.Combine(_dir, "state"), Authority = "http://idp", Audience = "test", UiClientId = "ui", UiClientSecret = "secret", RightsSeed = seed,
         };
@@ -197,6 +198,134 @@ public sealed class RunQueueTests : IDisposable
         Assert.NotNull(done.FinishedAt);
         Assert.Empty(_deployments.Queue);
         Assert.Equal(queued.RunId, _deployments.CurrentRun("p")!.RunId);
+    }
+
+    [Fact]
+    public async Task A_Run_Names_Who_Launched_It_In_Flight_And_In_The_Journal()
+    {
+        await ReplicaAsync("n");
+        await DeployAsync(DataPlan("p", "n"));
+
+        var run = _deployments.Enqueue("p", "ann@x.test");
+        await RunningAsync(run.RunId);
+        Assert.Equal("ann@x.test", _deployments.Queue.Single().LaunchedBy);
+        _runs.End(run.RunId, RunOutcome.Succeeded);
+        await FinishedAsync(run.RunId);
+
+        var journaled = Journaled(run.RunId);
+        Assert.Equal(("ann@x.test", null), (journaled.LaunchedBy, journaled.IdempotencyKey));
+    }
+
+    [Fact]
+    public async Task A_Second_Request_With_The_Same_Key_Answers_The_First_Run_Whether_It_Waits_Runs_Or_Is_Over()
+    {
+        await ReplicaAsync("n");
+        await DeployAsync(DataPlan("p", "n"));
+
+        var first = _deployments.Launch("p", "cron", "night-1");
+        await RunningAsync(first.Run.RunId);
+        var running = _deployments.Launch("p", "cron", "night-1");
+        _runs.End(first.Run.RunId, RunOutcome.Succeeded);
+        await FinishedAsync(first.Run.RunId);
+        var over = _deployments.Launch("p", "cron", "night-1");
+
+        Assert.False(first.Replayed);
+        Assert.Equal((first.Run.RunId, true, first.Run.RunId, true), (running.Run.RunId, running.Replayed, over.Run.RunId, over.Replayed));
+        Assert.Equal(RunState.Succeeded, over.Run.State);
+        Assert.Equal(("cron", "night-1"), (over.Run.LaunchedBy, over.Run.IdempotencyKey));
+        Assert.Single(_runs.Specs);
+        Assert.Single(_journal.List());
+    }
+
+    [Fact]
+    public async Task Requests_Racing_With_One_Key_Make_One_Run()
+    {
+        await ReplicaAsync("n");
+        await DeployAsync(DataPlan("p", "n"));
+
+        var answers = await Task.WhenAll(Enumerable.Range(0, 16).Select(_ => Task.Run(() => _deployments.Launch("p", "cron", "night-1"))));
+
+        Assert.Single(answers.Select(a => a.Run.RunId).Distinct());
+        Assert.Single(answers, a => !a.Replayed);
+    }
+
+    [Fact]
+    public async Task A_Key_Belongs_To_The_Caller_That_Sent_It_And_A_Request_Without_One_Is_Never_A_Replay()
+    {
+        await ReplicaAsync("n");
+        await DeployAsync(DataPlan("p", "n"));
+
+        var cron = _deployments.Launch("p", "cron", "k");
+        var other = _deployments.Launch("p", "other", "k");
+        var keyless = _deployments.Launch("p", "cron", null);
+        var again = _deployments.Launch("p", "cron", null);
+
+        Assert.Equal(4, new[] { cron, other, keyless, again }.Select(a => a.Run.RunId).Distinct().Count());
+        Assert.All(new[] { cron, other, keyless, again }, a => Assert.False(a.Replayed));
+    }
+
+    [Fact]
+    public async Task The_Same_Key_For_Another_Pipeline_Is_A_Conflict_And_Starts_Nothing()
+    {
+        await ReplicaAsync("n");
+        await DeployAsync(DataPlan("p", "n"));
+        _deployments.Launch("p", "cron", "night-1");
+
+        var refused = Assert.Throws<ConflictException>(() => _deployments.Launch("q", "cron", "night-1"));
+
+        Assert.Contains("'p'", refused.Message);
+        Assert.Single(_deployments.Queue);
+    }
+
+    [Fact]
+    public async Task A_Key_Is_Answered_After_A_Restart_As_Long_As_The_Run_Is_Journaled()
+    {
+        await ReplicaAsync("n");
+        await DeployAsync(DataPlan("p", "n"));
+        var first = _deployments.Launch("p", "cron", "night-1");
+        await RunningAsync(first.Run.RunId);
+        _runs.End(first.Run.RunId, RunOutcome.Failed);
+        await FinishedAsync(first.Run.RunId);
+
+        var restarted = TestDeployments.Create(
+            _inventory, _link, new ScriptedRuns(), new ReplicaAdmission(_registry, _state), new RightsFlowControl(_rights), _rights, new EventBus(),
+            new RunJournal(_options, NullLogger<RunJournal>.Instance), _options, _jobs);
+        var replay = restarted.Launch("p", "cron", "night-1");
+
+        Assert.Equal((first.Run.RunId, true, RunState.Failed), (replay.Run.RunId, replay.Replayed, replay.Run.State));
+        Assert.Empty(restarted.Queue);
+    }
+
+    [Fact]
+    public async Task A_Cancelled_Waiting_Run_Still_Answers_Its_Key()
+    {
+        await ReplicaAsync("n");
+        await DeployAsync(DataPlan("p", "n"));
+        var running = _deployments.Enqueue("p");
+        var waiting = _deployments.Launch("p", "cron", "night-1");
+        await RunningAsync(running.RunId);
+
+        _deployments.Cancel(waiting.Run.RunId);
+        var replay = _deployments.Launch("p", "cron", "night-1");
+
+        Assert.Equal((waiting.Run.RunId, true, RunState.Cancelled), (replay.Run.RunId, replay.Replayed, replay.Run.State));
+        Assert.Single(_deployments.Queue);
+    }
+
+    [Fact]
+    public async Task A_Run_Is_Found_Waiting_Running_And_Over()
+    {
+        await ReplicaAsync("n");
+        await DeployAsync(DataPlan("p", "n"));
+        var running = _deployments.Enqueue("p");
+        var waiting = _deployments.Enqueue("p");
+        await RunningAsync(running.RunId);
+
+        Assert.Equal((RunState.Running, RunState.Queued), (_deployments.FindRun(running.RunId)!.State, _deployments.FindRun(waiting.RunId)!.State));
+        _runs.End(running.RunId, RunOutcome.Succeeded);
+        await FinishedAsync(running.RunId);
+        Assert.Equal(RunState.Succeeded, _deployments.FindRun(running.RunId)!.State);
+        Assert.Null(_deployments.FindRun("run-999"));
     }
 
     [Theory]

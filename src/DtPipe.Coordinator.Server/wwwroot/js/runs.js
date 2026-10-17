@@ -64,7 +64,7 @@ function renderQueue() {
   if (!el) return;
   el.innerHTML = store.queue.length ? store.queue.map((r) => {
     const since = r.state === "running" ? `${((Date.now() - new Date(r.startedAt)) / 1000).toFixed(0)} s` : `queued ${((Date.now() - new Date(r.queuedAt)) / 1000).toFixed(0)} s ago`;
-    return `<div class="queue-item"><span class="outcome-chip ${esc(r.state)}">${esc(r.state)}</span> <b>${esc(r.pipelineId)}</b> <code>${esc(r.runId)}</code> <span class="hint">${since}</span>
+    return `<div class="queue-item"><span class="outcome-chip ${esc(r.state)}">${esc(r.state)}</span> <b>${esc(r.pipelineId)}</b> <code>${esc(r.runId)}</code> <span class="hint">${since}${r.launchedBy ? ` · by ${esc(r.launchedBy)}` : ""}</span>
       <button class="small ghost danger" data-cancel="${esc(r.runId)}">Cancel</button></div>`;
   }).join("") : `<p class="hint">Idle.</p>`;
 }
@@ -98,13 +98,13 @@ function renderJournal() {
   if (!el) return;
   const runs = store.runs.filter((r) => !filter || r.pipelineId === filter).slice(0, 60);
   el.innerHTML = runs.length ? `<table class="journal">
-    <tr><th>run</th><th>pipeline</th><th>outcome</th><th>started</th><th>duration</th><th>rows crossed</th><th>cause</th></tr>
+    <tr><th>run</th><th>pipeline</th><th>outcome</th><th>by</th><th>started</th><th>duration</th><th>rows crossed</th><th>cause</th></tr>
     ${runs.map((r) => {
       const rows = r.result?.edgeCounts?.reduce((s, e) => s + (e.received ?? 0), 0);
       return `<tr class="clickable" data-open="${esc(r.runId)}"><td><code>${esc(r.runId)}</code></td><td>${esc(r.pipelineId ?? r.planId)}</td>
-        <td><span class="outcome-chip ${esc(r.state)}">${esc(r.state)}</span></td><td>${esc(new Date(r.startedAt).toLocaleTimeString())}</td>
+        <td><span class="outcome-chip ${esc(r.state)}">${esc(r.state)}</span></td><td class="wrap">${esc(r.launchedBy ?? "")}</td><td>${esc(new Date(r.startedAt).toLocaleTimeString())}</td>
         <td class="num">${esc(duration(r))}</td><td class="num">${rows ? fmt(rows) : ""}</td><td class="wrap">${esc(r.result?.cause ? shortNode(r.result.cause) : r.refusal ? r.refusal.slice(0, 80) : "")}</td></tr>
-        ${openRun === r.runId ? `<tr><td colspan="7">${report(r)}</td></tr>` : ""}`;
+        ${openRun === r.runId ? `<tr><td colspan="8">${report(r)}</td></tr>` : ""}`;
     }).join("")}</table>` : `<p class="hint">No run yet.</p>`;
 }
 

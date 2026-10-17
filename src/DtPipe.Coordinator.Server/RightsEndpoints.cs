@@ -16,7 +16,7 @@ internal static class RightsEndpoints
                 idp = new { issuer = options.Authority, audience = options.Audience, grant = "client_credentials" },
                 identities = doc.Identities.Select(i => new
                 {
-                    i.ClientId, i.Name, i.Description, i.Groups, i.Enabled, i.Kind,
+                    i.ClientId, i.Name, i.Description, i.Groups, i.Enabled, i.Kind, i.Pipelines,
                     connected = i.IsNode && online.Contains(i.Name) && inventory.ClientIdOf(i.Name) == i.ClientId,
                 }),
                 groups = rights.Groups(),
@@ -35,7 +35,7 @@ internal static class RightsEndpoints
         {
             if (!PipelineLibrary.IsValidId(request.ClientId)) throw new ConflictException($"'{request.ClientId}' is not a client id: lowercase letters, digits and '-'.");
             rights.AddIdentity(new Identity(request.ClientId, string.IsNullOrWhiteSpace(request.Name) ? request.ClientId : request.Name, request.Description ?? "",
-                request.Groups ?? [], request.Enabled ?? true, request.Kind ?? IdentityKinds.Node), TrustedIdp.EmailOf(http));
+                request.Groups ?? [], request.Enabled ?? true, request.Kind ?? IdentityKinds.Node, request.Pipelines), TrustedIdp.EmailOf(http));
             enrollment.Remove(request.ClientId);
             bus.Publish("rights", new { });
             return Results.Ok();
@@ -43,7 +43,7 @@ internal static class RightsEndpoints
         admin.MapPut("/rights/identities/{id}", (string id, IdentityRequest request, RightsStore rights, NodeInventory inventory, EventBus bus, HttpContext http) =>
         {
             var before = rights.Find(id);
-            rights.UpdateIdentity(id, request.Name, request.Description, request.Groups, request.Enabled, TrustedIdp.EmailOf(http));
+            rights.UpdateIdentity(id, request.Name, request.Description, request.Groups, request.Enabled, TrustedIdp.EmailOf(http), request.Pipelines);
             // A node renamed connects again under its new name. A node whose groups changed connects again too, and its data
             // plane client registers again: until then a replica's registration holds the groups it had, and admission
             // places no run on it. A node whose identity is disabled loses its connections: its hosts are refused when they
@@ -89,4 +89,4 @@ internal static class RightsEndpoints
 
 internal sealed record MatrixRequest(Dictionary<string, List<string>> Matrix);
 internal sealed record AcceptRequest(string? Name, string? Description, List<string>? Groups);
-internal sealed record IdentityRequest(string ClientId, string? Name, string? Description, List<string>? Groups, bool? Enabled, string? Kind = null);
+internal sealed record IdentityRequest(string ClientId, string? Name, string? Description, List<string>? Groups, bool? Enabled, string? Kind = null, List<string>? Pipelines = null);
