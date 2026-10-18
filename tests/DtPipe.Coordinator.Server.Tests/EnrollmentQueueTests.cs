@@ -15,7 +15,7 @@ public sealed class EnrollmentQueueTests
     [Fact]
     public void A_New_Subject_Is_Recorded_Then_Unchanged_Until_It_Proposes_Something_Else()
     {
-        var queue = new EnrollmentQueue();
+        var queue = MemoryIgnoredHostStore.Queue();
         Assert.Equal(Proposal.Recorded, queue.Propose("s", Host(), NoLabels));
         Assert.Equal(Proposal.Unchanged, queue.Propose("s", Host(), NoLabels));
         Assert.Equal(Proposal.Changed, queue.Propose("s", Host("other"), NoLabels));
@@ -26,7 +26,7 @@ public sealed class EnrollmentQueueTests
     [Fact]
     public void What_A_Host_Proposes_Is_Cut_And_Stripped_Of_Control_Characters()
     {
-        var queue = new EnrollmentQueue();
+        var queue = MemoryIgnoredHostStore.Queue();
         var labels = Enumerable.Range(0, 30).ToDictionary(i => "claim" + i, _ => new string('v', 500));
         queue.Propose("s", Host(new string('n', 500) + "\n", "line one\r\nline two", Enumerable.Range(0, 50).Select(i => new string('b', 300)).ToArray()), labels);
         var pending = queue.Find("s")!;
@@ -41,7 +41,7 @@ public sealed class EnrollmentQueueTests
     [Fact]
     public void A_Full_Queue_Refuses_A_New_Subject_Once_And_Evicts_Nobody()
     {
-        var queue = new EnrollmentQueue();
+        var queue = MemoryIgnoredHostStore.Queue();
         for (var i = 0; i < EnrollmentQueue.MaxPending; i++) Assert.Equal(Proposal.Recorded, queue.Propose("s" + i, Host(), NoLabels));
         Assert.Equal(Proposal.Full, queue.Propose("late", Host(), NoLabels));
         Assert.Equal(Proposal.FullAgain, queue.Propose("late", Host(), NoLabels));
@@ -55,7 +55,7 @@ public sealed class EnrollmentQueueTests
     public void An_Ignored_Subject_Stays_Out_Until_The_Lifetime_Ends()
     {
         var time = new FakeTimeProvider();
-        var queue = new EnrollmentQueue(time);
+        var queue = MemoryIgnoredHostStore.Queue(time);
         queue.Propose("s", Host(), NoLabels);
         queue.Ignore("s");
         Assert.Empty(queue.List());
@@ -65,10 +65,39 @@ public sealed class EnrollmentQueueTests
     }
 
     [Fact]
+    public void An_Ignored_Subject_Is_Still_Ignored_After_A_Restart_Until_The_Lifetime_Ends()
+    {
+        var time = new FakeTimeProvider();
+        var store = new MemoryIgnoredHostStore();
+        new EnrollmentQueue(store, time).Ignore("s");
+
+        time.Advance(TimeSpan.FromHours(20));
+        var restarted = new EnrollmentQueue(store, time);
+        Assert.Equal(Proposal.Ignored, restarted.Propose("s", Host(), NoLabels));
+
+        time.Advance(TimeSpan.FromHours(5));
+        Assert.Equal(Proposal.Recorded, restarted.Propose("s", Host(), NoLabels));
+    }
+
+    [Fact]
+    public void A_Store_That_Refuses_Leaves_The_Host_Waiting_And_Not_Ignored()
+    {
+        var store = new FailingIgnoredHostStore(new MemoryIgnoredHostStore());
+        var queue = new EnrollmentQueue(store);
+        queue.Propose("s", Host(), NoLabels);
+        store.Down = true;
+
+        Assert.Throws<StoreUnavailableException>(() => queue.Ignore("s"));
+
+        Assert.Single(queue.List());
+        Assert.Equal(Proposal.Unchanged, queue.Propose("s", Host(), NoLabels));
+    }
+
+    [Fact]
     public void A_Waiting_Subject_Expires_When_Its_Host_Stops_Coming_Back()
     {
         var time = new FakeTimeProvider();
-        var queue = new EnrollmentQueue(time);
+        var queue = MemoryIgnoredHostStore.Queue(time);
         queue.Propose("s", Host(), NoLabels);
         time.Advance(EnrollmentQueue.Lifetime - TimeSpan.FromMinutes(1));
         queue.Propose("s", Host(), NoLabels);
@@ -81,7 +110,7 @@ public sealed class EnrollmentQueueTests
     [Fact]
     public void A_Subject_With_No_Usable_Key_Is_Invalid()
     {
-        var queue = new EnrollmentQueue();
+        var queue = MemoryIgnoredHostStore.Queue();
         Assert.Equal(Proposal.Invalid, queue.Propose(null, Host(), NoLabels));
         Assert.Equal(Proposal.Invalid, queue.Propose("", Host(), NoLabels));
         Assert.Equal(Proposal.Invalid, queue.Propose(new string('s', EnrollmentQueue.MaxSubject + 1), Host(), NoLabels));

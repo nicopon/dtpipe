@@ -32,20 +32,31 @@ public enum Proposal
 /// entry per subject, in memory (a host announces itself again every few seconds, so a restart loses
 /// nothing), bounded in number, and expired. What a host proposes is untrusted text: every string is
 /// cut to a length here and shown escaped by the page, and none is ever an authority. A full queue
-/// refuses a new subject and never evicts a waiting one.
+/// refuses a new subject and never evicts a waiting one. The hosts an administrator set aside are
+/// kept in an <see cref="IIgnoredHostStore"/>: read when the queue is built and written through by
+/// <see cref="Ignore"/>, so that an announcement, which asks whether its subject is set aside, never
+/// waits on the store.
 /// </summary>
-public sealed class EnrollmentQueue(TimeProvider? time = null)
+public sealed class EnrollmentQueue
 {
     public const int MaxPending = 50;
     public static readonly TimeSpan Lifetime = TimeSpan.FromHours(24);
     public const int MaxSubject = 128, MaxName = 63, MaxDescription = 200, MaxOrigin = 120, MaxBricks = 20, MaxBrick = 80, MaxLabels = 10, MaxLabelKey = 40, MaxLabelValue = 120;
     private const int MaxIgnored = 500;
 
-    private readonly TimeProvider _time = time ?? TimeProvider.System;
+    private readonly IIgnoredHostStore _store;
+    private readonly TimeProvider _time;
     private readonly object _lock = new();
     private readonly Dictionary<string, PendingHost> _pending = new(StringComparer.Ordinal);
     private readonly Dictionary<string, DateTimeOffset> _ignored = new(StringComparer.Ordinal);
     private readonly HashSet<string> _toldFull = new(StringComparer.Ordinal);
+
+    /// <summary>Starts with the hosts the store says are still set aside; a store that cannot be read stops the start.</summary>
+    public EnrollmentQueue(IIgnoredHostStore store, TimeProvider? time = null)
+    {
+        (_store, _time) = (store, time ?? TimeProvider.System);
+        foreach (var (subject, until) in store.Load(_time.GetUtcNow())) _ignored[subject] = until;
+    }
 
     public Proposal Propose(string? subject, NodeAnnouncement announcement, IReadOnlyDictionary<string, string> labels)
     {
@@ -101,17 +112,22 @@ public sealed class EnrollmentQueue(TimeProvider? time = null)
         }
     }
 
-    /// <summary>Sets a subject aside for <see cref="Lifetime"/>: without this it would come back at the host's next attempt.</summary>
+    /// <summary>
+    /// Sets a subject aside for <see cref="Lifetime"/>: without this it would come back at the host's next attempt. The store keeps
+    /// it first, outside the lock every announcement takes; one that refuses leaves the host waiting and throws.
+    /// </summary>
     public void Ignore(string subject)
     {
+        var now = _time.GetUtcNow();
+        var until = now + Lifetime;
+        _store.Add(subject, until, now, MaxIgnored);
         lock (_lock)
         {
-            var now = _time.GetUtcNow();
             Expire(now);
             _pending.Remove(subject);
             if (_ignored.Count >= MaxIgnored && !_ignored.ContainsKey(subject))
                 _ignored.Remove(_ignored.MinBy(kv => kv.Value).Key);
-            _ignored[subject] = now + Lifetime;
+            _ignored[subject] = until;
         }
     }
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Starts, stops and inspects the distributed lab: one coordinator, four data-node hosts and a
 # runner, as plain local processes. Everything the lab writes lives under .state/ (databases,
-# fragments, library, logs); the run journal, the rights and the armed deployments live in Redis.
+# fragments, library, logs); the rest of the coordinator's state lives in Redis.
 #
 #   ./lab.sh up        build, seed if needed, start everything, print the page URL
 #                      (LAB_NODE_SANDBOX=1 starts the nodes in sandbox mode: see "nodes";

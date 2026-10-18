@@ -160,7 +160,7 @@ takes its client in `idp-clients.json` (then an IdP restart); its identity then 
 a host whose token no identity knows is not a node. It waits in the Access view's *Waiting for approval* card,
 with the name, description and bricks it proposes (and the token's claims listed by
 `Coordinator:Identity:LabelClaims`, none by default), and an administrator accepts it by giving it a node name and
-groups, or sets it aside for 24 hours. The list lives in memory, holds 50 hosts, and never evicts one that waits.
+groups, or sets it aside for 24 hours. The list of hosts that wait lives in memory and holds 50, never evicting one that waits; the hosts set aside are kept in Redis, so a restart does not let them back in early.
 
 ### The stand-alone test IdP (`Lab.Idp`)
 

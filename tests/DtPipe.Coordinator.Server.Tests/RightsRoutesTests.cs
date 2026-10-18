@@ -72,6 +72,23 @@ public sealed class RightsRoutesTests : IDisposable
     }
 
     [Fact]
+    public async Task A_Store_That_Is_Down_Answers_503_To_Setting_A_Host_Aside_And_The_Host_Keeps_Waiting()
+    {
+        var queue = _host.Services.GetRequiredService<EnrollmentQueue>();
+        queue.Propose("stranger", new NodeAnnouncement("proposed", "", [], NodeRole.Data, []), new Dictionary<string, string>());
+        _host.IgnoredHosts.Down = true;
+
+        using var refused = await _admin.PostAsync("/api/rights/pending/stranger/ignore", null, Ct);
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, refused.StatusCode);
+        Assert.Single(queue.List());
+        _host.IgnoredHosts.Down = false;
+        using var done = await _admin.PostAsync("/api/rights/pending/stranger/ignore", null, Ct);
+        Assert.Equal(HttpStatusCode.OK, done.StatusCode);
+        Assert.Empty(queue.List());
+    }
+
+    [Fact]
     public async Task Disabling_An_Identity_Drops_The_Control_Connection_Of_Its_Replicas()
     {
         var identity = await AnIdentityWithAReplicaAsync();

@@ -9,7 +9,7 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   and hosts the distributed family (`src/DtPipe.Coordinator*`, `src/DtPipe.PipelineNode*`) as a
   consumer: product code a lab need may shape, never code written for the lab alone. A need of the
   engine is reported to the user, not patched in. `[unchecked]`
-- **The lab's run journal, rights and armed deployments are in a Redis whose settings are fixed once per state directory.** `lab.sh up` records the Redis
+- **The lab's coordinator state, its library apart, is in a Redis whose settings are fixed once per state directory.** `lab.sh up` records the Redis
   (`LAB_REDIS`, else a `redis-server` of its own on `LAB_REDIS_PORT` with its data under `.state/redis`, fsynced on every write,
   and a message naming what is missing when there is none) and a random key prefix in `.state/redis.env`; `exec-coordinator`
   reads it back, so `tools/campaign.py` restarts the coordinator on the same journal and a reset lab starts a new one even on a

@@ -45,6 +45,7 @@ builder.Services.Replace(ServiceDescriptor.Singleton<IHubProgressMonitor, EventP
 
 builder.Services.AddSingleton<EventBus>();
 builder.Services.AddSingleton<NodeInventory>();
+builder.Services.AddSingleton<IIgnoredHostStore, RedisIgnoredHostStore>();
 builder.Services.AddSingleton<EnrollmentQueue>();
 builder.Services.AddSingleton<NodeRequests>();
 builder.Services.AddSingleton<BrickCatalog>();
@@ -68,7 +69,9 @@ builder.Services.AddSingleton<PipelineHealth>();
 var app = builder.Build();
 // The session keys are read before anything is served: Redis down stops the start instead of the first sign-in.
 TrustedIdp.EnsureSessionKeys(app.Services);
+// The armed deployments and the hosts set aside are read now too: a Redis that cannot be read stops the start.
 app.Services.GetRequiredService<DeploymentManager>();
+app.Services.GetRequiredService<EnrollmentQueue>();
 
 app.Use(async (context, next) =>
 {

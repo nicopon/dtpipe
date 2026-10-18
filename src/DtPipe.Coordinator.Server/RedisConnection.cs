@@ -3,8 +3,7 @@ using StackExchange.Redis;
 namespace DtPipe.Coordinator.Server;
 
 /// <summary>
-/// The coordinator's one connection to Redis, which the stores that keep its state borrow (<see cref="RedisRunStore"/>,
-/// <see cref="RedisRightsStore"/>, <see cref="RedisXmlRepository"/>): none owns it, and the container disposes it. A command sent while
+/// The coordinator's one connection to Redis, which the stores that keep its state borrow: none owns it, and the container disposes it. A command sent while
 /// Redis is down fails at once and a command that gets no answer fails after <see cref="SyncTimeout"/>, both as
 /// <see cref="StoreUnavailableException"/>. A connection string is a secret: no message here carries it, only the endpoints.
 /// </summary>

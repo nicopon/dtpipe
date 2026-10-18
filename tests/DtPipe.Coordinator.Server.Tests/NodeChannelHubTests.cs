@@ -26,7 +26,7 @@ public sealed class NodeChannelHubTests : IDisposable
     private readonly ReplicaRegistry _registry = new();
     private readonly NodeInventory _inventory;
     private readonly ReplicaProtocol _protocol;
-    private readonly EnrollmentQueue _enrollment = new();
+    private readonly EnrollmentQueue _enrollment = MemoryIgnoredHostStore.Queue();
     private readonly EventBus _bus = new();
     private readonly RightsStore _rights;
     private readonly OrphanRunsTests.Abandonments _abandonments = new();

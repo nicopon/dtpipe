@@ -288,7 +288,17 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   forgetting was kept while the call timed out leaves the deployment in memory until the next start, when it is gone. Arm the pipeline
   again (it replaces the record), or undeploy it after the restart.
   `[local: ArmedDeploymentTests, DeploymentRoutesTests; RedisDeploymentStoreTests (needs DTPIPE_TEST_REDIS or DTPIPE_TEST_REUSE_INFRA)]`
-  `[unchecked: a Redis that loses a write it acknowledged; a write that times out and is applied]`
+  `[unchecked: a Redis that loses a write it acknowledged; a write that times out and is applied; that a restart of the real coordinator keeps an armed deployment, shown by a throwaway script only]`
+- **The hosts set aside are in Redis, read once, and an announcement never waits on it.** `EnrollmentQueue` loads an
+  `IIgnoredHostStore` (`RedisIgnoredHostStore`: a sorted set at `{prefix}ignored-hosts`, each subject scored by the instant it is let
+  back in) when it is built, and the server builds it at start, so a Redis that cannot be read stops the start. `Propose`, which every
+  announcement runs under the queue's lock, asks memory only. `Ignore` writes the store first, outside that lock, then memory; a store
+  that refuses (`StoreUnavailableException`, 503) leaves the host waiting and not set aside. The instant is absolute, so a restart does
+  not extend the 24 hours, and the bound `MaxIgnored` is kept by the store's write as by memory, the subject let back in soonest going
+  first. The hosts that wait stay in memory: a host announces again within seconds, and what it proposed is untrusted text that
+  expires with the host. **Limit**: an `Ignore` that timed out may have been applied, and then the host is set aside in the store
+  while it still waits in memory until it announces again after the next start.
+  `[local: EnrollmentQueueTests, RightsRoutesTests; RedisIgnoredHostStoreTests (needs DTPIPE_TEST_REDIS or DTPIPE_TEST_REUSE_INFRA)]`
 - **Deployments and runs are decided under one lock.** `DeploymentManager` is what the routes call, over three
   parts and the one `DeploymentLedger` they share: `DeploymentService` (the deployments), `RunQueue` (the queue
   and the dispatch) and `LabFaults`. A decision that reads both sides, such as a deployment refused while a run of
