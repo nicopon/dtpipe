@@ -64,53 +64,59 @@ public sealed record RunView(
 }
 
 /// <summary>
-/// Every run, one JSON file each under <c>runs/&lt;pipeline&gt;/</c> in the state directory, read back at start. Runs are what
-/// happened, not what was designed: the library's git history never holds them. A run is written when it is queued, again when it
-/// starts and when it ends, so a restart finds what it interrupted: those runs are ended then (<see cref="RestartedRefusal"/>), and
-/// the ones that had started are <see cref="Orphans"/>, whose children may still run. History (<see cref="List"/>, <see cref="Find"/>)
-/// holds the runs that are over and keeps the latest <see cref="Kept"/>, at start as when it records; a run in flight is on disk only.
+/// Every run, a JSON document each in the <see cref="IRunStore"/>, read back at start. Runs are what happened, not what was
+/// designed: the library's git history never holds them. A run is written when it is queued, again when it starts and when it
+/// ends, so a restart finds what it interrupted: those runs are ended then (<see cref="RestartedRefusal"/>), and the ones that had
+/// started are <see cref="Orphans"/>, whose children may still run. History (<see cref="List"/>, <see cref="Find"/>) holds the runs
+/// that are over and keeps the latest <see cref="IRunStore.Window"/>, in memory as in the store; a run in flight is in the store
+/// only. A run not yet over that cannot be written throws <see cref="StoreUnavailableException"/>, so none starts without its
+/// record; one that is over is kept in memory whatever the store says, since refusing it would help nobody, and a store that missed
+/// it leaves it in flight for the next start to end.
 /// </summary>
 public sealed class RunJournal
 {
-    private const int Kept = 200;
+    private const int Kept = IRunStore.Window;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     {
-        WriteIndented = true,
         Converters = { new JsonStringEnumConverter() },
     };
 
-    private readonly string _dir;
+    private readonly IRunStore _store;
+    private readonly ILogger<RunJournal> _logger;
     private readonly object _lock = new();
     private readonly List<RunView> _runs = [];
-    private int _seq;
 
     /// <summary>The refusal of a run a restart interrupted.</summary>
     public const string RestartedRefusal = "The coordinator restarted before this run ended.";
 
-    public RunJournal(CoordinatorServerOptions options, ILogger<RunJournal> logger)
+    public RunJournal(IRunStore store, ILogger<RunJournal> logger)
     {
-        _dir = Path.Combine(options.StateDir, "runs");
-        Directory.CreateDirectory(_dir);
-        foreach (var file in Directory.EnumerateFiles(_dir, "*.json", SearchOption.AllDirectories))
+        (_store, _logger) = (store, logger);
+        var stored = store.Load();
+        var loaded = new Dictionary<string, RunView>(StringComparer.Ordinal);
+        foreach (var document in stored.History.Concat(stored.InFlight))
         {
             try
             {
-                if (JsonSerializer.Deserialize<RunView>(File.ReadAllText(file), Json) is { } run) _runs.Add(run);
+                if (JsonSerializer.Deserialize<RunView>(document, Json) is { } run) loaded[run.RunId] = run;
             }
             catch (Exception ex)
             {
-                logger.LogWarning("Run journal entry {File} skipped: {Error}", file, ex.Message);
+                logger.LogWarning("Run journal document skipped: {Error}", ex.Message);
             }
         }
-        // The next id is read from every run loaded, before the window: a run's id and its start time do not follow one order.
-        _seq = _runs.Select(r => int.TryParse(r.RunId.Split('-').Last(), out var n) ? n : 0).DefaultIfEmpty(0).Max();
-        for (var i = 0; i < _runs.Count; i++)
+        // The counter is raised to every id read, before the window: a run's id and its start time do not follow one order.
+        store.RaiseSequenceTo(loaded.Keys.Select(IdNumber).DefaultIfEmpty(0).Max());
+        foreach (var run in loaded.Values.Where(r => r.IsOver)) _runs.Add(run);
+        foreach (var run in loaded.Values.Where(r => !r.IsOver))
         {
-            if (_runs[i].IsOver) continue;
-            if (_runs[i].State == RunState.Running && _runs[i].Plan is not null) Orphans.Add(_runs[i]);
-            _runs[i] = _runs[i] with { State = RunState.Error, FinishedAt = DateTimeOffset.UtcNow, Refusal = RestartedRefusal };
-            Write(_runs[i]);
+            if (run.State == RunState.Running && run.Plan is not null) Orphans.Add(run);
+            var ended = run with { State = RunState.Error, FinishedAt = DateTimeOffset.UtcNow, Refusal = RestartedRefusal };
+            Write(ended);
+            _runs.Add(ended);
         }
+        // A run over that a crash left among the runs in flight is moved to the history.
+        foreach (var run in stored.InFlight.Select(d => Parse(d)).Where(r => r is { IsOver: true })) Write(run!);
         _runs.Sort((a, b) => b.StartedAt.CompareTo(a.StartedAt));
         if (_runs.Count > Kept) _runs.RemoveRange(Kept, _runs.Count - Kept);
     }
@@ -118,18 +124,29 @@ public sealed class RunJournal
     /// <summary>The runs a restart found started and not over: their fragments were placed on replicas, and their children may still run.</summary>
     public List<RunView> Orphans { get; } = [];
 
-    public string NextRunId() => $"run-{Interlocked.Increment(ref _seq)}";
+    public string NextRunId() => $"run-{_store.NextSequence()}";
 
     /// <summary>Writes the run, whatever its state; one that is over also enters the history.</summary>
     public void Record(RunView run)
     {
-        Write(run);
-        if (!run.IsOver) return;
+        if (!run.IsOver)
+        {
+            Write(run);
+            return;
+        }
         lock (_lock)
         {
             _runs.RemoveAll(r => r.RunId == run.RunId);
             _runs.Insert(0, run);
             if (_runs.Count > Kept) _runs.RemoveAt(_runs.Count - 1);
+        }
+        try
+        {
+            Write(run);
+        }
+        catch (StoreUnavailableException ex)
+        {
+            _logger.LogError("Run {RunId} is over but the store did not keep it; a restart ends it as interrupted: {Error}", run.RunId, ex.Message);
         }
     }
 
@@ -144,16 +161,14 @@ public sealed class RunJournal
         lock (_lock) return _runs.FirstOrDefault(match);
     }
 
-    // Written beside and moved over, so a crash leaves a whole file: the file of the latest id is what keeps the next id fresh.
-    private void Write(RunView run)
+    private void Write(RunView run) =>
+        _store.Put(new StoredRun(run.RunId, JsonSerializer.Serialize(run, Json), run.IsOver, run.FinishedAt ?? run.StartedAt));
+
+    private static RunView? Parse(string document)
     {
-        var dir = Path.Combine(_dir, DirectoryName(run.PipelineId ?? run.PlanId));
-        Directory.CreateDirectory(dir);
-        var path = Path.Combine(dir, run.RunId + ".json");
-        File.WriteAllText(path + ".tmp", JsonSerializer.Serialize(run, Json));
-        File.Move(path + ".tmp", path, overwrite: true);
+        try { return JsonSerializer.Deserialize<RunView>(document, Json); }
+        catch (JsonException) { return null; }
     }
 
-    private static string DirectoryName(string name) =>
-        string.Concat(name.Select(c => char.IsLetterOrDigit(c) || c is '-' or '_' ? c : '_'));
+    private static long IdNumber(string runId) => long.TryParse(runId.Split('-').Last(), out var n) ? n : 0;
 }

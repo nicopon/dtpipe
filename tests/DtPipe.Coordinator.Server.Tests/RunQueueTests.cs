@@ -74,6 +74,7 @@ public sealed class RunQueueTests : IDisposable
     private readonly ScriptedRuns _runs = new();
     private readonly FakeJobs _jobs = new();
     private readonly CoordinatorServerOptions _options;
+    private readonly FailingRunStore _store;
     private readonly RunJournal _journal;
     private readonly EventBus _bus = new();
     private readonly DeploymentManager _deployments;
@@ -96,13 +97,14 @@ public sealed class RunQueueTests : IDisposable
         };
         _rights = new RightsStore(options);
         _inventory = new NodeInventory(_registry);
-        _journal = new RunJournal(options, NullLogger<RunJournal>.Instance);
+        _store = new FailingRunStore(MemoryRunStore.At(options.StateDir));
+        _journal = new RunJournal(_store, NullLogger<RunJournal>.Instance);
         _deployments = TestDeployments.Create(
             _inventory, _link, _runs, new ReplicaAdmission(_registry, _state), new RightsFlowControl(_rights), _rights, _bus,
             _journal, options, _jobs);
     }
 
-    public void Dispose() => Directory.Delete(_dir, recursive: true);
+    public void Dispose() { if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true); }
 
     private static readonly FragmentUnit[] Units = [new("src", FragmentUnitKind.SourceSend, "src")];
 
@@ -289,7 +291,7 @@ public sealed class RunQueueTests : IDisposable
 
         var restarted = TestDeployments.Create(
             _inventory, _link, new ScriptedRuns(), new ReplicaAdmission(_registry, _state), new RightsFlowControl(_rights), _rights, new EventBus(),
-            new RunJournal(_options, NullLogger<RunJournal>.Instance), _options, _jobs);
+            MemoryRunStore.Journal(_options), _options, _jobs);
         var replay = restarted.Launch("p", "cron", "night-1");
 
         Assert.Equal((first.Run.RunId, true, RunState.Failed), (replay.Run.RunId, replay.Replayed, replay.Run.State));
@@ -306,7 +308,7 @@ public sealed class RunQueueTests : IDisposable
         var waiting = _deployments.Launch("p", "cron", "night-2");
         Assert.Equal(RunState.Queued, waiting.Run.State);
 
-        var journal = new RunJournal(_options, NullLogger<RunJournal>.Instance);
+        var journal = MemoryRunStore.Journal(_options);
         var restarted = TestDeployments.Create(
             _inventory, _link, new ScriptedRuns(), new ReplicaAdmission(_registry, _state), new RightsFlowControl(_rights), _rights, new EventBus(),
             journal, _options, _jobs);
@@ -316,6 +318,21 @@ public sealed class RunQueueTests : IDisposable
         Assert.Equal(running.Run.RunId, restarted.Launch("p", "cron", "night-1").Run.RunId);
         Assert.Empty(restarted.Queue);
         Assert.True(int.Parse(journal.NextRunId().Split('-').Last()) > int.Parse(waiting.Run.RunId.Split('-').Last()));
+    }
+
+    [Fact]
+    public async Task A_Launch_The_Store_Cannot_Journal_Is_Refused_And_Leaves_Nothing_In_The_Queue()
+    {
+        await ReplicaAsync("n");
+        await DeployAsync(DataPlan("p", "n"));
+        _store.Down = true;
+
+        Assert.Throws<StoreUnavailableException>(() => _deployments.Launch("p", "cron", "night-1"));
+        Assert.Empty(_deployments.Queue);
+
+        _store.Down = false;
+        var launched = _deployments.Launch("p", "cron", "night-1");
+        Assert.False(launched.Replayed);
     }
 
     [Fact]

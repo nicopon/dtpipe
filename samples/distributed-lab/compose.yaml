@@ -79,6 +79,17 @@ services:
       interval: 2s
       retries: 30
 
+  # The coordinator's run journal. Every write is fsynced, as a journal that never reuses an id needs.
+  redis:
+    image: redis:7.4-alpine
+    command: redis-server --appendonly yes --appendfsync always
+    volumes:
+      - ./.stack/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      retries: 30
+
   coordinator:
     <<: *dotnet-service
     image: dtpipe-lab-stack/coordinator-lab
@@ -91,6 +102,8 @@ services:
       Coordinator__Scenarios: /lab/pipelines
       Coordinator__LibrarySeed: /lab/library-seed
       Coordinator__RightsSeed: /lab/rights-seed.json
+      Coordinator__Redis__ConnectionString: redis:6379
+      Coordinator__Redis__Initialize: "true"
       Coordinator__Ui__ClientSecret: ${LAB_UI_SECRET:-coordinator-ui-lab-secret}
       Coordinator__Studio__ClientId: dtpipe-studio
       Coordinator__Roles__Admin: ${LAB_ADMIN:-labadmin}@dtpipe.test
@@ -101,6 +114,7 @@ services:
     depends_on:
       idp: { condition: service_healthy }
       proxy: { condition: service_healthy }
+      redis: { condition: service_healthy }
     healthcheck:
       test: ["CMD", "curl", "-fs", "http://localhost:8080/healthz"]
       interval: 2s

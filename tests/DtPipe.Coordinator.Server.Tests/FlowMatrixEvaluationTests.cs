@@ -73,14 +73,14 @@ public sealed class FlowMatrixEvaluationTests : IDisposable
         _planner = new PlanBuilder(_inventory, new NodeRequests(_inventory, new NoHub()), new BrickCatalog(_inventory), new PlanRegistry(_flow), rights);
         _deployments = TestDeployments.Create(
             _inventory, new NoLink(), new NoRuns(), new ReplicaAdmission(_registry, new InMemoryStateStore()), _flow, rights, new EventBus(),
-            new RunJournal(options, NullLogger<RunJournal>.Instance), options);
+            MemoryRunStore.Journal(options), options);
 
         Runner("r1", "crm");
         Runner("r2", "audit");
         Runner("r3", "ops");
     }
 
-    public void Dispose() => Directory.Delete(_dir, recursive: true);
+    public void Dispose() { if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true); }
 
     private void Runner(string name, string group)
     {

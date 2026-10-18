@@ -50,6 +50,8 @@ public sealed class CoordinatorHost(string? studioClientId = CoordinatorHost.Stu
         builder.UseSetting("Coordinator:LabMode", labMode ? "true" : "false");
         builder.ConfigureTestServices(services =>
         {
+            // The run journal's store is in memory: the real one is Redis, which these tests are not about.
+            services.AddSingleton<IRunStore>(MemoryRunStore.At(_state));
             if (check is not null) services.AddSingleton<DesignValidator>(new StubValidator(check, bindings => CheckedBindings = bindings));
             var configuration = new OpenIdConnectConfiguration
             {

@@ -1,13 +1,21 @@
 namespace DtPipe.Coordinator.Server;
 
 /// <summary>
+/// The Redis that keeps the run journal (<c>Coordinator:Redis</c>). <see cref="ConnectionString"/> is a secret when it holds a
+/// password: it is read from the environment (<c>Coordinator__Redis__ConnectionString</c>) and written in no log or message.
+/// <see cref="KeyPrefix"/> lets several coordinators share one Redis. <see cref="Initialize"/> allows a journal to begin where
+/// Redis holds none: the first start, or after Redis lost its data.
+/// </summary>
+public sealed record RedisSettings(string? ConnectionString = null, string KeyPrefix = "dtpipe-coordinator:", bool Initialize = false);
+
+/// <summary>
 /// The server's settings, from the <c>Coordinator</c> configuration section: environment variables
 /// (<c>Coordinator__StateDirectory</c>, …) or command-line arguments (<c>--Coordinator:StateDirectory</c>).
 /// Paths are resolved against the working directory.
 /// </summary>
 public sealed class CoordinatorServerOptions
 {
-    /// <summary>Where the library, the run journal, the rights document and every plan's scratch files live.</summary>
+    /// <summary>Where the library, the rights document and every plan's scratch files live.</summary>
     public required string StateDir { get; init; }
 
     /// <summary>The issuer of every token the server accepts: an OpenID Connect provider it trusts.</summary>
@@ -51,6 +59,9 @@ public sealed class CoordinatorServerOptions
     /// </summary>
     public TimeSpan HealthMaxAge { get; init; } = TimeSpan.FromMinutes(5);
 
+    /// <summary>Where the run journal lives beyond the process; the server does not start without a connection string.</summary>
+    public RedisSettings Redis { get; init; } = new();
+
     /// <summary>The Lab view's scenarios, one job file each; read only in <see cref="LabMode"/>.</summary>
     public string? Scenarios { get; init; }
 
@@ -71,6 +82,10 @@ public sealed class CoordinatorServerOptions
             IdentityLabelClaims = section.GetSection("Identity:LabelClaims").Get<string[]>() ?? [],
             LabMode = section.GetValue<bool>("LabMode"),
             Scenarios = PathOf("Scenarios"),
+            Redis = new RedisSettings(
+                section["Redis:ConnectionString"] is { Length: > 0 } redis ? redis : null,
+                section["Redis:KeyPrefix"] is { Length: > 0 } prefix ? prefix : "dtpipe-coordinator:",
+                section.GetValue<bool>("Redis:Initialize")),
             HealthMaxAge = section.GetValue<TimeSpan?>("Health:MaxAge") is { } age && age > TimeSpan.Zero ? age : TimeSpan.FromMinutes(5),
         };
     }

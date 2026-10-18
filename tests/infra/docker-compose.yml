@@ -119,6 +119,19 @@ services:
       az storage container create --name dtpipe-azure-bucket --connection-string 'DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;'
       "
 
+  # The coordinator's run journal. Every write is fsynced, as a journal that never reuses an id needs.
+  redis:
+    image: redis:7.4-alpine
+    container_name: dtpipe-integ-redis
+    command: redis-server --appendonly yes --appendfsync always
+    ports:
+      - "6390:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
 volumes:
   minio-data:
   azurite-data:

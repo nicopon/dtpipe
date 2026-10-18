@@ -204,8 +204,8 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   `.yaml` per pipeline) and `Coordinator:RightsSeed`; with neither, the library has no pipeline
   and the rights no identity and an empty matrix: nobody may send anything until an administrator
   says so. The library is a git repository of its own under `library/` in the state directory,
-  driven by the `git` command line with a fixed identity (the image needs `git`); run history lives
-  in `runs/` and armed deployments in `deployments/`, outside git and read back at start; the Lab view's fixed plan is in memory.
+  driven by the `git` command line with a fixed identity (the image needs `git`); armed deployments live
+  in `deployments/`, outside git and read back at start, and run history in Redis (see "A run is journaled as it goes"); the Lab view's fixed plan is in memory.
 - **Cuts inside a branch belong to `dtpipe split`**, run on the node whose data the branch reads
   (`BranchCut`: the branch alone, its two halves back); a branch that reads no node's data is not
   cut. `PlanBuilder` puts the consumer half in the branch's place, only regroups whole branches
@@ -289,27 +289,39 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   ledger's lock where the run is queued, and a run is journaled before it leaves the ledger, so a retry that races the end of the
   first finds it in one or the other. A repeat answers the first run whatever became of it (a new attempt takes a new key), the same
   key for another pipeline is a conflict, and a request with no key is never a repeat. The key lives as long as its run is
-  journaled (`RunJournal.Kept`, applied at start as when recording); a run in flight when the server stops is ended at the next
+  journaled (`IRunStore.Window`, applied at start as when recording); a run in flight when the server stops is ended at the next
   start (`RunJournal.RestartedRefusal`) and answers its key as that run. `RunJournal.Find` scans every kept run, `List`'s limit being a page.
   `[local: RunQueueTests, RunJournalTests, ServiceRoutesTests, the lab's smoke.py bricks - a service launches a run]`
 - **A state is written as a lowercase word, by the converter on the property that carries it.** `RunView.State` and
-  `DeploymentView.State` are a `RunState` and a `DeploymentState`; the pages, the event stream and the journal's files
+  `DeploymentView.State` are a `RunState` and a `DeploymentState`; the pages, the event stream and the journal's documents
   carry the name of the value in lowercase, never as declared. Where no property carries a deployment's state (the
   `deploy` event, the text of a refusal), `StateWords.Word` writes it; `undeployed` is the word of an event, not a
-  state. A journal file whose state is none of the values, or a number, is skipped when the server starts.
+  state. A journal document whose state is none of the values, or a number, is skipped when the server starts.
   `[local: StateWireTests, RunQueueTests]`
-- **A run is journaled as it goes, and a restart ends what it interrupted.** `RunQueue` writes the run when it is queued (under the
-  ledger's lock, before the ticket is visible), when it starts and when it ends, and `RunJournal` reads every file for the next id,
-  so an id is never given twice. History (`List`, `Find`, `PipelineHealth`) holds the runs that are over; a run in flight is on
-  disk only. At start `RunJournal` gives each run it finds queued or running the state `error` and `RestartedRefusal`, and lists
-  the ones that had started as `Orphans`. `OrphanRuns` asks every replica of an orphan fragment's node, once, when it announces
-  with its data plane client (`NodeChannelHub.Announce`, off the hub's thread), to abandon it, until a replica answers that it
-  held it; the authority is the journal, never what an announcement says.
-  `[local: RunJournalTests, RunQueueTests, OrphanRunsTests, NodeChannelHubTests]` `[unchecked: a second restart before the
-  replicas announce forgets the list; a wired child with nothing to write ends only once a relay touches its torn-down transfer]`
+- **A run is journaled as it goes, and a restart ends what it interrupted.** `RunJournal` keeps the runs in an `IRunStore`, which is
+  Redis (`RedisRunStore`): one document per run, the ids of the runs in flight, the ids of the latest `IRunStore.Window` over, and
+  the counter that draws ids (`INCR`). `RunQueue` draws the id and writes the run when it is queued (under the ledger's lock, before
+  the ticket is visible), when it starts and when it ends. History (`List`, `Find`, `PipelineHealth`) holds the runs that are over and
+  is read from memory, loaded at start: one coordinator writes the store, so the window in memory is the store's, and a key's
+  lookup `(LaunchedBy, key)` costs no call to Redis under the ledger's lock. **A run not yet over that the store cannot keep
+  throws `StoreUnavailableException`** (503 from the middleware of `Program.cs`), so none is queued or started
+  without its record; a run that is over is kept in memory whatever the store says and only logged, and a store that missed it
+  leaves it in flight for the next start to end. A command that finds Redis disconnected fails at once instead of waiting in a
+  backlog. At start `RunJournal` gives each run it finds queued or running the state `error` and `RestartedRefusal`, and lists the
+  ones that had started as `Orphans`; `OrphanRuns` asks every replica of an orphan fragment's node, once, when it announces with
+  its data plane client (`NodeChannelHub.Announce`, off the hub's thread), to abandon it, until a replica answers that it held it;
+  the authority is the journal, never what an announcement says. **An id is never given twice**: the counter is raised at start to
+  the highest id read and never lowered, and a store with no counter and no run (a first start, or Redis that lost its data) refuses
+  to start unless `Coordinator:Redis:Initialize` is true, since the ids would begin again. Redis must therefore persist every write
+  (`appendonly yes`, `appendfsync always`: the lab's and `tests/infra`'s). `Coordinator:Redis:ConnectionString` is a secret
+  (read it from the environment) and is in no log or message, only the endpoints; `KeyPrefix` separates coordinators on one Redis.
+  A reason that goes into `RunView.Refusal` is the server's own text, never a Redis message.
+  `[local: RunJournalTests, RunQueueTests, OrphanRunsTests, NodeChannelHubTests; RedisRunStoreTests (needs DTPIPE_TEST_REDIS or
+  DTPIPE_TEST_REUSE_INFRA); tools/campaign.py F4]` `[unchecked: a second restart before the replicas announce forgets the list; a wired
+  child with nothing to write ends only once a relay touches its torn-down transfer; a Redis that loses a write it acknowledged]`
 - **A run that was placed records the replica of each fragment.** `RunJournal` keeps the `RunResult` whole,
   `RunResult.Replicas` included: an instance id and the `Origin` the replica announced, untrusted text the pages
-  escape. A run refused at admission has none, and a file that names none reads as a run with none.
+  escape. A run refused at admission has none, and a document that names none reads as a run with none.
   `[local: RunJournalTests]` `[unchecked: the pages' escaping of Origin]`
 - **A run names the subject and the groups of each fragment's node.** `RunQueue` reads them from the
   rights when the run starts, through `LaunchPlanner.RunFragmentsOf` (`RightsStore.SubjectOf`: the client id of

@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 # Starts, stops and inspects the distributed lab: one coordinator, four data-node hosts and a
 # runner, as plain local processes. Everything the lab writes lives under .state/ (databases,
-# fragments, library, runs, logs).
+# fragments, library, logs); the run journal lives in Redis.
 #
 #   ./lab.sh up        build, seed if needed, start everything, print the page URL
 #                      (LAB_NODE_SANDBOX=1 starts the nodes in sandbox mode: see "nodes";
 #                      LAB_REPLICAS="node-4=2,runner-1=2" starts that many hosts for those nodes,
 #                      all of one identity: the first is named for the node, the others <node>.r2, ...)
+#   LAB_REDIS=H:P      the Redis that keeps the run journal. Unset, `up` starts the redis-server it finds on LAB_REDIS_PORT
+#                      (5191) with its data under .state/redis, and fails naming what is missing when there is none; any
+#                      Redis does (tests/infra/start_infra.sh starts one on localhost:6390). `up` records the Redis and a
+#                      random key prefix in .state/redis.env, which every later call reads back: a reset lab starts a
+#                      new journal and a throw-away LAB_STATE sees no other lab's runs
 #   LAB_STATE=DIR      moves the state directory (an absolute path), for a throw-away run: a relative one would not
 #                      match the absolute paths in the command lines of the hosts' children
 #   ./lab.sh down      stop every lab process: those the pid files name, and any other whose command line names the state
@@ -43,6 +48,7 @@ STACK_PORT="${LAB_STACK_HTTP_PORT:-80}"
 STACK_SUFFIX="$([[ "$STACK_PORT" == 80 ]] || echo ":$STACK_PORT")"
 STACK_URL="http://coordinator.localtest.me$STACK_SUFFIX"
 NODES=(node-1 node-2 node-3 node-4 runner-1)
+REDIS_PORT="${LAB_REDIS_PORT:-5191}"
 
 # The processes that carry the nodes: one per node, and the extra replicas LAB_REPLICAS asks for ("node=count",
 # comma-separated), each named <node>.r<n>. A count that is not a number is an error, never one replica.
@@ -158,13 +164,51 @@ require_clean_start() {
         exit 1
     fi
     command -v lsof >/dev/null 2>&1 || return 0
-    for port in "$PORT" "${LAB_IDP_PORT:-5190}"; do
+    local ports=("$PORT" "${LAB_IDP_PORT:-5190}")
+    [[ -f "$STATE/redis.env" ]] || [[ -n "${LAB_REDIS:-}" ]] || ports+=("$REDIS_PORT")
+    for port in "${ports[@]}"; do
         for pid in $(lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null); do
             is_tracked "$pid" && continue
             echo "Port $port is held by pid $pid, which is not the lab's: $(ps -o args= -p "$pid" | cut -c1-110)" >&2
             exit 1
         done
     done
+}
+
+# Where the run journal lives, fixed once per state directory (.state/redis.env): the Redis (LAB_REDIS, else the lab's own) and a
+# prefix no other lab shares, so a reset lab starts a journal of its own even on a Redis that outlives it. REDIS_OWN is set when
+# the lab starts that Redis itself.
+load_redis_settings() {
+    if [[ ! -f "$STATE/redis.env" ]]; then
+        mkdir -p "$STATE"
+        {
+            echo "REDIS_URL=${LAB_REDIS:-127.0.0.1:$REDIS_PORT}"
+            echo "REDIS_PREFIX=lab-$(od -An -N6 -tx1 /dev/urandom | tr -d ' \n'):"
+            [[ -n "${LAB_REDIS:-}" ]] || echo "REDIS_OWN=1"
+        } >"$STATE/redis.env"
+    fi
+    REDIS_OWN=""
+    # shellcheck disable=SC1091
+    source "$STATE/redis.env"
+}
+
+# The run journal's Redis: the one LAB_REDIS names, else a redis-server of the lab's own, started here with its data in
+# .state/redis and every write fsynced (a journal that never reuses an id needs it).
+start_redis() {
+    load_redis_settings
+    [[ -n "$REDIS_OWN" ]] || return 0
+    if ! command -v redis-server >/dev/null 2>&1; then
+        echo "The lab keeps its run journal in Redis and there is no redis-server here: install one, or set LAB_REDIS=host:port" >&2
+        echo "(tests/infra/start_infra.sh starts one on localhost:6390)." >&2
+        exit 1
+    fi
+    mkdir -p "$STATE/redis"
+    start redis redis-server --bind 127.0.0.1 --port "$REDIS_PORT" --dir "$STATE/redis" --appendonly yes --appendfsync always --save ""
+    for _ in $(seq 1 40); do
+        python3 -c 'import socket,sys; socket.create_connection(("127.0.0.1", int(sys.argv[1])), 1).close()' "$REDIS_PORT" 2>/dev/null && return
+        sleep 0.25
+    done
+    echo "Redis did not come up; see $STATE/logs/redis.log" >&2; exit 1
 }
 
 start() {
@@ -191,11 +235,13 @@ start_idp() {
 # Replaces this shell with the coordinator's server, in lab mode, on the lab's state and seeds. Extra
 # arguments are passed on. The one way the server starts, for this script and for tools/campaign.py.
 exec_coordinator() {
+    load_redis_settings
     exec dotnet "$STATE/bin/coordinator/DtPipe.Coordinator.Server.dll" --urls "$URL" \
         --Coordinator:StateDirectory="$STATE" --Coordinator:Authority="$IDP_URL" \
         --Coordinator:LabMode=true --Coordinator:Scenarios="$LAB/pipelines" \
         --Coordinator:LibrarySeed="$LAB/library-seed" --Coordinator:RightsSeed="$LAB/rights-seed.json" \
         --Coordinator:Ui:ClientSecret=coordinator-ui-lab-secret --Coordinator:Studio:ClientId=dtpipe-studio \
+        --Coordinator:Redis:ConnectionString="$REDIS_URL" --Coordinator:Redis:KeyPrefix="$REDIS_PREFIX" --Coordinator:Redis:Initialize=true \
         --Coordinator:Roles:Admin="${LAB_ADMIN:-labadmin}@dtpipe.test" \
         --Coordinator:Roles:Designer=labdesigner@dtpipe.test --Coordinator:Roles:Reader=labreader@dtpipe.test "$@"
 }
@@ -268,6 +314,7 @@ up() {
 
     echo "Starting"
     start_idp
+    start_redis
     start coordinator "$LAB/lab.sh" exec-coordinator
 
     for _ in $(seq 1 60); do
@@ -331,9 +378,9 @@ smoke_passes() {
 }
 
 down() {
-    local names=(coordinator idp "${ALL_PROCS[@]}")
-    # Nodes first, so each can tear down its own dtpipe children while the coordinator still answers.
-    for name in "${ALL_PROCS[@]}" coordinator idp; do
+    local names=(coordinator idp redis "${ALL_PROCS[@]}")
+    # Nodes first, so each can tear down its own dtpipe children while the coordinator still answers; Redis last, with the journal.
+    for name in "${ALL_PROCS[@]}" coordinator idp redis; do
         if is_running "$name"; then
             kill -TERM "$(cat "$STATE/run/$name.pid")" 2>/dev/null || true
         fi
@@ -355,7 +402,7 @@ down() {
 }
 
 status() {
-    for name in idp coordinator "${ALL_PROCS[@]}"; do
+    for name in idp redis coordinator "${ALL_PROCS[@]}"; do
         if is_running "$name"; then echo "  $name  running (pid $(cat "$STATE/run/$name.pid"))"; else echo "  $name  stopped"; fi
     done
     local pid args

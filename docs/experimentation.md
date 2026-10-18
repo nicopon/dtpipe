@@ -47,10 +47,12 @@ reaches its library from a studio. The command is in the
 
 ## Limits to know first
 
-- **The coordinator is one process, not a highly available service.** Its rights, its library, its
-  armed deployments and the history of its runs are files in its state directory and survive a
-  restart. A run in flight does not: it is ended as an error, keeps its id, and the nodes that
-  carried it are asked to abandon its fragments.
+- **The coordinator is one process, not a highly available service.** Its rights, its library and
+  its armed deployments are files in its state directory, and the history of its runs is in the
+  Redis it is configured with (`Coordinator:Redis:ConnectionString`). It does not start without
+  one, and a first start on an empty Redis needs `Coordinator:Redis:Initialize` set to true. All
+  of it survives a restart. A run in flight does not: it is ended as an error, keeps its id, and
+  the nodes that carried it are asked to abandon its fragments.
 - **One machine; Windows untried.** The lab has been exercised on a single macOS machine, as local
   processes and as a compose stack of Linux containers. A node is designed to run on Windows, which
   has not been tried.

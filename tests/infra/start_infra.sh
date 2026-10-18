@@ -96,6 +96,10 @@ is_db_ready() {
             $ENGINE_CMD exec "$container" nc -z 127.0.0.1 10000 >/dev/null 2>&1
             return $?
              ;;
+         "dtpipe-integ-redis")
+            $ENGINE_CMD exec "$container" redis-cli ping >/dev/null 2>&1
+            return $?
+             ;;
          *)
             return 0 # Default to success for others
              ;;
@@ -103,7 +107,7 @@ is_db_ready() {
 }
 
 # List of expected containers from docker-compose.yml
-CONTAINERS=("dtpipe-integ-postgres" "dtpipe-integ-mssql" "dtpipe-integ-oracle" "dtpipe-integ-mssql-tools" "dtpipe-integ-mysql" "dtpipe-integ-minio" "dtpipe-integ-azurite")
+CONTAINERS=("dtpipe-integ-postgres" "dtpipe-integ-mssql" "dtpipe-integ-oracle" "dtpipe-integ-mssql-tools" "dtpipe-integ-mysql" "dtpipe-integ-minio" "dtpipe-integ-azurite" "dtpipe-integ-redis")
 
 check_all_ready() {
     for container in "${CONTAINERS[@]}"; do

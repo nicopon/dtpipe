@@ -57,13 +57,13 @@ public sealed class DeploymentManagerTests : IDisposable
         };
         _rights = new RightsStore(options);
         _inventory = new NodeInventory(_registry);
-        _journal = new RunJournal(options, NullLogger<RunJournal>.Instance);
+        _journal = MemoryRunStore.Journal(options);
         _deployments = TestDeployments.Create(
             _inventory, _link, new NoRuns(), new ReplicaAdmission(_registry, _state), new RightsFlowControl(_rights), _rights, new EventBus(),
             _journal, options);
     }
 
-    public void Dispose() => Directory.Delete(_dir, recursive: true);
+    public void Dispose() { if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true); }
 
     private static BrickInfo Brick(string input) => new("src", BrickKind.Source, "source", "", $$"""{"input":"{{input}}"}""", null, null);
 

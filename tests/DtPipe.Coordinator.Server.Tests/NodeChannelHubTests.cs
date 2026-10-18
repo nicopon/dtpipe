@@ -46,10 +46,10 @@ public sealed class NodeChannelHubTests : IDisposable
         _rights = new RightsStore(_options);
         _inventory = new NodeInventory(_registry);
         // A run the last coordinator left in flight on node-known.
-        new RunJournal(_options, NullLogger<RunJournal>.Instance).Record(new RunView(
+        MemoryRunStore.Journal(_options).Record(new RunView(
             "run-3", "plan-1", RunState.Running, DateTimeOffset.UtcNow, null, null, null, null, "p", DateTimeOffset.UtcNow,
             new RunPlan("plan-1", null, [new RunPlanFragment("p@node-known", "node-known", "v1")], [])));
-        _orphans = new OrphanRuns(new RunJournal(_options, NullLogger<RunJournal>.Instance), _abandonments, NullLogger<OrphanRuns>.Instance);
+        _orphans = new OrphanRuns(MemoryRunStore.Journal(_options), _abandonments, NullLogger<OrphanRuns>.Instance);
         _protocol = new ReplicaProtocol(_registry, new NoRuns(), new InMemoryStateStore(), NullLogger<ReplicaProtocol>.Instance);
     }
 
@@ -60,7 +60,7 @@ public sealed class NodeChannelHubTests : IDisposable
         public Task<ExitedAck> OnExitedAsync(ReplicaKey replica, FragmentExit exit) => Task.FromResult(ExitedAck.NotAdmitted);
     }
 
-    public void Dispose() => Directory.Delete(_dir, recursive: true);
+    public void Dispose() { if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true); }
 
     private (NodeChannelHub Hub, Caller Caller) Connect(string connectionId, string subject)
     {

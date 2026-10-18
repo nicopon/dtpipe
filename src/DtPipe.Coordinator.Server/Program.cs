@@ -52,6 +52,8 @@ builder.Services.AddSingleton(services => new PipelineLibrary(
     services.GetRequiredService<AutoPlacer>().Check, services.GetRequiredService<AutoPlacer>().Resolve));
 builder.Services.AddSingleton<IJobSource>(services => services.GetRequiredService<PipelineLibrary>());
 builder.Services.AddSingleton<ILibraryHeads>(services => services.GetRequiredService<PipelineLibrary>());
+builder.Services.AddSingleton<IRunStore>(services =>
+    RedisRunStore.Connect(server.Redis, services.GetRequiredService<ILoggerFactory>().CreateLogger<RedisRunStore>()));
 builder.Services.AddSingleton<RunJournal>();
 builder.Services.AddSingleton<OrphanRuns>();
 builder.Services.AddSingleton<DeploymentManager>();
@@ -66,6 +68,11 @@ app.Use(async (context, next) =>
     catch (ConflictException ex)
     {
         context.Response.StatusCode = StatusCodes.Status409Conflict;
+        await context.Response.WriteAsJsonAsync(new { error = ex.Message });
+    }
+    catch (StoreUnavailableException ex)
+    {
+        context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
         await context.Response.WriteAsJsonAsync(new { error = ex.Message });
     }
 });

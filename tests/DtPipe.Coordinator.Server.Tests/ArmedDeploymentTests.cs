@@ -88,7 +88,7 @@ public sealed partial class ArmedDeploymentTests : IDisposable
         Restart();
     }
 
-    public void Dispose() => Directory.Delete(_dir, recursive: true);
+    public void Dispose() { if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true); }
 
     /// <summary>The rights: <c>n</c> and <c>m</c> in <c>crm</c>, runner <c>r2</c> in <c>crm</c>, and <c>r1</c> in <paramref name="runnerOneGroup"/>; crm may send to crm.</summary>
     private string Seed(string runnerOneGroup)
@@ -108,7 +108,7 @@ public sealed partial class ArmedDeploymentTests : IDisposable
     {
         var rights = new RightsStore(_options);
         var inventory = new NodeInventory(registry);
-        var journal = new RunJournal(_options, NullLogger<RunJournal>.Instance);
+        var journal = MemoryRunStore.Journal(_options);
         _bus = new EventBus();
         BrickCatalog? bricks = null;
         BindingVerifier? verifier = null;

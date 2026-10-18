@@ -81,61 +81,36 @@ public sealed class StateWireTests : IDisposable
     }
 
     [Fact]
-    public void The_Journal_Keeps_The_State_Of_A_Run_As_A_Lowercase_Word_In_Its_File_And_Reads_Every_Such_File_Back()
+    public void The_Journal_Keeps_The_State_Of_A_Run_As_A_Lowercase_Word_In_Its_Document_And_Reads_Every_Such_Document_Back()
     {
-        var journal = new RunJournal(OptionsIn(_dir), NullLogger<RunJournal>.Instance);
+        var journal = MemoryRunStore.Journal(OptionsIn(_dir));
         foreach (var (word, i) in RunWords.Select((w, i) => (w, i)))
             journal.Record(RunIn(word, $"run-{i + 1}"));
 
         foreach (var (word, i) in RunWords.Select((w, i) => (w, i)))
-            Assert.Contains($"\"state\": \"{word}\"", File.ReadAllText(Path.Combine(_dir, "runs", "p", $"run-{i + 1}.json")));
+            Assert.Contains($"\"state\":\"{word}\"", MemoryRunStore.At(_dir).Document($"run-{i + 1}"));
 
         // A restart ends a run that was queued or running.
-        var again = new RunJournal(OptionsIn(_dir), NullLogger<RunJournal>.Instance);
+        var again = MemoryRunStore.Journal(OptionsIn(_dir));
         Assert.Equal(RunWords.Select(w => w is "queued" or "running" ? "error" : w).Order(), again.List().Select(r => WordOf(r.State)).Order());
         Assert.Equal("run-8", again.NextRunId());
     }
 
-    /// <summary>A file written by hand in the journal's format, one per state: each is read back as it says, a run in flight as one the restart ended, and none makes the next id go down.</summary>
+    /// <summary>A document whose state is none of the seven, or a number, cannot be read: it is skipped, and the others are read and the journal starts.</summary>
     [Fact]
-    public void A_Journal_File_Of_Every_State_Is_Read_Back_And_The_Next_Id_Follows_The_Highest()
+    public void A_Journal_Document_Whose_State_Is_None_Of_The_Seven_Or_A_Number_Is_Skipped_And_The_Others_Are_Read()
     {
-        var runs = Path.Combine(_dir, "runs", "p");
-        Directory.CreateDirectory(runs);
-        foreach (var (word, i) in RunWords.Select((w, i) => (w, i)))
-            File.WriteAllText(Path.Combine(runs, $"run-{(i + 1) * 3}.json"), $$"""
-                {
-                  "runId": "run-{{(i + 1) * 3}}", "planId": "plan-1", "state": "{{word}}",
-                  "startedAt": "2026-01-01T00:00:00+00:00", "finishedAt": "2026-01-01T00:00:10+00:00",
-                  "result": null, "description": null, "refusal": null, "pipelineId": "p", "queuedAt": "2026-01-01T00:00:00+00:00"
-                }
-                """);
-
-        var journal = new RunJournal(OptionsIn(_dir), NullLogger<RunJournal>.Instance);
-
-        Assert.Equal(RunWords.Count(), journal.List().Count);
-        foreach (var (word, i) in RunWords.Select((w, i) => (w, i)))
-            Assert.Equal(word is "queued" or "running" ? "error" : word, WordOf(journal.List().Single(r => r.RunId == $"run-{(i + 1) * 3}").State));
-        Assert.Equal("run-22", journal.NextRunId());
-        Assert.All(journal.List(), r => Assert.True(r.IsOver));
-    }
-
-    /// <summary>A journal file whose state is none of the seven, or a number, cannot be read: it is skipped, and the others are read and the journal starts.</summary>
-    [Fact]
-    public void A_Journal_File_Whose_State_Is_None_Of_The_Seven_Or_A_Number_Is_Skipped_And_The_Others_Are_Read()
-    {
-        var runs = Path.Combine(_dir, "runs", "p");
-        Directory.CreateDirectory(runs);
+        var store = MemoryRunStore.At(_dir);
         foreach (var (id, state) in new[] { ("run-1", "\"succeeded\""), ("run-2", "\"paused\""), ("run-3", "3") })
-            File.WriteAllText(Path.Combine(runs, id + ".json"), $$"""
+            store.Seed(id, $$"""
                 {
                   "runId": "{{id}}", "planId": "plan-1", "state": {{state}},
                   "startedAt": "2026-01-01T00:00:00+00:00", "finishedAt": "2026-01-01T00:00:10+00:00",
                   "result": null, "description": null, "refusal": null, "pipelineId": "p", "queuedAt": "2026-01-01T00:00:00+00:00"
                 }
-                """);
+                """, over: true);
 
-        var journal = new RunJournal(OptionsIn(_dir), NullLogger<RunJournal>.Instance);
+        var journal = MemoryRunStore.Journal(OptionsIn(_dir));
 
         Assert.Equal("run-1", Assert.Single(journal.List()).RunId);
     }

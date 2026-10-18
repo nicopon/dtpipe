@@ -230,7 +230,8 @@ while any replica is connected.
   flight - and TransportR's own (the default in-memory store) live in the process: a restart loses
   all of it, and the transfers it carried are gone. **A restart is read from the host's run journal, never from what the
   nodes do next**: a replica announcing again is an ordinary announcement, never evidence of a run. The host journals each
-  run when it is queued, when it starts and when it ends; after a restart it ends the runs it finds in flight, and asks each
+  run when it is queued, when it starts and when it ends, in a store that outlives the process (the server's is Redis);
+  after a restart it ends the runs it finds in flight, and asks each
   replica of a node that carried a started run to abandon those fragments (`INodeLink.CancelAsync`, answered false by a
   replica that holds none). No message tells a node to drop what it holds on a guess: the authority is a journaled run.
   A restart that finds no journal, or a replica that never announces again, still falls to the operator, who restarts the

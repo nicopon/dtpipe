@@ -30,16 +30,16 @@ public sealed class OrphanRunsTests : IDisposable
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "orphans-" + Guid.NewGuid().ToString("N"));
     private readonly Abandonments _link = new();
 
-    public void Dispose() => Directory.Delete(_dir, recursive: true);
+    public void Dispose() { if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true); }
 
     private OrphanRuns Restarted(params (string RunId, string Fragment, string Node)[] runs)
     {
         var options = new CoordinatorServerOptions { StateDir = _dir, Authority = "http://idp", Audience = "test", UiClientId = "ui", UiClientSecret = "secret" };
-        var before = new RunJournal(options, NullLogger<RunJournal>.Instance);
+        var before = MemoryRunStore.Journal(options);
         foreach (var (runId, fragment, node) in runs)
             before.Record(new RunView(runId, "plan", RunState.Running, DateTimeOffset.UtcNow, null, null, null, null, "p", DateTimeOffset.UtcNow,
                 new RunPlan("plan", null, [new RunPlanFragment(fragment, node, "v1")], [])));
-        return new OrphanRuns(new RunJournal(options, NullLogger<RunJournal>.Instance), _link, NullLogger<OrphanRuns>.Instance);
+        return new OrphanRuns(MemoryRunStore.Journal(options), _link, NullLogger<OrphanRuns>.Instance);
     }
 
     private static async Task Settled(Func<bool> condition)

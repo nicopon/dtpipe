@@ -21,8 +21,9 @@ disposable hosts of `DtPipe.PipelineNode.Hosting`. They drive the `dtpipe` binar
 ## Quick start
 
 Prerequisites: the .NET 10 SDK, `python3`, a bash shell, network access to nuget.org for the
-TransportR `0.5.1` packages (restored like any other dependency of `DtPipe.Coordinator`), and a
-built binary:
+TransportR `0.5.1` packages (restored like any other dependency of `DtPipe.Coordinator`), a
+`redis-server` on the path (or `LAB_REDIS=host:port` naming a Redis; `tests/infra/start_infra.sh`
+starts one on `localhost:6390`) and a built binary:
 
 ```bash
 ./build.sh                          # at the repository root: produces dist/release/dtpipe
@@ -257,7 +258,8 @@ planning ever sends a job as written.
 save and each save of bindings is a commit. Armed deployments are kept apart, in `.state/deployments`. A seed `<id>.yaml` brings its `<id>.bindings.json`, which binds each source and sink branch to a
 node and a brick and a mode (`strict`: the branch must stay that brick, word for word; `contract`, `compatible`, `tolerant`: the brick may change, judged against what the last check pinned); the runner is never bound. Several pipelines may be deployed at once. Their runs are in
 flight together when they share no data node; otherwise they wait their turn in the order they came
-(the runner never counts). Finished runs are kept in `.state/runs/`.
+(the runner never counts). Runs are kept in Redis, under a key prefix derived from the state directory,
+so a throw-away `LAB_STATE` sees no other lab's runs.
 
 
 ## Lab view scenarios (`/lab/`)
@@ -334,7 +336,7 @@ replica ran each fragment.
   fragment: the coordinator's log carries the refusal.
 - One run at a time per data node: the runner's fragments of two runs share its host with no bound
   on either. The coordinator is not highly available: a restart ends the runs in flight as errors (they keep their ids and the journal
-  holds them), and asks the node hosts that carried them to abandon their fragments when they announce again; the library, the armed
+  holds them, in Redis), and asks the node hosts that carried them to abandon their fragments when they announce again; the library, the armed
   deployments and the finished runs survive. A host that does not announce again keeps its fragments until it is restarted
   (`./lab.sh down`, then `./lab.sh up`). Nothing reconstructs a run from the nodes reconnecting: the journal is the authority.
 - A studio knows a source brick's columns, not those after a step: dtpipe offers no schema of
