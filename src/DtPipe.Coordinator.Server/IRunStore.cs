@@ -9,11 +9,15 @@ public sealed record StoredRun(string RunId, string Document, bool Over, DateTim
 /// <summary>What <see cref="IRunStore.Load"/> found: the documents of runs not over, and those of the latest runs that are, newest first.</summary>
 public sealed record StoredRuns(IReadOnlyList<string> InFlight, IReadOnlyList<string> History);
 
+/// <summary>A fragment of a run a restart interrupted, which the replicas of <see cref="Node"/> are still to be asked to abandon.</summary>
+public sealed record OwedFragment(string RunId, string Fragment, string Node);
+
 /// <summary>The store cannot be reached or did not answer in time: nothing it was asked to keep was kept.</summary>
 public sealed class StoreUnavailableException(string message, Exception? inner = null) : Exception(message, inner);
 
 /// <summary>
-/// What <see cref="RunJournal"/> keeps beyond the process: the runs by id and the counter that gives their ids. One coordinator
+/// What <see cref="RunJournal"/> keeps beyond the process: the runs by id, the counter that gives their ids and the
+/// abandonments still owed. One coordinator
 /// writes it. A store holds documents and indexes, never the shape of a run: the journal serializes.
 /// A call that cannot reach the store throws <see cref="StoreUnavailableException"/> having changed nothing.
 /// </summary>
@@ -21,6 +25,9 @@ public interface IRunStore
 {
     /// <summary>The runs that are over a store keeps in its history.</summary>
     const int Window = 200;
+
+    /// <summary>How long an abandonment stays owed: the child of an interrupted run is most often already gone.</summary>
+    static readonly TimeSpan OwedFor = TimeSpan.FromHours(24);
 
     /// <summary>The next id number, one greater than any it gave: it is atomic and never goes back.</summary>
     long NextSequence();
@@ -40,4 +47,13 @@ public interface IRunStore
 
     /// <summary>The runs in flight and the latest <see cref="Window"/> runs that are over, newest first.</summary>
     StoredRuns Load();
+
+    /// <summary>Records abandonments owed until <paramref name="until"/>.</summary>
+    void AddOwed(IReadOnlyCollection<OwedFragment> owed, DateTimeOffset until);
+
+    /// <summary>The abandonments still owed at <paramref name="now"/>; those that fell due are forgotten.</summary>
+    IReadOnlyList<OwedFragment> ReadOwed(DateTimeOffset now);
+
+    /// <summary>Settles an abandonment: a replica held that fragment and gave it up.</summary>
+    void RemoveOwed(OwedFragment owed);
 }

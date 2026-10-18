@@ -67,7 +67,8 @@ public sealed record RunView(
 /// Every run, a JSON document each in the <see cref="IRunStore"/>, read back at start. Runs are what happened, not what was
 /// designed: the library's git history never holds them. A run is written when it is queued, again when it starts and when it
 /// ends, so a restart finds what it interrupted: those runs are ended then (<see cref="RestartedRefusal"/>), and the ones that had
-/// started are <see cref="Orphans"/>, whose children may still run. History (<see cref="List"/>, <see cref="Find"/>) holds the runs
+/// started leave their fragments <see cref="Owed"/>: their children may still run, and the abandonment is kept in the store until
+/// a replica gives them up, so a second restart before the replicas announce forgets nothing. History (<see cref="List"/>, <see cref="Find"/>) holds the runs
 /// that are over and keeps the latest <see cref="IRunStore.Window"/>, in memory as in the store; a run in flight is in the store
 /// only. A run not yet over that cannot be written throws <see cref="StoreUnavailableException"/>, so none starts without its
 /// record; one that is over is kept in memory whatever the store says, since refusing it would help nobody, and a store that missed
@@ -108,9 +109,15 @@ public sealed class RunJournal
         // The counter is raised to every id read, before the window: a run's id and its start time do not follow one order.
         store.RaiseSequenceTo(loaded.Keys.Select(IdNumber).DefaultIfEmpty(0).Max());
         foreach (var run in loaded.Values.Where(r => r.IsOver)) _runs.Add(run);
-        foreach (var run in loaded.Values.Where(r => !r.IsOver))
+        var interrupted = loaded.Values.Where(r => !r.IsOver).ToList();
+        // Owed before the runs are ended: a crash between the two finds the runs in flight again and owes them again.
+        store.AddOwed(
+            [.. interrupted.Where(r => r.State == RunState.Running && r.Plan is not null)
+                .SelectMany(r => r.Plan!.Fragments.Select(f => new OwedFragment(r.RunId, f.Name, f.Node)))],
+            DateTimeOffset.UtcNow + IRunStore.OwedFor);
+        Owed = store.ReadOwed(DateTimeOffset.UtcNow);
+        foreach (var run in interrupted)
         {
-            if (run.State == RunState.Running && run.Plan is not null) Orphans.Add(run);
             var ended = run with { State = RunState.Error, FinishedAt = DateTimeOffset.UtcNow, Refusal = RestartedRefusal };
             Write(ended);
             _runs.Add(ended);
@@ -121,8 +128,21 @@ public sealed class RunJournal
         if (_runs.Count > Kept) _runs.RemoveRange(Kept, _runs.Count - Kept);
     }
 
-    /// <summary>The runs a restart found started and not over: their fragments were placed on replicas, and their children may still run.</summary>
-    public List<RunView> Orphans { get; } = [];
+    /// <summary>The fragments of runs that started and were interrupted, whose replicas have not all given them up: their children may still run.</summary>
+    public IReadOnlyList<OwedFragment> Owed { get; }
+
+    /// <summary>A replica gave the fragment up. A store that cannot say so leaves it owed, to be asked again at the next start.</summary>
+    public void Settle(OwedFragment owed)
+    {
+        try
+        {
+            _store.RemoveOwed(owed);
+        }
+        catch (StoreUnavailableException ex)
+        {
+            _logger.LogWarning("{Fragment} of run {RunId} stays owed; it is asked again at the next start: {Error}", owed.Fragment, owed.RunId, ex.Message);
+        }
+    }
 
     public string NextRunId() => $"run-{_store.NextSequence()}";
 

@@ -114,10 +114,10 @@ public sealed class RunJournalTests
         Assert.All(again.List(), r => Assert.Equal((RunState.Error, RunJournal.RestartedRefusal), (r.State, r.Refusal)));
         Assert.Equal(["run-4", "run-9"], again.List().Select(r => r.RunId).Order());
         Assert.NotNull(again.Find(r => r.IdempotencyKey == "k-run-9")!.FinishedAt);
-        Assert.Equal("run-9", Assert.Single(again.Orphans).RunId);
+        Assert.Equal(new OwedFragment("run-9", "p@n", "n"), Assert.Single(again.Owed));
         Assert.Equal("run-10", again.NextRunId());
-        // The store says the run is over: a second restart finds no orphan and ends nothing again.
-        Assert.Empty(Open().Orphans);
+        // The store says the run is over: a second restart ends nothing again, and the abandonment is still owed.
+        Assert.Equal("run-9", Assert.Single(Open().Owed).RunId);
     }
 
     [Fact]
@@ -128,7 +128,7 @@ public sealed class RunJournalTests
         var again = Open();
 
         Assert.Equal(RunState.Error, Assert.Single(again.List()).State);
-        Assert.Empty(again.Orphans);
+        Assert.Empty(again.Owed);
     }
 
     [Fact]

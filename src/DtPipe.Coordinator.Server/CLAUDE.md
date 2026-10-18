@@ -307,17 +307,18 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   throws `StoreUnavailableException`** (503 from the middleware of `Program.cs`), so none is queued or started
   without its record; a run that is over is kept in memory whatever the store says and only logged, and a store that missed it
   leaves it in flight for the next start to end. A command that finds Redis disconnected fails at once instead of waiting in a
-  backlog. At start `RunJournal` gives each run it finds queued or running the state `error` and `RestartedRefusal`, and lists the
-  ones that had started as `Orphans`; `OrphanRuns` asks every replica of an orphan fragment's node, once, when it announces with
-  its data plane client (`NodeChannelHub.Announce`, off the hub's thread), to abandon it, until a replica answers that it held it;
-  the authority is the journal, never what an announcement says. **An id is never given twice**: the counter is raised at start to
+  backlog. At start `RunJournal` gives each run it finds queued or running the state `error` and `RestartedRefusal`, and owes
+  the fragments of the ones that had started (`RunJournal.Owed`, written to the store before the run is ended, and kept until a replica gives
+  the fragment up or a day passes); `OrphanRuns` asks every replica of an owed fragment's node, once, when it announces with
+  its data plane client (`NodeChannelHub.Announce`, off the hub's thread), to abandon it, until a replica answers that it held it,
+  so a second restart before the replicas announce keeps the obligation; the authority is the journal, never what an announcement says. **An id is never given twice**: the counter is raised at start to
   the highest id read and never lowered, and a store with no counter and no run (a first start, or Redis that lost its data) refuses
   to start unless `Coordinator:Redis:Initialize` is true, since the ids would begin again. Redis must therefore persist every write
   (`appendonly yes`, `appendfsync always`: the lab's and `tests/infra`'s). `Coordinator:Redis:ConnectionString` is a secret
   (read it from the environment) and is in no log or message, only the endpoints; `KeyPrefix` separates coordinators on one Redis.
   A reason that goes into `RunView.Refusal` is the server's own text, never a Redis message.
   `[local: RunJournalTests, RunQueueTests, OrphanRunsTests, NodeChannelHubTests; RedisRunStoreTests (needs DTPIPE_TEST_REDIS or
-  DTPIPE_TEST_REUSE_INFRA); tools/campaign.py F4]` `[unchecked: a second restart before the replicas announce forgets the list; a wired
+  DTPIPE_TEST_REUSE_INFRA); tools/campaign.py F4]` `[unchecked: a wired
   child with nothing to write ends only once a relay touches its torn-down transfer; a Redis that loses a write it acknowledged]`
 - **A run that was placed records the replica of each fragment.** `RunJournal` keeps the `RunResult` whole,
   `RunResult.Replicas` included: an instance id and the `Origin` the replica announced, untrusted text the pages

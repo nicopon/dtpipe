@@ -103,6 +103,23 @@ public sealed class RedisRunStoreTests : IDisposable
     }
 
     [Fact]
+    public void An_Abandonment_Owed_Survives_A_Restart_Until_It_Is_Settled_Or_Falls_Due()
+    {
+        NeedRedis();
+        var store = Open();
+        var kept = new OwedFragment("run-1", "p@n", "n");
+        var gone = new OwedFragment("run-2", "q@m", "m");
+        var now = DateTimeOffset.UtcNow;
+        store.AddOwed([kept, gone], now.AddHours(1));
+        store.AddOwed([new OwedFragment("run-3", "r@n", "n")], now.AddSeconds(-1));
+
+        Assert.Equal([kept, gone], Open().ReadOwed(now).OrderBy(o => o.RunId));
+
+        store.RemoveOwed(gone);
+        Assert.Equal([kept], Open().ReadOwed(now));
+    }
+
+    [Fact]
     public void The_History_Keeps_The_Latest_Two_Hundred_And_Drops_The_Documents_It_Cuts()
     {
         NeedRedis();

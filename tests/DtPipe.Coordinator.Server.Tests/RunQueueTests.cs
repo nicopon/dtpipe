@@ -314,7 +314,7 @@ public sealed class RunQueueTests : IDisposable
             journal, _options, _jobs);
 
         Assert.Equal([RunState.Error, RunState.Error], new[] { running.Run.RunId, waiting.Run.RunId }.Select(id => journal.Find(r => r.RunId == id)!.State));
-        Assert.Equal(running.Run.RunId, Assert.Single(journal.Orphans).RunId);
+        Assert.Equal(running.Run.RunId, Assert.Single(journal.Owed).RunId);
         Assert.Equal(running.Run.RunId, restarted.Launch("p", "cron", "night-1").Run.RunId);
         Assert.Empty(restarted.Queue);
         Assert.True(int.Parse(journal.NextRunId().Split('-').Last()) > int.Parse(waiting.Run.RunId.Split('-').Last()));

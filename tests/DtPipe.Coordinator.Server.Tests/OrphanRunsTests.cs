@@ -98,6 +98,24 @@ public sealed class OrphanRunsTests : IDisposable
     }
 
     [Fact]
+    public async Task A_Second_Restart_Before_Any_Replica_Announces_Still_Owes_The_Abandonment_Until_A_Replica_Gives_It_Up()
+    {
+        Restarted(("run-1", "p@n", "n"));
+        var options = new CoordinatorServerOptions { StateDir = _dir, Authority = "http://idp", Audience = "test", UiClientId = "ui", UiClientSecret = "secret" };
+        var orphans = new OrphanRuns(MemoryRunStore.Journal(options), _link, NullLogger<OrphanRuns>.Instance);
+        var holder = Replica("sub-n", "a");
+        _link.Holders.Add(holder);
+
+        orphans.OnAnnounced(holder, "n");
+        await Settled(() => _link.Asked.Count == 1);
+        await Task.Delay(100);
+
+        Assert.Equal([(holder, "run-1", "p@n")], _link.Asked);
+        // The replica held it and gave it up: a third start owes nothing.
+        Assert.Empty(MemoryRunStore.Journal(options).Owed);
+    }
+
+    [Fact]
     public async Task A_Coordinator_With_Nothing_Interrupted_Asks_Nobody()
     {
         var orphans = Restarted();

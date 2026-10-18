@@ -16,6 +16,7 @@ public sealed class MemoryRunStore : IRunStore
     private readonly Dictionary<string, string> _documents = [];
     private readonly HashSet<string> _active = [];
     private readonly List<(string Id, DateTimeOffset At)> _history = [];
+    private readonly Dictionary<OwedFragment, DateTimeOffset> _owed = [];
     private long _seq;
 
     /// <summary>The store a test names; the same one every time it is asked for the same name.</summary>
@@ -69,6 +70,25 @@ public sealed class MemoryRunStore : IRunStore
             }
             else _active.Add(run.RunId);
         }
+    }
+
+    public void AddOwed(IReadOnlyCollection<OwedFragment> owed, DateTimeOffset until)
+    {
+        lock (_lock) foreach (var o in owed) _owed[o] = until;
+    }
+
+    public IReadOnlyList<OwedFragment> ReadOwed(DateTimeOffset now)
+    {
+        lock (_lock)
+        {
+            foreach (var due in _owed.Where(o => o.Value <= now).Select(o => o.Key).ToList()) _owed.Remove(due);
+            return [.. _owed.Keys];
+        }
+    }
+
+    public void RemoveOwed(OwedFragment owed)
+    {
+        lock (_lock) _owed.Remove(owed);
     }
 
     public StoredRuns Load()

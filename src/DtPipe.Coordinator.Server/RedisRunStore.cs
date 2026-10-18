@@ -5,7 +5,8 @@ namespace DtPipe.Coordinator.Server;
 
 /// <summary>
 /// <see cref="IRunStore"/> on Redis, under keys that start with the configured prefix: <c>seq</c> (the counter), <c>run:{id}</c> (a
-/// document), <c>active</c> (the ids not over), <c>history</c> (the ids that are over, ranked by when they ended). A write is one transaction, and the cut of the history a second step that
+/// document), <c>active</c> (the ids not over), <c>history</c> (the ids that are over, ranked by when they ended) and <c>owed</c>
+/// (the abandonments, ranked by when they fall due). A write is one transaction, and the cut of the history a second step that
 /// can be repeated. A document is the truth and the indexes follow it, so the journal heals an index a crash left behind.
 /// A connection string is a secret: no message here carries it, only the endpoints.
 /// </summary>
@@ -22,13 +23,13 @@ public sealed class RedisRunStore : IRunStore, IDisposable
     private readonly ConnectionMultiplexer _redis;
     private readonly IDatabase _db;
     private readonly bool _initialize;
-    private readonly RedisKey _seq, _active, _history;
+    private readonly RedisKey _seq, _active, _history, _owed;
     private readonly string _prefix;
 
     private RedisRunStore(ConnectionMultiplexer redis, RedisSettings settings)
     {
         (_redis, _db, _initialize, _prefix) = (redis, redis.GetDatabase(), settings.Initialize, settings.KeyPrefix);
-        (_seq, _active, _history) = (_prefix + "seq", _prefix + "active", _prefix + "history");
+        (_seq, _active, _history, _owed) = (_prefix + "seq", _prefix + "active", _prefix + "history", _prefix + "owed");
     }
 
     /// <summary>Connects, and refuses when Redis cannot be reached now: a coordinator that cannot journal does not start.</summary>
@@ -115,6 +116,21 @@ public sealed class RedisRunStore : IRunStore, IDisposable
         }
         return new StoredRuns(inFlight, over);
     });
+
+    public void AddOwed(IReadOnlyCollection<OwedFragment> owed, DateTimeOffset until) => Call(() =>
+    {
+        if (owed.Count == 0) return 0;
+        _db.SortedSetAdd(_owed, [.. owed.Select(o => new SortedSetEntry(JsonSerializer.Serialize(o), until.ToUnixTimeMilliseconds()))]);
+        return 0;
+    });
+
+    public IReadOnlyList<OwedFragment> ReadOwed(DateTimeOffset now) => Call(() =>
+    {
+        _db.SortedSetRemoveRangeByScore(_owed, double.NegativeInfinity, now.ToUnixTimeMilliseconds());
+        return (IReadOnlyList<OwedFragment>)[.. _db.SortedSetRangeByRank(_owed).Select(m => JsonSerializer.Deserialize<OwedFragment>(m.ToString())!)];
+    });
+
+    public void RemoveOwed(OwedFragment owed) => Call(() => _db.SortedSetRemove(_owed, JsonSerializer.Serialize(owed)));
 
     public void Dispose() => _redis.Dispose();
 
