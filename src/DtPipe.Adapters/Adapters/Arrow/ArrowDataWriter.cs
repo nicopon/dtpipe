@@ -39,8 +39,10 @@ public sealed class ArrowAdapterDataWriter : IColumnarDataWriter, IRequiresOptio
         using (batch)
         {
             // The first batch declares the stream: only a batch carries a timestamp's zone and the
-            // metadata of an extension type, which the columns cannot.
-            OpenIpcWriter(batch.Schema);
+            // metadata of an extension type, which the columns cannot. A later batch is written
+            // under that header, so one that differs is refused rather than written unreadable.
+            if (!IsOpen) OpenIpcWriter(batch.Schema);
+            else RequireHeaderSchema(batch.Schema);
             if (_isIpcFile)
                 await _arrowFileWriter!.WriteRecordBatchAsync(batch, ct);
             else
@@ -160,6 +162,32 @@ public sealed class ArrowAdapterDataWriter : IColumnarDataWriter, IRequiresOptio
 		// What a stream with no batch declares; replaced by the first batch's own schema.
 		_schema = BuildSchema(columns);
 	}
+
+	private bool IsOpen => _arrowStreamWriter != null || _arrowFileWriter != null;
+
+	private void RequireHeaderSchema(Schema batchSchema)
+	{
+		var header = _schema!;
+		if (ReferenceEquals(header, batchSchema)) return;
+
+		var expected = header.FieldsList;
+		var actual = batchSchema.FieldsList;
+		if (expected.Count != actual.Count)
+			throw Drift($"it carries {actual.Count} columns where the stream declared {expected.Count}");
+
+		for (var i = 0; i < expected.Count; i++)
+		{
+			var key = FieldKey(expected[i]);
+			if (key == FieldKey(actual[i])) continue;
+			throw Drift($"column {i} '{actual[i].Name}' is {key} in the stream and {FieldKey(actual[i])} in this batch");
+		}
+	}
+
+	private static string FieldKey(Field field)
+		=> ArrowSchemaSerializer.SerializeCompact(new Schema([field], null));
+
+	private static InvalidOperationException Drift(string detail)
+		=> new($"Arrow writer: a batch differs from the stream's schema, which the first batch fixed: {detail}.");
 
 	private void OpenIpcWriter(Schema schema)
 	{

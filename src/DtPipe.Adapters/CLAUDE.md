@@ -42,7 +42,12 @@ A timestamp's zone and an extension type's metadata (`arrow.uuid`) live on the b
 with that batch's schema, so the stream reads back under the contract it left with; the target
 (file, stdout or pipe) is opened at `InitializeAsync`. With no batch, `CompleteAsync` writes the
 schema of the columns explicitly: the end marker alone carries none, and an empty stream would
-otherwise tell the next fragment nothing. `[CI: ArrowWriterSchemaFidelityTests, validate_arrow_roundtrip.sh]`
+otherwise tell the next fragment nothing.
+
+That header holds for the whole stream: a later batch whose columns differ from it (count, name, type,
+zone, nullability, field metadata) is refused with the column named, never written under a header it
+does not match. No conversion, per the core rule. `[CI: ArrowWriterSchemaFidelityTests,
+validate_arrow_roundtrip.sh]`
 
 ## Writing adapter help (`[Description]` / `[ComponentHelp]`)
 

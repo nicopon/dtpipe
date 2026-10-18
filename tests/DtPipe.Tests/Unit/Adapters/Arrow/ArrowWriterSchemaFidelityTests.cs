@@ -101,4 +101,26 @@ public class ArrowWriterSchemaFidelityTests : IDisposable
 		Assert.Equal(["ts", "u"], schema.FieldsList.Select(f => f.Name));
 		Assert.IsType<TimestampType>(schema.GetFieldByName("ts").DataType);
 	}
+
+	[Theory]
+	[InlineData("drift.arrow")]
+	[InlineData("drift.ipc")]
+	public async Task A_Later_Batch_That_Differs_From_The_First_Is_Refused(string name)
+	{
+		var path = Path.Combine(_dir, name);
+		var otherZone = new TimestampType(TimeUnit.Microsecond, "UTC");
+		var schema = new Schema.Builder()
+			.Field(new Field("ts", otherZone, true))
+			.Field(new Field("u", new FixedSizeBinaryType(16), true))
+			.Build();
+		var ts = new TimestampArray.Builder(otherZone).Append(DateTimeOffset.UnixEpoch).Build();
+		var uuids = new FixedSizeBinaryArrayBuilder(16);
+		ArrowTypeMapper.AppendValue(uuids, Guid.NewGuid());
+		var u = uuids.Build();
+		var drifted = new RecordBatch(schema, [ts, u], 1);
+
+		var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => WriteAsync(path, RichBatch(), drifted));
+
+		Assert.Contains("'ts'", ex.Message);
+	}
 }
