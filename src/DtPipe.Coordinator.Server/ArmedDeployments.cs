@@ -23,56 +23,40 @@ public interface IJobSource
 }
 
 /// <summary>
-/// The armed deployments, one JSON file each under <c>deployments/</c> in the state directory, outside git like the run
-/// journal, read back at start. A file that cannot be read is skipped with a warning.
+/// The armed deployments as <see cref="DeploymentService"/> sees them: each serialized as one JSON document in an
+/// <see cref="IDeploymentStore"/>, read back at start. A document that cannot be read, or that names another pipeline than its
+/// own, is skipped with a warning, and its pipeline is then not armed. An id that is no library id has no document, and the store
+/// is never asked for it.
 /// </summary>
-internal sealed class DeploymentStore
+internal sealed class DeploymentStore(IDeploymentStore store, ILogger logger)
 {
-    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
-
-    private readonly string _dir;
-    private readonly ILogger _logger;
-
-    public DeploymentStore(string stateDir, ILogger logger)
-    {
-        _dir = Path.Combine(stateDir, "deployments");
-        _logger = logger;
-        Directory.CreateDirectory(_dir);
-    }
+    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     public IReadOnlyList<ArmedDeployment> Load()
     {
         var armed = new List<ArmedDeployment>();
-        foreach (var file in Directory.EnumerateFiles(_dir, "*.json"))
+        foreach (var stored in store.Load())
         {
             try
             {
-                var record = JsonSerializer.Deserialize<ArmedDeployment>(File.ReadAllText(file), Json);
-                if (record is null || !PipelineLibrary.IsValidId(record.PipelineId) || Path.GetFileNameWithoutExtension(file) != record.PipelineId)
-                    throw new JsonException("it does not name the pipeline of its file");
+                var record = JsonSerializer.Deserialize<ArmedDeployment>(stored.Document, Json);
+                if (record is null || !PipelineLibrary.IsValidId(record.PipelineId) || record.PipelineId != stored.PipelineId)
+                    throw new JsonException("it does not name the pipeline it is kept for");
                 armed.Add(record);
             }
-            catch (Exception ex) when (ex is JsonException or IOException)
+            catch (JsonException ex)
             {
-                _logger.LogWarning("Deployment {File} skipped: {Error}", file, ex.Message);
+                logger.LogWarning("Deployment {Pipeline} skipped: {Error}", stored.PipelineId, ex.Message);
             }
         }
         return armed;
     }
 
-    public void Save(ArmedDeployment armed)
-    {
-        var path = PathOf(armed.PipelineId);
-        var temporary = path + ".tmp";
-        File.WriteAllText(temporary, JsonSerializer.Serialize(armed, Json));
-        File.Move(temporary, path, overwrite: true);
-    }
+    public void Save(ArmedDeployment armed) => store.Save(armed.PipelineId, JsonSerializer.Serialize(armed, Json));
 
-    /// <summary>Forgets the pipeline's armed deployment, if it has one; a lab plan's id may be no library id and has no file.</summary>
+    /// <summary>Forgets the pipeline's armed deployment, if it has one; a lab plan's id may be no library id and has no document.</summary>
     public void Delete(string pipelineId)
     {
-        if (PipelineLibrary.IsValidId(pipelineId)) File.Delete(PathOf(pipelineId));
+        if (PipelineLibrary.IsValidId(pipelineId)) store.Delete(pipelineId);
     }
-
-    private string PathOf(string pipelineId) => Path.Combine(_dir, pipelineId + ".json");
 }

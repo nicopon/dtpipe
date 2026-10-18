@@ -255,11 +255,11 @@ reader or writer. The switch belongs to the host's own environment, and only the
 planning ever sends a job as written.
 
 **The library** is a git repository under `.state/library`, started from `library-seed/`: each
-save and each save of bindings is a commit. Armed deployments are kept apart, in `.state/deployments`. A seed `<id>.yaml` brings its `<id>.bindings.json`, which binds each source and sink branch to a
+save and each save of bindings is a commit. Armed deployments are kept in Redis, like the runs. A seed `<id>.yaml` brings its `<id>.bindings.json`, which binds each source and sink branch to a
 node and a brick and a mode (`strict`: the branch must stay that brick, word for word; `contract`, `compatible`, `tolerant`: the brick may change, judged against what the last check pinned); the runner is never bound. Several pipelines may be deployed at once. Their runs are in
 flight together when they share no data node; otherwise they wait their turn in the order they came
-(the runner never counts). Runs are kept in Redis, under a key prefix derived from the state directory,
-so a throw-away `LAB_STATE` sees no other lab's runs.
+(the runner never counts). Runs and armed deployments are kept in Redis, under a key prefix derived from the state directory,
+so a throw-away `LAB_STATE` sees no other lab's runs or deployments.
 
 
 ## Lab view scenarios (`/lab/`)

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Starts, stops and inspects the distributed lab: one coordinator, four data-node hosts and a
 # runner, as plain local processes. Everything the lab writes lives under .state/ (databases,
-# fragments, library, logs); the run journal lives in Redis.
+# fragments, library, logs); the run journal, the rights and the armed deployments live in Redis.
 #
 #   ./lab.sh up        build, seed if needed, start everything, print the page URL
 #                      (LAB_NODE_SANDBOX=1 starts the nodes in sandbox mode: see "nodes";
 #                      LAB_REPLICAS="node-4=2,runner-1=2" starts that many hosts for those nodes,
 #                      all of one identity: the first is named for the node, the others <node>.r2, ...)
-#   LAB_REDIS=H:P      the Redis that keeps the run journal. Unset, `up` starts the redis-server it finds on LAB_REDIS_PORT
+#   LAB_REDIS=H:P      the Redis that keeps the coordinator's state. Unset, `up` starts the redis-server it finds on LAB_REDIS_PORT
 #                      (5191) with its data under .state/redis, and fails naming what is missing when there is none; any
 #                      Redis does (tests/infra/start_infra.sh starts one on localhost:6390). `up` records the Redis and a
 #                      random key prefix in .state/redis.env, which every later call reads back: a reset lab starts a

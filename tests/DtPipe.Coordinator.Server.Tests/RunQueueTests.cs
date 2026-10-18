@@ -585,7 +585,8 @@ public sealed class RunQueueTests : IDisposable
         _link.CheckGate.SetResult(new FragmentCheck(true));
         await deploying;
         await RunningAsync(second.RunId);
-        Assert.True(_runs.Saw(second.RunId));
+        // The run is Running a few statements before the orchestrator is handed it.
+        await UntilAsync(() => _runs.Saw(second.RunId), "the orchestrator to be handed the run");
         _runs.End(second.RunId, RunOutcome.Succeeded);
         await FinishedAsync(second.RunId);
     }

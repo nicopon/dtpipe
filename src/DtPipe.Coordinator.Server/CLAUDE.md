@@ -223,8 +223,8 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   `.yaml` per pipeline, for a new state directory) and `Coordinator:RightsSeed` (for rights Redis does not hold); with neither, the library has no pipeline
   and the rights no identity and an empty matrix: nobody may send anything until an administrator
   says so. The library is a git repository of its own under `library/` in the state directory,
-  driven by the `git` command line with a fixed identity (the image needs `git`); armed deployments live
-  in `deployments/`, outside git and read back at start, and run history in Redis (see "A run is journaled as it goes"); the Lab view's fixed plan is in memory.
+  driven by the `git` command line with a fixed identity (the image needs `git`); armed deployments and run history are in Redis
+  (see "A deployment is the coordinator's" and "A run is journaled as it goes"); the Lab view's fixed plan is in memory.
 - **Cuts inside a branch belong to `dtpipe split`**, run on the node whose data the branch reads
   (`BranchCut`: the branch alone, its two halves back); a branch that reads no node's data is not
   cut. `PlanBuilder` puts the consumer half in the branch's place, only regroups whole branches
@@ -259,9 +259,8 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   `[local: DtPipe.Coordinator.Server.Tests, Hosting.Tests FragmentJobTests, the lab's smoke.py, ui_check.py]`
   `[unchecked: a site that hashes on its own]`
 - **A deployment is the coordinator's, and nothing of it is left on a node.** A library pipeline is *armed*: `{pipeline, commit
-  of the job, the bindings at that commit, when, by whom}` (`ArmedDeployment`), written to `deployments/<id>.json` once its
-  deployment is ready and read back at start as ready, with no check, since no replica is connected yet; undeploying, a refused
-  arming and a fixed plan that replaces it delete the file, so memory and disk change together. A run reads the job at the armed
+  of the job, the bindings at that commit, when, by whom}` (`ArmedDeployment`), kept in Redis once its deployment is ready and read
+  back at start as ready, with no check, since no replica is connected yet. A run reads the job at the armed
   commit (`IJobSource`, the library) and the armed bindings, never the library as it is now. A node whose identity is gone stays
   armed, and a run is refused naming it. `DeployAsync` is the Lab view's fixed plan, in memory only. Deploying plans as a launch
   would, then asks every connected replica of each node whether it would run the fragments (`Check`, answered, spawning nothing)
@@ -272,6 +271,24 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   later is as good as one that was asked, and one that goes takes nothing with it: what decides a run is
   admission, at the run. A deployment's gate is held while it is deployed or removed; a run passes it to
   read the state and does not hold it. `[local: DeploymentManagerTests, RunQueueTests, ArmedDeploymentTests, the lab's smoke.py]`
+- **The armed deployments are in Redis, read once, and memory is the truth.** `DeploymentStore` is a thin face over
+  `IDeploymentStore` (`RedisDeploymentStore`): one hash at `{prefix}deployments`, a field per pipeline holding its JSON document, on the
+  connection every store borrows. `DeploymentService` loads it when it is built, so a Redis that cannot be read stops the start; a
+  document that cannot be read, or that names another pipeline than its field, is skipped with a warning, and its pipeline is then not
+  armed (`/health/pipelines/{id}` says `critical`, `not-armed`, for a supervisor that asks for it, and the pipeline is absent from the
+  listing). A write names no version: the deployment's gate and `ThrowIfBusy` serialize the writers of one pipeline and one
+  coordinator writes. **The store is written before memory changes and never under the ledger's lock.** A deployment replaces another
+  only after the store has forgotten the earlier one; an armed deployment is ready only after the store has kept it; an undeploy
+  forgets it in the store before memory does. A store that refuses (`StoreUnavailableException`, 503) therefore leaves the earlier
+  deployment as it was, or, when it refuses the record of a deployment whose check passed, removes that deployment from memory and
+  answers 503 (the clean-up that follows only logs when it fails, so the error the caller reads is the one that ended the arming). An id that is no library id
+  (the Lab view's fixed plan) has no record and never reaches the store. Redis that comes back empty is no failure to open: a pipeline with
+  no record is not armed and nothing runs, which `/health` reports. **Limit**: a write that timed out may have been applied. An arming whose
+  record was kept while memory refused it is read back ready at the next start, with no check; an undeploy or a replacement whose
+  forgetting was kept while the call timed out leaves the deployment in memory until the next start, when it is gone. Arm the pipeline
+  again (it replaces the record), or undeploy it after the restart.
+  `[local: ArmedDeploymentTests, DeploymentRoutesTests; RedisDeploymentStoreTests (needs DTPIPE_TEST_REDIS or DTPIPE_TEST_REUSE_INFRA)]`
+  `[unchecked: a Redis that loses a write it acknowledged; a write that times out and is applied]`
 - **Deployments and runs are decided under one lock.** `DeploymentManager` is what the routes call, over three
   parts and the one `DeploymentLedger` they share: `DeploymentService` (the deployments), `RunQueue` (the queue
   and the dispatch) and `LabFaults`. A decision that reads both sides, such as a deployment refused while a run of

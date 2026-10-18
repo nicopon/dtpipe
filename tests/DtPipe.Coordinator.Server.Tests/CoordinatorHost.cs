@@ -42,8 +42,12 @@ public sealed class CoordinatorHost(string? studioClientId = CoordinatorHost.Stu
     /// <summary>The rights' store; <c>Down</c> makes every call fail as an unreachable Redis does.</summary>
     internal FailingRightsStore Rights => _rights ??= new FailingRightsStore(MemoryRightsStore.At(_state));
 
+    /// <summary>The armed deployments' store; <c>Down</c> makes every call fail as an unreachable Redis does.</summary>
+    internal FailingDeploymentStore Deployments => _deployments ??= new FailingDeploymentStore(MemoryDeploymentStore.At(_state));
+
     private FailingRunStore? _runs;
     private FailingRightsStore? _rights;
+    private FailingDeploymentStore? _deployments;
 
     /// <summary>The server's state directory, which the host removes when it is disposed.</summary>
     public string StateDirectory => _state;
@@ -61,9 +65,10 @@ public sealed class CoordinatorHost(string? studioClientId = CoordinatorHost.Stu
         builder.ConfigureTestServices(services =>
         {
             // What the coordinator keeps beyond the process is in memory: the real store is Redis, which these tests are not about.
-            // Either can be taken down, as Redis can.
+            // Each can be taken down, as Redis can.
             services.AddSingleton<IRunStore>(Runs);
             services.AddSingleton<IRightsStore>(Rights);
+            services.AddSingleton<IDeploymentStore>(Deployments);
             services.AddSingleton<IXmlRepository>(new MemoryXmlRepository());
             if (check is not null) services.AddSingleton<DesignValidator>(new StubValidator(check, bindings => CheckedBindings = bindings));
             var configuration = new OpenIdConnectConfiguration

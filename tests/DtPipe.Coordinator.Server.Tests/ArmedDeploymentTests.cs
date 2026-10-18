@@ -10,7 +10,7 @@ namespace DtPipe.Coordinator.Server.Tests;
 
 /// <summary>
 /// A library pipeline is armed at a commit and planned when it is launched: the runner is chosen then, the plan a run ran is
-/// journaled with it, and what is armed is kept on disk and read back. Two data nodes (<c>n</c>, <c>m</c>) and two runners
+/// journaled with it, and what is armed is kept in a store and read back. Two data nodes (<c>n</c>, <c>m</c>) and two runners
 /// (<c>r1</c>, <c>r2</c>) share one state directory across the "restart" the tests make.
 /// </summary>
 public sealed partial class ArmedDeploymentTests : IDisposable
@@ -24,8 +24,12 @@ public sealed partial class ArmedDeploymentTests : IDisposable
         /// <summary>When set, the replicas answer <c>Check</c> only once it completes: an arming stays under way until then.</summary>
         public Task? Hold { get; set; }
 
+        /// <summary>Completes when a replica is first asked to <c>Check</c>.</summary>
+        public TaskCompletionSource Asked { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public async Task<FragmentCheck> CheckAsync(ReplicaKey replica, FragmentSpec spec, CancellationToken ct)
         {
+            Asked.TrySetResult();
             if (Hold is not null) await Hold;
             return new FragmentCheck(true);
         }
@@ -60,6 +64,7 @@ public sealed partial class ArmedDeploymentTests : IDisposable
     private NodeInventory _inventory;
     private RunJournal _journal;
     private DeploymentManager _deployments;
+    private FailingDeploymentStore _store = null!;
     private int _connections;
     private Func<BrickCatalog, NodeRequests, BindingVerifier>? _verifier;
     private EventBus _bus = new();
@@ -112,13 +117,15 @@ public sealed partial class ArmedDeploymentTests : IDisposable
         _bus = new EventBus();
         BrickCatalog? bricks = null;
         BindingVerifier? verifier = null;
+        _store = new FailingDeploymentStore(MemoryDeploymentStore.At(_options.StateDir));
         var deployments = TestDeployments.Create(
             inventory, _link, _runs, new ReplicaAdmission(registry, _state), new RightsFlowControl(rights), rights, _bus, journal, _options, _jobs,
             (b, requests) =>
             {
                 bricks = b;
                 return verifier = _verifier?.Invoke(b, requests) ?? new BindingVerifier(b, requests);
-            });
+            },
+            _store);
         _health = new PipelineHealth(
             deployments, _jobs, _heads, new AutoPlacer(bricks!, inventory, null!, rights), verifier!, bricks!, inventory, journal, _bus, _options,
             NullLogger<PipelineHealth>.Instance, _time);
@@ -239,7 +246,7 @@ public sealed partial class ArmedDeploymentTests : IDisposable
         await NodeAsync("r1", "crm", NodeRole.Runner);
         var armed = Armed();
         await _deployments.ArmAsync(armed, Job, CancellationToken.None);
-        Assert.True(File.Exists(Path.Combine(_dir, "state", "deployments", "p.json")));
+        Assert.Equal(["p"], StoredPipelines());
 
         Restart();
 
@@ -303,23 +310,64 @@ public sealed partial class ArmedDeploymentTests : IDisposable
         Assert.Contains("cannot be read at 01234567", refused.Refusal);
     }
 
+    private IReadOnlyList<string> StoredPipelines() => MemoryDeploymentStore.At(_options.StateDir).Pipelines();
+
     [Fact]
-    public async Task Undeploying_Or_Replacing_An_Armed_Deployment_Leaves_No_File()
+    public async Task Undeploying_Or_Replacing_An_Armed_Deployment_Leaves_No_Record()
     {
         await NodeAsync("n", "crm", NodeRole.Data);
         await NodeAsync("r1", "crm", NodeRole.Runner);
-        var file = Path.Combine(_dir, "state", "deployments", "p.json");
         await _deployments.ArmAsync(Armed(), Job, CancellationToken.None);
-        Assert.True(File.Exists(file));
+        Assert.Equal(["p"], StoredPipelines());
 
         await _deployments.UndeployAsync("p", CancellationToken.None);
-        Assert.False(File.Exists(file));
+        Assert.Empty(StoredPipelines());
 
         await _deployments.ArmAsync(Armed(), Job, CancellationToken.None);
         var fixedPlan = (await _deployments.PlanLaunchAsync("p", Job, Armed().Bindings, CancellationToken.None)).Plan;
         await _deployments.DeployAsync(fixedPlan, "lab", CancellationToken.None);
-        Assert.False(File.Exists(file));
+        Assert.Empty(StoredPipelines());
         Assert.Null(_deployments.ArmedOf("p"));
+    }
+
+    [Fact]
+    public async Task A_Store_That_Is_Down_Leaves_The_Armed_Deployment_Where_It_Was()
+    {
+        await NodeAsync("n", "crm", NodeRole.Data);
+        await NodeAsync("r1", "crm", NodeRole.Runner);
+        var armed = Armed();
+        await _deployments.ArmAsync(armed, Job, CancellationToken.None);
+
+        _store.Down = true;
+        await Assert.ThrowsAsync<StoreUnavailableException>(() => _deployments.UndeployAsync("p", CancellationToken.None));
+        await Assert.ThrowsAsync<StoreUnavailableException>(() => _deployments.ArmAsync(Armed(), Job, CancellationToken.None));
+
+        // Nothing changed: the deployment is armed, ready and kept, and no refusal was published for an arming that never began.
+        Assert.Equal(armed.Commit, _deployments.ArmedOf("p")!.Commit);
+        Assert.Equal(DeploymentState.Ready, Assert.Single(await _deployments.DeploymentsAsync()).State);
+        _store.Down = false;
+        Assert.Equal(["p"], StoredPipelines());
+    }
+
+    [Fact]
+    public async Task An_Arming_The_Store_Cannot_Keep_Is_Refused_And_Not_Left_In_Memory()
+    {
+        await NodeAsync("n", "crm", NodeRole.Data);
+        await NodeAsync("r1", "crm", NodeRole.Runner);
+        var hold = new TaskCompletionSource();
+        _link.Hold = hold.Task;
+
+        // The store is up when the arming begins and down when it would keep the deployment.
+        var arming = _deployments.ArmAsync(Armed(), Job, CancellationToken.None);
+        await _link.Asked.Task.WaitAsync(Wait);
+        _store.Down = true;
+        hold.SetResult();
+
+        await Assert.ThrowsAsync<StoreUnavailableException>(() => arming);
+        Assert.Null(_deployments.ArmedOf("p"));
+        Assert.Empty(await _deployments.DeploymentsAsync());
+        _store.Down = false;
+        Assert.Empty(StoredPipelines());
     }
 
     // ---- Bindings in a mode other than strict ----

@@ -16,7 +16,7 @@ internal sealed class FakeJobs : IJobSource
         Fault is { } fault ? Task.FromException<string?>(fault) : Task.FromResult(Jobs.TryGetValue((pipelineId, commit), out var job) ? job : null);
 }
 
-/// <summary>Builds a <see cref="DeploymentManager"/> over the parts a test already holds, planning with the real planner.</summary>
+/// <summary>Builds a <see cref="DeploymentManager"/> over the parts a test already holds, planning with the real planner; its store is the options' state directory's, unless given.</summary>
 internal static class TestDeployments
 {
     private sealed class NoHub : IHubContext<NodeChannelHub>
@@ -28,13 +28,13 @@ internal static class TestDeployments
     public static DeploymentManager Create(
         NodeInventory inventory, INodeLink link, IRunOrchestrator runs, ReplicaAdmission admission, IFlowControlService flow,
         RightsStore rights, EventBus bus, RunJournal journal, CoordinatorServerOptions options, IJobSource? jobs = null,
-        Func<BrickCatalog, NodeRequests, BindingVerifier>? verifier = null)
+        Func<BrickCatalog, NodeRequests, BindingVerifier>? verifier = null, IDeploymentStore? store = null)
     {
         var bricks = new BrickCatalog(inventory);
         var requests = new NodeRequests(inventory, new NoHub());
         var planner = new PlanBuilder(inventory, requests, bricks, new PlanRegistry(flow), rights);
         return new DeploymentManager(
             inventory, link, runs, admission, flow, rights, bus, journal, new AutoPlacer(bricks, inventory, planner, rights), bricks,
-            verifier?.Invoke(bricks, requests) ?? new BindingVerifier(bricks, requests), jobs ?? new FakeJobs(), options, NullLogger<DeploymentManager>.Instance);
+            verifier?.Invoke(bricks, requests) ?? new BindingVerifier(bricks, requests), jobs ?? new FakeJobs(), store ?? MemoryDeploymentStore.At(options.StateDir), NullLogger<DeploymentManager>.Instance);
     }
 }

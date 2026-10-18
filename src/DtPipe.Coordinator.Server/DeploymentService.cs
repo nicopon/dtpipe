@@ -11,7 +11,8 @@ namespace DtPipe.Coordinator.Server;
 /// fragment has a replica that says so and that admission could place a run on. Nothing is left on a node, so a replica that
 /// arrives later is as good as one that was asked, and one that goes away takes nothing with it. What decides a run is
 /// admission, at the run. Each deployment has a gate, held while it is deployed or removed; a run passes it to read the state
-/// and does not hold it while it runs.
+/// and does not hold it while it runs. The store is written before memory is changed and before a deployment is ready, and never
+/// under the ledger's lock: a store that refuses leaves memory as it was, or removes the deployment that could not be kept.
 /// </summary>
 internal sealed class DeploymentService
 {
@@ -140,28 +141,34 @@ internal sealed class DeploymentService
         await deployment.Gate.WaitAsync(ct);
         try
         {
-            lock (_ledger.Lock)
-            {
-                _ledger.Deployments[pipelineId] = deployment;
-                _ledger.LastDeployed = pipelineId;
-            }
-            // Memory and disk change together: what replaces an armed deployment leaves no file behind.
+            // The store first: a store that refuses leaves the earlier deployment as it was, and what replaces an armed
+            // deployment leaves no record behind whether or not the new one is kept.
             _store.Delete(pipelineId);
-            Publish(deployment);
+            try
+            {
+                lock (_ledger.Lock)
+                {
+                    _ledger.Deployments[pipelineId] = deployment;
+                    _ledger.LastDeployed = pipelineId;
+                }
+                Publish(deployment);
 
-            await CheckAsync(deployment, ct);
-            deployment.State = DeploymentState.Ready;
-            if (deployment.Armed is { } armed) _store.Save(armed);
-            Publish(deployment);
-        }
-        catch (Exception ex)
-        {
-            // A deployment is all of its fragments or none: a refused one is not kept.
-            deployment.State = DeploymentState.Failed;
-            deployment.Message = ex.Message;
-            Publish(deployment);
-            Forget(deployment);
-            throw;
+                await CheckAsync(deployment, ct);
+                // Ready only once the store has it: an armed deployment that could not be kept is not kept.
+                if (deployment.Armed is { } armed) _store.Save(armed);
+                deployment.State = DeploymentState.Ready;
+                Publish(deployment);
+            }
+            catch (Exception ex)
+            {
+                // A deployment is all of its fragments or none: a refused one is not kept.
+                deployment.State = DeploymentState.Failed;
+                // A store's own message names its endpoints: the pages get the server's words.
+                deployment.Message = ex is StoreUnavailableException ? "The coordinator's store is unavailable, so the deployment could not be kept." : ex.Message;
+                Publish(deployment);
+                Forget(deployment);
+                throw;
+            }
         }
         finally
         {
@@ -217,7 +224,9 @@ internal sealed class DeploymentService
             if (_ledger.LastDeployed == deployment.PipelineId)
                 _ledger.LastDeployed = _ledger.Deployments.Values.OrderByDescending(d => d.DeployedAt).FirstOrDefault()?.PipelineId;
         }
-        _store.Delete(deployment.PipelineId);
+        // Called on the way out of a failure: a store that cannot forget it must not hide why the deployment was refused.
+        try { _store.Delete(deployment.PipelineId); }
+        catch (StoreUnavailableException ex) { _logger.LogWarning(ex, "The store could not forget the refused deployment of {Pipeline}", deployment.PipelineId); }
         PublishDeployments();
     }
 
@@ -232,12 +241,13 @@ internal sealed class DeploymentService
         await deployment.Gate.WaitAsync(ct);
         try
         {
+            // The store first: a store that refuses leaves the deployment in place, and the removal is asked again.
+            _store.Delete(pipelineId);
             lock (_ledger.Lock)
             {
                 _ledger.Deployments.Remove(pipelineId);
                 if (_ledger.LastDeployed == pipelineId) _ledger.LastDeployed = _ledger.Deployments.Values.OrderByDescending(d => d.DeployedAt).FirstOrDefault()?.PipelineId;
             }
-            _store.Delete(pipelineId);
             _bus.Publish("deploy", new { planId = deployment.PlanId, pipelineId, state = "undeployed" });
             PublishDeployments();
         }

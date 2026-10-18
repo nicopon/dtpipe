@@ -59,6 +59,7 @@ builder.Services.AddSingleton(services => new PipelineLibrary(
 builder.Services.AddSingleton<IJobSource>(services => services.GetRequiredService<PipelineLibrary>());
 builder.Services.AddSingleton<ILibraryHeads>(services => services.GetRequiredService<PipelineLibrary>());
 builder.Services.AddSingleton<IRunStore, RedisRunStore>();
+builder.Services.AddSingleton<IDeploymentStore, RedisDeploymentStore>();
 builder.Services.AddSingleton<RunJournal>();
 builder.Services.AddSingleton<OrphanRuns>();
 builder.Services.AddSingleton<DeploymentManager>();

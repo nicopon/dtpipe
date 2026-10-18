@@ -1234,7 +1234,7 @@ def preflight():
     found = [("stray", f"{kind} pid {pid} (parent {ppid}) {args[:140]}") for pid, ppid, kind, args in bench.foreign(STATE, NODES)]
     found += [("busy", f"pid {pid}: {why}: {args[:140]}") for pid, why, args in bench.busy_machine(STATE, NODES, os.path.dirname(TOXI))]
     found += [("version", p) for p in bench.frozen_problems(repo, DTPIPE, STATE, NODES, os.environ.get("CAMPAIGN_FROZEN"))]
-    found += [("deployments", p) for p in bench.armed_deployments(STATE, [i["name"] for i in S.call("/api/rights")["identities"]])]
+    found += [("deployments", p) for p in bench.armed_deployments(S.call("/api/deployments"), [i["name"] for i in S.call("/api/rights")["identities"]])]
     return found
 
 

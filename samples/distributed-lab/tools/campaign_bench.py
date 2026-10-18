@@ -4,7 +4,6 @@ through the proxies the campaign creates and doubles a node, which no verdict sh
 a run plans from the bindings it was armed with, and one that binds a node the rights give no identity is refused,
 which every trial would then read as a failure of the lab."""
 import glob
-import json
 import os
 import re
 import subprocess
@@ -162,22 +161,17 @@ def launched_binaries(state_dir, node_names):
     return values
 
 
-def armed_deployments(state_dir, identity_names):
+def armed_deployments(deployments, identity_names):
     """Why an armed deployment cannot run as the rights stand, as a list of sentences (empty when every one can): each node
     its bindings name must have an identity (`identity_names`, as the coordinator's rights give them), since a plan is made at
-    each launch from the rights as they are."""
+    each launch from the rights as they are. `deployments` is what `/api/deployments` lists: a deployment that is armed names
+    the nodes of its bindings, a plan the Lab view fixed names none and is not judged."""
     names = set(identity_names)
     problems = []
-    for path in sorted(glob.glob(os.path.join(state_dir, "deployments", "*.json"))):
-        pipeline = os.path.splitext(os.path.basename(path))[0]
-        try:
-            with open(path, encoding="utf-8") as f:
-                nodes = {b["node"] for b in json.load(f)["bindings"].values()}
-        except (OSError, ValueError, KeyError, TypeError) as e:
-            problems.append(f"the armed deployment of {pipeline} cannot be read: {e}")
-            continue
+    for deployment in sorted(deployments, key=lambda d: d["pipelineId"]):
+        nodes = set(deployment.get("nodes") or [])
         if nodes - names:
-            problems.append(f"the armed deployment of {pipeline} binds {', '.join(sorted(nodes - names))}, which the rights give no identity")
+            problems.append(f"the armed deployment of {deployment['pipelineId']} binds {', '.join(sorted(nodes - names))}, which the rights give no identity")
     return problems
 
 
