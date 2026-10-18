@@ -327,7 +327,8 @@ public sealed partial class PipelineLibrary : IJobSource, ILibraryHeads
             UseShellExecute = false,
         };
         // A fixed identity, and nothing from any repository that encloses the state directory.
-        foreach (var arg in new[] { "-c", "user.name=dtpipe-coordinator", "-c", "user.email=coordinator@localhost", "-c", "commit.gpgsign=false", "-c", "core.quotepath=false" })
+        // No maintenance: git would detach one after each commit, writing into the repository beyond the call.
+        foreach (var arg in new[] { "-c", "user.name=dtpipe-coordinator", "-c", "user.email=coordinator@localhost", "-c", "commit.gpgsign=false", "-c", "core.quotepath=false", "-c", "gc.auto=0", "-c", "maintenance.auto=false" })
             psi.ArgumentList.Add(arg);
         foreach (var arg in args) psi.ArgumentList.Add(arg);
         psi.Environment.Remove("GIT_DIR");
