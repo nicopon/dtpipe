@@ -1,10 +1,11 @@
 namespace DtPipe.Coordinator.Server;
 
 /// <summary>
-/// The Redis that keeps the run journal (<c>Coordinator:Redis</c>). <see cref="ConnectionString"/> is a secret when it holds a
-/// password: it is read from the environment (<c>Coordinator__Redis__ConnectionString</c>) and written in no log or message.
-/// <see cref="KeyPrefix"/> lets several coordinators share one Redis. <see cref="Initialize"/> allows a journal to begin where
-/// Redis holds none: the first start, or after Redis lost its data.
+/// The Redis that keeps the coordinator's state: the run journal, the rights and the session keys (<c>Coordinator:Redis</c>).
+/// <see cref="ConnectionString"/> is a secret when it holds a password: it is read from the environment
+/// (<c>Coordinator__Redis__ConnectionString</c>) and written in no log or message.
+/// <see cref="KeyPrefix"/> lets several coordinators share one Redis. <see cref="Initialize"/> allows the journal and the rights to
+/// begin where Redis holds none: the first start, or after Redis lost its data.
 /// </summary>
 public sealed record RedisSettings(string? ConnectionString = null, string KeyPrefix = "dtpipe-coordinator:", bool Initialize = false);
 

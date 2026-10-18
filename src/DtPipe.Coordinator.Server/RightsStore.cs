@@ -45,8 +45,8 @@ public sealed record RightsDocument(
     List<Identity> Identities, Dictionary<string, List<string>> Matrix, List<AuditEntry>? Audit = null);
 
 /// <summary>
-/// Who may send what to whom, in one editable document, <c>rights.json</c> in the state directory,
-/// started from <see cref="CoordinatorServerOptions.RightsSeed"/>:
+/// Who may send what to whom, in one editable document kept in an <see cref="IRightsStore"/>, started from
+/// <see cref="CoordinatorServerOptions.RightsSeed"/> when the store holds none:
 /// <list type="bullet">
 /// <item><b>who</b>: the clients of the trusted IdP this coordinator grants anything to; the name and
 ///   the groups of a node are its identity's, never ones it declares or its token carries;</item>
@@ -54,42 +54,49 @@ public sealed record RightsDocument(
 ///   transfer and by the planner on every plan. A node sends to another only if every group of the
 ///   sender may send to every group of the receiver.</item>
 /// </list>
+/// The document is read once, at start, and memory is the truth after it: a reader never waits for the store. A change is made on a
+/// copy, written, and published only when the store kept it, so a store that refuses leaves the rights as they were. A write that
+/// finds the store at another version than the one this store last read (another writer, or an earlier write acknowledged late)
+/// reads the document again and refuses that one change.
 /// </summary>
 public sealed class RightsStore
 {
     private const int AuditKept = 200;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
-    private readonly string _path;
-    private readonly object _lock = new();
-    private RightsDocument _doc;
+    private sealed record State(RightsDocument Doc, long Version);
+
+    private readonly IRightsStore _store;
+    private readonly object _write = new();
+    // Replaced whole, never edited: a reader takes the reference once and needs no lock.
+    private volatile State _state;
 
     public event Action? Changed;
 
-    public RightsStore(CoordinatorServerOptions options)
+    public RightsStore(IRightsStore store, CoordinatorServerOptions options)
     {
-        _path = Path.Combine(options.StateDir, "rights.json");
-        // A new state directory starts from the seed, or from no identity and an empty matrix: nobody
+        _store = store;
+        // A new store starts from the seed, or from no identity and an empty matrix: nobody
         // may send anything until an administrator says so.
-        var source = File.Exists(_path) ? _path : options.RightsSeed;
-        _doc = source is null
-            ? new RightsDocument([], [])
-            : JsonSerializer.Deserialize<RightsDocument>(File.ReadAllText(source), Json)
-              ?? throw new InvalidOperationException($"{source}: empty rights document.");
-        _doc = _doc with { Identities = [.. _doc.Identities.Select(Normalized)], Audit = _doc.Audit ?? [] };
-        CheckUnique(_doc.Identities);
-        if (source != _path) Save(source is null ? "Rights started empty" : $"Rights started from {Path.GetFileName(source)}");
+        if (store.Load() is not { } stored)
+        {
+            var seed = options.RightsSeed;
+            var doc = seed is null ? new RightsDocument([], []) : Read(File.ReadAllText(seed), seed);
+            doc = Record(Prepared(doc), seed is null ? "Rights started empty" : $"Rights started from {Path.GetFileName(seed)}", null);
+            if (store.Create(Serialize(doc)))
+            {
+                _state = new State(doc, 1);
+                return;
+            }
+            // A start that crossed this one wrote first: its document is the rights.
+            stored = store.Load() ?? throw new InvalidOperationException("The rights document disappeared while the coordinator started.");
+        }
+        _state = new State(Prepared(Read(stored.Document, "the rights store")), stored.Version);
     }
 
-    public RightsDocument Snapshot()
-    {
-        lock (_lock) return JsonSerializer.Deserialize<RightsDocument>(JsonSerializer.Serialize(_doc, Json), Json)!;
-    }
+    public RightsDocument Snapshot() => Copy(_state.Doc);
 
-    public Identity? Find(string? clientId)
-    {
-        lock (_lock) return _doc.Identities.FirstOrDefault(i => i.ClientId == clientId);
-    }
+    public Identity? Find(string? clientId) => _state.Doc.Identities.FirstOrDefault(i => i.ClientId == clientId);
 
     /// <summary>
     /// The subject node <paramref name="node"/> connects under: the client id of the one identity that
@@ -97,32 +104,23 @@ public sealed class RightsStore
     /// carries the name any more, or when the identity is disabled, as nothing then says who may host the
     /// node's fragments.
     /// </summary>
-    public string SubjectOf(string node)
-    {
-        lock (_lock) return ActiveHostLocked(node, "who may host its fragments").ClientId;
-    }
+    public string SubjectOf(string node) => ActiveHost(node, "who may host its fragments").ClientId;
 
     /// <summary>
     /// The groups the rights give the node named <paramref name="node"/> now, which its replicas' data plane clients must hold.
     /// Refused for a node with no identity or a disabled one, as <see cref="SubjectOf"/> is.
     /// </summary>
-    public IReadOnlyList<string> GroupsOf(string node)
-    {
-        lock (_lock) return ActiveHostLocked(node, "which groups it holds").Groups;
-    }
+    public IReadOnlyList<string> GroupsOf(string node) => ActiveHost(node, "which groups it holds").Groups;
 
     /// <summary>The identity that carries the node name <paramref name="node"/>, enabled or not; a name that a monitor carries is no node's.</summary>
-    public Identity? NodeIdentity(string node)
-    {
-        lock (_lock) return IdentityNamedLocked(node);
-    }
+    public Identity? NodeIdentity(string node) => IdentityNamed(_state.Doc, node);
 
-    private Identity? IdentityNamedLocked(string node) => _doc.Identities.FirstOrDefault(i => i.IsNode && i.Name == node);
+    private static Identity? IdentityNamed(RightsDocument doc, string node) => doc.Identities.FirstOrDefault(i => i.IsNode && i.Name == node);
 
     /// <summary>The identity that can host <paramref name="node"/> now: the one that carries the name, if it is enabled.</summary>
-    private Identity ActiveHostLocked(string node, string nothingSays)
+    private Identity ActiveHost(string node, string nothingSays)
     {
-        var identity = IdentityNamedLocked(node)
+        var identity = IdentityNamed(_state.Doc, node)
             ?? throw new ConflictException($"Node '{node}' has no identity in the rights: nothing says {nothingSays}.");
         return identity.Enabled
             ? identity
@@ -131,92 +129,80 @@ public sealed class RightsStore
 
     public IReadOnlyList<string> Groups()
     {
-        lock (_lock)
-        {
-            return _doc.Identities.SelectMany(i => i.Groups).Concat(_doc.Matrix.Keys).Concat(_doc.Matrix.Values.SelectMany(v => v))
-                .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
-        }
+        var doc = _state.Doc;
+        return doc.Identities.SelectMany(i => i.Groups).Concat(doc.Matrix.Keys).Concat(doc.Matrix.Values.SelectMany(v => v))
+            .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
     }
 
     /// <summary>Whether every group of the sender may send to every group of the receiver; false when either has none.</summary>
     public bool CanSend(IReadOnlySet<string> from, IReadOnlySet<string> to)
     {
-        lock (_lock) return from.Count > 0 && to.Count > 0 && from.All(f => to.All(t => AllowedLocked(f, t)));
+        var doc = _state.Doc;
+        return from.Count > 0 && to.Count > 0 && from.All(f => to.All(t => Allowed(doc, f, t)));
     }
 
-    private bool AllowedLocked(string from, string to) =>
-        _doc.Matrix.TryGetValue(from, out var targets) && (targets.Contains("*") || targets.Contains(to, StringComparer.OrdinalIgnoreCase));
+    private static bool Allowed(RightsDocument doc, string from, string to) =>
+        doc.Matrix.TryGetValue(from, out var targets) && (targets.Contains("*") || targets.Contains(to, StringComparer.OrdinalIgnoreCase));
 
-    public void SetMatrix(Dictionary<string, List<string>> matrix, string? by = null)
+    public void SetMatrix(Dictionary<string, List<string>> matrix, string? by = null) => Edit(by, doc =>
     {
-        lock (_lock)
+        var changes = new List<string>();
+        foreach (var group in matrix.Keys.Union(doc.Matrix.Keys).Order(StringComparer.Ordinal))
         {
-            var changes = new List<string>();
-            foreach (var group in matrix.Keys.Union(_doc.Matrix.Keys).Order(StringComparer.Ordinal))
-            {
-                var before = _doc.Matrix.GetValueOrDefault(group) ?? [];
-                var after = matrix.GetValueOrDefault(group) ?? [];
-                foreach (var t in after.Except(before)) changes.Add($"{group} → {t} allowed");
-                foreach (var t in before.Except(after)) changes.Add($"{group} → {t} revoked");
-            }
-            _doc.Matrix.Clear();
-            foreach (var (group, targets) in matrix) _doc.Matrix[group] = targets.Distinct().Order(StringComparer.Ordinal).ToList();
-            Save(changes.Count > 0 ? "Flow matrix: " + string.Join(", ", changes) : "Flow matrix saved, unchanged", by);
+            var before = doc.Matrix.GetValueOrDefault(group) ?? [];
+            var after = matrix.GetValueOrDefault(group) ?? [];
+            foreach (var t in after.Except(before)) changes.Add($"{group} → {t} allowed");
+            foreach (var t in before.Except(after)) changes.Add($"{group} → {t} revoked");
         }
-    }
+        doc.Matrix.Clear();
+        foreach (var (group, targets) in matrix) doc.Matrix[group] = targets.Distinct().Order(StringComparer.Ordinal).ToList();
+        return changes.Count > 0 ? "Flow matrix: " + string.Join(", ", changes) : "Flow matrix saved, unchanged";
+    });
 
-    public void AddIdentity(Identity identity, string? by = null)
+    public void AddIdentity(Identity identity, string? by = null) => Edit(by, doc =>
     {
-        lock (_lock)
-        {
-            if (_doc.Identities.Any(i => i.ClientId == identity.ClientId)) throw new ConflictException($"'{identity.ClientId}' already exists.");
-            var added = Normalized(identity);
-            CheckUnique([.. _doc.Identities, added]);
-            _doc.Identities.Add(added);
-            Save(added.IsNode
-                ? $"Identity {added.ClientId} added (node {added.Name}, groups {string.Join(", ", added.Groups)})"
-                : added.Kind == IdentityKinds.Launcher
-                    ? $"Identity {added.ClientId} added ({added.Kind} {added.Name}, pipelines {string.Join(", ", added.Pipelines!)})"
-                    : $"Identity {added.ClientId} added ({added.Kind} {added.Name})", by);
-        }
-    }
+        if (doc.Identities.Any(i => i.ClientId == identity.ClientId)) throw new ConflictException($"'{identity.ClientId}' already exists.");
+        var added = Normalized(identity);
+        CheckUnique([.. doc.Identities, added]);
+        doc.Identities.Add(added);
+        return added.IsNode
+            ? $"Identity {added.ClientId} added (node {added.Name}, groups {string.Join(", ", added.Groups)})"
+            : added.Kind == IdentityKinds.Launcher
+                ? $"Identity {added.ClientId} added ({added.Kind} {added.Name}, pipelines {string.Join(", ", added.Pipelines!)})"
+                : $"Identity {added.ClientId} added ({added.Kind} {added.Name})";
+    });
 
     /// <summary>
     /// Edits an identity. An argument that is null is left as the identity has it: an edit says what it changes, and a field it
-    /// leaves out is neither emptied, renamed nor enabled by the omission. The identity is read and written under one lock.
+    /// leaves out is neither emptied, renamed nor enabled by the omission. The identity is read and written as one change.
     /// </summary>
-    public void UpdateIdentity(string clientId, string? name, string? description, IReadOnlyList<string>? groups, bool? enabled, string? by = null, IReadOnlyList<string>? pipelines = null)
-    {
-        lock (_lock)
+    public void UpdateIdentity(string clientId, string? name, string? description, IReadOnlyList<string>? groups, bool? enabled, string? by = null, IReadOnlyList<string>? pipelines = null) =>
+        Edit(by, doc =>
         {
-            var index = _doc.Identities.FindIndex(i => i.ClientId == clientId);
+            var index = doc.Identities.FindIndex(i => i.ClientId == clientId);
             if (index < 0) throw new ConflictException($"'{clientId}' does not exist.");
-            var before = _doc.Identities[index];
+            var before = doc.Identities[index];
             var after = Normalized(before with
             {
                 Name = name ?? before.Name, Description = description ?? before.Description,
                 Groups = groups ?? before.Groups, Enabled = enabled ?? before.Enabled, Pipelines = pipelines ?? before.Pipelines,
             });
-            CheckUnique(_doc.Identities.Select((i, at) => at == index ? after : i).ToList());
-            _doc.Identities[index] = after;
+            CheckUnique(doc.Identities.Select((i, at) => at == index ? after : i).ToList());
+            doc.Identities[index] = after;
             var changes = new List<string>();
             if (!before.Groups.SequenceEqual(after.Groups)) changes.Add($"groups {string.Join("+", before.Groups)} → {string.Join("+", after.Groups)}");
             if (!(before.Pipelines ?? []).SequenceEqual(after.Pipelines!)) changes.Add($"pipelines {string.Join("+", before.Pipelines ?? [])} → {string.Join("+", after.Pipelines!)}");
             if (before.Name != after.Name) changes.Add($"node {before.Name} → {after.Name}");
             if (before.Enabled != after.Enabled) changes.Add(after.Enabled ? "enabled" : "disabled");
             if (before.Description != after.Description) changes.Add("described again");
-            Save($"Identity {clientId}: " + (changes.Count > 0 ? string.Join(", ", changes) : "unchanged"), by);
-        }
-    }
+            return $"Identity {clientId}: " + (changes.Count > 0 ? string.Join(", ", changes) : "unchanged");
+        });
 
-    public void RemoveIdentity(string clientId, string? by = null)
+    public void RemoveIdentity(string clientId, string? by = null) => Edit(by, doc =>
     {
-        lock (_lock)
-        {
-            if (_doc.Identities.RemoveAll(i => i.ClientId == clientId) == 0) throw new ConflictException($"'{clientId}' does not exist.");
-            Save($"Identity {clientId} removed", by);
-        }
-    }
+        if (doc.Identities.RemoveAll(i => i.ClientId == clientId) == 0) throw new ConflictException($"'{clientId}' does not exist.");
+        return $"Identity {clientId} removed";
+    });
 
     /// <summary>The identity with its name, groups and pipelines trimmed, sorted and distinct; refused when its name, groups or pipelines are unusable.</summary>
     private static Identity Normalized(Identity identity)
@@ -246,14 +232,57 @@ public sealed class RightsStore
             throw new ConflictException($"'{duplicate.Key}' is the client id of more than one identity.");
     }
 
-    private void Save(string change, string? by = null)
+    /// <summary>
+    /// Applies <paramref name="edit"/>, which changes a copy of the rights and says what it changed, then writes the copy and publishes it.
+    /// An edit that is refused, or a store that cannot keep the copy, leaves the rights as they are.
+    /// </summary>
+    private void Edit(string? by, Func<RightsDocument, string> edit)
     {
-        _doc.Audit!.Insert(0, new AuditEntry(DateTimeOffset.UtcNow, change, by));
-        if (_doc.Audit.Count > AuditKept) _doc.Audit.RemoveRange(AuditKept, _doc.Audit.Count - AuditKept);
-        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-        File.WriteAllText(_path, JsonSerializer.Serialize(_doc, Json));
+        lock (_write)
+        {
+            var current = _state;
+            var next = Copy(current.Doc);
+            next = Record(next, edit(next), by);
+            if (_store.Replace(Serialize(next), current.Version) is not { } version)
+            {
+                Reread();
+                throw new ConflictException(
+                    "The rights changed in the store since this coordinator read them (another writer, or an earlier change that was kept after it reported failing). They have been read again: repeat the change.");
+            }
+            _state = new State(next, version);
+            Changed?.Invoke();
+        }
+    }
+
+    private void Reread()
+    {
+        if (_store.Load() is not { } stored) return;
+        _state = new State(Prepared(Read(stored.Document, "the rights store")), stored.Version);
         Changed?.Invoke();
     }
+
+    /// <summary>The document with its identities normalized and unique, and an audit list.</summary>
+    private static RightsDocument Prepared(RightsDocument doc)
+    {
+        var prepared = doc with { Identities = [.. doc.Identities.Select(Normalized)], Audit = doc.Audit ?? [] };
+        CheckUnique(prepared.Identities);
+        return prepared;
+    }
+
+    /// <summary>The document with <paramref name="change"/> at the head of its audit, which keeps the latest <see cref="AuditKept"/>.</summary>
+    private static RightsDocument Record(RightsDocument doc, string change, string? by)
+    {
+        doc.Audit!.Insert(0, new AuditEntry(DateTimeOffset.UtcNow, change, by));
+        if (doc.Audit.Count > AuditKept) doc.Audit.RemoveRange(AuditKept, doc.Audit.Count - AuditKept);
+        return doc;
+    }
+
+    private static RightsDocument Read(string text, string source) =>
+        JsonSerializer.Deserialize<RightsDocument>(text, Json) ?? throw new InvalidOperationException($"{source}: empty rights document.");
+
+    private static string Serialize(RightsDocument doc) => JsonSerializer.Serialize(doc, Json);
+
+    private static RightsDocument Copy(RightsDocument doc) => Read(Serialize(doc), "the rights");
 }
 
 /// <summary>

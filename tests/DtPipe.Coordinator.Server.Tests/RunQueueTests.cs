@@ -95,7 +95,7 @@ public sealed class RunQueueTests : IDisposable
         {
             StateDir = Path.Combine(_dir, "state"), Authority = "http://idp", Audience = "test", UiClientId = "ui", UiClientSecret = "secret", RightsSeed = seed,
         };
-        _rights = new RightsStore(options);
+        _rights = MemoryRightsStore.Rights(options);
         _inventory = new NodeInventory(_registry);
         _store = new FailingRunStore(MemoryRunStore.At(options.StateDir));
         _journal = new RunJournal(_store, NullLogger<RunJournal>.Instance);

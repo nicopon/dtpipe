@@ -51,6 +51,27 @@ public sealed class RightsRoutesTests : IDisposable
     }
 
     [Fact]
+    public async Task A_Store_That_Is_Down_Answers_503_To_A_Change_And_The_Rights_Are_Still_Read()
+    {
+        var identity = await AnIdentityWithAReplicaAsync();
+        _host.Rights.Down = true;
+
+        using var edit = await Put(identity with { Groups = ["crm", "sales"] });
+        using var matrix = await _admin.PutAsJsonAsync("/api/rights/matrix", new { matrix = new Dictionary<string, string[]> { ["crm"] = ["crm"] } }, Web, Ct);
+        using var read = await _admin.GetAsync("/api/rights", Ct);
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, edit.StatusCode);
+        Assert.Contains("\"error\"", await edit.Content.ReadAsStringAsync(Ct));
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, matrix.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, read.StatusCode);
+        Assert.Equal(["crm"], _host.Services.GetRequiredService<RightsStore>().Find("a")!.Groups);
+        Assert.Equal(0, _aborts);
+        _host.Rights.Down = false;
+        using var again = await Put(identity with { Groups = ["crm", "sales"] });
+        Assert.Equal(HttpStatusCode.OK, again.StatusCode);
+    }
+
+    [Fact]
     public async Task Disabling_An_Identity_Drops_The_Control_Connection_Of_Its_Replicas()
     {
         var identity = await AnIdentityWithAReplicaAsync();

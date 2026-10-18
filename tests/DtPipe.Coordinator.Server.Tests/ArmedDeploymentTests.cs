@@ -106,7 +106,7 @@ public sealed partial class ArmedDeploymentTests : IDisposable
 
     private (RightsStore, NodeInventory, RunJournal, DeploymentManager) Start(ReplicaRegistry registry)
     {
-        var rights = new RightsStore(_options);
+        var rights = MemoryRightsStore.Rights(_options);
         var inventory = new NodeInventory(registry);
         var journal = MemoryRunStore.Journal(_options);
         _bus = new EventBus();

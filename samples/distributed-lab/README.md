@@ -146,7 +146,7 @@ Tokens come from `Lab.Idp` (below), which the coordinator trusts for its audienc
 holds a client id and secret in its `nodes/<node>.json`, which `idp-clients.json` registers; the
 token it obtains names it (`sub`) and grants nothing. The coordinator gives that subject its groups,
 which TransportR's hub then enforces: a node sends to another only if every group of the sender may
-send to every group of the receiver. What is allowed lives in one document, `.state/rights.json`,
+send to every group of the receiver. What is allowed lives in one document, kept in the coordinator's Redis,
 started from `rights-seed.json` and edited in the **Access** view:
 
 | | Enforced |

@@ -1068,7 +1068,7 @@ def bricks_pass():
 
     def health():
         # A supervisor reads /health with a service token whose identity the rights grant the kind monitor, and nothing else. The
-        # identity is added here when the rights predate the seed (a stack keeps rights.json across restarts); the IdP client is in
+        # identity is added here when the rights predate the seed (a stack keeps its rights across restarts); the IdP client is in
         # idp-clients.json. The pipeline is armed for the check and undone after it.
         if not any(i["clientId"] == "monitor-1" for i in call("/api/rights")["identities"]):
             call("/api/rights/identities", {"clientId": "monitor-1", "name": "monitor-1", "description": "Supervisor", "kind": "monitor"})
@@ -1114,7 +1114,7 @@ def bricks_pass():
     def launch():
         # A scheduler starts a run with a service token whose identity the rights grant the kind launcher, for the pipelines the
         # identity lists, and nothing else. The identity is created here, or its list completed, when the rights predate the seed
-        # (a stack keeps rights.json across restarts); the IdP client is in idp-clients.json.
+        # (a stack keeps its rights across restarts); the IdP client is in idp-clients.json.
         pid = "customers-mirror"
         mine = next((i for i in call("/api/rights")["identities"] if i["clientId"] == "launcher-1"), None)
         if mine is None:

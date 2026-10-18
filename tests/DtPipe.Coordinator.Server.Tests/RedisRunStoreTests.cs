@@ -6,44 +6,26 @@ using Xunit;
 namespace DtPipe.Coordinator.Server.Tests;
 
 /// <summary>
-/// The journal over a real Redis. It needs one: <c>DTPIPE_TEST_REDIS</c> names it, and <c>DTPIPE_TEST_REUSE_INFRA</c> stands for the
-/// container of <c>tests/infra</c> (<c>localhost:6390</c>). Each test keys its own prefix, so none sees another's runs.
+/// The journal over a real Redis (<see cref="RedisTestBed"/>), under a prefix of each test's own.
 /// </summary>
 public sealed class RedisRunStoreTests : IDisposable
 {
-    private const string InfraRedis = "localhost:6390";
+    private readonly RedisTestBed _bed = new();
 
-    private readonly string _prefix = "test-" + Guid.NewGuid().ToString("N") + ":";
-    private readonly List<RedisRunStore> _opened = [];
+    private string _prefix => _bed.Prefix;
 
-    public void Dispose()
-    {
-        foreach (var store in _opened) store.Dispose();
-        if (ConnectionString() is not { } connection) return;
-        using var redis = ConnectionMultiplexer.Connect(connection);
-        var db = redis.GetDatabase();
-        foreach (var key in redis.GetServer(redis.GetEndPoints()[0]).Keys(pattern: _prefix + "*")) db.KeyDelete(key);
-    }
+    public void Dispose() => _bed.Dispose();
 
-    private static string? ConnectionString() =>
-        Environment.GetEnvironmentVariable("DTPIPE_TEST_REDIS") is { Length: > 0 } named ? named
-        : Environment.GetEnvironmentVariable("DTPIPE_TEST_REUSE_INFRA") is "true" or "1" ? InfraRedis
-        : null;
+    private static string? ConnectionString() => RedisTestBed.ConnectionString();
 
-    private RedisRunStore Open(bool initialize = true)
-    {
-        var store = RedisRunStore.Connect(
-            new RedisSettings(ConnectionString() ?? throw new InvalidOperationException("no Redis"), _prefix, initialize), NullLogger.Instance);
-        _opened.Add(store);
-        return store;
-    }
+    private RedisRunStore Open(bool initialize = true) => new(_bed.Open(initialize));
 
     private RunJournal Journal(RedisRunStore store) => new(store, NullLogger<RunJournal>.Instance);
 
     private static RunView Over(string id, DateTimeOffset at, string? key = null) =>
         new(id, "plan", RunState.Succeeded, at, at, null, null, null, "p", at, LaunchedBy: "cron", IdempotencyKey: key);
 
-    private static void NeedRedis() => Assert.SkipUnless(ConnectionString() is not null, "No Redis: set DTPIPE_TEST_REDIS, or DTPIPE_TEST_REUSE_INFRA=true with tests/infra up.");
+    private static void NeedRedis() => RedisTestBed.Need();
 
     [Fact]
     public void An_Id_Is_Never_Given_Again_After_A_Restart()
@@ -143,7 +125,7 @@ public sealed class RedisRunStoreTests : IDisposable
         var logs = new CapturedLogger();
         var secret = "hunter2-secret";
 
-        var failure = Assert.Throws<InvalidOperationException>(() => RedisRunStore.Connect(
+        var failure = Assert.Throws<InvalidOperationException>(() => RedisConnection.Connect(
             new RedisSettings($"localhost:1,password={secret},connectTimeout=300,connectRetry=1"), logs));
 
         Assert.DoesNotContain(secret, failure.ToString());
@@ -155,7 +137,7 @@ public sealed class RedisRunStoreTests : IDisposable
     [InlineData("localhost:notaport,password=hunter2-secret")]
     public void A_Connection_String_That_Does_Not_Parse_Is_In_No_Message(string connection)
     {
-        var failure = Assert.ThrowsAny<Exception>(() => RedisRunStore.Connect(new RedisSettings(connection), new CapturedLogger()));
+        var failure = Assert.ThrowsAny<Exception>(() => RedisConnection.Connect(new RedisSettings(connection), new CapturedLogger()));
 
         Assert.DoesNotContain("hunter2-secret", failure.ToString());
     }

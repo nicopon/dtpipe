@@ -43,7 +43,7 @@ public sealed class NodeChannelHubTests : IDisposable
             StateDir = Path.Combine(_dir, "state"), Authority = "http://idp", Audience = "test",
             UiClientId = "ui", UiClientSecret = "secret", RightsSeed = seed, IdentityLabelClaims = ["team"],
         };
-        _rights = new RightsStore(_options);
+        _rights = MemoryRightsStore.Rights(_options);
         _inventory = new NodeInventory(_registry);
         // A run the last coordinator left in flight on node-known.
         MemoryRunStore.Journal(_options).Record(new RunView(

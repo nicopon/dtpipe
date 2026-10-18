@@ -37,7 +37,7 @@ public sealed class BindingTests : IDisposable
               { "clientId": "node-off", "name": "node-off", "description": "", "groups": ["crm"], "enabled": false },
               { "clientId": "watch", "name": "watch", "description": "", "kind": "monitor" } ], "matrix": {} }
             """);
-        _rights = new RightsStore(new CoordinatorServerOptions
+        _rights = MemoryRightsStore.Rights(new CoordinatorServerOptions
         {
             StateDir = Path.Combine(_dir, "state"), Authority = "http://idp", Audience = "test", UiClientId = "ui", UiClientSecret = "secret", RightsSeed = seed,
         });

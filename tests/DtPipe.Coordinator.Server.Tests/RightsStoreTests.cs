@@ -21,7 +21,7 @@ public sealed class RightsStoreTests : IDisposable
     {
         var seed = Path.Combine(_dir, "seed.json");
         File.WriteAllText(seed, json);
-        return new RightsStore(Options(Path.Combine(_dir, "state-" + Guid.NewGuid().ToString("N")), seed));
+        return MemoryRightsStore.Rights(Options(Path.Combine(_dir, "state-" + Guid.NewGuid().ToString("N")), seed));
     }
 
     private const string Document = """
@@ -119,10 +119,53 @@ public sealed class RightsStoreTests : IDisposable
         var dir = Path.Combine(_dir, "state-saved");
         var seed = Path.Combine(_dir, "seed-saved.json");
         File.WriteAllText(seed, Document);
-        new RightsStore(Options(dir, seed)).UpdateIdentity("a", "node-a", "Renamed", ["crm", "sales"], true, "someone@test");
-        var reread = new RightsStore(Options(dir));
+        MemoryRightsStore.Rights(Options(dir, seed)).UpdateIdentity("a", "node-a", "Renamed", ["crm", "sales"], true, "someone@test");
+        var reread = MemoryRightsStore.Rights(Options(dir));
         Assert.Equal(["crm", "sales"], reread.Find("a")!.Groups);
         Assert.Equal("someone@test", reread.Snapshot().Audit![0].By);
+    }
+
+    [Fact]
+    public void A_Store_That_Refuses_The_Write_Leaves_The_Rights_As_They_Were()
+    {
+        var seed = Path.Combine(_dir, "seed-refused.json");
+        File.WriteAllText(seed, Document);
+        var options = Options(Path.Combine(_dir, "state-refused"), seed);
+        var failing = new FailingRightsStore(MemoryRightsStore.At(options.StateDir));
+        var store = new RightsStore(failing, options);
+        var before = store.Snapshot();
+
+        failing.Down = true;
+        Assert.Throws<StoreUnavailableException>(() => store.UpdateIdentity("a", null, null, ["sales"], null, "someone@test"));
+        Assert.Throws<StoreUnavailableException>(() => store.SetMatrix([], "someone@test"));
+        Assert.Throws<StoreUnavailableException>(() => store.RemoveIdentity("b"));
+
+        Assert.Equal(["crm"], store.Find("a")!.Groups);
+        Assert.NotNull(store.Find("b"));
+        Assert.Equal(before.Matrix.Count, store.Snapshot().Matrix.Count);
+        Assert.Equal(before.Audit!.Count, store.Snapshot().Audit!.Count);
+        failing.Down = false;
+        store.UpdateIdentity("a", null, null, ["sales"], null, "someone@test");
+        Assert.Equal(["sales"], MemoryRightsStore.Rights(options).Find("a")!.Groups);
+    }
+
+    [Fact]
+    public void A_Store_That_Moved_On_Is_Read_Again_And_The_Change_Is_Refused_Once()
+    {
+        var seed = Path.Combine(_dir, "seed-moved.json");
+        File.WriteAllText(seed, Document);
+        var options = Options(Path.Combine(_dir, "state-moved"), seed);
+        var first = MemoryRightsStore.Rights(options);
+        // Another writer kept a change this one never saw.
+        var other = MemoryRightsStore.Rights(options);
+        other.UpdateIdentity("b", null, "Changed elsewhere", null, null);
+
+        Assert.Throws<ConflictException>(() => first.UpdateIdentity("a", null, "Mine", null, null));
+
+        Assert.Equal("Changed elsewhere", first.Find("b")!.Description);
+        Assert.Equal("A", first.Find("a")!.Description);
+        first.UpdateIdentity("a", null, "Mine", null, null);
+        Assert.Equal("Mine", MemoryRightsStore.Rights(options).Find("a")!.Description);
     }
 
     [Fact]

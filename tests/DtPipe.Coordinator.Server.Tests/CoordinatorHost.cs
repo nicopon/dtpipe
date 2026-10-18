@@ -35,6 +35,15 @@ public sealed class CoordinatorHost(string? studioClientId = CoordinatorHost.Stu
 
     private readonly string _state = Path.Combine(Path.GetTempPath(), "coordinator-host-" + Guid.NewGuid().ToString("N"));
 
+    /// <summary>The run journal's store; <c>Down</c> makes every call fail as an unreachable Redis does.</summary>
+    internal FailingRunStore Runs => _runs ??= new FailingRunStore(MemoryRunStore.At(_state));
+
+    /// <summary>The rights' store; <c>Down</c> makes every call fail as an unreachable Redis does.</summary>
+    internal FailingRightsStore Rights => _rights ??= new FailingRightsStore(MemoryRightsStore.At(_state));
+
+    private FailingRunStore? _runs;
+    private FailingRightsStore? _rights;
+
     /// <summary>The server's state directory, which the host removes when it is disposed.</summary>
     public string StateDirectory => _state;
 
@@ -50,8 +59,10 @@ public sealed class CoordinatorHost(string? studioClientId = CoordinatorHost.Stu
         builder.UseSetting("Coordinator:LabMode", labMode ? "true" : "false");
         builder.ConfigureTestServices(services =>
         {
-            // The run journal's store is in memory: the real one is Redis, which these tests are not about.
-            services.AddSingleton<IRunStore>(MemoryRunStore.At(_state));
+            // What the coordinator keeps beyond the process is in memory: the real store is Redis, which these tests are not about.
+            // Either can be taken down, as Redis can.
+            services.AddSingleton<IRunStore>(Runs);
+            services.AddSingleton<IRightsStore>(Rights);
             if (check is not null) services.AddSingleton<DesignValidator>(new StubValidator(check, bindings => CheckedBindings = bindings));
             var configuration = new OpenIdConnectConfiguration
             {

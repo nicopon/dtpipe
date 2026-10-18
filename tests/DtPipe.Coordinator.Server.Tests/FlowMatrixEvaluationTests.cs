@@ -67,7 +67,7 @@ public sealed class FlowMatrixEvaluationTests : IDisposable
         {
             StateDir = Path.Combine(_dir, "state"), Authority = "http://idp", Audience = "test", UiClientId = "ui", UiClientSecret = "secret", RightsSeed = seed,
         };
-        var rights = new RightsStore(options);
+        var rights = MemoryRightsStore.Rights(options);
         _flow = new CountingFlow(new DefaultFlowControlService(_matrix));
         _inventory = new NodeInventory(_registry);
         _planner = new PlanBuilder(_inventory, new NodeRequests(_inventory, new NoHub()), new BrickCatalog(_inventory), new PlanRegistry(_flow), rights);

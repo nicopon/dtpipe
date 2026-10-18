@@ -162,15 +162,11 @@ def launched_binaries(state_dir, node_names):
     return values
 
 
-def armed_deployments(state_dir):
+def armed_deployments(state_dir, identity_names):
     """Why an armed deployment cannot run as the rights stand, as a list of sentences (empty when every one can): each node
-    its bindings name must have an identity, since a plan is made at each launch from the rights as they are. A file that
-    cannot be read is a finding."""
-    try:
-        with open(os.path.join(state_dir, "rights.json"), encoding="utf-8") as f:
-            names = {i["name"] for i in json.load(f)["identities"]}
-    except (OSError, ValueError, KeyError, TypeError) as e:
-        return [f"the rights cannot be read to judge the armed deployments: {e}"]
+    its bindings name must have an identity (`identity_names`, as the coordinator's rights give them), since a plan is made at
+    each launch from the rights as they are."""
+    names = set(identity_names)
     problems = []
     for path in sorted(glob.glob(os.path.join(state_dir, "deployments", "*.json"))):
         pipeline = os.path.splitext(os.path.basename(path))[0]

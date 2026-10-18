@@ -55,7 +55,7 @@ public sealed class DeploymentManagerTests : IDisposable
         {
             StateDir = Path.Combine(_dir, "state"), Authority = "http://idp", Audience = "test", UiClientId = "ui", UiClientSecret = "secret", RightsSeed = seed,
         };
-        _rights = new RightsStore(options);
+        _rights = MemoryRightsStore.Rights(options);
         _inventory = new NodeInventory(_registry);
         _journal = MemoryRunStore.Journal(options);
         _deployments = TestDeployments.Create(

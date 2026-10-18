@@ -76,6 +76,18 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   the `account` group, `/healthz`, the metadata document, `/account/*` and the hubs. `[local: RouteTableTests]`
 - **Every rights change names its author** (`AuditEntry.By`, the signed-in email). The session
   cookie's keys live in `keys/` in the state directory, so a restart signs nobody out.
+- **The rights are kept in Redis, read once, and memory is the truth.** `RightsStore` is a thin face over `IRightsStore`
+  (`RedisRightsStore`): one JSON document and its version in a hash at `{prefix}rights`, on the connection every store borrows
+  (`RedisConnection`, which the container disposes). It is loaded at start, and every reader (`CanSend` on each transfer, `Find` on
+  each request) takes the document in memory without a lock, so none waits on Redis. A change is made on a copy, written with a
+  compare-and-set on the version and published only when the store kept it: a store that refuses (`StoreUnavailableException`, 503)
+  leaves the rights as they were. One write gate serializes the changes and is held across the Redis call, which fails at once when
+  disconnected and after `RedisConnection.SyncTimeout` otherwise. A write that finds another version (another writer, or an earlier
+  write that timed out and was kept) reads the document again and refuses that change (409): **a 503 on a change may still have
+  been applied**. A store with no document starts from `Coordinator:RightsSeed` once (`Create` is atomic, and a start that loses
+  the race reads the winner's document) or empty, and refuses unless `Coordinator:Redis:Initialize` is true, since rights begun
+  again could grant what was revoked. `[local: RightsStoreTests, RightsRoutesTests; RedisRightsStoreTests (needs DTPIPE_TEST_REDIS
+  or DTPIPE_TEST_REUSE_INFRA)]` `[unchecked: a Redis that loses a write it acknowledged]`
 - **Lab mode is off by default, and everything only a bench needs sits behind it.**
   `LabModeEndpoints` maps the Lab view's scenario catalog and manual planning (`/api/plan`,
   `/api/deploy`), and fault injection, for admins; the pages under `wwwroot/lab/`
@@ -200,8 +212,8 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   plan that holds and a replica that could run each fragment, not that the run will succeed: the replicas' `Check` and `CheckSink`
   stay at arming and launching. `[local: ArmedDeploymentTests (Health), TrustedIdpTests, RouteTableTests, the lab's smoke.py bricks - health, ui_check.py]`
   `[unchecked: that a status is right for a state no test builds]`
-- **A new state directory starts from the seeds, or empty.** `Coordinator:LibrarySeed` (one
-  `.yaml` per pipeline) and `Coordinator:RightsSeed`; with neither, the library has no pipeline
+- **A new state starts from the seeds, or empty.** `Coordinator:LibrarySeed` (one
+  `.yaml` per pipeline, for a new state directory) and `Coordinator:RightsSeed` (for rights Redis does not hold); with neither, the library has no pipeline
   and the rights no identity and an empty matrix: nobody may send anything until an administrator
   says so. The library is a git repository of its own under `library/` in the state directory,
   driven by the `git` command line with a fixed identity (the image needs `git`); armed deployments live

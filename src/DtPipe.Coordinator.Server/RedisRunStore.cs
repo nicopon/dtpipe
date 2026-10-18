@@ -8,67 +8,32 @@ namespace DtPipe.Coordinator.Server;
 /// document), <c>active</c> (the ids not over), <c>history</c> (the ids that are over, ranked by when they ended) and <c>owed</c>
 /// (the abandonments, ranked by when they fall due). A write is one transaction, and the cut of the history a second step that
 /// can be repeated. A document is the truth and the indexes follow it, so the journal heals an index a crash left behind.
-/// A connection string is a secret: no message here carries it, only the endpoints.
+/// It borrows the coordinator's <see cref="RedisConnection"/>.
 /// </summary>
-public sealed class RedisRunStore : IRunStore, IDisposable
+public sealed class RedisRunStore : IRunStore
 {
-    private static readonly TimeSpan SyncTimeout = TimeSpan.FromSeconds(3);
-
     private const string RaiseScript = """
         local current = redis.call('GET', KEYS[1])
         if current == false or tonumber(current) < tonumber(ARGV[1]) then redis.call('SET', KEYS[1], ARGV[1]) end
         return 1
         """;
 
-    private readonly ConnectionMultiplexer _redis;
+    private readonly RedisConnection _redis;
     private readonly IDatabase _db;
-    private readonly bool _initialize;
     private readonly RedisKey _seq, _active, _history, _owed;
     private readonly string _prefix;
 
-    private RedisRunStore(ConnectionMultiplexer redis, RedisSettings settings)
+    public RedisRunStore(RedisConnection redis)
     {
-        (_redis, _db, _initialize, _prefix) = (redis, redis.GetDatabase(), settings.Initialize, settings.KeyPrefix);
+        (_redis, _db, _prefix) = (redis, redis.Db, redis.KeyPrefix);
         (_seq, _active, _history, _owed) = (_prefix + "seq", _prefix + "active", _prefix + "history", _prefix + "owed");
-    }
-
-    /// <summary>Connects, and refuses when Redis cannot be reached now: a coordinator that cannot journal does not start.</summary>
-    public static RedisRunStore Connect(RedisSettings settings, ILogger logger)
-    {
-        if (settings.ConnectionString is not { Length: > 0 } connection)
-            throw new InvalidOperationException("Coordinator:Redis:ConnectionString is required: the Redis that keeps the run journal.");
-        ConfigurationOptions configuration;
-        try
-        {
-            configuration = ConfigurationOptions.Parse(connection);
-        }
-        catch (ArgumentException)
-        {
-            // No inner exception: the parser may echo the part of the string it could not read.
-            throw new InvalidOperationException("Coordinator:Redis:ConnectionString is not a Redis connection string.");
-        }
-        ConnectionMultiplexer redis;
-        try
-        {
-            configuration.AbortOnConnectFail = true;
-            configuration.SyncTimeout = (int)SyncTimeout.TotalMilliseconds;
-            // A command sent while the connection is down fails at once instead of waiting in a backlog.
-            configuration.BacklogPolicy = BacklogPolicy.FailFast;
-            redis = ConnectionMultiplexer.Connect(configuration);
-        }
-        catch (RedisException ex)
-        {
-            throw new InvalidOperationException($"The run journal could not reach Redis: {ex.GetType().Name}. Check Coordinator:Redis:ConnectionString.", ex);
-        }
-        logger.LogInformation("Run journal on Redis at {Endpoints}, keys under '{Prefix}'", Endpoints(redis), settings.KeyPrefix);
-        return new RedisRunStore(redis, settings);
     }
 
     public long NextSequence() => Call(() => _db.StringIncrement(_seq));
 
     public void RaiseSequenceTo(long floor) => Call(() =>
     {
-        if (floor == 0 && !_initialize && !_db.KeyExists(_seq))
+        if (floor == 0 && !_redis.Initialize && !_db.KeyExists(_seq))
             throw new InvalidOperationException(
                 "The run counter is absent and no run is kept: Redis may have lost its data, and run ids would start again. "
                 + "Set Coordinator:Redis:Initialize to true to begin a new journal.");
@@ -88,7 +53,7 @@ public sealed class RedisRunStore : IRunStore, IDisposable
         };
         if (run.Over) tasks.Add(transaction.SetRemoveAsync(_active, run.RunId));
         if (!transaction.Execute()) throw new StoreUnavailableException("The run journal's Redis refused the write.");
-        Task.WaitAll([.. tasks], SyncTimeout);
+        Task.WaitAll([.. tasks], RedisConnection.SyncTimeout);
         if (run.Over) Cut();
         return 0;
     });
@@ -132,22 +97,7 @@ public sealed class RedisRunStore : IRunStore, IDisposable
 
     public void RemoveOwed(OwedFragment owed) => Call(() => _db.SortedSetRemove(_owed, JsonSerializer.Serialize(owed)));
 
-    public void Dispose() => _redis.Dispose();
-
     private RedisKey RunKey(RedisValue id) => _prefix + "run:" + id;
 
-    private T Call<T>(Func<T> command)
-    {
-        if (!_redis.IsConnected) throw new StoreUnavailableException($"The run journal's Redis ({Endpoints(_redis)}) is not connected.");
-        try
-        {
-            return command();
-        }
-        catch (Exception ex) when (ex is RedisException or TimeoutException)
-        {
-            throw new StoreUnavailableException($"The run journal's Redis ({Endpoints(_redis)}) did not answer: {ex.GetType().Name}.", ex);
-        }
-    }
-
-    private static string Endpoints(ConnectionMultiplexer redis) => string.Join(", ", redis.GetEndPoints().Select(e => e.ToString()));
+    private T Call<T>(Func<T> command) => _redis.Call("the run journal", command);
 }

@@ -71,7 +71,7 @@ public sealed class PlanModeTests : IDisposable
               { "clientId": "node-r", "name": "r", "description": "", "groups": ["run"] },
               { "clientId": "node-d", "name": "d", "description": "", "groups": ["data"] } ], "matrix": {} }
             """);
-        var rights = new RightsStore(new CoordinatorServerOptions
+        var rights = MemoryRightsStore.Rights(new CoordinatorServerOptions
         {
             StateDir = Path.Combine(_dir, "state"), Authority = "http://idp", Audience = "test", UiClientId = "ui", UiClientSecret = "secret", RightsSeed = seed,
         });

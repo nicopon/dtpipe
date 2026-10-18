@@ -25,6 +25,10 @@ builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Ad
 // is identified by a token of the trusted IdP, its group read from the rights document by its
 // subject. The flow matrix is the rights document's too, read live by the hub on every transfer and
 // by the planner on every plan.
+// The state the coordinator keeps beyond the process is on one Redis connection, which the stores below borrow.
+builder.Services.AddSingleton(services =>
+    RedisConnection.Connect(server.Redis, services.GetRequiredService<ILoggerFactory>().CreateLogger<RedisConnection>()));
+builder.Services.AddSingleton<IRightsStore, RedisRightsStore>();
 builder.Services.AddSingleton<RightsStore>();
 builder.Services.AddCoordinatorHub(_ => { }).Build();
 builder.Services.AddNodeLink<NodeChannelHub>();
@@ -52,8 +56,7 @@ builder.Services.AddSingleton(services => new PipelineLibrary(
     services.GetRequiredService<AutoPlacer>().Check, services.GetRequiredService<AutoPlacer>().Resolve));
 builder.Services.AddSingleton<IJobSource>(services => services.GetRequiredService<PipelineLibrary>());
 builder.Services.AddSingleton<ILibraryHeads>(services => services.GetRequiredService<PipelineLibrary>());
-builder.Services.AddSingleton<IRunStore>(services =>
-    RedisRunStore.Connect(server.Redis, services.GetRequiredService<ILoggerFactory>().CreateLogger<RedisRunStore>()));
+builder.Services.AddSingleton<IRunStore, RedisRunStore>();
 builder.Services.AddSingleton<RunJournal>();
 builder.Services.AddSingleton<OrphanRuns>();
 builder.Services.AddSingleton<DeploymentManager>();

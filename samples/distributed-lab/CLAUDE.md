@@ -9,7 +9,7 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   and hosts the distributed family (`src/DtPipe.Coordinator*`, `src/DtPipe.PipelineNode*`) as a
   consumer: product code a lab need may shape, never code written for the lab alone. A need of the
   engine is reported to the user, not patched in. `[unchecked]`
-- **The lab's run journal is in a Redis whose settings are fixed once per state directory.** `lab.sh up` records the Redis
+- **The lab's run journal and rights are in a Redis whose settings are fixed once per state directory.** `lab.sh up` records the Redis
   (`LAB_REDIS`, else a `redis-server` of its own on `LAB_REDIS_PORT` with its data under `.state/redis`, fsynced on every write,
   and a message naming what is missing when there is none) and a random key prefix in `.state/redis.env`; `exec-coordinator`
   reads it back, so `tools/campaign.py` restarts the coordinator on the same journal and a reset lab starts a new one even on a
@@ -31,7 +31,7 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   strict|sandbox` restarts the hosts in a mode, and `lab.sh smoke` does so per pass. The runner
   runs any fragment in both. `[local: smoke.py bricks, sandbox]`
 - **`monitor-1` is the lab's supervisor**: a client of `idp-clients.json` and an identity of kind `monitor` in
-  `rights-seed.json`, which reads `/health` and nothing else. A stack keeps `rights.json` across restarts, so
+  `rights-seed.json`, which reads `/health` and nothing else. A stack keeps its rights (in Redis) across restarts, so
   `smoke.py bricks` adds the identity through `POST /api/rights/identities` when the rights predate the seed.
   It arms `customers-mirror` for the check and undeploys it. `[local: smoke.py bricks - health, ui_check.py]`
 - **`launcher-1` is the lab's scheduler**: a client of `idp-clients.json` and an identity of kind `launcher` in

@@ -52,7 +52,7 @@ public sealed class PlanRightsTests : IDisposable
         var seed = Path.Combine(_dir, $"seed-{_seeds++}.json");
         var rows = identities.Select(i => new { clientId = "node-" + i.Node, name = i.Node, description = "", groups = i.Groups, enabled = i.Enabled });
         File.WriteAllText(seed, JsonSerializer.Serialize(new { version = 2, identities = rows, matrix = new { } }, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
-        return new RightsStore(new CoordinatorServerOptions
+        return MemoryRightsStore.Rights(new CoordinatorServerOptions
         {
             StateDir = Path.Combine(_dir, $"state-{_seeds}"), Authority = "http://idp", Audience = "test", UiClientId = "ui", UiClientSecret = "secret", RightsSeed = seed,
         });
