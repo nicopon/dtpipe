@@ -74,8 +74,15 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   maps `/health` on its own group, outside `/api`, for a monitor, and `/api/health` on the reader group; `ServiceEndpoints` maps `/service`
   on its own group, outside `/api`, for a launcher, with no CSRF filter since a service's token is bearer only; `Program.cs` keeps
   the `account` group, `/healthz`, the metadata document, `/account/*` and the hubs. `[local: RouteTableTests]`
-- **Every rights change names its author** (`AuditEntry.By`, the signed-in email). The session
-  cookie's keys live in `keys/` in the state directory, so a restart signs nobody out.
+- **Every rights change names its author** (`AuditEntry.By`, the signed-in email).
+- **The session cookie's keys are in Redis, and a start that cannot read them stops.** `TrustedIdp.AddSessionKeys` points
+  DataProtection at the `IXmlRepository` the host registers (`RedisXmlRepository`: a list at `{prefix}session-keys`, one element per
+  entry), under a fixed application name so that two hosts of one coordinator read each other's cookies, and `EnsureSessionKeys` reads
+  the key ring before anything is served: a repository that fails throws, never returns nothing, since DataProtection would then mint a
+  key and sign everyone out unannounced. A restart signs nobody out. **Limit**: the keys are stored as DataProtection hands them over,
+  unencrypted (as the directory they replace held them), and they cross the network: protect Redis with TLS and an ACL.
+  `[local: SessionKeysTests; RedisSessionKeysTests (needs DTPIPE_TEST_REDIS or DTPIPE_TEST_REUSE_INFRA)]`
+  `[unchecked: a cookie that survives a restart of the real coordinator is not tested by a test project]`
 - **The rights are kept in Redis, read once, and memory is the truth.** `RightsStore` is a thin face over `IRightsStore`
   (`RedisRightsStore`): one JSON document and its version in a hash at `{prefix}rights`, on the connection every store borrows
   (`RedisConnection`, which the container disposes). It is loaded at start, and every reader (`CanSend` on each transfer, `Find` on
@@ -84,7 +91,7 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   leaves the rights as they were. One write gate serializes the changes and is held across the Redis call, which fails at once when
   disconnected and after `RedisConnection.SyncTimeout` otherwise. A write that finds another version (another writer, or an earlier
   write that timed out and was kept) reads the document again and refuses that change (409): **a 503 on a change may still have
-  been applied**. A store with no document starts from `Coordinator:RightsSeed` once (`Create` is atomic, and a start that loses
+  been applied**, and then the route's other effects (cutting an identity's replicas) did not run: repeating the change finds nothing to change, and `POST /api/rights/identities/{id}/reconnect` cuts them. A store with no document starts from `Coordinator:RightsSeed` once (`Create` is atomic, and a start that loses
   the race reads the winner's document) or empty, and refuses unless `Coordinator:Redis:Initialize` is true, since rights begun
   again could grant what was revoked. `[local: RightsStoreTests, RightsRoutesTests; RedisRightsStoreTests (needs DTPIPE_TEST_REDIS
   or DTPIPE_TEST_REUSE_INFRA)]` `[unchecked: a Redis that loses a write it acknowledged]`

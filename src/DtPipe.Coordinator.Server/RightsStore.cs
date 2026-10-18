@@ -247,7 +247,7 @@ public sealed class RightsStore
             {
                 Reread();
                 throw new ConflictException(
-                    "The rights changed in the store since this coordinator read them (another writer, or an earlier change that was kept after it reported failing). They have been read again: repeat the change.");
+                    "The rights changed in the store since this coordinator read them (another writer, or an earlier change that was kept after it reported failing). They have been read again: check them, and repeat the change if it is not there.");
             }
             _state = new State(next, version);
             Changed?.Invoke();

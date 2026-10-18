@@ -337,7 +337,7 @@ replica ran each fragment.
 - One run at a time per data node: the runner's fragments of two runs share its host with no bound
   on either. The coordinator is not highly available: a restart ends the runs in flight as errors (they keep their ids and the journal
   holds them, in Redis), and asks the node hosts that carried them to abandon their fragments when they announce again; the library, the armed
-  deployments and the finished runs survive. A host that does not announce again keeps its fragments until it is restarted
+  deployments, the rights, the session keys and the finished runs survive. A host that does not announce again keeps its fragments until it is restarted
   (`./lab.sh down`, then `./lab.sh up`). Nothing reconstructs a run from the nodes reconnecting: the journal is the authority.
 - A studio knows a source brick's columns, not those after a step: dtpipe offers no schema of
   a job's branch without running it.

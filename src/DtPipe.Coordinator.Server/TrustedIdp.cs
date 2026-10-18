@@ -5,6 +5,8 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.DataProtection.KeyManagement;
+using Microsoft.AspNetCore.DataProtection.Repositories;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
 using TransportR.Identity;
@@ -165,10 +167,27 @@ public static class TrustedIdp
         });
         services.AddSingleton<IAuthorizationHandler, ServiceKindHandler>();
         services.AddSingleton<IClaimsTransformation, CoordinatorRoles>();
-        // The session cookie is encrypted with keys kept in the state directory, so a restart does
-        // not sign every person out.
-        services.AddDataProtection().PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(server.StateDir, "keys")));
+        services.AddSessionKeys();
     }
+
+    /// <summary>
+    /// The session cookie is encrypted with keys the host's <see cref="IXmlRepository"/> keeps, so a restart does not sign every person
+    /// out, and every instance over the same repository reads each other's cookies. The application name is fixed: the default is the
+    /// content root, which differs between two hosts of the same coordinator.
+    /// </summary>
+    public static IServiceCollection AddSessionKeys(this IServiceCollection services)
+    {
+        services.AddDataProtection().SetApplicationName("dtpipe-coordinator");
+        services.AddOptions<KeyManagementOptions>().Configure<IXmlRepository>((options, repository) => options.XmlRepository = repository);
+        return services;
+    }
+
+    /// <summary>
+    /// Reads the key ring now, creating a key when the repository holds none: a repository that cannot be reached stops the start, where
+    /// the first request would otherwise find out and a key made then and lost would sign everyone out.
+    /// </summary>
+    public static void EnsureSessionKeys(IServiceProvider services) =>
+        services.GetRequiredService<IDataProtectionProvider>().CreateProtector("session-keys-check").Protect("check");
 
     /// <summary>A person signed in, whatever their role: who they are is all <c>/api/me</c> needs.</summary>
     public const string SignedIn = "signed-in";

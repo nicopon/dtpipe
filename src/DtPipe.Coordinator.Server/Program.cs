@@ -4,6 +4,7 @@ using DtPipe.Coordinator.Contracts;
 using DtPipe.Coordinator.Server;
 using DtPipe.Jobs.Coordinator;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.DataProtection.Repositories;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using TransportR.FlowControl;
@@ -29,6 +30,7 @@ builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Ad
 builder.Services.AddSingleton(services =>
     RedisConnection.Connect(server.Redis, services.GetRequiredService<ILoggerFactory>().CreateLogger<RedisConnection>()));
 builder.Services.AddSingleton<IRightsStore, RedisRightsStore>();
+builder.Services.AddSingleton<IXmlRepository, RedisXmlRepository>();
 builder.Services.AddSingleton<RightsStore>();
 builder.Services.AddCoordinatorHub(_ => { }).Build();
 builder.Services.AddNodeLink<NodeChannelHub>();
@@ -63,6 +65,8 @@ builder.Services.AddSingleton<DeploymentManager>();
 builder.Services.AddSingleton<PipelineHealth>();
 
 var app = builder.Build();
+// The session keys are read before anything is served: Redis down stops the start instead of the first sign-in.
+TrustedIdp.EnsureSessionKeys(app.Services);
 app.Services.GetRequiredService<DeploymentManager>();
 
 app.Use(async (context, next) =>

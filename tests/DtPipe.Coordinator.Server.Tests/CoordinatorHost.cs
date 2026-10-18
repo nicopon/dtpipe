@@ -2,6 +2,7 @@ using DtPipe.Jobs.Coordinator;
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
+using Microsoft.AspNetCore.DataProtection.Repositories;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -63,6 +64,7 @@ public sealed class CoordinatorHost(string? studioClientId = CoordinatorHost.Stu
             // Either can be taken down, as Redis can.
             services.AddSingleton<IRunStore>(Runs);
             services.AddSingleton<IRightsStore>(Rights);
+            services.AddSingleton<IXmlRepository>(new MemoryXmlRepository());
             if (check is not null) services.AddSingleton<DesignValidator>(new StubValidator(check, bindings => CheckedBindings = bindings));
             var configuration = new OpenIdConnectConfiguration
             {

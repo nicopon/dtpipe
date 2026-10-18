@@ -32,13 +32,6 @@ public sealed class RedisTestBed : IDisposable
         return connection;
     }
 
-    /// <summary>The raw database, to read what a store wrote or to take it away.</summary>
-    public static IDatabase Raw(out ConnectionMultiplexer redis)
-    {
-        redis = ConnectionMultiplexer.Connect(ConnectionString()!);
-        return redis.GetDatabase();
-    }
-
     public void Dispose()
     {
         foreach (var opened in _opened) opened.Dispose();
