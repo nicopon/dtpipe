@@ -137,7 +137,7 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   and with no runner or no brick node online the check cannot run, so it refuses by name; never a
   commit that was not checked. It covers the studio and the pages alike, and `PUT /api/library/{id}/bindings`, which
   checks the job the library holds under the bindings it receives; `DeleteAsync` and the seeds loaded at
-  start check nothing. `[local: StudioRoutesTests, the lab's smoke.py bricks — a library save's check, a sink that refuses]`
+  start check nothing. The push to the library's remote comes after the check and the write, never before. `[local: StudioRoutesTests, the lab's smoke.py bricks — a library save's check, a sink that refuses]`
 - **A save may say which version it read.** `PUT /api/library/{id}` with `If-None-Match: *` creates
   only, with `If-Match: "<commit>"` replaces only that version: 412 otherwise, with the commit in
   place. The check runs under the library's lock. The version is the last commit of the job file,
@@ -220,11 +220,38 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   stay at arming and launching. `[local: ArmedDeploymentTests (Health), TrustedIdpTests, RouteTableTests, the lab's smoke.py bricks - health, ui_check.py]`
   `[unchecked: that a status is right for a state no test builds]`
 - **A new state starts from the seeds, or empty.** `Coordinator:LibrarySeed` (one
-  `.yaml` per pipeline, for a new state directory) and `Coordinator:RightsSeed` (for rights Redis does not hold); with neither, the library has no pipeline
+  `.yaml` per pipeline, for a library that has no history, here or at its remote) and `Coordinator:RightsSeed` (for rights Redis does not hold); with neither, the library has no pipeline
   and the rights no identity and an empty matrix: nobody may send anything until an administrator
   says so. The library is a git repository of its own under `library/` in the state directory,
-  driven by the `git` command line with a fixed identity (the image needs `git`); armed deployments and run history are in Redis
+  driven by the `git` command line with a fixed identity (the image needs `git`), and starts with a commit of its own (empty without seeds)
+  so that a write always has a commit to go back to; armed deployments and run history are in Redis
   (see "A deployment is the coordinator's" and "A run is journaled as it goes"); the Lab view's fixed plan is in memory.
+  `Coordinator:Redis:Initialize` lets every one of these begin where nothing is kept, the library's remote included.
+- **The library is pushed to a git remote when one is configured, and the remote is the authority.** `Coordinator:Library:Remote:Url`
+  (an `https://` URL, a `file://` URL or an absolute path; SSH is not supported), `Token`, `User` and `Timeout` are read by
+  `LibraryRemoteSettings`, which refuses at start a URL that carries a user, a password, a query or a fragment, and a token for a remote
+  that is not `https://`. No URL in this server carries a secret, so nothing needs one masked, and the family never references Core's
+  `ConnectionStringSanitizer`. Without a remote the state directory holds the only copy of the library, which no restart replaces; with
+  one, `library/` is a copy a restart reads back. **The token reaches git in the environment of the one process that talks to the remote**
+  (`GIT_CONFIG_*` setting `http.<url>.extraHeader`, scoped to the URL so that a redirect elsewhere is not sent it; no git process inherits the
+  `Coordinator__*` variables that hold the token and the other settings): never in `argv`, which
+  `ps` lists, and never in `.git/config`, since the address too is an argument and never a configured `remote`. Set it from the
+  environment, never `--Coordinator:Library:Remote:Token`. What git says goes to the log with the token replaced and is in no response.
+  With a remote the library is read at start (`OpenAsync`): a remote that cannot be reached, a history that has parted from it, or a
+  remote with no library when the coordinator has none either and `Coordinator:Redis:Initialize` is not true (a wrong address, or a
+  remote that lost its data) stops the start; a remote that lost its data under a coordinator that may begin gets the local copy pushed back, and with no copy
+  the seeds. **A write aligns, writes, pushes** (`PipelineLibrary.Written`, under the library's one lock): it fetches the remote's `main` and
+  puts the library on it (behind, it moves forward; ahead, it drops what the remote lacks and logs each commit; parted, it refuses naming both
+  heads), then writes and commits, then pushes without force. A failure from the write on puts the files and the history back exactly (`reset --hard` to the earlier `HEAD`,
+  `clean` of the pipeline's directory, which a new pipeline would otherwise leave), so a refused save leaves nothing; a write that commits nothing
+  pushes nothing. The write, the push and the undo run on no request token, and the push is bounded by `Timeout` (the process and
+  its children are ended). The answer is a 503 `{error}` in this server's words: *could not be reached or refused the credentials*, *refused the save*
+  (the remote answered about the ref: a hook, a right, a history it rejects) or *did not answer in time*. **Only a fetch that failed and a push the remote refused
+  guarantee that nothing was kept**; after any other failure the push may have reached the remote, and the save shows here at the next save or
+  start. The studio's contract is unchanged: it reads the `error` of a status it does not know. `JobAtAsync` (every launch, the health read, the binding verifier)
+  reads an immutable commit without the lock once the library is open, so no launch waits for a save or for the remote; every other read waits for a
+  push in flight, `Timeout` at most. `[local: LibraryRemoteTests]` `[unchecked: a git server that goes down in the middle of a push and
+  applies it; an https remote with a token; Windows; the health read after an alignment, which publishes no event and so may stay stale up to Coordinator:Health:MaxAge]`
 - **Cuts inside a branch belong to `dtpipe split`**, run on the node whose data the branch reads
   (`BranchCut`: the branch alone, its two halves back); a branch that reads no node's data is not
   cut. `PlanBuilder` puts the consumer half in the branch's place, only regroups whole branches

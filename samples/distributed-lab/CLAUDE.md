@@ -15,6 +15,12 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   reads it back, so `tools/campaign.py` restarts the coordinator on the same journal and a reset lab starts a new one even on a
   Redis that outlives it. `Coordinator:Redis:Initialize` is true here only: a lab begins where Redis holds nothing. The stack's
   `redis` service keeps its data in `.stack/redis`, its own directory like every service's. `[local: lab.sh up, tools/campaign.py F4]`
+- **The lab's library is pushed to a bare repository beside its state.** `exec-coordinator` creates `.state/library.git` when it is missing
+  (`git init --bare`, nothing of the server) and passes it as `Coordinator:Library:Remote:Url`, so `tools/campaign.py` restarts the coordinator on the
+  same remote and `lab.sh reset` takes it with the state. The stack's coordinator mounts `.stack/library.git` for the same purpose and its
+  entrypoint (`docker/coordinator-entrypoint.sh`) creates the repository on first start, as a node seeds its own database. The remote is the one
+  directory the stack adds beside a service's own: it stands for a git server a deployment would run, and only the coordinator mounts it. `[local: lab.sh up, lab.sh stack up, smoke.py library]`
+  `[unchecked: that a restart with the local copy removed reads the library and an armed deployment back, shown by a throwaway script only]`
 - **The lab runs the server in lab mode, on its own seeds.** `lab.sh exec-coordinator` is the one
   way the server starts, for `lab.sh` and `tools/campaign.py`: `Coordinator:LabMode`, the scenarios
   in `pipelines/`, the library from `library-seed/`, the rights from `rights-seed.json`, the state in
@@ -103,7 +109,7 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   in the lab's logs is counted into the trial's `I7`, never absorbed. `[local: tools/campaign.py with
   CAMPAIGN_PREFLIGHT=report prints the checks without refusing]`
 - **The compose stack mounts nothing across services.** `compose.yaml` gives each service its own
-  directory under `.stack/` (a node its database, the coordinator its state, the IdP its key) and
+  directory under `.stack/` (a node its database, the coordinator its state and its library remote, the IdP its key) and
   the runner none: the stack is the proof that the coordinator reads no node's data, so a volume
   shared between two services voids it. A node seeds its own database on first start
   (`docker/node-entrypoint.sh`, `seed.sh` with its name) and refuses a scale other than the one it

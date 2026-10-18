@@ -1,11 +1,12 @@
 namespace DtPipe.Coordinator.Server;
 
 /// <summary>
-/// The Redis that keeps the coordinator's state: the run journal, the rights and the session keys (<c>Coordinator:Redis</c>).
+/// The Redis that keeps the coordinator's state: the run journal, the rights, the deployments and the session keys (<c>Coordinator:Redis</c>).
 /// <see cref="ConnectionString"/> is a secret when it holds a password: it is read from the environment
 /// (<c>Coordinator__Redis__ConnectionString</c>) and written in no log or message.
-/// <see cref="KeyPrefix"/> lets several coordinators share one Redis. <see cref="Initialize"/> allows the journal and the rights to
-/// begin where Redis holds none: the first start, or after Redis lost its data.
+/// <see cref="KeyPrefix"/> lets several coordinators share one Redis. <see cref="Initialize"/> allows the journal, the rights and the library
+/// to begin where the state holds none: the first start, or after Redis (or the library's remote) lost its data. The connection string is
+/// set through the environment only: a command-line argument can be listed by any process of the host.
 /// </summary>
 public sealed record RedisSettings(string? ConnectionString = null, string KeyPrefix = "dtpipe-coordinator:", bool Initialize = false);
 
@@ -63,6 +64,9 @@ public sealed class CoordinatorServerOptions
     /// <summary>Where the run journal lives beyond the process; the server does not start without a connection string.</summary>
     public RedisSettings Redis { get; init; } = new();
 
+    /// <summary>The git repository the library is pushed to (<c>Coordinator:Library:Remote</c>); none when unset, and the library then stays in the state directory.</summary>
+    public LibraryRemoteSettings? LibraryRemote { get; init; }
+
     /// <summary>The Lab view's scenarios, one job file each; read only in <see cref="LabMode"/>.</summary>
     public string? Scenarios { get; init; }
 
@@ -87,6 +91,7 @@ public sealed class CoordinatorServerOptions
                 section["Redis:ConnectionString"] is { Length: > 0 } redis ? redis : null,
                 section["Redis:KeyPrefix"] is { Length: > 0 } prefix ? prefix : "dtpipe-coordinator:",
                 section.GetValue<bool>("Redis:Initialize")),
+            LibraryRemote = LibraryRemoteSettings.FromConfiguration(section),
             HealthMaxAge = section.GetValue<TimeSpan?>("Health:MaxAge") is { } age && age > TimeSpan.Zero ? age : TimeSpan.FromMinutes(5),
         };
     }

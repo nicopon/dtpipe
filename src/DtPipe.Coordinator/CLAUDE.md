@@ -226,18 +226,20 @@ while any replica is connected.
 
 ## State and availability
 
-- **The coordinator is not highly available.** Its state - the replica registry, the plans, the runs in
-  flight - and TransportR's own (the default in-memory store) live in the process: a restart loses
-  all of it, and the transfers it carried are gone. **A restart is read from the host's run journal, never from what the
+- **The coordinator is one instance that restarts fast, not a highly available service.** What a host must not lose - the run journal,
+  the rights, the armed deployments, the session keys, the pipeline library - is kept outside the process (the server's are Redis and a
+  git remote: `src/DtPipe.Coordinator.Server/CLAUDE.md`), so a restart on an empty state directory loses none of it. What lives in the
+  process is lost: the replica registry (rebuilt as replicas announce), the plans, the runs in flight and the transfers they carried,
+  and TransportR's own store (the default, in memory). **A restart is read from the host's run journal, never from what the
   nodes do next**: a replica announcing again is an ordinary announcement, never evidence of a run. The host journals each
   run when it is queued, when it starts and when it ends, in a store that outlives the process (the server's is Redis);
   after a restart it ends the runs it finds in flight, and asks each
   replica of a node that carried a started run to abandon those fragments (`INodeLink.CancelAsync`, answered false by a
   replica that holds none). No message tells a node to drop what it holds on a guess: the authority is a journaled run.
   A restart that finds no journal, or a replica that never announces again, still falls to the operator, who restarts the
-  node hosts, which kills their fragment children. High availability would be a mode of its own, with the state held in an
-  external persistent store (TransportR's hub is highly available only with its Redis store and sticky sessions, and even
-  then its transfers are local to the instance), designed as such rather than inferred from reconnections.
+  node hosts, which kills their fragment children. No second instance takes over: TransportR's hub is highly available only
+  with its Redis store and sticky sessions, its transfers stay local to the instance, and it refuses a transfer a host opens
+  between two instances, so the state outside the process serves a fast restart and never an active/active pair.
   `[local: tools/campaign.py F4 - the lost run keeps its id, the abandon reaches the children]`
 - **A node renews its own token, and the hub closes a connection whose token ran out.** A node built
   with `AccessTokenProvider` renews ahead of the expiry, so an idle or a long-running node outlives

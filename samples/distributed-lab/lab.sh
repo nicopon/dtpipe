@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Starts, stops and inspects the distributed lab: one coordinator, four data-node hosts and a
 # runner, as plain local processes. Everything the lab writes lives under .state/ (databases,
-# fragments, library, logs); the rest of the coordinator's state lives in Redis.
+# fragments, library, the bare repository the library is pushed to, logs); the rest of the
+# coordinator's state lives in Redis.
 #
 #   ./lab.sh up        build, seed if needed, start everything, print the page URL
 #                      (LAB_NODE_SANDBOX=1 starts the nodes in sandbox mode: see "nodes";
@@ -232,14 +233,22 @@ start_idp() {
     echo "The IdP did not come up; see $STATE/logs/idp.log" >&2; exit 1
 }
 
+# The bare repository the coordinator's library is pushed to, beside the state so that a reset takes it too: with it
+# the local library is a copy, which a restart reads back. A deployment points the coordinator at a git server instead.
+library_remote() {
+    [[ -f "$STATE/library.git/HEAD" ]] || git init -q --bare -b main "$STATE/library.git"
+}
+
 # Replaces this shell with the coordinator's server, in lab mode, on the lab's state and seeds. Extra
 # arguments are passed on. The one way the server starts, for this script and for tools/campaign.py.
 exec_coordinator() {
     load_redis_settings
+    library_remote
     exec dotnet "$STATE/bin/coordinator/DtPipe.Coordinator.Server.dll" --urls "$URL" \
         --Coordinator:StateDirectory="$STATE" --Coordinator:Authority="$IDP_URL" \
         --Coordinator:LabMode=true --Coordinator:Scenarios="$LAB/pipelines" \
         --Coordinator:LibrarySeed="$LAB/library-seed" --Coordinator:RightsSeed="$LAB/rights-seed.json" \
+        --Coordinator:Library:Remote:Url="$STATE/library.git" \
         --Coordinator:Ui:ClientSecret=coordinator-ui-lab-secret --Coordinator:Studio:ClientId=dtpipe-studio \
         --Coordinator:Redis:ConnectionString="$REDIS_URL" --Coordinator:Redis:KeyPrefix="$REDIS_PREFIX" --Coordinator:Redis:Initialize=true \
         --Coordinator:Roles:Admin="${LAB_ADMIN:-labadmin}@dtpipe.test" \

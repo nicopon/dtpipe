@@ -59,6 +59,8 @@ FROM coordinator AS coordinator-lab
 COPY samples/distributed-lab/pipelines/ /lab/pipelines/
 COPY samples/distributed-lab/library-seed/ /lab/library-seed/
 COPY samples/distributed-lab/rights-seed.json /lab/rights-seed.json
+COPY samples/distributed-lab/docker/coordinator-entrypoint.sh /lab/coordinator-entrypoint.sh
+ENTRYPOINT ["/lab/coordinator-entrypoint.sh"]
 
 FROM with-dtpipe AS runner
 COPY --from=hosts-build /out/runner /app

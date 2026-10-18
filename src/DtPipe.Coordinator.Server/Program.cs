@@ -56,7 +56,8 @@ builder.Services.AddSingleton<DesignValidator>();
 builder.Services.AddSingleton<BindingVerifier>();
 builder.Services.AddSingleton(services => new PipelineLibrary(
     services.GetRequiredService<CoordinatorServerOptions>(),
-    services.GetRequiredService<AutoPlacer>().Check, services.GetRequiredService<AutoPlacer>().Resolve));
+    services.GetRequiredService<AutoPlacer>().Check, services.GetRequiredService<AutoPlacer>().Resolve,
+    services.GetRequiredService<ILoggerFactory>().CreateLogger<PipelineLibrary>()));
 builder.Services.AddSingleton<IJobSource>(services => services.GetRequiredService<PipelineLibrary>());
 builder.Services.AddSingleton<ILibraryHeads>(services => services.GetRequiredService<PipelineLibrary>());
 builder.Services.AddSingleton<IRunStore, RedisRunStore>();
@@ -72,6 +73,8 @@ TrustedIdp.EnsureSessionKeys(app.Services);
 // The armed deployments and the hosts set aside are read now too: a Redis that cannot be read stops the start.
 app.Services.GetRequiredService<DeploymentManager>();
 app.Services.GetRequiredService<EnrollmentQueue>();
+// With a remote, the library is read from it now: a remote that cannot be reached, or that holds nothing to begin from, stops the start.
+if (server.LibraryRemote is not null) await app.Services.GetRequiredService<PipelineLibrary>().OpenAsync(CancellationToken.None);
 
 app.Use(async (context, next) =>
 {

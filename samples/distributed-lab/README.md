@@ -83,7 +83,9 @@ run side by side. Browse the coordinator at that name, never `127.0.0.1`.
 | Directory | Mounted by | Holds |
 |---|---|---|
 | `.stack/idp/` | `idp` | its signing key |
-| `.stack/coordinator/` | `coordinator` | library, runs, rights, session keys |
+| `.stack/coordinator/` | `coordinator` | its copy of the library, its fragments' scratch files |
+| `.stack/library.git/` | `coordinator` | the bare repository the library is pushed to, created on first start |
+| `.stack/redis/` | `redis` | runs, rights, armed deployments, session keys |
 | `.stack/node-N/` | `node-N` | its database, seeded on first start, and its fragment jobs |
 
 The runner mounts nothing. `LAB_SCALE` (default `1`) multiplies the seeded rows for every node: a
@@ -255,7 +257,8 @@ reader or writer. The switch belongs to the host's own environment, and only the
 planning ever sends a job as written.
 
 **The library** is a git repository under `.state/library`, started from `library-seed/`: each
-save and each save of bindings is a commit. Armed deployments are kept in Redis, like the runs. A seed `<id>.yaml` brings its `<id>.bindings.json`, which binds each source and sink branch to a
+save and each save of bindings is a commit, pushed to the bare repository `.state/library.git` before the save is accepted
+(`lab.sh` creates it; a refused push undoes the save, and `rm -r .state/library` followed by a restart reads the library back from it). Armed deployments are kept in Redis, like the runs. A seed `<id>.yaml` brings its `<id>.bindings.json`, which binds each source and sink branch to a
 node and a brick and a mode (`strict`: the branch must stay that brick, word for word; `contract`, `compatible`, `tolerant`: the brick may change, judged against what the last check pinned); the runner is never bound. Several pipelines may be deployed at once. Their runs are in
 flight together when they share no data node; otherwise they wait their turn in the order they came
 (the runner never counts). Runs and armed deployments are kept in Redis, under a key prefix derived from the state directory,
@@ -337,7 +340,7 @@ replica ran each fragment.
 - One run at a time per data node: the runner's fragments of two runs share its host with no bound
   on either. The coordinator is not highly available: a restart ends the runs in flight as errors (they keep their ids and the journal
   holds them, in Redis), and asks the node hosts that carried them to abandon their fragments when they announce again; the library, the armed
-  deployments, the rights, the session keys and the finished runs survive. A host that does not announce again keeps its fragments until it is restarted
+  deployments, the rights, the session keys and the finished runs survive, the library by being read back from its remote. A host that does not announce again keeps its fragments until it is restarted
   (`./lab.sh down`, then `./lab.sh up`). Nothing reconstructs a run from the nodes reconnecting: the journal is the authority.
 - A studio knows a source brick's columns, not those after a step: dtpipe offers no schema of
   a job's branch without running it.

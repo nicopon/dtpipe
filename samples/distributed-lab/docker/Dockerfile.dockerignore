@@ -11,5 +11,6 @@
 !samples/distributed-lab/rights-seed.json
 !samples/distributed-lab/idp-clients.json
 !samples/distributed-lab/docker/node-entrypoint.sh
+!samples/distributed-lab/docker/coordinator-entrypoint.sh
 **/bin/
 **/obj/

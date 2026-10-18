@@ -16,6 +16,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="DtPipe.Coordinator.Server.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- An external OpenID Connect provider issues every token: services present bearer tokens,
          people sign in through the provider into a session cookie. -->
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.12" />
