@@ -191,6 +191,11 @@ Both inputs are streamed — `← [a]  +from [b]`, where the join above read `+r
 > come out, not the order they come out in. Add an `--sql` stage with an `ORDER BY` if something
 > downstream depends on it.
 
+> [!NOTE]
+> The sources of a `--merge` must share one schema: the same columns, in the same order, with the
+> same types. A source that differs is refused before any row moves, naming the column; nothing is
+> converted. Align the branches with `--column-type`, `--compute` or an `--sql` stage.
+
 ## The rules that catch people out
 
 **Repeating `-i`, `--from` or `--job` opens a new branch.** That is the only way a single command

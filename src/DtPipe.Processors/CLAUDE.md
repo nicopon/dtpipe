@@ -14,6 +14,9 @@ execution. The fetch goes through the shared DuckDB read path; never reimplement
 - `--duck-init` / `--compute` / `--expand` values resolve through `IStringContentResolver`
   (`CliStringContentResolver` for the CLI, `DefaultStringContentResolver` headless).
 - `DuckInitSqlRunner` (Core) is the single init-SQL runner for reader, writer and processor.
+- `MergeTransformer.OpenAsync` refuses channels that do not share a schema (count, names, structural
+  types; a zone, nullability or field metadata is not compared, since a published channel schema
+  carries none of them reliably). It never converts. `[CI: MergeTransformerSchemaTests]`
 - Each factory validates its own `--from` arity: `--merge` takes several aliases, `--sql` exactly one
   and materialises the rest through `--ref` (cost-based planning, see `REFERENCE.md#dag-syntax`).
 

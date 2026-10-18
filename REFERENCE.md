@@ -562,7 +562,7 @@ DuckDB extensions (`excel`, `httpfs`, `azure`, `ducklake`…) are reached throug
 | `--ref ALIAS[,ALIAS...]` | Materialized reference source(s) — fully preloaded before query execution. Use for JOIN lookups |
 | `--sql "QUERY"` | Inline SQL executed by the internal DuckDB engine (standard SQL, window functions, CTEs, JSON) |
 | `--duck-init "SQL"` | SQL to run on the DuckDB SQL processor connection after open (e.g. `LOAD httpfs`). See [Value Resolution](#value-resolution) |
-| `--merge` | UNION ALL of all `--from` sources. Requires at least 2 streaming sources |
+| `--merge` | UNION ALL of all `--from` sources. Requires at least 2 streaming sources that share one schema: same columns, names and types, else the run is refused before any row moves |
 
 > **`--ref` is intentionally materialized.** Secondary sources declared via `--ref` are read fully
 > into memory so the query engine can build a cost-based plan. Only the `--from` source streams.
