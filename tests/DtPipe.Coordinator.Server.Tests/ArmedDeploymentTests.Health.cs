@@ -69,6 +69,17 @@ public sealed partial class ArmedDeploymentTests
     private async Task<PipelineHealthView> ViewAsync() => Assert.Single((await _health.ReadAsync("p", CancellationToken.None)).Pipelines);
 
     /// <summary>Reads again until the status is not the one a background ask is going to change.</summary>
+    /// <summary>Waits for a state that a background task reaches, which no view reports.</summary>
+    private static async Task UntilAsync(Func<bool> reached)
+    {
+        var deadline = DateTime.UtcNow + Wait;
+        while (!reached())
+        {
+            if (DateTime.UtcNow > deadline) throw new TimeoutException("The background task did not reach the state awaited.");
+            await Task.Delay(10, TestContext.Current.CancellationToken);
+        }
+    }
+
     private async Task<PipelineHealthView> ViewWhenAsync(Func<PipelineHealthView, bool> done)
     {
         var deadline = DateTime.UtcNow + Wait;
@@ -195,8 +206,11 @@ public sealed partial class ArmedDeploymentTests
         await ArmedHealthyAsync(new Binding("n", "src", "compatible", new BindingPin("an-older-version", "{}")));
 
         var first = await ViewAsync();
+        await UntilAsync(() => node.Count == 1);
         _bus.Publish("nodes", new { });
         var second = await ViewAsync();
+        // A second question would start on a pool thread: give it the time to show.
+        await Task.Delay(100, TestContext.Current.CancellationToken);
 
         Assert.Equal(HealthStatus.Warning, first.Status);
         Assert.Equal(HealthSeverity.Warning, Cause(first, HealthCauses.VerdictPending).Severity);
