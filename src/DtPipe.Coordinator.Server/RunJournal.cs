@@ -64,9 +64,11 @@ public sealed record RunView(
 }
 
 /// <summary>
-/// Every finished run, one JSON file each under <c>runs/&lt;pipeline&gt;/</c> in the state directory, read back at
-/// start. Runs are what happened, not what was designed: the library's git history never holds them. A run is journaled when it
-/// finishes, so the journal holds none in flight, and keeps the latest <see cref="Kept"/>, at start as when it records.
+/// Every run, one JSON file each under <c>runs/&lt;pipeline&gt;/</c> in the state directory, read back at start. Runs are what
+/// happened, not what was designed: the library's git history never holds them. A run is written when it is queued, again when it
+/// starts and when it ends, so a restart finds what it interrupted: those runs are ended then (<see cref="RestartedRefusal"/>), and
+/// the ones that had started are <see cref="Orphans"/>, whose children may still run. History (<see cref="List"/>, <see cref="Find"/>)
+/// holds the runs that are over and keeps the latest <see cref="Kept"/>, at start as when it records; a run in flight is on disk only.
 /// </summary>
 public sealed class RunJournal
 {
@@ -81,6 +83,9 @@ public sealed class RunJournal
     private readonly object _lock = new();
     private readonly List<RunView> _runs = [];
     private int _seq;
+
+    /// <summary>The refusal of a run a restart interrupted.</summary>
+    public const string RestartedRefusal = "The coordinator restarted before this run ended.";
 
     public RunJournal(CoordinatorServerOptions options, ILogger<RunJournal> logger)
     {
@@ -99,17 +104,27 @@ public sealed class RunJournal
         }
         // The next id is read from every run loaded, before the window: a run's id and its start time do not follow one order.
         _seq = _runs.Select(r => int.TryParse(r.RunId.Split('-').Last(), out var n) ? n : 0).DefaultIfEmpty(0).Max();
+        for (var i = 0; i < _runs.Count; i++)
+        {
+            if (_runs[i].IsOver) continue;
+            if (_runs[i].State == RunState.Running && _runs[i].Plan is not null) Orphans.Add(_runs[i]);
+            _runs[i] = _runs[i] with { State = RunState.Error, FinishedAt = DateTimeOffset.UtcNow, Refusal = RestartedRefusal };
+            Write(_runs[i]);
+        }
         _runs.Sort((a, b) => b.StartedAt.CompareTo(a.StartedAt));
         if (_runs.Count > Kept) _runs.RemoveRange(Kept, _runs.Count - Kept);
     }
 
+    /// <summary>The runs a restart found started and not over: their fragments were placed on replicas, and their children may still run.</summary>
+    public List<RunView> Orphans { get; } = [];
+
     public string NextRunId() => $"run-{Interlocked.Increment(ref _seq)}";
 
+    /// <summary>Writes the run, whatever its state; one that is over also enters the history.</summary>
     public void Record(RunView run)
     {
-        var dir = Path.Combine(_dir, DirectoryName(run.PipelineId ?? run.PlanId));
-        Directory.CreateDirectory(dir);
-        File.WriteAllText(Path.Combine(dir, run.RunId + ".json"), JsonSerializer.Serialize(run, Json));
+        Write(run);
+        if (!run.IsOver) return;
         lock (_lock)
         {
             _runs.RemoveAll(r => r.RunId == run.RunId);
@@ -127,6 +142,16 @@ public sealed class RunJournal
     public RunView? Find(Func<RunView, bool> match)
     {
         lock (_lock) return _runs.FirstOrDefault(match);
+    }
+
+    // Written beside and moved over, so a crash leaves a whole file: the file of the latest id is what keeps the next id fresh.
+    private void Write(RunView run)
+    {
+        var dir = Path.Combine(_dir, DirectoryName(run.PipelineId ?? run.PlanId));
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, run.RunId + ".json");
+        File.WriteAllText(path + ".tmp", JsonSerializer.Serialize(run, Json));
+        File.Move(path + ".tmp", path, overwrite: true);
     }
 
     private static string DirectoryName(string name) =>

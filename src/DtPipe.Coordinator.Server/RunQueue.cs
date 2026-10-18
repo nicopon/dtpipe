@@ -7,9 +7,10 @@ public sealed record LaunchedRun(RunView Run, bool Replayed);
 
 /// <summary>
 /// The runs: queued, sent to the coordinator's own <see cref="IRunOrchestrator"/>, which places, launches, wires and
-/// judges, and journaled when they finish; this class only asks. A run is sent once no run already sent, and no older run
+/// judges, and journaled as they go; this class only asks. A run is sent once no run already sent, and no older run
 /// still waiting, uses one of its data nodes (<see cref="RunDispatch"/>): runs on disjoint data nodes are in flight
-/// together, and a runner never counts. A run sent holds its data nodes until it finishes.
+/// together, and a runner never counts. A run sent holds its data nodes until it finishes. A run is journaled when it is queued,
+/// when it starts and when it ends.
 /// </summary>
 internal sealed class RunQueue
 {
@@ -77,6 +78,8 @@ internal sealed class RunQueue
             var now = DateTimeOffset.UtcNow;
             ticket = new Ticket(new RunView(
                 _journal.NextRunId(), deployment.PlanId, RunState.Queued, now, null, null, null, null, pipelineId, now, LaunchedBy: by, IdempotencyKey: idempotencyKey));
+            // On disk before the ticket is visible: a restart finds the run, and its id is never given again.
+            _journal.Record(ticket.View);
             _ledger.Queued.Add(ticket);
         }
         var view = ticket.View;
@@ -222,6 +225,7 @@ internal sealed class RunQueue
 
         view = view with { State = RunState.Running, StartedAt = DateTimeOffset.UtcNow, PlanId = plan.Id, Plan = journaled };
         lock (_ledger.Lock) ticket.View = view;
+        _journal.Record(view);
         _bus.Publish("run", view);
         _deployments.PublishDeployments();
 

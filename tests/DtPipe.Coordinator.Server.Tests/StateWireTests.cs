@@ -71,11 +71,13 @@ public sealed class StateWireTests : IDisposable
             journal.Record(RunIn(word, $"run-{i + 1}"));
         var client = host.Bearer(CoordinatorHost.Person(CoordinatorHost.Reader));
 
+        // History holds the runs that are over; a run in flight is on disk and in the queue.
+        var over = RunWords.Where(w => w is not ("queued" or "running")).Order();
         var runs = await client.GetFromJsonAsync<JsonElement>("/api/runs", Ct);
-        Assert.Equal(RunWords.Order(), runs.EnumerateArray().Select(r => r.GetProperty("state").GetString()!).Order());
+        Assert.Equal(over, runs.EnumerateArray().Select(r => r.GetProperty("state").GetString()!).Order());
 
         var snapshot = await client.GetFromJsonAsync<JsonElement>("/api/state", Ct);
-        Assert.Equal(RunWords.Order(), snapshot.GetProperty("history").EnumerateArray().Select(r => r.GetProperty("state").GetString()!).Order());
+        Assert.Equal(over, snapshot.GetProperty("history").EnumerateArray().Select(r => r.GetProperty("state").GetString()!).Order());
     }
 
     [Fact]
@@ -88,12 +90,13 @@ public sealed class StateWireTests : IDisposable
         foreach (var (word, i) in RunWords.Select((w, i) => (w, i)))
             Assert.Contains($"\"state\": \"{word}\"", File.ReadAllText(Path.Combine(_dir, "runs", "p", $"run-{i + 1}.json")));
 
+        // A restart ends a run that was queued or running.
         var again = new RunJournal(OptionsIn(_dir), NullLogger<RunJournal>.Instance);
-        Assert.Equal(RunWords.Order(), again.List().Select(r => WordOf(r.State)).Order());
+        Assert.Equal(RunWords.Select(w => w is "queued" or "running" ? "error" : w).Order(), again.List().Select(r => WordOf(r.State)).Order());
         Assert.Equal("run-8", again.NextRunId());
     }
 
-    /// <summary>A file written by hand in the journal's format, one per state: each is read back as it says, and none makes the next id go down.</summary>
+    /// <summary>A file written by hand in the journal's format, one per state: each is read back as it says, a run in flight as one the restart ended, and none makes the next id go down.</summary>
     [Fact]
     public void A_Journal_File_Of_Every_State_Is_Read_Back_And_The_Next_Id_Follows_The_Highest()
     {
@@ -112,9 +115,9 @@ public sealed class StateWireTests : IDisposable
 
         Assert.Equal(RunWords.Count(), journal.List().Count);
         foreach (var (word, i) in RunWords.Select((w, i) => (w, i)))
-            Assert.Equal(word, WordOf(journal.List().Single(r => r.RunId == $"run-{(i + 1) * 3}").State));
+            Assert.Equal(word is "queued" or "running" ? "error" : word, WordOf(journal.List().Single(r => r.RunId == $"run-{(i + 1) * 3}").State));
         Assert.Equal("run-22", journal.NextRunId());
-        Assert.All(journal.List(), r => Assert.Equal(r.State is not (RunState.Queued or RunState.Running), r.IsOver));
+        Assert.All(journal.List(), r => Assert.True(r.IsOver));
     }
 
     /// <summary>A journal file whose state is none of the seven, or a number, cannot be read: it is skipped, and the others are read and the journal starts.</summary>

@@ -228,14 +228,16 @@ while any replica is connected.
 
 - **The coordinator is not highly available.** Its state - the replica registry, the plans, the runs in
   flight - and TransportR's own (the default in-memory store) live in the process: a restart loses
-  all of it, and the transfers it carried are gone. **Nothing reconstructs that state from what the
-  nodes do next**: a replica announcing again is an ordinary announcement, never evidence of a run, and
-  no message tells a node to drop what it holds on a guess. A coordinator restart is an operator
-  event: the operator restarts the node hosts, which kills their fragment children. High
-  availability would be a mode of its own, with the state held in an external persistent store
-  (TransportR's hub is highly available only with its Redis store and sticky sessions, and even then
-  its transfers are local to the instance), designed as such rather than inferred from reconnections.
-  `[local: tools/campaign.py F4 — hosts come back, the reset leaves nothing running]`
+  all of it, and the transfers it carried are gone. **A restart is read from the host's run journal, never from what the
+  nodes do next**: a replica announcing again is an ordinary announcement, never evidence of a run. The host journals each
+  run when it is queued, when it starts and when it ends; after a restart it ends the runs it finds in flight, and asks each
+  replica of a node that carried a started run to abandon those fragments (`INodeLink.CancelAsync`, answered false by a
+  replica that holds none). No message tells a node to drop what it holds on a guess: the authority is a journaled run.
+  A restart that finds no journal, or a replica that never announces again, still falls to the operator, who restarts the
+  node hosts, which kills their fragment children. High availability would be a mode of its own, with the state held in an
+  external persistent store (TransportR's hub is highly available only with its Redis store and sticky sessions, and even
+  then its transfers are local to the instance), designed as such rather than inferred from reconnections.
+  `[local: tools/campaign.py F4 - the lost run keeps its id, the abandon reaches the children]`
 - **A node renews its own token, and the hub closes a connection whose token ran out.** A node built
   with `AccessTokenProvider` renews ahead of the expiry, so an idle or a long-running node outlives
   its token's lifetime. A node given a static token cannot renew: its connection is closed at the

@@ -29,6 +29,8 @@ public sealed class NodeChannelHubTests : IDisposable
     private readonly EnrollmentQueue _enrollment = new();
     private readonly EventBus _bus = new();
     private readonly RightsStore _rights;
+    private readonly OrphanRunsTests.Abandonments _abandonments = new();
+    private readonly OrphanRuns _orphans;
     private readonly CoordinatorServerOptions _options;
 
     public NodeChannelHubTests()
@@ -43,6 +45,11 @@ public sealed class NodeChannelHubTests : IDisposable
         };
         _rights = new RightsStore(_options);
         _inventory = new NodeInventory(_registry);
+        // A run the last coordinator left in flight on node-known.
+        new RunJournal(_options, NullLogger<RunJournal>.Instance).Record(new RunView(
+            "run-3", "plan-1", RunState.Running, DateTimeOffset.UtcNow, null, null, null, null, "p", DateTimeOffset.UtcNow,
+            new RunPlan("plan-1", null, [new RunPlanFragment("p@node-known", "node-known", "v1")], [])));
+        _orphans = new OrphanRuns(new RunJournal(_options, NullLogger<RunJournal>.Instance), _abandonments, NullLogger<OrphanRuns>.Instance);
         _protocol = new ReplicaProtocol(_registry, new NoRuns(), new InMemoryStateStore(), NullLogger<ReplicaProtocol>.Instance);
     }
 
@@ -58,10 +65,25 @@ public sealed class NodeChannelHubTests : IDisposable
     private (NodeChannelHub Hub, Caller Caller) Connect(string connectionId, string subject)
     {
         var caller = new Caller(connectionId, subject);
-        return (new NodeChannelHub(_inventory, _protocol, _rights, _enrollment, _options, _bus, NullLogger<NodeChannelHub>.Instance) { Context = caller }, caller);
+        return (new NodeChannelHub(_inventory, _protocol, _rights, _enrollment, _options, _bus, _orphans, NullLogger<NodeChannelHub>.Instance) { Context = caller }, caller);
     }
 
     private static NodeAnnouncement Proposing(string name) => new(name, "proposed description", [], NodeRole.Data, []);
+
+    [Fact]
+    public async Task A_Replica_Is_Asked_To_Abandon_A_Run_The_Restart_Left_Only_Once_Its_Data_Plane_Client_Is_Announced()
+    {
+        var (hub, _) = Connect("c1", "known");
+        await hub.Announce(Proposing("node-known"));
+        await Task.Delay(100);
+        Assert.Empty(_abandonments.Asked);
+
+        await hub.Announce(Proposing("node-known") with { InstanceId = Guid.NewGuid(), DataPlaneClientId = Guid.NewGuid() });
+        for (var i = 0; i < 200 && _abandonments.Asked.IsEmpty; i++) await Task.Delay(25);
+
+        var asked = Assert.Single(_abandonments.Asked);
+        Assert.Equal(("known", "run-3", "p@node-known"), (asked.Replica.Node, asked.RunId, asked.Fragment));
+    }
 
     [Fact]
     public async Task An_Unknown_Subject_Waits_And_Is_Never_A_Node()

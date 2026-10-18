@@ -227,8 +227,8 @@ the answer is the `runId` (202): the scheduler asks `GET /service/runs/{id}` unt
 (`POST /service/runs/{id}/cancel`; a run of another identity or of a person is not its to cancel). An `Idempotency-Key` header
 (1 to 128 letters, digits, `.`, `_`, `:` or `-`) makes a retry safe: a second request of the same identity with the same key
 answers the first run (200) and queues none, whatever became of it, and the same key for another pipeline is a 409. The key lives
-with the run in the journal, which keeps the latest 200 runs, so a run still in flight when the server stops is not journaled and
-its key is not known again. A run names who started it (`launchedBy`: a person's email, a service's client id) and the pages show
+with the run in the journal, which keeps the latest 200 finished runs; a run still in flight when the server stops is ended as an
+error at the next start and answers its key as that run. A run names who started it (`launchedBy`: a person's email, a service's client id) and the pages show
 it. A launcher reaches nothing else: not `/api`, not `/health`, not the node channel.
 
 **A binding is held to its brick by a mode.** `strict` needs the branch to be the brick, word for word.
@@ -333,10 +333,10 @@ replica ran each fragment.
 - A transfer the hub refuses under the flow matrix shows in the run's verdict as an unresponsive
   fragment: the coordinator's log carries the refusal.
 - One run at a time per data node: the runner's fragments of two runs share its host with no bound
-  on either. The coordinator is not highly available: a restart loses every deployment and the runs
-  in flight (the library and the finished runs of the run journal survive), and the node hosts keep
-  running the lost runs' fragments until they are restarted. After a coordinator restart, restart the lab (`./lab.sh down`, then
-  `./lab.sh up`); nothing reconstructs a run from the nodes reconnecting.
+  on either. The coordinator is not highly available: a restart ends the runs in flight as errors (they keep their ids and the journal
+  holds them), and asks the node hosts that carried them to abandon their fragments when they announce again; the library, the armed
+  deployments and the finished runs survive. A host that does not announce again keeps its fragments until it is restarted
+  (`./lab.sh down`, then `./lab.sh up`). Nothing reconstructs a run from the nodes reconnecting: the journal is the authority.
 - A studio knows a source brick's columns, not those after a step: dtpipe offers no schema of
   a job's branch without running it.
 - `lab.sh` needs bash. The node host itself uses no POSIX-only API, but the lab is not tested on

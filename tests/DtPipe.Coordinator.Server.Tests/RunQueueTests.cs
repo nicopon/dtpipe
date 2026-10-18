@@ -297,6 +297,28 @@ public sealed class RunQueueTests : IDisposable
     }
 
     [Fact]
+    public async Task A_Restart_Ends_The_Runs_It_Interrupted_Keeps_Their_Keys_And_Never_Reuses_Their_Ids()
+    {
+        await ReplicaAsync("n");
+        await DeployAsync(DataPlan("p", "n"));
+        var running = _deployments.Launch("p", "cron", "night-1");
+        await RunningAsync(running.Run.RunId);
+        var waiting = _deployments.Launch("p", "cron", "night-2");
+        Assert.Equal(RunState.Queued, waiting.Run.State);
+
+        var journal = new RunJournal(_options, NullLogger<RunJournal>.Instance);
+        var restarted = TestDeployments.Create(
+            _inventory, _link, new ScriptedRuns(), new ReplicaAdmission(_registry, _state), new RightsFlowControl(_rights), _rights, new EventBus(),
+            journal, _options, _jobs);
+
+        Assert.Equal([RunState.Error, RunState.Error], new[] { running.Run.RunId, waiting.Run.RunId }.Select(id => journal.Find(r => r.RunId == id)!.State));
+        Assert.Equal(running.Run.RunId, Assert.Single(journal.Orphans).RunId);
+        Assert.Equal(running.Run.RunId, restarted.Launch("p", "cron", "night-1").Run.RunId);
+        Assert.Empty(restarted.Queue);
+        Assert.True(int.Parse(journal.NextRunId().Split('-').Last()) > int.Parse(waiting.Run.RunId.Split('-').Last()));
+    }
+
+    [Fact]
     public async Task A_Cancelled_Waiting_Run_Still_Answers_Its_Key()
     {
         await ReplicaAsync("n");

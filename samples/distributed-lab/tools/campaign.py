@@ -492,10 +492,11 @@ def survivors():
 
 
 def cell_F4():
-    """The coordinator is killed and restarted in mid-run. It is not highly available (its state is in memory and
-    nothing rebuilds it from the nodes), so what is judged is that the hosts come back (I1), that the operator's reset,
-    which restarts the hosts, leaves nothing running (I3), and that the lab runs a reference pipeline afterwards (I4).
-    What the restart left behind before that reset is recorded, not judged."""
+    """The coordinator is killed and restarted in mid-run. Its memory is lost, its run journal is not: the lost run is ended
+    ("restarted") and keeps its id, and the replicas that carried it are asked to abandon its fragments. Judged: the hosts
+    come back (I1), the lost run is in the history as an error and so no later run took its id (I8), no fragment child of it
+    lives 10 s after the hosts are back, with no reset (I3), and the lab runs a reference pipeline afterwards (I4). The
+    operator's reset that follows is still played, and leaves nothing running (I3)."""
     for rep in range(REPS):
         rec = {"cell": "F4 coordinator restart", "rep": rep, "pipeline": "sensor-stream", "expect": ["restarted"], "at": 4,
                "campaign": CAMPAIGN, "time": time.strftime("%Y-%m-%dT%H:%M:%S"), "inv": {}}
@@ -513,11 +514,16 @@ def cell_F4():
             rec["info"] = {"lost_run": lost, "survivors_10s_after_return": survivors(),
                            "lost_run_in_queue": any(r["runId"] == lost for r in S.call("/api/runs/queue")),
                            "lost_run_in_history": any(r["runId"] == lost for r in S.call("/api/runs"))}
+            if rec["info"]["survivors_10s_after_return"]:
+                rec["inv"]["I3"] = f"{len(rec['info']['survivors_10s_after_return'])} fragment child process(es) alive 10s after the hosts came back, with no reset"
+            kept = next((r for r in S.call("/api/runs") if r["runId"] == lost), None)
+            if kept is None or kept["state"] != "error":
+                rec["inv"]["I8"] = f"the lost run {lost} is not in the history as an error: {kept and kept['state']}"
             restart_lab()  # the operator's reset: stopping the hosts stops their fragment children
             time.sleep(10)
             left = children()
             if left:
-                rec["inv"]["I3"] = f"{len(left)} fragment child process(es) alive 10s after the operator's reset"
+                rec["inv"]["I3"] = rec["inv"].get("I3", "") + f" {len(left)} fragment child process(es) alive 10s after the operator's reset"
         except Exception as e:
             rec["inv"]["I1"] = f"the lab did not come back: {str(e)[:150]}"
             rec["elapsed"] = round(time.time() - t0, 2)
@@ -530,10 +536,6 @@ def cell_F4():
         problem = reference_ok(rec)
         if problem:
             rec["inv"]["I4"] = problem
-        try:
-            rec.setdefault("info", {})["lost_run_id_reused"] = lost is not None and any(r["runId"] == lost for r in S.call("/api/runs"))
-        except Exception:
-            pass
         record(rec)
 
 

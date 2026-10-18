@@ -118,4 +118,51 @@ public sealed class RunJournalTests : IDisposable
         Assert.Equal(plan.Fragments, back.Plan.Fragments);
         Assert.Equal(plan.Bindings, back.Plan.Bindings);
     }
+
+    private CoordinatorServerOptions Options() =>
+        new() { StateDir = _dir, Authority = "http://idp", Audience = "test", UiClientId = "ui", UiClientSecret = "secret" };
+
+    private static RunView InFlight(string id, RunState state, RunPlan? plan = null) =>
+        new(id, "plan", state, DateTimeOffset.UtcNow, null, null, null, null, "p", DateTimeOffset.UtcNow, plan, LaunchedBy: "cron", IdempotencyKey: "k-" + id);
+
+    [Fact]
+    public void A_Run_In_Flight_Is_On_Disk_And_In_No_History()
+    {
+        var journal = new RunJournal(Options(), NullLogger<RunJournal>.Instance);
+
+        journal.Record(InFlight("run-1", RunState.Queued));
+
+        Assert.True(File.Exists(Path.Combine(_dir, "runs", "p", "run-1.json")));
+        Assert.Empty(journal.List());
+        Assert.Null(journal.Find(r => r.RunId == "run-1"));
+    }
+
+    [Fact]
+    public void A_Restart_Ends_A_Run_In_Flight_Keeps_Its_Key_And_Counts_Its_Id()
+    {
+        var journal = new RunJournal(Options(), NullLogger<RunJournal>.Instance);
+        journal.Record(InFlight("run-4", RunState.Queued));
+        journal.Record(InFlight("run-9", RunState.Running, new RunPlan("plan", null, [new RunPlanFragment("p@n", "n", "v1")], [])));
+
+        var again = new RunJournal(Options(), NullLogger<RunJournal>.Instance);
+
+        Assert.All(again.List(), r => Assert.Equal((RunState.Error, RunJournal.RestartedRefusal), (r.State, r.Refusal)));
+        Assert.Equal(["run-4", "run-9"], again.List().Select(r => r.RunId).Order());
+        Assert.NotNull(again.Find(r => r.IdempotencyKey == "k-run-9")!.FinishedAt);
+        Assert.Equal("run-9", Assert.Single(again.Orphans).RunId);
+        Assert.Equal("run-10", again.NextRunId());
+        // The file says the run is over: a second restart finds no orphan and ends nothing again.
+        Assert.Empty(new RunJournal(Options(), NullLogger<RunJournal>.Instance).Orphans);
+    }
+
+    [Fact]
+    public void A_Running_Run_That_Never_Had_A_Plan_Is_Ended_But_Owes_Nothing_To_A_Node()
+    {
+        new RunJournal(Options(), NullLogger<RunJournal>.Instance).Record(InFlight("run-1", RunState.Running));
+
+        var again = new RunJournal(Options(), NullLogger<RunJournal>.Instance);
+
+        Assert.Equal(RunState.Error, Assert.Single(again.List()).State);
+        Assert.Empty(again.Orphans);
+    }
 }

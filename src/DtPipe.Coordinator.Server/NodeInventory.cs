@@ -122,7 +122,7 @@ public sealed class NodeInventory(ReplicaRegistry registry)
 /// </summary>
 public sealed class NodeChannelHub(
     NodeInventory inventory, ReplicaProtocol protocol, RightsStore rights, EnrollmentQueue enrollment, CoordinatorServerOptions options,
-    EventBus bus, ILogger<NodeChannelHub> logger) : Hub
+    EventBus bus, OrphanRuns orphans, ILogger<NodeChannelHub> logger) : Hub
 {
     public async Task Announce(NodeAnnouncement announcement)
     {
@@ -159,6 +159,7 @@ public sealed class NodeChannelHub(
         }
         inventory.Announced(identity.Name, identity.ClientId, named, identity.Groups);
         bus.Publish("nodes", inventory.Snapshot());
+        if (named.DataPlaneClientId is not null) orphans.OnAnnounced(replica.Value, identity.Name);
     }
 
     /// <summary>A valid token no identity knows: the host waits for an administrator, and nothing else of it is let in.</summary>

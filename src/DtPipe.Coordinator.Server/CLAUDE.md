@@ -289,8 +289,8 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   ledger's lock where the run is queued, and a run is journaled before it leaves the ledger, so a retry that races the end of the
   first finds it in one or the other. A repeat answers the first run whatever became of it (a new attempt takes a new key), the same
   key for another pipeline is a conflict, and a request with no key is never a repeat. The key lives as long as its run is
-  journaled (`RunJournal.Kept`, applied at start as when recording); a run in flight when the server stops is not journaled, and
-  its key goes with it. `RunJournal.Find` scans every kept run, `List`'s limit being a page.
+  journaled (`RunJournal.Kept`, applied at start as when recording); a run in flight when the server stops is ended at the next
+  start (`RunJournal.RestartedRefusal`) and answers its key as that run. `RunJournal.Find` scans every kept run, `List`'s limit being a page.
   `[local: RunQueueTests, RunJournalTests, ServiceRoutesTests, the lab's smoke.py bricks - a service launches a run]`
 - **A state is written as a lowercase word, by the converter on the property that carries it.** `RunView.State` and
   `DeploymentView.State` are a `RunState` and a `DeploymentState`; the pages, the event stream and the journal's files
@@ -298,6 +298,15 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   `deploy` event, the text of a refusal), `StateWords.Word` writes it; `undeployed` is the word of an event, not a
   state. A journal file whose state is none of the values, or a number, is skipped when the server starts.
   `[local: StateWireTests, RunQueueTests]`
+- **A run is journaled as it goes, and a restart ends what it interrupted.** `RunQueue` writes the run when it is queued (under the
+  ledger's lock, before the ticket is visible), when it starts and when it ends, and `RunJournal` reads every file for the next id,
+  so an id is never given twice. History (`List`, `Find`, `PipelineHealth`) holds the runs that are over; a run in flight is on
+  disk only. At start `RunJournal` gives each run it finds queued or running the state `error` and `RestartedRefusal`, and lists
+  the ones that had started as `Orphans`. `OrphanRuns` asks every replica of an orphan fragment's node, once, when it announces
+  with its data plane client (`NodeChannelHub.Announce`, off the hub's thread), to abandon it, until a replica answers that it
+  held it; the authority is the journal, never what an announcement says.
+  `[local: RunJournalTests, RunQueueTests, OrphanRunsTests, NodeChannelHubTests]` `[unchecked: a second restart before the
+  replicas announce forgets the list; a wired child with nothing to write ends only once a relay touches its torn-down transfer]`
 - **A run that was placed records the replica of each fragment.** `RunJournal` keeps the `RunResult` whole,
   `RunResult.Replicas` included: an instance id and the `Origin` the replica announced, untrusted text the pages
   escape. A run refused at admission has none, and a file that names none reads as a run with none.
