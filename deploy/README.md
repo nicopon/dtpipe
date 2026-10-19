@@ -80,8 +80,11 @@ start the coordinator **without** `Coordinator__Initialize`:
 
 ```bash
 docker run --rm -v coordinator-state:/state -v "$PWD":/backup:ro alpine \
-    tar -C /state -xzf /backup/coordinator-state.tgz
+    sh -c 'find /state -mindepth 1 -delete && tar -C /state -xzf /backup/coordinator-state.tgz'
 ```
+
+If `Coordinator__Sqlite__Directory` puts the database on another volume, back up both and restore
+both.
 
 - Without `Initialize`, a volume that did not get its database stops the start ("the rights
   document is absent") instead of beginning again, so a restore that missed the file shows at once.

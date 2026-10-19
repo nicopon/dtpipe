@@ -75,7 +75,9 @@ open http://lab.localtest.me        # the home page: links, health, test account
 the images are built from (without it the images say `unknown` and `stack smoke` refuses them), and `LAB_UID` / `LAB_GID`,
 the user who owns `.stack/`. The services that mount it run as that user, so `rm -rf .stack` needs no root; the
 runner mounts nothing and runs as the image's own unprivileged user. Run `docker compose` yourself with
-`SOURCE_REVISION=$(git rev-parse HEAD) LAB_UID=$(id -u) LAB_GID=$(id -g)` set, and with `.stack/*` created.
+`SOURCE_REVISION=$(git rev-parse HEAD) LAB_UID=$(id -u) LAB_GID=$(id -g)` set, and with `.stack/*` created, and
+the store: `COMPOSE_PROFILES=redis` for the default (the `redis` service is a profile), or
+`LAB_STACK_STORE=sqlite LAB_STACK_REDIS=` for SQLite, where the empty value is the point.
 The coordinator and the runner are the product's images, `coordinator-lab` adding the lab's seeds to the first.
 `*.localtest.me` resolves to `127.0.0.1`: the host needs a DNS that answers for it. A proxy (Caddy)
 publishes the stack's only port and routes by host name: `coordinator.localtest.me` to the
