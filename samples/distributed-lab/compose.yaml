@@ -121,9 +121,12 @@ services:
       interval: 2s
       retries: 30
 
-  # The coordinator's run journal. Every write is fsynced, as a journal that never reuses an id needs.
+  # The coordinator's state when the stack runs on Redis, which is the default; LAB_STACK_STORE=sqlite (lab.sh) leaves
+  # this service out and the coordinator keeps its state in its own directory. Every write is fsynced, as a journal that
+  # never reuses an id needs.
   redis:
     <<: *host-user
+    profiles: [redis]
     image: redis:7.4-alpine
     command: redis-server --appendonly yes --appendfsync always
     volumes:
@@ -151,8 +154,9 @@ services:
       Coordinator__LibrarySeed: /lab/library-seed
       Coordinator__RightsSeed: /lab/rights-seed.json
       Coordinator__Library__Remote__Url: /lab/library.git
-      Coordinator__Store: redis
-      Coordinator__Redis__ConnectionString: redis:6379
+      # The store is the stack's: Redis unless lab.sh gives LAB_STACK_STORE=sqlite, which also empties the connection string.
+      Coordinator__Store: ${LAB_STACK_STORE:-redis}
+      Coordinator__Redis__ConnectionString: ${LAB_STACK_REDIS-redis:6379}
       Coordinator__Initialize: "true"
       Coordinator__Ui__ClientSecret: ${LAB_UI_SECRET:-coordinator-ui-lab-secret}
       Coordinator__Studio__ClientId: dtpipe-studio
@@ -165,7 +169,7 @@ services:
     depends_on:
       idp: { condition: service_healthy }
       proxy: { condition: service_healthy }
-      redis: { condition: service_healthy }
+      redis: { condition: service_healthy, required: false }
     healthcheck:
       test: ["CMD", "curl", "-fs", "http://localhost:8080/healthz"]
       interval: 2s

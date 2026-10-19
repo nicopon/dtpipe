@@ -33,6 +33,11 @@
 #                        up      build the images and start the services (LAB_NODE_SANDBOX=1: sandbox nodes)
 #                        down    stop them; .stack/ keeps the data
 #                        nodes M, status, smoke [pass], ui, studio, logs: as above, against the stack
+#                        restart-check [restore|restore-alone]: ends the coordinator's process and starts it again and checks that its state came
+#                            back, a session included. restore does it on a copy of the state directory, as deploy/README.md's backup; restore-alone
+#                            also empties the library's remote. Named only
+#   LAB_STACK_STORE=sqlite  the stack's coordinator keeps its state in .stack/coordinator and the redis service stays out
+#                           (default redis); a stack is made on one store, so purge .stack/ to change it
 set -euo pipefail
 
 LAB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -428,9 +433,15 @@ status() {
 # 127.0.0.1, which the local lab's cookies hold). smoke.py, ui_check.py and studio_check.py are the
 # ones the local lab runs, pointed at STACK_URL; LAB_TARGET=stack tells smoke.py where the stack differs.
 # The images are built from the commit HEAD names, and the services that mount .stack/ run as the user who owns it.
+# LAB_STACK_STORE=sqlite keeps the coordinator's state in its own directory and leaves the redis service (a profile) out; the
+# default is Redis. A stack is made on one store: purge .stack/ to change it.
 compose() {
+    local store="${LAB_STACK_STORE:-redis}"
+    [[ "$store" == redis || "$store" == sqlite ]] || { echo "LAB_STACK_STORE is redis or sqlite, not '$store'" >&2; return 1; }
     (cd "$LAB" \
-        && SOURCE_REVISION="$(git rev-parse HEAD)" LAB_UID="$(id -u)" LAB_GID="$(id -g)" docker compose "$@")
+        && SOURCE_REVISION="$(git rev-parse HEAD)" LAB_UID="$(id -u)" LAB_GID="$(id -g)" LAB_STACK_STORE="$store" \
+            LAB_STACK_REDIS="$([[ "$store" == redis ]] && echo redis:6379)" COMPOSE_PROFILES="$([[ "$store" == redis ]] && echo redis)" \
+            docker compose "$@")
 }
 
 # The node services take their mode from LAB_NODE_SANDBOX, which compose reads from this shell.
@@ -446,19 +457,49 @@ stack_nodes_mode() {
     nodes_report "$STACK_URL" "$mode" 90 || { echo "The stack's node hosts did not come back in $mode mode." >&2; exit 1; }
 }
 
+# Ends the coordinator's process and starts it again on the state it left, the way a deployment would; smoke.py restart
+# runs it between two reads. `restore` also takes the state directory as deploy/README.md says a backup does (stopped, the
+# whole directory copied), empties it and puts the copy back; `restore-alone` also empties the library's remote, as a
+# deployment with none would have it, so that the restored library/ is the only copy.
+stack_cycle() {
+    local how="${1:-}"
+    [[ "$how" == restart || "$how" == restore || "$how" == restore-alone ]] || { echo "usage: $0 stack cycle restart|restore|restore-alone" >&2; exit 1; }
+    if [[ "$how" != restart ]]; then
+        local copy="$STACK/coordinator.backup"
+        compose stop coordinator
+        rm -rf "${copy:?}"
+        cp -a "$STACK/coordinator" "$copy"
+        find "${STACK:?}/coordinator" -mindepth 1 -delete
+        [[ "$how" == restore-alone ]] && find "${STACK:?}/library.git" -mindepth 1 -delete
+        cp -a "$copy/." "$STACK/coordinator/"
+        rm -rf "${copy:?}"
+        compose start coordinator
+    else
+        compose restart coordinator
+    fi
+    for _ in $(seq 1 90); do curl -fs "$STACK_URL/healthz" >/dev/null 2>&1 && break; sleep 1; done
+    nodes_report "$STACK_URL" strict 90 || { echo "The stack's node hosts did not come back after the coordinator's $how." >&2; exit 1; }
+}
+
 stack() {
     local command="${1:-}"; [[ $# -gt 0 ]] && shift
     case "$command" in
         up)
             # Created here, by the user, so that docker does not create them as root.
-            mkdir -p "$STACK"/{idp,redis,coordinator,library.git,node-1,node-2,node-3,node-4}
+            mkdir -p "$STACK"/{idp,coordinator,library.git,node-1,node-2,node-3,node-4}
+            [[ "${LAB_STACK_STORE:-redis}" == sqlite ]] || mkdir -p "$STACK/redis"
             compose up -d --build --wait
             nodes_report "$STACK_URL" "$([[ "${LAB_NODE_SANDBOX:-}" == 1 ]] && echo sandbox || echo strict)" 90 \
                 || { echo "The stack's node hosts did not come online; see ./lab.sh stack logs" >&2; exit 1; }
             echo
             echo "Stack ready: $STACK_URL (home page: http://lab.localtest.me$STACK_SUFFIX)" ;;
-        down) compose down ;;
+        down) compose --profile '*' down ;;
         nodes) stack_nodes_mode "${1:-}" ;;
+        cycle) stack_cycle "${1:-}" ;;
+        restart-check)
+            local how="${1:-restart}"
+            stack_nodes_mode strict
+            LAB_TARGET=stack LAB_COORDINATOR_RESTART="$LAB/lab.sh stack cycle $how" python3 -u "$LAB/smoke.py" "$STACK_URL" "$DTPIPE" "$STACK" restart ;;
         status)
             compose ps --format '  {{.Service}}  {{.Status}}'
             if curl -fs "$STACK_URL/healthz" >/dev/null 2>&1; then
@@ -469,7 +510,7 @@ stack() {
         ui) python3 "$LAB/tools/ui_check.py" "$STACK_URL" "$STACK/ui" ;;
         studio) python3 "$LAB/tools/studio_check.py" "$STACK_URL" "$DTPIPE" "$STACK/studio" ;;
         logs) compose logs --tail 20 -f ;;
-        *) echo "usage: $0 stack up|down|nodes M|status|smoke [pass]|ui|studio|logs" >&2; exit 1 ;;
+        *) echo "usage: $0 stack up|down|nodes M|status|smoke [pass]|restart-check [restore|restore-alone]|ui|studio|logs" >&2; exit 1 ;;
     esac
 }
 

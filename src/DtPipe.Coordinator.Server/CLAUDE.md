@@ -88,10 +88,11 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   share its state does not keep it alone in silence. **SQLite**: `SqliteDatabase` is one file, `coordinator.db`, in
   `Coordinator:Sqlite:Directory` (the state directory unless set), held exclusively by one connection for the life of the process, WAL
   and `synchronous=FULL`: a second coordinator on the file is refused at its start, which is why this store is one coordinator; run
-  several on Redis. The exclusive lock needs no shared memory, so the file can sit on a network volume. A change of the schema takes
+  several on Redis. Nothing else can open the file while the process runs, so a backup is taken stopped and takes the whole state
+  directory (`deploy/README.md`). The exclusive lock needs no shared memory, so the file can sit on a network volume. A change of the schema takes
   `PRAGMA user_version`; a newer file is refused. `Coordinator:Initialize` has one meaning for both stores: a document or counter
   that is absent begins only when it is true. A new store takes its contract from `IRunStore`, `IRightsStore`, `IDeploymentStore`,
-  `IIgnoredHostStore` and `IXmlRepository`, and its own tests, as `SqliteStoreTests` and the Redis ones. `[local: SqliteStoreTests]`
+  `IIgnoredHostStore` and `IXmlRepository`, and its own tests, as `SqliteStoreTests` and the Redis ones. `[local: SqliteStoreTests; lab.sh stack restart-check with LAB_STACK_STORE=sqlite, restored from a copy as deploy/README.md's backup]`
   `[unchecked: the file on a network volume; a power cut between a write and its sync]`
 - **The session cookie's keys are in Redis, and a start that cannot read them stops.** `TrustedIdp.AddSessionKeys` points
   DataProtection at the `IXmlRepository` the host registers (`RedisXmlRepository`: a list at `{prefix}session-keys`, one element per
@@ -100,7 +101,7 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   key and sign everyone out unannounced. A restart signs nobody out. **Limit**: the keys are stored as DataProtection hands them over,
   unencrypted (as the directory they replace held them), and they cross the network: protect Redis with TLS and an ACL.
   `[local: SessionKeysTests; RedisSessionKeysTests (needs DTPIPE_TEST_REDIS or DTPIPE_TEST_REUSE_INFRA)]`
-  `[unchecked: a cookie that survives a restart of the real coordinator is not tested by a test project]`
+  `[local: lab.sh stack restart-check, on either store]`
 - **The rights are kept in Redis, read once, and memory is the truth.** `RightsStore` is a thin face over `IRightsStore`
   (`RedisRightsStore`): one JSON document and its version in a hash at `{prefix}rights`, on the connection every store borrows
   (`RedisConnection`, which the container disposes). It is loaded at start, and every reader (`CanSend` on each transfer, `Find` on
@@ -333,7 +334,7 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   forgetting was kept while the call timed out leaves the deployment in memory until the next start, when it is gone. Arm the pipeline
   again (it replaces the record), or undeploy it after the restart.
   `[local: ArmedDeploymentTests, DeploymentRoutesTests; RedisDeploymentStoreTests (needs DTPIPE_TEST_REDIS or DTPIPE_TEST_REUSE_INFRA)]`
-  `[unchecked: a Redis that loses a write it acknowledged; a write that times out and is applied; that a restart of the real coordinator keeps an armed deployment, shown by a throwaway script only]`
+  `[local: lab.sh stack restart-check — an armed pipeline read back, on either store]` `[unchecked: a Redis that loses a write it acknowledged; a write that times out and is applied]`
 - **The hosts set aside are in Redis, read once, and an announcement never waits on it.** `EnrollmentQueue` loads an
   `IIgnoredHostStore` (`RedisIgnoredHostStore`: a sorted set at `{prefix}ignored-hosts`, each subject scored by the instant it is let
   back in) when it is built, and the server builds it at start, so a Redis that cannot be read stops the start. `Propose`, which every

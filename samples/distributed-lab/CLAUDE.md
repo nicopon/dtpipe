@@ -10,6 +10,9 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   consumer: product code a lab need may shape, never code written for the lab alone. A need of the
   engine is reported to the user, not patched in. `[unchecked]`
 - **The lab runs the coordinator on `Coordinator:Store=redis`**, whatever the product's default is: it is the store that shares state between coordinators.
+  The stack alone also runs on the product's default: `LAB_STACK_STORE=sqlite` empties the Redis connection string, leaves the `redis`
+  service (a Compose profile) out, and keeps the state in `.stack/coordinator`. A stack is made on one store; purge `.stack/` to change it.
+  `[local: lab.sh stack up|smoke|ui|studio with LAB_STACK_STORE=sqlite]`
 - **The lab's coordinator state, its library apart, is in a Redis whose settings are fixed once per state directory.** `lab.sh up` records the Redis
   (`LAB_REDIS`, else a `redis-server` of its own on `LAB_REDIS_PORT` with its data under `.state/redis`, fsynced on every write,
   and a message naming what is missing when there is none) and a random key prefix in `.state/redis.env`; `exec-coordinator`
@@ -21,7 +24,7 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   same remote and `lab.sh reset` takes it with the state. The stack's coordinator mounts `.stack/library.git` for the same purpose and its
   entrypoint (`docker/coordinator-entrypoint.sh`) creates the repository on first start, as a node seeds its own database. The remote is the one
   directory the stack adds beside a service's own: it stands for a git server a deployment would run, and only the coordinator mounts it. `[local: lab.sh up, lab.sh stack up, smoke.py library]`
-  `[unchecked: that a restart with the local copy removed reads the library and an armed deployment back, shown by a throwaway script only]`
+  `[local: lab.sh stack restart-check restore-alone — the local copy is the only one]`
 - **The lab runs the server in lab mode, on its own seeds.** `lab.sh exec-coordinator` is the one
   way the server starts, for `lab.sh` and `tools/campaign.py`: `Coordinator:LabMode`, the scenarios
   in `pipelines/`, the library from `library-seed/`, the rights from `rights-seed.json`, the state in
@@ -144,6 +147,12 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   coordinator's log, the enrollment host, the revision each node's own binary and image must carry). A new check that
   starts a process or reads a path of the local lab takes its stack form there too.
   `[local: lab.sh stack smoke, ui, studio]`
+- **The coordinator's restart is checked on the stack, named only.** `lab.sh stack restart-check [restore|restore-alone]` runs `smoke.py restart`:
+  a rights edit, a library save, an armed pipeline, a run and a session cookie are recorded, the container is stopped and started (`restore`: on
+  a copy of its state directory put back, as `deploy/README.md` describes a backup; `restore-alone`: with the library's remote emptied too), and
+  each is read back with the cookie sent as it was, never signed in again. The stack keeps `Coordinator:Initialize` true, so a store that lost
+  its state would begin again in silence: the guard compares values and fails then. A run asked in the gap between a host announcing and its data
+  plane client registering is refused by name and asked again. `[local: lab.sh stack restart-check]`
 - Verify a change with `./lab.sh smoke`, a page change with `./lab.sh ui` too, and a change to what
   `dtpipe studio` calls with `./lab.sh studio` (`tools/studio_check.py`, outside CI); one that touches
   the images, `compose.yaml` or a check's stack form with `./lab.sh stack smoke|ui|studio` as well. The page checks

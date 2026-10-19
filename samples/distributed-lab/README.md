@@ -45,7 +45,7 @@ open http://127.0.0.1:5180          # sign in as labadmin / labadminpwd; the Lab
 | `./lab.sh ui` | drives both pages in headless Chrome, the library without any designer entry, a pipeline's page with its job read only; screenshots to `.state/ui/` |
 | `./lab.sh seed` | rebuilds the databases (`LAB_SCALE=5` multiplies the row counts) |
 | `./lab.sh logs` | follows every log |
-| `./lab.sh stack up\|down\|status\|nodes\|smoke\|ui\|studio\|logs` | the same commands against [the compose stack](#the-compose-stack) |
+| `./lab.sh stack up\|down\|status\|nodes\|smoke\|restart-check\|ui\|studio\|logs` | the same commands against [the compose stack](#the-compose-stack) |
 | `./lab.sh down` / `reset` | stops everything, including a process of the lab whose pid file was lost (it says "Lab stopped" only when none is left, and otherwise lists them and fails) / also deletes `.state/` |
 
 Every page and `/api` call needs a person signed in through the IdP, with a role: `labadmin`
@@ -88,15 +88,20 @@ run side by side. Browse the coordinator at that name, never `127.0.0.1`.
 | Directory | Mounted by | Holds |
 |---|---|---|
 | `.stack/idp/` | `idp` | its signing key |
-| `.stack/coordinator/` | `coordinator` | its copy of the library, its fragments' scratch files |
+| `.stack/coordinator/` | `coordinator` | its copy of the library, its fragments' scratch files, and with `LAB_STACK_STORE=sqlite` its state |
 | `.stack/library.git/` | `coordinator` | the bare repository the library is pushed to, created on first start |
-| `.stack/redis/` | `redis` | runs, rights, armed deployments, session keys |
+| `.stack/redis/` | `redis` | runs, rights, armed deployments, session keys (not with `LAB_STACK_STORE=sqlite`) |
 | `.stack/node-N/` | `node-N` | its database, seeded on first start, and its fragment jobs |
 
 The runner mounts nothing. `LAB_SCALE` (default `1`) multiplies the seeded rows for every node: a
 node's rows reference the others' counts, so a node seeded at another scale refuses to start; delete
 `.stack/` to seed again. `LAB_NODE_SANDBOX=1 ./lab.sh stack up` starts the data nodes in sandbox
-mode. `LAB_STACK_HTTP_PORT` moves the proxy off port 80, outside and inside: tokens name the issuer
+mode. `LAB_STACK_STORE=sqlite` runs the coordinator on the product's default store, a SQLite file in
+`.stack/coordinator/`, with no `redis` service: the same checks pass on both, and a stack is made on one
+store, so delete `.stack/` to change it. `./lab.sh stack restart-check [restore|restore-alone]` ends the
+coordinator and starts it again, on a copy of its state directory put back for `restore` (also with the
+library's remote emptied for `restore-alone`), and checks that a rights edit, a library save, an armed
+pipeline, a run and a session cookie come back. `LAB_STACK_HTTP_PORT` moves the proxy off port 80, outside and inside: tokens name the issuer
 with that port, and the IdP accepts the coordinator's redirects at it (`Idp:ExtraOrigins`). Leave
 it unset for port 80: the IdP names itself without a default port, and `dtpipe studio` refuses an
 authority that differs from that name by more than a trailing slash, an explicit `:80` included.

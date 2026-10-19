@@ -29,7 +29,10 @@ The replicas': node-4 carried by two hosts (LAB_REPLICAS=node-4=2), played only 
 it ran on; a replica that stops says so, is gone at once and removes its directory; one that is cut is listed disconnected,
 then lost once its grace has run out, and the next run goes to the other; a replica announcing another declaration of a brick is passed over for a plan made from
 the first one, and when none is left the run is refused, until the pipeline is deployed again. Local lab only.
-Usage: smoke.py <lab-url> <dtpipe> <state-dir> [lab|library|rights|faults|bricks|sandbox|replicas] [pipeline-id-substring ...]
+The restart's: the stack's coordinator ended and started again (`lab.sh stack restart-check [restore]`, which gives the command in
+LAB_COORDINATOR_RESTART), played only when named: what the coordinator kept comes back as it was, on whichever store it runs: a rights
+edit, an armed pipeline, a journaled run, the ids that follow, and a session cookie that is not signed in again.
+Usage: smoke.py <lab-url> <dtpipe> <state-dir> [lab|library|rights|faults|bricks|sandbox|replicas|restart] [pipeline-id-substring ...]
 A leading pass name runs that pass alone.
 Against the compose stack (`lab.sh stack smoke`, LAB_TARGET=stack) the state directory is `.stack/`: the
 witness reads the databases the nodes seeded there, the library is the coordinator's own directory, its
@@ -40,7 +43,7 @@ import base64, csv, glob, io, itertools, json, os, re, signal, subprocess, sys, 
 from datetime import datetime
 
 URL, DTPIPE, STATE = sys.argv[1].rstrip("/"), sys.argv[2], sys.argv[3]
-PASSES = {"lab", "library", "rights", "faults", "bricks", "sandbox", "replicas"}
+PASSES = {"lab", "library", "rights", "faults", "bricks", "sandbox", "replicas", "restart"}
 ONLY = sys.argv[4] if len(sys.argv) > 4 and sys.argv[4] in PASSES else None
 SELECTED = sys.argv[5:] if ONLY else sys.argv[4:]
 RUN_TIMEOUT = 180
@@ -1649,12 +1652,131 @@ def replicas_pass():
     return failures[0]
 
 
+def restart_pass():
+    """The coordinator is ended and started again by LAB_COORDINATOR_RESTART, and everything it must read back is read back: a
+    rights edit, an armed pipeline, a run that is over, the id of the next run, and the session cookie signed in before, sent
+    again as it was: no sign-in follows, so a store that lost the session keys fails here and not as a silent new login."""
+    import shlex
+    failures = 0
+    command = os.environ.get("LAB_COORDINATOR_RESTART")
+    if not STACK or not command:
+        print("FAIL  restart  needs the compose stack and the command that restarts its coordinator: lab.sh stack restart-check")
+        return 1
+    pipeline, probe = "customers-mirror", "restart-probe"
+    kept = {}
+
+    def check(name, test):
+        nonlocal failures
+        started = time.time()
+        try:
+            print(f"PASS  restart  {name:28} {test()}  ({time.time() - started:.1f}s)")
+        except Exception as e:
+            failures += 1
+            print(f"FAIL  restart  {name:28} {e}")
+
+    def raw_me():
+        """The status of /api/me for the cookie as the browser holds it, never signing in again."""
+        cookie = "; ".join(f"{c.name}={c.value}" for c in SESSION.jar if c.domain.startswith("coordinator"))
+        request = urllib.request.Request(URL + "/api/me", headers={"Cookie": kept.setdefault("cookie", cookie)})
+        try:
+            with urllib.request.build_opener(_NoRedirect).open(request, timeout=30) as r:
+                return r.status
+        except urllib.error.HTTPError as e:
+            return e.code
+
+    def number(run_id):
+        return int(run_id.rsplit("-", 1)[1])
+
+    def identities():
+        return {i["clientId"]: {k: v for k, v in i.items() if k != "connected"} for i in call("/api/rights")["identities"]}
+
+    def before():
+        call("/api/me")
+        if raw_me() != 200 or not kept["cookie"]:
+            raise RuntimeError(f"the session cookie is not accepted before the restart: {raw_me()}")
+        call("/api/rights/identities", {"clientId": probe, "name": probe, "description": "Restart probe", "kind": "monitor"})
+        kept["identity"] = identities()[probe]
+        # A library of seeds reads back the same commits after a restart that lost it, so the library holds a save of its own.
+        saved = call(f"/api/library/{probe}", {"yaml": call(f"/api/library/{pipeline}")["yaml"] + "# restart probe\n", "message": "smoke: restart"}, "PUT")
+        kept["library"] = call(f"/api/library/{probe}")
+        call(f"/api/library/{pipeline}/deploy", {})
+        kept["deployment"] = next(d for d in call("/api/deployments") if d["pipelineId"] == pipeline)
+        run = call("/api/runs", {"pipelineId": pipeline})
+        final = until(lambda: _finished(run["runId"]), RUN_TIMEOUT, "the run before the restart")
+        if final["state"] != "succeeded":
+            raise RuntimeError(f"the run before the restart: {final['state']}")
+        kept["run"] = final
+        return f"{probe} added and saved at {kept['library'].get('commit')}, {pipeline} armed at {kept['deployment'].get('commit')}, {final['runId']} journaled, cookie held"
+
+    def restarted():
+        subprocess.run(shlex.split(command), check=True, capture_output=True, text=True)
+        return "the coordinator and its hosts are back"
+
+    def rights():
+        now = identities().get(probe)
+        if now != kept["identity"]:
+            raise RuntimeError(f"{probe} was {kept['identity']}, now {now}")
+        return f"{probe} as it was"
+
+    def library():
+        now = call(f"/api/library/{probe}")
+        if (now.get("commit"), now.get("yaml")) != (kept["library"].get("commit"), kept["library"].get("yaml")):
+            raise RuntimeError(f"the save {probe} was at {kept['library'].get('commit')}, now {now.get('commit')}")
+        return f"the save {probe} is at {now.get('commit')}"
+
+    def armed():
+        now = next((d for d in call("/api/deployments") if d["pipelineId"] == pipeline), None)
+        if now is None or (now["state"], now.get("commit")) != (kept["deployment"]["state"], kept["deployment"].get("commit")):
+            raise RuntimeError(f"{pipeline} was {kept['deployment']['state']} at {kept['deployment'].get('commit')}, now {now and (now['state'], now.get('commit'))}")
+        return f"{pipeline} still {now['state']} at {now.get('commit')}"
+
+    def journal():
+        now = next((r for r in call("/api/runs") if r["runId"] == kept["run"]["runId"]), None)
+        if now is None or now["state"] != "succeeded" or now["startedAt"] != kept["run"]["startedAt"]:
+            raise RuntimeError(f"{kept['run']['runId']} was succeeded, now {now and now['state']}")
+        # A host is online before its data plane client is registered again: a run in that gap is refused by name, and is asked again.
+        deadline = time.time() + 60
+        while True:
+            run = call("/api/runs", {"pipelineId": pipeline})
+            final = until(lambda: _finished(run["runId"]), RUN_TIMEOUT, "the run after the restart")
+            if final["state"] == "succeeded" or "is not registered" not in (final.get("refusal") or "") or time.time() > deadline:
+                break
+            time.sleep(2)
+        if final["state"] != "succeeded" or number(final["runId"]) <= number(kept["run"]["runId"]):
+            raise RuntimeError(f"the run after the restart: {final['state']} {final['runId']} after {kept['run']['runId']}: {final.get('refusal') or final.get('description')}")
+        return f"{kept['run']['runId']} still journaled; the next run is {final['runId']} and succeeded"
+
+    def session():
+        status = raw_me()
+        if status != 200:
+            raise RuntimeError(f"the cookie held before the restart is answered {status}")
+        return "the cookie held before the restart is still accepted"
+
+    try:
+        check("state before", before)
+        check("restart", restarted)
+        check("rights", rights)
+        check("library", library)
+        check("armed pipeline", armed)
+        check("journal and ids", journal)
+        check("session cookie", session)
+    finally:
+        try:
+            undeploy(pipeline)
+            call(f"/api/rights/identities/{probe}", None, "DELETE")
+            call(f"/api/library/{probe}", None, "DELETE")
+        except Exception as e:
+            failures += 1
+            print(f"FAIL  restart  {'clean-up':28} {e}")
+    return failures
+
+
 def main():
     ctx = Context()
     failures = (catalog_pass(ctx) if ONLY in (None, "lab") else 0) + (library_pass(ctx) if ONLY in (None, "library") else 0) \
         + (rights_pass() if ONLY in (None, "rights") else 0) + (faults_pass() if ONLY in (None, "faults") else 0) \
         + (bricks_pass() if ONLY in (None, "bricks") else 0) + (sandbox_pass() if ONLY in (None, "sandbox") else 0) \
-        + (replicas_pass() if ONLY == "replicas" else 0)
+        + (replicas_pass() if ONLY == "replicas" else 0) + (restart_pass() if ONLY == "restart" else 0)
     return 1 if failures else 0
 
 
