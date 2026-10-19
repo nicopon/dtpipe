@@ -328,8 +328,8 @@ the control plane, over each replica's node channel; TransportR carries the data
   runs as `1654:1654` with `/state` owned by that user. The lab's images extend these and the product's names no lab; `deploy/`
   is scanned like `src/`. **The server listens in plain HTTP and reads no forwarded header**: a TLS proxy in front is
   told to it by `Coordinator:PublicUrl`, the address people reach it at, so it does not turn into `http://` return addresses.
-  `[CI: validate_distributed_boundary.sh — deploy/ names no lab]` `[local: PublicUrlTests; the lab's smoke.py bricks - versions]`
-  `[unchecked: a Linux Docker host; a real TLS proxy; a volume owned by another uid; deploy/README.md is in no documentation check, so keep its lines to 100 columns]`
+  `[CI: validate_distributed_boundary.sh — deploy/ names no lab]` `[local: PublicUrlTests; the lab's smoke.py bricks - versions; the lab's tools/linux_replay.sh uid, a named volume of another uid]`
+  `[unchecked: a Linux Docker host, where tools/linux_replay.sh is the replay; a real TLS proxy; a bind mount of another uid; deploy/README.md is in no documentation check, so keep its lines to 100 columns]`
 - **The CLI hosts neither a node nor a hub.** `dtpipe` is the child a node drives, reached through `arrow:`;
   it references no TransportR assembly and no project of the family, maps no SignalR hub, and `dtpipe
   studio` is a client of the coordinator's `/api`, only when it is given `--coordinator`.

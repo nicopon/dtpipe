@@ -141,6 +141,9 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   of the stack (the enrollment check) runs as the invoking user too. `smoke.py bricks - versions` requires every node's `dtpipe` and
   the revision label of the coordinator, runner and node images to be HEAD; a tree that is dirty at the same HEAD is not seen.
   `[local: lab.sh stack smoke]` `[unchecked: Docker on Linux, where a bind mount keeps its owner]`
+- **`tools/campaign.py` runs on the local lab only.** It tests the engine under faults; the stack is the check of the image and of its state
+  (`smoke`, `restart-check`), and `tools/linux_replay.sh` the replay of both on a Linux Docker host, where a bind mount keeps its owner and
+  a volume can belong to another uid. `[unchecked: the replay on a Linux host]`
 - **The stack is a target of the lab's checks, never a second set.** `lab.sh stack smoke|ui|studio`
   run `smoke.py`, `tools/ui_check.py` and `tools/studio_check.py` against `STACK_URL`;
   `LAB_TARGET=stack` is the only switch, read where the stack differs (the library directory, the

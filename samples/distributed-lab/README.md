@@ -122,7 +122,9 @@ differs, `smoke.py` follows `LAB_TARGET=stack`, which `lab.sh` sets:
   from the tree without its git metadata, so it carries no revision suffix.
 
 The containers run in UTC whatever the host's zone; the witness runs in the host's. The campaign
-(`tools/campaign.py`) is not played on the stack.
+(`tools/campaign.py`) is not played on the stack. On a Linux Docker host, where a bind mount keeps its
+owner, `tools/linux_replay.sh [stack|sqlite|uid]` plays the stack on each store, removes `.stack/` without
+`sudo`, and starts the product's coordinator image on a volume of another uid and on one of its own.
 
 ## The nodes
 
