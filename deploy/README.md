@@ -27,7 +27,9 @@ docker build -f deploy/Dockerfile --target runner \
   write `/state` and `/tmp`; the coordinator under a uid with no home is not checked.
 - Run them under an init (`docker run --init`, `init: true` in compose): the runner starts
   `dtpipe` child processes, and dotnet as PID 1 ignores the signal of its own crash.
-- `GET /healthz` answers 200 whenever the coordinator serves; it is anonymous.
+- `GET /healthz` answers 200 whenever the coordinator serves; it is anonymous. The coordinator
+  image checks it itself (`docker ps` shows `healthy`); an orchestrator's own probe replaces that
+  check. The runner has no such route and its image no check.
 
 ## The smallest coordinator
 
@@ -47,8 +49,9 @@ docker run -d --init --name coordinator -p 8080:8080 -v coordinator-state:/state
   start unless it is set, because rights begun again could grant what was revoked and run ids
   would be given twice. Remove it afterwards, so that a volume that was not mounted stops the
   start instead of beginning again.
-- The volume is the coordinator's whole state: **back it up**. The database is a single file that
-  one process holds; a second coordinator on the same volume is refused at its start.
+- The volume is the coordinator's whole state: **back it up**, as
+  [below](#backing-up-a-sqlite-coordinator). The database is a single file that one process holds;
+  a second coordinator on the same volume is refused at its start.
 - `Coordinator__Sqlite__Directory` puts the database in another directory, for example a volume of
   its own mounted at `/data`. The directory must be writable by `1654`.
 - A SQLite coordinator is one coordinator. To run several, or to keep the state off the host, use
@@ -56,6 +59,40 @@ docker run -d --init --name coordinator -p 8080:8080 -v coordinator-state:/state
   settings given while the store is SQLite stop the start. Persist every Redis write
   (`appendonly yes`, `appendfsync always`), and protect it with TLS and an ACL: the session keys
   are stored unencrypted.
+
+## Backing up a SQLite coordinator
+
+There is no online backup. One process holds `coordinator.db` exclusively and in WAL mode, so a
+copy made while it runs lacks what the journal has not given back to the file, and no other tool
+(`sqlite3 .backup`, `litestream`) can open it beside the coordinator. Back it up stopped, and copy
+the **whole state**: `coordinator.db`, its `-wal` file if there is one, and `library/`. A file alone
+restores the rights and the runs but not the library.
+
+```bash
+docker stop coordinator
+docker run --rm -v coordinator-state:/state:ro -v "$PWD":/backup alpine \
+    tar -C /state -czf /backup/coordinator-state.tgz .
+docker start coordinator
+```
+
+To restore, stop the coordinator, empty the volume (or use a new one), unpack the copy into it and
+start the coordinator **without** `Coordinator__Initialize`:
+
+```bash
+docker run --rm -v coordinator-state:/state -v "$PWD":/backup:ro alpine \
+    tar -C /state -xzf /backup/coordinator-state.tgz
+```
+
+- Without `Initialize`, a volume that did not get its database stops the start ("the rights
+  document is absent") instead of beginning again, so a restore that missed the file shows at once.
+- What comes back is the state of the copy: rights edits, armed pipelines, runs, session keys and
+  library saves made since are gone, and the run ids that followed the copy are given again.
+- With a library remote (`Coordinator__Library__Remote__Url`), `library/` is aligned to the remote
+  at the start: the remote is the authority, so a save pushed since the copy is kept. Without one,
+  `library/` in the volume is the only copy, and a restore brings it back as it was at the copy.
+- Keep the copy as private as the volume: it holds the session keys, unencrypted.
+- A Redis coordinator is backed up through Redis (`appendonly` file or snapshot), and its library
+  as above.
 
 ## What a deployment provides
 
@@ -101,5 +138,8 @@ A person who may inspect the container (`docker inspect`, the pod's spec) can re
 environment: give that right with the same care as the secrets.
 
 Checked: the public address, in `PublicUrlTests`, and the SQLite store, in `SqliteStoreTests`, of
-[tests/DtPipe.Coordinator.Server.Tests](../tests/DtPipe.Coordinator.Server.Tests). Not checked:
-a real TLS proxy, a Linux Docker host, an https remote with a token.
+[tests/DtPipe.Coordinator.Server.Tests](../tests/DtPipe.Coordinator.Server.Tests). Checked on the
+real containers, on SQLite: the coordinator ended and started again, and a copy of its state
+directory put back, read back the rights, the library, the armed pipelines, the run journal and a
+session cookie. Not checked: a real TLS proxy, a Linux Docker host, a volume owned by another uid,
+a SQLite file on a network volume, an https remote with a token.
