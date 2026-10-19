@@ -36,7 +36,7 @@ public sealed class RedisRunStore : IRunStore
         if (floor == 0 && !_redis.Initialize && !_db.KeyExists(_seq))
             throw new InvalidOperationException(
                 "The run counter is absent and no run is kept: Redis may have lost its data, and run ids would start again. "
-                + "Set Coordinator:Redis:Initialize to true to begin a new journal.");
+                + "Set Coordinator:Initialize to true to begin a new journal.");
         _db.ScriptEvaluate(RaiseScript, [_seq], [floor]);
         return 0;
     });

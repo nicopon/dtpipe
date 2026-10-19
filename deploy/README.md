@@ -29,26 +29,48 @@ docker build -f deploy/Dockerfile --target runner \
   `dtpipe` child processes, and dotnet as PID 1 ignores the signal of its own crash.
 - `GET /healthz` answers 200 whenever the coordinator serves; it is anonymous.
 
+## The smallest coordinator
+
+One coordinator, one volume, no other service. The coordinator keeps its state in a SQLite file,
+`coordinator.db`, and its library as a git repository, both under `/state`:
+
+```bash
+docker run -d --init --name coordinator -p 8080:8080 -v coordinator-state:/state \
+    -e Coordinator__Initialize=true \
+    -e Coordinator__Authority=https://idp.example \
+    -e Coordinator__Ui__ClientSecret=... \
+    -e Coordinator__PublicUrl=https://coordinator.example \
+    dtpipe-coordinator
+```
+
+- `Coordinator__Initialize=true` is for the first start only. A store that holds nothing stops the
+  start unless it is set, because rights begun again could grant what was revoked and run ids
+  would be given twice. Remove it afterwards, so that a volume that was not mounted stops the
+  start instead of beginning again.
+- The volume is the coordinator's whole state: **back it up**. The database is a single file that
+  one process holds; a second coordinator on the same volume is refused at its start.
+- `Coordinator__Sqlite__Directory` puts the database in another directory, for example a volume of
+  its own mounted at `/data`. The directory must be writable by `1654`.
+- A SQLite coordinator is one coordinator. To run several, or to keep the state off the host, use
+  Redis: `Coordinator__Store=redis` with `Coordinator__Redis__ConnectionString` (a secret). Redis
+  settings given while the store is SQLite stop the start. Persist every Redis write
+  (`appendonly yes`, `appendfsync always`), and protect it with TLS and an ACL: the session keys
+  are stored unencrypted.
+
 ## What a deployment provides
 
-- **Redis** (`Coordinator__Redis__ConnectionString`, a secret). It holds the rights, the run
-  journal, the armed deployments and the session keys. Persist every write (`appendonly yes`,
-  `appendfsync always`). The session keys are stored unencrypted: protect Redis with TLS and an
-  ACL. Without Redis the coordinator does not start.
-- **The first start** (`Coordinator__Redis__Initialize=true`), on an empty Redis only. Leave it
-  unset afterwards, so that a Redis that lost its data stops the start instead of beginning again.
+- **A store**: the coordinator's volume (SQLite, the default), or a Redis
+  (`Coordinator__Store=redis`).
 - **The library.** With `Coordinator__Library__Remote__Url` (and `__Token`, a secret, `__User`,
   `__Timeout`), every save is pushed to that git remote before it is accepted. Without it,
-  `/state/library` holds the **only copy**: back that directory up, or accept losing the library
-  with it. A deployment chooses one of the two.
+  `/state/library` holds the **only copy**: it is in the volume, so back the volume up, or accept
+  losing the library with it. A deployment chooses one of the two.
 - **An identity provider** (`Coordinator__Authority`, https in production). The pages sign
   people in with `Coordinator__Ui__ClientId` and `Coordinator__Ui__ClientSecret` (a secret): a
   confidential client whose redirect URI is `https://<public address>/signin-oidc`.
   `Coordinator__Studio__ClientId` names the public client `dtpipe studio` signs in with.
 - **People**: `Coordinator__Roles__Admin`, `__Designer`, `__Reader`. Nobody unlisted may do
   anything.
-- **The state directory** (`Coordinator__StateDirectory`, `/state` in the image): scratch files
-  and the library's local copy.
 - **TLS**, by a proxy in front, and `Coordinator__PublicUrl`: see below.
 
 A node host (the runner, or a team's own) takes its coordinator's address and the provider's
@@ -60,10 +82,11 @@ the coordinator's, never its own.
 The coordinator listens in plain HTTP and never terminates TLS: a proxy or ingress does. Tell the
 coordinator the address people reach it at, once, as `Coordinator__PublicUrl` (for example
 `https://coordinator.example`: a scheme, a host and a port if not the default, no path). The
-server builds from it the address it tells the studio (`/.well-known/oauth-protected-resource`), the sign-in's return address, and the
-`Secure` flag of the session cookie. It reads no `X-Forwarded-*` header and ignores the `Host` of a
-request, so no caller can change them. Without it the request's own scheme and host stand, and
-behind a TLS proxy the sign-in would send `http://` return addresses.
+server builds from it the address it tells the studio (`/.well-known/oauth-protected-resource`),
+the sign-in's return address, and the `Secure` flag of the session cookie. It reads no
+`X-Forwarded-*` header and ignores the `Host` of a request, so no caller can change them. Without
+it the request's own scheme and host stand, and behind a TLS proxy the sign-in would send
+`http://` return addresses.
 
 The node channel and the data plane are SignalR: the proxy must pass WebSocket upgrades and keep
 long requests open. A node may also reach the coordinator directly, inside the network.
@@ -77,6 +100,6 @@ a response. The token reaches git in the environment of the one process that tal
 A person who may inspect the container (`docker inspect`, the pod's spec) can read its
 environment: give that right with the same care as the secrets.
 
-Checked: the public address, in `PublicUrlTests` of
+Checked: the public address, in `PublicUrlTests`, and the SQLite store, in `SqliteStoreTests`, of
 [tests/DtPipe.Coordinator.Server.Tests](../tests/DtPipe.Coordinator.Server.Tests). Not checked:
 a real TLS proxy, a Linux Docker host, an https remote with a token.

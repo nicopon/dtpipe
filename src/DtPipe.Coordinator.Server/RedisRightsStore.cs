@@ -36,7 +36,7 @@ public sealed class RedisRightsStore(RedisConnection redis) : IRightsStore
         if (!redis.Initialize)
             throw new InvalidOperationException(
                 "The rights document is absent: Redis may have lost its data, and a rights document started again could grant what was revoked. "
-                + "Set Coordinator:Redis:Initialize to true to begin new rights.");
+                + "Set Coordinator:Initialize to true to begin new rights.");
         return (long)redis.Db.ScriptEvaluate(CreateScript, [_key], [document]) == 1;
     });
 

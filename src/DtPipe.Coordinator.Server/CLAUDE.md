@@ -82,6 +82,17 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   on its own group, outside `/api`, for a launcher, with no CSRF filter since a service's token is bearer only; `Program.cs` keeps
   the `account` group, `/healthz`, the metadata document, `/account/*` and the hubs. `[local: RouteTableTests]`
 - **Every rights change names its author** (`AuditEntry.By`, the signed-in email).
+- **The state is kept in one store, SQLite unless the deployment chose Redis.** `Coordinator:Store` is `sqlite` (the default) or
+  `redis`; `StoreRegistration` registers the five stores of the chosen kind, opened when the first is asked for, which the server
+  does before it serves. Redis settings under the SQLite store stop the start rather than being ignored, so a coordinator meant to
+  share its state does not keep it alone in silence. **SQLite**: `SqliteDatabase` is one file, `coordinator.db`, in
+  `Coordinator:Sqlite:Directory` (the state directory unless set), held exclusively by one connection for the life of the process, WAL
+  and `synchronous=FULL`: a second coordinator on the file is refused at its start, which is why this store is one coordinator; run
+  several on Redis. The exclusive lock needs no shared memory, so the file can sit on a network volume. A change of the schema takes
+  `PRAGMA user_version`; a newer file is refused. `Coordinator:Initialize` has one meaning for both stores: a document or counter
+  that is absent begins only when it is true. A new store takes its contract from `IRunStore`, `IRightsStore`, `IDeploymentStore`,
+  `IIgnoredHostStore` and `IXmlRepository`, and its own tests, as `SqliteStoreTests` and the Redis ones. `[local: SqliteStoreTests]`
+  `[unchecked: the file on a network volume; a power cut between a write and its sync]`
 - **The session cookie's keys are in Redis, and a start that cannot read them stops.** `TrustedIdp.AddSessionKeys` points
   DataProtection at the `IXmlRepository` the host registers (`RedisXmlRepository`: a list at `{prefix}session-keys`, one element per
   entry), under a fixed application name so that two hosts of one coordinator read each other's cookies, and `EnsureSessionKeys` reads
@@ -99,7 +110,7 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   disconnected and after `RedisConnection.SyncTimeout` otherwise. A write that finds another version (another writer, or an earlier
   write that timed out and was kept) reads the document again and refuses that change (409): **a 503 on a change may still have
   been applied**, and then the route's other effects (cutting an identity's replicas) did not run: repeating the change finds nothing to change, and `POST /api/rights/identities/{id}/reconnect` cuts them. A store with no document starts from `Coordinator:RightsSeed` once (`Create` is atomic, and a start that loses
-  the race reads the winner's document) or empty, and refuses unless `Coordinator:Redis:Initialize` is true, since rights begun
+  the race reads the winner's document) or empty, and refuses unless `Coordinator:Initialize` is true, since rights begun
   again could grant what was revoked. `[local: RightsStoreTests, RightsRoutesTests; RedisRightsStoreTests (needs DTPIPE_TEST_REDIS
   or DTPIPE_TEST_REUSE_INFRA)]` `[unchecked: a Redis that loses a write it acknowledged]`
 - **Lab mode is off by default, and everything only a bench needs sits behind it.**
@@ -233,7 +244,7 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   driven by the `git` command line with a fixed identity (the image needs `git`), and starts with a commit of its own (empty without seeds)
   so that a write always has a commit to go back to; armed deployments and run history are in Redis
   (see "A deployment is the coordinator's" and "A run is journaled as it goes"); the Lab view's fixed plan is in memory.
-  `Coordinator:Redis:Initialize` lets every one of these begin where nothing is kept, the library's remote included.
+  `Coordinator:Initialize` lets every one of these begin where nothing is kept, the library's remote included.
 - **The library is pushed to a git remote when one is configured, and the remote is the authority.** `Coordinator:Library:Remote:Url`
   (an `https://` URL, a `file://` URL or an absolute path; SSH is not supported), `Token`, `User` and `Timeout` are read by
   `LibraryRemoteSettings`, which refuses at start a URL that carries a user, a password, a query or a fragment, and a token for a remote
@@ -245,7 +256,7 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   `ps` lists, and never in `.git/config`, since the address too is an argument and never a configured `remote`. Set it from the
   environment, never `--Coordinator:Library:Remote:Token`. What git says goes to the log with the token replaced and is in no response.
   With a remote the library is read at start (`OpenAsync`): a remote that cannot be reached, a history that has parted from it, or a
-  remote with no library when the coordinator has none either and `Coordinator:Redis:Initialize` is not true (a wrong address, or a
+  remote with no library when the coordinator has none either and `Coordinator:Initialize` is not true (a wrong address, or a
   remote that lost its data) stops the start; a remote that lost its data under a coordinator that may begin gets the local copy pushed back, and with no copy
   the seeds. **A write aligns, writes, pushes** (`PipelineLibrary.Written`, under the library's one lock): it fetches the remote's `main` and
   puts the library on it (behind, it moves forward; ahead, it drops what the remote lacks and logs each commit; parted, it refuses naming both
@@ -393,7 +404,7 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   its data plane client (`NodeChannelHub.Announce`, off the hub's thread), to abandon it, until a replica answers that it held it,
   so a second restart before the replicas announce keeps the obligation; the authority is the journal, never what an announcement says. **An id is never given twice**: the counter is raised at start to
   the highest id read and never lowered, and a store with no counter and no run (a first start, or Redis that lost its data) refuses
-  to start unless `Coordinator:Redis:Initialize` is true, since the ids would begin again. Redis must therefore persist every write
+  to start unless `Coordinator:Initialize` is true, since the ids would begin again. Redis must therefore persist every write
   (`appendonly yes`, `appendfsync always`: the lab's and `tests/infra`'s). `Coordinator:Redis:ConnectionString` is a secret
   (read it from the environment) and is in no log or message, only the endpoints; `KeyPrefix` separates coordinators on one Redis.
   A reason that goes into `RunView.Refusal` is the server's own text, never a Redis message.

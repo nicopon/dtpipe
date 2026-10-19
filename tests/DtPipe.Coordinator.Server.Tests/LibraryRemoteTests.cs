@@ -54,7 +54,7 @@ public sealed class LibraryRemoteTests : IDisposable
         new CoordinatorServerOptions
         {
             StateDir = state, Authority = "http://idp", Audience = "test", UiClientId = "ui", UiClientSecret = "secret",
-            LibraryRemote = remote ?? new LibraryRemoteSettings(_bare), Redis = new RedisSettings(Initialize: begin),
+            LibraryRemote = remote ?? new LibraryRemoteSettings(_bare), Initialize = begin,
         }, logger: log);
 
     private void Hook(string name, string script)
@@ -305,7 +305,7 @@ public sealed class LibraryRemoteTests : IDisposable
         using var host = root.WithWebHostBuilder(b =>
         {
             b.UseSetting("Coordinator:Library:Remote:Url", _bare);
-            b.UseSetting("Coordinator:Redis:Initialize", "true");
+            b.UseSetting("Coordinator:Initialize", "true");
         });
         using var client = host.CreateClient();
         client.DefaultRequestHeaders.Authorization = new("Bearer", CoordinatorHost.Person(CoordinatorHost.Designer));

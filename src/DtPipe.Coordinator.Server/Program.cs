@@ -26,11 +26,8 @@ builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Ad
 // is identified by a token of the trusted IdP, its group read from the rights document by its
 // subject. The flow matrix is the rights document's too, read live by the hub on every transfer and
 // by the planner on every plan.
-// The state the coordinator keeps beyond the process is on one Redis connection, which the stores below borrow.
-builder.Services.AddSingleton(services =>
-    RedisConnection.Connect(server.Redis, services.GetRequiredService<ILoggerFactory>().CreateLogger<RedisConnection>()));
-builder.Services.AddSingleton<IRightsStore, RedisRightsStore>();
-builder.Services.AddSingleton<IXmlRepository, RedisXmlRepository>();
+// The state the coordinator keeps beyond the process is on one store, a SQLite file or a Redis, which the stores borrow.
+builder.Services.AddCoordinatorStores(server);
 builder.Services.AddSingleton<RightsStore>();
 builder.Services.AddCoordinatorHub(_ => { }).Build();
 builder.Services.AddNodeLink<NodeChannelHub>();
@@ -45,7 +42,6 @@ builder.Services.Replace(ServiceDescriptor.Singleton<IHubProgressMonitor, EventP
 
 builder.Services.AddSingleton<EventBus>();
 builder.Services.AddSingleton<NodeInventory>();
-builder.Services.AddSingleton<IIgnoredHostStore, RedisIgnoredHostStore>();
 builder.Services.AddSingleton<EnrollmentQueue>();
 builder.Services.AddSingleton<NodeRequests>();
 builder.Services.AddSingleton<BrickCatalog>();
@@ -60,8 +56,6 @@ builder.Services.AddSingleton(services => new PipelineLibrary(
     services.GetRequiredService<ILoggerFactory>().CreateLogger<PipelineLibrary>()));
 builder.Services.AddSingleton<IJobSource>(services => services.GetRequiredService<PipelineLibrary>());
 builder.Services.AddSingleton<ILibraryHeads>(services => services.GetRequiredService<PipelineLibrary>());
-builder.Services.AddSingleton<IRunStore, RedisRunStore>();
-builder.Services.AddSingleton<IDeploymentStore, RedisDeploymentStore>();
 builder.Services.AddSingleton<RunJournal>();
 builder.Services.AddSingleton<OrphanRuns>();
 builder.Services.AddSingleton<DeploymentManager>();

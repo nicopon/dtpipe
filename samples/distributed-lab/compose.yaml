@@ -151,8 +151,9 @@ services:
       Coordinator__LibrarySeed: /lab/library-seed
       Coordinator__RightsSeed: /lab/rights-seed.json
       Coordinator__Library__Remote__Url: /lab/library.git
+      Coordinator__Store: redis
       Coordinator__Redis__ConnectionString: redis:6379
-      Coordinator__Redis__Initialize: "true"
+      Coordinator__Initialize: "true"
       Coordinator__Ui__ClientSecret: ${LAB_UI_SECRET:-coordinator-ui-lab-secret}
       Coordinator__Studio__ClientId: dtpipe-studio
       Coordinator__Roles__Admin: ${LAB_ADMIN:-labadmin}@dtpipe.test

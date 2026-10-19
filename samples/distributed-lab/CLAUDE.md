@@ -9,11 +9,12 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   and hosts the distributed family (`src/DtPipe.Coordinator*`, `src/DtPipe.PipelineNode*`) as a
   consumer: product code a lab need may shape, never code written for the lab alone. A need of the
   engine is reported to the user, not patched in. `[unchecked]`
+- **The lab runs the coordinator on `Coordinator:Store=redis`**, whatever the product's default is: it is the store that shares state between coordinators.
 - **The lab's coordinator state, its library apart, is in a Redis whose settings are fixed once per state directory.** `lab.sh up` records the Redis
   (`LAB_REDIS`, else a `redis-server` of its own on `LAB_REDIS_PORT` with its data under `.state/redis`, fsynced on every write,
   and a message naming what is missing when there is none) and a random key prefix in `.state/redis.env`; `exec-coordinator`
   reads it back, so `tools/campaign.py` restarts the coordinator on the same journal and a reset lab starts a new one even on a
-  Redis that outlives it. `Coordinator:Redis:Initialize` is true here only: a lab begins where Redis holds nothing. The stack's
+  Redis that outlives it. `Coordinator:Initialize` is true here only: a lab begins where Redis holds nothing. The stack's
   `redis` service keeps its data in `.stack/redis`, its own directory like every service's. `[local: lab.sh up, tools/campaign.py F4]`
 - **The lab's library is pushed to a bare repository beside its state.** `exec-coordinator` creates `.state/library.git` when it is missing
   (`git init --bare`, nothing of the server) and passes it as `Coordinator:Library:Remote:Url`, so `tools/campaign.py` restarts the coordinator on the

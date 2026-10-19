@@ -59,7 +59,7 @@ public sealed class RedisRunStoreTests : IDisposable
         NeedRedis();
 
         var refused = Assert.Throws<InvalidOperationException>(() => Journal(Open(initialize: false)));
-        Assert.Contains("Coordinator:Redis:Initialize", refused.Message);
+        Assert.Contains("Coordinator:Initialize", refused.Message);
 
         Assert.Equal("run-1", Journal(Open(initialize: true)).NextRunId());
     }

@@ -90,7 +90,7 @@ public sealed partial class PipelineLibrary : IJobSource, ILibraryHeads
     {
         _root = Path.Combine(options.StateDir, "library");
         _seedDir = options.LibrarySeed;
-        (_remote, _mayBegin, _log) = (options.LibraryRemote, options.Redis.Initialize, logger);
+        (_remote, _mayBegin, _log) = (options.LibraryRemote, options.Initialize, logger);
         _bindingProblems = bindingProblems ?? ((_, _) => []);
         _resolveBricks = resolveBricks ?? ((_, bindings) => bindings);
     }
@@ -346,7 +346,7 @@ public sealed partial class PipelineLibrary : IJobSource, ILibraryHeads
         {
             if (_remote is not null && remoteHead is null && !_mayBegin)
                 throw new InvalidOperationException(
-                    $"The library's remote ({_remote.Url}) holds no library and this coordinator has none: set Coordinator:Redis:Initialize to true to begin one there.");
+                    $"The library's remote ({_remote.Url}) holds no library and this coordinator has none: set Coordinator:Initialize to true to begin one there.");
             var seeds = _seedDir is not null && Directory.Exists(_seedDir) ? Directory.GetFiles(_seedDir, "*.yaml") : [];
             foreach (var seed in seeds)
             {

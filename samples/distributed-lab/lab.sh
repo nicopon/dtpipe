@@ -250,7 +250,7 @@ exec_coordinator() {
         --Coordinator:LibrarySeed="$LAB/library-seed" --Coordinator:RightsSeed="$LAB/rights-seed.json" \
         --Coordinator:Library:Remote:Url="$STATE/library.git" \
         --Coordinator:Ui:ClientSecret=coordinator-ui-lab-secret --Coordinator:Studio:ClientId=dtpipe-studio \
-        --Coordinator:Redis:ConnectionString="$REDIS_URL" --Coordinator:Redis:KeyPrefix="$REDIS_PREFIX" --Coordinator:Redis:Initialize=true \
+        --Coordinator:Store=redis --Coordinator:Redis:ConnectionString="$REDIS_URL" --Coordinator:Redis:KeyPrefix="$REDIS_PREFIX" --Coordinator:Initialize=true \
         --Coordinator:Roles:Admin="${LAB_ADMIN:-labadmin}@dtpipe.test" \
         --Coordinator:Roles:Designer=labdesigner@dtpipe.test --Coordinator:Roles:Reader=labreader@dtpipe.test "$@"
 }

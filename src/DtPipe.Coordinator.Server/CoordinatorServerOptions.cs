@@ -1,7 +1,17 @@
 namespace DtPipe.Coordinator.Server;
 
+/// <summary>Where the coordinator keeps its state beyond the process (<c>Coordinator:Store</c>).</summary>
+public enum StoreKind
+{
+    /// <summary>A SQLite database file in a directory of the host: one coordinator, no other service. The default.</summary>
+    Sqlite,
+
+    /// <summary>A Redis the deployment provides.</summary>
+    Redis,
+}
+
 /// <summary>
-/// The Redis that keeps the coordinator's state: the run journal, the rights, the deployments and the session keys (<c>Coordinator:Redis</c>).
+/// The Redis that keeps the coordinator's state when <see cref="StoreKind.Redis"/> is chosen: the run journal, the rights, the deployments and the session keys (<c>Coordinator:Redis</c>).
 /// <see cref="ConnectionString"/> is a secret when it holds a password: it is read from the environment
 /// (<c>Coordinator__Redis__ConnectionString</c>) and written in no log or message.
 /// <see cref="KeyPrefix"/> lets several coordinators share one Redis. <see cref="Initialize"/> allows the journal, the rights and the library
@@ -61,8 +71,24 @@ public sealed class CoordinatorServerOptions
     /// </summary>
     public TimeSpan HealthMaxAge { get; init; } = TimeSpan.FromMinutes(5);
 
-    /// <summary>Where the run journal lives beyond the process; the server does not start without a connection string.</summary>
+    /// <summary>Where the state lives beyond the process (<c>Coordinator:Store</c>, <c>sqlite</c> or <c>redis</c>); SQLite when unset.</summary>
+    public StoreKind Store { get; init; } = StoreKind.Sqlite;
+
+    /// <summary>
+    /// Whether the state may begin where none is kept (<c>Coordinator:Initialize</c>): the first start, or after the store (or the library's
+    /// remote) lost its data. Off, a store that holds nothing stops the start, since rights begun again could grant what was revoked
+    /// and run ids would be given twice.
+    /// </summary>
+    public bool Initialize { get; init; }
+
+    /// <summary>The Redis the state lives in when <see cref="Store"/> is Redis; the server does not start without a connection string.</summary>
     public RedisSettings Redis { get; init; } = new();
+
+    /// <summary>
+    /// The directory of the SQLite database when <see cref="Store"/> is SQLite (<c>Coordinator:Sqlite:Directory</c>): the state directory
+    /// unless set, so that a volume mounted for the state holds the database too, and a volume of its own can hold it alone.
+    /// </summary>
+    public string? SqliteDirectory { get; init; }
 
     /// <summary>The git repository the library is pushed to (<c>Coordinator:Library:Remote</c>); none when unset, and the library then stays in the state directory.</summary>
     public LibraryRemoteSettings? LibraryRemote { get; init; }
@@ -91,6 +117,13 @@ public sealed class CoordinatorServerOptions
     {
         var section = configuration.GetSection("Coordinator");
         string? PathOf(string key) => section[key] is { Length: > 0 } value ? Path.GetFullPath(value) : null;
+        var store = section["Store"] is { Length: > 0 } kind
+            ? Enum.TryParse<StoreKind>(kind, ignoreCase: true, out var parsed) ? parsed
+                : throw new InvalidOperationException("Coordinator:Store must be 'sqlite' or 'redis'.")
+            : StoreKind.Sqlite;
+        // Redis settings under the SQLite store would be ignored in silence, and a coordinator meant to share its state would keep it alone.
+        if (store == StoreKind.Sqlite && (section["Redis:ConnectionString"] is { Length: > 0 } || section["Redis:KeyPrefix"] is { Length: > 0 }))
+            throw new InvalidOperationException("Coordinator:Redis settings are given but Coordinator:Store is 'sqlite': set Coordinator:Store to 'redis', or remove them.");
         return new CoordinatorServerOptions
         {
             StateDir = PathOf("StateDirectory") ?? Path.GetFullPath("state"),
@@ -105,10 +138,13 @@ public sealed class CoordinatorServerOptions
             LabMode = section.GetValue<bool>("LabMode"),
             PublicUrl = PublicUrlOf(section["PublicUrl"]),
             Scenarios = PathOf("Scenarios"),
+            Store = store,
+            Initialize = section.GetValue<bool>("Initialize"),
+            SqliteDirectory = PathOf("Sqlite:Directory"),
             Redis = new RedisSettings(
                 section["Redis:ConnectionString"] is { Length: > 0 } redis ? redis : null,
                 section["Redis:KeyPrefix"] is { Length: > 0 } prefix ? prefix : "dtpipe-coordinator:",
-                section.GetValue<bool>("Redis:Initialize")),
+                section.GetValue<bool>("Initialize")),
             LibraryRemote = LibraryRemoteSettings.FromConfiguration(section),
             HealthMaxAge = section.GetValue<TimeSpan?>("Health:MaxAge") is { } age && age > TimeSpan.Zero ? age : TimeSpan.FromMinutes(5),
         };

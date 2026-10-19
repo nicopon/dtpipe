@@ -48,9 +48,10 @@ reaches its library from a studio. The command is in the
 ## Limits to know first
 
 - **The coordinator is one process, not a highly available service.** The history of its runs, its
-  armed deployments, its rights and its session keys are in the Redis it is configured with
-  (`Coordinator:Redis:ConnectionString`). It does not start without one, and a first start on an
-  empty Redis needs `Coordinator:Redis:Initialize` set to true. Its library is a git repository in
+  armed deployments, its rights and its session keys are in a SQLite file in its state directory
+  (`Coordinator:Sqlite:Directory` moves it), or in a Redis (`Coordinator:Store` set to `redis`,
+  with `Coordinator:Redis:ConnectionString`). A first start on an empty store needs
+  `Coordinator:Initialize` set to true. Its library is a git repository in
   its state directory; with a git remote configured (`Coordinator:Library:Remote:Url`, and the
   token in `Coordinator__Library__Remote__Token`) every save is pushed before it is accepted, a
   save the remote refuses is undone, and a state directory that is lost is read back from the
