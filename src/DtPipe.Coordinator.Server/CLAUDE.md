@@ -57,6 +57,13 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   the pipeline exists or is armed, so a launcher learns nothing of a pipeline off its list; a run off the list is read as no run (404). It cancels only a run it started (`RunView.LaunchedBy` is its client id), a run of
   another identity or of a person being no run to it as well; a person's `/api/runs/cancel` is unchanged.
   `[local: DtPipe.Coordinator.Server.Tests TrustedIdpTests, ServiceRoutesTests, NodeChannelHubTests, the lab's smoke.py rights, bricks - health, a service launches a run]`
+- **A forwarded header is believed only from a listed peer.** The server listens in plain HTTP and a proxy in front terminates
+  TLS. `Coordinator:TrustedProxies` (addresses and CIDR networks, `TrustedProxies.OptionsFor`) lists the peers whose
+  `X-Forwarded-Proto` and `X-Forwarded-Host` `UseForwardedHeaders` applies, first in the pipeline; the defaults' loopback is
+  cleared, and with the list empty the middleware is not added. `OriginOf` (the metadata document, the `WWW-Authenticate`
+  challenge), the OpenID Connect return address and the `SameAsRequest` cookies (session, correlation, nonce) all read the
+  request's scheme and host, so they follow. An entry that is neither an address nor a network stops the start, named. List the
+  proxy, never a network a client can reach the server from. `[local: ForwardedHeadersTests]` `[unchecked: a real TLS proxy]`
 - **A refused page gives a way out.** A person with no role who opens a page is signed out here
   and at the provider and lands on `/account/denied`: keeping the provider's session would sign
   the same person in again on the next try. A person who lacks only the admin role gets a 403 page

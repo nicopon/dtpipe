@@ -67,6 +67,12 @@ public sealed class CoordinatorServerOptions
     /// <summary>The git repository the library is pushed to (<c>Coordinator:Library:Remote</c>); none when unset, and the library then stays in the state directory.</summary>
     public LibraryRemoteSettings? LibraryRemote { get; init; }
 
+    /// <summary>
+    /// The proxies in front of the server whose <c>X-Forwarded-Proto</c> and <c>X-Forwarded-Host</c> it believes (<c>Coordinator:TrustedProxies</c>,
+    /// addresses or CIDR networks). None when unset, and then no forwarded header is read.
+    /// </summary>
+    public IReadOnlyList<string> TrustedProxies { get; init; } = [];
+
     /// <summary>The Lab view's scenarios, one job file each; read only in <see cref="LabMode"/>.</summary>
     public string? Scenarios { get; init; }
 
@@ -86,6 +92,7 @@ public sealed class CoordinatorServerOptions
             RightsSeed = PathOf("RightsSeed"),
             IdentityLabelClaims = section.GetSection("Identity:LabelClaims").Get<string[]>() ?? [],
             LabMode = section.GetValue<bool>("LabMode"),
+            TrustedProxies = section.GetSection("TrustedProxies").Get<string[]>() ?? [],
             Scenarios = PathOf("Scenarios"),
             Redis = new RedisSettings(
                 section["Redis:ConnectionString"] is { Length: > 0 } redis ? redis : null,

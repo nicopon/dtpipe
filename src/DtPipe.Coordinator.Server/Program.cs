@@ -67,7 +67,10 @@ builder.Services.AddSingleton<OrphanRuns>();
 builder.Services.AddSingleton<DeploymentManager>();
 builder.Services.AddSingleton<PipelineHealth>();
 
+var forwarded = TrustedProxies.OptionsFor(server.TrustedProxies);
 var app = builder.Build();
+// First, so that every middleware and handler below sees the scheme and the host the person's browser used.
+if (forwarded is not null) app.UseForwardedHeaders(forwarded);
 // The session keys are read before anything is served: Redis down stops the start instead of the first sign-in.
 TrustedIdp.EnsureSessionKeys(app.Services);
 // The armed deployments and the hosts set aside are read now too: a Redis that cannot be read stops the start.
