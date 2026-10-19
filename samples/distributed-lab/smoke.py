@@ -618,7 +618,7 @@ def rights_pass():
             container = "lab-enroll-host"
             subprocess.run(["docker", "rm", "-f", container], capture_output=True)
             host = subprocess.Popen(["docker", "run", "--rm", "--init", "--name", container, "--network", "dtpipe-lab-stack_default",
-                                     "-v", f"{root}:/enroll", "--entrypoint", "dotnet", "dtpipe-lab-stack/node", "/app/Lab.NodeHost.dll",
+                                     "--user", f"{os.getuid()}:{os.getgid()}", "-e", "HOME=/tmp", "-v", f"{root}:/enroll", "--entrypoint", "dotnet", "dtpipe-lab-stack/node", "/app/Lab.NodeHost.dll",
                                      "--config", "/enroll/node.json", "--state", "/enroll", "--coordinator", "http://coordinator:8080",
                                      "--idp", rights["idp"]["issuer"], "--dtpipe", "/usr/local/bin/dtpipe"],
                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -1241,17 +1241,32 @@ def bricks_pass():
         return f"{len(names)} typed columns and the first {len(expected) - 1} rows are the sample's"
 
     def versions():
-        # Every node host announces what its dtpipe binary says of itself: here, the release binary; on the
-        # stack, the one in each node's own image, built from the tree without its git metadata.
-        def says(name):
-            command = (["docker", "compose", "-f", os.path.join(LAB_DIR, "compose.yaml"), "exec", "-T", name, "dtpipe"] if STACK else [DTPIPE])
-            return subprocess.run([*command, "--version"], capture_output=True, text=True, timeout=30).stdout.split()[1]
-
+        # Every node host announces what its dtpipe binary says of itself. Locally, the release binary's. On the
+        # stack, the binary of each node's own image, built from the tree without its git metadata: it must say
+        # the commit HEAD names, as must the revision label of every image the stack runs.
         nodes = call("/api/catalog")["nodes"]
+        if not nodes:
+            raise RuntimeError("no node")
+        if STACK:
+            head = subprocess.run(["git", "-C", LAB_DIR, "rev-parse", "HEAD"], capture_output=True, text=True, timeout=30).stdout.strip()
+            wrong = {n["name"]: n["dtpipeVersion"] for n in nodes if not n["dtpipeVersion"].endswith("+" + head)}
+            labels = {}
+            for image in ("coordinator-lab", "runner", "node"):
+                shown = subprocess.run(["docker", "image", "inspect", "dtpipe-lab-stack/" + image, "--format", '{{index .Config.Labels "org.opencontainers.image.revision"}}'],
+                                       capture_output=True, text=True, timeout=30).stdout.strip()
+                if shown != head:
+                    labels[image] = shown or "none"
+            if wrong or labels:
+                raise RuntimeError(f"the stack must run commit {head}: nodes announce {wrong or 'it'}, images labelled {labels or 'it'}")
+            return f"{len(nodes)} nodes announce dtpipe at {head[:12]}, as do the stack's images"
+
+        def says(name):
+            return subprocess.run([DTPIPE, "--version"], capture_output=True, text=True, timeout=30).stdout.split()[1]
+
         expected = {n["name"]: says(n["name"]) for n in nodes}
         wrong = {n["name"]: n["dtpipeVersion"] for n in nodes if n["dtpipeVersion"] != expected[n["name"]]}
-        if wrong or not nodes:
-            raise RuntimeError(f"expected {expected} of the nodes: {wrong or 'no node'}")
+        if wrong:
+            raise RuntimeError(f"expected {expected} of the nodes: {wrong}")
         return f"{len(nodes)} nodes announce dtpipe {', '.join(sorted(set(expected.values())))}"
 
     check("versions", versions)

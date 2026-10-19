@@ -71,7 +71,12 @@ open http://lab.localtest.me        # the home page: links, health, test account
 ./lab.sh stack down                 # stops everything; .stack/ keeps the data
 ```
 
-`docker compose up -d --build` and `down` do the same as `stack up` and `stack down`.
+`stack up` is `docker compose up -d --build` with what the build and the run need: `SOURCE_REVISION`, the commit
+the images are built from (the product's `deploy/Dockerfile` refuses to build without it), and `LAB_UID` / `LAB_GID`,
+the user who owns `.stack/`. The services that mount it run as that user, so `rm -rf .stack` needs no root; the
+runner mounts nothing and runs as the image's own unprivileged user. Run `docker compose` yourself with
+`SOURCE_REVISION=$(git rev-parse HEAD) LAB_UID=$(id -u) LAB_GID=$(id -g)` set, and with `.stack/*` created.
+The coordinator and the runner are the product's images, `coordinator-lab` adding the lab's seeds to the first.
 `*.localtest.me` resolves to `127.0.0.1`: the host needs a DNS that answers for it. A proxy (Caddy)
 publishes the stack's only port and routes by host name: `coordinator.localtest.me` to the
 coordinator, `idp.localtest.me` to the IdP, `lab.localtest.me` to the home page. Inside the

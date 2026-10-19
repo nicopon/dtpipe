@@ -3,8 +3,13 @@
 # coordinator's library remote (the bare repository its library is pushed to) beside its state; no
 # service reads another's data. Configuration is the environment's.
 #
-#   docker compose up -d --build        then open http://lab.localtest.me
-#   docker compose down                 .stack/ stays; delete it to seed again
+#   ./lab.sh stack up                   then open http://lab.localtest.me
+#   ./lab.sh stack down                 .stack/ stays; delete it to seed again
+#
+# lab.sh sets what the build and the run need: SOURCE_REVISION, the commit the images are built from
+# (the product's Dockerfile refuses to build without it: `SOURCE_REVISION=$(git rev-parse HEAD)`),
+# and LAB_UID / LAB_GID, the user who owns .stack/ (the services that mount it run as that user, so
+# deleting it needs no root; the default is the images' own user, 1654, for a directory it owns).
 #
 # *.localtest.me resolves to 127.0.0.1 outside Docker; inside, the proxy carries those names as
 # network aliases, so the IdP has one issuer for browsers and containers alike.
@@ -28,23 +33,56 @@ x-build: &build
   context: ../..
   dockerfile: samples/distributed-lab/docker/Dockerfile
 
+# The product's images, which the lab's extend. SOURCE_REVISION is the commit the images are built
+# from (lab.sh sets it): the product's Dockerfile refuses a build without it.
+x-product-build: &product-build
+  context: ../..
+  dockerfile: deploy/Dockerfile
+  args:
+    SOURCE_REVISION: ${SOURCE_REVISION:-}
+
+# The services whose directory under .stack/ is the host's: LAB_UID and LAB_GID (lab.sh sets them)
+# run them as the user who owns that directory, so nothing in it needs root to remove. HOME is
+# writable for a uid the images do not know.
+x-host-user: &host-user
+  user: "${LAB_UID:-1654}:${LAB_GID:-1654}"
+
 x-node: &node
-  <<: *dotnet-service
+  <<: [*dotnet-service, *host-user]
   image: dtpipe-lab-stack/node
   build:
     <<: *build
     target: node
+    additional_contexts:
+      product-with-dtpipe: service:product-with-dtpipe
   depends_on:
     coordinator: { condition: service_healthy }
     proxy: { condition: service_healthy }
 
 x-node-environment: &node-environment
+  HOME: /tmp
   LAB_SCALE: ${LAB_SCALE:-1}
   LAB_COORDINATOR_URL: http://coordinator:8080
   LAB_IDP_URL: http://idp.localtest.me${LAB_STACK_HTTP_PORT:+:}${LAB_STACK_HTTP_PORT:-}
   LAB_NODE_SANDBOX: ${LAB_NODE_SANDBOX:-}
 
 services:
+  # Built, never started (scale 0): the images the lab's extend, handed to them as build contexts.
+  product-runtime:
+    image: dtpipe-lab-stack/product-runtime
+    scale: 0
+    build: { <<: *product-build, target: runtime }
+
+  product-with-dtpipe:
+    image: dtpipe-lab-stack/product-with-dtpipe
+    scale: 0
+    build: { <<: *product-build, target: with-dtpipe }
+
+  product-coordinator:
+    image: dtpipe-lab-stack/product-coordinator
+    scale: 0
+    build: { <<: *product-build, target: coordinator }
+
   proxy:
     image: caddy:2-alpine
     ports:
@@ -63,12 +101,15 @@ services:
       retries: 30
 
   idp:
-    <<: *dotnet-service
+    <<: [*dotnet-service, *host-user]
     image: dtpipe-lab-stack/idp
     build:
       <<: *build
       target: idp
+      additional_contexts:
+        product-runtime: service:product-runtime
     environment:
+      HOME: /tmp
       Idp__Issuer: http://idp.localtest.me${LAB_STACK_HTTP_PORT:+:}${LAB_STACK_HTTP_PORT:-}
       Idp__ClientsFile: /lab/idp-clients.json
       Idp__SigningKeyFile: /state/signing-key.pem
@@ -82,6 +123,7 @@ services:
 
   # The coordinator's run journal. Every write is fsynced, as a journal that never reuses an id needs.
   redis:
+    <<: *host-user
     image: redis:7.4-alpine
     command: redis-server --appendonly yes --appendfsync always
     volumes:
@@ -92,14 +134,22 @@ services:
       retries: 30
 
   coordinator:
-    <<: *dotnet-service
+    <<: [*dotnet-service, *host-user]
     image: dtpipe-lab-stack/coordinator-lab
     build:
       <<: *build
       target: coordinator-lab
+      additional_contexts:
+        product-coordinator: service:product-coordinator
     environment:
+      HOME: /tmp
       Coordinator__Authority: http://idp.localtest.me${LAB_STACK_HTTP_PORT:+:}${LAB_STACK_HTTP_PORT:-}
       Coordinator__LabMode: "true"
+      # The proxy is a container of this network, behind Docker's private ranges: its X-Forwarded-Proto
+      # and X-Forwarded-Host are believed, a client's own are not.
+      Coordinator__TrustedProxies__0: 10.0.0.0/8
+      Coordinator__TrustedProxies__1: 172.16.0.0/12
+      Coordinator__TrustedProxies__2: 192.168.0.0/16
       Coordinator__Scenarios: /lab/pipelines
       Coordinator__LibrarySeed: /lab/library-seed
       Coordinator__RightsSeed: /lab/rights-seed.json
@@ -152,9 +202,7 @@ services:
   runner-1:
     <<: *dotnet-service
     image: dtpipe-lab-stack/runner
-    build:
-      <<: *build
-      target: runner
+    build: { <<: *product-build, target: runner }
     environment:
       DtPipeNode__Name: runner-1
       DtPipeNode__Description: Runner - no database, carries every step between the bricks

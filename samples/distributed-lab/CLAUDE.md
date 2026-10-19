@@ -124,10 +124,19 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   the IdP names itself without a default port, and `dtpipe studio` refuses an authority that differs
   from that name by more than a trailing slash, an explicit `:80` included. `[local: lab.sh stack
   studio, on port 80 only]`
-- **The `coordinator` and `runner` image targets hold nothing of the lab**: lab content enters
-  through `coordinator-lab`, `node`, `idp` or `compose.yaml`'s environment, so those two targets
-  can leave `samples/` unchanged. Every .NET service runs under `init: true`: dotnet as PID 1 hangs
-  on its own crash, and the nodes start dtpipe children. `[unchecked]`
+- **The lab's images extend the product's, never the other way.** `deploy/Dockerfile` builds the coordinator, the runtime and the
+  runtime with `dtpipe`; `compose.yaml` builds each as a service of `scale: 0` and hands it to `docker/Dockerfile` as a named build
+  context (`additional_contexts`), where `coordinator-lab`, `node` and `idp` add lab content. `runner-1` is the product's `runner`
+  target as built. Lab content enters through those three targets or `compose.yaml`'s environment, never `deploy/`. Every .NET
+  service runs under `init: true`: dotnet as PID 1 hangs on its own crash, and the nodes start dtpipe children. `[unchecked]`
+- **The stack's images are built from the commit HEAD names, and its services run unprivileged.** `compose()` in `lab.sh` sets
+  `SOURCE_REVISION` (`${SOURCE_REVISION:-}` in `compose.yaml`: a `:?` would fail `down` and `exec` too, and the product's
+  Dockerfile refuses the empty value), `LAB_UID` and `LAB_GID`. The services that mount a `.stack/` directory (`node-N`, `idp`, `coordinator`,
+  `redis`) run as that user and with `HOME=/tmp`, so nothing in `.stack/` is owned by root; `lab.sh stack up` creates the directories
+  first, as docker would create them as root. The runner mounts nothing and keeps the image's own user (1654). A throwaway container
+  of the stack (the enrollment check) runs as the invoking user too. `smoke.py bricks - versions` requires every node's `dtpipe` and
+  the revision label of the coordinator, runner and node images to be HEAD; a tree that is dirty at the same HEAD is not seen.
+  `[local: lab.sh stack smoke]` `[unchecked: Docker on Linux, where a bind mount keeps its owner]`
 - **The stack is a target of the lab's checks, never a second set.** `lab.sh stack smoke|ui|studio`
   run `smoke.py`, `tools/ui_check.py` and `tools/studio_check.py` against `STACK_URL`;
   `LAB_TARGET=stack` is the only switch, read where the stack differs (the library directory, the

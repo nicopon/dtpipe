@@ -143,6 +143,7 @@ example to make it checked]`
 | `src/DtPipe.Coordinator.Contracts` | Node channel messages, `BrickRules`: what coordinator and nodes share |
 | `src/DtPipe.PipelineNode.Hosting` | `AddDtPipeNode`: makes any .NET host a node (bricks, fragments, tokens) |
 | `src/DtPipe.PipelineNode.Runner` | The official runner: a node that hosts no data and runs any fragment |
+| `deploy` | The Dockerfile of the coordinator's and the runner's images, and `deploy/README.md`: what a deployment provides |
 | `tests/DtPipe.Tests` | xunit.v3 unit and integration tests |
 
 `DtPipe.Core` holds abstractions, models and the engine only. The **distributed family** is every
@@ -320,6 +321,14 @@ the control plane, over each replica's node channel; TransportR carries the data
   else, a **launcher** (a scheduler) starts the runs of the pipelines its identity lists and reads them, on
   `/service` and nowhere else; the last two have no group and no node, so a valid token of theirs is refused at
   the announcement and on `/api`, and neither reaches the other's route.
+- **The product's images carry the revision they were built from and run unprivileged.** `deploy/Dockerfile` refuses a build
+  without `SOURCE_REVISION` (the full commit id), refuses one whose `dtpipe` or host does not report it, and labels the image
+  with it (`org.opencontainers.image.revision`); `.git` is not in the build context, so nothing else can supply it. Every image
+  runs as `1654:1654` with `/state` owned by that user. The lab's images extend these and the product's names no lab; `deploy/`
+  is scanned like `src/`. **The server listens in plain HTTP and believes `X-Forwarded-Proto` and `X-Forwarded-Host` only from
+  `Coordinator:TrustedProxies`** (empty: none), so a TLS proxy in front does not turn into `http://` return addresses.
+  `[CI: validate_distributed_boundary.sh — deploy/ names no lab]` `[local: ForwardedHeadersTests; the lab's smoke.py bricks - versions]`
+  `[unchecked: a Linux Docker host; a real TLS proxy; a volume owned by another uid]`
 - **The CLI hosts neither a node nor a hub.** `dtpipe` is the child a node drives, reached through `arrow:`;
   it references no TransportR assembly and no project of the family, maps no SignalR hub, and `dtpipe
   studio` is a client of the coordinator's `/api`, only when it is given `--coordinator`.

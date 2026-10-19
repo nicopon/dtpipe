@@ -5,7 +5,7 @@ set -e
 # Source-level guard on the distributed-pipeline split: TransportR is named only by the distributed
 # family (every project named DtPipe.Coordinator* or DtPipe.PipelineNode*), its tests and the lab; no
 # core project reaches it; the two base libraries stay libraries; the lab and its sample data stay
-# under samples/, outside the solution and the build; the family reaches the solution only through
+# under samples/, outside the solution and the build, and the product's images (deploy/) name none of them; the family reaches the solution only through
 # DtPipe.Jobs; the CLI maps no SignalR hub.
 #
 # Scope: names and references, not behaviour. A type that crosses the line without naming TransportR
@@ -64,9 +64,15 @@ if grep -qE 'DtPipe\.(Coordinator|PipelineNode)|distributed-lab|Lab\.(Coordinato
 fi
 pass "DtPipe.sln names neither the distributed family nor the lab"
 
-# 4. The lab, and the pipelines and bricks of its sample data, are named under samples/ only.
+# 4. The lab, and the pipelines and bricks of its sample data, are named under samples/ only. The
+#    product's images (deploy/) are such a place: every file there, whatever its type.
 HITS=""
-for f in $(echo "$OUTSIDE" | grep -E '^(src/|tests/|build\.sh$|\.github/|Directory\.Build\.props$)' | grep -E '\.(cs|csproj|props|sh|yml|yaml)$' || true); do
+for f in $(
+    {
+        echo "$OUTSIDE" | grep -E '^(src/|tests/|build\.sh$|\.github/|Directory\.Build\.props$)' | grep -E '\.(cs|csproj|props|sh|yml|yaml)$' || true
+        echo "$OUTSIDE" | grep -E '^deploy/' || true
+    }
+); do
     [ -f "$f" ] || continue
     # This guard names the lab on purpose.
     [ "$f" = "tests/scripts/validate_distributed_boundary.sh" ] && continue

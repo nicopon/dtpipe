@@ -427,7 +427,11 @@ status() {
 # The compose stack: the same lab in containers, reached by the names its proxy answers to (never
 # 127.0.0.1, which the local lab's cookies hold). smoke.py, ui_check.py and studio_check.py are the
 # ones the local lab runs, pointed at STACK_URL; LAB_TARGET=stack tells smoke.py where the stack differs.
-compose() { (cd "$LAB" && docker compose "$@"); }
+# The images are built from the commit HEAD names, and the services that mount .stack/ run as the user who owns it.
+compose() {
+    (cd "$LAB" \
+        && SOURCE_REVISION="$(git rev-parse HEAD)" LAB_UID="$(id -u)" LAB_GID="$(id -g)" docker compose "$@")
+}
 
 # The node services take their mode from LAB_NODE_SANDBOX, which compose reads from this shell.
 stack_nodes_mode() {
@@ -446,6 +450,8 @@ stack() {
     local command="${1:-}"; [[ $# -gt 0 ]] && shift
     case "$command" in
         up)
+            # Created here, by the user, so that docker does not create them as root.
+            mkdir -p "$STACK"/{idp,redis,coordinator,library.git,node-1,node-2,node-3,node-4}
             compose up -d --build --wait
             nodes_report "$STACK_URL" "$([[ "${LAB_NODE_SANDBOX:-}" == 1 ]] && echo sandbox || echo strict)" 90 \
                 || { echo "The stack's node hosts did not come online; see ./lab.sh stack logs" >&2; exit 1; }
