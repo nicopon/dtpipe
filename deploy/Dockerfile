@@ -3,10 +3,11 @@
 #
 #   docker build -f deploy/Dockerfile --target coordinator --build-arg SOURCE_REVISION=$(git rev-parse HEAD) .
 #
-# SOURCE_REVISION is required: .git is not in the build context, so the version a binary reports
-# carries the revision only if it is handed over, and the build fails when the binary does not say it.
-# A revision is the full commit id; every image that carries a binary built here has it as its
-# org.opencontainers.image.revision label.
+# SOURCE_REVISION is the full commit id the images are built from. .git is not in the build context, so
+# the version a binary reports carries the revision only if it is handed over. Given, it must be a
+# full commit id and the build fails when a binary does not report it; every image then has it as its
+# org.opencontainers.image.revision label. Left out, the build warns, the binaries report no revision
+# and the label is "unknown": a build that cannot say what it was built from.
 #
 # The dtpipe binary is built here for Linux, never copied from the host: a host build may link
 # libraries the image does not have.
@@ -24,30 +25,35 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS source
 WORKDIR /src
 COPY Directory.Build.props ./
 COPY src/ src/
-ARG SOURCE_REVISION
-RUN printf '%s' "$SOURCE_REVISION" | grep -Eq '^[0-9a-f]{40}$' \
-    || { echo "SOURCE_REVISION must be the full commit id (git rev-parse HEAD), not '$SOURCE_REVISION'." >&2; exit 1; }
+ARG SOURCE_REVISION=""
+RUN if [ -z "$SOURCE_REVISION" ]; then \
+        echo "WARNING: no SOURCE_REVISION build argument: these images will not say which commit they were built from (--build-arg SOURCE_REVISION=\$(git rev-parse HEAD))." >&2; \
+    else \
+        printf '%s' "$SOURCE_REVISION" | grep -Eq '^[0-9a-f]{40}$' \
+        || { echo "SOURCE_REVISION must be the full commit id (git rev-parse HEAD), not '$SOURCE_REVISION'." >&2; exit 1; }; \
+    fi
 
 # Self-contained single file, as build.sh publishes it, for the architecture being built.
 FROM source AS dtpipe-build
 ARG TARGETARCH
-ARG SOURCE_REVISION
+ARG SOURCE_REVISION=""
 RUN --mount=type=cache,id=dtpipe-nuget,target=/root/.nuget/packages,sharing=locked \
     rid="linux-$([ "$TARGETARCH" = arm64 ] && echo arm64 || echo x64)" \
     && dotnet publish src/DtPipe/DtPipe.csproj -c Release -r "$rid" --self-contained true \
         -p:PublishSingleFile=true -p:DebugType=none -p:DebugSymbols=false -p:SourceRevisionId="$SOURCE_REVISION" -o /out \
     && mv /out/DtPipe /out/dtpipe \
-    && /out/dtpipe --version | grep -qF "+$SOURCE_REVISION" \
+    && { [ -z "$SOURCE_REVISION" ] || /out/dtpipe --version | grep -qF "+$SOURCE_REVISION"; } \
     || { echo "dtpipe does not report the revision $SOURCE_REVISION." >&2; exit 1; }
 
 # Framework-dependent: the runtime image carries ASP.NET Core.
 FROM source AS hosts-build
-ARG SOURCE_REVISION
+ARG SOURCE_REVISION=""
 RUN --mount=type=cache,id=dtpipe-nuget,target=/root/.nuget/packages,sharing=locked \
     dotnet publish src/DtPipe.Coordinator.Server/DtPipe.Coordinator.Server.csproj -c Release -p:SourceRevisionId="$SOURCE_REVISION" -o /out/coordinator \
     && dotnet publish src/DtPipe.PipelineNode.Runner/DtPipe.PipelineNode.Runner.csproj -c Release -p:SourceRevisionId="$SOURCE_REVISION" -o /out/runner \
-    && grep -qaF "+$SOURCE_REVISION" /out/coordinator/DtPipe.Coordinator.Server.dll \
-    && grep -qaF "+$SOURCE_REVISION" /out/runner/DtPipe.PipelineNode.Runner.dll \
+    && { [ -z "$SOURCE_REVISION" ] \
+        || { grep -qaF "+$SOURCE_REVISION" /out/coordinator/DtPipe.Coordinator.Server.dll \
+             && grep -qaF "+$SOURCE_REVISION" /out/runner/DtPipe.PipelineNode.Runner.dll; }; } \
     || { echo "A host does not carry the revision $SOURCE_REVISION." >&2; exit 1; }
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
@@ -59,13 +65,13 @@ USER 1654:1654
 # A single-file binary unpacks its native libraries on first run: under /tmp, which any uid may write,
 # not under a HOME that a uid with no entry in /etc/passwd lacks.
 FROM runtime AS with-dtpipe
-ARG SOURCE_REVISION
-LABEL org.opencontainers.image.revision=$SOURCE_REVISION
+ARG SOURCE_REVISION=""
+LABEL org.opencontainers.image.revision=${SOURCE_REVISION:-unknown}
 COPY --from=dtpipe-build --chmod=755 /out/dtpipe /usr/local/bin/dtpipe
 ENV DOTNET_BUNDLE_EXTRACT_BASE_DIR=/tmp/.net
 
 FROM runtime AS coordinator
-ARG SOURCE_REVISION
+ARG SOURCE_REVISION=""
 USER root
 # git refuses a repository that another user owns; the library is the state directory's, whoever mounted it.
 RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/* \
@@ -73,7 +79,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /
 USER 1654:1654
 COPY --from=hosts-build /out/coordinator /app
 ENV Coordinator__StateDirectory=/state
-LABEL org.opencontainers.image.revision=$SOURCE_REVISION
+LABEL org.opencontainers.image.revision=${SOURCE_REVISION:-unknown}
 EXPOSE 8080
 ENTRYPOINT ["dotnet", "/app/DtPipe.Coordinator.Server.dll"]
 

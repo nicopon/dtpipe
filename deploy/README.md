@@ -16,9 +16,11 @@ docker build -f deploy/Dockerfile --target runner \
     --build-arg SOURCE_REVISION=$(git rev-parse HEAD) -t dtpipe-runner .
 ```
 
-- `SOURCE_REVISION` is required and must be the full commit id. The build fails without it, and
-  fails again if the `dtpipe` binary or a host does not report it. It is also the image's
-  `org.opencontainers.image.revision` label, which is how a deployment tells what it runs.
+- `SOURCE_REVISION` is the full commit id the images are built from, and `.git` is not in the
+  build context, so it must be handed over. Given, a wrong value fails the build, and so does a
+  `dtpipe` binary or a host that does not report it; it is also the image's
+  `org.opencontainers.image.revision` label, which is how a deployment tells what it runs. Left
+  out, the build only warns: the binaries report no revision and the label says `unknown`.
 - Both run as `1654:1654` (the `app` user of the .NET images), listen on 8080 and keep their
   state in `/state`, which that user owns. A named volume mounted there inherits the owner; a
   bind mount must be owned by that uid. The runner's `dtpipe` runs under another uid that can
@@ -57,8 +59,8 @@ the coordinator's, never its own.
 
 The coordinator listens in plain HTTP and never terminates TLS: a proxy or ingress does. Tell the
 coordinator the address people reach it at, once, as `Coordinator__PublicUrl` (for example
-`https://coordinator.example`: a scheme, a host and a port if not the default, no path). The server builds from it the address it
-tells the studio (`/.well-known/oauth-protected-resource`), the sign-in's return address, and the
+`https://coordinator.example`: a scheme, a host and a port if not the default, no path). The
+server builds from it the address it tells the studio (`/.well-known/oauth-protected-resource`), the sign-in's return address, and the
 `Secure` flag of the session cookie. It reads no `X-Forwarded-*` header and ignores the `Host` of a
 request, so no caller can change them. Without it the request's own scheme and host stand, and
 behind a TLS proxy the sign-in would send `http://` return addresses.

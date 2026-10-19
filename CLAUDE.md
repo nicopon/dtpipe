@@ -321,9 +321,9 @@ the control plane, over each replica's node channel; TransportR carries the data
   else, a **launcher** (a scheduler) starts the runs of the pipelines its identity lists and reads them, on
   `/service` and nowhere else; the last two have no group and no node, so a valid token of theirs is refused at
   the announcement and on `/api`, and neither reaches the other's route.
-- **The product's images carry the revision they were built from and run unprivileged.** `deploy/Dockerfile` refuses a build
-  without `SOURCE_REVISION` (the full commit id), refuses one whose `dtpipe` or host does not report it, and labels the image
-  with it (`org.opencontainers.image.revision`); `.git` is not in the build context, so nothing else can supply it. Every image
+- **The product's images carry the revision they were built from and run unprivileged.** `deploy/Dockerfile` takes `SOURCE_REVISION`
+  (the full commit id): a value given is refused if malformed or if a `dtpipe` or host does not report it, and labels the image
+  with it; left out, the build warns and the label says `unknown`. The lab's stack is the strict case: its guard requires HEAD (`org.opencontainers.image.revision`); `.git` is not in the build context, so nothing else can supply it. Every image
   runs as `1654:1654` with `/state` owned by that user. The lab's images extend these and the product's names no lab; `deploy/`
   is scanned like `src/`. **The server listens in plain HTTP and reads no forwarded header**: a TLS proxy in front is
   told to it by `Coordinator:PublicUrl`, the address people reach it at, so it does not turn into `http://` return addresses.

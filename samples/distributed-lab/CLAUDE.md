@@ -130,8 +130,8 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   target as built. Lab content enters through those three targets or `compose.yaml`'s environment, never `deploy/`. Every .NET
   service runs under `init: true`: dotnet as PID 1 hangs on its own crash, and the nodes start dtpipe children. `[unchecked]`
 - **The stack's images are built from the commit HEAD names, and its services run unprivileged.** `compose()` in `lab.sh` sets
-  `SOURCE_REVISION` (`${SOURCE_REVISION:-}` in `compose.yaml`: a `:?` would fail `down` and `exec` too, and the product's
-  Dockerfile refuses the empty value), `LAB_UID` and `LAB_GID`. The services that mount a `.stack/` directory (`node-N`, `idp`, `coordinator`,
+  `SOURCE_REVISION` (`${SOURCE_REVISION:-}` in `compose.yaml`: a `:?` would fail `down` and `exec` too; an empty value
+  builds images labelled `unknown`, which the `versions` guard refuses), `LAB_UID` and `LAB_GID`. The services that mount a `.stack/` directory (`node-N`, `idp`, `coordinator`,
   `redis`) run as that user and with `HOME=/tmp`, so nothing in `.stack/` is owned by root; `lab.sh stack up` creates the directories
   first, as docker would create them as root. The runner mounts nothing and keeps the image's own user (1654). A throwaway container
   of the stack (the enrollment check) runs as the invoking user too. `smoke.py bricks - versions` requires every node's `dtpipe` and

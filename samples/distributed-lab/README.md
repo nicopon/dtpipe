@@ -72,7 +72,7 @@ open http://lab.localtest.me        # the home page: links, health, test account
 ```
 
 `stack up` is `docker compose up -d --build` with what the build and the run need: `SOURCE_REVISION`, the commit
-the images are built from (the product's `deploy/Dockerfile` refuses to build without it), and `LAB_UID` / `LAB_GID`,
+the images are built from (without it the images say `unknown` and `stack smoke` refuses them), and `LAB_UID` / `LAB_GID`,
 the user who owns `.stack/`. The services that mount it run as that user, so `rm -rf .stack` needs no root; the
 runner mounts nothing and runs as the image's own unprivileged user. Run `docker compose` yourself with
 `SOURCE_REVISION=$(git rev-parse HEAD) LAB_UID=$(id -u) LAB_GID=$(id -g)` set, and with `.stack/*` created.

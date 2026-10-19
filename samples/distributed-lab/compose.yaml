@@ -7,7 +7,7 @@
 #   ./lab.sh stack down                 .stack/ stays; delete it to seed again
 #
 # lab.sh sets what the build and the run need: SOURCE_REVISION, the commit the images are built from
-# (the product's Dockerfile refuses to build without it: `SOURCE_REVISION=$(git rev-parse HEAD)`),
+# (`SOURCE_REVISION=$(git rev-parse HEAD)`; without it the images say `unknown` and smoke.py refuses them),
 # and LAB_UID / LAB_GID, the user who owns .stack/ (the services that mount it run as that user, so
 # deleting it needs no root; the default is the images' own user, 1654, for a directory it owns).
 #
@@ -34,7 +34,7 @@ x-build: &build
   dockerfile: samples/distributed-lab/docker/Dockerfile
 
 # The product's images, which the lab's extend. SOURCE_REVISION is the commit the images are built
-# from (lab.sh sets it): the product's Dockerfile refuses a build without it.
+# from (lab.sh sets it).
 x-product-build: &product-build
   context: ../..
   dockerfile: deploy/Dockerfile
