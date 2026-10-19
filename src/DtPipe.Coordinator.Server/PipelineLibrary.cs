@@ -366,22 +366,8 @@ public sealed partial class PipelineLibrary : IJobSource, ILibraryHeads
             await GitAsync(["reset", "-q", "--hard"], ct);
             await GitAsync(["clean", "-fdq", "--", "pipelines"], ct);
         }
-        await RemoveLayoutsAsync(ct);
         if (_remote is not null && await CurrentCommitAsync() != remoteHead) await PushAsync();
         _ready = true;
-    }
-
-    /// <summary>
-    /// A layout.json is where a coordinator's designer drew each card; no designer remains, so a library
-    /// that still tracks any drops them all in one commit. Idempotent: with none tracked, it commits nothing.
-    /// </summary>
-    private async Task RemoveLayoutsAsync(CancellationToken ct)
-    {
-        var tracked = (await TryGitAsync(["ls-files", "-z", "--", ":(glob)pipelines/*/layout.json"], ct) ?? "")
-            .Split('\0', StringSplitOptions.RemoveEmptyEntries);
-        if (tracked.Length == 0) return;
-        await GitAsync(["rm", "-q", "--", .. tracked], ct);
-        await GitAsync(["commit", "-q", "-m", "Remove the designer's layouts"], ct);
     }
 
     private async Task<string?> CurrentCommitAsync() =>

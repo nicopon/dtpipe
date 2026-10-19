@@ -180,9 +180,8 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   the node of a brick one node offers and of each brick the person chose; a brick two nodes offer that nobody chose stays
   unbound, which the answer's `bindingProblems` says and the pipeline's page then lets a person choose.
   `[local: BindingTests, StudioRoutesTests, StudioPublishTests]`
-- **The library keeps a job and its bindings, no plan, nothing a designer drew.** `pipelines/<id>/` holds
-  `pipeline.yaml` and `bindings.json`; a library that still tracks a `layout.json` drops them all in
-  one commit when it first opens. `[local: the lab's smoke.py library — no layouts]`
+- **The library keeps a job and its bindings, no plan.** `pipelines/<id>/` holds `pipeline.yaml` and
+  `bindings.json`. `[local: LibraryRemoteTests, BindingTests]` `[unchecked: that nothing else is written there]`
 - **The binding decides where a brick branch runs, and a bound branch never runs on the runner.** `bindings.json` maps the
   alias of each source or sink branch of the job to `{node, brick, mode}`; every branch that is neither bound nor a brick goes
   to the runner, which is stateless and never named. `AutoPlacer.PlanAsync` places a bound alias on its node or refuses the

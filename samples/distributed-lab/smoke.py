@@ -244,27 +244,7 @@ def library_pass(ctx):
     except Exception as e:
         failures += 1
         print(f"FAIL  library  {'a studio publishes':28} {e}")
-    try:
-        print(f"PASS  library  {'no layouts':28} {layouts_gone()}")
-    except Exception as e:
-        failures += 1
-        print(f"FAIL  library  {'no layouts':28} {e}")
     return failures
-
-
-def layouts_gone():
-    """No coordinator designer remains, so no pipeline of the library keeps a layout: the library drops
-    those it still tracked in one commit of its own, which its history keeps."""
-    repo = os.path.join(STATE, "coordinator" if STACK else "", "library")
-    git = lambda *a: subprocess.run(["git", "-C", repo, *a], capture_output=True, text=True, check=True).stdout
-    tracked = git("ls-files", ":(glob)pipelines/*/layout.json").split()
-    if tracked:
-        raise RuntimeError(f"still tracked: {tracked}")
-    ever = git("log", "--all", "--format=%h", "--", ":(glob)pipelines/*/layout.json").split()
-    removed = [c for c in git("log", "--format=%s").splitlines() if c == "Remove the designer's layouts"]
-    if ever and len(removed) != 1:
-        raise RuntimeError(f"{len(ever)} commit(s) touched a layout, {len(removed)} removal commit(s)")
-    return f"none tracked; {len(ever)} commit(s) ever touched one, removed by {len(removed)} commit of their own"
 
 
 def studio_publishes(deployed):
