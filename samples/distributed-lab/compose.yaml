@@ -145,8 +145,8 @@ services:
       HOME: /tmp
       Coordinator__Authority: http://idp.localtest.me${LAB_STACK_HTTP_PORT:+:}${LAB_STACK_HTTP_PORT:-}
       Coordinator__LabMode: "true"
-      # The proxy is a container of this network, behind Docker's private ranges: its X-Forwarded-Proto
-      # and X-Forwarded-Host are believed, a client's own are not.
+      # The lab trusts its whole network, nodes included, because the proxy is a container of it: a node
+      # could forge these headers. A deployment lists its proxy alone (deploy/README.md).
       Coordinator__TrustedProxies__0: 10.0.0.0/8
       Coordinator__TrustedProxies__1: 172.16.0.0/12
       Coordinator__TrustedProxies__2: 192.168.0.0/16

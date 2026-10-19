@@ -328,7 +328,7 @@ the control plane, over each replica's node channel; TransportR carries the data
   is scanned like `src/`. **The server listens in plain HTTP and believes `X-Forwarded-Proto` and `X-Forwarded-Host` only from
   `Coordinator:TrustedProxies`** (empty: none), so a TLS proxy in front does not turn into `http://` return addresses.
   `[CI: validate_distributed_boundary.sh — deploy/ names no lab]` `[local: ForwardedHeadersTests; the lab's smoke.py bricks - versions]`
-  `[unchecked: a Linux Docker host; a real TLS proxy; a volume owned by another uid]`
+  `[unchecked: a Linux Docker host; a real TLS proxy; a volume owned by another uid; deploy/README.md is in no documentation check, so keep its lines to 100 columns]`
 - **The CLI hosts neither a node nor a hub.** `dtpipe` is the child a node drives, reached through `arrow:`;
   it references no TransportR assembly and no project of the family, maps no SignalR hub, and `dtpipe
   studio` is a client of the coordinator's `/api`, only when it is given `--coordinator`.

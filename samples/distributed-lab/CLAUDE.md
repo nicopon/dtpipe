@@ -123,7 +123,7 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   directly, never through the proxy. The issuer spells a port only when `LAB_STACK_HTTP_PORT` is set:
   the IdP names itself without a default port, and `dtpipe studio` refuses an authority that differs
   from that name by more than a trailing slash, an explicit `:80` included. `[local: lab.sh stack
-  studio, on port 80 only]`
+  studio]`
 - **The lab's images extend the product's, never the other way.** `deploy/Dockerfile` builds the coordinator, the runtime and the
   runtime with `dtpipe`; `compose.yaml` builds each as a service of `scale: 0` and hands it to `docker/Dockerfile` as a named build
   context (`additional_contexts`), where `coordinator-lab`, `node` and `idp` add lab content. `runner-1` is the product's `runner`
@@ -140,7 +140,7 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
 - **The stack is a target of the lab's checks, never a second set.** `lab.sh stack smoke|ui|studio`
   run `smoke.py`, `tools/ui_check.py` and `tools/studio_check.py` against `STACK_URL`;
   `LAB_TARGET=stack` is the only switch, read where the stack differs (the library directory, the
-  coordinator's log, the enrollment host, the version of each node's own binary). A new check that
+  coordinator's log, the enrollment host, the revision each node's own binary and image must carry). A new check that
   starts a process or reads a path of the local lab takes its stack form there too.
   `[local: lab.sh stack smoke, ui, studio]`
 - Verify a change with `./lab.sh smoke`, a page change with `./lab.sh ui` too, and a change to what

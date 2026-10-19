@@ -7,8 +7,6 @@ deployment must provide. The behaviour of the server is in
 [src/DtPipe.Coordinator.Server/CLAUDE.md](../src/DtPipe.Coordinator.Server/CLAUDE.md); the
 settings a node host takes are `DtPipeNode__*` (the runner) or the host team's own.
 
-This file is not covered by the repository's documentation checks; keep lines to 100 columns.
-
 ## The images
 
 ```bash
@@ -23,7 +21,8 @@ docker build -f deploy/Dockerfile --target runner \
   `org.opencontainers.image.revision` label, which is how a deployment tells what it runs.
 - Both run as `1654:1654` (the `app` user of the .NET images), listen on 8080 and keep their
   state in `/state`, which that user owns. A named volume mounted there inherits the owner; a
-  bind mount must be owned by that uid. Another uid works if it can write `/state` and `/tmp`.
+  bind mount must be owned by that uid. The runner's `dtpipe` runs under another uid that can
+  write `/state` and `/tmp`; the coordinator under a uid with no home is not checked.
 - Run them under an init (`docker run --init`, `init: true` in compose): the runner starts
   `dtpipe` child processes, and dotnet as PID 1 ignores the signal of its own crash.
 - `GET /healthz` answers 200 whenever the coordinator serves; it is anonymous.
