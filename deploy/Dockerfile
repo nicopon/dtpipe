@@ -81,6 +81,9 @@ COPY --from=hosts-build /out/coordinator /app
 ENV Coordinator__StateDirectory=/state
 LABEL org.opencontainers.image.revision=${SOURCE_REVISION:-unknown}
 EXPOSE 8080
+# /healthz is anonymous and answers 200 once the server serves, which is after its store and library are open. An
+# orchestrator that probes on its own (a compose file, a pod spec) replaces this check.
+HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=3 CMD curl -fs http://localhost:8080/healthz || exit 1
 ENTRYPOINT ["dotnet", "/app/DtPipe.Coordinator.Server.dll"]
 
 FROM with-dtpipe AS runner
