@@ -3,7 +3,6 @@ using System.Security.Cryptography;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.DataProtection.Repositories;
-using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -18,11 +17,10 @@ namespace DtPipe.Coordinator.Server.Tests;
 /// The coordinator's server in memory, trusting a test provider: its configuration is handed over
 /// directly, with a key generated here, so nothing is discovered over the network. The state
 /// directory is a fresh temporary one, and lab mode is off unless asked. <c>check</c> stands for the designer's check, which needs a runner and
-/// the bricks' nodes; without it the real one runs. <c>trustedProxies</c> is the list of proxies whose forwarded headers are believed, and <c>peer</c>
-/// the address every request seems to come from (none otherwise, as in memory).
+/// the bricks' nodes; without it the real one runs. <c>publicUrl</c> is the address the server is told people reach it at.
 /// </summary>
 public sealed class CoordinatorHost(string? studioClientId = CoordinatorHost.StudioClient, Func<string, DesignCheck>? check = null, bool labMode = false,
-    string[]? trustedProxies = null, string? peer = null)
+    string? publicUrl = null)
     : WebApplicationFactory<Program>
 {
     /// <summary>The bindings the stand-in check was last asked to judge, as the route merged them.</summary>
@@ -69,7 +67,7 @@ public sealed class CoordinatorHost(string? studioClientId = CoordinatorHost.Stu
         builder.UseSetting("Coordinator:Roles:Reader", Reader);
         builder.UseSetting("Coordinator:Studio:ClientId", studioClientId ?? "");
         builder.UseSetting("Coordinator:LabMode", labMode ? "true" : "false");
-        for (var i = 0; i < (trustedProxies?.Length ?? 0); i++) builder.UseSetting($"Coordinator:TrustedProxies:{i}", trustedProxies![i]);
+        if (publicUrl is not null) builder.UseSetting("Coordinator:PublicUrl", publicUrl);
         builder.ConfigureTestServices(services =>
         {
             // What the coordinator keeps beyond the process is in memory: the real store is Redis, which these tests are not about.
@@ -79,7 +77,6 @@ public sealed class CoordinatorHost(string? studioClientId = CoordinatorHost.Stu
             services.AddSingleton<IDeploymentStore>(Deployments);
             services.AddSingleton<IIgnoredHostStore>(IgnoredHosts);
             services.AddSingleton<IXmlRepository>(new MemoryXmlRepository());
-            if (peer is not null) services.AddSingleton<IStartupFilter>(new PeerFilter(System.Net.IPAddress.Parse(peer)));
             if (check is not null) services.AddSingleton<DesignValidator>(new StubValidator(check, bindings => CheckedBindings = bindings));
             var configuration = new OpenIdConnectConfiguration
             {
@@ -131,20 +128,6 @@ public sealed class CoordinatorHost(string? studioClientId = CoordinatorHost.Stu
         base.Dispose(disposing);
         if (disposing && Directory.Exists(_state)) Directory.Delete(_state, recursive: true);
     }
-}
-
-/// <summary>Gives every request the address of a peer, which a request in memory does not have.</summary>
-internal sealed class PeerFilter(System.Net.IPAddress peer) : IStartupFilter
-{
-    public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
-    {
-        app.Use((context, run) =>
-        {
-            context.Connection.RemoteIpAddress = peer;
-            return run(context);
-        });
-        next(app);
-    };
 }
 
 /// <summary>The designer's check answered by a function, for tests that exercise what is around it.</summary>

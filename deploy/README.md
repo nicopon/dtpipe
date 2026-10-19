@@ -47,7 +47,7 @@ docker build -f deploy/Dockerfile --target runner \
   anything.
 - **The state directory** (`Coordinator__StateDirectory`, `/state` in the image): scratch files
   and the library's local copy.
-- **TLS**, by a proxy in front: see below.
+- **TLS**, by a proxy in front, and `Coordinator__PublicUrl`: see below.
 
 A node host (the runner, or a team's own) takes its coordinator's address and the provider's
 client credentials (`DtPipeNode__CoordinatorUrl`, `DtPipeNode__Oidc__*`); its rights are
@@ -55,17 +55,16 @@ the coordinator's, never its own.
 
 ## HTTPS in front
 
-The coordinator listens in plain HTTP and never terminates TLS: a proxy or ingress does, and
-passes the request on with `X-Forwarded-Proto` and `X-Forwarded-Host` (or the original `Host`
-header). The server builds from them the address it tells the studio
-(`/.well-known/oauth-protected-resource`), the sign-in's return address, and the `Secure` flag
-of the session cookie. It believes them **only from the peers listed in
-`Coordinator__TrustedProxies__0`, `__1`, … (addresses or CIDR networks)**. Left empty, no
-forwarded header is read, so behind a TLS proxy the sign-in would send `http://` return addresses.
-List the proxy, never a network a client can reach the server from.
+The coordinator listens in plain HTTP and never terminates TLS: a proxy or ingress does. Tell the
+coordinator the address people reach it at, once, as `Coordinator__PublicUrl` (for example
+`https://coordinator.example`: a scheme, a host and a port if not the default, no path). The server builds from it the address it
+tells the studio (`/.well-known/oauth-protected-resource`), the sign-in's return address, and the
+`Secure` flag of the session cookie. It reads no `X-Forwarded-*` header and ignores the `Host` of a
+request, so no caller can change them. Without it the request's own scheme and host stand, and
+behind a TLS proxy the sign-in would send `http://` return addresses.
 
-The node channel and the data plane are SignalR: the proxy must pass WebSocket upgrades and
-keep long requests open. A node may also reach the coordinator directly, inside the network.
+The node channel and the data plane are SignalR: the proxy must pass WebSocket upgrades and keep
+long requests open. A node may also reach the coordinator directly, inside the network.
 
 ## Secrets
 
@@ -76,6 +75,6 @@ a response. The token reaches git in the environment of the one process that tal
 A person who may inspect the container (`docker inspect`, the pod's spec) can read its
 environment: give that right with the same care as the secrets.
 
-Checked: the forwarded headers, in `ForwardedHeadersTests` of
+Checked: the public address, in `PublicUrlTests` of
 [tests/DtPipe.Coordinator.Server.Tests](../tests/DtPipe.Coordinator.Server.Tests). Not checked:
 a real TLS proxy, a Linux Docker host, an https remote with a token.

@@ -68,13 +68,24 @@ public sealed class CoordinatorServerOptions
     public LibraryRemoteSettings? LibraryRemote { get; init; }
 
     /// <summary>
-    /// The proxies in front of the server whose <c>X-Forwarded-Proto</c> and <c>X-Forwarded-Host</c> it believes (<c>Coordinator:TrustedProxies</c>,
-    /// addresses or CIDR networks). None when unset, and then no forwarded header is read.
+    /// The address people reach the server at (<c>Coordinator:PublicUrl</c>, <c>https://coordinator.example</c>): a scheme, a host and
+    /// a port, no path. The server listens in plain HTTP behind a proxy that terminates TLS, so what the request says of its scheme and
+    /// host is not what a person's browser used. When set, every request is read as made to this address, whatever its headers say.
+    /// None when unset, and then the request's own scheme and host stand.
     /// </summary>
-    public IReadOnlyList<string> TrustedProxies { get; init; } = [];
+    public Uri? PublicUrl { get; init; }
 
     /// <summary>The Lab view's scenarios, one job file each; read only in <see cref="LabMode"/>.</summary>
     public string? Scenarios { get; init; }
+
+    private static Uri? PublicUrlOf(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https")
+            || uri.AbsolutePath != "/" || uri.Query.Length > 0 || uri.Fragment.Length > 0 || uri.UserInfo.Length > 0)
+            throw new InvalidOperationException("Coordinator:PublicUrl must be an http or https address with a host and an optional port, and no user, path, query or fragment (https://coordinator.example).");
+        return uri;
+    }
 
     public static CoordinatorServerOptions FromConfiguration(IConfiguration configuration)
     {
@@ -92,7 +103,7 @@ public sealed class CoordinatorServerOptions
             RightsSeed = PathOf("RightsSeed"),
             IdentityLabelClaims = section.GetSection("Identity:LabelClaims").Get<string[]>() ?? [],
             LabMode = section.GetValue<bool>("LabMode"),
-            TrustedProxies = section.GetSection("TrustedProxies").Get<string[]>() ?? [],
+            PublicUrl = PublicUrlOf(section["PublicUrl"]),
             Scenarios = PathOf("Scenarios"),
             Redis = new RedisSettings(
                 section["Redis:ConnectionString"] is { Length: > 0 } redis ? redis : null,
