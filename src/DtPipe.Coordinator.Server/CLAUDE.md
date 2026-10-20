@@ -241,8 +241,9 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
 - **A new state starts from the seeds, or empty.** `Coordinator:LibrarySeed` (one
   `.yaml` per pipeline, for a library that has no history, here or at its remote) and `Coordinator:RightsSeed` (for rights Redis does not hold); with neither, the library has no pipeline
   and the rights no identity and an empty matrix: nobody may send anything until an administrator
-  says so. The library is a git repository of its own under `library/` in the state directory,
-  driven by the `git` command line with a fixed identity (the image needs `git`), and starts with a commit of its own (empty without seeds)
+  says so. The library is a git repository of its own, `library/` under the state directory unless
+  `Coordinator:Library:Directory` puts it elsewhere, driven by the `git` command line with a fixed identity and with
+  its own directory trusted (`safe.directory`, whoever owns a mounted volume; the image needs `git`), and starts with a commit of its own (empty without seeds)
   so that a write always has a commit to go back to; armed deployments and run history are in Redis
   (see "A deployment is the coordinator's" and "A run is journaled as it goes"); the Lab view's fixed plan is in memory.
   `Coordinator:Initialize` lets every one of these begin where nothing is kept, the library's remote included.

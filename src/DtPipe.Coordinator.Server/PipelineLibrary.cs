@@ -88,7 +88,7 @@ public sealed partial class PipelineLibrary : IJobSource, ILibraryHeads
         Func<string, IReadOnlyDictionary<string, Binding>, IReadOnlyDictionary<string, Binding>>? resolveBricks = null,
         ILogger? logger = null)
     {
-        _root = Path.Combine(options.StateDir, "library");
+        _root = options.LibraryDirectory ?? Path.Combine(options.StateDir, "library");
         _seedDir = options.LibrarySeed;
         (_remote, _mayBegin, _log) = (options.LibraryRemote, options.Initialize, logger);
         _bindingProblems = bindingProblems ?? ((_, _) => []);
@@ -527,7 +527,8 @@ public sealed partial class PipelineLibrary : IJobSource, ILibraryHeads
         };
         // A fixed identity, and nothing from any repository that encloses the state directory.
         // No maintenance: git would detach one after each commit, writing into the repository beyond the call.
-        foreach (var arg in new[] { "-c", "user.name=dtpipe-coordinator", "-c", "user.email=coordinator@localhost", "-c", "commit.gpgsign=false", "-c", "core.quotepath=false", "-c", "gc.auto=0", "-c", "maintenance.auto=false" })
+        // The library is this server's own: git refuses a repository that another user owns, which a mounted volume often is.
+        foreach (var arg in new[] { "-c", $"safe.directory={_root}", "-c", "user.name=dtpipe-coordinator", "-c", "user.email=coordinator@localhost", "-c", "commit.gpgsign=false", "-c", "core.quotepath=false", "-c", "gc.auto=0", "-c", "maintenance.auto=false" })
             psi.ArgumentList.Add(arg);
         if (remote)
             // Never a prompt, never a helper's stored credential, and a transfer that stalls ends on its own before the timeout does.

@@ -90,6 +90,12 @@ public sealed class CoordinatorServerOptions
     /// </summary>
     public string? SqliteDirectory { get; init; }
 
+    /// <summary>
+    /// Where the library's git repository lives (<c>Coordinator:Library:Directory</c>): <c>library</c> under the state directory unless set,
+    /// so that a deployment can keep the repository on a volume of its own, apart from the state directory's scratch files.
+    /// </summary>
+    public string? LibraryDirectory { get; init; }
+
     /// <summary>The git repository the library is pushed to (<c>Coordinator:Library:Remote</c>); none when unset, and the library then stays in the state directory.</summary>
     public LibraryRemoteSettings? LibraryRemote { get; init; }
 
@@ -133,6 +139,7 @@ public sealed class CoordinatorServerOptions
             UiClientSecret = section["Ui:ClientSecret"] ?? throw new InvalidOperationException("Coordinator:Ui:ClientSecret is required: the secret of the pages' client at the provider."),
             StudioClientId = section["Studio:ClientId"] is { Length: > 0 } studio ? studio : null,
             LibrarySeed = PathOf("LibrarySeed"),
+            LibraryDirectory = PathOf("Library:Directory"),
             RightsSeed = PathOf("RightsSeed"),
             IdentityLabelClaims = section.GetSection("Identity:LabelClaims").Get<string[]>() ?? [],
             LabMode = section.GetValue<bool>("LabMode"),

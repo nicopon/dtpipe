@@ -86,9 +86,7 @@ ENV DOTNET_BUNDLE_EXTRACT_BASE_DIR=/tmp/.net
 FROM runtime AS coordinator
 ARG SOURCE_REVISION=""
 USER root
-# git refuses a repository that another user owns; the library is the state directory's, whoever mounted it.
-RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/* \
-    && git config --system --add safe.directory /state/library
+RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
 USER 1654:1654
 COPY --from=hosts-build /out/coordinator /app
 ENV Coordinator__StateDirectory=/state

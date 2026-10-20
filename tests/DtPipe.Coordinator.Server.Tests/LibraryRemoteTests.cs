@@ -192,6 +192,22 @@ public sealed class LibraryRemoteTests : IDisposable
     }
 
     [Fact]
+    public async Task The_library_lives_where_its_directory_says_and_is_trusted_there()
+    {
+        var elsewhere = Path.Combine(_dir, "volume", "git");
+        var library = new PipelineLibrary(new CoordinatorServerOptions
+        {
+            StateDir = State("a"), LibraryDirectory = elsewhere, Authority = "http://idp", Audience = "test", UiClientId = "ui", UiClientSecret = "secret",
+            LibraryRemote = new LibraryRemoteSettings(_bare), Initialize = true,
+        });
+        var saved = await library.SaveAsync("orders", Job, "create", Ct);
+
+        Assert.Equal(saved.Commit, Git(elsewhere, "rev-parse", "HEAD"));
+        Assert.False(Directory.Exists(Local(State("a"))));
+        Assert.Contains($"safe.directory={elsewhere}", library.Prepare(["status"], remote: false).ArgumentList);
+    }
+
+    [Fact]
     public async Task The_token_is_in_no_argument_no_message_no_log_and_no_configuration()
     {
         const string Token = "s3cr3t-t0ken";

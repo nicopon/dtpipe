@@ -1400,6 +1400,7 @@ environment first (`Coordinator__Authority`), then from command-line arguments
 | `Redis__ConnectionString` / `Redis__KeyPrefix` | The Redis to use with `Store=redis` (a secret), and the prefix of its keys |
 | `Initialize` | `true` lets a store that holds nothing begin: the first start, or after data was lost |
 | `StateDirectory` | Where the library, the rights and scratch files live. Default: `./state` |
+| `Library__Directory` | Where the library's git repository lives. Default: `library` under `StateDirectory` |
 | `Library__Remote__Url` / `__Token` / `__User` / `__Timeout` | A git remote every library save is pushed to before it is accepted (token: a secret) |
 | `RightsSeed` | A rights document a new store starts from. Default: no node, no edge |
 | `LibrarySeed` | A folder of `.yaml` pipelines (with optional `.bindings.json`) a new library starts with |

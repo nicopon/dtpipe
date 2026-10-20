@@ -97,7 +97,9 @@ docker run -d --init --name coordinator -p 8080:8080 -v coordinator-state:/state
   [below](#backing-up-a-sqlite-coordinator). The database is a single file that one process holds;
   a second coordinator on the same volume is refused at its start.
 - `Coordinator__Sqlite__Directory` puts the database in another directory, for example a volume of
-  its own mounted at `/data`. The directory must be writable by `1654`.
+  its own mounted at `/data`, and `Coordinator__Library__Directory` does the same for the library's
+  git repository (`library` under `/state` by default). Both must be writable by `1654`; the
+  server trusts the library's directory itself, whoever owns the volume.
 - A SQLite coordinator is one coordinator. To run several, or to keep the state off the host, use
   Redis: `Coordinator__Store=redis` with `Coordinator__Redis__ConnectionString` (a secret). Redis
   settings given while the store is SQLite stop the start. Persist every Redis write
