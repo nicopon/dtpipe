@@ -1,0 +1,20 @@
+{
+  "DtPipeNode": {
+    "Bricks": [
+      {
+        "Id": "numbers",
+        "Kind": "Source",
+        "Title": "Numbers, generated",
+        "Description": "One thousand rows, a single column GenerateIndex: no database behind it.",
+        "Branch": { "input": "generate:1000" }
+      },
+      {
+        "Id": "totals",
+        "Kind": "Sink",
+        "Title": "Totals, as a CSV file",
+        "Description": "Written to /state/totals.csv in the node's volume, replaced on each run.",
+        "Branch": { "output": "csv:/state/totals.csv" }
+      }
+    ]
+  }
+}

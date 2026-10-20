@@ -14,6 +14,8 @@
 #
 #   coordinator   the coordinator's server, with git (its library is a git repository) and no dtpipe
 #   runner        the official runner, with dtpipe in /usr/local/bin
+#   trial-idp     the identity provider of the trial recipe (deploy/compose.yaml): not for production
+#   trial-node    the data node of the trial recipe, with dtpipe: not for production
 #   runtime       the base of both: ASP.NET Core, curl for health checks, the unprivileged user
 #   with-dtpipe   runtime plus the dtpipe binary: the base of the runner, and of any host that runs fragments
 #
@@ -56,6 +58,17 @@ RUN --mount=type=cache,id=dtpipe-nuget,target=/root/.nuget/packages,sharing=lock
              && grep -qaF "+$SOURCE_REVISION" /out/runner/DtPipe.PipelineNode.Runner.dll; }; } \
     || { echo "A host does not carry the revision $SOURCE_REVISION." >&2; exit 1; }
 
+# The trial recipe's two hosts, built from this checkout by compose and never published.
+FROM source AS trial-build
+ARG SOURCE_REVISION=""
+RUN --mount=type=cache,id=dtpipe-nuget,target=/root/.nuget/packages,sharing=locked \
+    dotnet publish src/DtPipe.Coordinator.TrialIdp/DtPipe.Coordinator.TrialIdp.csproj -c Release -p:SourceRevisionId="$SOURCE_REVISION" -o /out/trial-idp \
+    && dotnet publish src/DtPipe.PipelineNode.TrialNode/DtPipe.PipelineNode.TrialNode.csproj -c Release -p:SourceRevisionId="$SOURCE_REVISION" -o /out/trial-node \
+    && { [ -z "$SOURCE_REVISION" ] \
+        || { grep -qaF "+$SOURCE_REVISION" /out/trial-idp/DtPipe.Coordinator.TrialIdp.dll \
+             && grep -qaF "+$SOURCE_REVISION" /out/trial-node/DtPipe.PipelineNode.TrialNode.dll; }; } \
+    || { echo "A trial host does not carry the revision $SOURCE_REVISION." >&2; exit 1; }
+
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/* \
     && mkdir /state && chown 1654:1654 /state
@@ -91,3 +104,22 @@ COPY --from=hosts-build /out/runner /app
 ENV DtPipeNode__DtPipe=/usr/local/bin/dtpipe \
     DtPipeNode__StateDirectory=/state
 ENTRYPOINT ["dotnet", "/app/DtPipe.PipelineNode.Runner.dll"]
+
+# The clients file is mounted at Idp__ClientsFile by the recipe; /state keeps the signing key, so tokens survive a restart.
+# The port is ASPNETCORE_HTTP_PORTS: the issuer a token names must be the address browsers and services both reach.
+FROM runtime AS trial-idp
+ARG SOURCE_REVISION=""
+COPY --from=trial-build /out/trial-idp /app
+ENV Idp__ClientsFile=/etc/trial-idp/clients.json \
+    Idp__SigningKeyFile=/state/signing-key.pem
+LABEL org.opencontainers.image.revision=${SOURCE_REVISION:-unknown}
+EXPOSE 8080
+HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=3 CMD curl -fs http://localhost:${ASPNETCORE_HTTP_PORTS:-8080}/healthz || exit 1
+ENTRYPOINT ["dotnet", "/app/DtPipe.Coordinator.TrialIdp.dll"]
+
+# The bricks come from the file DtPipeNode__BricksFile names, which the recipe mounts.
+FROM with-dtpipe AS trial-node
+COPY --from=trial-build /out/trial-node /app
+ENV DtPipeNode__DtPipe=/usr/local/bin/dtpipe \
+    DtPipeNode__StateDirectory=/state
+ENTRYPOINT ["dotnet", "/app/DtPipe.PipelineNode.TrialNode.dll"]

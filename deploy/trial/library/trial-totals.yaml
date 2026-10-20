@@ -1,0 +1,12 @@
+# Totals of generated numbers
+# A source brick on the trial node, summed on the runner, written by a sink brick on the trial node.
+numbers:
+  input: generate:1000
+total:
+  from: numbers
+  provider-options:
+    sql:
+      query: SELECT COUNT(*) AS n, SUM(GenerateIndex) AS total FROM numbers
+write:
+  from: total
+  output: csv:/state/totals.csv

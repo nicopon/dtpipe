@@ -1,13 +1,57 @@
 # Running the coordinator and the runner
 
 The images of a distributed pipeline's two hosts come from one Dockerfile, `deploy/Dockerfile`.
-A deployment builds them from a checkout and runs them with its own orchestrator: nothing here
-publishes an image, starts a container for you or ships a chart. This page is the list of what a
-deployment must provide. The behaviour of the server is in
+Each release publishes them on GHCR, `ghcr.io/nicopon/dtpipe-coordinator` and
+`ghcr.io/nicopon/dtpipe-runner`, tagged with the version, its major.minor and `latest`, for
+`linux/amd64` and `linux/arm64`. [`deploy/compose.yaml`](./compose.yaml) is a recipe that runs
+them to try them. A deployment runs the images with its own orchestrator: nothing here ships a
+chart, and there is no image of the `dtpipe` CLI or of a ready-made data node. This page is the
+list of what a deployment must provide. The behaviour of the server is in
 [src/DtPipe.Coordinator.Server/CLAUDE.md](../src/DtPipe.Coordinator.Server/CLAUDE.md); the
 settings a node host takes are `DtPipeNode__*` (the runner) or the host team's own.
 
+## Trying it
+
+```bash
+docker compose -f deploy/compose.yaml up --build --wait
+```
+
+**Not for production.** The recipe starts a coordinator on Redis, a runner, a data node and an
+identity provider, with secrets that are written in the files. It listens in plain HTTP on the
+loopback of the host only. Every file it mounts is under `deploy/`; the images of the coordinator
+and the runner come from GHCR, and the identity provider and the data node are built from the
+checkout (the first start takes a few minutes for them).
+
+- **People.** The pages are at <http://coordinator.localtest.me:8080>. Any user name made of
+  letters, digits, `.`, `_` or `-` signs in on the trial identity provider with its name followed
+  by `pwd` as the password; `admin` (`adminpwd`) is the coordinator's administrator, and nobody
+  else may do anything. The address needs `localtest.me`, a public name that resolves to
+  `127.0.0.1`; without a network that resolves it, add `idp.localtest.me` and
+  `coordinator.localtest.me` to `/etc/hosts`.
+- **A run.** The library holds one pipeline, `trial-totals`: a generated source on the data node,
+  summed by the runner, written back to the data node. It runs from the pages, or as a scheduler
+  would: a `launcher-1` token (client `launcher-1`, secret `launcher-1-trial-secret`, from
+  `http://idp.localtest.me:5190/connect/token`) posted to
+  `/service/runs` with `{"pipelineId": "trial-totals"}`. The result is in the data node's
+  `/state/totals.csv`. The pipeline is armed first, from its page: launched unarmed, the
+  coordinator answers 409.
+- **Version.** The identity provider and the data node are built from the checkout you run the
+  recipe in, so run it from the checkout of a tag, with `DTPIPE_VERSION` set to that version
+  without the `v` (`DTPIPE_VERSION=1.11.0`).
+- **Local images.** `DTPIPE_VERSION` picks a published version (default `latest`);
+  `DTPIPE_COORDINATOR_IMAGE` and `DTPIPE_RUNNER_IMAGE` name any other image, for example one built
+  as [below](#the-images). `SOURCE_REVISION` is handed to the two images the recipe builds.
+- **`Coordinator__Initialize` stays on.** The recipe is meant to start again after
+  `docker compose down -v`; a deployment sets it for the first start only, as
+  [below](#the-smallest-coordinator).
+- **The trial identity provider** (`src/DtPipe.Coordinator.TrialIdp`) says who a caller is and
+  nothing else, signs with a key kept in its volume, keeps no user, and accepts any name. The
+  data node (`src/DtPipe.PipelineNode.TrialNode`) is what a team's own service looks like to the
+  coordinator: it adds a node to itself and declares two bricks in a file. Neither is published.
+
 ## The images
+
+A release publishes them; to build them from a checkout instead:
 
 ```bash
 docker build -f deploy/Dockerfile --target coordinator \

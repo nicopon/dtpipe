@@ -1,0 +1,11 @@
+{
+  "identities": [
+    { "clientId": "trial-node", "name": "trial-node", "description": "Trial data node", "groups": ["trial"] },
+    { "clientId": "runner-1", "name": "runner-1", "description": "Runner", "groups": ["runner"] },
+    { "clientId": "launcher-1", "name": "launcher-1", "description": "Scheduler", "kind": "launcher", "pipelines": ["trial-totals"] }
+  ],
+  "matrix": {
+    "trial": ["runner"],
+    "runner": ["trial"]
+  }
+}

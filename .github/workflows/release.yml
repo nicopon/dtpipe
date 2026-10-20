@@ -4,11 +4,13 @@ on:
   push:
     tags:
       - 'v*'
-
+  # Builds the images of the distributed pipeline's two hosts without publishing them: a loadable tarball per image and architecture.
+  workflow_dispatch:
 
 jobs:
   build:
     name: Build ${{ matrix.platform }}
+    if: github.event_name == 'push'
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -105,6 +107,7 @@ jobs:
 
   release:
     name: Create GitHub Release
+    if: github.event_name == 'push'
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -146,6 +149,7 @@ jobs:
 
   publish-nuget:
     name: Publish to NuGet
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -165,3 +169,143 @@ jobs:
           find . -name "*.nupkg" \
             -iname "dtpipe*" \
             -exec dotnet nuget push {} --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate \;
+
+  # The product's two images (deploy/Dockerfile): built natively on each architecture, because the Dockerfile runs the
+  # dtpipe binary it builds. At a tag they are pushed by digest and joined into one multi-arch tag below; run by hand,
+  # they are only built, with the commit the run is on as their revision.
+  images:
+    name: Image ${{ matrix.image }} ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { image: coordinator, arch: amd64, runner: ubuntu-latest }
+          - { image: coordinator, arch: arm64, runner: ubuntu-24.04-arm }
+          - { image: runner, arch: amd64, runner: ubuntu-latest }
+          - { image: runner, arch: arm64, runner: ubuntu-24.04-arm }
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Name the image
+        id: name
+        run: echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/dtpipe-${{ matrix.image }}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push by digest
+        id: push
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          target: ${{ matrix.image }}
+          platforms: linux/${{ matrix.arch }}
+          build-args: SOURCE_REVISION=${{ github.sha }}
+          labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          outputs: type=image,name=${{ steps.name.outputs.image }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: Keep the digest
+        if: github.event_name == 'push'
+        run: |
+          mkdir -p digests
+          touch "digests/$(echo '${{ steps.push.outputs.digest }}' | cut -d: -f2)"
+
+      - name: Upload the digest
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.image }}-${{ matrix.arch }}
+          path: digests/*
+          if-no-files-found: error
+
+      - name: Build and load
+        if: github.event_name != 'push'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          target: ${{ matrix.image }}
+          platforms: linux/${{ matrix.arch }}
+          build-args: SOURCE_REVISION=${{ github.sha }}
+          labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          tags: dtpipe-${{ matrix.image }}:${{ matrix.arch }}
+          load: true
+
+      - name: Read the revision label
+        if: github.event_name != 'push'
+        run: |
+          revision=$(docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "dtpipe-${{ matrix.image }}:${{ matrix.arch }}")
+          echo "revision label: $revision"
+          [ "$revision" = "${{ github.sha }}" ]
+          docker save "dtpipe-${{ matrix.image }}:${{ matrix.arch }}" | gzip > "dtpipe-${{ matrix.image }}-${{ matrix.arch }}.tar.gz"
+
+      - name: Upload the image
+        if: github.event_name != 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-${{ matrix.image }}-${{ matrix.arch }}
+          path: dtpipe-${{ matrix.image }}-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+
+  # One tag per image over both architectures: the version, its major.minor and latest. A pre-release (alpha, beta, rc)
+  # gets its version tag only.
+  images-tag:
+    name: Tag the images
+    if: github.event_name == 'push'
+    needs: images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Download the digests
+        uses: actions/download-artifact@v4
+        with:
+          pattern: digest-*
+          path: digests
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Join the architectures
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          tags=("$version")
+          if [[ ! "$version" =~ (alpha|beta|rc) ]]; then
+            tags+=("${version%.*}" latest)
+          fi
+          for image in coordinator runner; do
+            name="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/dtpipe-$image"
+            sources=()
+            for digest in "digests/digest-$image-"*/*; do sources+=("$name@sha256:$(basename "$digest")"); done
+            args=()
+            for tag in "${tags[@]}"; do args+=(-t "$name:$tag"); done
+            docker buildx imagetools create "${args[@]}" \
+              --annotation "index:org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
+              "${sources[@]}"
+            docker buildx imagetools inspect "$name:$version"
+          done

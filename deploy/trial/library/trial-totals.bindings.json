@@ -1,0 +1,4 @@
+{
+  "numbers": { "node": "trial-node", "brick": "numbers", "mode": "strict" },
+  "write": { "node": "trial-node", "brick": "totals", "mode": "strict" }
+}

@@ -1,0 +1,45 @@
+{
+  "clients": [
+    {
+      "clientId": "coordinator-ui",
+      "grant": "authorization_code",
+      "secret": "coordinator-ui-trial-secret",
+      "displayName": "Coordinator pages",
+      "redirectUris": [
+        "http://coordinator.localtest.me:8080/signin-oidc"
+      ],
+      "postLogoutRedirectUris": [
+        "http://coordinator.localtest.me:8080/signout-callback-oidc"
+      ]
+    },
+    {
+      "clientId": "dtpipe-studio",
+      "grant": "authorization_code",
+      "applicationType": "native",
+      "displayName": "dtpipe studio",
+      "redirectUris": [
+        "http://127.0.0.1/callback"
+      ],
+      "audience": "dtpipe-coordinator",
+      "refreshTokens": true
+    },
+    {
+      "clientId": "trial-node",
+      "grant": "client_credentials",
+      "secret": "trial-node-trial-secret",
+      "displayName": "Trial data node"
+    },
+    {
+      "clientId": "runner-1",
+      "grant": "client_credentials",
+      "secret": "runner-1-trial-secret",
+      "displayName": "Runner"
+    },
+    {
+      "clientId": "launcher-1",
+      "grant": "client_credentials",
+      "secret": "launcher-1-trial-secret",
+      "displayName": "Scheduler"
+    }
+  ]
+}
