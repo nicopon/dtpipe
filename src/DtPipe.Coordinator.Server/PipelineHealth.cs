@@ -80,8 +80,9 @@ public interface ILibraryHeads
 /// A computation asks no node: a verdict of a mode that needs one is read from <see cref="BindingVerifier"/> if it is known, and when it is
 /// not, the ask starts once in the background and the pipeline is a <c>warning</c> until it answers. A result is kept while nothing the
 /// server publishes about nodes, rights, the library or the deployments moves (and no background ask has ended), and for at most
-/// <see cref="CoordinatorServerOptions.HealthMaxAge"/>, since the state of TransportR's registrations moves without an event. One
-/// computation runs at a time; a request that waited for it reads its result when it is still the state's.
+/// <see cref="CoordinatorServerOptions.HealthMaxAge"/>, since the state of TransportR's registrations moves without an event. A result
+/// that holds a replica connected and not eligible for a fragment of its plan is kept for <see cref="Unsettled"/> at most, the state
+/// being one a registration ends and no event says so. One computation runs at a time; a request that waited for it reads its result when it is still the state's.
 /// </para>
 /// </summary>
 public sealed class PipelineHealth
@@ -90,6 +91,9 @@ public sealed class PipelineHealth
     public static readonly IReadOnlyList<string> Subjects = ["nodes", "rights", "library", "deploy", "deployments"];
 
     private static readonly TimeSpan KnownBound = TimeSpan.FromSeconds(5);
+
+    /// <summary>How long a read is kept while a connected replica cannot run a fragment: its client may register at any moment, with no event.</summary>
+    public static readonly TimeSpan Unsettled = TimeSpan.FromSeconds(5);
 
     private readonly DeploymentManager _deployments;
     private readonly IJobSource _jobs;
@@ -134,7 +138,7 @@ public sealed class PipelineHealth
     {
         lock (_lock)
         {
-            if (_kept is { } kept && kept.Generation == generation && _time.GetUtcNow() - kept.At < _maxAge)
+            if (_kept is { } kept && kept.Generation == generation && _time.GetUtcNow() - kept.At < AgeBound(kept.Report))
             {
                 report = kept.Report;
                 return true;
@@ -143,6 +147,9 @@ public sealed class PipelineHealth
         report = null!;
         return false;
     }
+
+    private TimeSpan AgeBound(HealthReport report) =>
+        report.Pipelines.Any(p => p.Fragments.Any(f => f.Eligible < f.Replicas)) ? (_maxAge < Unsettled ? _maxAge : Unsettled) : _maxAge;
 
     /// <summary>The health of every armed pipeline: what is kept when the state has not moved, else a computation, which only one request makes at a time.</summary>
     public async Task<HealthReport> ReadAsync(CancellationToken ct)

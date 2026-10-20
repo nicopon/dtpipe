@@ -95,15 +95,17 @@ public sealed partial class ArmedDeploymentTests
     private static HealthCause Cause(PipelineHealthView view, string code) => Assert.Single(view.Causes, c => c.Code == code);
 
     /// <summary>Announces one more replica of the data node <c>n</c>, whose data plane client is registered or not.</summary>
-    private async Task ReplicaOfNAsync(bool registered, params BrickInfo[] bricks)
+    private async Task<ClientRegistration> ReplicaOfNAsync(bool registered, params BrickInfo[] bricks)
     {
         var client = Guid.NewGuid();
-        if (registered) await _state.SaveClientAsync(new ClientRegistration(client, "data-n-" + client.ToString("N")[..4], ["crm"], null, null, DateTime.UtcNow, Subject: "node-n"));
+        var registration = new ClientRegistration(client, "data-n-" + client.ToString("N")[..4], ["crm"], null, null, DateTime.UtcNow, Subject: "node-n");
+        if (registered) await _state.SaveClientAsync(registration);
         var announcement = new NodeAnnouncement(
             "n", "", [], NodeRole.Data, bricks.Length > 0 ? bricks : [Brick()], Capabilities: [NodeAnnouncement.LaunchToken],
             InstanceId: Guid.NewGuid(), DataPlaneClientId: client);
         _registry.Announce($"c-n-{Interlocked.Increment(ref _connections)}", "node-n", announcement, ["crm"], () => { });
         _inventory.Announced("n", "node-n", announcement, ["crm"]);
+        return registration;
     }
 
     // ---- ok, and what is only worth knowing ----
@@ -479,5 +481,37 @@ public sealed partial class ArmedDeploymentTests
         _time.Advance(TimeSpan.FromSeconds(2));
         await _health.ReadAsync(CancellationToken.None);
         Assert.Equal(before + 1, _health.Computed);
+    }
+
+    [Fact]
+    public async Task A_Read_With_A_Replica_That_Cannot_Run_A_Fragment_Is_Kept_Only_Briefly_Since_Its_Client_May_Register_With_No_Event()
+    {
+        await ArmedHealthyAsync();
+        var late = await ReplicaOfNAsync(registered: false);
+        Assert.Equal(HealthStatus.Warning, (await ViewAsync()).Status);
+        var before = _health.Computed;
+
+        await _state.SaveClientAsync(late);
+        _time.Advance(PipelineHealth.Unsettled - TimeSpan.FromSeconds(1));
+        await _health.ReadAsync(CancellationToken.None);
+        Assert.Equal(before, _health.Computed);
+
+        _time.Advance(TimeSpan.FromSeconds(2));
+        var view = await ViewAsync();
+        Assert.Equal(before + 1, _health.Computed);
+        Assert.Equal(HealthStatus.Ok, view.Status);
+    }
+
+    [Fact]
+    public async Task A_Read_Where_Every_Connected_Replica_Can_Run_Its_Fragment_Is_Kept_Up_To_The_Maximum_Age()
+    {
+        await ArmedHealthyAsync();
+        await _health.ReadAsync(CancellationToken.None);
+        var before = _health.Computed;
+
+        _time.Advance(PipelineHealth.Unsettled + TimeSpan.FromSeconds(1));
+        await _health.ReadAsync(CancellationToken.None);
+
+        Assert.Equal(before, _health.Computed);
     }
 }

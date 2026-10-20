@@ -232,7 +232,8 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   changed, a later version in the library or none, the last run); the status is the worst. Never a `warning` for a single replica:
   nothing records how many are expected. One computation runs at a time, and its result is read again until the count of `nodes`,
   `rights`, `library`, `deploy` and `deployments` events moves or it is `MaxAge` old (5 minutes: TransportR's registrations move
-  with no event). `GET /health/pipelines[/{id}]` (a monitor) and `GET /api/health` (the pages) answer 200 whenever the caller is
+  with no event), and `PipelineHealth.Unsettled` (5 seconds) old when a fragment of its plan has a connected replica that is not
+  eligible, since that state ends with a registration and nothing publishes it. `GET /health/pipelines[/{id}]` (a monitor) and `GET /api/health` (the pages) answer 200 whenever the caller is
   admitted, with the status in the body; an id that is not armed is `critical`, so that a disarming alerts. "Launchable" is a
   plan that holds and a replica that could run each fragment, not that the run will succeed: the replicas' `Check` and `CheckSink`
   stay at arming and launching. `[local: ArmedDeploymentTests (Health), TrustedIdpTests, RouteTableTests, the lab's smoke.py bricks - health, ui_check.py]`
