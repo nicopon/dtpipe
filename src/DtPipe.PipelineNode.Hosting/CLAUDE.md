@@ -85,9 +85,8 @@ none. One node per process, which is one replica of its node's identity; a secon
   the connection of, or that cannot be delivered, is held and sent once after the next announcement it
   accepts, and a report in flight when one is accepted is sent again at once; `NotAdmitted` is final. The
   report carries the token of the launch that started the child (`LaunchRequest.LaunchToken`, kept with the
-  run and copied into `FragmentExit`), a held one included, and the host announces
-  `NodeAnnouncement.LaunchToken` for it: the coordinator admits no report without the token, and places
-  no run on a replica that does not announce it.
+  run and copied into `FragmentExit`), a held one included: the coordinator admits no report
+  without it.
   `[local: PipelineNode.Tests ReplicaRunsTests, CoordinatorDrivenTests, NodeAgentDataPlaneTests]` `[unchecked: the report in flight when an announcement lands]`
 - **A run the coordinator never wires is abandoned.** `DtPipeNodeOptions.UnwiredRunTimeout` bounds the wait
   from `Launch` to the last `Wire` asked for, so a coordinator that vanished does not leave a child until the

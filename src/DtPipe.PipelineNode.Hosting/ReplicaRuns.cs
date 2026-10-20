@@ -17,7 +17,7 @@ namespace DtPipe.PipelineNode.Hosting;
 /// </summary>
 internal sealed class ReplicaRuns : IAsyncDisposable
 {
-    private sealed class Entry(FragmentRun run, FragmentSpec spec, string jobPath, PipelineNode node, string? launchToken)
+    private sealed class Entry(FragmentRun run, FragmentSpec spec, string jobPath, PipelineNode node, string launchToken)
     {
         public FragmentRun Run { get; } = run;
         public PipelineNode Node { get; } = node;
@@ -25,7 +25,7 @@ internal sealed class ReplicaRuns : IAsyncDisposable
         public string JobPath { get; } = jobPath;
 
         /// <summary>The token the coordinator minted for the launch that started this child, returned in its report.</summary>
-        public string? LaunchToken { get; } = launchToken;
+        public string LaunchToken { get; } = launchToken;
         public int CompletionStarted;
         public readonly CancellationTokenSource Unwired = new();
     }

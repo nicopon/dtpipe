@@ -67,7 +67,7 @@ public class ReplicaRunsTests : IDisposable
     }
 
     private static LaunchRequest WaitingRun(string runId) =>
-        new(runId, new FragmentSpec("A", "v", [new FragmentEdge("in", FragmentEdgeDirection.Inbound)], Yaml: WaitsOnItsInput));
+        new(runId, new FragmentSpec("A", "v", [new FragmentEdge("in", FragmentEdgeDirection.Inbound)], Yaml: WaitsOnItsInput), $"token-{runId}");
 
     /// <summary>
     /// A <c>Cancel</c> answers when it has faulted the run: it does not wait for the child to end, nor for another run
@@ -82,7 +82,7 @@ public class ReplicaRunsTests : IDisposable
         await using var _node = node;
         await using var _runs = runs;
         Assert.True((await runs.LaunchAsync(WaitingRun("run-1"))).Started);
-        var other = new LaunchRequest("run-2", WaitingRun("run-2").Spec);
+        var other = WaitingRun("run-2");
         Assert.True((await runs.LaunchAsync(other)).Started);
         Assert.Equal(2, runs.Count);
 

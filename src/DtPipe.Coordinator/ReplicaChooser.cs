@@ -29,17 +29,6 @@ internal static class ReplicaChooser
     }
 
     /// <summary>
-    /// Why the replica cannot be placed on a run for want of a launch token, or null: it announced
-    /// <see cref="NodeAnnouncement.LaunchToken"/>, so its report carries the token of the launch it answers. A replica
-    /// that does not (an older version) is out, as a replica at another version of a brick is, and not a reason to refuse
-    /// the run while another replica of the node is in.
-    /// </summary>
-    public static string? LaunchTokenRefusal(NodeAnnouncement announcement) =>
-        announcement.Offers(NodeAnnouncement.LaunchToken)
-            ? null
-            : "it runs a version that does not return a launch's token: update it.";
-
-    /// <summary>
     /// Why the replica's TransportR client cannot carry the run's bytes, or null: it announced a client, that client
     /// is registered, still connected, under the subject of the replica's connection, with exactly the groups the
     /// rights give the node today. Closed by default, so a registration written before the rights changed is out until

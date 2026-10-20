@@ -147,7 +147,7 @@ public sealed partial class ArmedDeploymentTests : IDisposable
         var subject = "node-" + name;
         await _state.SaveClientAsync(new ClientRegistration(client, "data-" + name, [group], null, null, DateTime.UtcNow, Subject: subject));
         var announcement = new NodeAnnouncement(
-            name, "", [], role, role == NodeRole.Data ? [brick ?? Brick()] : [], Capabilities: [NodeAnnouncement.LaunchToken],
+            name, "", [], role, role == NodeRole.Data ? [brick ?? Brick()] : [],
             InstanceId: Guid.NewGuid(), DataPlaneClientId: client);
         var connection = $"c-{name}-{Interlocked.Increment(ref _connections)}";
         _registry.Announce(connection, subject, announcement, [group], () => { });

@@ -189,8 +189,8 @@ while any replica is connected.
 
 - **A plan, a deployment and a run request name a node, never a replica.** The replica is chosen at admission,
   for the run. `[unchecked]`
-- **A replica is eligible for a fragment when** it is connected; it is of the fragment's node; it announces
-  `NodeAnnouncement.LaunchToken`; its TransportR client is verified; and the bricks it announces compose the
+- **A replica is eligible for a fragment when** it is connected; it is of the fragment's node; its TransportR
+  client is verified; and the bricks it announces compose the
   version of the plan.
   `ReplicaChooser` is that rule, pure. The client is verified when it is announced, registered, still
   connected, registered under the subject of the replica's connection, and holding exactly the groups the
@@ -202,13 +202,6 @@ while any replica is connected.
   update leaves replicas at two versions of a brick: the run goes to one that composes the plan. Admission
   refuses only when none does (`NoEligibleReplicaException`, naming each fragment and why, replica by
   replica) after `AdmissionTimeout`. `[local: ReplicaAdmissionSubjectTests]`
-- **A replica that does not announce `NodeAnnouncement.LaunchToken` is out of every run.** Its report would carry
-  no token and could not be told from a stale one, so it is never placed: a node updates replica by replica
-  without interruption, and the runs of a node whose only replica is older are refused, naming the reason,
-  until that replica is updated. A host updated before its coordinator is not refused: the older coordinator
-  ignores the field and the capability. The order of an update that cannot move at once is the TransportR
-  rule above, the coordinator first.
-  `[local: LaunchTokenEligibilityTests, LaunchTokenWireTests]` `[unchecked: a host updated before its coordinator]`
 - **The client id a replica announces is verified twice.** At the announcement, as a courtesy: one registered
   under another subject, or announced by another replica, is refused. At admission, as the authority: the
   registration is read at the moment of choosing. Only the second sees a client registered after the

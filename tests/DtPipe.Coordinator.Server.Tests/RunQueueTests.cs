@@ -120,7 +120,7 @@ public sealed class RunQueueTests : IDisposable
         var subject = "node-" + name;
         await _state.SaveClientAsync(new ClientRegistration(client, "data-" + name, ["crm"], null, null, DateTime.UtcNow, Subject: subject));
         var announcement = new NodeAnnouncement(
-            name, "", [], role, role == NodeRole.Data ? [Brick()] : [], Capabilities: [NodeAnnouncement.LaunchToken],
+            name, "", [], role, role == NodeRole.Data ? [Brick()] : [],
             InstanceId: Guid.NewGuid(), DataPlaneClientId: client);
         var connection = $"c-{name}-{Interlocked.Increment(ref _connections)}";
         _connectionsOf.GetOrAdd(name, _ => []).Add(connection);

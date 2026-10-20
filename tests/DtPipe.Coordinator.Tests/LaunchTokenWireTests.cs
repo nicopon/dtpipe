@@ -6,17 +6,15 @@ using Xunit;
 namespace DtPipe.Coordinator.Tests;
 
 /// <summary>
-/// The node channel speaks SignalR's JSON protocol with its default options. A message written by a version that
-/// does not know the launch token reads as one with no token, and a message with a field this version does not know is
-/// still read: a coordinator and its replicas of different versions understand each other, the replica without the token
-/// being kept out of runs by admission, not by a failure to read.
+/// The node channel speaks SignalR's JSON protocol with its default options. An exit that carries no token reads as one
+/// with none, which the orchestrator never admits, and a message with a field this version does not know is still read.
 /// </summary>
 public class LaunchTokenWireTests
 {
     private static readonly JsonSerializerOptions Hub = new JsonHubProtocolOptions().PayloadSerializerOptions;
 
     [Fact]
-    public void AnExitWrittenByAReplicaThatDoesNotKnowTheToken_ReadsWithNone()
+    public void AnExitThatCarriesNoToken_ReadsWithNone()
     {
         var exit = JsonSerializer.Deserialize<FragmentExit>(
             """{"runId":"r","fragment":"f","exitCode":0,"origin":"Local","firstFault":null,"rowCounts":{}}""", Hub);
@@ -32,16 +30,6 @@ public class LaunchTokenWireTests
             """{"runId":"r","fragment":"f","exitCode":0,"origin":"Local","firstFault":null,"rowCounts":{},"launchToken":"t","aLaterField":1}""", Hub);
 
         Assert.Equal("t", exit!.LaunchToken);
-    }
-
-    [Fact]
-    public void ALaunchWrittenByACoordinatorThatDoesNotKnowTheToken_ReadsWithNone()
-    {
-        var launch = JsonSerializer.Deserialize<LaunchRequest>(
-            """{"runId":"r","spec":{"fragment":"f","version":"v","edges":[]}}""", Hub);
-
-        Assert.Equal("f", launch!.Spec.Fragment);
-        Assert.Null(launch.LaunchToken);
     }
 
     [Fact]

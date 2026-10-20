@@ -63,8 +63,7 @@ public sealed record FragmentEligibility(IReadOnlyList<ReplicaKey> Eligible, str
 /// Decides which replica runs each fragment of a run. A replica is eligible for a fragment when it is connected, of
 /// the fragment's node, its TransportR client is registered under the right subject with the right groups
 /// (<see cref="ReplicaChooser.DataPlaneRefusal"/>), the bricks it announces compose the version of the plan
-/// (<see cref="ReplicaChooser.CompositionRefusal"/>), and it returns a launch's token in its reports
-/// (<see cref="ReplicaChooser.LaunchTokenRefusal"/>). Among the eligible ones the registry takes the one with the
+/// (<see cref="ReplicaChooser.CompositionRefusal"/>). Among the eligible ones the registry takes the one with the
 /// fewest runs.
 /// </summary>
 public sealed class ReplicaAdmission
@@ -106,8 +105,7 @@ public sealed class ReplicaAdmission
     {
         if (!registrations.Read.TryGetValue((replica.Key, replica.ConnectionId, replica.DataPlaneClientId), out var registration))
             return "it changed while it was read.";
-        return ReplicaChooser.LaunchTokenRefusal(replica.Announcement)
-            ?? ReplicaChooser.DataPlaneRefusal(replica, registration, fragment.Groups, _options.AdmitUnboundFragments)
+        return ReplicaChooser.DataPlaneRefusal(replica, registration, fragment.Groups, _options.AdmitUnboundFragments)
             ?? ReplicaChooser.CompositionRefusal(fragment.Spec, replica.Announcement);
     }
 

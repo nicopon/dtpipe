@@ -68,11 +68,9 @@ public enum NodeRole { Data, Runner }
 /// What a node host says of itself. <see cref="Name"/> and <see cref="Description"/> are proposals: the
 /// coordinator names the node from its rights, and a host its rights do not know only waits for
 /// approval. <see cref="Capabilities"/> are what the host offers: <see cref="RawFragments"/> when its own
-/// configuration lets it run a fragment that is no brick, the name of each request it answers, and
-/// <see cref="LaunchToken"/>, a mark of the protocol every host of a version that returns a launch's token
-/// announces. Admission reads <see cref="RawFragments"/> and <see cref="LaunchToken"/> to tell the replicas
-/// that can run a fragment from the others. The coordinator shows them and never sets them; the host enforces
-/// what it offers.
+/// configuration lets it run a fragment that is no brick, and the name of each request it answers. Admission reads
+/// <see cref="RawFragments"/> to tell the replicas that can run a fragment from the others. The coordinator shows them
+/// and never sets them; the host enforces what it offers.
 /// <see cref="DtpipeVersion"/> is what the host's dtpipe binary says of itself (<c>--version</c>), null
 /// when it did not say: shown beside a studio's own, never a reason to refuse. One identity may be
 /// carried by several hosts, its replicas: <see cref="InstanceId"/> is chosen by the host process once and
@@ -89,12 +87,6 @@ public sealed record NodeAnnouncement(
 {
     /// <summary>The capability of a host that accepts a fragment written as a job, not only one made of its bricks.</summary>
     public const string RawFragments = "raw-fragments";
-
-    /// <summary>
-    /// The mark of a host that returns, in <see cref="FragmentExit.LaunchToken"/>, the token its <c>Launch</c> carried. A
-    /// replica that does not announce it is never placed on a run: its report could not be told from a stale one.
-    /// </summary>
-    public const string LaunchToken = "launch-token";
 
     public bool Offers(string capability) => Capabilities?.Contains(capability, StringComparer.Ordinal) == true;
 }
@@ -224,7 +216,7 @@ public sealed record FragmentSpec(
 /// minted by the coordinator for this launch alone and returned by the replica in its <c>Exited</c>: it tells the report of
 /// this child from the report of an earlier one that held the same run id, fragment and replica. It is no secret.
 /// </summary>
-public sealed record LaunchRequest(string RunId, FragmentSpec Spec, string? LaunchToken = null);
+public sealed record LaunchRequest(string RunId, FragmentSpec Spec, string LaunchToken);
 
 /// <summary>What <c>Launch</c> answers: the child is spawned and its edges can be wired, or why the host refused to run the fragment.</summary>
 public sealed record LaunchResult(bool Started, string? Refusal = null);

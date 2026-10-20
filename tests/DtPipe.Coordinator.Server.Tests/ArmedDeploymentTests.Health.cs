@@ -101,7 +101,7 @@ public sealed partial class ArmedDeploymentTests
         var registration = new ClientRegistration(client, "data-n-" + client.ToString("N")[..4], ["crm"], null, null, DateTime.UtcNow, Subject: "node-n");
         if (registered) await _state.SaveClientAsync(registration);
         var announcement = new NodeAnnouncement(
-            "n", "", [], NodeRole.Data, bricks.Length > 0 ? bricks : [Brick()], Capabilities: [NodeAnnouncement.LaunchToken],
+            "n", "", [], NodeRole.Data, bricks.Length > 0 ? bricks : [Brick()],
             InstanceId: Guid.NewGuid(), DataPlaneClientId: client);
         _registry.Announce($"c-n-{Interlocked.Increment(ref _connections)}", "node-n", announcement, ["crm"], () => { });
         _inventory.Announced("n", "node-n", announcement, ["crm"]);

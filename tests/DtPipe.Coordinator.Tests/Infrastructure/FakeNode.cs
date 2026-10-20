@@ -31,9 +31,6 @@ public sealed class FakeNodeOptions
 
     /// <summary>False: the node answers a <c>Cancel</c> that it knows no such run.</summary>
     public bool KnowsTheRun { get; init; } = true;
-
-    /// <summary>False: the node announces itself as a version that does not return a launch's token.</summary>
-    public bool AnnounceLaunchToken { get; init; } = true;
 }
 
 /// <summary>
@@ -109,7 +106,6 @@ public sealed class FakeNode : IAsyncDisposable
 
     public Task AnnounceAsync() => Channel.InvokeAsync(NodeChannel.Announce, new NodeAnnouncement(
         Name, "", [], _options.Role, _options.Bricks,
-        Capabilities: _options.AnnounceLaunchToken ? [NodeAnnouncement.LaunchToken] : null, DtpipeVersion: null,
         InstanceId: InstanceId, Origin: "test", DataPlaneClientId: _options.AnnouncedDataPlaneClientId ?? DataPlane?.ClientId));
 
     /// <summary>The token of the launch of <paramref name="fragment"/> in <paramref name="runId"/> this node received, null when it received none.</summary>

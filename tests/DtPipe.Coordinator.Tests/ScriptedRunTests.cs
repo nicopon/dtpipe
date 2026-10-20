@@ -115,7 +115,7 @@ public class ScriptedRunTests
                 var client = Guid.NewGuid();
                 await _state.SaveClientAsync(new ClientRegistration(client, "data-" + node, ["test"], null, null, DateTime.UtcNow, Subject: node));
                 var announcement = new NodeAnnouncement(
-                    node, "", [], NodeRole.Runner, [], Capabilities: [NodeAnnouncement.LaunchToken], InstanceId: Guid.NewGuid(), DataPlaneClientId: client);
+                    node, "", [], NodeRole.Runner, [], InstanceId: Guid.NewGuid(), DataPlaneClientId: client);
                 Link.Replicas[node] = _registry.Announce("connection-" + node, node, announcement, ["test"], () => { });
             }
             return this;

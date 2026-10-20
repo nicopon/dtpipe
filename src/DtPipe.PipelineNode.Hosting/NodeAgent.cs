@@ -314,7 +314,7 @@ internal sealed class NodeAgent : BackgroundService
         {
             await _hub!.InvokeAsync(NodeChannel.Announce,
                 new NodeAnnouncement(_options.Name, _options.Description, _datasets, Role, _bricks.Bricks,
-                    Capabilities: [NodeAnnouncement.LaunchToken, .. _gate is null ? [] : new[] { NodeAnnouncement.RawFragments }, .. _requests.Keys.Order(StringComparer.Ordinal)],
+                    Capabilities: [.. _gate is null ? [] : new[] { NodeAnnouncement.RawFragments }, .. _requests.Keys.Order(StringComparer.Ordinal)],
                     DtpipeVersion: _dtpipeVersion, InstanceId: _instanceId, Origin: $"{Environment.MachineName}:{Environment.ProcessId}",
                     DataPlaneClientId: _node?.ClientId), bounded.Token);
         }

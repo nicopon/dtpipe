@@ -27,7 +27,7 @@ public class FailedLaunchTests : IDisposable
             spec => FragmentIntake.JobOf(spec, FragmentPolicy.AnyFragment, null, (_, _) => null, []),
             _ => NullLogger.Instance, NullLogger.Instance, TimeSpan.FromMinutes(5));
 
-        var result = await runs.LaunchAsync(new LaunchRequest("r1", new FragmentSpec("A", "v", [], Yaml: "a:\n  input: generate:1\n  output: arrow:-\n")));
+        var result = await runs.LaunchAsync(new LaunchRequest("r1", new FragmentSpec("A", "v", [], Yaml: "a:\n  input: generate:1\n  output: arrow:-\n"), "token-1"));
 
         Assert.False(result.Started);
         Assert.Contains("could not start dtpipe", result.Refusal);

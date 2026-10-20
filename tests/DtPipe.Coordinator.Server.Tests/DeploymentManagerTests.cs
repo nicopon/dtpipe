@@ -72,7 +72,7 @@ public sealed class DeploymentManagerTests : IDisposable
     {
         var client = Guid.NewGuid();
         await _state.SaveClientAsync(new ClientRegistration(client, "data-" + instance, ["crm"], null, null, DateTime.UtcNow, Subject: "node-n"));
-        var announcement = new NodeAnnouncement("n", "", [], NodeRole.Data, bricks, Capabilities: [NodeAnnouncement.LaunchToken], InstanceId: Guid.Parse($"00000000-0000-0000-0000-{instance:000000000000}"), DataPlaneClientId: client);
+        var announcement = new NodeAnnouncement("n", "", [], NodeRole.Data, bricks, InstanceId: Guid.Parse($"00000000-0000-0000-0000-{instance:000000000000}"), DataPlaneClientId: client);
         var key = _registry.Announce("c" + instance, "node-n", announcement, ["crm"], () => { });
         _inventory.Announced("n", "node-n", announcement, ["crm"]);
         return key;
