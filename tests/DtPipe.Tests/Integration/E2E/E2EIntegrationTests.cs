@@ -407,10 +407,8 @@ public class E2EIntegrationTests : IAsyncLifetime
 
 		// Register secrets manager and resolver
 		services.AddSingleton<DtPipe.Cli.Security.ISecretsManager>(secretsManager);
-		services.AddSingleton<DtPipe.Core.Expressions.IStringContentResolver, DtPipe.Cli.Expressions.CompositeStringContentResolver>();
-		services.AddSingleton<DtPipe.Core.Expressions.IStringInterpolator, DtPipe.Cli.Expressions.EnvVarInterpolator>();
-		services.AddSingleton<DtPipe.Core.Expressions.IStringInterpolator, DtPipe.Cli.Security.KeyringInterpolator>();
-		services.AddSingleton<DtPipe.Core.Expressions.IStringInterpolator, DtPipe.Cli.Incremental.CursorInterpolator>();
+		services.AddSingleton<DtPipe.Core.Expressions.IStringContentResolver>(
+			DtPipe.Cli.Expressions.CompositeStringContentResolver.Standard(secretsManager));
 
 		// Reader Factories
 		services.AddSingleton<IStreamReaderFactory>(sp => new CliStreamReaderFactory(

@@ -51,7 +51,7 @@ public static class JobGraph
             processor,
             JobYaml.Transformers(branch).Select(DescribeStage).ToList(),
             options,
-            JobYaml.Variables(JobYaml.Serialize(new YamlMappingNode { { alias, branch } })));
+            JobYaml.Variables(alias, branch));
     }
 
     private static StageView DescribeStage(YamlMappingNode transformer)

@@ -107,4 +107,8 @@ public static class JobYaml
     /// <summary>Environment variables a job text resolves through <c>${{NAME}}</c>: the names of <see cref="VariableTokens"/>.</summary>
     public static IReadOnlyList<string> Variables(string text) =>
         VariableTokens.Expressions(text).Where(VariableTokens.IsName).ToList();
+
+    /// <summary>The variables one branch reads, as <see cref="Variables(string)"/> reads them from its text.</summary>
+    public static IReadOnlyList<string> Variables(string alias, YamlMappingNode branch) =>
+        Variables(Serialize(new YamlMappingNode { { alias, branch } }));
 }

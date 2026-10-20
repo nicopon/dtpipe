@@ -64,7 +64,7 @@ public class DesignValidator(BrickCatalog bricks, NodeRequests nodes)
                     sinks.Add(new Placed(alias, sink));
                     break;
                 default:
-                    var reached = JobYaml.Variables(JobYaml.Serialize(new YamlMappingNode { { alias, branch } }))
+                    var reached = JobYaml.Variables(alias, branch)
                         .Select(nodes.HostOf).OfType<string>().Distinct().ToList();
                     if (reached.Count > 0) refusals.Add(AutoPlacer.NotABrick(alias, reached));
                     rewritten.Add(alias, JobYaml.CloneBranch(branch));

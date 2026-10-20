@@ -225,8 +225,8 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
 - **A variable's name is the contract.** `StudioVariables` reads a job's `${{…}}` with the run's own
   grammar (`VariableTokens` in `DtPipe.Jobs`), and an action arms each chosen value for
   its own call chain (`LaunchValues.Arm`, an `AsyncLocal` like `NonInteractiveGuard`) which
-  `LaunchValueInterpolator` gives the real resolver ahead of the environment, in the DI chain and in
-  `JobFileParser`'s own. Nothing writes the process environment, so a request beside the action never
+  `LaunchValueInterpolator` gives the real resolver ahead of the environment, in the one chain
+  `CompositeStringContentResolver.Standard` builds for the DI and for `JobFileParser`. Nothing writes the process environment, so a request beside the action never
   resolves its values; the Variables tab reads the real environment only.
   `[CI: StudioServerTests, StudioSampleTests — the values reach every branch of a DAG]` The
   launch file holds an alias or a typed text, never a keyring value; the page sees names and

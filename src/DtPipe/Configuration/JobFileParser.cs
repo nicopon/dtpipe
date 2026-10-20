@@ -129,24 +129,12 @@ public static partial class JobFileParser
 	}
 
 	/// <summary>
-	/// Interpolates ${{VAR}} patterns through the canonical resolver chain (F11):
-	/// launch values → keyring → cursor → env, exactly the engine used for CLI connection strings.
-	/// The compiled regex stays only as the matcher for ${{...}} tokens.
+	/// Interpolates ${{VAR}} patterns through <see cref="DtPipe.Cli.Expressions.CompositeStringContentResolver.Standard"/>,
+	/// the chain CLI connection strings go through.
 	/// </summary>
-	internal static string InterpolateVariables(string content, DtPipe.Cli.Security.ISecretsManager? secretsManager)
-	{
-		var interpolators = new List<DtPipe.Core.Expressions.IStringInterpolator>
-		{
-			new DtPipe.Cli.Expressions.LaunchValueInterpolator(),
-			new DtPipe.Cli.Incremental.CursorInterpolator(),
-		};
-		if (secretsManager != null)
-			interpolators.Insert(1, new DtPipe.Cli.Security.KeyringInterpolator(secretsManager));
-		interpolators.Add(new DtPipe.Cli.Expressions.EnvVarInterpolator());
-
-		var resolver = new DtPipe.Cli.Expressions.CompositeStringContentResolver(interpolators);
-		return resolver.ResolveAsync(content).GetAwaiter().GetResult() ?? content;
-	}
+	internal static string InterpolateVariables(string content, DtPipe.Cli.Security.ISecretsManager? secretsManager) =>
+		DtPipe.Cli.Expressions.CompositeStringContentResolver.Standard(secretsManager)
+			.ResolveAsync(content).GetAwaiter().GetResult() ?? content;
 
 	private static List<TransformerConfig>? ParseTransformers(List<System.Collections.IDictionary>? transformers)
 	{

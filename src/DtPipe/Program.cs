@@ -323,11 +323,8 @@ class Program
 			services.AddSingleton<DtPipe.Cli.Security.ISecretsManager, DtPipe.Cli.Security.KeyringSecretsManager>();
 		}
 
-		services.AddSingleton<DtPipe.Core.Expressions.IStringContentResolver, DtPipe.Cli.Expressions.CompositeStringContentResolver>();
-		services.AddSingleton<DtPipe.Core.Expressions.IStringInterpolator, DtPipe.Cli.Expressions.LaunchValueInterpolator>();
-		services.AddSingleton<DtPipe.Core.Expressions.IStringInterpolator, DtPipe.Cli.Expressions.EnvVarInterpolator>();
-		services.AddSingleton<DtPipe.Core.Expressions.IStringInterpolator, DtPipe.Cli.Security.KeyringInterpolator>();
-		services.AddSingleton<DtPipe.Core.Expressions.IStringInterpolator, DtPipe.Cli.Incremental.CursorInterpolator>();
+		services.AddSingleton<DtPipe.Core.Expressions.IStringContentResolver>(sp =>
+			DtPipe.Cli.Expressions.CompositeStringContentResolver.Standard(sp.GetRequiredService<DtPipe.Cli.Security.ISecretsManager>()));
 
 		// F13 — deterministic component discovery replaces the manual registration list.
 		var catalog = ComponentCatalog.Discover(

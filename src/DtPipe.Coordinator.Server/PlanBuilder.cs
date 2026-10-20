@@ -384,7 +384,7 @@ public sealed class PlanBuilder(
     private async Task<BranchSplit?> SplitAsync(CutRequest cut, YamlMappingNode branch, List<string> errors, CancellationToken ct)
     {
         var single = new YamlMappingNode { { cut.Branch, JobYaml.CloneBranch(branch) } };
-        var owners = JobYaml.Variables(JobYaml.Serialize(single)).Select(nodes.HostOf).OfType<string>().Distinct().ToList();
+        var owners = JobYaml.Variables(cut.Branch, branch).Select(nodes.HostOf).OfType<string>().Distinct().ToList();
         if (owners.Count > 1)
         {
             errors.Add($"'{cut.Branch}' reaches data on {string.Join(" and ", owners)}; a cut runs on the one node whose data the branch reads.");

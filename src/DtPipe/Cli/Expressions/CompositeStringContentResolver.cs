@@ -1,5 +1,7 @@
 using System.Text;
 using DtPipe.Jobs;
+using DtPipe.Cli.Incremental;
+using DtPipe.Cli.Security;
 using DtPipe.Core.Expressions;
 
 namespace DtPipe.Cli.Expressions;
@@ -13,6 +15,20 @@ namespace DtPipe.Cli.Expressions;
 public sealed class CompositeStringContentResolver : IStringContentResolver
 {
     private readonly IEnumerable<IStringInterpolator> _interpolators;
+
+    /// <summary>
+    /// The resolver every run uses, the one place the chain's order is fixed: launch values, keyring, cursor,
+    /// then the environment, which answers any name and so comes last. Without a secrets manager the
+    /// chain has no keyring.
+    /// </summary>
+    public static CompositeStringContentResolver Standard(ISecretsManager? secrets)
+    {
+        var chain = new List<IStringInterpolator> { new LaunchValueInterpolator() };
+        if (secrets != null) chain.Add(new KeyringInterpolator(secrets));
+        chain.Add(new CursorInterpolator());
+        chain.Add(new EnvVarInterpolator());
+        return new CompositeStringContentResolver(chain);
+    }
 
     public CompositeStringContentResolver(IEnumerable<IStringInterpolator> interpolators)
     {

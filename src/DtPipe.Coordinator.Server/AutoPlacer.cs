@@ -207,7 +207,7 @@ public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, Pla
                     continue;
                 }
                 // A node's database is reached only through a brick its owner declared.
-                var variables = JobYaml.Variables(JobYaml.Serialize(new() { { alias, branch } })).Where(hostOf.ContainsKey).ToList();
+                var variables = JobYaml.Variables(alias, branch).Where(hostOf.ContainsKey).ToList();
                 if (variables.Count > 0)
                 {
                     errors.Add(NotABrick(alias, variables.Select(v => hostOf[v]).Distinct()));
