@@ -227,8 +227,11 @@ public sealed class PipelineNode : IAsyncDisposable
     /// and starts relaying it. True when it was the last edge the run declares. A transfer that never reaches this node
     /// faults the run (<see cref="FaultOrigin.Remote"/>) and returns false.
     /// </summary>
+    /// <exception cref="ArgumentException">The run declares no edge of that alias; the handle is not claimed.</exception>
     public async Task<bool> WireAsync(FragmentRun run, string alias, string transferId, CancellationToken ct = default)
     {
+        if (run.Edges.All(e => e.Alias != alias))
+            throw new ArgumentException($"The run declares no edge '{alias}'.", nameof(alias));
         object handle;
         try { handle = await ClaimHandleAsync(transferId, ct); }
         catch (TimeoutException ex)

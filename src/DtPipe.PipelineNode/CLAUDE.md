@@ -77,7 +77,8 @@ stdin/stdout and TransportR. It speaks to no coordinator itself.
   first. `[local: PipelineNode.Tests, DtPipe.Coordinator.Tests.RunOrchestratorTests]`
 - `ConnectAsync` connects the replica's client and launches nothing; `Launch` spawns a run's child and
   `WireAsync(run, alias, transferId)` hands it one edge's transfer, `true` when it was the last edge the run
-  declares.
+  declares. An alias the run does not declare is refused (`ArgumentException`) before the handle is claimed, so the
+  handle stays for the edge that exists. `[local: WireEdgeAliasTests]`
 - **A run is its launcher's to dispose.** Disposing the node closes its client and releases the handles no run
   claimed; it ends no run. `[unchecked]`
 - **A test whose verdict depends on how soon a child starts or how soon its end is seen joins
