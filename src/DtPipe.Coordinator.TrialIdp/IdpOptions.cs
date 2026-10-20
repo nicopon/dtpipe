@@ -1,4 +1,4 @@
-namespace DtPipe.Lab.Idp;
+namespace DtPipe.Coordinator.TrialIdp;
 
 /// <summary>
 /// The test IdP's settings, from the <c>Idp</c> configuration section: environment variables

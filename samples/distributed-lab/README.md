@@ -3,7 +3,7 @@
 A self-contained demonstrator for dtpipe's distributed pipelines: one coordinator, four data
 nodes each with its own database, and a runner, run as plain local processes or as a compose
 stack ([below](#the-compose-stack)).
-Every node authenticates with a test identity provider, `Lab.Idp`, which says who it is; the
+Every node authenticates with a test identity provider, `DtPipe.Coordinator.TrialIdp`, which says who it is; the
 coordinator decides what it may do.
 
 Each data node offers **bricks**: reads and writes its owner preconfigured on its database. The
@@ -158,7 +158,7 @@ which group may send to which: every data group may feed the `runner`, the `runn
 
 ## Rights and the identity provider
 
-Tokens come from `Lab.Idp` (below), which the coordinator trusts for its audience. Each node host
+Tokens come from `DtPipe.Coordinator.TrialIdp` (below), which the coordinator trusts for its audience. Each node host
 holds a client id and secret in its `nodes/<node>.json`, which `idp-clients.json` registers; the
 token it obtains names it (`sub`) and grants nothing. The coordinator gives that subject its groups,
 which TransportR's hub then enforces: a node sends to another only if every group of the sender may
@@ -178,7 +178,7 @@ with the name, description and bricks it proposes (and the token's claims listed
 `Coordinator:Identity:LabelClaims`, none by default), and an administrator accepts it by giving it a node name and
 groups, or sets it aside for 24 hours. The list of hosts that wait lives in memory and holds 50, never evicting one that waits; the hosts set aside are kept in Redis, so a restart does not let them back in early.
 
-### The stand-alone test IdP (`Lab.Idp`)
+### The stand-alone test IdP (`DtPipe.Coordinator.TrialIdp`)
 
 The identity provider of the lab, standing in for whatever provider a deployment trusts. It says
 **who** a caller is, never what the caller may do: its tokens carry a subject, a name and an email,
@@ -343,7 +343,7 @@ replica ran each fragment.
 - Everything runs on one machine, but nothing relies on it: the coordinator never opens a node's
   database. A cut, a brick preview and a library save's check are each read by the
   node that hosts the data; only `smoke.py`'s witness reads the seeded files directly.
-- People sign in through `Lab.Idp`: `labadmin`, `labdesigner` and `labreader` (password: the name
+- People sign in through `DtPipe.Coordinator.TrialIdp`: `labadmin`, `labdesigner` and `labreader` (password: the name
   followed by `pwd`) hold the coordinator's three roles; any other name signs in with none. Tokens last 12 hours
   (the IdP's `Idp:AccessTokenLifetimeSeconds` changes it). Each node renews its token before it expires, so a
   deployment can sit idle, or run, past its tokens' lifetime. A node that cannot renew (the

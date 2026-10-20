@@ -1,5 +1,5 @@
 using System.Security.Claims;
-using DtPipe.Lab.Idp;
+using DtPipe.Coordinator.TrialIdp;
 using Microsoft.AspNetCore;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
@@ -10,7 +10,7 @@ using OpenIddict.Abstractions;
 using OpenIddict.Server.AspNetCore;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
-// A test identity provider for the distributed lab: OpenIddict, client credentials for services and
+// A trial identity provider for the coordinator and its nodes, never for production: OpenIddict, client credentials for services and
 // authorization code with PKCE for front ends, with refresh tokens for a client that asks for them. It says who a caller is; what a caller may do belongs
 // to the services that trust it.
 var builder = WebApplication.CreateBuilder(args);
@@ -24,7 +24,7 @@ builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
 
 builder.Services.AddDbContext<IdpDbContext>(o =>
 {
-    o.UseInMemoryDatabase("lab-idp");
+    o.UseInMemoryDatabase("trial-idp");
     o.UseOpenIddict();
 });
 
@@ -32,7 +32,7 @@ builder.Services.AddDbContext<IdpDbContext>(o =>
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(o =>
     {
-        o.Cookie.Name = "lab-idp";
+        o.Cookie.Name = "trial-idp";
         o.LoginPath = "/account/login";
         o.ExpireTimeSpan = TimeSpan.FromHours(8);
     });
@@ -70,7 +70,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();
 
-app.MapGet("/", () => Results.Text("dtpipe lab IdP: see /.well-known/openid-configuration"));
+app.MapGet("/", () => Results.Text("dtpipe trial IdP, not for production: see /.well-known/openid-configuration"));
 app.MapGet("/healthz", () => Results.Ok());
 
 app.MapGet("/account/login", (HttpContext context, IAntiforgery antiforgery, string? returnUrl) =>

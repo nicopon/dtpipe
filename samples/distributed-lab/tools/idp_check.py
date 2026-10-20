@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Checks the lab's test IdP (Lab.Idp) end to end, as its clients use it.
+"""Checks the lab's test IdP (DtPipe.Coordinator.TrialIdp) end to end, as its clients use it.
 
     python3 tools/idp_check.py [http://127.0.0.1:5190]
 

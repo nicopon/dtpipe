@@ -19,14 +19,13 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS source
 WORKDIR /src
 COPY Directory.Build.props ./
 COPY src/ src/
-COPY samples/distributed-lab/Lab.Idp/ samples/distributed-lab/Lab.Idp/
 COPY samples/distributed-lab/Lab.NodeHost/ samples/distributed-lab/Lab.NodeHost/
 
 # Framework-dependent: the runtime image carries ASP.NET Core.
 FROM source AS hosts-build
 RUN --mount=type=cache,id=dtpipe-lab-nuget,target=/root/.nuget/packages,sharing=locked \
     dotnet publish samples/distributed-lab/Lab.NodeHost/Lab.NodeHost.csproj -c Release -o /out/node \
-    && dotnet publish samples/distributed-lab/Lab.Idp/Lab.Idp.csproj -c Release -o /out/idp
+    && dotnet publish src/DtPipe.Coordinator.TrialIdp/DtPipe.Coordinator.TrialIdp.csproj -c Release -o /out/idp
 
 FROM product-coordinator AS coordinator-lab
 USER root
@@ -52,4 +51,4 @@ ENTRYPOINT ["/lab/node-entrypoint.sh"]
 FROM product-runtime AS idp
 COPY --from=hosts-build /out/idp /app
 COPY samples/distributed-lab/idp-clients.json /lab/idp-clients.json
-ENTRYPOINT ["dotnet", "/app/Lab.Idp.dll"]
+ENTRYPOINT ["dotnet", "/app/DtPipe.Coordinator.TrialIdp.dll"]

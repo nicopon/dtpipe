@@ -93,7 +93,7 @@ require_dtpipe() {
 
 build() {
     echo "Building the lab"
-    dotnet build "$LAB/Lab.Idp/Lab.Idp.csproj" -c Release -o "$STATE/bin/idp" -v q -nologo >"$STATE/logs/build.log" 2>&1 \
+    dotnet build "$REPO/src/DtPipe.Coordinator.TrialIdp/DtPipe.Coordinator.TrialIdp.csproj" -c Release -o "$STATE/bin/idp" -v q -nologo >"$STATE/logs/build.log" 2>&1 \
         || { cat "$STATE/logs/build.log" >&2; exit 1; }
     # Published, not built: the server serves the wwwroot published beside it.
     dotnet publish "$REPO/src/DtPipe.Coordinator.Server/DtPipe.Coordinator.Server.csproj" -c Release -o "$STATE/bin/coordinator" -v q -nologo >>"$STATE/logs/build.log" 2>&1 \
@@ -229,7 +229,7 @@ start() {
 # Its signing key lives in .state/idp/, so tokens survive its restart. Extra arguments are passed on
 # (tools/campaign.py shortens the token lifetime with --Idp:AccessTokenLifetimeSeconds=20).
 start_idp() {
-    start idp dotnet "$STATE/bin/idp/Lab.Idp.dll" --urls "$IDP_URL" --Idp:Issuer="$IDP_URL" \
+    start idp dotnet "$STATE/bin/idp/DtPipe.Coordinator.TrialIdp.dll" --urls "$IDP_URL" --Idp:Issuer="$IDP_URL" \
         --Idp:ClientsFile="$LAB/idp-clients.json" --Idp:SigningKeyFile="$STATE/idp/signing-key.pem" "$@"
     for _ in $(seq 1 60); do
         python3 -c 'import sys,urllib.request; urllib.request.urlopen(sys.argv[1] + "/healthz", timeout=2)' "$IDP_URL" 2>/dev/null && return

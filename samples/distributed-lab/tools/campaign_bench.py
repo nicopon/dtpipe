@@ -40,7 +40,7 @@ def lab_processes():
                 rows.append((pid, ppid, "host", args))
             elif "DtPipe.Coordinator.Server.dll" in args:
                 rows.append((pid, ppid, "coordinator", args))
-            elif "Lab.Idp.dll" in args:
+            elif "DtPipe.Coordinator.TrialIdp.dll" in args:
                 rows.append((pid, ppid, "idp", args))
         elif base == "toxiproxy-server":
             rows.append((pid, ppid, "toxiproxy", ""))
@@ -212,7 +212,7 @@ def frozen_problems(repo, dtpipe, state_dir, node_names, expected=None):
     if dirty:
         problems.append(f"{len(dirty)} tracked file(s) changed since the frozen commit, e.g. {dirty[0].strip()}")
     for dll in (os.path.join("node", "Lab.NodeHost.dll"), os.path.join("runner", "DtPipe.PipelineNode.Runner.dll"),
-                os.path.join("coordinator", "DtPipe.Coordinator.Server.dll"), os.path.join("idp", "Lab.Idp.dll")):
+                os.path.join("coordinator", "DtPipe.Coordinator.Server.dll"), os.path.join("idp", "DtPipe.Coordinator.TrialIdp.dll")):
         path = os.path.join(state_dir, "bin", dll)
         try:
             with open(path, "rb") as f:

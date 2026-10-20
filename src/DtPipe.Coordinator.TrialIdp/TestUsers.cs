@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 using OpenIddict.Abstractions;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
-namespace DtPipe.Lab.Idp;
+namespace DtPipe.Coordinator.TrialIdp;
 
 /// <summary>
 /// The users of a test IdP: any name made of letters, digits, <c>.</c>, <c>_</c> or <c>-</c> is a
@@ -50,7 +50,7 @@ public static partial class TestUsers
             <html lang="en">
             <head>
             <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-            <title>Lab IdP</title>
+            <title>Trial IdP</title>
             <style>
               :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
               body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: Canvas; }
@@ -61,8 +61,8 @@ public static partial class TestUsers
             </head>
             <body>
             <form method="post" action="/account/login">
-              <h1>Lab IdP</h1>
-              <p class="hint">Test users only: the password of <code>toto</code> is <code>totopwd</code>.</p>
+              <h1>Trial IdP</h1>
+              <p class="hint">Trial IdP, not for production. Test users only: the password of <code>toto</code> is <code>totopwd</code>.</p>
               {{message}}
               <input type="hidden" name="{{E(antiforgeryField)}}" value="{{E(antiforgeryToken)}}">
               <input type="hidden" name="returnUrl" value="{{E(returnUrl)}}">

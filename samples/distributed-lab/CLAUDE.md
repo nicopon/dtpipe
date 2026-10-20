@@ -78,10 +78,10 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   version of a brick. That pass is named only, refuses the compose stack (it starts hosts), and leaves the hosts
   started as the lab starts them. `[local: smoke.py replicas, tools/campaign.py F13]`
 - **The IdP's signing key survives an IdP restart.** A node host reuses its cached token until
-  shortly before it expires, so `Lab.Idp` reads its key from `.state/idp/signing-key.pem` (generated
+  shortly before it expires, so `DtPipe.Coordinator.TrialIdp` reads its key from `.state/idp/signing-key.pem` (generated
   once, readable by its owner only, outside git). `lab.sh idp --Idp:AccessTokenLifetimeSeconds=N`
   restarts it with shorter tokens for trials. `[local: tools/campaign.py S3, S5]`
-- **`Lab.Idp` says who, never what.** Its tokens carry a subject, a name and an email; no group,
+- **`DtPipe.Coordinator.TrialIdp` says who, never what.** Its tokens carry a subject, a name and an email; no group,
   role or permission enters a token or the clients file, because what a caller may do belongs to
   the coordinator. A client's `audience` and `refreshTokens` are protocol, not a right. It stands
   alone: no reference to dtpipe, TransportR or the coordinator. `[local: tools/idp_check.py]`
@@ -93,7 +93,7 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   off the redirect to the loopback. Its refresh tokens live in the IdP's memory: an IdP restart
   signs every studio out. `[local: tools/idp_check.py, smoke.py rights — studio bearer]`
 - A node's tokens come from the IdP its `Oidc:Authority` names, through the discovery document:
-  `lab.sh` starts `Lab.Idp` first and points the coordinator (`--authority`) and every node at it.
+  `lab.sh` starts `DtPipe.Coordinator.TrialIdp` first and points the coordinator (`--authority`) and every node at it.
   The secrets live in `idp-clients.json` (the IdP) and the node files (the clients), never in the
   rights document. `[local: smoke.py rights]`
 - `tools/campaign.py` plays a fixed matrix of faults (a killed child or host, a cancellation, a
