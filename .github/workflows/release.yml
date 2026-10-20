@@ -5,7 +5,18 @@ on:
     tags:
       - 'v*'
   # Builds the images of the distributed pipeline's two hosts without publishing them: a loadable tarball per image and architecture.
+  # Run by hand, the workflow builds the images and keeps them as artifacts. With publish, it pushes them to GHCR under the
+  # one tag given, never latest, major.minor or a release version, so a trial of the push path needs no v tag.
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Push the images to GHCR instead of keeping them as artifacts
+        type: boolean
+        default: false
+      tag:
+        description: Image tag to publish under (publish only), for example edge or 1.11.0-rc.1
+        type: string
+        default: ''
 
 jobs:
   build:
@@ -171,11 +182,13 @@ jobs:
             -exec dotnet nuget push {} --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate \;
 
   # The product's two images (deploy/Dockerfile): built natively on each architecture, because the Dockerfile runs the
-  # dtpipe binary it builds. At a tag they are pushed by digest and joined into one multi-arch tag below; run by hand,
-  # they are only built, with the commit the run is on as their revision.
+  # dtpipe binary it builds. At a tag, or by hand with publish, they are pushed by digest and joined into one multi-arch
+  # tag below; run by hand otherwise, they are only built, with the commit the run is on as their revision.
   images:
     name: Image ${{ matrix.image }} ${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
+    env:
+      PUBLISH: ${{ github.event_name == 'push' || inputs.publish }}
     permissions:
       contents: read
       packages: write
@@ -189,6 +202,15 @@ jobs:
           - { image: runner, arch: arm64, runner: ubuntu-24.04-arm }
 
     steps:
+      - name: Check the tag to publish under
+        if: github.event_name == 'workflow_dispatch' && inputs.publish
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          [[ "$TAG" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]] || { echo "tag must be 1 to 128 letters, digits, '.', '_' or '-'." >&2; exit 1; }
+          [[ "$TAG" == latest || "$TAG" =~ ^v?[0-9]+(\.[0-9]+){0,2}$ ]] && { echo "tag '$TAG' is a release's: only a tag push publishes those." >&2; exit 1; }
+          echo "publishing under $TAG"
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -200,7 +222,7 @@ jobs:
         run: echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/dtpipe-${{ matrix.image }}" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GHCR
-        if: github.event_name == 'push'
+        if: env.PUBLISH == 'true'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -209,7 +231,7 @@ jobs:
 
       - name: Build and push by digest
         id: push
-        if: github.event_name == 'push'
+        if: env.PUBLISH == 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -221,13 +243,13 @@ jobs:
           outputs: type=image,name=${{ steps.name.outputs.image }},push-by-digest=true,name-canonical=true,push=true
 
       - name: Keep the digest
-        if: github.event_name == 'push'
+        if: env.PUBLISH == 'true'
         run: |
           mkdir -p digests
           touch "digests/$(echo '${{ steps.push.outputs.digest }}' | cut -d: -f2)"
 
       - name: Upload the digest
-        if: github.event_name == 'push'
+        if: env.PUBLISH == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: digest-${{ matrix.image }}-${{ matrix.arch }}
@@ -235,7 +257,7 @@ jobs:
           if-no-files-found: error
 
       - name: Build and load
-        if: github.event_name != 'push'
+        if: env.PUBLISH != 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -248,7 +270,7 @@ jobs:
           load: true
 
       - name: Read the revision label
-        if: github.event_name != 'push'
+        if: env.PUBLISH != 'true'
         run: |
           revision=$(docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "dtpipe-${{ matrix.image }}:${{ matrix.arch }}")
           echo "revision label: $revision"
@@ -256,7 +278,7 @@ jobs:
           docker save "dtpipe-${{ matrix.image }}:${{ matrix.arch }}" | gzip > "dtpipe-${{ matrix.image }}-${{ matrix.arch }}.tar.gz"
 
       - name: Upload the image
-        if: github.event_name != 'push'
+        if: env.PUBLISH != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: image-${{ matrix.image }}-${{ matrix.arch }}
@@ -264,10 +286,10 @@ jobs:
           if-no-files-found: error
 
   # One tag per image over both architectures: the version, its major.minor and latest. A pre-release (alpha, beta, rc)
-  # gets its version tag only.
+  # gets its version tag only, and a run by hand gets the one tag it was given.
   images-tag:
     name: Tag the images
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || inputs.publish
     needs: images
     runs-on: ubuntu-latest
     permissions:
@@ -292,11 +314,18 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Join the architectures
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          tags=("$version")
-          if [[ ! "$version" =~ (alpha|beta|rc) ]]; then
-            tags+=("${version%.*}" latest)
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            version="${GITHUB_REF_NAME#v}"
+            tags=("$version")
+            if [[ ! "$version" =~ (alpha|beta|rc) ]]; then
+              tags+=("${version%.*}" latest)
+            fi
+          else
+            version="$INPUT_TAG"
+            tags=("$version")
           fi
           for image in coordinator runner; do
             name="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/dtpipe-$image"
