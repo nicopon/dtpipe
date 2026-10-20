@@ -70,7 +70,9 @@ none. One node per process, which is one replica of its node's identity; a secon
   cover a connection the server closes (a reconnect the coordinator asked for, an announcement it
   refused), so `hub.Closed` only signals and `ReconnectLoopAsync` starts the connection again and
   announces. Only the host's own stop ends a connect loop: an invocation cut by the coordinator's
-  close also throws an `OperationCanceledException`. `[local: the lab's smoke.py rights — identity,
+  close also throws an `OperationCanceledException`. The loop waits between tries (`NodeAgent.RetryDelay`): 1 s,
+  doubling to 15 s, so a coordinator that does not answer, or refuses the announcement, is not asked once a second.
+  `[local: Hosting.Tests ConnectRetryTests, PipelineNode.Tests ConnectBackoffTests; the lab's smoke.py rights — identity,
   disabled]`
 - **A replica serves several runs, and answers each message as it arrives.** `ReplicaRuns` is the run
   protocol - the one table from the coordinator's `Launch`, `Wire`, `Cancel`, `Check` and `Kill` to a method,

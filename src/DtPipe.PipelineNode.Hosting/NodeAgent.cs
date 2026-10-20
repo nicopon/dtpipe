@@ -156,6 +156,15 @@ internal sealed class NodeAgent : BackgroundService
 
     private static readonly TimeSpan ReconnectDelay = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan AnnounceTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan RetryDelayCap = TimeSpan.FromSeconds(15);
+
+    /// <summary>The wait before the next try of the connect loop after <paramref name="failures"/> failures in a row: 1 s, doubling, up to <see cref="RetryDelayCap"/>.</summary>
+    internal static TimeSpan RetryDelay(int failures)
+    {
+        var doubled = TimeSpan.FromSeconds(1 << Math.Clamp(failures - 1, 0, 5));
+        return doubled < RetryDelayCap ? doubled : RetryDelayCap;
+    }
+
 
     /// <summary>
     /// Starts the connection, retrying until the coordinator answers, then announces the replica. The announcement comes first: a
@@ -163,6 +172,7 @@ internal sealed class NodeAgent : BackgroundService
     /// </summary>
     private async Task ConnectAsync(HubConnection hub, CancellationToken ct)
     {
+        var failures = 0;
         while (true)
         {
             ct.ThrowIfCancellationRequested();
@@ -185,7 +195,7 @@ internal sealed class NodeAgent : BackgroundService
                 {
                     try { await hub.StopAsync(ct); } catch (Exception) when (!ct.IsCancellationRequested) { }
                 }
-                await Task.Delay(TimeSpan.FromSeconds(1), ct);
+                await Task.Delay(RetryDelay(++failures), ct);
             }
         }
     }
