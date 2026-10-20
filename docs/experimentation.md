@@ -1,7 +1,8 @@
 # Experimentation
 
 > **Experimental.** Everything on this page may change or disappear without notice. It carries no
-> stability promise, ships in no package, and is not meant for production.
+> stability promise, ships in no package (the coordinator and the runner alone are published, as
+> container images), and is not meant for production.
 
 DtPipe runs a pipeline in one process. The experimental part cuts one pipeline into **fragments**
 and runs each on a different host, with the Arrow data streaming between them.
@@ -26,6 +27,14 @@ The lab exists to try the idea and to find where it breaks, not to serve a workl
 has been run on Windows. To see it run, follow its
 [README](../samples/distributed-lab/README.md). The rules the server holds to (rights, library,
 placement, runs) are in its [CLAUDE.md](../src/DtPipe.Coordinator.Server/CLAUDE.md).
+
+## Try it
+
+A release publishes the coordinator and the runner as container images, and `deploy/compose.yaml`
+runs them with a trial data node and a trial identity provider from one command. The walkthrough
+is [Try a distributed pipeline](guides/distributed-trial.md); running the two hosts for real is
+[deploy/README.md](../deploy/README.md); every setting is in
+[REFERENCE.md](../REFERENCE.md#distributed-pipeline-experimental).
 
 ## Nodes and replicas
 

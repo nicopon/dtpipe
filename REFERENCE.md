@@ -1367,6 +1367,90 @@ one or one reached through a link. A job's relative paths resolve from the folde
 
 Quit from the page ends the session (exit 0); Ctrl+C ends it with exit 130.
 
+
+---
+
+## Distributed pipeline (experimental)
+
+> **Experimental.** May change or disappear without notice; see
+> [docs/experimentation.md](./docs/experimentation.md). A walkthrough that starts one from a single
+> command is [docs/guides/distributed-trial.md](./docs/guides/distributed-trial.md); running the
+> two hosts for real is [deploy/README.md](./deploy/README.md).
+
+A **coordinator** cuts a pipeline into fragments and runs each on a **node**, a host that carries
+data; a **runner** is a node with no data that runs every step between the bricks. The coordinator
+and the runner are published as container images, `ghcr.io/nicopon/dtpipe-coordinator` and
+`ghcr.io/nicopon/dtpipe-runner`, by each release. A node that serves real data is your own .NET
+host that calls `AddDtPipeNode` and declares its **bricks**. Every setting below is read from the
+environment first (`Coordinator__Authority`), then from command-line arguments
+(`--Coordinator:Authority`); a secret belongs in the environment only.
+
+### Coordinator settings (`Coordinator__*`)
+
+| Setting | Description |
+|---|---|
+| `Authority` | The OpenID Connect provider the coordinator trusts (required). `https` in production |
+| `Audience` | The audience a service's token must name. Default: `dtpipe-coordinator` |
+| `Ui__ClientId` / `Ui__ClientSecret` | The confidential client the pages sign people in with (the secret is required). Default id: `coordinator-ui` |
+| `Studio__ClientId` | The public client `dtpipe studio` signs in with. Unset: no person's token reaches `/api` |
+| `Roles__Admin` / `__Designer` / `__Reader` | Lists of people, matched on the claim `Roles__Claim` (default `email`). Nobody unlisted may do anything |
+| `PublicUrl` | The address people reach the coordinator at, behind a TLS proxy: scheme, host, port, no path |
+| `Store` | `sqlite` (default; one coordinator, a file in the state directory) or `redis` |
+| `Sqlite__Directory` | Where the SQLite file lives, if not the state directory |
+| `Redis__ConnectionString` / `Redis__KeyPrefix` | The Redis to use with `Store=redis` (a secret), and the prefix of its keys |
+| `Initialize` | `true` lets a store that holds nothing begin: the first start, or after data was lost |
+| `StateDirectory` | Where the library, the rights and scratch files live. Default: `./state` |
+| `Library__Remote__Url` / `__Token` / `__User` / `__Timeout` | A git remote every library save is pushed to before it is accepted (token: a secret) |
+| `RightsSeed` | A rights document a new store starts from. Default: no node, no edge |
+| `LibrarySeed` | A folder of `.yaml` pipelines (with optional `.bindings.json`) a new library starts with |
+| `Identity__LabelClaims` | Claims shown beside a host waiting for approval; a label only |
+| `Health__MaxAge` | The longest a health read is kept. Default: five minutes |
+
+The state directory is the coordinator's whole state when the store is SQLite: back it up stopped,
+as described in [deploy/README.md](./deploy/README.md#backing-up-a-sqlite-coordinator).
+`GET /healthz` answers 200, anonymously, once the server serves.
+
+### Node host settings (`DtPipeNode__*`)
+
+| Setting | Description |
+|---|---|
+| `Name` / `Description` | The name the host proposes. The coordinator names a node from its rights, not from this |
+| `CoordinatorUrl` | The coordinator's base address |
+| `Oidc__Authority` / `__ClientId` / `__ClientSecret` / `__Scope` | The client-credentials client the host authenticates as; its client id is the node's identity |
+| `DtPipe` | The `dtpipe` binary every fragment runs as a child process. Default: `dtpipe` on the path |
+| `StateDirectory` | Where fragment jobs are written and run from. Default: a directory under the temp directory |
+| `Policy` | `Bricks` (default: a data node runs only its own bricks) or `AnyFragment` (a runner) |
+| `UnwiredRunTimeout` | How long a launched run may wait for its edges to be wired. Default: five minutes |
+| `FaultInjection` | `true` lets the host end a run's child when the coordinator asks, for a test bench. Default: off |
+| `Variables__<NAME>` | A value every fragment reads as `${{NAME}}`; it never leaves the node |
+
+A **brick** is a read or a write the node's owner declared on the node's own data. A pipeline
+binds a branch to a brick in `<id>.bindings.json`, beside its YAML in the library: the node, the
+brick, and a mode (`strict`, `contract`, `compatible` or `tolerant`) that says how far the brick
+may change after the binding was checked.
+
+### Rights and identities
+
+The identity provider says who a caller is; the coordinator's **rights** say what it may do. Each
+identity (the `client_id` of a client-credentials client) has a name and belongs to groups, and a
+**matrix** lists which group may send rows to which. An identity has a kind: `node` (the default,
+hosts fragments), `monitor` (reads `/health/pipelines` and nothing else) or `launcher` (starts the
+runs of the pipelines it lists on `/service`, and reads them). A host whose identity the rights do
+not know waits in the **Access** view until an administrator accepts it.
+
+### Routes for services
+
+| Route | Caller | Description |
+|---|---|---|
+| `GET /healthz` | anyone | The server serves |
+| `GET /health/pipelines` | monitor | Whether each armed pipeline can be launched, and why not |
+| `POST /service/runs` | launcher | Start a run: `{"pipelineId": "…"}`; an optional `Idempotency-Key` header makes a repeat answer the same run. 409 if the pipeline is not armed |
+| `GET /service/runs/{id}` | launcher | The run's `state` and whether its sinks may be partial |
+| `POST /service/runs/{id}/cancel` | launcher | Cancel a run the same launcher started |
+
+A service sends a bearer token from the provider's client-credentials flow; a person's token never
+reaches `/service`, and a service's never reaches `/api`.
+
 ---
 
 ## Model Context Protocol (MCP) Server

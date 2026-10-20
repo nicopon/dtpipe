@@ -49,7 +49,7 @@ More, from a first pipeline to a DAG: [docs/quickstart.md](./docs/quickstart.md)
 `dtpipe studio ./jobs` opens a local page over the YAML jobs of a folder: each job as cards you
 edit and sample on the real engine, with the target never written. It is part of the CLI and needs
 no coordinator; `--coordinator` only adds the bricks and the pipeline library of a
-[distributed setup](./docs/experimentation.md). Details in
+[distributed setup](#distributed-pipelines-experimental). Details in
 [REFERENCE.md](./REFERENCE.md#studio-dtpipe-studio).
 
 > **Not everything in this release is stable.** The distributed pipeline (coordinator, pipeline
@@ -58,6 +58,18 @@ no coordinator; `--coordinator` only adds the bricks and the pipeline library of
 > before, reading, transforming and writing through the CLI, a job file or the MCP server, is
 > versioned as it always was. The distributed family has not been run on Windows; see
 > [docs/experimentation.md](./docs/experimentation.md).
+
+## Distributed pipelines (experimental)
+
+A **coordinator** cuts a pipeline into fragments and runs each next to its data, on **nodes** that
+offer **bricks** (reads and writes their owner declared on their own database); a **runner** is a
+node with no data that runs the steps between the bricks. The coordinator keeps the pipelines in a
+git-backed library, decides who may send rows to whom, and gives each run one verdict. The
+coordinator and the runner are published as container images, and `docker compose -f
+deploy/compose.yaml up -d` starts a trial of both on your machine. Start with
+[Try a distributed pipeline](./docs/guides/distributed-trial.md); to run them for real, see
+[deploy/README.md](./deploy/README.md); every setting is in
+[REFERENCE.md](./REFERENCE.md#distributed-pipeline-experimental).
 
 ## What it connects to
 

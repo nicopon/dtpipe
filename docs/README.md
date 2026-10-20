@@ -30,6 +30,8 @@ build and nothing to publish. Every link below is a relative link inside this fo
 | Keep credentials out of the command line | [Secrets](guides/secrets.md) |
 | Run it in a .NET estate, or call it from .NET code | [dtpipe and .NET](dotnet.md) |
 | Understand an error message | [Troubleshooting](troubleshooting.md) |
+| Try a distributed pipeline from one command (experimental) | [Try a distributed pipeline](guides/distributed-trial.md) |
+| Design a job as cards in a local page (experimental) | [Try a distributed pipeline](guides/distributed-trial.md#design-a-job-in-the-studio) |
 
 ## Connections
 
@@ -43,8 +45,10 @@ string format and the rules that apply to every provider.
 ## Experimentation
 
 Running one pipeline cut into fragments on several hosts is **experimental**: the libraries behind
-it and the lab that demonstrates them may change or go away. Read
-[**Experimentation**](experimentation.md) before you try it.
+it and the lab that demonstrates them may change or go away, as may `dtpipe studio`, the local
+page that designs jobs as cards. Read [**Experimentation**](experimentation.md) for the limits,
+then [**Try a distributed pipeline**](guides/distributed-trial.md) to start one from a single
+command.
 
 ## Reference
 
