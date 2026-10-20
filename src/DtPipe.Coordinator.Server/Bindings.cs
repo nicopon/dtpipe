@@ -21,6 +21,9 @@ public static class BindingCauses
     /// <summary>A binding names a branch that is no brick: only a brick is bound, and a bound branch never runs on the runner.</summary>
     public const string NotABrick = "not-a-brick";
 
+    /// <summary>A referenced brick is no longer at the version a check pinned.</summary>
+    public const string BrickChanged = "brick-changed";
+
     /// <summary>A binding names a branch the job does not have.</summary>
     public const string NoBranch = "no-branch";
 
@@ -79,13 +82,17 @@ public static class Bindings
     /// has the pin of the brick the check sampled, which it then names. A pin that does not hold what its mode compares (a contract
     /// the node did not send) is left out, so the binding stays <see cref="BindingCauses.Unchecked"/> rather than pass for ever.
     /// </summary>
-    public static Dictionary<string, Binding> Pinned(IReadOnlyDictionary<string, Binding> bindings, IReadOnlyDictionary<string, CheckedPin>? pins)
+    public static Dictionary<string, Binding> Pinned(
+        IReadOnlyDictionary<string, Binding> bindings, IReadOnlyDictionary<string, CheckedPin>? pins, IReadOnlySet<string>? referenced = null)
     {
         var pinned = new Dictionary<string, Binding>(StringComparer.Ordinal);
         foreach (var (alias, binding) in bindings)
         {
             var mode = ModeOf(binding);
-            if (mode == BindingModes.Strict) pinned[alias] = binding with { Pin = null };
+            // A referenced brick has no text to be its own pin: every mode, strict included, pins the version it was checked at.
+            if (mode == BindingModes.Strict && referenced?.Contains(alias) == true && pins?.GetValueOrDefault(alias) is { } version)
+                pinned[alias] = binding with { Pin = new BindingPin(version.Pin.Version) };
+            else if (mode == BindingModes.Strict) pinned[alias] = binding with { Pin = null };
             else if (pins?.GetValueOrDefault(alias) is { } seen && (mode == BindingModes.Tolerant || seen.Pin.Contract is not null))
                 pinned[alias] = binding with { Brick = seen.Brick, Pin = mode == BindingModes.Tolerant ? seen.Pin with { Contract = null } : seen.Pin };
             else pinned[alias] = binding with { Pin = null };

@@ -26,6 +26,14 @@ public class FragmentJobTests
     }
 
     [Fact]
+    public void The_version_of_a_fragment_of_bricks_is_the_hash_of_its_units_and_the_versions_of_their_bricks()
+    {
+        FragmentUnit[] units = [new("src", FragmentUnitKind.SourceSend, "src"), new("load", FragmentUnitKind.Sink, "dim", "src")];
+
+        Assert.Equal("5bfb4330239ee1f49973beb37ab812972d5207a6667cc373a2240c80fe8d50cb", FragmentJob.VersionOf(units, (id, _) => id == "src" ? "aaaaaaaaaaaa" : "bbbbbbbbbbbb"));
+    }
+
+    [Fact]
     public void A_source_that_sends_its_rows_and_a_relay_compose_in_the_order_given()
     {
         var (yaml, error) = Compose(

@@ -61,7 +61,7 @@ public class ReplicaRunsTests : IDisposable
         var node = await PipelineNode.ConnectAsync(new NodeClientOptions { HubUrl = host.Url });
         var runs = new ReplicaRuns(
             host.CreateNodeChannel(), node, "A", DtPipeExecutableLocator.Path, new Dictionary<string, string>(), _dir.FullName,
-            spec => FragmentIntake.JobOf(spec, FragmentPolicy.AnyFragment, null, (_, _) => null, []),
+            spec => FragmentIntake.JobOf(spec, FragmentPolicy.AnyFragment, null, (_, _) => null, (_, _) => null, []),
             _ => NullLogger.Instance, NullLogger.Instance, unwired);
         return (host, node, runs);
     }

@@ -10,10 +10,11 @@ namespace DtPipe.PipelineNode.Hosting;
 internal static class FragmentIntake
 {
     public static (string? Yaml, string? Reason) JobOf(
-        FragmentSpec spec, FragmentPolicy policy, FragmentGate? gate, FragmentJob.BranchOfBrick brickBranch, IReadOnlyList<BrickForm> forms)
+        FragmentSpec spec, FragmentPolicy policy, FragmentGate? gate, FragmentJob.BranchOfBrick brickBranch,
+        FragmentJob.VersionOfBrick brickVersion, IReadOnlyList<BrickForm> forms)
     {
         if (spec.Units is not null)
-            return policy == FragmentPolicy.AnyFragment ? (null, "a runner has no brick to compose a job from.") : FragmentJob.ComposeFor(spec, brickBranch);
+            return policy == FragmentPolicy.AnyFragment ? (null, "a runner has no brick to compose a job from.") : FragmentJob.ComposeFor(spec, brickBranch, brickVersion);
         if (spec.Yaml is null) return (null, $"{spec.Fragment} carries neither bricks nor a job.");
         if (policy == FragmentPolicy.AnyFragment) return (spec.Yaml, null);
         var refusal = gate is null ? "this node runs the bricks its owner declared, by id, and takes no job as written." : gate(spec, forms);

@@ -42,7 +42,7 @@ public sealed class HashValueTests
             new BrickInfo("a-sink", BrickKind.Sink, "t", "", """{"output":"sqlite:b"}""", null, null));
 
         var replica = Assert.Single(Assert.Single(_inventory.Snapshot()).Replicas);
-        Assert.Equal("29753842", replica.Bricks);
+        Assert.Equal("9fab5341", replica.Bricks);
     }
 
     [Fact]

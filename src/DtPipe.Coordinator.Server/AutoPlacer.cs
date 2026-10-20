@@ -32,12 +32,13 @@ public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, Pla
     /// </summary>
     public IReadOnlyDictionary<string, string> BrickAliases(string yaml, IReadOnlyDictionary<string, Binding>? bindings = null)
     {
-        bindings ??= NoBindings;
+        bindings = BrickReferences.Expand(yaml, bindings ?? NoBindings);
         var brickOf = new Dictionary<string, string>(StringComparer.Ordinal);
         try
         {
             foreach (var (alias, branch) in JobYaml.Branches(JobYaml.Parse(yaml)))
             {
+                if (BrickRef.Of(alias, branch) is { } reference) { if (bricks.Find(reference.Key) is { } referenced) brickOf[alias] = referenced.Key; continue; }
                 if (!bindings.TryGetValue(alias, out var binding)) continue;
                 // A binding that is not strict names its brick, whatever the branch's text is now.
                 if (!Bindings.IsStrict(binding) && binding.Brick is { } id && bricks.Find($"{binding.Node}/{id}") is { } named) brickOf[alias] = named.Key;
@@ -55,8 +56,11 @@ public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, Pla
         try
         {
             foreach (var (alias, branch) in JobYaml.Branches(JobYaml.Parse(yaml)))
-                if (bricks.MatchAll(branch) is { Count: > 0 } offered)
+            {
+                if (BrickRef.Of(alias, branch) is { } reference) offers[alias] = [reference.Node];
+                else if (bricks.MatchAll(branch) is { Count: > 0 } offered)
                     offers[alias] = offered.Select(b => b.Node).Distinct().Order(StringComparer.Ordinal).ToList();
+            }
         }
         catch (Exception) { }
         return offers;
@@ -69,7 +73,7 @@ public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, Pla
     /// </summary>
     public IReadOnlyDictionary<string, Binding> Resolve(string yaml, IReadOnlyDictionary<string, Binding> bindings)
     {
-        var resolved = new Dictionary<string, Binding>(bindings, StringComparer.Ordinal);
+        var resolved = new Dictionary<string, Binding>(BrickReferences.Expand(yaml, bindings), StringComparer.Ordinal);
         try
         {
             foreach (var (alias, branch) in JobYaml.Branches(JobYaml.Parse(yaml)))
@@ -91,11 +95,22 @@ public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, Pla
         var problems = new List<BindingProblem>();
         var nodes = inventory.Snapshot().ToDictionary(n => n.Name, StringComparer.Ordinal);
         var aliases = new HashSet<string>(StringComparer.Ordinal);
+        bindings = BrickReferences.Expand(yaml, bindings);
         try
         {
             foreach (var (alias, branch) in JobYaml.Branches(JobYaml.Parse(yaml)))
             {
                 aliases.Add(alias);
+                if (BrickRef.Misuse(alias, branch) is { } misuse)
+                {
+                    problems.Add(new(alias, BindingCauses.NotABrick, misuse, true));
+                    continue;
+                }
+                if (BrickRef.Of(alias, branch) is { } reference)
+                {
+                    if (CheckReference(reference, bindings.GetValueOrDefault(alias), nodes) is { } referenced) problems.Add(referenced);
+                    continue;
+                }
                 var offered = bricks.MatchAll(branch);
                 if (!bindings.TryGetValue(alias, out var binding))
                 {
@@ -147,6 +162,39 @@ public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, Pla
     }
 
     /// <summary>
+    /// Why a referenced brick does not hold, or null. A reference names its node and its brick, so there is no text to match:
+    /// the node must be known, enabled and online, offer a source of that id, and the version a check pinned must still be the
+    /// brick's (strict), or the mode's own pin must hold what it compares (another mode).
+    /// </summary>
+    private BindingProblem? CheckReference(BrickReference reference, Binding? binding, IReadOnlyDictionary<string, NodeView> nodes)
+    {
+        var (alias, mode) = (reference.Alias, binding is null ? BindingModes.Strict : Bindings.ModeOf(binding));
+        var bound = $"brick '{reference.Brick}' on {reference.Node}";
+        var identity = rights.NodeIdentity(reference.Node);
+        if (!BindingModes.All.Contains(mode))
+            return new(alias, BindingCauses.UnsupportedMode, $"'{alias}' references {bound} in mode '{mode}': the modes are {string.Join(", ", BindingModes.All)}.", true);
+        if (identity is null)
+            return new(alias, BindingCauses.UnknownNode, $"'{alias}' references {bound}, which is no node of this coordinator.", true);
+        if (!identity.Enabled)
+            return new(alias, BindingCauses.UnknownNode, $"'{alias}' references {bound}, whose identity is disabled.", true);
+        if (!nodes.TryGetValue(reference.Node, out var view))
+            return new(alias, BindingCauses.Offline, $"'{alias}' references {bound}, which has no connected replica.", false);
+        if (bricks.Find(reference.Key) is not { } brick)
+            return view.Online
+                ? new(alias, BindingCauses.NotOffered, $"'{alias}' references {bound}, which that node does not offer.", true)
+                : new(alias, BindingCauses.Offline, $"'{alias}' references {bound}, which has no connected replica.", false);
+        if (brick.Kind != BrickKind.Source)
+            return new(alias, BindingCauses.NotABrick, $"'{alias}' references {bound}, which is not a source: only a source is read by reference.", true);
+        if (mode != BindingModes.Strict) return CheckHeld(alias, binding!, bound, mode, view);
+        if (binding?.Pin is not { } pin)
+            return new(alias, BindingCauses.Unchecked, $"'{alias}' references {bound} and no check has pinned its version: save the pipeline again.", true);
+        if (pin.Version != brick.Version)
+            return new(alias, BindingCauses.BrickChanged,
+                $"'{alias}' was checked against version {pin.Version} of {bound}, which is now {brick.Version}: save the pipeline again.", true);
+        return view.Online ? null : new(alias, BindingCauses.Offline, $"'{alias}' references {bound}, which has no connected replica.", false);
+    }
+
+    /// <summary>
     /// Why a binding in a mode other than strict does not hold on a node that has an identity and has announced itself, or null when it
     /// does. It needs a brick that node offers and a pin a check wrote that holds what the mode compares.
     /// </summary>
@@ -177,6 +225,7 @@ public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, Pla
         var errors = new List<string>();
         var placed = new Dictionary<string, string>(StringComparer.Ordinal);
         var named = new Dictionary<string, string>(StringComparer.Ordinal);
+        bindings = BrickReferences.Expand(yaml, bindings);
         var nodes = inventory.Snapshot();
         var hostOf = nodes.SelectMany(n => n.Datasets.Select(d => (d.Variable, n.Name))).ToDictionary(x => x.Variable, x => x.Name, StringComparer.Ordinal);
         var problems = Check(yaml, bindings);
@@ -187,6 +236,8 @@ public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, Pla
         {
             foreach (var (alias, branch) in JobYaml.Branches(JobYaml.Parse(yaml)))
             {
+                // A reference the check refused, or a misuse of the scheme, never reaches a node or the runner: dtpipe does not read it.
+                if (BrickRef.Misuse(alias, branch) is not null || (refused.Contains(alias) && BrickRef.Of(alias, branch) is not null)) continue;
                 // A bound alias is placed on its node or not at all, and so is a brick nobody bound: neither is the runner's.
                 var bound = bindings.TryGetValue(alias, out var binding);
                 if (bound || bricks.MatchAll(branch).Count > 0)

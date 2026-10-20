@@ -82,9 +82,8 @@ public sealed class DeploymentManagerTests : IDisposable
 
     private static DistributionPlan Plan()
     {
-        var planned = FragmentJob.Compose(Units, FragmentJob.Over([Brick("sqlite:a")])).Yaml!;
         var fragment = new PlannedFragment(
-            "p@n", "n", ["crm"], "", FragmentJob.VersionOf(planned), [], ["src"], FragmentForm.Bricks, Composition: Units);
+            "p@n", "n", ["crm"], "", FragmentJob.VersionOf(Units, FragmentJob.VersionsOver([Brick("sqlite:a")])), [], ["src"], FragmentForm.Bricks, Composition: Units);
         return new DistributionPlan("plan-1", "p", [], [], [fragment], [], [], [], null);
     }
 

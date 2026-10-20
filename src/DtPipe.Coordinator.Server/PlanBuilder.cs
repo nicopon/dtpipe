@@ -277,12 +277,27 @@ public sealed class PlanBuilder(
                 }
                 else if (!(mode == PlanMode.Manual && node.Capabilities.Contains(NodeAnnouncement.RawFragments)))
                 {
-                    var forms = node.Bricks.Select(b => BrickRules.Declared(b.Kind, b.Branch)).ToList();
+                    var forms = node.Bricks.Where(b => b.Branch is not null).Select(b => BrickRules.Declared(b.Kind, b.Branch!)).ToList();
                     errors.Add($"{draft.Name}: {BrickRules.FragmentRefusal(yaml, forms, requireBricks: true) ?? "this node runs bricks by id, and this fragment is not made of them."}");
                     continue;
                 }
             }
-            var version = FragmentJob.VersionOf(yaml);
+            // A fragment of bricks is versioned by the versions of its bricks, the only thing of them the coordinator holds.
+            // dtpipe does not read brick:, so a reference leaves the coordinator only as a brick its own node composes.
+            // The planner has added the wiring (an arrow output) by now, so a reference is read by its input alone.
+            var refused = false;
+            foreach (var (key, branch) in draft.Owned)
+            {
+                if (JobYaml.Scalar(branch, "input") is not { } input || !input.StartsWith(BrickRef.Scheme, StringComparison.Ordinal)) continue;
+                if (!BrickRef.TryParse(input, out var refNode, out var refBrick))
+                    errors.Add($"{draft.Name}: '{key}' has a malformed brick reference '{input}'.");
+                else if (refNode != draft.Node || form != FragmentForm.Bricks)
+                    errors.Add($"{draft.Name}: '{key}' references {refNode}/{refBrick}, which only {refNode} composes into a fragment of bricks.");
+                else continue;
+                refused = true;
+            }
+            if (refused) continue;
+            var version = composition is not null ? FragmentJob.VersionOf(composition, (id, _) => bricks.Find($"{draft.Node}/{id}")?.Version) : FragmentJob.VersionOf(yaml);
 
             if (draft.Edges.Count == 0)
                 errors.Add($"{draft.Name} exchanges nothing with another node. A pipeline node completes only once every one of its edges is wired: cut the pipeline, or spread its branches over several nodes.");
@@ -355,6 +370,11 @@ public sealed class PlanBuilder(
             if (heads.ContainsKey(cut.Branch))
             {
                 errors.Add($"'{cut.Branch}' is cut more than once; the planner keeps one cut per branch.");
+                return null;
+            }
+            if (branches.TryGetValue(cut.Branch, out var referenced) && (BrickRef.Of(cut.Branch, referenced) is not null || BrickRef.Misuse(cut.Branch, referenced) is not null))
+            {
+                errors.Add($"'{cut.Branch}' references a brick, which only its node composes: it is not cut.");
                 return null;
             }
             if (!branches.TryGetValue(cut.Branch, out var branch) || !JobGraph.Describe(cut.Branch, branch).Cuttable)

@@ -110,7 +110,7 @@ public sealed class NodeInventory(ReplicaRegistry registry)
 
     /// <summary>The start of a hash of the bricks a replica announces: equal on replicas that offer the same, different while one is being updated.</summary>
     private static string BricksHash(IReadOnlyList<BrickInfo>? bricks) =>
-        ContentHash.Of(string.Join('\n', (bricks ?? []).OrderBy(b => b.Id, StringComparer.Ordinal).Select(b => $"{b.Id}\t{b.Kind}\t{b.Branch}")), 8);
+        ContentHash.Of(string.Join('\n', (bricks ?? []).OrderBy(b => b.Id, StringComparer.Ordinal).Select(b => $"{b.Id}\t{b.Kind}\t{BrickRules.VersionOf(b)}")), 8);
 }
 
 /// <summary>

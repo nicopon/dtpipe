@@ -314,8 +314,7 @@ public class ReplicaAdmissionSubjectTests
         var jwt = new TestJwt();
         await using var host = await StartAsync(jwt);
         var units = new[] { new FragmentUnit("src", FragmentUnitKind.SourceSend, "src") };
-        var planned = FragmentJob.Compose(units, FragmentJob.Over([Brick("sqlite:a")])).Yaml!;
-        var spec = new FragmentSpec("frag-x", FragmentJob.VersionOf(planned), [], Units: units);
+        var spec = new FragmentSpec("frag-x", FragmentJob.VersionOf(units, FragmentJob.VersionsOver([Brick("sqlite:a")])), [], Units: units);
 
         // The changed replica has the lowest instance id: a tie-break alone would have chosen it.
         await using var changed = await FakeNode.StartAsync(host, "node-x", new FakeNodeOptions

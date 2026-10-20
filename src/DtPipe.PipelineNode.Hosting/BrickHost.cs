@@ -10,8 +10,8 @@ namespace DtPipe.PipelineNode.Hosting;
 
 /// <summary>
 /// The bricks this node offers. It reads its own databases through the dtpipe binary, with the
-/// environment its fragments inherit: a source's schema comes from <c>dtpipe inspect</c>, a preview
-/// and a sample from a bounded read, a source's verdict on its pinned contract from that read and
+/// environment its fragments inherit: a source's schema, a preview
+/// and a sample come from a bounded read, asked for, a source's verdict on its pinned contract from that read and
 /// <c>dtpipe contract diff</c>, a sink's verdict on a contract from <c>dtpipe contract check</c>.
 /// The coordinator never opens a brick's database for this.
 /// </summary>
@@ -19,17 +19,32 @@ internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> dec
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
+    // What the node knows of each brick it offers, text included: it never leaves the node.
+    private IReadOnlyList<BrickInfo> _declared = [];
+
+    /// <summary>
+    /// What the node announces: a source brick as the coordinator needs it and nothing more (no text, no schema), a sink
+    /// still with its text, each with the version its text gives.
+    /// </summary>
     public IReadOnlyList<BrickInfo> Bricks { get; private set; } = [];
 
-    /// <summary>The branch of the announced brick <paramref name="id"/> as its owner declared it, or <c>null</c> when none of that kind is offered.</summary>
-    public YamlMappingNode? DeclaredBranch(string id, BrickKind kind) => FragmentJob.Over(Bricks)(id, kind);
+    /// <summary>The branch of the brick <paramref name="id"/> as its owner declared it, or <c>null</c> when none of that kind is offered.</summary>
+    public YamlMappingNode? DeclaredBranch(string id, BrickKind kind) => FragmentJob.Over(_declared)(id, kind);
 
-    /// <summary>What every announced brick is, for <see cref="BrickRules"/>; set once with <see cref="Bricks"/>.</summary>
+    /// <summary>The version of the brick <paramref name="id"/> as the node declares it, the one it announces.</summary>
+    public string? DeclaredVersion(string id, BrickKind kind) => FragmentJob.VersionsOver(_declared)(id, kind);
+
+    /// <summary>What every offered brick is, for <see cref="BrickRules"/>; set once with <see cref="Bricks"/>.</summary>
     public IReadOnlyList<BrickForm> Forms { get; private set; } = [];
 
-    public async Task InspectAsync(CancellationToken ct)
+    /// <summary>
+    /// Reads the declarations. A source's schema is not read here: it needs the database, and the coordinator asks for it
+    /// when a person looks at the brick (<see cref="PreviewAsync"/>), so a node that starts reads no data.
+    /// </summary>
+    public Task InspectAsync(CancellationToken ct)
     {
-        var bricks = new List<BrickInfo>();
+        var declaredBricks = new List<BrickInfo>();
+        var announced = new List<BrickInfo>();
         foreach (var brick in declared)
         {
             // A brick this node would refuse to run must not be offered: the designer would place it here.
@@ -38,27 +53,15 @@ internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> dec
                 logger.LogWarning("Brick {Brick} is not offered: {Reason}", brick.Id, refusal);
                 continue;
             }
-            IReadOnlyList<BrickColumn>? schema = null;
-            string? error = null;
-            if (brick.Kind == BrickKind.Source)
-            {
-                try
-                {
-                    var (input, query) = SourceRead(brick);
-                    var result = await dtpipe.RunAsync(["inspect", "--input", input, .. query is null ? Array.Empty<string>() : ["--query", query], "--format", "json"], ct);
-                    if (result.Succeeded) schema = JsonSerializer.Deserialize<List<BrickColumn>>(result.Stdout, Json);
-                    else error = result.Diagnostic;
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    error = ex.Message;
-                }
-                if (error is not null) logger.LogWarning("Brick {Brick}: schema not inspected: {Error}", brick.Id, error);
-            }
-            bricks.Add(new BrickInfo(brick.Id, brick.Kind, brick.Title, brick.Description ?? "", brick.BranchJson, schema, error));
+            var version = BrickRules.VersionOf(brick.Kind, brick.BranchJson);
+            var full = new BrickInfo(brick.Id, brick.Kind, brick.Title, brick.Description ?? "", brick.BranchJson, null, null, version);
+            declaredBricks.Add(full);
+            announced.Add(brick.Kind == BrickKind.Source ? full with { Branch = null } : full);
         }
-        Bricks = bricks;
-        Forms = bricks.Select(b => BrickRules.Declared(b.Kind, b.Branch)).ToList();
+        _declared = declaredBricks;
+        Bricks = announced;
+        Forms = declaredBricks.Select(b => BrickRules.Declared(b.Kind, b.Branch!)).ToList();
+        return Task.CompletedTask;
     }
 
     /// <summary>A source's first rows, as its declared branch reads them, or what a sink's table holds now.</summary>
@@ -124,7 +127,7 @@ internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> dec
     /// </summary>
     public async Task<BrickSample> SampleAsync(string id, int rows)
     {
-        var brick = Bricks.FirstOrDefault(b => b.Id == id && b.Kind == BrickKind.Source);
+        var brick = _declared.FirstOrDefault(b => b.Id == id && b.Kind == BrickKind.Source);
         if (brick is null) return new BrickSample(null, $"{node} offers no source brick '{id}'.");
         try
         {
@@ -235,7 +238,7 @@ internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> dec
     /// </summary>
     public async Task<SinkCheck> CheckSinkAsync(string id, string contractJson)
     {
-        var brick = Bricks.FirstOrDefault(b => b.Id == id && b.Kind == BrickKind.Sink);
+        var brick = _declared.FirstOrDefault(b => b.Id == id && b.Kind == BrickKind.Sink);
         if (brick is null) return new SinkCheck(false, $"{node} offers no sink brick '{id}'.");
         try
         {
@@ -287,13 +290,6 @@ internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> dec
         {
             try { Directory.Delete(dir, recursive: true); } catch (IOException) { }
         }
-    }
-
-    private static (string Input, string? Query) SourceRead(BrickDeclaration brick)
-    {
-        var branch = Branch(brick);
-        return (Scalar(branch, "input") ?? throw new InvalidOperationException("The source names no input."),
-                ProviderOption(branch, "-reader", "query"));
     }
 
     private static JsonElement Branch(BrickDeclaration brick) => JsonDocument.Parse(brick.BranchJson).RootElement.Clone();

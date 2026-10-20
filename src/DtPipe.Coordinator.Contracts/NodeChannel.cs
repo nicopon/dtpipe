@@ -96,15 +96,21 @@ public enum BrickKind { Source, Sink }
 public sealed record BrickColumn(string Name, string Type, bool IsNullable);
 
 /// <summary>
-/// A read or a write the node's owner preconfigured on one of its databases. <see cref="Branch"/>
-/// is the brick's piece of a dtpipe branch, as JSON text exactly as the node's file declares it: a
-/// source's <c>input</c> and reader options, a sink's <c>output</c> and writer options. The node
-/// inspects a source's schema itself, where the data is; <see cref="SchemaError"/> says why it
-/// could not.
+/// A read or a write the node's owner preconfigured on one of its databases. A **minimal** brick (<see cref="Branch"/> is
+/// <c>null</c>) is announced by what the coordinator needs and nothing else: its id, kind, title, description and
+/// <see cref="Version"/>, a hash of the declared text taken on the node (<see cref="BrickRules.VersionOf(BrickKind, string)"/>), so
+/// the text, its variables and its schema stay on the node; a job references it as <c>brick:&lt;node&gt;/&lt;id&gt;</c> and the
+/// node composes the branch from its own declarations. A brick that still carries its <see cref="Branch"/> (the piece of a dtpipe
+/// branch as JSON text, exactly as the node's file declares it) is matched by that text. <see cref="Schema"/> is announced by
+/// a node at start with neither: it is read on demand, and <see cref="SchemaError"/> says why one could not be.
 /// </summary>
 public sealed record BrickInfo(
-    string Id, BrickKind Kind, string Title, string Description, string Branch,
-    IReadOnlyList<BrickColumn>? Schema, string? SchemaError);
+    string Id, BrickKind Kind, string Title, string Description, string? Branch,
+    IReadOnlyList<BrickColumn>? Schema, string? SchemaError, string? Version = null)
+{
+    /// <summary>A brick announced without its text.</summary>
+    public bool IsMinimal => Branch is null;
+}
 
 /// <summary>
 /// What <c>PreviewBrick</c> answers: CSV text, or why the node could not read it. For a source brick

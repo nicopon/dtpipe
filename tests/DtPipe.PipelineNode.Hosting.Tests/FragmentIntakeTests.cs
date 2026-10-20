@@ -16,11 +16,13 @@ public class FragmentIntakeTests
     private static readonly FragmentUnit[] Units = [new("anonymize", FragmentUnitKind.Inbound), new("load", FragmentUnitKind.Sink, "dim", "anonymize")];
 
     private static FragmentSpec Planned(string? version = null) => new(
-        "p@node-4", version ?? FragmentJob.VersionOf(FragmentJob.Compose(Units, (id, kind) => Declared(id, kind)).Yaml!), [], Units: Units);
+        "p@node-4", version ?? FragmentJob.VersionOf(Units, VersionOf), [], Units: Units);
 
     private static (string? Yaml, string? Reason) Resolve(FragmentSpec fragment, FragmentPolicy policy = FragmentPolicy.Bricks, FragmentGate? gate = null,
-        FragmentJob.BranchOfBrick? branch = null) =>
-        FragmentIntake.JobOf(fragment, policy, gate, branch ?? ((id, kind) => Declared(id, kind)), []);
+        FragmentJob.BranchOfBrick? branch = null, FragmentJob.VersionOfBrick? version = null) =>
+        FragmentIntake.JobOf(fragment, policy, gate, branch ?? ((id, kind) => Declared(id, kind)), version ?? VersionOf, []);
+
+    private static string? VersionOf(string id, BrickKind kind) => Declared(id, kind) is { } b ? BrickRules.VersionOf(kind, JobYaml.ToJson(b)!.ToJsonString()) : null;
 
     [Fact]
     public void A_data_node_composes_the_job_the_coordinator_planned_from_its_own_bricks()
@@ -34,7 +36,9 @@ public class FragmentIntakeTests
     [Fact]
     public void A_brick_that_changed_since_the_plan_is_refused_by_name()
     {
-        var (yaml, reason) = Resolve(Planned(), branch: (id, kind) => Declared(id, kind, Sink.Replace("\"dim\"", "\"dim2\"")));
+        var changed = Sink.Replace("\"dim\"", "\"dim2\"");
+        var (yaml, reason) = Resolve(Planned(), branch: (id, kind) => Declared(id, kind, changed),
+            version: (id, kind) => Declared(id, kind, changed) is { } b ? BrickRules.VersionOf(kind, JobYaml.ToJson(b)!.ToJsonString()) : null);
 
         Assert.Null(yaml);
         Assert.Contains("a brick of p@node-4 (dim) changed since the plan was made", reason);

@@ -49,6 +49,20 @@ public static class BrickRules
     public static BrickForm Declared(BrickKind kind, YamlMappingNode branch) => new(kind, Canonical(branch));
 
     /// <summary>
+    /// The version of a brick declared as <paramref name="branchJson"/>: the start of the hash of its canonical text, taken once by
+    /// the node that owns the text. Variables stay as the <c>${{Name}}</c> tokens the text holds, so no value enters the hash.
+    /// </summary>
+    public static string VersionOf(BrickKind kind, string branchJson) => ContentHash.Of(Declared(kind, branchJson).Canonical, 12);
+
+    /// <summary>The version an announced brick carries, or the one its text gives when it carries none (a test fixture's: a node always announces one).</summary>
+    public static string? VersionOf(BrickInfo brick)
+    {
+        if (brick.Version is not null || brick.Branch is not { } text) return brick.Version;
+        try { return VersionOf(brick.Kind, text); }
+        catch (Exception) { return null; }
+    }
+
+    /// <summary>
     /// The form of a whole branch, with the wiring the planner adds around a brick set aside: a sink is
     /// fed through <c>from</c>, and a source sent straight to another node gains <c>output: arrow:-</c>.
     /// </summary>

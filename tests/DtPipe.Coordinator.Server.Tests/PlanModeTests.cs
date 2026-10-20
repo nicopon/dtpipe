@@ -137,6 +137,23 @@ public sealed class PlanModeTests : IDisposable
     }
 
     [Fact]
+    public async Task A_Brick_Reference_Reaches_No_Fragment_Written_As_A_Job_And_No_Runner()
+    {
+        DataNode("d", acceptsRaw: true);
+        var job = "a:\n  input: brick:d/src\nb:\n  from: a\n  output: csv:out.csv\n";
+
+        foreach (var (node, other) in new[] { ("d", "r"), ("r", "r") })
+        {
+            var plan = await _planner.BuildAsync(
+                new PlanRequest("p", job, null, new Dictionary<string, string> { ["a"] = node, ["b"] = other }), PlanMode.Manual, TestContext.Current.CancellationToken);
+
+            Assert.True(plan.Errors.Any(e => e.Contains("d/src", StringComparison.Ordinal)), $"{node}: " + string.Join(" / ", plan.Errors));
+            Assert.False(plan.Deployable);
+            Assert.DoesNotContain(plan.Fragments, f => f.Yaml.Contains("brick:", StringComparison.Ordinal) && f.Form == FragmentForm.Job);
+        }
+    }
+
+    [Fact]
     public async Task A_Fragment_Naming_A_Variable_That_Is_No_Identifier_Is_Refused_On_A_Node_That_Does_Not_Host_It()
     {
         DataNode("d", acceptsRaw: true);

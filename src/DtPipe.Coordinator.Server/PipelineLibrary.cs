@@ -106,7 +106,7 @@ public sealed partial class PipelineLibrary : IJobSource, ILibraryHeads
             if (!File.Exists(yamlPath)) continue;
             var yaml = await File.ReadAllTextAsync(yamlPath, ct);
             var (title, description, _) = DesignService.ReadHeader(yaml);
-            var bindings = ReadBindings(id);
+            var bindings = BrickReferences.Expand(yaml, ReadBindings(id));
             var last = (await HistoryCoreAsync(id, 1, ct)).FirstOrDefault();
             entries.Add(new LibraryEntry(id, title, description, await JobCommitAsync(id, ct), last?.Date, last?.Message,
                 _bindingProblems(yaml, bindings)));
@@ -120,7 +120,7 @@ public sealed partial class PipelineLibrary : IJobSource, ILibraryHeads
         var yamlPath = Path.Combine(dir, "pipeline.yaml");
         if (!File.Exists(yamlPath)) return null;
         var yaml = await File.ReadAllTextAsync(yamlPath, ct);
-        var bindings = ReadBindings(id);
+        var bindings = BrickReferences.Expand(yaml, ReadBindings(id));
         return new LibraryDocument(id, yaml, await JobCommitAsync(id, ct), bindings, _bindingProblems(yaml, bindings));
     }, ct);
 
@@ -157,13 +157,14 @@ public sealed partial class PipelineLibrary : IJobSource, ILibraryHeads
         var resolved = new Dictionary<string, Binding>(_resolveBricks(yaml, merged), StringComparer.Ordinal);
         foreach (var (alias, old) in kept)
             if (resolved.TryGetValue(alias, out var binding) && binding.Brick is null) resolved[alias] = binding with { Brick = old.Brick };
-        if (Bindings.Serialize(resolved) != Bindings.Serialize(kept) && (resolved.Count > 0 || kept.Count > 0))
+        // What is kept holds no node or brick for a referenced alias: the job says them.
+        var stored = BrickReferences.Strip(yaml, resolved);
+        if (Bindings.Serialize(stored) != Bindings.Serialize(kept) && (stored.Count > 0 || kept.Count > 0))
         {
-            kept = resolved;
-            await WriteBindingsAsync(dir, kept, NoCancel);
+            await WriteBindingsAsync(dir, stored, NoCancel);
         }
         await CommitAsync($"pipelines/{id}", Message(message, $"Save {id}"), NoCancel);
-        return new SaveOutcome(await JobCommitAsync(id, NoCancel), before != yaml, kept);
+        return new SaveOutcome(await JobCommitAsync(id, NoCancel), before != yaml, BrickReferences.Expand(yaml, stored));
     }, ct);
 
     private static string Short(string? commit) => commit is null ? "nothing" : commit[..Math.Min(8, commit.Length)];
@@ -181,8 +182,8 @@ public sealed partial class PipelineLibrary : IJobSource, ILibraryHeads
         var dir = PipelineDir(id);
         var yamlPath = Path.Combine(dir, "pipeline.yaml");
         if (!File.Exists(yamlPath)) throw new ConflictException($"'{id}' is not in the library.");
-        var resolved = _resolveBricks(await File.ReadAllTextAsync(yamlPath, NoCancel), bindings);
-        await WriteBindingsAsync(dir, resolved, NoCancel);
+        var yaml = await File.ReadAllTextAsync(yamlPath, NoCancel);
+        await WriteBindingsAsync(dir, BrickReferences.Strip(yaml, _resolveBricks(yaml, bindings)), NoCancel);
         return new BindingsSaved(await CommitAsync($"pipelines/{id}", Message(message, $"Bind {id}"), NoCancel));
     }, ct);
 

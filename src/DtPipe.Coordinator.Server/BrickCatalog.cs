@@ -26,9 +26,13 @@ public sealed record BrickView(
 /// </summary>
 public sealed class BrickCatalog(NodeInventory inventory)
 {
-    private sealed record Resolved(BrickView View, YamlMappingNode Branch, string Canonical, string Declared);
+    // Canonical is null for a minimal brick: it has no text to match, and a job reaches it by reference.
+    private sealed record Resolved(BrickView View, YamlMappingNode Branch, string? Canonical, string Declared);
 
-    /// <summary>What reading an announced brick gives, which depends on the brick alone; <see cref="Branch"/> is <c>null</c> for a brick whose text is no mapping.</summary>
+    /// <summary>
+    /// What reading an announced brick gives, which depends on the brick alone; <see cref="Branch"/> is <c>null</c> for a brick whose text
+    /// is no mapping, and for a minimal brick, which has none: its branch is the reference to it.
+    /// </summary>
     private sealed record Read(YamlMappingNode? Branch, string Canonical, string Version, string Yaml);
 
     // By the announced object: a brick announced again is another object, so it is read again.
@@ -90,11 +94,14 @@ public sealed class BrickCatalog(NodeInventory inventory)
         {
             foreach (var brick in node.Bricks)
             {
-                if (_read.GetValue(brick, ReadOf) is not { Branch: { } branch } read) continue;
+                var read = _read.GetValue(brick, ReadOf);
+                // A minimal brick is read as the reference a job makes to it, which names the node as it is called now.
+                var branch = brick.IsMinimal ? new YamlMappingNode { { "input", BrickRef.Format(node.Name, brick.Id) } } : read.Branch;
+                if (branch is null || (brick.IsMinimal && read.Version.Length == 0)) continue;
                 resolved.Add(new Resolved(
-                    new BrickView($"{node.Name}/{brick.Id}", node.Name, brick.Id, brick.Kind, brick.Title, brick.Description, read.Yaml,
-                        read.Version, brick.Schema, brick.SchemaError, node.Online),
-                    branch, read.Canonical, brick.Branch));
+                    new BrickView($"{node.Name}/{brick.Id}", node.Name, brick.Id, brick.Kind, brick.Title, brick.Description,
+                        brick.IsMinimal ? JobYaml.Serialize(branch) : read.Yaml, read.Version, brick.Schema, brick.SchemaError, node.Online),
+                    branch, brick.IsMinimal ? null : read.Canonical, brick.IsMinimal ? JobYaml.ToJson(branch)!.ToJsonString() : brick.Branch!));
             }
         }
         return resolved;
@@ -103,9 +110,10 @@ public sealed class BrickCatalog(NodeInventory inventory)
     private static Read ReadOf(BrickInfo brick)
     {
         // The one reading of an announced brick, the node's and the replica chooser's too.
+        if (brick.IsMinimal) return new Read(null, "", BrickRules.VersionOf(brick) ?? "", "");
         if (FragmentJob.Declared(brick) is not { } branch) return new Read(null, "", "", "");
         var canonical = BrickRules.Declared(brick.Kind, branch).Canonical;
-        var version = ContentHash.Of(canonical, 12);
+        var version = BrickRules.VersionOf(brick) ?? ContentHash.Of(canonical, 12);
         var yaml = JobYaml.Serialize(branch);
         return new Read(branch, canonical, version, yaml);
     }

@@ -11,8 +11,8 @@ namespace DtPipe.Coordinator;
 internal static class ReplicaChooser
 {
     /// <summary>
-    /// Why the replica cannot compose <paramref name="spec"/> from what it announced, or null. A fragment made of
-    /// bricks must compose, from the bricks the replica declares, to the version of the plan; a fragment written as a
+    /// Why the replica cannot run <paramref name="spec"/> from what it announced, or null. A fragment made of
+    /// bricks needs the versions of the bricks the replica announces to give the version of the plan; a fragment written as a
     /// job needs a replica that runs any fragment or accepts one as written. A replica at another version of a brick
     /// (a rolling update) is out for that fragment, not a reason to refuse the run while another is in.
     /// </summary>
@@ -21,7 +21,7 @@ internal static class ReplicaChooser
         if (spec.Units is not null)
         {
             if (announcement.Role == NodeRole.Runner) return "a runner has no brick to compose a job from.";
-            return FragmentJob.ComposeFor(spec, FragmentJob.Over(announcement.Bricks)).Reason;
+            return FragmentJob.VersionRefusal(spec, FragmentJob.VersionsOver(announcement.Bricks));
         }
         if (spec.Yaml is null) return $"{spec.Fragment} carries neither bricks nor a job.";
         if (announcement.Role == NodeRole.Runner || announcement.Offers(NodeAnnouncement.RawFragments)) return null;

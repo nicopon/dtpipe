@@ -34,6 +34,8 @@ public class DesignValidator(BrickCatalog bricks, NodeRequests nodes)
     /// </summary>
     public BrickView? BrickOf(string alias, YamlMappingNode branch, IReadOnlyDictionary<string, Binding> bindings)
     {
+        // A reference names its brick: there is no text to match and no node to choose.
+        if (BrickRef.Of(alias, branch) is { } reference) return bricks.Find(reference.Key);
         if (bindings.TryGetValue(alias, out var held) && !Bindings.IsStrict(held) && held.Brick is { } id && bricks.Find($"{held.Node}/{id}") is { } named)
             return named;
         var offered = bricks.MatchAll(branch);
@@ -48,6 +50,14 @@ public class DesignValidator(BrickCatalog bricks, NodeRequests nodes)
         var refusals = new List<string>();
         foreach (var (alias, branch) in JobYaml.Branches(JobYaml.Parse(yaml)))
         {
+            // A reference is the node's to compose, and dtpipe does not read it: one that names no source brick is refused here by name,
+            // never copied into the runner's dry-run.
+            if (BrickRef.Misuse(alias, branch) is { } misuse) { refusals.Add(misuse); continue; }
+            if (BrickRef.Of(alias, branch) is { } named && BrickOf(alias, branch, bindings) is not { Kind: BrickKind.Source })
+            {
+                refusals.Add($"'{alias}' references {named.Key}, which no node offers as a source.");
+                continue;
+            }
             switch (BrickOf(alias, branch, bindings))
             {
                 case { Kind: BrickKind.Source } source:

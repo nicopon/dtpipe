@@ -21,12 +21,14 @@ internal static class LibraryEndpoints
             // The check samples each brick on the node its binding names: the one this save carries over the one kept. What a check
             // pins is written with them; a pin the request brings is not read.
             var held = (await library.GetAsync(id, ct))?.Bindings ?? new Dictionary<string, Binding>();
-            var bound = Bindings.Merge(held, request.Bindings);
+            var referenced = BrickReferences.In(request.Yaml).Keys.ToHashSet(StringComparer.Ordinal);
+            var bound = BrickReferences.Expand(request.Yaml, Bindings.Merge(held, request.Bindings));
             var (refused, check) = await CheckedAsync(validator, request.Yaml, bound, ct);
             if (refused is not null) return refused;
-            // The entries to write: those the request names, and those the check re-pinned, which have a mode other than strict.
-            var pinned = Bindings.Pinned(bound, check!.Pins);
-            var written = pinned.Where(b => request.Bindings?.ContainsKey(b.Key) == true || !Bindings.IsStrict(b.Value))
+            // The entries to write: those the request names, those the check re-pinned, which have a mode other than strict, and the
+            // referenced bricks, which every mode pins at a version.
+            var pinned = Bindings.Pinned(bound, check!.Pins, referenced);
+            var written = pinned.Where(b => request.Bindings?.ContainsKey(b.Key) == true || !Bindings.IsStrict(b.Value) || referenced.Contains(b.Key))
                 .ToDictionary(b => b.Key, b => b.Value, StringComparer.Ordinal);
             var absent = http.Headers.IfNoneMatch.ToString().Trim() == "*";
             var expected = http.Headers.IfMatch.ToString().Trim() is { Length: > 0 } tag ? (tag.StartsWith("W/") ? tag[2..] : tag).Trim('"') : null;
@@ -66,10 +68,11 @@ internal static class LibraryEndpoints
             var bindings = request.Bindings ?? new Dictionary<string, Binding>();
             if (Refusal(bindings) is { } malformed) return Results.BadRequest(new { error = malformed });
             var doc = await library.GetAsync(id, ct) ?? throw new ConflictException($"'{id}' is not in the library.");
-            var stripped = bindings.ToDictionary(b => b.Key, b => b.Value with { Pin = null }, StringComparer.Ordinal);
+            var referenced = BrickReferences.In(doc.Yaml).Keys.ToHashSet(StringComparer.Ordinal);
+            var stripped = BrickReferences.Expand(doc.Yaml, bindings.ToDictionary(b => b.Key, b => b.Value with { Pin = null }, StringComparer.Ordinal));
             var (refused, check) = await CheckedAsync(validator, doc.Yaml, stripped, ct);
             if (refused is not null) return refused;
-            var saved = await library.SaveBindingsAsync(id, Bindings.Pinned(stripped, check!.Pins), request.Message ?? "", ct);
+            var saved = await library.SaveBindingsAsync(id, Bindings.Pinned(stripped, check!.Pins, referenced), request.Message ?? "", ct);
             bus.Publish("library", new { id, commit = saved.Commit });
             var problems = (await library.GetAsync(id, ct))?.BindingProblems ?? [];
             return Results.Ok(new { id, commit = saved.Commit, problems });

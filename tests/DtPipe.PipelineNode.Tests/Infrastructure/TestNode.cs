@@ -79,7 +79,7 @@ internal sealed class TestNode : IAsyncDisposable
         var dir = Directory.CreateTempSubdirectory("test-node-runs-").FullName;
         var runs = new ReplicaRuns(
             channel, node, name, DtPipeExecutableLocator.Path, new Dictionary<string, string>(), dir,
-            spec => FragmentIntake.JobOf(spec, FragmentPolicy.AnyFragment, null, (_, _) => null, []),
+            spec => FragmentIntake.JobOf(spec, FragmentPolicy.AnyFragment, null, (_, _) => null, (_, _) => null, []),
             _ => NullLogger.Instance, NullLogger.Instance, unwiredTimeout ?? TimeSpan.FromMinutes(5), faultInjection);
         runs.Bind();
         var test = new TestNode(name, node, channel, runs, id, FragmentOf(name, jobPath, edges));

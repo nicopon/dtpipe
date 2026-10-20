@@ -131,9 +131,8 @@ public sealed class RunQueueTests : IDisposable
 
     private static DistributionPlan DataPlan(string pipeline, string node)
     {
-        var composed = FragmentJob.Compose(Units, FragmentJob.Over([Brick()])).Yaml!;
         var fragment = new PlannedFragment(
-            $"{pipeline}@{node}", node, ["crm"], "", FragmentJob.VersionOf(composed), [], ["src"], FragmentForm.Bricks, Composition: Units);
+            $"{pipeline}@{node}", node, ["crm"], "", FragmentJob.VersionOf(Units, FragmentJob.VersionsOver([Brick()])), [], ["src"], FragmentForm.Bricks, Composition: Units);
         return new DistributionPlan("plan-" + pipeline, pipeline, [], [], [fragment], [], [], [], null);
     }
 
