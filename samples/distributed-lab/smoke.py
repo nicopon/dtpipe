@@ -764,7 +764,23 @@ def rights_pass():
             return e.code
 
     def studio():
+    def status():
+        # `lab.sh status` reads the coordinator's node table: every node the API lists is on a line with its groups and replicas.
+        command = [os.path.join(LAB_DIR, "lab.sh")] + (["stack"] if STACK else []) + ["status"]
+        shown = subprocess.run(command, capture_output=True, text=True, timeout=120)
+        if shown.returncode != 0:
+            raise RuntimeError(f"{' '.join(command)} -> {shown.returncode}: {shown.stderr[-300:]}")
+        nodes = call("/api/nodes")
+        for n in nodes:
+            line = next((l for l in shown.stdout.splitlines() if l.split()[:1] == [n["name"]] and " replicas " in l), None)
+            connected = sum(1 for r in n["replicas"] if r["connected"])
+            expected = f"{'online ' if n['online'] else 'offline'} {'+'.join(n['groups'])}"
+            if line is None or expected not in line or f"replicas {connected}/{len(n['replicas'])}" not in line:
+                raise RuntimeError(f"{n['name']}: expected '{expected}' with {connected}/{len(n['replicas'])} replicas, status says {line!r}")
+        return f"{len(nodes)} nodes, each with its groups and replicas on a line of `lab.sh status`"
+
         # dtpipe studio signs a person in through its own public client and calls /api with their
+    check("lab.sh status", status)
         # bearer token: the roles are the same configuration's, a change still needs the CSRF header,
         # and the token reaches no part of the data plane.
         designer = studio_tokens(URL, "labdesigner")["access_token"]
