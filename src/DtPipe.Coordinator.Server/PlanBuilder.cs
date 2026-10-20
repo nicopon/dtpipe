@@ -287,6 +287,7 @@ public sealed class PlanBuilder(
             if (draft.Edges.Count == 0)
                 errors.Add($"{draft.Name} exchanges nothing with another node. A pipeline node completes only once every one of its edges is wired: cut the pipeline, or spread its branches over several nodes.");
 
+            foreach (var refusal in VariableTokens.Refusals(yaml)) errors.Add($"{draft.Name}: {refusal}");
             var hosted = nodes[draft.Node].Datasets.Select(d => d.Variable).ToHashSet(StringComparer.Ordinal);
             foreach (var variable in JobYaml.Variables(yaml).Where(v => !hosted.Contains(v)))
             {

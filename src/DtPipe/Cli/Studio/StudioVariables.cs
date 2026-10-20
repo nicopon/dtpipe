@@ -1,4 +1,4 @@
-using DtPipe.Cli.Expressions;
+using DtPipe.Jobs;
 using DtPipe.Cli.Security;
 
 namespace DtPipe.Cli.Studio;
@@ -14,7 +14,7 @@ public sealed record StudioOverride(string? Keyring = null, string? Value = null
 public sealed record StudioVariable(string Expression, string Kind, string Name, bool Defined, StudioOverride? Override, bool Ready);
 
 /// <summary>
-/// The variables of a job, read with the run's own grammar (<see cref="CompositeStringContentResolver.Expressions"/>),
+/// The variables of a job, read with the run's own grammar (<see cref="VariableTokens"/>),
 /// and what a sample launches them with. A variable's name is the contract: the job keeps
 /// <c>${{NAME}}</c>, and the studio, like a node in production, decides what it resolves to. The
 /// page sees names and aliases, never a value it did not type.
@@ -37,8 +37,9 @@ public sealed class StudioVariables(StudioLocalFiles local, ISecretsManager secr
         // The keyring is opened only for a job that names it: on some systems opening it asks the person.
         var keyring = new Lazy<HashSet<string>>(() => Aliases().ToHashSet(StringComparer.OrdinalIgnoreCase));
         var variables = new List<StudioVariable>();
-        foreach (var expression in CompositeStringContentResolver.Expressions(yaml))
+        foreach (var expression in VariableTokens.Expressions(yaml))
         {
+            if (VariableTokens.Refusal(expression) is { } refusal) throw new StudioRefusal(422, refusal);
             if (expression.StartsWith(KeyringPrefix, StringComparison.OrdinalIgnoreCase))
             {
                 var alias = expression[KeyringPrefix.Length..];

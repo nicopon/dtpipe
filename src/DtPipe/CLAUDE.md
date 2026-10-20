@@ -223,7 +223,7 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   keeps out of git; nothing there is reached through a link, and a link refuses the save before the
   job is written.
 - **A variable's name is the contract.** `StudioVariables` reads a job's `${{…}}` with the run's own
-  grammar (`CompositeStringContentResolver.Expressions`), and an action arms each chosen value for
+  grammar (`VariableTokens` in `DtPipe.Jobs`), and an action arms each chosen value for
   its own call chain (`LaunchValues.Arm`, an `AsyncLocal` like `NonInteractiveGuard`) which
   `LaunchValueInterpolator` gives the real resolver ahead of the environment, in the DI chain and in
   `JobFileParser`'s own. Nothing writes the process environment, so a request beside the action never

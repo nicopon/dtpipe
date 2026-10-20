@@ -1,6 +1,5 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using System.Text.RegularExpressions;
 using YamlDotNet.Core;
 using YamlDotNet.RepresentationModel;
 
@@ -11,7 +10,7 @@ namespace DtPipe.Jobs;
 /// readers move whole branches, or take one apart at its endpoints; none interprets a branch's
 /// options, which stay dtpipe's business.
 /// </summary>
-public static partial class JobYaml
+public static class JobYaml
 {
     public static YamlMappingNode Parse(string yaml)
     {
@@ -105,10 +104,7 @@ public static partial class JobYaml
         _ => null,
     };
 
-    /// <summary>Environment variables a job text resolves through <c>${{NAME}}</c>.</summary>
+    /// <summary>Environment variables a job text resolves through <c>${{NAME}}</c>: the names of <see cref="VariableTokens"/>.</summary>
     public static IReadOnlyList<string> Variables(string text) =>
-        VariablePattern().Matches(text).Select(m => m.Groups[1].Value).Distinct(StringComparer.Ordinal).ToList();
-
-    [GeneratedRegex(@"\$\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")]
-    private static partial Regex VariablePattern();
+        VariableTokens.Expressions(text).Where(VariableTokens.IsName).ToList();
 }

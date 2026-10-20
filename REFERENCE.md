@@ -772,6 +772,10 @@ so it is the authority on any shape this table leaves open.
 Environment variables and secrets use the `${{...}}` syntax. See
 [Value Resolution](#value-resolution) for the full compatibility matrix and CLI/YAML differences.
 
+What stands between the braces is a variable name (letters, digits and underscores, not starting
+with a digit) or a reference (`scheme://…`). Any other expression is refused, so a name the
+environment holds under another spelling is never silently left as written.
+
 ---
 
 ## Provider-Specific Options

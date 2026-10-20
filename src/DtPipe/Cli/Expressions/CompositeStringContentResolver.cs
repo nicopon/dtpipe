@@ -1,5 +1,5 @@
 using System.Text;
-using System.Text.RegularExpressions;
+using DtPipe.Jobs;
 using DtPipe.Core.Expressions;
 
 namespace DtPipe.Cli.Expressions;
@@ -12,17 +12,6 @@ namespace DtPipe.Cli.Expressions;
 /// </summary>
 public sealed class CompositeStringContentResolver : IStringContentResolver
 {
-    private static readonly Regex InterpolationPattern =
-        new(@"\$\{\{([^}]+)\}\}", RegexOptions.Compiled);
-
-    /// <summary>
-    /// The expressions a text interpolates, each once, in order, as this resolver reads them: what is
-    /// inside <c>${{…}}</c>, trimmed. For a caller that has to name a job's variables without
-    /// resolving them, so it never reads the token grammar differently from the run.
-    /// </summary>
-    public static IReadOnlyList<string> Expressions(string text) =>
-        InterpolationPattern.Matches(text).Select(m => m.Groups[1].Value.Trim()).Distinct(StringComparer.Ordinal).ToList();
-
     private readonly IEnumerable<IStringInterpolator> _interpolators;
 
     public CompositeStringContentResolver(IEnumerable<IStringInterpolator> interpolators)
@@ -54,31 +43,32 @@ public sealed class CompositeStringContentResolver : IStringContentResolver
             }
         }
 
-        // 3. Inline Interpolation (e.g. ${{expr}})
-        var matches = InterpolationPattern.Matches(s);
-        if (matches.Count == 0) return s;
+        // 3. Inline Interpolation (e.g. ${{expr}}), through the grammar every reader of a job shares
+        var tokens = VariableTokens.Of(s).ToList();
+        if (tokens.Count == 0) return s;
 
         var sb = new StringBuilder();
         var lastIndex = 0;
 
-        foreach (Match match in matches)
+        foreach (var token in tokens)
         {
-            sb.Append(s, lastIndex, match.Index - lastIndex);
-            
-            var expr = match.Groups[1].Value.Trim();
-            string? resolvedValue = null;
+            if (VariableTokens.Refusal(token.Expression) is { } refusal)
+                throw new FormatException(refusal);
 
+            sb.Append(s, lastIndex, token.Index - lastIndex);
+
+            string? resolvedValue = null;
             foreach (var interpolator in _interpolators)
             {
-                resolvedValue = await interpolator.TryResolveAsync(expr, ct);
+                resolvedValue = await interpolator.TryResolveAsync(token.Expression, ct);
                 if (resolvedValue != null)
                 {
                     break;
                 }
             }
 
-            sb.Append(resolvedValue ?? match.Value);
-            lastIndex = match.Index + match.Length;
+            sb.Append(resolvedValue ?? s.Substring(token.Index, token.Length));
+            lastIndex = token.Index + token.Length;
         }
 
         sb.Append(s, lastIndex, s.Length - lastIndex);

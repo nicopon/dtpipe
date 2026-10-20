@@ -137,6 +137,19 @@ public sealed class PlanModeTests : IDisposable
     }
 
     [Fact]
+    public async Task A_Fragment_Naming_A_Variable_That_Is_No_Identifier_Is_Refused_On_A_Node_That_Does_Not_Host_It()
+    {
+        DataNode("d", acceptsRaw: true);
+        var job = "a:\n  input: sqlite:${{MY-VAR}}\nb:\n  from: a\n  output: csv:out.csv\n";
+
+        var plan = await _planner.BuildAsync(
+            new PlanRequest("p", job, null, new Dictionary<string, string> { ["a"] = "d", ["b"] = "r" }), PlanMode.Manual, TestContext.Current.CancellationToken);
+
+        Assert.Contains(plan.Errors, e => e.Contains("MY-VAR", StringComparison.Ordinal));
+        Assert.False(plan.Deployable);
+    }
+
+    [Fact]
     public async Task A_Manual_Plan_Cuts_A_Branch_On_The_Node_That_Hosts_Its_Data()
     {
         DataNode("d", acceptsRaw: true);

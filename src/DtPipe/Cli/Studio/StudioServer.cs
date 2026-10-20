@@ -725,14 +725,14 @@ public sealed partial class StudioServer : IAsyncDisposable
     internal static string ForRecognition(string yaml, BrickCatalogView? catalog)
     {
         var announced = (catalog?.Bricks ?? [])
-            .SelectMany(b => CompositeStringContentResolver.Expressions(b.Branch.ToJsonString()))
-            .Where(e => !e.Contains("://", StringComparison.Ordinal))
+            .SelectMany(b => VariableTokens.Expressions(b.Branch.ToJsonString()))
+            .Where(e => !VariableTokens.IsReference(e))
             .ToHashSet(StringComparer.Ordinal);
         var kept = new YamlMappingNode();
         foreach (var (alias, branch) in JobYaml.Branches(JobYaml.Parse(yaml)))
         {
             var ends = new[] { JobYaml.Scalar(branch, "input"), JobYaml.Scalar(branch, "output") };
-            if (ends.Any(end => end is not null && CompositeStringContentResolver.Expressions(end).Any(announced.Contains)))
+            if (ends.Any(end => end is not null && VariableTokens.Expressions(end).Any(announced.Contains)))
                 kept.Add(alias, JobYaml.CloneBranch(branch));
         }
         return kept.Children.Count == 0 ? "" : JobYaml.Serialize(kept);
