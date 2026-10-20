@@ -121,8 +121,8 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   which mode they run in. Never add a bench-only
   route outside `MapLabMode`. `[local: RouteTableTests]` `[unchecked: whether a new route belongs to the bench]`
 - **Fault injection ends a fragment's child only on a replica whose host enabled it.** A replica that did
-  not answers that it ended none, and the kill route does not report that.
-  `[local: PipelineNode.Tests FaultInjectionTests]` `[unchecked: the route's answer to a kill nobody carried out]`
+  not answers that it ended none, and the kill route answers 200 with `killed`, the count of children ended over
+  every replica of the node: `0` says none was. `[local: PipelineNode.Tests FaultInjectionTests, RunQueueTests]`
 - **The server never opens a node's data.** What reads it asks the node that hosts it, through
   `NodeRequests`: a brick preview and a cut (the named request `lab.split`, which only a lab host registers), and a
   library save's check (`DesignValidator`): each source brick's node sends its first row as Arrow IPC

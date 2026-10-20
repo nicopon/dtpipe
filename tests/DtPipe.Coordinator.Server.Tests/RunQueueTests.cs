@@ -24,13 +24,16 @@ public sealed class RunQueueTests : IDisposable
         public FragmentCheck Answer { get; set; } = new(true);
         public ConcurrentQueue<(ReplicaKey Replica, string Fragment)> Killed { get; } = new();
 
+        /// <summary>How many children a replica says it ended.</summary>
+        public int Ended { get; set; } = 1;
+
         public Task<FragmentCheck> CheckAsync(ReplicaKey replica, FragmentSpec spec, CancellationToken ct) =>
             CheckGate is { } gate ? gate.Task : Task.FromResult(Answer);
 
         public Task<int> KillAsync(ReplicaKey replica, string fragment, CancellationToken ct)
         {
             Killed.Enqueue((replica, fragment));
-            return Task.FromResult(1);
+            return Task.FromResult(Ended);
         }
 
         public Task<LaunchResult> LaunchAsync(ReplicaKey replica, LaunchRequest request, CancellationToken ct) => throw new NotSupportedException();
@@ -643,9 +646,12 @@ public sealed class RunQueueTests : IDisposable
 
         var unknown = await Assert.ThrowsAsync<ConflictException>(() => _deployments.KillAsync("x@n", CancellationToken.None));
         Assert.Equal("'x@n' is not a fragment of a deployed plan.", unknown.Message);
-        await _deployments.KillAsync("p@n", CancellationToken.None);
+        Assert.Equal(2, await _deployments.KillAsync("p@n", CancellationToken.None));
         Assert.Equal(new[] { first, second }.OrderBy(k => k.Instance), _link.Killed.Select(k => k.Replica).OrderBy(k => k.Instance));
         Assert.All(_link.Killed, killed => Assert.Equal("p@n", killed.Fragment));
+
+        _link.Ended = 0;
+        Assert.Equal(0, await _deployments.KillAsync("p@n", CancellationToken.None));
 
         foreach (var connection in _connectionsOf["n"]) _registry.Disconnected(connection);
         var offline = await Assert.ThrowsAsync<ConflictException>(() => _deployments.KillAsync("p@n", CancellationToken.None));

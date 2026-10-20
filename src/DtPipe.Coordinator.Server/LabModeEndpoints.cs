@@ -25,8 +25,8 @@ public static class LabModeEndpoints
 
         api.MapPost("/fragments/{name}/kill", async (string name, DeploymentManager deployments, CancellationToken ct) =>
         {
-            await deployments.KillAsync(name, ct);
-            return Results.Accepted();
+            var killed = await deployments.KillAsync(name, ct);
+            return Results.Ok(new { killed });
         });
     }
 }

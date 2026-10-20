@@ -96,6 +96,6 @@ public sealed class DeploymentManager
     /// </summary>
     public void Cancel(string? runId = null) => _runs.Cancel(runId);
 
-    /// <summary>Fault injection: ends the child of the fragment's run on every replica of its node.</summary>
-    public Task KillAsync(string fragmentName, CancellationToken ct) => _lab.KillAsync(fragmentName, ct);
+    /// <summary>Fault injection: ends the child of the fragment's run on every replica of its node. How many it ended.</summary>
+    public Task<int> KillAsync(string fragmentName, CancellationToken ct) => _lab.KillAsync(fragmentName, ct);
 }
