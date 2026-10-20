@@ -115,6 +115,9 @@ public sealed class RunJournalTests
         Assert.Equal(["run-4", "run-9"], again.List().Select(r => r.RunId).Order());
         Assert.NotNull(again.Find(r => r.IdempotencyKey == "k-run-9")!.FinishedAt);
         Assert.Equal(new OwedFragment("run-9", "p@n", "n"), Assert.Single(again.Owed));
+        // Only the run that had started may have written a sink; the label is in the store, not only in memory.
+        Assert.Equal([("run-4", false), ("run-9", true)], again.List().OrderBy(r => r.RunId).Select(r => (r.RunId, r.SinkMayBePartial)));
+        Assert.True(Open().Find(r => r.RunId == "run-9")!.SinkMayBePartial);
         Assert.Equal("run-10", again.NextRunId());
         // The store says the run is over: a second restart ends nothing again, and the abandonment is still owed.
         Assert.Equal("run-9", Assert.Single(Open().Owed).RunId);

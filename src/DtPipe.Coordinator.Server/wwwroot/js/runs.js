@@ -84,6 +84,7 @@ function report(r) {
   const exits = res ? Object.values(res.reports).map((p) => `<tr><td>${esc(shortNode(p.fragment))}</td><td class="num">${p.exitCode}</td><td>${esc(p.origin ?? "")}</td><td class="wrap">${esc(p.firstFault ?? "")}</td></tr>`).join("") : "";
   return `<div class="run-report">
     ${r.refusal ? `<p class="mismatch">${esc(r.refusal)}</p>` : ""}
+    ${r.sinkMayBePartial ? `<p class="mismatch">The coordinator restarted while this run was in progress: its sinks may hold part of what it wrote.</p>` : ""}
     ${res?.cause ? `<p><b>Cause:</b> ${esc(shortNode(res.cause))}${res.causeIsUnresponsive ? " (unresponsive)" : ""}</p>` : ""}
     ${res?.consequences?.length ? `<p><b>Consequences:</b> ${res.consequences.map((c) => esc(shortNode(c))).join(", ")}</p>` : ""}
     ${edges ? `<table><tr><th>from</th><th>to</th><th>sent</th><th>received</th></tr>${edges}</table>` : ""}

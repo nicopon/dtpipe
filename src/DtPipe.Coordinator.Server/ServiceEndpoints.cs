@@ -76,12 +76,16 @@ internal static partial class ServiceEndpoints
 
 internal sealed record ServiceRunRequest(string? PipelineId);
 
-/// <summary>What a scheduler reads of a run: its id and state, never the plan, the nodes or the replicas.</summary>
+/// <summary>
+/// What a scheduler reads of a run: its id and state, and whether its sinks may be partial (<see cref="RunView.SinkMayBePartial"/>),
+/// never the plan, the nodes or the replicas.
+/// </summary>
 internal sealed record ServiceRun(
     string RunId, string PipelineId, [property: JsonConverter(typeof(WireEnumConverter<RunState>))] RunState State,
-    DateTimeOffset? QueuedAt, DateTimeOffset? StartedAt, DateTimeOffset? FinishedAt, string? Description, string? Refusal, string? LaunchedBy)
+    DateTimeOffset? QueuedAt, DateTimeOffset? StartedAt, DateTimeOffset? FinishedAt, string? Description, string? Refusal, string? LaunchedBy,
+    bool SinkMayBePartial)
 {
     public static ServiceRun Of(RunView run) => new(
         run.RunId, run.PipelineId!, run.State, run.QueuedAt, run.State == RunState.Queued ? null : run.StartedAt, run.FinishedAt,
-        run.Description, run.Refusal, run.LaunchedBy);
+        run.Description, run.Refusal, run.LaunchedBy, run.SinkMayBePartial);
 }

@@ -182,6 +182,7 @@ function runPanel(run, current) {
     <div class="outcome ${esc(run.state)}">${esc(run.runId)} · ${esc(run.state)} <span class="hint">${esc(duration(run))}</span></div>
     ${current ? "" : `<p class="hint">It ran a plan with other edges than this one.</p>`}
     ${run.refusal ? `<p class="mismatch">${esc(run.refusal)}</p>` : ""}
+    ${run.sinkMayBePartial ? `<p class="mismatch">The coordinator restarted while this run was in progress: its sinks may hold part of what it wrote.</p>` : ""}
     ${ranPlan(run.plan)}
     ${r?.cause ? `<p><b>Cause:</b> ${esc(shortNode(r.cause))}${r.causeIsUnresponsive ? " (unresponsive)" : ""}</p>` : ""}
     ${r?.consequences?.length ? `<p><b>Consequences:</b> ${r.consequences.map((c) => esc(shortNode(c))).join(", ")}</p>` : ""}

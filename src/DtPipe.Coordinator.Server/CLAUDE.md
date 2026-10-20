@@ -409,7 +409,9 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   (`appendonly yes`, `appendfsync always`: the lab's and `tests/infra`'s). `Coordinator:Redis:ConnectionString` is a secret
   (read it from the environment) and is in no log or message, only the endpoints; `KeyPrefix` separates coordinators on one Redis.
   A reason that goes into `RunView.Refusal` is the server's own text, never a Redis message.
-  `[local: RunJournalTests, RunQueueTests, OrphanRunsTests, NodeChannelHubTests; RedisRunStoreTests (needs DTPIPE_TEST_REDIS or
+  A run that had started carries `RunView.SinkMayBePartial` (also in `/service/runs`), true: its fragments had been launched and a sink may hold part of
+  what they wrote. It is a label only: nothing ranks resumption strategies or reruns the run, and a run that was only queued, or that ended any other way, has none.
+  `[local: RunJournalTests (the label), RunQueueTests, OrphanRunsTests, NodeChannelHubTests; RedisRunStoreTests (needs DTPIPE_TEST_REDIS or
   DTPIPE_TEST_REUSE_INFRA); tools/campaign.py F4]` `[unchecked: a wired
   child with nothing to write ends only once a relay touches its torn-down transfer; a Redis that loses a write it acknowledged]`
 - **A run that was placed records the replica of each fragment.** `RunJournal` keeps the `RunResult` whole,

@@ -52,13 +52,17 @@ public sealed record RunPlan(
 /// <summary>
 /// <see cref="Plan"/> is the plan the run ran, journaled with it. <see cref="LaunchedBy"/> names who started it: a person's email,
 /// or a service's client id (an id never holds an <c>@</c>). <see cref="IdempotencyKey"/> is the key a service sent with the
-/// request, when it sent one; it means something only together with <see cref="LaunchedBy"/>.
+/// request, when it sent one; it means something only together with <see cref="LaunchedBy"/>. <see cref="SinkMayBePartial"/> is
+/// true for a run a restart ended after it had started: its fragments had been launched and may have written part of their
+/// sinks. It ranks no recovery strategy and nothing reruns the run; a run that was only queued, or that ended any other way, is not
+/// labelled.
 /// </summary>
 public sealed record RunView(
     string RunId, string PlanId, [property: JsonConverter(typeof(WireEnumConverter<RunState>))] RunState State, DateTimeOffset StartedAt,
     DateTimeOffset? FinishedAt,
     RunResult? Result, string? Description, string? Refusal,
-    string? PipelineId = null, DateTimeOffset? QueuedAt = null, RunPlan? Plan = null, string? LaunchedBy = null, string? IdempotencyKey = null)
+    string? PipelineId = null, DateTimeOffset? QueuedAt = null, RunPlan? Plan = null, string? LaunchedBy = null, string? IdempotencyKey = null,
+    bool SinkMayBePartial = false)
 {
     [JsonIgnore] public bool IsOver => State is not (RunState.Queued or RunState.Running);
 }
@@ -67,7 +71,7 @@ public sealed record RunView(
 /// Every run, a JSON document each in the <see cref="IRunStore"/>, read back at start. Runs are what happened, not what was
 /// designed: the library's git history never holds them. A run is written when it is queued, again when it starts and when it
 /// ends, so a restart finds what it interrupted: those runs are ended then (<see cref="RestartedRefusal"/>), and the ones that had
-/// started leave their fragments <see cref="Owed"/>: their children may still run, and the abandonment is kept in the store until
+/// started are labelled <see cref="RunView.SinkMayBePartial"/> and leave their fragments <see cref="Owed"/>: their children may still run, and the abandonment is kept in the store until
 /// a replica gives them up, so a second restart before the replicas announce forgets nothing. History (<see cref="List"/>, <see cref="Find"/>) holds the runs
 /// that are over and keeps the latest <see cref="IRunStore.Window"/>, in memory as in the store; a run in flight is in the store
 /// only. A run not yet over that cannot be written throws <see cref="StoreUnavailableException"/>, so none starts without its
@@ -112,13 +116,13 @@ public sealed class RunJournal
         var interrupted = loaded.Values.Where(r => !r.IsOver).ToList();
         // Owed before the runs are ended: a crash between the two finds the runs in flight again and owes them again.
         store.AddOwed(
-            [.. interrupted.Where(r => r.State == RunState.Running && r.Plan is not null)
+            [.. interrupted.Where(Started)
                 .SelectMany(r => r.Plan!.Fragments.Select(f => new OwedFragment(r.RunId, f.Name, f.Node)))],
             DateTimeOffset.UtcNow + IRunStore.OwedFor);
         Owed = store.ReadOwed(DateTimeOffset.UtcNow);
         foreach (var run in interrupted)
         {
-            var ended = run with { State = RunState.Error, FinishedAt = DateTimeOffset.UtcNow, Refusal = RestartedRefusal };
+            var ended = run with { State = RunState.Error, FinishedAt = DateTimeOffset.UtcNow, Refusal = RestartedRefusal, SinkMayBePartial = Started(run) };
             Write(ended);
             _runs.Add(ended);
         }
@@ -189,6 +193,9 @@ public sealed class RunJournal
         try { return JsonSerializer.Deserialize<RunView>(document, Json); }
         catch (JsonException) { return null; }
     }
+
+    /// <summary>A run whose fragments were launched: a sink may hold part of what they wrote.</summary>
+    private static bool Started(RunView run) => run.State == RunState.Running && run.Plan is not null;
 
     private static long IdNumber(string runId) => long.TryParse(runId.Split('-').Last(), out var n) ? n : 0;
 }
