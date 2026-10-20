@@ -146,6 +146,28 @@ public sealed class DeploymentManagerTests : IDisposable
         Assert.Equal(0, Assert.Single((await _deployments.DeploymentsAsync()).Single().Fragments).Replicas);
     }
 
+    /// <summary>An identity that is removed is no identity: the run is refused as for a disabled one, and no replica counts.</summary>
+    [Fact]
+    public async Task A_Run_On_A_Node_Whose_Identity_Is_Removed_Is_Refused_And_Says_Why()
+    {
+        await ReplicaAsync(1, Brick("sqlite:a"));
+        await _deployments.DeployAsync(Plan(), "test", CancellationToken.None);
+        _rights.RemoveIdentity("node-n");
+
+        var queued = _deployments.Enqueue("p");
+
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        RunView? run;
+        while ((run = _journal.List().FirstOrDefault(r => r.RunId == queued.RunId)) is null)
+        {
+            if (DateTime.UtcNow > deadline) throw new TimeoutException("the run was never finished");
+            await Task.Delay(10, TestContext.Current.CancellationToken);
+        }
+        Assert.Equal(RunState.Refused, run.State);
+        Assert.Contains("Node 'n' has no identity in the rights", run.Refusal);
+        Assert.Equal(0, Assert.Single((await _deployments.DeploymentsAsync()).Single().Fragments).Replicas);
+    }
+
     [Fact]
     public async Task A_Node_With_No_Replica_Online_Is_Offline()
     {

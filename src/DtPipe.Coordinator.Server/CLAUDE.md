@@ -423,8 +423,7 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   then places the run only on replicas whose connection attests that subject and whose data plane client holds
   exactly those groups. A node that no identity carries any more, or whose identity is disabled, refuses the
   run (`refused`), and the server never sets `AdmissionOptions.AdmitUnboundFragments`.
-  `[local: RightsStoreTests, DeploymentManagerTests, RunQueueTests, the lab's smoke.py rights - a foreign replica]`
-  `[unchecked: the refused run of a node without an identity]`
+  `[local: RightsStoreTests, DeploymentManagerTests (disabled, removed), RunQueueTests, the lab's smoke.py rights - a foreign replica]`
 - **One source of rights.** `RightsStore` holds the identities and the flow matrix;
   `RightsFlowControl` replaces TransportR's `IFlowControlService`, so the hub checks the matrix as
   it is now on every transfer, and the planner and a deployment check every edge against it, each by one
