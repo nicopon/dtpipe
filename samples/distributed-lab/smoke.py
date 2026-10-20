@@ -54,6 +54,7 @@ STACK = os.environ.get("LAB_TARGET") == "stack"
 # /api serves people: smoke signs in as the lab's admin, through the IdP, as a browser would.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))
 import campaign_security as sec  # noqa: E402
+from enroll_host import UnknownHost  # noqa: E402
 from lab_session import ApiError, Session, studio_tokens  # noqa: E402
 SESSION = Session(URL, timeout=RUN_TIMEOUT)
 
@@ -590,51 +591,27 @@ def rights_pass():
         # A host whose token the rights do not know waits for an administrator: it proposes a name, which
         # authorises nothing. It is not a node, and no name it proposes (here node-2's) takes anyone's place.
         # Accepted under another name and a group, it comes online as what the rights say.
-        root = os.path.join(STATE, "enroll")
-        os.makedirs(root, exist_ok=True)
-        config = os.path.join(root, "node.json")
-        with open(config, "w") as f:
-            json.dump({"name": "node-2", "description": "proposes to be node-2", "clientId": "node-enroll", "secret": "node-enroll-lab-secret"}, f)
-        if STACK:
-            # A host the stack did not declare: a throwaway container of the node image, on the stack's network,
-            # reaching the coordinator directly and the IdP by the one name browsers and containers share.
-            container = "lab-enroll-host"
-            subprocess.run(["docker", "rm", "-f", container], capture_output=True)
-            host = subprocess.Popen(["docker", "run", "--rm", "--init", "--name", container, "--network", "dtpipe-lab-stack_default",
-                                     "--user", f"{os.getuid()}:{os.getgid()}", "-e", "HOME=/tmp", "-v", f"{root}:/enroll", "--entrypoint", "dotnet", "dtpipe-lab-stack/node", "/app/Lab.NodeHost.dll",
-                                     "--config", "/enroll/node.json", "--state", "/enroll", "--coordinator", "http://coordinator:8080",
-                                     "--idp", rights["idp"]["issuer"], "--dtpipe", "/usr/local/bin/dtpipe"],
-                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        else:
-            host = subprocess.Popen(["dotnet", os.path.join(STATE, "bin", "node", "Lab.NodeHost.dll"), "--config", config,
-                                     "--state", root, "--coordinator", URL, "--idp", rights["idp"]["issuer"], "--dtpipe", DTPIPE],
-                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
         def waiting():
             return next((p for p in call("/api/rights")["pending"] if p["subject"] == "node-enroll"), None)
 
         def node(name):
             return next((n for n in call("/api/nodes") if n["name"] == name), None)
         try:
-            pending = until(waiting, 60, "the unknown host to wait for approval")
-            if pending["proposedName"] != "node-2" or "node-enroll" in {i["clientId"] for i in call("/api/rights")["identities"]}:
-                raise RuntimeError(f"pending {pending}")
-            node2 = node("node-2")
-            if not node2 or not node2["online"] or node2["groups"] != ["sales"]:
-                raise RuntimeError(f"node-2 after the proposal: {node2}")
-            if node("enrolled-node"):
-                raise RuntimeError("a host waiting for approval is listed as a node")
-            call("/api/rights/pending/node-enroll/accept", {"name": "enrolled-node", "groups": ["crm"]})
-            until(lambda: (node("enrolled-node") or {}).get("online"), 60, "the accepted host to come online")
-            enrolled = node("enrolled-node")
-            if enrolled["groups"] != ["crm"] or waiting() or (node("node-2") or {}).get("groups") != ["sales"]:
-                raise RuntimeError(f"enrolled {enrolled}, still waiting {waiting()}, node-2 {node('node-2')}")
+            with UnknownHost(STATE, rights["idp"]["issuer"], URL, DTPIPE, STACK):
+                pending = until(waiting, 60, "the unknown host to wait for approval")
+                if pending["proposedName"] != "node-2" or "node-enroll" in {i["clientId"] for i in call("/api/rights")["identities"]}:
+                    raise RuntimeError(f"pending {pending}")
+                node2 = node("node-2")
+                if not node2 or not node2["online"] or node2["groups"] != ["sales"]:
+                    raise RuntimeError(f"node-2 after the proposal: {node2}")
+                if node("enrolled-node"):
+                    raise RuntimeError("a host waiting for approval is listed as a node")
+                call("/api/rights/pending/node-enroll/accept", {"name": "enrolled-node", "groups": ["crm"]})
+                until(lambda: (node("enrolled-node") or {}).get("online"), 60, "the accepted host to come online")
+                enrolled = node("enrolled-node")
+                if enrolled["groups"] != ["crm"] or waiting() or (node("node-2") or {}).get("groups") != ["sales"]:
+                    raise RuntimeError(f"enrolled {enrolled}, still waiting {waiting()}, node-2 {node('node-2')}")
         finally:
-            if STACK:
-                subprocess.run(["docker", "rm", "-f", "lab-enroll-host"], capture_output=True)
-            else:
-                host.terminate()
-            host.wait(10)
             if "node-enroll" in {i["clientId"] for i in call("/api/rights")["identities"]}:
                 call("/api/rights/identities/node-enroll", None, "DELETE")
         until(lambda: node("enrolled-node") is None, 30, "the removed identity's node to leave the inventory")
@@ -764,23 +741,7 @@ def rights_pass():
             return e.code
 
     def studio():
-    def status():
-        # `lab.sh status` reads the coordinator's node table: every node the API lists is on a line with its groups and replicas.
-        command = [os.path.join(LAB_DIR, "lab.sh")] + (["stack"] if STACK else []) + ["status"]
-        shown = subprocess.run(command, capture_output=True, text=True, timeout=120)
-        if shown.returncode != 0:
-            raise RuntimeError(f"{' '.join(command)} -> {shown.returncode}: {shown.stderr[-300:]}")
-        nodes = call("/api/nodes")
-        for n in nodes:
-            line = next((l for l in shown.stdout.splitlines() if l.split()[:1] == [n["name"]] and " replicas " in l), None)
-            connected = sum(1 for r in n["replicas"] if r["connected"])
-            expected = f"{'online ' if n['online'] else 'offline'} {'+'.join(n['groups'])}"
-            if line is None or expected not in line or f"replicas {connected}/{len(n['replicas'])}" not in line:
-                raise RuntimeError(f"{n['name']}: expected '{expected}' with {connected}/{len(n['replicas'])} replicas, status says {line!r}")
-        return f"{len(nodes)} nodes, each with its groups and replicas on a line of `lab.sh status`"
-
         # dtpipe studio signs a person in through its own public client and calls /api with their
-    check("lab.sh status", status)
         # bearer token: the roles are the same configuration's, a change still needs the CSRF header,
         # and the token reaches no part of the data plane.
         designer = studio_tokens(URL, "labdesigner")["access_token"]
@@ -803,7 +764,23 @@ def rights_pass():
             raise RuntimeError("a person's token was taken for a host waiting for approval")
         return f"{len(expected)} rules hold for the studio's bearer: roles, CSRF, no service on /api, no person on the data plane"
 
+    def status():
+        # `lab.sh status` reads the coordinator's node table: every node the API lists is on a line with its groups and replicas.
+        command = [os.path.join(LAB_DIR, "lab.sh")] + (["stack"] if STACK else []) + ["status"]
+        shown = subprocess.run(command, capture_output=True, text=True, timeout=120)
+        if shown.returncode != 0:
+            raise RuntimeError(f"{' '.join(command)} -> {shown.returncode}: {shown.stderr[-300:]}")
+        nodes = call("/api/nodes")
+        for n in nodes:
+            line = next((l for l in shown.stdout.splitlines() if l.split()[:1] == [n["name"]] and " replicas " in l), None)
+            connected = sum(1 for r in n["replicas"] if r["connected"])
+            expected = f"{'online ' if n['online'] else 'offline'} {'+'.join(n['groups'])}"
+            if line is None or expected not in line or f"replicas {connected}/{len(n['replicas'])}" not in line:
+                raise RuntimeError(f"{n['name']}: expected '{expected}' with {connected}/{len(n['replicas'])} replicas, status says {line!r}")
+        return f"{len(nodes)} nodes, each with its groups and replicas on a line of `lab.sh status`"
+
     check("identity provider", idp)
+    check("lab.sh status", status)
     check("roles and sessions", roles)
     check("studio bearer", studio)
     check("enrollment", enrollment)

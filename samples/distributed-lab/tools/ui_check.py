@@ -8,14 +8,17 @@ Writes one screenshot per step.
   2. Coordinator: each view rendered (nodes, library, a pipeline's page with its job read only, runs, access).
   2b. Library: the row actions agree with the plans and deployments, and Open shows the pipeline's page.
   3. No designer: no Designer entry in the navigation, no Design button, and no New or Import on the library.
+  4. Waiting for approval: a host the rights do not know proposes a name and a description made of HTML;
+     the card shows them as text and runs none of it.
 
 Usage: ui_check.py [lab-url] [out-dir]     (defaults: http://127.0.0.1:5180, .state/ui)
-The lab must be up. Exits 1 if any step fails.
+The lab must be up. LAB_TARGET=stack points step 4 at the compose stack, as for smoke.py. Exits 1 if any step fails.
 """
 import json, os, sys, time, urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from cdp import Browser
+from enroll_host import CLIENT, UnknownHost, forget
 from lab_session import ADMIN, Session
 
 URL = (sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:5180").rstrip("/")
@@ -24,6 +27,10 @@ os.makedirs(OUT, exist_ok=True)
 failed = False
 # The tool's own calls sign in through the IdP; the browser signs in through the IdP's form.
 SESSION = Session(URL)
+STACK = os.environ.get("LAB_TARGET") == "stack"
+LAB = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+STATE = os.path.join(LAB, ".stack") if STACK else os.environ.get("LAB_STATE", os.path.join(LAB, ".state"))
+DTPIPE = os.environ.get("DTPIPE", os.path.join(LAB, "..", "..", "dist", "release", "dtpipe"))
 
 
 def report(ok, name, detail, shot):
@@ -149,6 +156,34 @@ def no_designer(browser):
     report(gone and not errors, "no designer", f"list={on_list} page={on_page} #/designer -> {fallback}" + (f"  errors: {errors}" if errors else ""), "")
 
 
+def waiting_card(browser):
+    # What an unknown host proposes is its own text, and nothing it says is an authority: the page shows it as text.
+    name, description = "<b>node-2</b>", '<img src=x onerror="window.__enrolled=1"> proposes'
+    issuer = SESSION.call("/api/rights")["idp"]["issuer"]
+    try:
+        with UnknownHost(STATE, issuer, URL, DTPIPE, STACK, name, description):
+            seen = False
+            for _ in range(120):
+                seen = any(p["subject"] == CLIENT for p in SESSION.call("/api/rights")["pending"])
+                if seen:
+                    break
+                time.sleep(0.5)
+            browser.console.clear()
+            browser.js("location.hash = '#/nodes'")
+            browser.js("location.hash = '#/access'")
+            row = f"document.querySelector('[data-pending={json.dumps(CLIENT)}]')"
+            shown = seen and browser.wait_for(f"!!{row}", 20)
+            card = browser.js(f"({{heading: [...document.querySelectorAll('h2')].some(h => h.textContent.startsWith('Waiting for approval')),"
+                              f" text: ({row}?.textContent || '').includes({json.dumps(name)}) && ({row}?.textContent || '').includes({json.dumps(description)}),"
+                              f" markup: {row}?.querySelectorAll('b, img').length ?? -1, ran: window.__enrolled === 1}})") if shown else {}
+            shot = browser.shot(os.path.join(OUT, "app-waiting.png"))
+            errors = page_errors(browser)
+            ok = bool(shown) and card.get("heading") and card.get("text") and card.get("markup") == 0 and not card.get("ran") and not errors
+            report(ok, "waiting for approval", f"host seen={seen} card={card}" + (f"  errors: {errors}" if errors else ""), shot)
+    finally:
+        forget(SESSION.call)
+
+
 def sign_in(browser):
     browser.goto(URL + "/", 2)
     on_form = browser.wait_for("!!document.querySelector('form input[name=password]')", 20)
@@ -168,6 +203,7 @@ try:
     coordinator_views(browser)
     library_page(browser)
     no_designer(browser)
+    waiting_card(browser)
 finally:
     browser.close()
 sys.exit(1 if failed else 0)

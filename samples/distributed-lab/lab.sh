@@ -507,7 +507,7 @@ stack() {
                 nodes_table "$STACK_URL"
             fi ;;
         smoke) LAB_TARGET=stack smoke_passes stack_nodes_mode "$STACK_URL" "$STACK" "$@" ;;
-        ui) python3 "$LAB/tools/ui_check.py" "$STACK_URL" "$STACK/ui" ;;
+        ui) LAB_TARGET=stack python3 "$LAB/tools/ui_check.py" "$STACK_URL" "$STACK/ui" ;;
         studio) python3 "$LAB/tools/studio_check.py" "$STACK_URL" "$DTPIPE" "$STACK/studio" ;;
         logs) compose logs --tail 20 -f ;;
         *) echo "usage: $0 stack up|down|nodes M|status|smoke [pass]|restart-check [restore|restore-alone]|ui|studio|logs" >&2; exit 1 ;;

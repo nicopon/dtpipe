@@ -48,6 +48,10 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   `rights-seed.json` that lists `customers-mirror`, which starts its runs through `POST /service/runs` and reads them, and nothing
   else. `smoke.py bricks` creates the identity, or completes its list, when the rights predate the seed; it launches twice with one
   key and expects one run. `[local: smoke.py bricks - a service launches a run]`
+- **The host the rights do not know is launched by one module.** `tools/enroll_host.py` (`UnknownHost`) starts it, as a process of the
+  node host on the local lab and a throwaway container of the stack's node image on the stack, for `smoke.py rights` (enrollment) and
+  `ui_check.py` (the "Waiting for approval" card, whose proposed name and description are HTML and must show as text). `forget` takes it
+  out of the queue, which keeps a host that is gone for a day. `[local: smoke.py rights - enrollment, ui_check.py]`
 - **Lab nodes are disposable hosts of `DtPipe.PipelineNode.Hosting`.** `Lab.NodeHost` reads
   `nodes/<node>.json` into `AddDtPipeNode`; a node file whose `role` is `runner` starts the official
   `DtPipe.PipelineNode.Runner` instead, configured through its environment. `lab.sh exec-node` is
