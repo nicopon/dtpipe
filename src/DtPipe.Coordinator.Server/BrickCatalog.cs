@@ -12,14 +12,12 @@ namespace DtPipe.Coordinator.Server;
 /// would run changes.
 /// </summary>
 public sealed record BrickView(
-    string Key, string Node, string Id, BrickKind Kind, string Title, string Description, string Yaml, string Version,
-    IReadOnlyList<BrickColumn>? Schema, string? SchemaError, bool Online);
+    string Key, string Node, string Id, BrickKind Kind, string Title, string Description, string Yaml, string Version, bool Online);
 
 /// <summary>
 /// Every brick the nodes announce, by its reference: a job names a brick by node and id (<c>brick:&lt;node&gt;/&lt;id&gt;</c>), and a brick its
 /// owner changed has another version, which stops the pipelines checked against the old one. A node announces no text, so there is
-/// none to match; a brick announced with its text is not listed. The node's name and whether it is online are read from the
-/// inventory at every call.
+/// none to match. The node's name and whether it is online are read from the inventory at every call.
 /// </summary>
 public sealed class BrickCatalog(NodeInventory inventory)
 {
@@ -30,7 +28,7 @@ public sealed class BrickCatalog(NodeInventory inventory)
     /// <summary>Every brick as <c>dtpipe studio</c> reads it: the reference a job makes to it, as JSON, and never its text.</summary>
     public IReadOnlyList<CatalogBrick> Catalog() => Resolve().Select(r => new CatalogBrick(
         r.View.Key, r.View.Node, r.View.Id, KindOf(r.View.Kind), r.View.Title, r.View.Description, (JsonObject)JsonNode.Parse(JobYaml.ToJson(r.Branch)!.ToJsonString())!,
-        r.View.Version, null, null, r.View.Online)).ToList();
+        r.View.Version, r.View.Online)).ToList();
 
     public static string KindOf(BrickKind kind) => kind == BrickKind.Sink ? StepKinds.Sink : StepKinds.Source;
 
@@ -46,12 +44,12 @@ public sealed class BrickCatalog(NodeInventory inventory)
         {
             foreach (var brick in node.Bricks)
             {
-                if (string.IsNullOrWhiteSpace(brick.Version) || !brick.IsMinimal) continue;
+                if (string.IsNullOrWhiteSpace(brick.Version)) continue;
                 // A brick is read as the reference a job makes to it, which names the node as it is called now.
                 var branch = ReferenceTo(node.Name, brick);
                 resolved.Add(new Resolved(
                     new BrickView($"{node.Name}/{brick.Id}", node.Name, brick.Id, brick.Kind, brick.Title, brick.Description,
-                        JobYaml.Serialize(branch), brick.Version, brick.Schema, brick.SchemaError, node.Online),
+                        JobYaml.Serialize(branch), brick.Version, node.Online),
                     branch));
             }
         }

@@ -87,20 +87,15 @@ internal static class LibraryEndpoints
             var launch = await deployments.PlanLaunchAsync(id, doc.Yaml, doc.Bindings, ct);
             return Results.Ok(new { plan = launch.Plan, runner = launch.Runner, bricks = placer.BrickAliases(doc.Yaml), offers = placer.Offers(doc.Yaml) });
         });
-        // Arms the pipeline at the commit the library holds, with the bindings it holds. The plan a launch would make now must
-        // hold and every node must answer for its fragments; a refused arming is not kept.
-        designer.MapPost("/library/{id}/deploy", async (string id, HttpContext http, PipelineLibrary library, DeploymentManager deployments, CancellationToken ct) =>
+        // Arms the pipeline at the commit the library holds, with the bindings it holds. A reference no check has pinned is checked and
+        // pinned first, in a commit of its own (LibraryArming). The plan a launch would make now must hold and every node must answer
+        // for its fragments; a refused arming is not kept.
+        designer.MapPost("/library/{id}/deploy", async (string id, HttpContext http, PipelineLibrary library, LibraryArming arming, CancellationToken ct) =>
         {
             var doc = await library.GetAsync(id, ct);
             if (doc is null) return Results.NotFound(new { error = $"'{id}' is not in the library." });
             if (doc.Commit is null) return Results.Conflict(new { error = $"'{id}' has no commit to arm." });
-            if (doc.BindingProblems.Where(p => p.Blocking).Select(p => p.Message).ToList() is { Count: > 0 } refused)
-                return Results.Conflict(new { error = $"The bindings of '{id}' do not hold: " + string.Join(" ", refused) });
-            var armed = new ArmedDeployment(
-                id, doc.Commit, PipelineLibrary.Sha(doc.Yaml), Bindings.Sha(doc.Bindings), doc.Bindings, DateTimeOffset.UtcNow,
-                TrustedIdp.CallerOf(http));
-            await deployments.ArmAsync(armed, doc.Yaml, ct);
-            return Results.Ok(armed);
+            return Results.Ok(await arming.ArmAsync(doc, TrustedIdp.CallerOf(http), ct));
         });
     }
 

@@ -8,10 +8,7 @@ readings:
     generate:
       rows-per-second: 10000
 customers:
-  input: sqlite:${{LAB_CRM_DB}}
-  provider-options:
-    sqlite-reader:
-      query: SELECT customer_id, country FROM customers
+  input: brick:node-1/customer-countries
 enrich:
   from: readings
   ref:
@@ -23,8 +20,4 @@ enrich:
         FROM readings r JOIN customers c ON c.customer_id = 1 + r.GenerateIndex % 20000
 load:
   from: enrich
-  output: duck:${{LAB_WAREHOUSE_DB}}
-  provider-options:
-    duck-writer:
-      table: sensor_readings
-      strategy: Recreate
+  output: brick:node-4/sensor-readings

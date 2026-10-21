@@ -96,21 +96,13 @@ public enum BrickKind { Source, Sink }
 public sealed record BrickColumn(string Name, string Type, bool IsNullable);
 
 /// <summary>
-/// A read or a write the node's owner preconfigured on one of its databases. A node announces what the coordinator needs and
-/// nothing else: the id, kind, title, description and <see cref="Version"/>, the keyed hash of the declared text taken on the node
+/// A read or a write the node's owner preconfigured on one of its databases, as the node announces it: the id, kind, title,
+/// description and <see cref="Version"/>, the keyed hash of the declared text taken on the node
 /// (<see cref="BrickRules.VersionOf(BrickKind, string, string)"/>). The text, its variables and its schema stay on the node; a job
-/// references the brick as <c>brick:&lt;node&gt;/&lt;id&gt;</c> and the node composes the branch from its own declarations, so
-/// <see cref="Branch"/> is <c>null</c> in every announcement. A brick announced with a <see cref="Branch"/> set (the piece of a dtpipe branch as
-/// JSON text, exactly as a file declares it) is not listed by the coordinator. <see cref="Schema"/> is announced with neither: it is read on
-/// demand, and <see cref="SchemaError"/> says why one could not be.
+/// references the brick as <c>brick:&lt;node&gt;/&lt;id&gt;</c> and the node composes the branch from its own declarations. A schema
+/// depends on the rows, so it is read on demand (<c>PreviewBrick</c>), never announced.
 /// </summary>
-public sealed record BrickInfo(
-    string Id, BrickKind Kind, string Title, string Description, string? Branch,
-    IReadOnlyList<BrickColumn>? Schema, string? SchemaError, string Version)
-{
-    /// <summary>A brick announced without its text.</summary>
-    public bool IsMinimal => Branch is null;
-}
+public sealed record BrickInfo(string Id, BrickKind Kind, string Title, string Description, string Version);
 
 /// <summary>
 /// What <c>PreviewBrick</c> answers: CSV text, or why the node could not read it. For a source brick

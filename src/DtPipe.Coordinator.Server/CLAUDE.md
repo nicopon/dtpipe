@@ -158,7 +158,7 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   and with no runner or no brick node online the check cannot run, so it refuses by name; never a
   commit that was not checked. It covers the studio and the pages alike, and `PUT /api/library/{id}/bindings`, which
   checks the job the library holds under the bindings it receives; `DeleteAsync` and the seeds loaded at
-  start check nothing. The push to the library's remote comes after the check and the write, never before. `[local: StudioRoutesTests, the lab's smoke.py bricks — a library save's check, a sink that refuses]`
+  start check nothing, and the arming checks a seed's references (see "A binding decides"). The push to the library's remote comes after the check and the write, never before. `[local: StudioRoutesTests, the lab's smoke.py bricks — a library save's check, a sink that refuses]`
 - **A save may say which version it read.** `PUT /api/library/{id}` with `If-None-Match: *` creates
   only, with `If-Match: "<commit>"` replaces only that version: 412 otherwise, with the commit in
   place. The check runs under the library's lock. The version is the last commit of the job file,
@@ -167,16 +167,13 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   as the pages do. The answer says when a deployment still runs another version (`deployed`), judged by content: the hashes
   of the job and of the bindings it was armed with, so a commit that puts the old text back is the same version. `[local: StudioRoutesTests, the lab's smoke.py
   library — a studio publishes]`
-- **A save may carry the bindings it knows, and a studio names only what is unambiguous.** `LibrarySave.Bindings` sets the
+- **A save may carry the bindings it knows.** `LibrarySave.Bindings` sets the
   bindings it names into the ones the library keeps, entry by entry, in the same commit as the job; an alias it does not name
   keeps its node, and none leaves the bindings as they were. A binding is a node, a brick (its id on that node), a mode and,
   for a mode other than `strict`, a pin. **An entry that names no mode keeps the mode the library holds** (`Bindings.Merge`): a
-  studio knows no mode and reads no pin, and must not turn a `tolerant` binding back into `strict`: that is what keeps the
-  contract number. The modes are `strict`, `contract`, `compatible` and `tolerant`; a request for another is refused (400),
+  a publisher that names no mode must not turn a `tolerant` binding back into `strict`; `dtpipe studio` sends none. The modes are `strict`, `contract`, `compatible` and `tolerant`; a request for another is refused (400),
   and **a pin a request brings is never read**: the check writes it. A reference names its node and its brick, so the binding of its alias holds the mode and the pin
   alone, and `BrickReferences.Expand` puts the node and the brick back, inside the library's lock, whatever the request names.
-  `POST /api/bricks/recognize` answers, with each branch that references a brick the catalog offers, `Nodes`: the node the
-  reference names.
   `[local: BindingTests, StudioRoutesTests, StudioPublishTests]`
 - **The library keeps a job and its bindings, no plan.** `pipelines/<id>/` holds `pipeline.yaml` and
   `bindings.json`. `[local: LibraryRemoteTests, BindingTests]` `[unchecked: that nothing else is written there]`
@@ -195,16 +192,18 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   no replica has announced yet (after a restart, until its host announces) is `offline`, in every mode, and its bricks are
   not known: `AutoPlacer.PlanAsync` does not place the alias and the launch says the node has no connected replica.
   The bindings live beside the job. They are saved as given, an absent node included,
-  through `PUT /api/library/{id}/bindings`, and a seed brings its own as `<id>.bindings.json`. The list and the document carry
+  through `PUT /api/library/{id}/bindings`, and a seed brings its own as `<id>.bindings.json`, which carries a mode and no pin: a pin is the node's keyed version. The list and the document carry
   the problems, the planner refuses a plan that has a blocking one, and a deployment is refused naming them. A deployment keeps
   the bindings it was armed with, so new bindings change nothing that runs until it is armed again.
   The designer's check (`DesignValidator`) samples each brick on the node its reference names. **A check writes the pins**: each source's, from the sample its node read
   (the brick's version and the contract that read produced), each sink's, from the contract that reaches it in the runner's dry-run
   (`Bindings.Pinned`, in the same commit as the job); a referenced brick, in every mode, gets the version it was checked at: a strict reference is `brick-changed`, and so blocks a launch, from the moment its
   brick's version moves until a person saves the pipeline again and arms it again (an armed deployment keeps the pins it was armed
-  with). Rotating a node's `BrickKey` moves every version of its bricks at once. A contract the node did
+  with). **An arming writes the pin of a reference that has none** (`LibraryArming`, behind `POST /api/library/{id}/deploy`): it runs the same check, saves
+  the pins of those aliases alone in a commit of its own, and arms the library as it is then; a pin that exists is never moved by an arming, so a
+  `brick-changed` waits for a save, and a pipeline with any other blocking problem is refused before the check runs. Rotating a node's `BrickKey` moves every version of its bricks at once. A contract the node did
   not send leaves a `contract` or `compatible` binding unpinned, so `unchecked`, never pinned to something that passes.
-  `[local: BindingTests, LaunchRoutesTests, StudioRoutesTests]`
+  `[local: BindingTests, ArmedDeploymentTests (the arming), LaunchRoutesTests, StudioRoutesTests]`
 - **A brick that changed since its binding was checked is judged once per version, by the node that hosts it, and a verdict that
   breaks refuses the run by name.** `BindingVerifier` gives, per non-strict binding of a launch: `unchanged` when the brick is at the
   pin's version; `tolerated` for `tolerant` with no node asked; otherwise the node's answer: a source's `CheckSource` (its own sample
@@ -291,9 +290,8 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   brick, so `bindings.json` keeps for it the mode and the pin only: `BrickReferences.Expand` puts the node and the brick back for
   everything that reads a `Binding`, and `Strip` takes them out before a write. `BrickCatalog` keeps what it reads of each
   announced brick and reads a brick announced again anew; the node's name and whether it is online are read at every call, so a
-  brick is offline as soon as its node has no connected replica, one in its grace period included. A brick announced with its
-  text is not listed, and a branch that holds text is no brick: nothing matches a branch against a text. The planner never takes a
-  branch apart.
+  brick is offline as soon as its node has no connected replica, one in its grace period included. A branch that holds text is
+  no brick: nothing matches a branch against a text. The planner never takes a branch apart.
   `[local: BrickCatalogTests, MinimalBrickTests, the lab's smoke.py, ui_check.py]` `[unchecked: concurrent readers of the branch
   kept per brick; that an entry goes with its announcement]`
 - **A fragment declares each edge alias once**, so a branch that receives an edge under its own

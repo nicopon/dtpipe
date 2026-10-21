@@ -1,12 +1,8 @@
 {
   "customers": {
-    "node": "node-1",
-    "brick": "customer-countries",
     "mode": "strict"
   },
   "load": {
-    "node": "node-4",
-    "brick": "sensor-readings",
     "mode": "strict"
   }
 }

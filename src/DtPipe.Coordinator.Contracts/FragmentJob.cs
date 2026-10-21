@@ -17,21 +17,6 @@ public static partial class FragmentJob
     /// <summary>The declared branch of the brick <paramref name="id"/> of that kind, or <c>null</c> when the node offers none.</summary>
     public delegate YamlMappingNode? BranchOfBrick(string id, BrickKind kind);
 
-    /// <summary>
-    /// The branch a node's declaration of a brick holds, which only that node has: an announcement carries no text, so the
-    /// coordinator composes nothing from one. <c>null</c> when the declaration has no text or it is no mapping.
-    /// </summary>
-    public static YamlMappingNode? Declared(BrickInfo brick)
-    {
-        if (brick.Branch is null) return null;
-        try { return JobYaml.FromJson(JsonNode.Parse(brick.Branch)) as YamlMappingNode; }
-        catch (Exception) { return null; }
-    }
-
-    /// <summary>The bricks a node declares as <see cref="BranchOfBrick"/>: a brick of the kind asked, by id.</summary>
-    public static BranchOfBrick Over(IReadOnlyList<BrickInfo> bricks) =>
-        (id, kind) => bricks.FirstOrDefault(b => b.Id == id && b.Kind == kind) is { } brick ? Declared(brick) : null;
-
     /// <summary>The version of the brick <paramref name="id"/> of that kind, or <c>null</c> when the node offers none.</summary>
     public delegate string? VersionOfBrick(string id, BrickKind kind);
 

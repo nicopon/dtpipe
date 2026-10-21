@@ -10,10 +10,10 @@ no fragment of other nodes and speaks for no run it was not placed on; a data pl
 a disabled identity is refused and its host drops its data plane client, then takes a run once enabled; every edit is undone.
 The faults': a run cancelled while a fully wired fragment's child has nothing to write, whose
 verdict must come within the grace period.
-The bricks': on strict nodes, a fragment whose branch is not one of the node's bricks, or is one only
-by a hair, is refused by the node at once and leaves nothing deployed; the same wiring built from the
-bricks as declared deploys, relays included. The studio's routes give the catalog, what a job's
-branches are and a brick's Arrow sample.
+The bricks': on strict nodes, a fragment whose branch is not a brick the plan names by id is refused by the node at once and
+leaves nothing deployed; the same wiring built from the bricks by id deploys, relays included. The studio's routes give
+the catalog, what a job's branches are and a brick's Arrow sample. A library job names its bricks by reference, and the
+witness runs it with the text its nodes declare (tools/lab_bricks.py).
 The sandbox': on sandbox nodes any reader or writer is accepted, but a join or a processor on a data
 node is refused all the same: a data node only reads and writes. Runs on disjoint data nodes are in
 flight together, the runner they share notwithstanding.
@@ -55,6 +55,7 @@ STACK = os.environ.get("LAB_TARGET") == "stack"
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))
 import campaign_security as sec  # noqa: E402
 from enroll_host import UnknownHost  # noqa: E402
+from lab_bricks import expand, references  # noqa: E402
 from lab_session import ApiError, Session, studio_tokens  # noqa: E402
 SESSION = Session(URL, timeout=RUN_TIMEOUT)
 
@@ -147,6 +148,7 @@ class Context:
         check = check_of(yaml)
         if not check:
             raise RuntimeError("no `# lab-check:` query in the job header")
+        yaml = expand(yaml)  # the engine never reads brick:, and the witness has no coordinator: the owners' own declarations
         env = {**os.environ, **self.databases}
         env[self.warehouse] = self.witness_db
         job = os.path.join(STATE, "witness", name + ".yaml")
@@ -206,8 +208,9 @@ def library_pass(ctx):
         try:
             doc = call(f"/api/library/{pid}")
             check = ctx.witness("library-" + pid, doc["yaml"])
-            plan = call(f"/api/library/{pid}/plan")["plan"]
+            # Arming checks and pins the bricks a seed references; the plan a launch makes is read once they are pinned.
             call(f"/api/library/{pid}/deploy", {})
+            plan = call(f"/api/library/{pid}/plan")["plan"]
             queued.append((pid, plan, check))
         except Exception as e:
             failures += 1
@@ -457,12 +460,13 @@ def rights_pass():
         # refused it is the unit tests' to show.
         access = stranger_token()
         with open(os.path.join(LAB_DIR, "library-seed", "sensor-stream.yaml")) as f:
-            yaml = f.read()
+            yaml = expand(f.read())
         placement = {"readings": "runner-1", "enrich": "runner-1", "customers": "node-1", "load": "node-4"}
         pipeline = "smoke-foreign-report"
         hub = None
         try:
-            call("/api/deploy", {"pipelineId": pipeline, "yaml": yaml, "cuts": [], "placement": placement})
+            call("/api/deploy", {"pipelineId": pipeline, "yaml": yaml, "cuts": [], "placement": placement,
+                                   "bricks": {"customers": "customer-countries", "load": "sensor-readings"}})
             fragment = f"{pipeline}@node-4"
             hub = announce_as_a_replica_of_node_2(access, "smoke:foreign-report")
             run = call("/api/runs", {"pipelineId": pipeline})
@@ -799,19 +803,11 @@ LIBRARY_SEED = os.path.join(os.path.dirname(os.path.abspath(__file__)), "library
 
 # One source brick feeding a sink brick on another node and, through a runner step, a second sink brick:
 # the source's node relays the same branch onto two edges.
-RELAY_JOB = """customers:
-  input: sqlite:${{LAB_CRM_DB}}
-  provider-options:
-    sqlite-reader:
-      query: SELECT customer_id, first_name, last_name, email, city, country, signup_date FROM customers
+RELAY_JOB = expand("""customers:
+  input: brick:node-1/customers
 mirror:
   from: customers
-  output: duck:${{LAB_WAREHOUSE_DB}}
-  provider-options:
-    duck-writer:
-      table: customers_mirror
-      strategy: Upsert
-      key: customer_id
+  output: brick:node-4/customers-mirror
 copy:
   from: customers
   transformers:
@@ -820,13 +816,10 @@ copy:
       drop: first_name
 dim:
   from: copy
-  output: duck:${{LAB_WAREHOUSE_DB}}
-  provider-options:
-    duck-writer:
-      table: dim_customers
-      strategy: Recreate
-"""
+  output: brick:node-4/dim-customers
+""")
 RELAY_PLACEMENT = {"customers": "node-1", "mirror": "node-4", "copy": "runner-1", "dim": "node-4"}
+RELAY_BRICKS = {"customers": "customers", "mirror": "customers-mirror", "dim": "dim-customers"}
 
 
 def left_behind(prefix):
@@ -868,12 +861,12 @@ def refused(pipeline, yaml, cuts, placement, alias, node, why):
     raise RuntimeError("the deployment was accepted")
 
 
-def planned_refusal(pipeline, yaml, cuts, placement, alias, why):
+def planned_refusal(pipeline, yaml, cuts, placement, alias, why, bricks=None):
     """A deployment through the Lab view's own path to strict nodes. A data node runs only the bricks its owner
-    declared, by id, so a branch that is none is refused by the planner, naming `alias` and saying `why`,
-    before anything is sent to a node, and nothing of that deployment exists."""
+    declared, by id (`bricks`: the id each alias is composed from), so a branch that is none is refused by the planner,
+    naming `alias` and saying `why`, before anything is sent to a node, and nothing of that deployment exists."""
     try:
-        call("/api/deploy", {"pipelineId": pipeline, "yaml": yaml, "cuts": cuts, "placement": placement})
+        call("/api/deploy", {"pipelineId": pipeline, "yaml": yaml, "cuts": cuts, "placement": placement, "bricks": bricks})
     except RuntimeError as e:
         said = str(e)
         if "This plan cannot be deployed" not in said or f"'{alias}'" not in said or why not in said:
@@ -886,9 +879,9 @@ def planned_refusal(pipeline, yaml, cuts, placement, alias, why):
     raise RuntimeError("the deployment was accepted")
 
 
-def accepted(pipeline, yaml, cuts, placement):
+def accepted(pipeline, yaml, cuts, placement, bricks=None):
     try:
-        return call("/api/deploy", {"pipelineId": pipeline, "yaml": yaml, "cuts": cuts, "placement": placement})
+        return call("/api/deploy", {"pipelineId": pipeline, "yaml": yaml, "cuts": cuts, "placement": placement, "bricks": bricks})
     finally:
         undeploy(pipeline)
 
@@ -906,16 +899,19 @@ def checker(name, counter):
 
 
 def mirror_jobs():
-    mirror = open(os.path.join(LIBRARY_SEED, "customers-mirror.yaml")).read()
+    """customers-mirror as the engine sees it (the text of the bricks it references), then the same text reading
+    other columns and writing another table."""
+    mirror = expand(open(os.path.join(LIBRARY_SEED, "customers-mirror.yaml")).read())
     narrower = mirror.replace("SELECT customer_id, first_name, last_name, email, city, country, signup_date FROM customers",
                               "SELECT customer_id, email FROM customers")
-    elsewhere = mirror.replace("table: customers_mirror", "table: customers_elsewhere")
+    elsewhere = mirror.replace('"table": "customers_mirror"', '"table": "customers_elsewhere"')
     if narrower == mirror or elsewhere == mirror:
-        raise RuntimeError("library-seed/customers-mirror.yaml no longer has the query and table this pass alters")
+        raise RuntimeError("the bricks of library-seed/customers-mirror.yaml no longer have the query and table this pass alters")
     return mirror, narrower, elsewhere
 
 
 MIRROR_PLACEMENT = {"customers": "node-1", "mirror": "node-4"}
+MIRROR_BRICKS = {"customers": "customers", "mirror": "customers-mirror"}
 
 
 def bricks_pass():
@@ -937,20 +933,20 @@ def bricks_pass():
         # A file the node's owner never offered: the sink is a declared brick, so only the read is refused.
         job = mirror.replace("sqlite:${{LAB_CRM_DB}}", "csv:/etc/hosts")
         if job == mirror:
-            raise RuntimeError("library-seed/customers-mirror.yaml no longer reads sqlite:${{LAB_CRM_DB}}")
+            raise RuntimeError("the customers brick no longer reads sqlite:${{LAB_CRM_DB}}")
         return planned_refusal("bricks-probe", job, [], MIRROR_PLACEMENT, "customers", "not one of this node's bricks")
 
-    def source_by_a_hair():
-        accepted("bricks-probe", mirror, [], MIRROR_PLACEMENT)
-        detail = planned_refusal("bricks-probe", narrower, [], MIRROR_PLACEMENT, "customers", "not one of this node's bricks")
-        return "the bricks as declared deploy; a narrower query on the same brick: " + detail
-
-    def sink_by_a_hair():
-        detail = planned_refusal("bricks-probe", elsewhere, [], MIRROR_PLACEMENT, "mirror", "not one of this node's bricks")
-        return "another table on the same sink: " + detail
+    def named_by_id():
+        # A brick is the id its node declares: the bricks are accepted when the plan names them, and the same text, said as text, is
+        # none, whether it is the declared one or a narrower read or another table of the same brick.
+        accepted("bricks-probe", mirror, [], MIRROR_PLACEMENT, MIRROR_BRICKS)
+        detail = planned_refusal("bricks-probe", mirror, [], MIRROR_PLACEMENT, "customers", "not one of this node's bricks")
+        planned_refusal("bricks-probe", narrower, [], MIRROR_PLACEMENT, "customers", "not one of this node's bricks")
+        planned_refusal("bricks-probe", elsewhere, [], MIRROR_PLACEMENT, "mirror", "not one of this node's bricks")
+        return "the bricks named by id deploy; as text, the declared one, a narrower read and another table are refused: " + detail
 
     def relays():
-        plan = accepted("bricks-relay", RELAY_JOB, [], RELAY_PLACEMENT)
+        plan = accepted("bricks-relay", RELAY_JOB, [], RELAY_PLACEMENT, RELAY_BRICKS)
         relays_on_source = next(f["yaml"] for f in plan["fragments"] if f["node"] == "node-1").count("__to__")
         if relays_on_source < 2:
             raise RuntimeError(f"node-1 relays onto {relays_on_source} edge(s), expected 2")
@@ -981,10 +977,9 @@ def bricks_pass():
 
     def sink_refuses():
         yaml = open(os.path.join(LIBRARY_SEED, "revenue-by-country.yaml")).read()
-        wrong = yaml.replace("table: revenue_by_country\n      strategy: Recreate",
-                             "table: customers_mirror\n      strategy: Upsert\n      key: customer_id")
+        wrong = yaml.replace("output: brick:node-4/revenue-by-country", "output: brick:node-4/customers-mirror")
         if wrong == yaml:
-            raise RuntimeError("library-seed/revenue-by-country.yaml no longer loads its table this way")
+            raise RuntimeError("library-seed/revenue-by-country.yaml no longer writes brick:node-4/revenue-by-country")
         token = studio_tokens(URL, "labdesigner")["access_token"]
         pid = "smoke-refused-probe"
         status, body, _ = bearer(token, f"/api/library/{pid}", {"yaml": wrong, "message": "smoke: refused"}, "PUT")
@@ -1002,11 +997,12 @@ def bricks_pass():
 
     def binding_modes():
         # The check pins what it saw of each brick, by the nodes' own reads: a source's contract is the one its sample produced
-        # (dtpipe's `contract-save`), a sink's the one the runner's dry-run hands it. A mode other than strict is pinned by a save
-        # and by a bindings save alike; `tolerant` keeps the version alone, and a strict binding keeps no pin.
+        # (dtpipe's `contract-save`), a sink's the one the runner's dry-run hands it. A binding is pinned by a save and by a bindings
+        # save alike; `tolerant` and `strict` keep the version alone.
         token = studio_tokens(URL, "labdesigner")["access_token"]
         yaml = open(os.path.join(LIBRARY_SEED, "customers-mirror.yaml")).read()
-        seeded = json.load(open(os.path.join(LIBRARY_SEED, "customers-mirror.bindings.json")))
+        # A reference names its node and its brick; a request still names a node for each entry, and the job's reference wins.
+        seeded = {a: {"node": key.split("/")[0]} for a, key in references(yaml).items()}
         pid = "smoke-modes-probe"
         wanted = {a: {**b, "mode": "compatible"} for a, b in seeded.items()}
         try:
@@ -1033,14 +1029,14 @@ def bricks_pass():
                 raise RuntimeError(f"tolerant bindings: {status} {tolerant['bindings']}")
             status, body, _ = bearer(token, f"/api/library/{pid}/bindings", {"bindings": seeded, "message": "smoke: strict"}, "PUT")
             strict = json.loads(bearer(token, f"/api/library/{pid}")[1])
-            if status != 200 or any(b["mode"] != "strict" or b.get("pin") for b in strict["bindings"].values()):
+            if status != 200 or any(b["mode"] != "strict" or not (b.get("pin") or {}).get("version") or b["pin"].get("contract") for b in strict["bindings"].values()):
                 raise RuntimeError(f"strict bindings: {status} {strict['bindings']}")
         finally:
             try:
                 call(f"/api/library/{pid}", None, "DELETE")
             except ApiError:
                 pass
-        return "a save pins each brick's contract from the node's own read; no mode keeps the mode; tolerant keeps the version; strict none"
+        return "a save pins each brick's contract from the node's own read; no mode keeps the mode; tolerant and strict keep the version"
 
     def health():
         # A supervisor reads /health with a service token whose identity the rights grant the kind monitor, and nothing else. The
@@ -1168,8 +1164,9 @@ def bricks_pass():
             raise RuntimeError(f"the catalog has no source node-1/customers: {status} {body[:300]!r}")
         if not any(n["name"] == "runner-1" and n["role"] == "runner" for n in catalog["nodes"]):
             raise RuntimeError(f"the catalog lists no runner: {catalog['nodes']}")
-        status, body, _ = bearer(token, "/api/bricks/recognize", {"job": mirror}, "POST")
-        found = {r[k] for r in json.loads(body)["branches"].values() for k in ("match", "source", "sink") if r[k]}
+        reference = open(os.path.join(LIBRARY_SEED, "customers-mirror.yaml")).read()
+        status, body, _ = bearer(token, "/api/bricks/recognize", {"job": reference}, "POST")
+        found = {r["match"] for r in json.loads(body)["branches"].values() if r["match"]}
         if status != 200 or not {"node-1/customers", "node-4/customers-mirror"} <= found:
             raise RuntimeError(f"recognition of customers-mirror: {status} {body[:300]!r}")
         status, arrow, headers = bearer(token, "/api/bricks/node-1/customers/sample?rows=7", None, "POST")
@@ -1248,8 +1245,7 @@ def bricks_pass():
     check("versions", versions)
     check("the studio's routes", studio_routes)
     check("a brick's preview", brick_preview)
-    check("a source brick by a hair", source_by_a_hair)
-    check("a sink brick by a hair", sink_by_a_hair)
+    check("a brick named by id", named_by_id)
     check("relays", relays)
     check("a library save's check", library_save_check)
     check("a sink that refuses", sink_refuses)
@@ -1291,7 +1287,7 @@ def sandbox_pass():
     def cut_on_its_node():
         # The cut branch reads node-2's sales while the job joins two other nodes' data: only node-2
         # can run dtpipe split on it, and the planner asks it to.
-        yaml = open(os.path.join(LIBRARY_SEED, "revenue-by-country.yaml")).read()
+        yaml = expand(open(os.path.join(LIBRARY_SEED, "revenue-by-country.yaml")).read())
         placement = {"orders^": "node-2", "orders": "runner-1", "customers": "node-1", "products": "node-3",
                      "revenue": "runner-1", "load": "node-4"}
         plan = call("/api/plan", {"pipelineId": "smoke-cut", "yaml": yaml, "cuts": [{"branch": "orders", "at": 0}],
@@ -1361,9 +1357,10 @@ def faults_pass():
     started = time.time()
     try:
         with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "library-seed", "sensor-stream.yaml")) as f:
-            yaml = f.read()
+            yaml = expand(f.read())
         placement = {"readings": "runner-1", "enrich": "runner-1", "customers": "node-1", "load": "node-4"}
-        plan = call("/api/deploy", {"pipelineId": "smoke-faults", "yaml": yaml, "cuts": [], "placement": placement})
+        bricks = {"customers": "customer-countries", "load": "sensor-readings"}
+        plan = call("/api/deploy", {"pipelineId": "smoke-faults", "yaml": yaml, "cuts": [], "placement": placement, "bricks": bricks})
         run = call("/api/runs", {"pipelineId": plan["pipelineId"]})
         until(lambda: any(r["runId"] == run["runId"] and r["state"] == "running" for r in call("/api/runs/queue")), 60, "the run to start")
         time.sleep(3)
@@ -1524,7 +1521,7 @@ def replicas_pass():
         hosts.extend(sorted(host_name(replica_pid(r)) for r in replicas))
         declared.update({h: "lab" for h in hosts})
         apart = declared_apart()
-        call("/api/deploy", {"pipelineId": REPLICA_PROBE, "yaml": mirror, "cuts": [], "placement": MIRROR_PLACEMENT})
+        call("/api/deploy", {"pipelineId": REPLICA_PROBE, "yaml": mirror, "cuts": [], "placement": MIRROR_PLACEMENT, "bricks": MIRROR_BRICKS})
         first = []  # the host of the first run, then the other
 
         def named():
@@ -1606,7 +1603,7 @@ def replicas_pass():
 
         def deployed_again():
             undeploy(REPLICA_PROBE)
-            call("/api/deploy", {"pipelineId": REPLICA_PROBE, "yaml": elsewhere, "cuts": [], "placement": MIRROR_PLACEMENT})
+            call("/api/deploy", {"pipelineId": REPLICA_PROBE, "yaml": elsewhere, "cuts": [], "placement": MIRROR_PLACEMENT, "bricks": MIRROR_BRICKS})
             return f"deployed again from the declaration now announced, ran on {ran_on(run_probe())}"
         check("deployed again, it runs", deployed_again)
     except Exception as e:

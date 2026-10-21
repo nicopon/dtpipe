@@ -59,9 +59,9 @@ internal sealed class StudioFakes : IAsyncDisposable
         [new CatalogNode("n1", true, "data", "1.0.0+node")],
         [
             new CatalogBrick(SourceKey, "n1", "orders", StepKinds.Source, "Orders", "", new JsonObject { ["input"] = BrickRef.Format("n1", "orders") },
-                "aaaaaaaaaaaa", null, null, true),
+                "aaaaaaaaaaaa", true),
             new CatalogBrick(SinkKey, "n1", "archive", StepKinds.Sink, "Archive", "", new JsonObject { ["output"] = BrickRef.Format("n1", "archive") },
-                "bbbbbbbbbbbb", null, null, true),
+                "bbbbbbbbbbbb", true),
         ]);
 
     /// <summary>Rows <c>id</c> 1..n, as an Arrow IPC stream written by Apache.Arrow.</summary>

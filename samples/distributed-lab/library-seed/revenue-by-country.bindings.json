@@ -1,22 +1,14 @@
 {
-  "customers": {
-    "node": "node-1",
-    "brick": "customer-countries",
-    "mode": "strict"
-  },
-  "load": {
-    "node": "node-4",
-    "brick": "revenue-by-country",
-    "mode": "strict"
-  },
   "orders": {
-    "node": "node-2",
-    "brick": "orders-billable",
+    "mode": "strict"
+  },
+  "customers": {
     "mode": "strict"
   },
   "products": {
-    "node": "node-3",
-    "brick": "products",
+    "mode": "strict"
+  },
+  "load": {
     "mode": "strict"
   }
 }

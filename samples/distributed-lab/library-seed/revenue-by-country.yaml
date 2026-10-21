@@ -2,20 +2,11 @@
 # Three source bricks on three nodes, joined on the runner, loaded into the warehouse.
 # lab-check: SELECT count(*) AS n, sum(orders) AS orders, round(sum(revenue), 2) AS revenue FROM revenue_by_country
 orders:
-  input: duck:${{LAB_SALES_DB}}
-  provider-options:
-    duck-reader:
-      query: SELECT order_id, customer_id, product_id, quantity, order_date FROM orders WHERE status <> 'refunded'
+  input: brick:node-2/orders-billable
 customers:
-  input: sqlite:${{LAB_CRM_DB}}
-  provider-options:
-    sqlite-reader:
-      query: SELECT customer_id, country FROM customers
+  input: brick:node-1/customer-countries
 products:
-  input: sqlite:${{LAB_CATALOG_DB}}
-  provider-options:
-    sqlite-reader:
-      query: SELECT product_id, category, unit_price FROM products
+  input: brick:node-3/products
 revenue:
   from: orders
   ref:
@@ -32,8 +23,4 @@ revenue:
         GROUP BY ALL
 load:
   from: revenue
-  output: duck:${{LAB_WAREHOUSE_DB}}
-  provider-options:
-    duck-writer:
-      table: revenue_by_country
-      strategy: Recreate
+  output: brick:node-4/revenue-by-country

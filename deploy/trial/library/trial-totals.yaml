@@ -1,7 +1,8 @@
 # Totals of generated numbers
 # A source brick on the trial node, summed on the runner, written by a sink brick on the trial node.
+# A brick is named by reference: the node holds what it reads and writes.
 numbers:
-  input: generate:1000
+  input: brick:trial-node/numbers
 total:
   from: numbers
   provider-options:
@@ -9,4 +10,4 @@ total:
       query: SELECT COUNT(*) AS n, SUM(GenerateIndex) AS total FROM numbers
 write:
   from: total
-  output: csv:/state/totals.csv
+  output: brick:trial-node/totals

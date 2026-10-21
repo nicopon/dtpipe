@@ -40,6 +40,12 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   environment registers a fragment gate that accepts any reader or writer, the Lab view's mode; `lab.sh nodes
   strict|sandbox` restarts the hosts in a mode, and `lab.sh smoke` does so per pass. The runner
   runs any fragment in both. `[local: smoke.py bricks, sandbox]`
+- **A library seed names its bricks by reference, and the scenarios of `pipelines/` stay text.** A seed reads `input: brick:<node>/<brick>`
+  and writes `output: brick:<node>/<brick>` with `from`; its `.bindings.json` keeps the mode and no pin, which the arming writes. The engine
+  never reads `brick:`, so the witness of `smoke.py` runs a seed with the branch its node declares: `tools/lab_bricks.py` reads it from
+  `nodes/*.json`, never from the coordinator. A scenario of `pipelines/` is a plain job with a cut and a placement chosen by hand, which a
+  reference cannot take, so it runs on sandbox nodes as written. A strict probe through `/api/deploy` names the bricks by id (`bricks`).
+  `[local: smoke.py lab, library, bricks, sandbox]`
 - **`monitor-1` is the lab's supervisor**: a client of `idp-clients.json` and an identity of kind `monitor` in
   `rights-seed.json`, which reads `/health` and nothing else. A stack keeps its rights (in Redis) across restarts, so
   `smoke.py bricks` adds the identity through `POST /api/rights/identities` when the rights predate the seed.

@@ -196,8 +196,8 @@ while any replica is connected.
   connected, registered under the subject of the replica's connection, and holding exactly the groups the
   rights give the node now: closed by default, so a registration written before the rights changed is out
   until its client registers again. The composition is `FragmentJob.ComposeFor`, the function the replica
-  applies again at `Launch`, over the one reading of an announced brick (`FragmentJob.Declared`), so what
-  the coordinator calls eligible the replica runs. `[local: ReplicaAdmissionSubjectTests]`
+  applies again at `Launch`, over the bricks it declares; the coordinator compares the versions a replica announces
+  (`FragmentJob.VersionRefusal`), so what the coordinator calls eligible the replica runs. `[local: ReplicaAdmissionSubjectTests]`
 - **A replica at another version is out of that fragment, never a reason to refuse the run.** A rolling
   update leaves replicas at two versions of a brick: the run goes to one that composes the plan. Admission
   refuses only when none does (`NoEligibleReplicaException`, naming each fragment and why, replica by

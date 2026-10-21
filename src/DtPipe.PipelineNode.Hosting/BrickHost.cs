@@ -19,8 +19,10 @@ internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> dec
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
-    // What the node knows of each brick it offers, text included: it never leaves the node.
-    private IReadOnlyList<BrickInfo> _declared = [];
+    /// <summary>A brick the node offers: what the owner declared, text included, which never leaves the node, and what is announced of it.</summary>
+    private sealed record Offered(BrickDeclaration Declaration, BrickInfo Announced);
+
+    private IReadOnlyList<Offered> _offered = [];
 
     /// <summary>
     /// What the node announces: each brick as the coordinator needs it and nothing more (no text, no schema), with the
@@ -29,10 +31,11 @@ internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> dec
     public IReadOnlyList<BrickInfo> Bricks { get; private set; } = [];
 
     /// <summary>The branch of the brick <paramref name="id"/> as its owner declared it, or <c>null</c> when none of that kind is offered.</summary>
-    public YamlMappingNode? DeclaredBranch(string id, BrickKind kind) => FragmentJob.Over(_declared)(id, kind);
+    public YamlMappingNode? DeclaredBranch(string id, BrickKind kind) =>
+        _offered.FirstOrDefault(o => o.Announced.Id == id && o.Announced.Kind == kind) is { } offered ? BranchOf(offered.Declaration) : null;
 
     /// <summary>The version of the brick <paramref name="id"/> as the node declares it, the one it announces.</summary>
-    public string? DeclaredVersion(string id, BrickKind kind) => FragmentJob.VersionsOver(_declared)(id, kind);
+    public string? DeclaredVersion(string id, BrickKind kind) => FragmentJob.VersionsOver(Bricks)(id, kind);
 
     /// <summary>What every offered brick is, for <see cref="BrickRules"/>; set once with <see cref="Bricks"/>.</summary>
     public IReadOnlyList<BrickForm> Forms { get; private set; } = [];
@@ -44,8 +47,7 @@ internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> dec
     public Task InspectAsync(CancellationToken ct)
     {
         if (declared.Count > 0 && brickKey is null) throw new InvalidOperationException($"{node} offers bricks and has no brick key.");
-        var declaredBricks = new List<BrickInfo>();
-        var announced = new List<BrickInfo>();
+        var offered = new List<Offered>();
         foreach (var brick in declared)
         {
             // A brick this node would refuse to run must not be offered: the designer would place it here.
@@ -55,13 +57,11 @@ internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> dec
                 continue;
             }
             var version = BrickRules.VersionOf(brick.Kind, brick.BranchJson, brickKey!);
-            var full = new BrickInfo(brick.Id, brick.Kind, brick.Title, brick.Description ?? "", brick.BranchJson, null, null, version);
-            declaredBricks.Add(full);
-            announced.Add(full with { Branch = null });
+            offered.Add(new Offered(brick, new BrickInfo(brick.Id, brick.Kind, brick.Title, brick.Description ?? "", version)));
         }
-        _declared = declaredBricks;
-        Bricks = announced;
-        Forms = declaredBricks.Select(b => BrickRules.Declared(b.Kind, b.Branch!)).ToList();
+        _offered = offered;
+        Bricks = offered.Select(o => o.Announced).ToList();
+        Forms = offered.Select(o => BrickRules.Declared(o.Declaration.Kind, o.Declaration.BranchJson)).ToList();
         return Task.CompletedTask;
     }
 
@@ -128,7 +128,7 @@ internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> dec
     /// </summary>
     public async Task<BrickSample> SampleAsync(string id, int rows)
     {
-        var brick = _declared.FirstOrDefault(b => b.Id == id && b.Kind == BrickKind.Source);
+        var brick = _offered.FirstOrDefault(o => o.Announced.Id == id && o.Announced.Kind == BrickKind.Source)?.Declaration;
         if (brick is null) return new BrickSample(null, $"{node} offers no source brick '{id}'.");
         try
         {
@@ -239,7 +239,7 @@ internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> dec
     /// </summary>
     public async Task<SinkCheck> CheckSinkAsync(string id, string contractJson)
     {
-        var brick = _declared.FirstOrDefault(b => b.Id == id && b.Kind == BrickKind.Sink);
+        var brick = _offered.FirstOrDefault(o => o.Announced.Id == id && o.Announced.Kind == BrickKind.Sink)?.Declaration;
         if (brick is null) return new SinkCheck(false, $"{node} offers no sink brick '{id}'.");
         try
         {
@@ -271,13 +271,13 @@ internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> dec
     /// directory, which a concurrent run shares), and it is read back before the directory goes.
     /// </summary>
     private async Task<(DtPipeCommandResult Result, string? Contract)> RunBranchAsync(
-        BrickInfo brick, string endpoint, IReadOnlyDictionary<string, string> files, Func<string, string[]> args, bool saveContract = false)
+        BrickDeclaration brick, string endpoint, IReadOnlyDictionary<string, string> files, Func<string, string[]> args, bool saveContract = false)
     {
         var dir = Path.GetFullPath(Path.Combine(dtpipe.WorkingDirectory, "bricks", Guid.NewGuid().ToString("N")));
         Directory.CreateDirectory(dir);
         try
         {
-            var branch = FragmentJob.Declared(brick) ?? throw new InvalidOperationException($"The brick '{brick.Id}' declares no branch.");
+            var branch = BranchOf(brick) ?? throw new InvalidOperationException($"The brick '{brick.Id}' declares no branch.");
             JobYaml.Set(branch, endpoint, BrickRules.ArrowEndpoint);
             var saved = Path.Combine(dir, "saved.contract.json");
             if (saveContract) JobYaml.Set(branch, "contract-save", saved);
@@ -291,6 +291,13 @@ internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> dec
         {
             try { Directory.Delete(dir, recursive: true); } catch (IOException) { }
         }
+    }
+
+    /// <summary>The branch a declaration holds, or <c>null</c> when its text is no mapping.</summary>
+    private static YamlMappingNode? BranchOf(BrickDeclaration brick)
+    {
+        try { return JobYaml.FromJson(JsonNode.Parse(brick.BranchJson)) as YamlMappingNode; }
+        catch (Exception) { return null; }
     }
 
     private static JsonElement Branch(BrickDeclaration brick) => JsonDocument.Parse(brick.BranchJson).RootElement.Clone();

@@ -16,5 +16,5 @@ internal static class TestBricks
 
     /// <summary>A brick announced as a node announces it: its version, and no text.</summary>
     public static BrickInfo Announced(string id, BrickKind kind, string branchJson, string title = "t", string description = "") =>
-        new(id, kind, title, description, null, null, null, VersionOf(kind, branchJson));
+        new(id, kind, title, description, VersionOf(kind, branchJson));
 }

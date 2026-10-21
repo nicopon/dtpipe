@@ -30,7 +30,7 @@ internal static class NodeEndpoints
             {
                 var offered = BrickRef.Of(alias, branch) is { } reference && bricks.Find(reference.Key) is { } brick
                     && brick.Kind == (reference.IsSink ? BrickKind.Sink : BrickKind.Source) ? brick : null;
-                answers[alias] = new Recognition(offered?.Key, offered is null ? null : [offered.Node]);
+                answers[alias] = new Recognition(offered?.Key);
             }
             return Results.Ok(new RecognizeResponse(answers));
         });

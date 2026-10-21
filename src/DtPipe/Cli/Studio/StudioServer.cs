@@ -258,9 +258,6 @@ public sealed partial class StudioServer : IAsyncDisposable
                     var published = JobPath(request.Query["path"].ToString()) is { } publishedJob ? _local.ReadPublication(publishedJob) : null;
                     await JsonAsync(context, new { publication = published?.Coordinator == _tools.Coordinator?.Origin.ToString() ? published : null });
                     break;
-                case ("GET", "/api/bindings"):
-                    await BindingsAsync(context);
-                    break;
                 case ("POST", "/api/publish"):
                     await PublishAsync(context);
                     break;
@@ -565,9 +562,8 @@ public sealed partial class StudioServer : IAsyncDisposable
     /// Publishes the job as it is saved in the folder, never the page's cards: read again from disk and
     /// refused when it is not the text the page saved (its hash). Its launch file and its layout stay on
     /// this machine. A first publication creates only; a later one replaces only the commit published
-    /// last from here, or the one the person chose to replace after a 412. It binds each brick branch that
-    /// only one node offers and of each the person chose; a brick two nodes offer and nobody chose is left unbound, and the
-    /// coordinator says so in its answer.
+    /// last from here, or the one the person chose to replace after a 412. It sends no binding: a reference names its node and its
+    /// brick, and the coordinator keeps the mode and writes the pin.
     /// </summary>
     private async Task PublishAsync(HttpContext context)
     {
@@ -585,8 +581,7 @@ public sealed partial class StudioServer : IAsyncDisposable
         (LibrarySaved? Saved, LibraryConflict? Conflict, LibraryRefused? Refused) outcome;
         // Replace names the commit the person chose to replace; empty, it creates a pipeline gone since.
         var expected = asked.Replace is { } chosen ? (chosen.Length == 0 ? null : chosen) : last?.Commit;
-        var bindings = BindingsOf(await link.RecognizeAsync(job.Text, context.RequestAborted), asked.Bindings);
-        try { outcome = await link.PublishAsync(asked.Id!, job.Text, asked.Message, expected, bindings, context.RequestAborted); }
+        try { outcome = await link.PublishAsync(asked.Id!, job.Text, asked.Message, expected, context.RequestAborted); }
         catch (CoordinatorLinkException ex) { throw new StudioRefusal(502, ex.Message); }
         if (outcome.Conflict is { } conflict)
         {
@@ -603,40 +598,6 @@ public sealed partial class StudioServer : IAsyncDisposable
         var saved = outcome.Saved!;
         _local.WritePublication(path, new StudioPublication(origin, saved.Id, saved.Commit));
         await JsonAsync(context, saved);
-    }
-
-    /// <summary>
-    /// The nodes that offer each brick branch of a saved job, as the coordinator recognises them: what the page lets a person
-    /// choose among before publishing. Every branch that is a brick is listed, a brick one node offers included.
-    /// </summary>
-    private async Task BindingsAsync(HttpContext context)
-    {
-        var link = _tools.Coordinator ?? throw new StudioRefusal(404, "This studio was opened without --coordinator.");
-        var path = JobPath(context.Request.Query["path"].ToString()) ?? throw new StudioRefusal(400, "Name a job saved in the folder.");
-        var recognized = await link.RecognizeAsync(_folder.ReadJob(path).Text, context.RequestAborted);
-        await JsonAsync(context, new
-        {
-            branches = (recognized ?? new Dictionary<string, Recognition>()).Where(r => r.Value.Nodes is { Count: > 0 })
-                .OrderBy(r => r.Key, StringComparer.Ordinal).Select(r => new { alias = r.Key, nodes = r.Value.Nodes }),
-        });
-    }
-
-    /// <summary>
-    /// The bindings a publication carries: the node of each brick branch only one node offers, then what the person chose,
-    /// which must be a node that offers that brick. A brick several nodes offer and the person left unchosen stays unbound.
-    /// A binding names only its node: the brick is the reference's.
-    /// </summary>
-    internal static Dictionary<string, Binding> BindingsOf(IReadOnlyDictionary<string, Recognition>? recognized, IReadOnlyDictionary<string, string>? chosen)
-    {
-        var bindings = recognized?.Where(r => r.Value.Nodes is { Count: 1 })
-            .ToDictionary(r => r.Key, r => new Binding(r.Value.Nodes![0]), StringComparer.Ordinal) ?? new Dictionary<string, Binding>(StringComparer.Ordinal);
-        foreach (var (alias, node) in chosen ?? new Dictionary<string, string>())
-        {
-            if (recognized is null || !recognized.TryGetValue(alias, out var brick) || brick.Nodes?.Contains(node) != true)
-                throw new StudioRefusal(400, $"'{alias}' is not a brick that {node} offers.");
-            bindings[alias] = new Binding(node);
-        }
-        return bindings;
     }
 
     /// <summary>
@@ -843,8 +804,7 @@ public sealed partial class StudioServer : IAsyncDisposable
 
     private sealed record ImportRequest(List<string?>? Args);
 
-    private sealed record PublishRequest(string? Path, string? Hash, string? Id, string? Message, string? Replace,
-        IReadOnlyDictionary<string, string>? Bindings = null);
+    private sealed record PublishRequest(string? Path, string? Hash, string? Id, string? Message, string? Replace);
 
     private sealed record VariablesRequest(string? Path, string? Yaml, List<SampledBrick>? Bricks);
 

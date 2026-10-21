@@ -40,17 +40,20 @@ Open <http://coordinator.localtest.me:8080> and sign in as `admin` with the pass
 the trial identity provider accepts any name made of letters, digits, `.`, `_` or `-`, and the
 password is the name followed by `pwd`. Nobody but `admin` may do anything on this coordinator.
 
-- **Library** holds one pipeline, `trial-totals`: a generated source on the trial node, summed by
-  the runner, written to a file by a sink brick on the trial node.
+- **Library** holds one pipeline, `trial-totals`: a source brick on the trial node
+  (`brick:trial-node/numbers`), summed by the runner, written to a file by a sink brick on the trial
+  node (`brick:trial-node/totals`). A job names a brick by reference; the node holds what it reads
+  and writes.
 - **Runs** shows the queue and the journal of every run.
 - **Access** shows the rights: the two nodes, `trial-node` and `runner-1`, and the groups that may
   send rows to each other.
 
 ## Run the pipeline
 
-Open `trial-totals` in the library and press **Deploy**, which arms it: the coordinator checks
-that the bricks it names are offered and that the rights allow every edge, then keeps that version
-ready to launch. Press **Run**, then read what the sink wrote:
+Open `trial-totals` in the library and press **Deploy**, which arms it: the coordinator checks that
+the bricks it names are offered, samples each one and keeps the version it saw, checks that the
+rights allow every edge, then keeps that version ready to launch. Press **Run**, then read what the
+sink wrote:
 
 ```bash
 docker compose -f deploy/compose.yaml exec node cat /state/totals.csv

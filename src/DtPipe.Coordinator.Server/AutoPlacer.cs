@@ -123,7 +123,7 @@ public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, Pla
                 $"'{alias}' references {bound}, which is {(reference.IsSink ? "not a sink: only a sink is written" : "not a source: only a source is read")} by reference.", true);
         if (mode != BindingModes.Strict) return CheckHeld(alias, binding!, bound, mode, view);
         if (binding?.Pin is not { } pin)
-            return new(alias, BindingCauses.Unchecked, $"'{alias}' references {bound} and no check has pinned its version: save the pipeline again.", true);
+            return new(alias, BindingCauses.Unchecked, $"'{alias}' references {bound} and no check has pinned its version: arm or save the pipeline.", true);
         if (pin.Version != brick.Version)
             return new(alias, BindingCauses.BrickChanged,
                 $"'{alias}' was checked against version {pin.Version} of {bound}, which is now {brick.Version}: save the pipeline again.", true);

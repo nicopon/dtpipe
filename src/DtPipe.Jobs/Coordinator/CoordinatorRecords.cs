@@ -28,13 +28,11 @@ public sealed record CatalogColumn(string Name, string Type, bool IsNullable);
 /// One brick of the catalog. <see cref="Kind"/> is <see cref="StepKinds.Source"/> or
 /// <see cref="StepKinds.Sink"/>; <see cref="Branch"/> is the reference a job makes to the brick, as JSON:
 /// <c>{input: brick:&lt;node&gt;/&lt;id&gt;}</c> for a source, <c>{output: brick:&lt;node&gt;/&lt;id&gt;}</c> for a sink, never the text its node
-/// declares. <see cref="Schema"/> is always null, since a schema depends on the rows a source reads:
-/// <see cref="CoordinatorApi.Preview"/> reads them when a person looks at the brick. <see cref="Version"/> is the
-/// coordinator's, which changes exactly when what dtpipe would run does.
+/// declares. The catalog holds no schema, which depends on the rows a source reads: <see cref="CoordinatorApi.Preview"/> reads them
+/// when a person looks at the brick. <see cref="Version"/> is the coordinator's, which changes exactly when what dtpipe would run does.
 /// </summary>
 public sealed record CatalogBrick(
-    string Key, string Node, string Id, string Kind, string Title, string Description, JsonObject Branch, string Version,
-    IReadOnlyList<CatalogColumn>? Schema, string? SchemaError, bool Online);
+    string Key, string Node, string Id, string Kind, string Title, string Description, JsonObject Branch, string Version, bool Online);
 
 /// <summary>
 /// The first rows of a brick, read by its node when a person looks at it: <see cref="Csv"/> holds them and
@@ -50,10 +48,9 @@ public sealed record RecognizeRequest(string Job);
 /// <summary>
 /// What a branch is, by brick key: <see cref="Match"/> is the brick a reference names (<c>input: brick:&lt;node&gt;/&lt;id&gt;</c> or
 /// <c>output: brick:&lt;node&gt;/&lt;id&gt;</c>) when the catalog offers it in that direction, null for any other branch.
-/// <see cref="Nodes"/> are the nodes that offer it, null when <see cref="Match"/> is. The coordinator decides; the studio
-/// only reads the answer back.
+/// The reference names its node, so the answer holds nothing more. The coordinator decides; the studio only reads the answer back.
 /// </summary>
-public sealed record Recognition(string? Match, IReadOnlyList<string>? Nodes = null);
+public sealed record Recognition(string? Match);
 
 /// <summary>What each top-level branch of the job is, by alias.</summary>
 public sealed record RecognizeResponse(IReadOnlyDictionary<string, Recognition> Branches);

@@ -56,7 +56,6 @@ public sealed class BrickCatalogTests
         var catalogued = Assert.Single(_catalog.Catalog(), c => c.Id == "src");
         Assert.Equal("node-x/src", catalogued.Key);
         Assert.Equal("""{"input":"brick:node-x/src"}""", catalogued.Branch.ToJsonString());
-        Assert.Null(catalogued.Schema);
     }
 
     [Fact]
@@ -135,15 +134,5 @@ public sealed class BrickCatalogTests
         Assert.Null(_catalog.Find("node-x/src"));
         var renamed = _catalog.Find("node-y/src")!;
         Assert.Equal("node-y", renamed.Node);
-    }
-
-    /// <summary>A brick announced with its text is no brick of the catalog: a node announces a version and nothing else.</summary>
-    [Fact]
-    public void A_Brick_Announced_With_Its_Text_Is_Never_Listed()
-    {
-        Announce("c1", new BrickInfo("bad", BrickKind.Source, "t", "", Source, null, null, TestBricks.VersionOf(BrickKind.Source, Source)), Brick("src", BrickKind.Source, Source));
-
-        Assert.Equal(["node-x/src"], _catalog.List().Select(b => b.Key));
-        Assert.Null(_catalog.Find("node-x/bad"));
     }
 }

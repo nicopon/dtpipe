@@ -196,6 +196,40 @@ public sealed partial class ArmedDeploymentTests : IDisposable
     }
 
     [Fact]
+    public async Task Arming_A_Reference_No_Check_Pinned_Checks_It_Pins_Its_Version_And_Arms_With_The_Pin()
+    {
+        await NodeAsync("n", "crm", NodeRole.Data);
+        await NodeAsync("r1", "crm", NodeRole.Runner);
+        var version = Brick().Version;
+        var checks = 0;
+        var library = new PipelineLibrary(
+            new CoordinatorServerOptions
+            {
+                StateDir = Path.Combine(_dir, "library-state"), Authority = "http://idp", Audience = "test", UiClientId = "ui", UiClientSecret = "secret",
+            },
+            new AutoPlacer(new BrickCatalog(_inventory), _inventory, null!, _rights).Check);
+        await library.SaveAsync("p", Job, "create", CancellationToken.None);
+        var validator = new StubValidator(
+            _ => new DesignCheck(true, null, new Dictionary<string, CheckedPin> { ["src"] = new("src", new BindingPin(version)) }), _ => checks++);
+        var arming = new LibraryArming(library, validator, _deployments, _bus);
+        var unpinned = (await library.GetAsync("p", CancellationToken.None))!;
+        Assert.Equal(BindingCauses.Unchecked, Assert.Single(unpinned.BindingProblems).Cause);
+
+        var armed = await arming.ArmAsync(unpinned, "ann@x.test", CancellationToken.None);
+
+        var held = (await library.GetAsync("p", CancellationToken.None))!;
+        Assert.Empty(held.BindingProblems);
+        Assert.Equal(version, held.Bindings["src"].Pin!.Version);
+        Assert.Equal(held.Bindings, armed.Bindings);
+        Assert.Equal(armed, _deployments.ArmedOf("p"));
+        Assert.Equal(1, checks);
+
+        await arming.ArmAsync(held, "ann@x.test", CancellationToken.None);
+
+        Assert.Equal(1, checks);
+    }
+
+    [Fact]
     public async Task A_Runner_In_Groups_The_Matrix_Refuses_Is_Skipped_And_The_Next_One_Is_Chosen()
     {
         RunnerOneIn("audit");

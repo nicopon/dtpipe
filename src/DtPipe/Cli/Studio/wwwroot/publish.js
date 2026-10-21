@@ -1,6 +1,6 @@
 // @ts-check
-// Publishing the saved job to the coordinator's library: the id and message, the node of each brick several nodes
-// offer, and the outcome (published, refused by the coordinator's check, or in conflict with the library).
+// Publishing the saved job to the coordinator's library: the id and message, and the outcome (published, refused by the
+// coordinator's check, or in conflict with the library).
 
 import { api, el, status } from "./dom.js";
 import { showTab } from "./designer.js";
@@ -18,8 +18,8 @@ export function forgetPublication() {
 
 /**
  * The coordinator receives the job saved in the folder, never the cards: its layout and its launch values stay on this
- * machine. `replace` names the commit the person chose to replace after a conflict. A brick that several nodes offer asks
- * the person for its node first; one that a single node offers needs no choice.
+ * machine. `replace` names the commit the person chose to replace after a conflict. A brick is a reference that names its
+ * node, so a publication carries no binding.
  * @param {string} [replace]
  */
 export async function publish(replace) {
@@ -37,15 +37,6 @@ export async function publish(replace) {
     const message = prompt("Describe this version (the commit message):", `Publish ${job.path} from dtpipe studio`);
     if (message === null) return;
     publication.request = { id, message };
-    publication.bindings = {};
-    let branches = [];
-    try { branches = (await api(`/api/bindings?path=${encodeURIComponent(job.path)}`)).branches; } catch { /* the coordinator names what it can */ }
-    if (branches.some((b) => b.nodes.length > 1)) {
-      publication.outcome = { id, choosing: branches };
-      status("choose the node of each brick, then publish", "warn");
-      showTab("publish");
-      return;
-    }
   }
   return send(replace);
 }
@@ -55,8 +46,7 @@ async function send(replace) {
   const job = state.job;
   const request = publication.request;
   try {
-    const bindings = Object.fromEntries(Object.entries(publication.bindings).filter(([, node]) => node));
-    const saved = await api("/api/publish", { path: job.path, hash: job.hash, id: request.id, message: request.message, replace, bindings });
+    const saved = await api("/api/publish", { path: job.path, hash: job.hash, id: request.id, message: request.message, replace });
     publication.outcome = { id: request.id, saved };
     status(`published at ${short(saved.commit)}`, "good");
   } catch (e) {
@@ -80,24 +70,6 @@ async function send(replace) {
   showTab("publish");
 }
 
-// One selector per brick branch: the node that runs it, among the nodes that offer the brick. Left empty, the branch is
-// published unbound, and the coordinator keeps the binding it already holds for it, or lists it as a problem to settle there.
-function choosingView({ id, choosing }) {
-  const chosen = publication.bindings;
-  return [
-    el("p", {}, `Which node runs each brick of ${id}? The runner is never bound.`),
-    el("table", {}, choosing.map(({ alias, nodes }) => el("tr", {},
-      el("td", {}, el("code", {}, alias)),
-      el("td", {}, el("select", {
-        "aria-label": `Node of ${alias}`,
-        onchange: (e) => { chosen[alias] = e.target.value; },
-      },
-      el("option", { value: "", selected: !chosen[alias] && nodes.length > 1 }, "leave it to the coordinator"),
-      nodes.map((node) => el("option", { value: node, selected: chosen[alias] ? chosen[alias] === node : nodes.length === 1 }, node))))))),
-    el("p", {}, el("button", { id: "d-publish-now", onclick: () => send() }, "Publish")),
-  ];
-}
-
 /** The Publish tab. */
 export function publicationView() {
   const outcome = publication.outcome;
@@ -105,7 +77,6 @@ export function publicationView() {
   if (!outcome) {
     return el("p", { class: "hint" }, "Publish sends the job as saved in this folder to the coordinator's library. Its layout and its launch values stay on this machine.");
   }
-  if (outcome.choosing) return choosingView(outcome);
   if (outcome.refused) {
     const { error, report } = outcome.refused;
     return [el("p", { class: "warn" }, `${outcome.id} was not published: ${error}`),

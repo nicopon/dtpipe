@@ -66,7 +66,6 @@ public sealed class MinimalBrickTests : IDisposable
         var listed = Assert.Single(_catalog.List());
 
         Assert.Equal(("node-a/customers", brick.Version), (listed.Key, listed.Version));
-        Assert.Null(brick.Branch);
         Assert.DoesNotContain("sqlite", listed.Yaml);
         Assert.DoesNotContain("DB", listed.Yaml);
         Assert.Equal("brick:node-a/customers", Assert.Single(_catalog.Catalog()).Branch["input"]!.GetValue<string>());

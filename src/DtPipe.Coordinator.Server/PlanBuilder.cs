@@ -277,8 +277,7 @@ public sealed class PlanBuilder(
                 }
                 else if (!(mode == PlanMode.Manual && node.Capabilities.Contains(NodeAnnouncement.RawFragments)))
                 {
-                    var forms = node.Bricks.Where(b => b.Branch is not null).Select(b => BrickRules.Declared(b.Kind, b.Branch!)).ToList();
-                    errors.Add($"{draft.Name}: {BrickRules.FragmentRefusal(yaml, forms, requireBricks: true) ?? "this node runs bricks by id, and this fragment is not made of them."}");
+                    errors.Add($"{draft.Name}: {BrickRules.FragmentRefusal(yaml, [], requireBricks: true) ?? "this node runs bricks by id, and this fragment is not made of them."}");
                     continue;
                 }
             }

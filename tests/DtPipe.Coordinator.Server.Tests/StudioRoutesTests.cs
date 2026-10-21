@@ -61,7 +61,6 @@ public sealed class StudioRoutesTests : IDisposable
         Assert.Equal(("n1/orders", "source", "Orders"), (source.Key, source.Kind, source.Title));
         Assert.Equal("""{"input":"brick:n1/orders"}""", source.Branch.ToJsonString());
         Assert.Equal("""{"output":"brick:n1/archive"}""", sink.Branch.ToJsonString());
-        Assert.Null(source.Schema);
         Assert.Matches("^[0-9a-f]{12}$", source.Version);
     }
 
@@ -92,8 +91,6 @@ public sealed class StudioRoutesTests : IDisposable
         using var response = await As(CoordinatorHost.Reader).PostAsJsonAsync(CoordinatorApi.Recognize, new RecognizeRequest(job), Ct);
         var answer = await response.Content.ReadFromJsonAsync<RecognizeResponse>(Ct);
         Assert.Equal(new[] { "n1/orders", "n1/archive" }, new[] { answer!.Branches["read"].Match, answer.Branches["write"].Match });
-        Assert.Equal(["n1"], answer.Branches["read"].Nodes);
-        Assert.Equal(["n1"], answer.Branches["write"].Nodes);
         foreach (var alias in new[] { "backwards", "ghost", "says_more", "text" })
             Assert.Equal(new Recognition(null), answer.Branches[alias]);
     }

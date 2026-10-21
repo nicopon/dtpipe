@@ -1426,10 +1426,12 @@ as described in [deploy/README.md](./deploy/README.md#backing-up-a-sqlite-coordi
 | `BrickKey` | The key a brick's version is hashed under, required of a node that offers bricks (16 characters at least) and the same on all its replicas. Never announced; changing it changes every version |
 | `Variables__<NAME>` | A value every fragment reads as `${{NAME}}`; it never leaves the node |
 
-A **brick** is a read or a write the node's owner declared on the node's own data. A pipeline
-binds a branch to a brick in `<id>.bindings.json`, beside its YAML in the library: the node, the
-brick, and a mode (`strict`, `contract`, `compatible` or `tolerant`) that says how far the brick
-may change after the binding was checked.
+A **brick** is a read or a write the node's owner declared on the node's own data. A pipeline names
+it by reference: `input: brick:<node>/<brick>` reads a source, `output: brick:<node>/<brick>` with
+`from` writes a sink. `<id>.bindings.json`, beside its YAML in the library, keeps for each reference
+a mode (`strict`, `contract`, `compatible` or `tolerant`) that says how far the brick may change
+after it was checked, and the pin a check wrote. Arming a pipeline whose reference no check has
+pinned runs the check and writes the pin.
 
 ### Rights and identities
 

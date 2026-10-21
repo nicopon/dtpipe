@@ -103,7 +103,7 @@ public sealed class StudioBrickTests : IAsyncLifetime
         Assert.Equal("branch", KindOf(signedOut, "src"));
 
         await SignInAsync();
-        _fakes.Answers = new() { ["src"] = new Recognition(StudioFakes.SourceKey, ["n1"]) };
+        _fakes.Answers = new() { ["src"] = new Recognition(StudioFakes.SourceKey) };
         var (_, signedIn) = await CallAsync(HttpMethod.Post, "/api/design/decompose", new { yaml = Job });
 
         Assert.Equal(StudioFakes.SourceKey, BrickOf(signedIn, "src"));
@@ -117,7 +117,7 @@ public sealed class StudioBrickTests : IAsyncLifetime
         var job = Job + $"\nmine:\n  input: \"pg:Host=localhost;Username=me;Password={witness};Database=d\"\n  output: csv:m.csv\n"
             + "plain:\n  input: csv:local.csv\n  output: csv:p.csv\n";
         await SignInAsync();
-        _fakes.Answers = new() { ["src"] = new Recognition(StudioFakes.SourceKey, ["n1"]) };
+        _fakes.Answers = new() { ["src"] = new Recognition(StudioFakes.SourceKey) };
 
         var (_, decomposed) = await CallAsync(HttpMethod.Post, "/api/design/decompose", new { yaml = job });
 

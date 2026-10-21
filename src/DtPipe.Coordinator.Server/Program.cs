@@ -59,6 +59,7 @@ builder.Services.AddSingleton<ILibraryHeads>(services => services.GetRequiredSer
 builder.Services.AddSingleton<RunJournal>();
 builder.Services.AddSingleton<OrphanRuns>();
 builder.Services.AddSingleton<DeploymentManager>();
+builder.Services.AddSingleton<LibraryArming>();
 builder.Services.AddSingleton<PipelineHealth>();
 
 var app = builder.Build();

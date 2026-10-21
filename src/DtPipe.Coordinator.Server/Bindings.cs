@@ -63,7 +63,7 @@ public static class Bindings
     /// <summary>
     /// <paramref name="requested"/> set into <paramref name="held"/>, entry by entry: an alias the request does not name is kept, and
     /// one it names without a mode keeps the mode the library holds for it (a publisher that knows no mode must not turn a
-    /// <c>tolerant</c> binding back into <c>strict</c>). A request never brings a pin: only a check writes one.
+    /// <c>tolerant</c> binding back into <c>strict</c>). A request never brings a pin: only a check writes one, on a save, a bindings save or an arming.
     /// </summary>
     public static Dictionary<string, Binding> Merge(IReadOnlyDictionary<string, Binding> held, IReadOnlyDictionary<string, Binding>? requested)
     {
@@ -74,8 +74,8 @@ public static class Bindings
     }
 
     /// <summary>
-    /// <paramref name="bindings"/> as a check leaves them: a strict one has no pin (its text is the pin), and one in another mode
-    /// has the pin of the brick the check sampled, which it then names. A pin that does not hold what its mode compares (a contract
+    /// <paramref name="bindings"/> as a check leaves them: a referenced one has the version of the brick the check sampled in every mode, and
+    /// one in another mode also names that brick and holds the contract it saw; a strict binding of a branch that references no brick has no pin. A pin that does not hold what its mode compares (a contract
     /// the node did not send) is left out, so the binding stays <see cref="BindingCauses.Unchecked"/> rather than pass for ever.
     /// </summary>
     public static Dictionary<string, Binding> Pinned(

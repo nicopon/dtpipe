@@ -1,12 +1,8 @@
 {
   "customers": {
-    "node": "node-1",
-    "brick": "customers",
     "mode": "strict"
   },
   "mirror": {
-    "node": "node-4",
-    "brick": "customers-mirror",
     "mode": "strict"
   }
 }

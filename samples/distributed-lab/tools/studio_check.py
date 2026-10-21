@@ -187,7 +187,7 @@ def main():
 
         # 6. Publish: accepted, then refused with its report
         bad = open(os.path.join(LAB, "library-seed", "revenue-by-country.yaml")).read().replace(
-            "table: revenue_by_country\n      strategy: Recreate", "table: customers_mirror\n      strategy: Upsert\n      key: customer_id")
+            "output: brick:node-4/revenue-by-country", "output: brick:node-4/customers-mirror")
         with open(os.path.join(folder, "refused.yaml"), "w") as f:
             f.write(bad)
         browser.goto(address, 2)

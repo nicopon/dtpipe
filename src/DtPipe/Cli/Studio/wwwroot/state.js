@@ -45,10 +45,8 @@
 /** How the targets are written: `review` stops the real run before every writer, to be read before it writes. @typedef {{ review: boolean }} Writing */
 
 /**
- * The last publication's outcome ({ id, saved }, { id, conflict }, { id, refused } or, while the person chooses the
- * node of the bricks several nodes offer, { id, choosing }); the id and message being published; the node chosen for
- * each brick branch, by alias.
- * @typedef {{ outcome: any, request: { id: string, message: string } | null, bindings: Record<string, string> }} Publication
+ * The last publication's outcome ({ id, saved }, { id, conflict } or { id, refused }); the id and message being published.
+ * @typedef {{ outcome: any, request: { id: string, message: string } | null }} Publication
  */
 
 /**
@@ -76,7 +74,7 @@ export const state = {
   /** @type {Writing} */
   writing: { review: false },
   /** @type {Publication} */
-  publication: { outcome: null, request: null, bindings: {} },
+  publication: { outcome: null, request: null },
   /** @type {BrickRows | null} */
   brickRows: null,
   /** The variables of the composed job, by name, and the keyring's aliases: never a value the person did not type. @type {{ variables: any[], aliases: string[], error?: string }} */
