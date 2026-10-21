@@ -330,7 +330,7 @@ public sealed class PlanBuilder(
         foreach (var (key, _) in draft.Inbound) units.Add(new FragmentUnit(key, FragmentUnitKind.Inbound));
         foreach (var (key, branch) in draft.Owned)
         {
-            var brick = named?.TryGetValue(key, out var id) == true ? bricks.Find($"{draft.Node}/{id}") : bricks.MatchAll(branch).FirstOrDefault(b => b.Node == draft.Node);
+            var brick = named?.TryGetValue(key, out var id) == true ? bricks.Find($"{draft.Node}/{id}") : null;
             if (brick is null) return null;
             if (brick.Kind == BrickKind.Source)
             {

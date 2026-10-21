@@ -16,6 +16,7 @@ namespace DtPipe.Coordinator.Server.Tests;
 public sealed class StudioRoutesTests : IDisposable
 {
     private const string Source = """{"input": "duck:shop.db", "provider-options": {"duck": {"query": "SELECT 1"}}}""";
+    private const string Sink = """{"output": "csv:out.csv"}""";
     private readonly CoordinatorHost _host;
     private DesignCheck _verdict = new(true, null);
     private string? _checked;
@@ -38,7 +39,7 @@ public sealed class StudioRoutesTests : IDisposable
         var inventory = _host.Services.GetRequiredService<NodeInventory>();
         var registry = _host.Services.GetRequiredService<ReplicaRegistry>();
         var announcement = new NodeAnnouncement("n1", "", [], NodeRole.Data,
-            [TestBricks.WithText("orders", BrickKind.Source, Source, "Orders", "every order", [new BrickColumn("id", "BIGINT", false)])],
+            [TestBricks.Announced("orders", BrickKind.Source, Source, "Orders", "every order"), TestBricks.Announced("archive", BrickKind.Sink, Sink, "Archive")],
             DtpipeVersion: "9.9.9+abc");
         registry.Announce("c1", "n1", announcement, ["g"], () => { });
         inventory.Announced("n1", "n1", announcement, ["g"]);
@@ -50,44 +51,51 @@ public sealed class StudioRoutesTests : IDisposable
     }
 
     [Fact]
-    public async Task The_Catalog_Lists_Nodes_And_Bricks_With_Their_Declared_Branch()
+    public async Task The_Catalog_Lists_Nodes_And_Bricks_By_The_Reference_A_Job_Makes_To_Them_And_Never_Their_Text()
     {
         Announce();
         var catalog = await As(CoordinatorHost.Reader).GetFromJsonAsync<BrickCatalogView>(CoordinatorApi.Catalog, Ct);
         Assert.Equal(new CatalogNode("n1", true, "data", "9.9.9+abc"), Assert.Single(catalog!.Nodes));
-        var brick = Assert.Single(catalog.Bricks);
-        Assert.Equal(("n1/orders", "source", "Orders"), (brick.Key, brick.Kind, brick.Title));
-        Assert.Equal("duck:shop.db", brick.Branch["input"]!.GetValue<string>());
-        Assert.Equal("id", Assert.Single(brick.Schema!).Name);
-        Assert.Matches("^[0-9a-f]{12}$", brick.Version);
+        var source = catalog.Bricks.Single(b => b.Id == "orders");
+        var sink = catalog.Bricks.Single(b => b.Id == "archive");
+        Assert.Equal(("n1/orders", "source", "Orders"), (source.Key, source.Kind, source.Title));
+        Assert.Equal("""{"input":"brick:n1/orders"}""", source.Branch.ToJsonString());
+        Assert.Equal("""{"output":"brick:n1/archive"}""", sink.Branch.ToJsonString());
+        Assert.Null(source.Schema);
+        Assert.Matches("^[0-9a-f]{12}$", source.Version);
     }
 
     [Fact]
-    public async Task Recognition_Names_The_Brick_A_Branch_Is_Or_Starts_With()
+    public async Task Recognition_Names_The_Brick_A_Reference_Makes_In_The_Direction_It_Makes_It()
     {
         Announce();
         const string job = """
-            whole:
-              input: duck:shop.db
-              provider-options:
-                duck:
-                  query: SELECT 1
-            around:
-              input: duck:shop.db
-              provider-options:
-                duck:
-                  query: SELECT 1
+            read:
+              input: brick:n1/orders
+            write:
+              from: read
+              output: brick:n1/archive
+            backwards:
+              input: brick:n1/archive
+            ghost:
+              input: brick:n1/nothing
+            says_more:
+              input: brick:n1/orders
               output: csv:out.csv
-            other:
-              input: duck:other.db
+            text:
+              input: duck:shop.db
+              provider-options:
+                duck:
+                  query: SELECT 1
               output: csv:o.csv
             """;
         using var response = await As(CoordinatorHost.Reader).PostAsJsonAsync(CoordinatorApi.Recognize, new RecognizeRequest(job), Ct);
         var answer = await response.Content.ReadFromJsonAsync<RecognizeResponse>(Ct);
-        Assert.Equal(("n1/orders", "n1/orders", (string?)null), (answer!.Branches["whole"].Match, answer.Branches["whole"].Source, answer.Branches["whole"].Sink));
-        Assert.Equal(["n1"], answer.Branches["whole"].Nodes);
-        Assert.Equal(new Recognition(null, "n1/orders", null), answer.Branches["around"]);
-        Assert.Equal(new Recognition(null, null, null), answer.Branches["other"]);
+        Assert.Equal(new[] { "n1/orders", "n1/archive" }, new[] { answer!.Branches["read"].Match, answer.Branches["write"].Match });
+        Assert.Equal(["n1"], answer.Branches["read"].Nodes);
+        Assert.Equal(["n1"], answer.Branches["write"].Nodes);
+        foreach (var alias in new[] { "backwards", "ghost", "says_more", "text" })
+            Assert.Equal(new Recognition(null), answer.Branches[alias]);
     }
 
     [Fact]
@@ -185,12 +193,14 @@ public sealed class StudioRoutesTests : IDisposable
         Assert.Equal("a:\n  input: z\n", _checked);
     }
 
-    private const string Orders = "a:\n  input: duck:shop.db\n  provider-options:\n    duck:\n      query: SELECT 1\n";
+    private const string Orders = "a:\n  input: brick:n1/orders\n";
 
     [Fact]
-    public async Task A_Save_Binds_The_Branches_It_Names_And_The_Server_Resolves_Their_Bricks()
+    public async Task A_Save_Binds_The_Branches_It_Names_And_The_Reference_Names_Their_Bricks()
     {
         Announce();
+        var version = TestBricks.VersionOf(BrickKind.Source, Source);
+        _verdict = Pinned(version, null);
         using var request = new HttpRequestMessage(HttpMethod.Put, CoordinatorApi.Library("orders"))
         {
             Content = JsonContent.Create(new LibrarySave(Orders, "m", new Dictionary<string, Binding> { ["a"] = new Binding("n1") })),
@@ -199,7 +209,7 @@ public sealed class StudioRoutesTests : IDisposable
         Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
 
         var doc = await _host.Services.GetRequiredService<PipelineLibrary>().GetAsync("orders", Ct);
-        Assert.Equal(new Binding("n1", "orders", "strict"), doc!.Bindings["a"]);
+        Assert.Equal(new Binding("n1", "orders", "strict", new BindingPin(version)), doc!.Bindings["a"]);
         Assert.Empty(doc.BindingProblems);
     }
 
@@ -266,14 +276,14 @@ public sealed class StudioRoutesTests : IDisposable
     }
 
     [Fact]
-    public async Task A_Strict_Binding_Keeps_No_Pin()
+    public async Task A_Strict_Reference_Is_Pinned_At_The_Version_The_Check_Saw_And_Never_At_Its_Contract()
     {
         Announce();
         _verdict = Pinned("v1", "{}");
 
         Assert.Equal(HttpStatusCode.OK, await Put(new Binding("n1", "orders", "strict", new BindingPin("forged"))));
 
-        Assert.Null((await HeldAsync()).Pin);
+        Assert.Equal(new BindingPin("v1"), (await HeldAsync()).Pin);
     }
 
     [Fact]
@@ -321,7 +331,7 @@ public sealed class StudioRoutesTests : IDisposable
 
         Assert.Equal(HttpStatusCode.UnprocessableEntity, refused.StatusCode);
         Assert.Equal("'a': n1/orders does not accept what reaches it", (await refused.Content.ReadFromJsonAsync<LibraryRefused>(Ct))!.Report);
-        Assert.Empty((await library.GetAsync("orders", Ct))!.Bindings);
+        Assert.Equal(new Binding("n1", "orders"), (await library.GetAsync("orders", Ct))!.Bindings["a"]);
         Assert.Equal(Orders, _checked);
 
         _verdict = new DesignCheck(true, null);

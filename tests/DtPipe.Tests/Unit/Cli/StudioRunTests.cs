@@ -265,7 +265,7 @@ public sealed class StudioRunTests : IAsyncLifetime
     public async Task A_job_that_reads_a_brick_is_refused_by_name_before_anything_runs()
     {
         await StartAsync(coordinator: true);
-        var hash = await SaveAsync("orders:\n  input: \"duck:x.db\"\nmain:\n  from: orders\n  output: \"null:\"\n");
+        var hash = await SaveAsync("orders:\n  input: \"brick:n1/orders\"\nmain:\n  from: orders\n  output: \"null:\"\n");
 
         var (status, body) = await CallAsync(HttpMethod.Post, "/api/run/prepare",
             new { path = "job.yaml", hash, bricks = new[] { new { branch = "orders", key = StudioFakes.SourceKey } } });
@@ -276,10 +276,22 @@ public sealed class StudioRunTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_reference_no_card_binds_is_refused_by_name_before_it_reaches_the_engine()
+    {
+        await StartAsync(coordinator: true);
+        var hash = await SaveAsync("orders:\n  input: \"brick:n1/orders\"\nmain:\n  from: orders\n  output: \"null:\"\n");
+
+        var (status, body) = await CallAsync(HttpMethod.Post, "/api/run/prepare", new { path = "job.yaml", hash });
+
+        Assert.Equal(HttpStatusCode.Conflict, status);
+        Assert.Contains("'orders' (n1/orders)", body.GetProperty("error").GetString());
+    }
+
+    [Fact]
     public async Task A_sink_brick_is_written_to_a_throwaway_file_and_the_confirmation_says_so()
     {
         await StartAsync(coordinator: true);
-        var hash = await SaveAsync("a:\n  input: \"generate:3\"\nb:\n  from: a\n  output: \"csv:brick-target.csv\"\n");
+        var hash = await SaveAsync("a:\n  input: \"generate:3\"\nb:\n  from: a\n  output: \"brick:n1/archive\"\n");
         var bricks = new[] { new { branch = "b", key = StudioFakes.SinkKey } };
 
         var (_, prepared) = await CallAsync(HttpMethod.Post, "/api/run/prepare", new { path = "job.yaml", hash, bricks });

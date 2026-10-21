@@ -17,7 +17,7 @@ namespace DtPipe.Coordinator.Server.Tests;
 public sealed partial class ArmedDeploymentTests : IDisposable
 {
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(10);
-    private const string Job = "src:\n  input: sqlite:a\nout:\n  from: src\n  output: csv:out.csv\n";
+    private const string Job = "src:\n  input: brick:n/src\nout:\n  from: src\n  output: csv:out.csv\n";
     private const string Commit = "0123456789abcdef";
 
     private sealed class Replicas : INodeLink
@@ -140,7 +140,7 @@ public sealed partial class ArmedDeploymentTests : IDisposable
         (_rights, _inventory, _journal, _deployments) = Start(_registry);
     }
 
-    private static BrickInfo Brick() => TestBricks.WithText("src", BrickKind.Source, """{"input":"sqlite:a"}""", "source");
+    private static BrickInfo Brick() => TestBricks.Announced("src", BrickKind.Source, """{"input":"sqlite:a"}""", "source");
 
     private async Task NodeAsync(string name, string group, NodeRole role, BrickInfo? brick = null)
     {
@@ -156,7 +156,7 @@ public sealed partial class ArmedDeploymentTests : IDisposable
     }
 
     private static ArmedDeployment Armed(string node = "n", string job = Job) => new(
-        "p", Commit, PipelineLibrary.Sha(job), null, new Dictionary<string, Binding> { ["src"] = new Binding(node, "src", "strict") },
+        "p", Commit, PipelineLibrary.Sha(job), null, new Dictionary<string, Binding> { ["src"] = new Binding(node, "src", "strict", new BindingPin(Brick().Version)) },
         DateTimeOffset.UtcNow, "ann@x.test");
 
     private async Task RanAsync(RunView queued)
@@ -232,9 +232,9 @@ public sealed partial class ArmedDeploymentTests : IDisposable
     {
         await NodeAsync("n", "crm", NodeRole.Data);
         await NodeAsync("m", "crm", NodeRole.Data);
-        const string both = "src:\n  input: sqlite:a\n  output: arrow:-\n";
+        const string both = "src:\n  input: brick:n/src\n";
         // A plan with every branch bound is refused here only for what it lacks, never for a runner it does not use.
-        var launch = await _deployments.PlanLaunchAsync("p", both, new Dictionary<string, Binding> { ["src"] = new Binding("n", "src") }, CancellationToken.None);
+        var launch = await _deployments.PlanLaunchAsync("p", both, new Dictionary<string, Binding> { ["src"] = new Binding("n", "src", "strict", new BindingPin(Brick().Version)) }, CancellationToken.None);
 
         Assert.Null(launch.Runner);
         Assert.DoesNotContain(launch.Plan.Errors, e => e.Contains("runner"));
@@ -262,7 +262,7 @@ public sealed partial class ArmedDeploymentTests : IDisposable
         var refused = Journaled(run.RunId);
         Assert.Equal(RunState.Refused, refused.State);
         // The node has an identity and has not announced: it is absent, not a text that stopped being its brick.
-        Assert.Contains("'src' is bound to brick 'src' on n, which has no connected replica", refused.Refusal);
+        Assert.Contains("'src' references brick 'src' on n, which has no connected replica", refused.Refusal);
         Assert.DoesNotContain("no longer that brick", refused.Refusal);
         Assert.Empty(_runs.Specs);
 
@@ -289,7 +289,7 @@ public sealed partial class ArmedDeploymentTests : IDisposable
         Assert.NotNull(_deployments.ArmedOf("p"));
         var refused = Journaled(run.RunId);
         Assert.Equal(RunState.Refused, refused.State);
-        Assert.Contains("'src' is bound to brick 'src' on n", refused.Refusal);
+        Assert.Contains("'src' references brick 'src' on n", refused.Refusal);
     }
 
     [Fact]
@@ -374,7 +374,7 @@ public sealed partial class ArmedDeploymentTests : IDisposable
     // ---- Bindings in a mode other than strict ----
 
     /// <summary>The brick as its owner changed it since the binding was checked: the job still holds the old text.</summary>
-    private static BrickInfo Changed(string input = "sqlite:b") => TestBricks.WithText("src", BrickKind.Source, $$"""{"input":"{{input}}"}""", "source");
+    private static BrickInfo Changed(string input = "sqlite:b") => TestBricks.Announced("src", BrickKind.Source, $$"""{"input":"{{input}}"}""", "source");
 
     private static string VersionOf(BrickInfo brick) => brick.Version;
 
@@ -516,7 +516,7 @@ public sealed partial class ArmedDeploymentTests : IDisposable
         await NodeAsync("m", "crm", NodeRole.Data);
         await NodeAsync("r1", "crm", NodeRole.Runner);
 
-        var launch = await _deployments.PlanLaunchAsync("p", Job, new Dictionary<string, Binding> { ["src"] = new Binding("n", "src", "strict") }, CancellationToken.None);
+        var launch = await _deployments.PlanLaunchAsync("p", Job, new Dictionary<string, Binding> { ["src"] = new Binding("n", "src", "strict", new BindingPin(Brick().Version)) }, CancellationToken.None);
 
         Assert.True(launch.Ok, launch.Refusal);
         Assert.Contains(launch.Plan.Fragments, f => f.Node == "n");
@@ -576,7 +576,7 @@ public sealed partial class ArmedDeploymentTests : IDisposable
             var problem = Assert.Single(placer.Check(Job, bindings));
             Assert.Equal((BindingCauses.Offline, false), (problem.Cause, problem.Blocking));
             Assert.False(launch.Ok);
-            Assert.Contains("'src' is bound to brick 'src' on n, which has no connected replica", launch.Refusal);
+            Assert.Contains("'src' references brick 'src' on n, which has no connected replica", launch.Refusal);
         }
     }
 }

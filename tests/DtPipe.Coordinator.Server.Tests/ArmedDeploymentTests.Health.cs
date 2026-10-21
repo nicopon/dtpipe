@@ -194,7 +194,7 @@ public sealed partial class ArmedDeploymentTests
     public async Task Replicas_That_Offer_Different_Bricks_Are_A_Warning()
     {
         await ArmedHealthyAsync();
-        await ReplicaOfNAsync(registered: true, Brick(), TestBricks.WithText("other", BrickKind.Source, """{"input":"sqlite:z"}""", "source"));
+        await ReplicaOfNAsync(registered: true, Brick(), TestBricks.Announced("other", BrickKind.Source, """{"input":"sqlite:z"}""", "source"));
 
         var view = await ViewAsync();
 
@@ -269,7 +269,7 @@ public sealed partial class ArmedDeploymentTests
         var view = await ViewAsync();
 
         Assert.Equal(HealthStatus.Critical, view.Status);
-        Assert.Equal(("src", "n"), (Cause(view, BindingCauses.NotABrick).Alias, Cause(view, BindingCauses.NotABrick).Node));
+        Assert.Equal(("src", "n"), (Cause(view, BindingCauses.BrickChanged).Alias, Cause(view, BindingCauses.BrickChanged).Node));
     }
 
     [Fact]

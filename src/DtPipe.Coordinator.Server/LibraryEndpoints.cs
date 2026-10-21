@@ -85,7 +85,7 @@ internal static class LibraryEndpoints
             var doc = await library.GetAsync(id, ct);
             if (doc is null) return Results.NotFound(new { error = $"'{id}' is not in the library." });
             var launch = await deployments.PlanLaunchAsync(id, doc.Yaml, doc.Bindings, ct);
-            return Results.Ok(new { plan = launch.Plan, runner = launch.Runner, bricks = placer.BrickAliases(doc.Yaml, doc.Bindings), offers = placer.Offers(doc.Yaml) });
+            return Results.Ok(new { plan = launch.Plan, runner = launch.Runner, bricks = placer.BrickAliases(doc.Yaml), offers = placer.Offers(doc.Yaml) });
         });
         // Arms the pipeline at the commit the library holds, with the bindings it holds. The plan a launch would make now must
         // hold and every node must answer for its fragments; a refused arming is not kept.

@@ -219,7 +219,7 @@ public sealed class StudioPublishTests : IAsyncLifetime
     public async Task A_brick_only_one_node_offers_is_published_with_its_node()
     {
         await SignInAsync();
-        _fakes.Answers["main"] = new Recognition("n1/orders", null, null, ["n1"]);
+        _fakes.Answers["main"] = new Recognition("n1/orders", ["n1"]);
 
         var (status, _) = await PublishAsync(await HashAsync());
 
@@ -231,7 +231,7 @@ public sealed class StudioPublishTests : IAsyncLifetime
     public async Task A_brick_two_nodes_offer_is_published_unnamed()
     {
         await SignInAsync();
-        _fakes.Answers["main"] = new Recognition("n1/orders", null, null, ["n1", "n2"]);
+        _fakes.Answers["main"] = new Recognition("n1/orders", ["n1", "n2"]);
 
         var (status, _) = await PublishAsync(await HashAsync());
 
@@ -243,8 +243,8 @@ public sealed class StudioPublishTests : IAsyncLifetime
     public async Task The_page_lists_the_nodes_that_offer_each_brick_branch()
     {
         await SignInAsync();
-        _fakes.Answers["main"] = new Recognition("n1/orders", null, null, ["n1", "n2"]);
-        _fakes.Answers["other"] = new Recognition(null, null, null);
+        _fakes.Answers["main"] = new Recognition("n1/orders", ["n1", "n2"]);
+        _fakes.Answers["other"] = new Recognition(null);
 
         var (status, body) = await CallAsync(HttpMethod.Get, "/api/bindings?path=orders.yaml");
 
@@ -258,7 +258,7 @@ public sealed class StudioPublishTests : IAsyncLifetime
     public async Task A_node_the_person_chose_is_published_for_a_brick_several_nodes_offer()
     {
         await SignInAsync();
-        _fakes.Answers["main"] = new Recognition("n1/orders", null, null, ["n1", "n2"]);
+        _fakes.Answers["main"] = new Recognition("n1/orders", ["n1", "n2"]);
 
         var (status, _) = await CallAsync(HttpMethod.Post, "/api/publish",
             new { path = "orders.yaml", hash = await HashAsync(), id = "orders", message = "m", bindings = new { main = "n2" } });
@@ -271,7 +271,7 @@ public sealed class StudioPublishTests : IAsyncLifetime
     public async Task A_node_that_does_not_offer_the_brick_is_refused_and_nothing_is_published()
     {
         await SignInAsync();
-        _fakes.Answers["main"] = new Recognition("n1/orders", null, null, ["n1", "n2"]);
+        _fakes.Answers["main"] = new Recognition("n1/orders", ["n1", "n2"]);
 
         var (status, _) = await CallAsync(HttpMethod.Post, "/api/publish",
             new { path = "orders.yaml", hash = await HashAsync(), id = "orders", message = "m", bindings = new { main = "n3" } });

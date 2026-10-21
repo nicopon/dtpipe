@@ -112,7 +112,7 @@ public sealed class RunQueueTests : IDisposable
 
     private static readonly FragmentUnit[] Units = [new("src", FragmentUnitKind.SourceSend, "src")];
 
-    private static BrickInfo Brick() => TestBricks.WithText("src", BrickKind.Source, """{"input":"sqlite:a"}""", "source");
+    private static BrickInfo Brick() => TestBricks.Announced("src", BrickKind.Source, """{"input":"sqlite:a"}""", "source");
 
     /// <summary>One replica of the node <paramref name="name"/>, its TransportR client registered under the node's subject.</summary>
     private async Task<ReplicaKey> ReplicaAsync(string name, NodeRole role = NodeRole.Data)

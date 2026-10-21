@@ -6,8 +6,6 @@ namespace DtPipe.Coordinator.Server;
 /// <summary>Why a pipeline's bindings do not hold, as <see cref="BindingProblem.Cause"/>.</summary>
 public static class BindingCauses
 {
-    /// <summary>A branch is a brick and no binding names a node for it.</summary>
-    public const string Unassigned = "unassigned";
 
     /// <summary>A binding names a node the coordinator knows no identity for.</summary>
     public const string UnknownNode = "unknown-node";
@@ -27,8 +25,6 @@ public static class BindingCauses
     /// <summary>A binding names a branch the job does not have.</summary>
     public const string NoBranch = "no-branch";
 
-    /// <summary>The brick a binding names is not the one the branch's text designates on the bound node.</summary>
-    public const string BrickMismatch = "brick-mismatch";
 
     /// <summary>A binding asks for a mode that is none of <see cref="BindingModes.All"/>.</summary>
     public const string UnsupportedMode = "unsupported-mode";

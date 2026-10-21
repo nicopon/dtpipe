@@ -11,12 +11,9 @@ namespace DtPipe.Tests.Unit.Jobs;
 /// </summary>
 public sealed class DesignServiceTests
 {
-    private const string SourceYaml = "input: pg:Host=a\nprovider-options:\n  pg:\n    query: SELECT * FROM people\n";
-    private const string SinkYaml = "output: duck:archive.duckdb\nprovider-options:\n  duck-writer:\n    table: people\n";
-
     private static readonly DesignService WithBricks = new(new Bricks(
-        ("a/people", StepKinds.Source, SourceYaml),
-        ("b/archive", StepKinds.Sink, SinkYaml)));
+        ("a/people", StepKinds.Source),
+        ("b/archive", StepKinds.Sink)));
 
     private static readonly DesignService NoBricks = new(IBrickLookup.None);
 
@@ -32,7 +29,7 @@ public sealed class DesignServiceTests
         ]);
 
     [Fact]
-    public void Cards_Compose_Into_A_Plain_Job_With_Its_Header()
+    public void Cards_Compose_Into_A_Job_That_References_Its_Bricks()
     {
         var result = WithBricks.Compose(Masking());
 
@@ -43,10 +40,7 @@ public sealed class DesignServiceTests
             # Copies people without their email.
             # review-by: data-team
             people:
-              input: pg:Host=a
-              provider-options:
-                pg:
-                  query: SELECT * FROM people
+              input: brick:a/people
             masked:
               from: people
               transformers:
@@ -55,14 +49,21 @@ public sealed class DesignServiceTests
                   email: hidden
             archive:
               from: masked
-              output: duck:archive.duckdb
-              provider-options:
-                duck-writer:
-                  table: people
+              output: brick:b/archive
 
             """.Replace("\r\n", "\n"),
             result.Yaml);
         Assert.Equal(["people"], result.Steps.Single(s => s.Alias == "masked").DependsOn);
+
+        // A reference is read the way the coordinator and the node read it, and shares its branch with nothing.
+        var job = JobYaml.Parse(result.Yaml);
+        var people = BrickRef.Of("people", (YamlMappingNode)job["people"])!;
+        var archive = BrickRef.Of("archive", (YamlMappingNode)job["archive"])!;
+        Assert.Equal(("a/people", false), (people.Key, people.IsSink));
+        Assert.Equal(("b/archive", true), (archive.Key, archive.IsSink));
+        Assert.Null(BrickRef.Misuse("people", (YamlMappingNode)job["people"]));
+        Assert.Null(BrickRef.Misuse("archive", (YamlMappingNode)job["archive"]));
+        Assert.Null(BrickRef.Of("masked", (YamlMappingNode)job["masked"]));
     }
 
     [Fact]
@@ -83,29 +84,27 @@ public sealed class DesignServiceTests
     }
 
     [Fact]
-    public void A_Branch_Around_Two_Bricks_Is_Taken_Apart_And_Keeps_Its_Alias_On_Its_Work()
+    public void A_Reference_That_Says_More_Or_Names_No_Offered_Brick_Stays_A_Raw_Branch_And_Composes_Back()
     {
         const string job = """
-            copy:
-              input: pg:Host=a
-              output: duck:archive.duckdb
+            says_more:
+              input: brick:a/people
               transformers:
               - type: overwrite
                 mappings:
                   email: hidden
-              provider-options:
-                pg:
-                  query: SELECT * FROM people
-                duck-writer:
-                  table: people
+            not_offered:
+              input: brick:a/ghost
+            wrong_way:
+              input: brick:b/archive
             """;
 
         var result = WithBricks.Decompose(job);
 
-        Assert.Empty(result.Errors);
         Assert.Equal(
-            ["copy_source:source:a/people:", "copy:transform::copy_source", "copy_sink:sink:b/archive:copy"],
-            result.Model.Steps.Select(s => $"{s.Alias}:{s.Kind}:{s.Brick}:{string.Join(',', s.From ?? [])}"));
+            ["says_more:branch", "not_offered:branch", "wrong_way:branch"],
+            result.Model.Steps.Select(s => $"{s.Alias}:{s.Kind}"));
+        Assert.Equal(JobYaml.Serialize(JobYaml.Parse(job)), result.Yaml[result.Yaml.IndexOf('\n')..].TrimStart('\n'));
     }
 
     [Fact]
@@ -187,31 +186,20 @@ public sealed class DesignServiceTests
         Assert.Equal(["lab-check: SELECT 1"], directives);
     }
 
-    /// <summary>A catalog over branches declared here, matched by their text the way the coordinator matches by content.</summary>
-    private sealed class Bricks(params (string Key, string Kind, string Yaml)[] declared) : IBrickLookup
+    /// <summary>
+    /// A catalog of bricks offered here. Like the coordinator, it answers for a branch that is the reference to an offered
+    /// brick in the right direction, and for nothing else.
+    /// </summary>
+    private sealed class Bricks(params (string Key, string Kind)[] offered) : IBrickLookup
     {
-        private static string Text(YamlNode node) => JobYaml.Serialize(new YamlMappingNode { { "b", node } });
+        public DesignBrick? Find(string key) => offered.Where(b => b.Key == key)
+            .Select(b => new DesignBrick(b.Key, b.Kind, b.Key.Split('/')[0], "v1", b.Key, true)).FirstOrDefault();
 
-        private IEnumerable<(DesignBrick Brick, YamlMappingNode Branch)> All() => declared.Select(d =>
-            (new DesignBrick(d.Key, d.Kind, d.Key.Split('/')[0], "v1", d.Key, true), (YamlMappingNode)JobYaml.Parse($"b:\n  {d.Yaml.TrimEnd().Replace("\n", "\n  ")}\n")["b"]));
+        public YamlMappingNode BranchOf(DesignBrick brick) =>
+            new() { { brick.Kind == StepKinds.Sink ? "output" : "input", BrickRef.Format(brick.Node!, brick.Key.Split('/')[1]) } };
 
-        public DesignBrick? Find(string key) => All().FirstOrDefault(b => b.Brick.Key == key).Brick;
-
-        public YamlMappingNode BranchOf(DesignBrick brick) => JobYaml.CloneBranch(All().First(b => b.Brick.Key == brick.Key).Branch);
-
-        public DesignBrick? Match(YamlMappingNode branch)
-        {
-            var bare = new YamlMappingNode(branch.Children.Where(kv => ((YamlScalarNode)kv.Key).Value != "from"));
-            return All().FirstOrDefault(b => Text(b.Branch) == Text(bare)).Brick;
-        }
-
-        public DesignBrick? Contained(YamlMappingNode branch, string kind)
-        {
-            var endpoint = kind == StepKinds.Source ? "input" : "output";
-            var options = JobYaml.Mapping(branch, "provider-options");
-            return All().Where(b => b.Brick.Kind == kind && JobYaml.Scalar(b.Branch, endpoint) == JobYaml.Scalar(branch, endpoint))
-                .FirstOrDefault(b => JobYaml.Mapping(b.Branch, "provider-options")!.Children.All(kv =>
-                    options is not null && options.Children.TryGetValue(kv.Key, out var mine) && Text(mine) == Text(kv.Value))).Brick;
-        }
+        public DesignBrick? Match(YamlMappingNode branch) =>
+            BrickRef.Of("", branch) is { } reference && Find(reference.Key) is { } brick
+                && brick.Kind == (reference.IsSink ? StepKinds.Sink : StepKinds.Source) ? brick : null;
     }
 }

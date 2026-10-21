@@ -46,23 +46,21 @@ internal sealed class StudioFakes : IAsyncDisposable
     public readonly List<string> IdpPaths = [];
     public Dictionary<string, Recognition> Answers = [];
     public string? Recognized;
-    public int SampleRows;
+    public int SampleRows, PreviewCalls;
     public readonly Dictionary<string, (string Yaml, string Commit)> Library = [];
     public string? LastSaveBody;
     public LibraryRefused? Refusal;
     public bool Deployed;
     public int Commits;
-    public string SinkTarget = "csv:target.csv";
 
     public const string SourceKey = "n1/orders", SinkKey = "n1/archive";
 
     public BrickCatalogView Catalog => new(
         [new CatalogNode("n1", true, "data", "1.0.0+node")],
         [
-            new CatalogBrick(SourceKey, "n1", "orders", StepKinds.Source, "Orders", "", (JsonObject)JsonNode.Parse(
-                """{"input": "duck:${{NODE_ONLY_DB}}", "provider-options": {"duck": {"query": "SELECT id FROM orders"}}}""")!,
-                "aaaaaaaaaaaa", [new CatalogColumn("id", "BIGINT", false)], null, true),
-            new CatalogBrick(SinkKey, "n1", "archive", StepKinds.Sink, "Archive", "", new JsonObject { ["output"] = SinkTarget },
+            new CatalogBrick(SourceKey, "n1", "orders", StepKinds.Source, "Orders", "", new JsonObject { ["input"] = BrickRef.Format("n1", "orders") },
+                "aaaaaaaaaaaa", null, null, true),
+            new CatalogBrick(SinkKey, "n1", "archive", StepKinds.Sink, "Archive", "", new JsonObject { ["output"] = BrickRef.Format("n1", "archive") },
                 "bbbbbbbbbbbb", null, null, true),
         ]);
 
@@ -175,6 +173,10 @@ internal sealed class StudioFakes : IAsyncDisposable
         case "/api/bricks/recognize":
             Recognized = (await context.Request.ReadFromJsonAsync<RecognizeRequest>(JsonSerializerOptions.Web))!.Job;
             await context.Response.WriteAsJsonAsync(new RecognizeResponse(Answers), JsonSerializerOptions.Web);
+            break;
+        case "/api/bricks/n1/orders/preview":
+            PreviewCalls++;
+            await context.Response.WriteAsJsonAsync(new BrickPreviewView("id\n1\n", [new CatalogColumn("id", "BIGINT", false)]), JsonSerializerOptions.Web);
             break;
         case "/api/bricks/n1/orders/sample":
             SampleRows = int.Parse(context.Request.Query["rows"]!);

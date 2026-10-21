@@ -83,6 +83,7 @@ public sealed partial class StudioServer
             throw new StudioRefusal(409, "A run is refused here for a job that reads a brick: "
                 + string.Join(", ", sampling.Sources.Select(s => $"'{s.Alias}' ({s.Brick.Key})"))
                 + ". Its rows would recreate a real target on this machine. Sample it, or run it on its node.");
+        RefuseReferences(sampling.Yaml);
         var launch = _variables.LaunchEnvironment(path, sampling.Yaml);
         var staged = asked.Debug == true || asked.Review == true;
         // A suspended run has its rows; any run but its continuation would write the job again and leave them to be written twice.

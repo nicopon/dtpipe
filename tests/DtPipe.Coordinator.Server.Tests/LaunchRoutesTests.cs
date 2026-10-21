@@ -15,7 +15,11 @@ namespace DtPipe.Coordinator.Server.Tests;
 /// </summary>
 public sealed class LaunchRoutesTests : IDisposable
 {
-    private const string Job = "a:\n  input: sqlite:${{LAB_DB}}\nb:\n  from: a\n  output: csv:out.csv\n";
+    private const string Job = "a:\n  input: brick:node-a/customers\nb:\n  from: a\n  output: csv:out.csv\n";
+    private const string Text = """{"input":"sqlite:${{LAB_DB}}"}""";
+
+    /// <summary>What a check pinned for the reference to the brick: the version the node announces for it.</summary>
+    private static Binding Checked(string mode = "strict") => new("node-a", "customers", mode, new BindingPin(TestBricks.VersionOf(BrickKind.Source, Text), mode == "strict" ? null : "{}"));
     private static readonly JsonSerializerOptions Web = new(JsonSerializerDefaults.Web);
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
@@ -40,7 +44,7 @@ public sealed class LaunchRoutesTests : IDisposable
     /// <summary>Node A offers the customers brick under <c>crm</c>, a runner is connected, and A may send to it.</summary>
     private async Task NodeAAndARunnerAsync()
     {
-        var source = TestBricks.WithText("customers", BrickKind.Source, """{"input":"sqlite:${{LAB_DB}}"}""", "Customers");
+        var source = TestBricks.Announced("customers", BrickKind.Source, Text, "Customers");
         foreach (var identity in new[] { new IdentityBody("a", "node-a", "A", ["crm"], true), new IdentityBody("r", "runner", "R", ["run"], true) })
         {
             using var created = await _admin.PostAsJsonAsync("/api/rights/identities", identity, Web, Ct);
@@ -69,7 +73,7 @@ public sealed class LaunchRoutesTests : IDisposable
         await NodeAAndARunnerAsync();
         var library = _host.Services.GetRequiredService<PipelineLibrary>();
         await library.SaveAsync("orders", Job, "create", Ct);
-        await library.SaveBindingsAsync("orders", new Dictionary<string, Binding> { ["a"] = new Binding("node-a") }, "bind", Ct);
+        await library.SaveBindingsAsync("orders", new Dictionary<string, Binding> { ["a"] = Checked() }, "bind", Ct);
         var history = (await library.HistoryAsync("orders", Ct)).Count;
 
         var answer = await PlanAsync();
@@ -87,7 +91,7 @@ public sealed class LaunchRoutesTests : IDisposable
         await NodeAAndARunnerAsync();
         var library = _host.Services.GetRequiredService<PipelineLibrary>();
         await library.SaveAsync("orders", Job, "create", Ct);
-        await library.SaveBindingsAsync("orders", new Dictionary<string, Binding> { ["a"] = new Binding("node-a") }, "bind", Ct);
+        await library.SaveBindingsAsync("orders", new Dictionary<string, Binding> { ["a"] = Checked() }, "bind", Ct);
         string[] GroupsOfA(JsonElement answer) => answer.GetProperty("plan").GetProperty("fragments").EnumerateArray()
             .Single(f => f.GetProperty("node").GetString() == "node-a").GetProperty("groups").EnumerateArray().Select(g => g.GetString()!).ToArray();
         Assert.Equal(["crm"], GroupsOfA(await PlanAsync()));
@@ -100,16 +104,17 @@ public sealed class LaunchRoutesTests : IDisposable
 
     /// <summary>A brick branch with no node names the nodes that offer it; a binding on an absent node is a problem and refuses the deployment.</summary>
     [Fact]
-    public async Task A_Brick_Needs_Its_Node_And_A_Binding_On_An_Absent_Node_Refuses_The_Deployment()
+    public async Task A_Reference_Needs_Its_Version_Pinned_And_A_Reference_To_An_Absent_Node_Refuses_The_Deployment()
     {
         await NodeAAndARunnerAsync();
         var library = _host.Services.GetRequiredService<PipelineLibrary>();
         await library.SaveAsync("orders", Job, "create", Ct);
 
-        var unbound = await PlanAsync();
-        Assert.Contains(unbound.GetProperty("plan").GetProperty("errors").EnumerateArray(), e => e.GetString()!.Contains("node-a"));
+        var unpinned = await PlanAsync();
+        Assert.Contains(unpinned.GetProperty("plan").GetProperty("errors").EnumerateArray(), e => e.GetString()!.Contains("node-a"));
 
-        using var moved = await _admin.PutAsJsonAsync("/api/library/orders/bindings", new { bindings = new Dictionary<string, Binding> { ["a"] = new Binding("node-gone") } }, Web, Ct);
+        await library.SaveAsync("orders", Job.Replace("node-a", "node-gone"), "move", Ct);
+        using var moved = await _admin.PutAsJsonAsync("/api/library/orders/bindings", new { bindings = new Dictionary<string, Binding> { ["a"] = Checked() } }, Web, Ct);
         moved.EnsureSuccessStatusCode();
         var problems = (await moved.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("problems");
         Assert.Equal("unknown-node", Assert.Single(problems.EnumerateArray()).GetProperty("cause").GetString());

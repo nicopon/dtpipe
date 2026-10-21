@@ -27,20 +27,9 @@ public class DesignValidator(BrickCatalog bricks, NodeRequests nodes)
 
     private sealed record Placed(string Alias, BrickView Brick);
 
-    /// <summary>
-    /// The brick a branch is, on the node <paramref name="bindings"/> name for it. A binding in a mode other than strict names its
-    /// brick, whatever the branch's text is now. A branch no binding places (or places on a node that does not offer it) takes the
-    /// first node that offers the brick: the check judges the job's form, and the bindings' own problems are listed apart.
-    /// </summary>
-    public BrickView? BrickOf(string alias, YamlMappingNode branch, IReadOnlyDictionary<string, Binding> bindings)
-    {
-        // A reference names its brick: there is no text to match and no node to choose.
-        if (BrickRef.Of(alias, branch) is { } reference) return bricks.Find(reference.Key);
-        if (bindings.TryGetValue(alias, out var held) && !Bindings.IsStrict(held) && held.Brick is { } id && bricks.Find($"{held.Node}/{id}") is { } named)
-            return named;
-        var offered = bricks.MatchAll(branch);
-        return bindings.TryGetValue(alias, out var binding) && offered.FirstOrDefault(b => b.Node == binding.Node) is { } placed ? placed : offered.FirstOrDefault();
-    }
+    /// <summary>The brick a branch references, or null for any other branch: a reference names its brick, and there is no text to match.</summary>
+    public BrickView? BrickOf(string alias, YamlMappingNode branch) =>
+        BrickRef.Of(alias, branch) is { } reference ? bricks.Find(reference.Key) : null;
 
     public virtual async Task<DesignCheck> ValidateAsync(string yaml, IReadOnlyDictionary<string, Binding> bindings, CancellationToken ct)
     {
@@ -54,12 +43,12 @@ public class DesignValidator(BrickCatalog bricks, NodeRequests nodes)
             // never copied into the runner's dry-run.
             if (BrickRef.Misuse(alias, branch) is { } misuse) { refusals.Add(misuse); continue; }
             if (BrickRef.Of(alias, branch) is { } named
-                && BrickOf(alias, branch, bindings)?.Kind != (named.IsSink ? BrickKind.Sink : BrickKind.Source))
+                && BrickOf(alias, branch)?.Kind != (named.IsSink ? BrickKind.Sink : BrickKind.Source))
             {
                 refusals.Add($"'{alias}' references {named.Key}, which no node offers as a {(named.IsSink ? "sink" : "source")}.");
                 continue;
             }
-            switch (BrickOf(alias, branch, bindings))
+            switch (BrickOf(alias, branch))
             {
                 case { Kind: BrickKind.Source } source:
                     rewritten.Add(alias, new YamlMappingNode { { "input", BrickRules.ArrowEndpoint } });

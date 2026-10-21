@@ -14,8 +14,9 @@ internal static class NodeEndpoints
         api.MapGet("/nodes", (NodeInventory inventory) => inventory.Snapshot());
         api.MapGet("/bricks", (BrickCatalog bricks) => bricks.List());
 
-        // What dtpipe studio reads of the bricks: the catalog, and what each branch of a job is. Recognition
-        // is the coordinator's, by content (BrickCatalog); the studio only reads the answer back.
+        // What dtpipe studio reads of the bricks: the catalog, and what each branch of a job is. A job names a brick by
+        // reference (BrickRef), so recognising a branch is reading its reference against the catalog; the studio only
+        // reads the answer back.
         api.MapGet(CoordinatorApi.CatalogRoute, (NodeInventory inventory, BrickCatalog bricks) => new BrickCatalogView(
             [.. inventory.Snapshot().Select(n => new CatalogNode(n.Name, n.Online, n.Role == NodeRole.Runner ? "runner" : "data", n.DtpipeVersion))],
             bricks.Catalog()));
@@ -27,9 +28,9 @@ internal static class NodeEndpoints
             var answers = new Dictionary<string, Recognition>(StringComparer.Ordinal);
             foreach (var (alias, branch) in JobYaml.Branches(job))
             {
-                var whole = bricks.MatchAll(branch);
-                answers[alias] = new Recognition(whole.FirstOrDefault()?.Key, bricks.Contained(branch, BrickKind.Source)?.Key, bricks.Contained(branch, BrickKind.Sink)?.Key,
-                    whole.Count == 0 ? null : [.. whole.Select(b => b.Node).Distinct()]);
+                var offered = BrickRef.Of(alias, branch) is { } reference && bricks.Find(reference.Key) is { } brick
+                    && brick.Kind == (reference.IsSink ? BrickKind.Sink : BrickKind.Source) ? brick : null;
+                answers[alias] = new Recognition(offered?.Key, offered is null ? null : [offered.Node]);
             }
             return Results.Ok(new RecognizeResponse(answers));
         });
@@ -48,10 +49,12 @@ internal static class NodeEndpoints
                 return Results.Json(new { error = $"{node} did not answer within {bound.TotalSeconds:F0}s." }, statusCode: StatusCodes.Status504GatewayTimeout);
             }
         });
-        designer.MapPost("/bricks/{node}/{id}/preview", async (string node, string id, NodeRequests nodes, CancellationToken ct) =>
+        designer.MapPost(CoordinatorApi.PreviewRoute, async (string node, string id, NodeRequests nodes, CancellationToken ct) =>
         {
             var preview = await nodes.AskAsync<BrickPreview>(node, NodeChannel.PreviewBrick, [id, 20], TimeSpan.FromSeconds(40), ct);
-            return preview.Error is null ? Results.Ok(new { csv = preview.Csv, columns = preview.Columns }) : Results.BadRequest(new { error = preview.Error });
+            return preview.Error is null
+                ? Results.Ok(new BrickPreviewView(preview.Csv, preview.Columns?.Select(c => new CatalogColumn(c.Name, c.Type, c.IsNullable)).ToList()))
+                : Results.BadRequest(new { error = preview.Error });
         });
     }
 }

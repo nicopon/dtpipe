@@ -9,7 +9,7 @@ namespace DtPipe.Coordinator.Server.Tests;
 public sealed class EnrollmentQueueTests
 {
     private static NodeAnnouncement Host(string name = "proposed", string description = "a host", params string[] bricks) =>
-        new(name, description, [], NodeRole.Data, [.. bricks.Select(b => TestBricks.WithText(b, BrickKind.Source, "{}", b))]);
+        new(name, description, [], NodeRole.Data, [.. bricks.Select(b => TestBricks.Announced(b, BrickKind.Source, "{}", b))]);
 
     private static readonly IReadOnlyDictionary<string, string> NoLabels = new Dictionary<string, string>();
 

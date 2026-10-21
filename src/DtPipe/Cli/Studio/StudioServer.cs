@@ -210,6 +210,9 @@ public sealed partial class StudioServer : IAsyncDisposable
                 case ("GET", "/api/bricks"):
                     await BricksAsync(context);
                     break;
+                case ("POST", "/api/bricks/preview"):
+                    await BrickPreviewAsync(context);
+                    break;
                 case ("POST", "/api/design/compose"):
                     await JsonAsync(context, Design().Compose(await BodyAsync<DesignModel>(context)));
                     break;
@@ -512,6 +515,7 @@ public sealed partial class StudioServer : IAsyncDisposable
         var sampling = BrickSampling.Of(yaml, bricks, _tools.Coordinator?.Catalog);
         if (sampling.Sources.Count > 0 && _tools.Coordinator?.Status().State != CoordinatorLink.SignedIn)
             throw new StudioRefusal(409, "This job reads a node's brick: sign in to the coordinator to sample it.");
+        RefuseReferences(sampling.Yaml);
 
         // Every variable resolves before anything runs, and is named when it would not.
         var launch = _variables.LaunchEnvironment(JobPath(path), sampling.Yaml);
@@ -620,7 +624,7 @@ public sealed partial class StudioServer : IAsyncDisposable
     /// <summary>
     /// The bindings a publication carries: the node of each brick branch only one node offers, then what the person chose,
     /// which must be a node that offers that brick. A brick several nodes offer and the person left unchosen stays unbound.
-    /// The brick itself is the coordinator's to resolve from the job's text, so a binding names only its node.
+    /// A binding names only its node: the brick is the reference's.
     /// </summary>
     internal static Dictionary<string, Binding> BindingsOf(IReadOnlyDictionary<string, Recognition>? recognized, IReadOnlyDictionary<string, string>? chosen)
     {
@@ -710,32 +714,39 @@ public sealed partial class StudioServer : IAsyncDisposable
     {
         if (_tools.DesignWith is not { } with || _tools.Coordinator is not { } link) return _tools.Design;
         string job;
-        try { job = ForRecognition(yaml, link.Catalog); }
+        try { job = ForRecognition(yaml); }
         catch (Exception) { return Design(); }
-        // Nothing to ask for a job none of whose branches names a node's variable: it never leaves this machine.
+        // Nothing to ask for a job none of whose branches references a brick: it never leaves this machine.
         var answers = job.Length == 0 ? null : await link.RecognizeAsync(job, ct);
         return with(new StudioBricks(link.Catalog, job, answers));
     }
 
     /// <summary>
-    /// What the coordinator is asked to recognise: only the top-level branches whose input or output names a
-    /// variable that a node's brick announces, so a branch of this machine, a connection string included, is
-    /// never sent. A brick it misses opens as a local card, which loses nothing. Empty when no branch qualifies.
+    /// What the coordinator is asked to recognise: only the top-level branches that are a reference to a brick
+    /// (<see cref="BrickRef.Of"/>), so a branch of this machine, a connection string included, is never sent. A
+    /// reference it misses opens as a local card, which loses nothing. Empty when no branch qualifies.
     /// </summary>
-    internal static string ForRecognition(string yaml, BrickCatalogView? catalog)
+    internal static string ForRecognition(string yaml)
     {
-        var announced = (catalog?.Bricks ?? [])
-            .SelectMany(b => VariableTokens.Expressions(b.Branch.ToJsonString()))
-            .Where(e => !VariableTokens.IsReference(e))
-            .ToHashSet(StringComparer.Ordinal);
         var kept = new YamlMappingNode();
         foreach (var (alias, branch) in JobYaml.Branches(JobYaml.Parse(yaml)))
-        {
-            var ends = new[] { JobYaml.Scalar(branch, "input"), JobYaml.Scalar(branch, "output") };
-            if (ends.Any(end => end is not null && VariableTokens.Expressions(end).Any(announced.Contains)))
-                kept.Add(alias, JobYaml.CloneBranch(branch));
-        }
+            if (BrickRef.Of(alias, branch) is not null) kept.Add(alias, JobYaml.CloneBranch(branch));
         return kept.Children.Count == 0 ? "" : JobYaml.Serialize(kept);
+    }
+
+    /// <summary>
+    /// Refuses a job in which a branch still references a brick: the engine has no <c>brick:</c>, so what a sample or a run
+    /// does not bind to a throwaway file or a node's rows must not reach it. A job that is not readable is the engine's to report.
+    /// </summary>
+    internal static void RefuseReferences(string yaml)
+    {
+        IReadOnlyDictionary<string, BrickReference> left;
+        try { left = BrickRef.In(JobYaml.Parse(yaml)); }
+        catch (Exception ex) when (ex is FormatException or YamlDotNet.Core.YamlException) { return; }
+        if (left.Count > 0)
+            throw new StudioRefusal(409, "A branch references a brick, which only its node reads: "
+                + string.Join(", ", left.Values.Select(r => $"'{r.Alias}' ({r.Key})"))
+                + ". Sign in to the coordinator to sample it.");
     }
 
     /// <summary>The job with each brick's branch replaced as a sample replaces it; as it is when that cannot be done.</summary>
@@ -770,6 +781,21 @@ public sealed partial class StudioServer : IAsyncDisposable
             bricks = catalog?.Bricks ?? [],
             error,
         });
+    }
+
+    /// <summary>
+    /// A brick's first rows and their types, read by its node when a person looks at its card: the catalog carries no
+    /// schema, which depends on the rows. Read each time, kept nowhere, and outside the engine's slot since nothing runs here.
+    /// </summary>
+    private async Task BrickPreviewAsync(HttpContext context)
+    {
+        var link = _tools.Coordinator ?? throw new StudioRefusal(404, "This studio was opened without --coordinator.");
+        var asked = await BodyAsync<BrickPreviewRequest>(context);
+        var brick = link.Catalog?.Bricks.FirstOrDefault(b => b.Key == asked.Key)
+            ?? throw new StudioRefusal(409, $"'{asked.Key}' is no brick of the catalog read last: sign in to the coordinator.");
+        if (link.Status().State != CoordinatorLink.SignedIn) throw new StudioRefusal(409, "Sign in to the coordinator to read the rows of a brick.");
+        try { await JsonAsync(context, await link.PreviewAsync(brick.Node, brick.Id, context.RequestAborted)); }
+        catch (CoordinatorLinkException ex) { throw new StudioRefusal(502, ex.Message); }
     }
 
     private static async Task ServeAssetAsync(HttpContext context, string path)
@@ -812,6 +838,8 @@ public sealed partial class StudioServer : IAsyncDisposable
     private sealed record SaveRequest(string? Path, string? Hash, DesignModel? Model, bool AcceptErrors);
 
     private sealed record OpenLibraryRequest(string? Id);
+
+    private sealed record BrickPreviewRequest(string? Key);
 
     private sealed record ImportRequest(List<string?>? Args);
 

@@ -341,7 +341,7 @@ public sealed class NodeChannelHubTests : IDisposable
     [Fact]
     public async Task A_Rolling_Update_Shows_As_Replicas_That_Disagree_On_Their_Bricks()
     {
-        BrickInfo Brick(string input) => TestBricks.WithText("src", BrickKind.Source, $$"""{"input":"{{input}}"}""", "source");
+        BrickInfo Brick(string input) => TestBricks.Announced("src", BrickKind.Source, $$"""{"input":"{{input}}"}""", "source");
         var (first, _) = Connect("c1", "known");
         var (second, _) = Connect("c2", "known");
         await first.Announce(Replica(Guid.NewGuid()) with { Bricks = [Brick("sqlite:a")] });

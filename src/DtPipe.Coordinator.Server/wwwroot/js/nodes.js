@@ -1,5 +1,5 @@
-// Nodes: every node and runner, the bricks each offers with their schema and a preview read by
-// the node itself, the replicas that carry it, and the flow matrix.
+// Nodes: every node and runner, the bricks each offers by the reference a job makes to them, a preview read by
+// the node itself when asked, the replicas that carry it, and the flow matrix.
 import { api, csvTable, esc, nodeColor, store } from "./core.js";
 
 let host = null;
@@ -18,9 +18,6 @@ export function update(kind) {
 
 function brickRow(b) {
   const unfolded = open.has(b.key);
-  const schema = b.schema?.length
-    ? `<table class="schema"><tr><th>column</th><th>type</th><th>null</th></tr>${b.schema.map((c) => `<tr><td>${esc(c.name)}</td><td>${esc(c.type)}</td><td>${c.isNullable ? "yes" : "no"}</td></tr>`).join("")}</table>`
-    : b.schemaError ? `<p class="mismatch">schema: ${esc(b.schemaError)}</p>` : b.kind === "Sink" ? `<p class="hint">A sink declares where it writes; its table's content shows in the preview.</p>` : "";
   return `
     <div class="brick ${b.kind.toLowerCase()}" data-key="${esc(b.key)}">
       <div class="brick-line">
@@ -35,7 +32,7 @@ function brickRow(b) {
         </span>
       </div>
       ${b.description ? `<div class="hint">${esc(b.description)}</div>` : ""}
-      ${unfolded ? `<div class="brick-details">${schema}<pre>${esc(b.yaml)}</pre></div>` : ""}
+      ${unfolded ? `<div class="brick-details"><p class="hint">A job names this brick by the reference below; its node holds the rest.</p><pre>${esc(b.yaml)}</pre></div>` : ""}
       ${previews[b.key] ? `<div class="brick-preview">${previews[b.key]}</div>` : ""}
     </div>`;
 }

@@ -303,7 +303,7 @@ public class ReplicaAdmissionSubjectTests
         Assert.Equal(RunOutcome.Succeeded, (await run.WaitAsync(Wait)).Outcome);
     }
 
-    private static BrickInfo Brick(string input) => TestBricks.WithText("src", BrickKind.Source, $$"""{"input":"{{input}}"}""", "source");
+    private static BrickInfo Brick(string input) => TestBricks.Announced("src", BrickKind.Source, $$"""{"input":"{{input}}"}""", "source");
 
     /// <summary>
     /// A rolling update leaves two replicas of one node at two versions of a brick. The run is placed on the one that composes

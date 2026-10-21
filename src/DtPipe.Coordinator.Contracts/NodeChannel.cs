@@ -100,8 +100,8 @@ public sealed record BrickColumn(string Name, string Type, bool IsNullable);
 /// nothing else: the id, kind, title, description and <see cref="Version"/>, the keyed hash of the declared text taken on the node
 /// (<see cref="BrickRules.VersionOf(BrickKind, string, string)"/>). The text, its variables and its schema stay on the node; a job
 /// references the brick as <c>brick:&lt;node&gt;/&lt;id&gt;</c> and the node composes the branch from its own declarations, so
-/// <see cref="Branch"/> is <c>null</c> in every announcement. A <see cref="Branch"/> that is set (the piece of a dtpipe branch as
-/// JSON text, exactly as a file declares it) is matched by that text. <see cref="Schema"/> is announced with neither: it is read on
+/// <see cref="Branch"/> is <c>null</c> in every announcement. A brick announced with a <see cref="Branch"/> set (the piece of a dtpipe branch as
+/// JSON text, exactly as a file declares it) is not listed by the coordinator. <see cref="Schema"/> is announced with neither: it is read on
 /// demand, and <see cref="SchemaError"/> says why one could not be.
 /// </summary>
 public sealed record BrickInfo(

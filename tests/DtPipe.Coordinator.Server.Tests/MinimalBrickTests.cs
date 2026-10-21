@@ -73,15 +73,6 @@ public sealed class MinimalBrickTests : IDisposable
     }
 
     [Fact]
-    public void A_Reference_Is_Never_Matched_As_A_Text()
-    {
-        Announce(Minimal());
-        var branch = (YamlMappingNode)JobYaml.FromJson(JsonNode.Parse(Text));
-
-        Assert.Empty(_catalog.MatchAll(branch));
-    }
-
-    [Fact]
     public void A_Referenced_Brick_Is_Unchecked_Until_A_Check_Pins_Its_Version_And_Changed_When_Its_Version_Moves()
     {
         var brick = Minimal();

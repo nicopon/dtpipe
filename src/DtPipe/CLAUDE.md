@@ -245,17 +245,20 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   `GET /api/publish` no publication, and `/api/coordinator/login`, `/api/library`, `/api/library/open` and
   `POST /api/publish` answer 404 "opened without --coordinator". Jobs, cards, variables and samples never
   ask for the link; a route that needs it refuses the same way.
-  `[CI: StudioServerTests — jobs, cards, variables, samples and the four refusals]`
+  `[CI: StudioServerTests — jobs, cards, variables, samples and the five refusals]`
   `[unchecked: import, debug and run without a coordinator; that a new route needing the link refuses]`
-- **The coordinator decides what a brick is; the studio reads its answer.** Before taking a job
-  apart, the studio sends it to `/api/bricks/recognize` and gives `DesignService` a `StudioBricks`
-  that finds each answer again by the top-level branch's YAML, a key and never a matching rule
-  (`Match`/`Contained` see each top-level branch whole: `StudioBrickTests` pins it). Nobody signed
-  in, or no answer: no branch is a brick, and each opens as a local card. `Find`/`BranchOf` read the
-  catalog read last, kept after a sign-out, so a brick card still composes and saves. **Only a
-  branch whose input or output names a variable a node's brick announces is sent** (`ForRecognition`):
-  a branch of this machine, a connection string included, never leaves it, and a brick it misses
-  opens as a local card. `[CI: StudioBrickTests]`
+- **The coordinator decides what a brick is; the studio reads its answer.** A card that is a brick is written as the reference to
+  it (`input: brick:<node>/<id>` for a source, `output: brick:<node>/<id>` with `from` for a sink): `DesignService` writes it from the
+  catalog's `CatalogBrick.Branch`, the one composer. Before taking a job apart, the studio sends its reference branches to
+  `/api/bricks/recognize` and gives `DesignService` a `StudioBricks` that finds each answer again by the top-level branch's YAML, a
+  key and never a matching rule (`Match` sees each top-level branch whole: `StudioBrickTests` pins it). Nobody signed
+  in, or no answer: no reference is a brick, and each opens as a raw branch card, which composes back as written. `Find`/`BranchOf`
+  read the catalog read last, kept after a sign-out, so a brick card still composes and saves. **Only a branch that is a reference
+  is sent** (`ForRecognition`, by `BrickRef.Of`): a branch of this machine, a connection string included, never leaves it.
+  A reference never reaches the engine: a sample, a debug run or a real run of a job in which a branch still references a brick that
+  no card bound is refused by name (`RefuseReferences`). The catalog carries no schema, which depends on the rows: a brick card
+  reads its node's first rows when a person asks (`POST /api/bricks/preview`, `CoordinatorLink.PreviewAsync`), kept nowhere.
+  `[CI: StudioBrickTests, StudioRunTests]`
 - **A brick samples here through the run's own binding.** `BrickSampling` turns a source brick's
   branch into `input: arrow:-` and a sink brick's into `output: arrow:-`; `SampleAsync` binds them as
   `--bind-input`/`--bind-output` do (`AliasBindingApplier`, before validation): never a second
@@ -266,7 +269,7 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   resolves those.
 - **A publication binds a brick to a node only when one node offers it or the person chose it.** `/api/publish` asks the
   coordinator to recognise the saved job (`CoordinatorLink.RecognizeAsync`) and sends `LibrarySave.Bindings`, a `Binding` that
-  names only the node (the brick is the coordinator's to resolve from the job's text), for each branch that is a brick offered
+  names only the node (the reference names the brick), for each branch that is a brick offered
   by exactly one node, then the nodes the page sends as `bindings`, each of which must offer that brick (400 otherwise). A brick
   several nodes offer and nobody chose is left unbound, since the studio never picks a node for a person, and the coordinator's
   answer lists it. `GET /api/bindings?path=` gives the page the nodes that offer each brick branch of the saved job; the publish

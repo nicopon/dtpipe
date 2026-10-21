@@ -56,19 +56,19 @@ public sealed record DesignResult(
 /// <summary>
 /// Converts between the designer's cards and a dtpipe job, both ways, and is the only writer of the
 /// job text, for <c>dtpipe studio</c> and the coordinator alike. A composed job is a plain dtpipe
-/// job, readable and runnable as a whole on one machine: a source or sink brick is copied in as
-/// <paramref name="bricks"/> declares it, and a branch <paramref name="endpoints"/> took apart into
-/// its own source, transform and sink cards is joined back into one branch.
+/// job: a source or sink brick is written as the reference to it (<see cref="BrickRef"/>, which the engine never
+/// reads: the node that hosts the brick composes the rest), and a branch <paramref name="endpoints"/> took apart
+/// into its own source, transform and sink cards is joined back into one branch.
 /// </summary>
 public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? endpoints = null)
 {
     /// <summary>
-    /// A source or a sink inside a branch: a brick, or the branch's own endpoint (<see cref="Local"/>).
+    /// A source or a sink inside a branch: the branch's own endpoint (<see cref="Local"/>).
     /// <see cref="Keys"/> and <see cref="Components"/> are the branch keys and provider-options
     /// blocks it accounts for.
     /// </summary>
     private sealed record Endpoint(
-        string Kind, DesignBrick? Brick, YamlMappingNode? Local, IReadOnlySet<string> Keys, IReadOnlySet<string> Components);
+        string Kind, YamlMappingNode Local, IReadOnlySet<string> Keys, IReadOnlySet<string> Components);
 
     public DesignResult Compose(DesignModel model)
     {
@@ -199,9 +199,9 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
     }
 
     /// <summary>
-    /// A job back into cards. A branch that is a brick becomes that brick; a branch that reads, writes
+    /// A job back into cards. A branch that is the reference to a brick becomes that brick; a branch that reads, writes
     /// or does both around its own work is taken apart into one card each, the last one before the
-    /// sink keeping the alias its readers name, when each part is a brick or an endpoint
+    /// sink keeping the alias its readers name, when each part is an endpoint
     /// <paramref name="endpoints"/> can place. Anything else stays one <see cref="StepKinds.Branch"/>
     /// card, with its YAML as written.
     /// </summary>
@@ -242,6 +242,14 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
             yield break;
         }
 
+        // A reference nothing recognised (signed out, a brick the catalog lacks, the wrong direction, a branch that says more) is no
+        // endpoint of a reader or a writer: it stays as written, so two such branches are never joined into one that says too much.
+        if (new[] { "input", "output" }.Any(key => JobYaml.Scalar(branch, key)?.StartsWith(BrickRef.Scheme, StringComparison.Ordinal) == true))
+        {
+            yield return RawStep(alias, branch);
+            yield break;
+        }
+
         var keys = branch.Children.Keys.OfType<YamlScalarNode>().Select(k => k.Value!).ToHashSet(StringComparer.Ordinal);
         var options = JobYaml.Mapping(branch, "provider-options");
         var components = options?.Children.Keys.OfType<YamlScalarNode>().Select(k => k.Value!).ToHashSet(StringComparer.Ordinal) ?? [];
@@ -256,7 +264,7 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
 
         // A branch no card describes, or one whose only content is a plain tee, stays as written. A
         // branch that is nothing but one endpoint of its own is that endpoint's card.
-        var alone = source is null != sink is null && (source ?? sink)!.Local is not null;
+        var alone = source is null != sink is null;
         if (middle is { Kind: "" } || middle is null && (source is null || sink is null) && !alone)
         {
             yield return RawStep(alias, branch);
@@ -276,14 +284,12 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
     }
 
     /// <summary>
-    /// The brick a branch starts or ends with, or else the branch's own endpoint on that side when
-    /// <paramref name="owners"/> places every provider-options block it needs.
+    /// The branch's own endpoint on that side when <paramref name="owners"/> places every provider-options
+    /// block it needs.
     /// </summary>
-    private Endpoint? FindEndpoint(YamlMappingNode branch, string kind, EndpointBlocks? owners)
+    private static Endpoint? FindEndpoint(YamlMappingNode branch, string kind, EndpointBlocks? owners)
     {
         var endpointKey = kind == StepKinds.Source ? "input" : "output";
-        if (bricks.Contained(branch, kind) is { } brick)
-            return new Endpoint(kind, brick, null, new HashSet<string>([endpointKey], StringComparer.Ordinal), ComponentsOf(brick).ToHashSet(StringComparer.Ordinal));
         if (owners is null) return null;
 
         var sideKeys = kind == StepKinds.Source ? BranchSides.Read : BranchSides.Write;
@@ -307,13 +313,11 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
                 components.UnionWith(mine.Select(kv => ((YamlScalarNode)kv.Key).Value!));
             }
         }
-        return new Endpoint(kind, null, JobYaml.CloneBranch(local), keys, components);
+        return new Endpoint(kind, JobYaml.CloneBranch(local), keys, components);
     }
 
     private static DesignStep Card(Endpoint endpoint, string alias, IReadOnlyList<string>? from) =>
-        endpoint.Brick is not null
-            ? new DesignStep(alias, endpoint.Kind, endpoint.Brick.Key, from)
-            : new DesignStep(alias, endpoint.Kind, From: from, Yaml: BodyText(endpoint.Local!));
+        new(alias, endpoint.Kind, From: from, Yaml: BodyText(endpoint.Local));
 
     private static DesignStep NoCard(string alias) => new(alias, "");
 
@@ -336,7 +340,7 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
         if (rest.Count == 0 && middleKeys.IsSubsetOf(["from", "transformers"]))
         {
             if (!middleKeys.Contains("transformers"))
-                return source is not null && sink is not null || (source ?? sink)?.Local is not null ? null : NoCard(alias);
+                return source is not null || sink is not null ? null : NoCard(alias);
             return new DesignStep(alias, StepKinds.Transform, From: from, Transformers: JobYaml.ToJson(branch["transformers"]) as JsonArray);
         }
         if (source is null && rest.SetEquals(["sql"]) && middleKeys.Contains("from") && middleKeys.IsSubsetOf(["from", "ref"])
@@ -347,9 +351,6 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
             return new DesignStep(alias, StepKinds.Merge, From: from);
         return NoCard(alias);
     }
-
-    private IEnumerable<string> ComponentsOf(DesignBrick brick) =>
-        JobYaml.Mapping(bricks.BranchOf(brick), "provider-options")?.Children.Keys.OfType<YamlScalarNode>().Select(k => k.Value!) ?? [];
 
     /// <summary>
     /// A source or sink card that carries its own endpoint: a source's YAML is its whole branch, a

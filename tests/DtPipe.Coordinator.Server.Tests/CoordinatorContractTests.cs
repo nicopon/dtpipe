@@ -32,7 +32,7 @@ public sealed class CoordinatorContractTests
     public void Metadata_Uses_The_Rfc_Names_And_Omits_An_Absent_Client()
     {
         Assert.Equal(
-            """{"resource":"http://c.test","authorization_servers":["http://idp.test/"],"bearer_methods_supported":["header"],"dtpipe_contract":5,"dtpipe_studio_client_id":"studio"}""",
+            """{"resource":"http://c.test","authorization_servers":["http://idp.test/"],"bearer_methods_supported":["header"],"dtpipe_contract":6,"dtpipe_studio_client_id":"studio"}""",
             Write(new ResourceMetadata("http://c.test", ["http://idp.test/"], ["header"], CoordinatorApi.Contract, "studio")));
         Assert.DoesNotContain("dtpipe_studio_client_id", Write(new ResourceMetadata("http://c.test", ["http://idp.test/"], ["header"], 1)));
     }
@@ -40,14 +40,16 @@ public sealed class CoordinatorContractTests
     [Fact]
     public void Catalog_Recognition_And_Library_Records_Keep_Their_Json()
     {
-        var branch = (JsonObject)JsonNode.Parse("""{"input":"duck:x.db"}""")!;
+        var branch = (JsonObject)JsonNode.Parse("""{"input":"brick:n1/b"}""")!;
         Assert.Equal(
-            """{"nodes":[{"name":"n1","online":true,"role":"data","dtpipeVersion":"1.0.0"}],"bricks":[{"key":"n1/b","node":"n1","id":"b","kind":"source","title":"B","description":"","branch":{"input":"duck:x.db"},"version":"0123456789ab","schema":[{"name":"id","type":"int","isNullable":false}],"schemaError":null,"online":true}]}""",
+            """{"nodes":[{"name":"n1","online":true,"role":"data","dtpipeVersion":"1.0.0"}],"bricks":[{"key":"n1/b","node":"n1","id":"b","kind":"source","title":"B","description":"","branch":{"input":"brick:n1/b"},"version":"0123456789ab","schema":null,"schemaError":null,"online":true}]}""",
             Write(new BrickCatalogView([new CatalogNode("n1", true, "data", "1.0.0")],
-                [new CatalogBrick("n1/b", "n1", "b", "source", "B", "", branch, "0123456789ab", [new CatalogColumn("id", "int", false)], null, true)])));
+                [new CatalogBrick("n1/b", "n1", "b", "source", "B", "", branch, "0123456789ab", null, null, true)])));
         Assert.Equal("""{"job":"a:\n  input: x\n"}""", Write(new RecognizeRequest("a:\n  input: x\n")));
-        Assert.Equal("""{"branches":{"a":{"match":"n1/b","source":null,"sink":null,"nodes":["n1"]}}}""",
-            Write(new RecognizeResponse(new Dictionary<string, Recognition> { ["a"] = new("n1/b", null, null, ["n1"]) })));
+        Assert.Equal("""{"branches":{"a":{"match":"n1/b","nodes":["n1"]}}}""",
+            Write(new RecognizeResponse(new Dictionary<string, Recognition> { ["a"] = new("n1/b", ["n1"]) })));
+        Assert.Equal("""{"csv":"id\n1\n","columns":[{"name":"id","type":"int","isNullable":false}]}""",
+            Write(new BrickPreviewView("id\n1\n", [new CatalogColumn("id", "int", false)])));
         Assert.Equal("""{"id":"p","commit":"abc","deployed":false,"bindingProblems":null}""", Write(new LibrarySaved("p", "abc", false)));
         Assert.Equal("""{"error":"e","commit":null}""", Write(new LibraryConflict("e", null)));
         Assert.Equal("""{"error":"e","report":"r"}""", Write(new LibraryRefused("e", "r")));
@@ -73,6 +75,7 @@ public sealed class CoordinatorContractTests
     public void Routes_Escape_What_They_Carry()
     {
         Assert.Equal("/api/bricks/n%2F1/a%20b/sample", CoordinatorApi.Sample("n/1", "a b"));
+        Assert.Equal("/api/bricks/n%2F1/a%20b/preview", CoordinatorApi.Preview("n/1", "a b"));
         Assert.Equal("/api/library/orders", CoordinatorApi.Library("orders"));
         Assert.Equal("/api/library", CoordinatorApi.LibraryList);
     }

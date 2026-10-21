@@ -6,10 +6,9 @@ namespace DtPipe.Cli.Studio;
 
 /// <summary>
 /// The coordinator's bricks as the studio's designer sees them. <see cref="Find"/> and
-/// <see cref="BranchOf"/> read the catalog the studio read last; <see cref="Match"/> and
-/// <see cref="Contained"/> read back what the coordinator answered for each branch of the job being
-/// opened, found again by the branch's YAML. That YAML is only a key to the answer: deciding that a
-/// branch is a brick stays the coordinator's.
+/// <see cref="BranchOf"/> read the catalog the studio read last; <see cref="Match"/> reads back what the
+/// coordinator answered for each reference branch of the job being opened, found again by the branch's YAML.
+/// That YAML is only a key to the answer: deciding that a reference names a brick stays the coordinator's.
 /// </summary>
 public sealed class StudioBricks : IBrickLookup
 {
@@ -36,9 +35,6 @@ public sealed class StudioBricks : IBrickLookup
         : throw new InvalidOperationException($"No brick '{brick.Key}' is in the catalog read last.");
 
     public DesignBrick? Match(YamlMappingNode branch) => Answer(branch)?.Match is { } key ? Find(key) : null;
-
-    public DesignBrick? Contained(YamlMappingNode branch, string kind) =>
-        (kind == StepKinds.Sink ? Answer(branch)?.Sink : Answer(branch)?.Source) is { } key ? Find(key) : null;
 
     private Recognition? Answer(YamlMappingNode branch) => _answers.GetValueOrDefault(Key(branch));
 

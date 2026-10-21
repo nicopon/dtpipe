@@ -51,6 +51,12 @@
  * @typedef {{ outcome: any, request: { id: string, message: string } | null, bindings: Record<string, string> }} Publication
  */
 
+/**
+ * The rows a brick card asked its node for: the brick's key, `loading` while the node reads, then `done` (csv and
+ * columns) or `failed` (error). One slot, replaced by the next read; the catalog keeps no schema, which depends on the rows.
+ * @typedef {{ key: string, phase: "loading" | "done" | "failed", csv?: string | null, columns?: { name: string, type: string, isNullable: boolean }[] | null, error?: string }} BrickRows
+ */
+
 /** @returns {Preview} */
 export const freshPreview = () => ({
   rows: 1000, loaded: false, real: false, watch: [], branches: [], places: new Map(), shown: new Map(), edited: new Set(),
@@ -71,6 +77,8 @@ export const state = {
   writing: { review: false },
   /** @type {Publication} */
   publication: { outcome: null, request: null, bindings: {} },
+  /** @type {BrickRows | null} */
+  brickRows: null,
   /** The variables of the composed job, by name, and the keyring's aliases: never a value the person did not type. @type {{ variables: any[], aliases: string[], error?: string }} */
   vars: { variables: [], aliases: [] },
   /** The components the palette offers. */

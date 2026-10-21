@@ -52,7 +52,7 @@ builder.Services.AddSingleton<DesignValidator>();
 builder.Services.AddSingleton<BindingVerifier>();
 builder.Services.AddSingleton(services => new PipelineLibrary(
     services.GetRequiredService<CoordinatorServerOptions>(),
-    services.GetRequiredService<AutoPlacer>().Check, services.GetRequiredService<AutoPlacer>().Resolve,
+    services.GetRequiredService<AutoPlacer>().Check,
     services.GetRequiredService<ILoggerFactory>().CreateLogger<PipelineLibrary>()));
 builder.Services.AddSingleton<IJobSource>(services => services.GetRequiredService<PipelineLibrary>());
 builder.Services.AddSingleton<ILibraryHeads>(services => services.GetRequiredService<PipelineLibrary>());

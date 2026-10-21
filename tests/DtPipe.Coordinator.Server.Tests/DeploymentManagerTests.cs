@@ -66,7 +66,7 @@ public sealed class DeploymentManagerTests : IDisposable
 
     public void Dispose() { if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true); }
 
-    private static BrickInfo Brick(string input) => TestBricks.WithText("src", BrickKind.Source, $$"""{"input":"{{input}}"}""", "source");
+    private static BrickInfo Brick(string input) => TestBricks.Announced("src", BrickKind.Source, $$"""{"input":"{{input}}"}""", "source");
 
     /// <summary>A replica of the node "n", its TransportR client registered under the node's subject with the node's groups.</summary>
     private async Task<ReplicaKey> ReplicaAsync(int instance, params BrickInfo[] bricks)

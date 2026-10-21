@@ -10,24 +10,19 @@ namespace DtPipe.Jobs;
 public sealed record DesignBrick(string Key, string Kind, string? Node, string? Version, string? Title, bool Online);
 
 /// <summary>
-/// The bricks a designer may place, and how a branch is recognised as one: by its content, never by
-/// a name. The coordinator's catalog offers its nodes' bricks; <see cref="None"/> offers nothing.
+/// The bricks a designer may place, and how a branch is recognised as one: a brick is found by its key
+/// (<c>node/id</c>), and a branch is one when it is the reference to it (<see cref="BrickRef"/>). The coordinator's
+/// catalog offers its nodes' bricks; <see cref="None"/> offers nothing.
 /// </summary>
 public interface IBrickLookup
 {
     DesignBrick? Find(string key);
 
-    /// <summary>A copy of the branch the brick stands for, as its owner declared it.</summary>
+    /// <summary>A copy of the branch that references the brick: <c>input: brick:&lt;key&gt;</c> for a source, <c>output: brick:&lt;key&gt;</c> for a sink.</summary>
     YamlMappingNode BranchOf(DesignBrick brick);
 
-    /// <summary>The brick a whole branch is, or null.</summary>
+    /// <summary>The brick a whole branch references, or null.</summary>
     DesignBrick? Match(YamlMappingNode branch);
-
-    /// <summary>
-    /// The brick a branch starts with (<paramref name="kind"/> is <see cref="StepKinds.Source"/>) or
-    /// ends with (<see cref="StepKinds.Sink"/>), around work of its own, or null.
-    /// </summary>
-    DesignBrick? Contained(YamlMappingNode branch, string kind);
 
     static IBrickLookup None { get; } = new NoBricks();
 
@@ -36,6 +31,5 @@ public interface IBrickLookup
         public DesignBrick? Find(string key) => null;
         public YamlMappingNode BranchOf(DesignBrick brick) => throw new InvalidOperationException($"No brick '{brick.Key}' is on offer.");
         public DesignBrick? Match(YamlMappingNode branch) => null;
-        public DesignBrick? Contained(YamlMappingNode branch, string kind) => null;
     }
 }

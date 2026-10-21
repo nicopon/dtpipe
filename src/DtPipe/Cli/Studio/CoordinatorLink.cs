@@ -229,6 +229,16 @@ public sealed class CoordinatorLink : IDisposable
         return await response.Content.ReadAsByteArrayAsync(ct);
     }
 
+    /// <summary>A brick's first rows and the types they have, read by its node when a person looks at the brick.</summary>
+    public async Task<BrickPreviewView> PreviewAsync(string node, string id, CancellationToken ct)
+    {
+        using var response = await SendAsync(HttpMethod.Post, CoordinatorApi.Preview(node, id), ct: ct);
+        if (!response.IsSuccessStatusCode)
+            throw new CoordinatorLinkException($"{node}/{id} sent no preview: {await ErrorOf(response, ct)}");
+        return await response.Content.ReadFromJsonAsync<BrickPreviewView>(JsonSerializerOptions.Web, ct)
+            ?? throw new CoordinatorLinkException($"{node}/{id} sent no preview.");
+    }
+
     /// <summary>The pipelines of the coordinator's library, each with the version of its job.</summary>
     public async Task<IReadOnlyList<LibraryItem>> LibraryAsync(CancellationToken ct)
     {

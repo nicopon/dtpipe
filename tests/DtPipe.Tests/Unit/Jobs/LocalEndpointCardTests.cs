@@ -53,6 +53,19 @@ public sealed class LocalEndpointCardTests
     }
 
     [Fact]
+    public void A_Reference_The_Lookup_Does_Not_Recognise_Stays_A_Raw_Branch_Whatever_The_Endpoint_Rules()
+    {
+        // Signed out, or a reference the coordinator does not answer for: with dtpipe's own rules in place, a reference is
+        // never taken for a reader's or a writer's own endpoint, so two branches are never joined into one that says too much.
+        const string job = "customers:\n  input: brick:n/customers\nmirror:\n  from: customers\n  output: brick:n/mirror\n";
+
+        var result = Design.Decompose(job);
+
+        Assert.Equal("customers:branch<> | mirror:branch<customers>", Cards(result));
+        SameJob(job, result.Yaml);
+    }
+
+    [Fact]
     public void A_Linear_Branch_Opens_As_Source_Transform_And_Sink()
     {
         var result = Design.Decompose(Linear);

@@ -39,8 +39,8 @@ public sealed class HashValueTests
     public void A_Replicas_Bricks_Hash_Is_Eight_Characters_Whatever_The_Order_They_Are_Announced_In()
     {
         Announce(
-            TestBricks.WithText("z-src", BrickKind.Source, """{"input":"sqlite:a"}"""),
-            TestBricks.WithText("a-sink", BrickKind.Sink, """{"output":"sqlite:b"}"""));
+            TestBricks.Announced("z-src", BrickKind.Source, """{"input":"sqlite:a"}"""),
+            TestBricks.Announced("a-sink", BrickKind.Sink, """{"output":"sqlite:b"}"""));
 
         var replica = Assert.Single(Assert.Single(_inventory.Snapshot()).Replicas);
         Assert.Equal("67be2e1c", replica.Bricks);
@@ -49,7 +49,7 @@ public sealed class HashValueTests
     [Fact]
     public void A_Bricks_Version_Is_Twelve_Characters_Of_The_Keyed_Hash_Of_Its_Canonical_Form()
     {
-        Announce(TestBricks.WithText("customers", BrickKind.Source, Declaration));
+        Announce(TestBricks.Announced("customers", BrickKind.Source, Declaration));
 
         var brick = new BrickCatalog(_inventory).Find("node-x/customers");
         Assert.Equal("a778983c7c3d", brick!.Version);

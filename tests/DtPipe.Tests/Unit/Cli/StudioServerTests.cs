@@ -384,6 +384,7 @@ public sealed class StudioServerTests : IAsyncLifetime
         [
             (HttpMethod.Get, "/api/library", null), (HttpMethod.Post, "/api/library/open", new { id = "orders" }),
             (HttpMethod.Post, "/api/coordinator/login", null), (HttpMethod.Post, "/api/publish", new { path = "a.yaml", hash, id = "orders" }),
+            (HttpMethod.Post, "/api/bricks/preview", new { key = "n1/orders" }),
         ];
         Assert.Equal(
             needingOne.Select(c => $"{c.Item1} {c.Item2} 404"),

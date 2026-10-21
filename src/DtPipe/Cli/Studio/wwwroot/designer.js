@@ -39,6 +39,7 @@ let host = null;
 let hooks = {};
 const composing = sequence();
 const opening = sequence();
+const reading = sequence();
 
 onZone("palette", renderPalette);
 onZone("canvas", renderCanvas);
@@ -64,6 +65,8 @@ export function mountDesigner(root, options = {}) {
  */
 export async function openJob(yaml, layout, unsaved = false, kept = null) {
   const ticket = opening.begin();
+  reading.cancel();
+  state.brickRows = null;
   const answer = await api("/api/design/decompose", { yaml, layout: layout || null });
   // Another job was asked for meanwhile: its cards are the ones to show.
   if (opening.stale(ticket)) return false;
@@ -862,16 +865,45 @@ function brickView(step) {
       el("tr", {}, el("td", {}, "node"), el("td", {}, brick.node, brick.online ? "" : " (offline)")),
       el("tr", {}, el("td", {}, "brick"), el("td", {}, el("code", {}, brick.key))),
       el("tr", {}, el("td", {}, "version"), el("td", {}, el("code", {}, brick.version))))),
-    brick.kind === "source" ? [
-      el("h3", {}, "Columns"),
-      brick.schema?.length
-        ? el("table", { class: "vars" }, el("tbody", {}, brick.schema.map((c) => el("tr", {}, el("td", {}, el("code", {}, c.name)), el("td", {}, c.type, c.isNullable ? "" : " not null")))))
-        : el("p", { class: "hint" }, brick.schemaError || "Its node read no schema."),
-    ] : null,
+    brickRowsView(brick),
     el("p", { class: "hint" }, step.kind === "source"
       ? "A sample reads its rows from its node, through the coordinator."
       : "A sample writes nothing to it: its rows end in a throwaway file."),
   ];
+}
+
+// What a brick holds is read by its node when a person asks, never kept in the catalog: its columns depend on its rows.
+function brickRowsView(brick) {
+  const read = state.brickRows?.key === brick.key ? state.brickRows : null;
+  const title = brick.kind === "source" ? "Rows" : "What it holds now";
+  const button = el("button", { class: "small ghost", "data-read-brick": brick.key, disabled: read?.phase === "loading" }, read ? "Read again" : "Read its rows");
+  if (!read) return [el("h3", {}, title), el("p", {}, button), el("p", { class: "hint" }, `${brick.node} reads the first rows of the brick: nothing is kept.`)];
+  if (read.phase === "loading") return [el("h3", {}, title), el("p", {}, button), el("p", { class: "hint" }, `Reading on ${brick.node}…`)];
+  if (read.phase === "failed") return [el("h3", {}, title), el("p", {}, button), el("p", { class: "hint warn" }, read.error)];
+  return [
+    el("h3", {}, title),
+    el("p", {}, button),
+    read.columns?.length
+      ? el("table", { class: "vars" }, el("tbody", {}, read.columns.map((c) => el("tr", {}, el("td", {}, el("code", {}, c.name)), el("td", {}, c.type, c.isNullable ? "" : " not null")))))
+      : null,
+    read.csv ? el("pre", { class: "mono" }, read.csv) : null,
+    el("p", { class: "hint" }, `First rows, read by ${brick.node} just now.`),
+  ];
+}
+
+async function readBrick(key) {
+  const ticket = reading.begin();
+  state.brickRows = { key, phase: "loading" };
+  invalidate("inspector");
+  try {
+    const answer = await api("/api/bricks/preview", { key });
+    if (reading.stale(ticket)) return;
+    state.brickRows = { key, phase: "done", csv: answer.csv, columns: answer.columns };
+  } catch (e) {
+    if (reading.stale(ticket)) return;
+    state.brickRows = { key, phase: "failed", error: e.message };
+  }
+  invalidate("inspector");
 }
 
 function bindInspector() {
@@ -911,6 +943,7 @@ function bindInspector() {
     const b = targetOf(e).closest("button");
     if (!b) return;
     const step = current();
+    if (b.dataset.readBrick !== undefined) { readBrick(b.dataset.readBrick); return; }
     if (b.dataset.unwire !== undefined) { disconnect({ from: b.dataset.unwire, to: b.dataset.to || step.alias, port: b.dataset.port }); return; }
     if (!step) return;
     if (b.dataset.removeStep !== undefined) { removeStep(step.alias); return; }

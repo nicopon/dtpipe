@@ -58,7 +58,6 @@ td.wrap { white-space: normal; }
 .kind-badge { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; padding: 0 6px; border-radius: 4px; font-weight: 700; }
 .kind-badge.source { color: var(--ok); border: 1px solid var(--ok); }
 .kind-badge.sink { color: var(--accent); border: 1px solid var(--accent); }
-table.schema { width: auto; margin: 6px 0; }
 table.matrix { width: auto; }
 table.matrix td { text-align: center; width: 70px; }
 table.matrix td.yes { color: var(--ok); font-weight: 700; }

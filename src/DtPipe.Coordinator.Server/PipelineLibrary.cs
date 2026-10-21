@@ -77,23 +77,19 @@ public sealed partial class PipelineLibrary : IJobSource, ILibraryHeads
     private volatile bool _ready;
 
     private readonly Func<string, IReadOnlyDictionary<string, Binding>, IReadOnlyList<BindingProblem>> _bindingProblems;
-    private readonly Func<string, IReadOnlyDictionary<string, Binding>, IReadOnlyDictionary<string, Binding>> _resolveBricks;
 
     /// <param name="options">Where the library lives.</param>
     /// <param name="bindingProblems">Why bindings do not hold for a job now; with none given, nothing is wrong.</param>
-    /// <param name="resolveBricks">The bindings with the brick each one lacks filled in from the job; with none given, they are kept as they are.</param>
     /// <param name="logger">Where the remote's own words go, after the token is taken out: they are never in a response.</param>
     public PipelineLibrary(CoordinatorServerOptions options,
         Func<string, IReadOnlyDictionary<string, Binding>, IReadOnlyList<BindingProblem>>? bindingProblems = null,
-        Func<string, IReadOnlyDictionary<string, Binding>, IReadOnlyDictionary<string, Binding>>? resolveBricks = null,
         ILogger? logger = null)
     {
         _root = options.LibraryDirectory ?? Path.Combine(options.StateDir, "library");
         _seedDir = options.LibrarySeed;
         (_remote, _mayBegin, _log) = (options.LibraryRemote, options.Initialize, logger);
         _bindingProblems = bindingProblems ?? ((_, _) => []);
-        _resolveBricks = resolveBricks ?? ((_, bindings) => bindings);
-    }
+            }
 
     public async Task<IReadOnlyList<LibraryEntry>> ListAsync(CancellationToken ct) => await Locked(async () =>
     {
@@ -154,7 +150,7 @@ public sealed partial class PipelineLibrary : IJobSource, ILibraryHeads
         var merged = kept.ToDictionary(b => b.Key, b => Bindings.IsStrict(b.Value) ? b.Value with { Brick = null } : b.Value, StringComparer.Ordinal);
         foreach (var (alias, binding) in bindings ?? new Dictionary<string, Binding>())
             merged[alias] = binding with { Mode = binding.Mode ?? kept.GetValueOrDefault(alias)?.Mode };
-        var resolved = new Dictionary<string, Binding>(_resolveBricks(yaml, merged), StringComparer.Ordinal);
+        var resolved = new Dictionary<string, Binding>(BrickReferences.Expand(yaml, merged), StringComparer.Ordinal);
         foreach (var (alias, old) in kept)
             if (resolved.TryGetValue(alias, out var binding) && binding.Brick is null) resolved[alias] = binding with { Brick = old.Brick };
         // What is kept holds no node or brick for a referenced alias: the job says them.
@@ -183,7 +179,7 @@ public sealed partial class PipelineLibrary : IJobSource, ILibraryHeads
         var yamlPath = Path.Combine(dir, "pipeline.yaml");
         if (!File.Exists(yamlPath)) throw new ConflictException($"'{id}' is not in the library.");
         var yaml = await File.ReadAllTextAsync(yamlPath, NoCancel);
-        await WriteBindingsAsync(dir, BrickReferences.Strip(yaml, _resolveBricks(yaml, bindings)), NoCancel);
+        await WriteBindingsAsync(dir, BrickReferences.Strip(yaml, BrickReferences.Expand(yaml, bindings)), NoCancel);
         return new BindingsSaved(await CommitAsync($"pipelines/{id}", Message(message, $"Bind {id}"), NoCancel));
     }, ct);
 
