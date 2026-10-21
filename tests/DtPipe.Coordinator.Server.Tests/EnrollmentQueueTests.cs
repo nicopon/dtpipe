@@ -2,13 +2,14 @@ using System.Security.Claims;
 using DtPipe.Coordinator.Contracts;
 using Microsoft.Extensions.Time.Testing;
 using Xunit;
+using DtPipe.Tests.Shared;
 
 namespace DtPipe.Coordinator.Server.Tests;
 
 public sealed class EnrollmentQueueTests
 {
     private static NodeAnnouncement Host(string name = "proposed", string description = "a host", params string[] bricks) =>
-        new(name, description, [], NodeRole.Data, [.. bricks.Select(b => new BrickInfo(b, BrickKind.Source, b, "", "{}", null, null))]);
+        new(name, description, [], NodeRole.Data, [.. bricks.Select(b => TestBricks.WithText(b, BrickKind.Source, "{}", b))]);
 
     private static readonly IReadOnlyDictionary<string, string> NoLabels = new Dictionary<string, string>();
 

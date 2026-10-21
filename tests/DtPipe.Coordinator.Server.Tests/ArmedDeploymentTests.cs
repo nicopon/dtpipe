@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using TransportR.Models;
 using TransportR.Services;
 using Xunit;
+using DtPipe.Tests.Shared;
 
 namespace DtPipe.Coordinator.Server.Tests;
 
@@ -139,7 +140,7 @@ public sealed partial class ArmedDeploymentTests : IDisposable
         (_rights, _inventory, _journal, _deployments) = Start(_registry);
     }
 
-    private static BrickInfo Brick() => new("src", BrickKind.Source, "source", "", """{"input":"sqlite:a"}""", null, null);
+    private static BrickInfo Brick() => TestBricks.WithText("src", BrickKind.Source, """{"input":"sqlite:a"}""", "source");
 
     private async Task NodeAsync(string name, string group, NodeRole role, BrickInfo? brick = null)
     {
@@ -373,10 +374,9 @@ public sealed partial class ArmedDeploymentTests : IDisposable
     // ---- Bindings in a mode other than strict ----
 
     /// <summary>The brick as its owner changed it since the binding was checked: the job still holds the old text.</summary>
-    private static BrickInfo Changed(string input = "sqlite:b") => new("src", BrickKind.Source, "source", "", $$"""{"input":"{{input}}"}""", null, null);
+    private static BrickInfo Changed(string input = "sqlite:b") => TestBricks.WithText("src", BrickKind.Source, $$"""{"input":"{{input}}"}""", "source");
 
-    private static string VersionOf(BrickInfo brick) =>
-        ContentHash.Of(BrickRules.Declared(brick.Kind, FragmentJob.Declared(brick)!).Canonical, 12);
+    private static string VersionOf(BrickInfo brick) => brick.Version;
 
     private static ArmedDeployment ArmedWith(Binding binding) => new(
         "p", Commit, PipelineLibrary.Sha(Job), null, new Dictionary<string, Binding> { ["src"] = binding }, DateTimeOffset.UtcNow, "ann@x.test");

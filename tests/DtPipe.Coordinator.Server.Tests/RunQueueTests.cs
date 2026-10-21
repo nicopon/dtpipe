@@ -6,6 +6,7 @@ using Microsoft.Extensions.Options;
 using TransportR.Models;
 using TransportR.Services;
 using Xunit;
+using DtPipe.Tests.Shared;
 
 namespace DtPipe.Coordinator.Server.Tests;
 
@@ -111,7 +112,7 @@ public sealed class RunQueueTests : IDisposable
 
     private static readonly FragmentUnit[] Units = [new("src", FragmentUnitKind.SourceSend, "src")];
 
-    private static BrickInfo Brick() => new("src", BrickKind.Source, "source", "", """{"input":"sqlite:a"}""", null, null);
+    private static BrickInfo Brick() => TestBricks.WithText("src", BrickKind.Source, """{"input":"sqlite:a"}""", "source");
 
     /// <summary>One replica of the node <paramref name="name"/>, its TransportR client registered under the node's subject.</summary>
     private async Task<ReplicaKey> ReplicaAsync(string name, NodeRole role = NodeRole.Data)

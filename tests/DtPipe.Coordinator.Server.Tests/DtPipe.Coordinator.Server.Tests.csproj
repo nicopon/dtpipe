@@ -9,6 +9,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="..\Shared\TestBricks.cs" Link="Shared\TestBricks.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\DtPipe.Coordinator.Server\DtPipe.Coordinator.Server.csproj" />
   </ItemGroup>
 

@@ -15,7 +15,7 @@ namespace DtPipe.PipelineNode.Hosting;
 /// <c>dtpipe contract diff</c>, a sink's verdict on a contract from <c>dtpipe contract check</c>.
 /// The coordinator never opens a brick's database for this.
 /// </summary>
-internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> declared, DtPipeCommand dtpipe, ILogger logger)
+internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> declared, string? brickKey, DtPipeCommand dtpipe, ILogger logger)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
@@ -23,8 +23,8 @@ internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> dec
     private IReadOnlyList<BrickInfo> _declared = [];
 
     /// <summary>
-    /// What the node announces: a source brick as the coordinator needs it and nothing more (no text, no schema), a sink
-    /// still with its text, each with the version its text gives.
+    /// What the node announces: each brick as the coordinator needs it and nothing more (no text, no schema), with the
+    /// version its text gives under the node's key.
     /// </summary>
     public IReadOnlyList<BrickInfo> Bricks { get; private set; } = [];
 
@@ -43,6 +43,7 @@ internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> dec
     /// </summary>
     public Task InspectAsync(CancellationToken ct)
     {
+        if (declared.Count > 0 && brickKey is null) throw new InvalidOperationException($"{node} offers bricks and has no brick key.");
         var declaredBricks = new List<BrickInfo>();
         var announced = new List<BrickInfo>();
         foreach (var brick in declared)
@@ -53,10 +54,10 @@ internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> dec
                 logger.LogWarning("Brick {Brick} is not offered: {Reason}", brick.Id, refusal);
                 continue;
             }
-            var version = BrickRules.VersionOf(brick.Kind, brick.BranchJson);
+            var version = BrickRules.VersionOf(brick.Kind, brick.BranchJson, brickKey!);
             var full = new BrickInfo(brick.Id, brick.Kind, brick.Title, brick.Description ?? "", brick.BranchJson, null, null, version);
             declaredBricks.Add(full);
-            announced.Add(brick.Kind == BrickKind.Source ? full with { Branch = null } : full);
+            announced.Add(full with { Branch = null });
         }
         _declared = declaredBricks;
         Bricks = announced;

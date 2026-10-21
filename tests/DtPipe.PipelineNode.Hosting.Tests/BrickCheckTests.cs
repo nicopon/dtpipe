@@ -2,6 +2,7 @@ using System.Runtime.Versioning;
 using DtPipe.Coordinator.Contracts;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
+using DtPipe.Tests.Shared;
 
 namespace DtPipe.PipelineNode.Hosting.Tests;
 
@@ -58,7 +59,7 @@ public sealed class BrickCheckTests : IDisposable
     [UnsupportedOSPlatform("windows")]
     private async Task<BrickHost> HostAsync(string produced)
     {
-        var host = new BrickHost("n1", [new BrickDeclaration("orders", BrickKind.Source, "Orders", null, Orders)], Binary(produced), NullLogger.Instance);
+        var host = new BrickHost("n1", [new BrickDeclaration("orders", BrickKind.Source, "Orders", null, Orders)], TestBricks.Key, Binary(produced), NullLogger.Instance);
         await host.InspectAsync(TestContext.Current.CancellationToken);
         return host;
     }

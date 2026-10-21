@@ -16,7 +16,7 @@ none. One node per process, which is one replica of its node's identity; a secon
   owner's, so naming one by id does not turn matching back into trusting a name. `FragmentPolicy`
   comes from configuration or `RunAnyFragment`, never from a field of a message. `FragmentIntake`
   decides it all before anything is spawned, for `Launch` and for `Check` alike, and the coordinator asks
-  the same of the bricks a replica announces before it places a run there.
+  whether the versions a replica announces give the plan's version (`FragmentJob.VersionRefusal`) before it places a run there.
   `[local: Hosting.Tests FragmentJobTests, FragmentIntakeTests; the lab's smoke.py bricks, sandbox]`
 - **What a host offers beyond its bricks is its own registration.** `WithFragmentGate` replaces the
   check a data node makes of a fragment (the host's word, like the policy), and `WithRequest`
@@ -37,8 +37,8 @@ none. One node per process, which is one replica of its node's identity; a secon
   `BrickHost.SampleAsync` reads a source brick it announced, with `output: arrow:-` and `--limit`,
   the bytes its fragment would send; a real bounded read, so `--dry-run`'s source-side guarantees do
   not apply. A source brick's preview is that sample (`PreviewSourceAsync`): its types come from
-  `dtpipe inspect` on the sample's own bytes and its values from the same file, never from the
-  schema announced at start, which `inspect` reads from the input and query alone. A sink's preview
+  `dtpipe inspect` on the sample's own bytes and its values from the same file, never from a schema read
+  from the input and query alone: a node announces none. A sink's preview
   reads its table. It refuses by name a sample over `MaxSampleBytes` before
   sending, so an answer stays under the coordinator's channel message limit.
   `CheckSinkAsync` runs `dtpipe contract check` on a sink brick fed from `arrow:-`, which inspects
@@ -57,6 +57,11 @@ none. One node per process, which is one replica of its node's identity; a secon
   reading of a branch**, shared with the coordinator, so a studio never calls something a brick
   the node then declines. `BrickHost` does not announce a declared brick that fails the structure rule.
   `[unchecked: a declared brick that fails the structure rule]`
+- **A brick is announced by its version, and the key of the version never leaves the node.** `BrickHost` announces each brick
+  without its text and with `BrickRules.VersionOf(kind, text, DtPipeNodeOptions.BrickKey)`, the HMAC of its canonical text; a host
+  that offers bricks without a key of `BrickRules.MinKeyLength` characters does not start (`DescribedValidation`). All replicas of a node
+  share the key, since a replica under another announces other versions and is eligible to no plan. `[local: Hosting.Tests
+  DtPipeNodeBuilderTests; Server.Tests BrickFormTests]` `[unchecked: that two replicas share the key; that the key is in no announcement or log]`
 - **A variable's value never leaves the node.** The announcement names it, with an engine for a
   database, so the coordinator never holds a path or a secret to open. Variables reach a child through `FragmentLaunch.ChildEnvironment`
   and `DtPipeCommand` (the node's own reads), never through this process's environment: the host

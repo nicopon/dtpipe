@@ -9,6 +9,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="..\Shared\TestBricks.cs" Link="Shared\TestBricks.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\DtPipe.PipelineNode.Hosting\DtPipe.PipelineNode.Hosting.csproj" />
   </ItemGroup>
 

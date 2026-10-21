@@ -144,9 +144,9 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   records): the server maps those routes and writes those records, and the metadata document
   announces `CoordinatorApi.Contract`; a change a deployed studio would misread takes a new number.
   The library's listing and `GET /api/library/{id}` are part of it: the studio opens a pipeline from them.
-  `/api/catalog` lists nodes and bricks with each brick's declared branch; `/api/bricks/recognize`
-  says what each top-level branch of a job is, by `BrickCatalog`'s own `Match` and `Contained`, so the
-  studio never decides a brick itself; `/api/bricks/{node}/{id}/sample` asks the node for at most
+  `/api/catalog` lists nodes and bricks with each brick's reference, never its text; `/api/bricks/recognize`
+  says what each top-level branch of a job is, by `BrickCatalog`'s own `Match` and `Contained`, which read a text and so find only a brick
+  announced with one (no node announces any), so the studio never decides a brick itself; `/api/bricks/{node}/{id}/sample` asks the node for at most
   `MaxSampleRows` rows as Arrow IPC (`SampleBrick`, which the node host bounds in bytes before it
   sends, below the channel's message limit). `[local: CoordinatorContractTests, StudioRoutesTests,
   the lab's smoke.py bricks — the studio's routes]`
@@ -172,7 +172,7 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   studio knows no mode and reads no pin, and must not turn a `tolerant` binding back into `strict`: that is what keeps the
   contract number. The modes are `strict`, `contract`, `compatible` and `tolerant`; a request for another is refused (400),
   and **a pin a request brings is never read**: the check writes it. The save resolves every brick of a strict binding it was not
-  given, inside the library's lock, from the text it now holds: the brick the branch designates on the bound node
+  given, inside the library's lock, from the text it now holds (a referenced alias has none: its reference names the brick): the brick the branch designates on the bound node
   (`AutoPlacer.Resolve`, over `BrickCatalog.MatchAll`), so a strict binding never keeps the brick of a text that was edited. A
   binding in another mode keeps its brick by id. A request that names a brick keeps it, and `AutoPlacer.Check` reports it when a
   strict binding's text is not that brick there.
@@ -183,20 +183,21 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
 - **The library keeps a job and its bindings, no plan.** `pipelines/<id>/` holds `pipeline.yaml` and
   `bindings.json`. `[local: LibraryRemoteTests, BindingTests]` `[unchecked: that nothing else is written there]`
 - **The binding decides where a brick branch runs, and a bound branch never runs on the runner.** `bindings.json` maps the
-  alias of each source or sink branch of the job to `{node, brick, mode}`; every branch that is neither bound nor a brick goes
+  alias of each source or sink branch of the job to `{node, brick, mode}`, an alias that is a reference to `{mode, pin}`; every branch that is neither bound nor a brick goes
   to the runner, which is stateless and never named. `AutoPlacer.PlanAsync` places a bound alias on its node or refuses the
   plan, never anywhere else: a bound branch whose text is no longer its brick is an error naming the alias, the node and the
   brick. `AutoPlacer.Check` is the one function that says why bindings do not hold: a brick branch bound to no node
   (`unassigned`), a node with no identity (`unknown-node`), a node that does not offer the brick (`not-offered`), a brick that is
   not the one the text designates on that node (`brick-mismatch`), a mode that is none of the four (`unsupported-mode`), a binding
-  in another mode that no check pinned, or pinned without the contract its mode compares (`unchecked`), a binding for a branch
+  in another mode that no check pinned, or pinned without the contract its mode compares, and a strict reference no check pinned (`unchecked`), a
+  referenced brick whose version is no longer the pinned one (`brick-changed`), a binding for a branch
   that is no brick or not in the job (`not-a-brick`, `no-branch`), all blocking, and a node with no connected replica
   (`offline`), which is not. A binding in a mode other than `strict` is judged by its node and its brick's id alone: the branch's
   text is whatever it was when the binding was checked. **Who a node is, the rights say; whether it is here, the inventory says.**
   `unknown-node` is a name no enabled node identity carries (a monitor's name is no node's); a node with an identity that
   no replica has announced yet (after a restart, until its host announces) is `offline`, in every mode, and its bricks are
   not known: `AutoPlacer.PlanAsync` does not place the alias and the launch says the node has no connected replica. `BrickCatalog.Match` is first-match and so unfit to choose a node: placing goes through `MatchAll`.
-  The bindings live beside the job so a pipeline stays a plain dtpipe job. They are saved as given, an absent node included,
+  The bindings live beside the job. They are saved as given, an absent node included,
   through `PUT /api/library/{id}/bindings`, and a seed brings its own as `<id>.bindings.json`. The list and the document carry
   the problems, the planner refuses a plan that has a blocking one, and a deployment is refused naming them. A deployment keeps
   the bindings it was armed with, so new bindings change nothing that runs until it is armed again.
@@ -204,7 +205,10 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   with the request's over them; a brick no binding places is sampled on the first node that offers it. A binding in another mode
   names its brick by id, and that is the brick sampled. **A check writes the pins**: each source's, from the sample its node read
   (the brick's version and the contract that read produced), each sink's, from the contract that reaches it in the runner's dry-run
-  (`Bindings.Pinned`, in the same commit as the job); a strict binding gets none, its text being the pin. A contract the node did
+  (`Bindings.Pinned`, in the same commit as the job); a strict binding on a text gets none, its text being the pin, while a
+  referenced brick, in every mode, gets the version it was checked at: a strict reference is `brick-changed`, and so blocks a launch, from the moment its
+  brick's version moves until a person saves the pipeline again and arms it again (an armed deployment keeps the pins it was armed
+  with). Rotating a node's `BrickKey` moves every version of its bricks at once. A contract the node did
   not send leaves a `contract` or `compatible` binding unpinned, so `unchecked`, never pinned to something that passes.
   `[local: BindingTests, LaunchRoutesTests, StudioRoutesTests]`
 - **A brick that changed since its binding was checked is judged once per version, by the node that hosts it, and a verdict that
@@ -282,25 +286,31 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   every other caller plans in `Library`, where a request that carries cuts is refused before any node
   is asked. `[local: PlanModeTests; the lab's smoke.py lab (a cut through /api/deploy), sandbox (a cut
   through /api/plan)]` `[unchecked: a new route that plans in Manual]`
-- **A brick is matched by content, never by name, and the binding decides the placement.** A branch is a brick when its
-  canonical form (`BrickRules.Canonical`) equals the one its node declares; a pipeline stays a plain dtpipe job with
-  no reference to a brick in it. The content is what `strict` checks of a binding, never what places it: a bound alias
-  whose content stopped matching is refused, not run elsewhere. `dtpipe studio` may take an imported branch apart around the bricks
-  it contains (authoring, before anything is saved, through the recognition this server answers); the
-  planner never does. `BrickCatalog` keeps what it reads of each announced brick (its branch, canonical form, version
-  and text) and reads a brick announced again anew; the node's name and whether it is online are read at every call, so
-  a brick is offline as soon as its node has no connected replica, one in its grace period included. It hands out a
-  copy of a branch, never the one it keeps.
-  `[local: BrickCatalogTests, the lab's smoke.py, ui_check.py]` `[unchecked: concurrent readers of the branch kept per
-  brick; that an entry goes with its announcement]`
+- **A job names a brick by reference, a node holds its text, and the reference decides the placement.** A source is read
+  by `input: brick:<node>/<brick>`, a sink written by `output: brick:<node>/<brick>` with the one branch it reads in `from`
+  (`DtPipe.Jobs/BrickRef`, which only the distributed family and the designer read: the engine never sees `brick:`); a branch that
+  says more, or reads none or several, is a misuse (`BrickRef.Misuse`, `not-a-brick`). A node announces a brick by its id, kind,
+  title, description and **version**, never its text, its variables or its schema: the version is the HMAC-SHA256 of the canonical
+  text (`BrickRules.Canonical`) under the node's `BrickKey`, so it changes exactly when what dtpipe would run changes, and a
+  secret in the text gives no oracle. The coordinator composes a fragment from ids and versions it by the versions of its bricks
+  (`FragmentJob.VersionOf`); the node composes the job from its own declarations and compares. A reference names its node and its
+  brick, so `bindings.json` keeps for it the mode and the pin only: `BrickReferences.Expand` puts the node and the brick back for
+  everything that reads a `Binding`, and `Strip` takes them out before a write. `BrickCatalog` keeps what it reads of each
+  announced brick and reads a brick announced again anew; the node's name and whether it is online are read at every call, so a
+  brick is offline as soon as its node has no connected replica, one in its grace period included. A branch of a job that holds
+  text is matched by its canonical form (`MatchAll`, `Contained`) only against a brick announced with text, which a node does not
+  announce. `dtpipe studio` may take an imported branch apart around the bricks it contains (authoring, before anything is
+  saved); the planner never does.
+  `[local: BrickCatalogTests, MinimalBrickTests, the lab's smoke.py, ui_check.py]` `[unchecked: concurrent readers of the branch
+  kept per brick; that an entry goes with its announcement]`
 - **A fragment declares each edge alias once**, so a branch that receives an edge under its own
   alias (a cut's tail) sends on through a relay, never with `output: arrow:-` on itself.
   `[local: the lab's smoke.py lab]`
 - **The server designs nothing.** A pipeline reaches the library by a save that is checked
   (`PUT /api/library/{id}`) from `dtpipe studio`, whose designer is `DtPipe.Jobs`' (rule in the root
   `CLAUDE.md`); the pages list, read, restore, bind and run it, and show its job read only. A
-  brick's canonical form and version are pinned by `BrickFormTests`: changing either gives every
-  brick a new version. `HashValueTests` pins the values of the hashes the server compares or shows (a saved
+  brick's canonical form, and its version under a given key, are pinned by `BrickFormTests`: changing either, or
+  the key, gives every brick a new version. `HashValueTests` pins the values of the hashes the server compares or shows (a saved
   plan's job, a brick's version, a replica's bricks), and `Hosting.Tests FragmentJobTests` a fragment's version;
   they are computed by `ContentHash` (`DtPipe.Coordinator.Contracts`).
   `[local: DtPipe.Coordinator.Server.Tests, Hosting.Tests FragmentJobTests, the lab's smoke.py, ui_check.py]`

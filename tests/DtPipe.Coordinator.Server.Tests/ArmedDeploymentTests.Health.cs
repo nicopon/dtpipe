@@ -3,6 +3,7 @@ using DtPipe.Jobs.Coordinator;
 using Microsoft.Extensions.Logging.Abstractions;
 using TransportR.Models;
 using Xunit;
+using DtPipe.Tests.Shared;
 
 namespace DtPipe.Coordinator.Server.Tests;
 
@@ -193,7 +194,7 @@ public sealed partial class ArmedDeploymentTests
     public async Task Replicas_That_Offer_Different_Bricks_Are_A_Warning()
     {
         await ArmedHealthyAsync();
-        await ReplicaOfNAsync(registered: true, Brick(), new BrickInfo("other", BrickKind.Source, "source", "", """{"input":"sqlite:z"}""", null, null));
+        await ReplicaOfNAsync(registered: true, Brick(), TestBricks.WithText("other", BrickKind.Source, """{"input":"sqlite:z"}""", "source"));
 
         var view = await ViewAsync();
 

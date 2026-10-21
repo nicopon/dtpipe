@@ -3,6 +3,7 @@ using DtPipe.Coordinator.Contracts;
 using DtPipe.Jobs;
 using Xunit;
 using YamlDotNet.RepresentationModel;
+using DtPipe.Tests.Shared;
 
 namespace DtPipe.PipelineNode.Hosting.Tests;
 
@@ -22,7 +23,7 @@ public class FragmentIntakeTests
         FragmentJob.BranchOfBrick? branch = null, FragmentJob.VersionOfBrick? version = null) =>
         FragmentIntake.JobOf(fragment, policy, gate, branch ?? ((id, kind) => Declared(id, kind)), version ?? VersionOf, []);
 
-    private static string? VersionOf(string id, BrickKind kind) => Declared(id, kind) is { } b ? BrickRules.VersionOf(kind, JobYaml.ToJson(b)!.ToJsonString()) : null;
+    private static string? VersionOf(string id, BrickKind kind) => Declared(id, kind) is { } b ? TestBricks.VersionOf(kind, JobYaml.ToJson(b)!.ToJsonString()) : null;
 
     [Fact]
     public void A_data_node_composes_the_job_the_coordinator_planned_from_its_own_bricks()
@@ -38,7 +39,7 @@ public class FragmentIntakeTests
     {
         var changed = Sink.Replace("\"dim\"", "\"dim2\"");
         var (yaml, reason) = Resolve(Planned(), branch: (id, kind) => Declared(id, kind, changed),
-            version: (id, kind) => Declared(id, kind, changed) is { } b ? BrickRules.VersionOf(kind, JobYaml.ToJson(b)!.ToJsonString()) : null);
+            version: (id, kind) => Declared(id, kind, changed) is { } b ? TestBricks.VersionOf(kind, JobYaml.ToJson(b)!.ToJsonString()) : null);
 
         Assert.Null(yaml);
         Assert.Contains("a brick of p@node-4 (dim) changed since the plan was made", reason);

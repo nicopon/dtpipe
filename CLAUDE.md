@@ -303,7 +303,7 @@ the control plane, over each replica's node channel; TransportR carries the data
 - **A replica has one TransportR client at a time for all its runs, and is the only TransportR client they
   have.** The node is a byte relay: dtpipe reaches it through `arrow:` and references no TransportR
   assembly.
-- **A node's replicas must be interchangeable**: one database, the same variables, the same bricks outside
+- **A node's replicas must be interchangeable**: one database, the same variables, the same `BrickKey`, the same bricks outside
   a rolling update. Nothing checks it; any eligible replica may run a fragment. `[unchecked]`
 - **A fragment runs on a replica of its node's identity, and only that replica speaks for it.** Admission
   places each fragment on a replica connected under the subject of its node whose bricks compose the plan's

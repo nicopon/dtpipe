@@ -49,7 +49,7 @@ public sealed record BindingProblem(string Alias, string Cause, string Message, 
 /// <summary>
 /// Where a pipeline's bricks run: the node and the brick each source or sink branch of its job is bound to, by the branch's
 /// alias. The runner is never bound: it is stateless, and every branch that is no brick goes to it. The library keeps the
-/// bindings beside the job, in <c>bindings.json</c>, so the job stays a plain dtpipe job.
+/// bindings beside the job, in <c>bindings.json</c>: a reference holds only its mode and its pin there, the job says the node and the brick.
 /// </summary>
 public static class Bindings
 {

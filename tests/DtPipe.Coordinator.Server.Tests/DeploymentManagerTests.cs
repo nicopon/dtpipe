@@ -5,6 +5,7 @@ using TransportR.Interfaces;
 using TransportR.Models;
 using TransportR.Services;
 using Xunit;
+using DtPipe.Tests.Shared;
 
 namespace DtPipe.Coordinator.Server.Tests;
 
@@ -65,7 +66,7 @@ public sealed class DeploymentManagerTests : IDisposable
 
     public void Dispose() { if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true); }
 
-    private static BrickInfo Brick(string input) => new("src", BrickKind.Source, "source", "", $$"""{"input":"{{input}}"}""", null, null);
+    private static BrickInfo Brick(string input) => TestBricks.WithText("src", BrickKind.Source, $$"""{"input":"{{input}}"}""", "source");
 
     /// <summary>A replica of the node "n", its TransportR client registered under the node's subject with the node's groups.</summary>
     private async Task<ReplicaKey> ReplicaAsync(int instance, params BrickInfo[] bricks)

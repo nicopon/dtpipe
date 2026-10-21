@@ -3,6 +3,7 @@ using DtPipe.Coordinator.Contracts;
 using DtPipe.Jobs;
 using Xunit;
 using YamlDotNet.RepresentationModel;
+using DtPipe.Tests.Shared;
 
 namespace DtPipe.Coordinator.Server.Tests;
 
@@ -30,7 +31,7 @@ public sealed class BrickCatalogTests
         _catalog = new BrickCatalog(_inventory);
     }
 
-    private static BrickInfo Brick(string id, BrickKind kind, string branch) => new(id, kind, "t", "", branch, null, null);
+    private static BrickInfo Brick(string id, BrickKind kind, string branch) => TestBricks.WithText(id, kind, branch);
 
     /// <summary>The host announces on a connection, as the node channel does: the registry takes it, then the inventory records it.</summary>
     private void Announce(string connection, params BrickInfo[] bricks) => AnnounceAs("node-x", connection, bricks);
@@ -166,7 +167,8 @@ public sealed class BrickCatalogTests
     [Fact]
     public void A_Brick_Whose_Text_Is_No_Mapping_Is_Never_Listed()
     {
-        Announce("c1", Brick("bad", BrickKind.Source, "[1, 2]"), Brick("src", BrickKind.Source, Source));
+        // A node never announces a version for text that is no mapping, so the fixture carries a literal.
+        Announce("c1", new BrickInfo("bad", BrickKind.Source, "t", "", "[1, 2]", null, null, "unreadable"), Brick("src", BrickKind.Source, Source));
 
         Assert.Equal(["node-x/src"], _catalog.List().Select(b => b.Key));
         Assert.Equal(["node-x/src"], _catalog.List().Select(b => b.Key));

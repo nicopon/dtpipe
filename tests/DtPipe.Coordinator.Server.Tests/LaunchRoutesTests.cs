@@ -5,6 +5,7 @@ using DtPipe.Coordinator.Contracts;
 using DtPipe.Jobs.Coordinator;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
+using DtPipe.Tests.Shared;
 
 namespace DtPipe.Coordinator.Server.Tests;
 
@@ -39,7 +40,7 @@ public sealed class LaunchRoutesTests : IDisposable
     /// <summary>Node A offers the customers brick under <c>crm</c>, a runner is connected, and A may send to it.</summary>
     private async Task NodeAAndARunnerAsync()
     {
-        var source = new BrickInfo("customers", BrickKind.Source, "Customers", "", """{"input":"sqlite:${{LAB_DB}}"}""", null, null);
+        var source = TestBricks.WithText("customers", BrickKind.Source, """{"input":"sqlite:${{LAB_DB}}"}""", "Customers");
         foreach (var identity in new[] { new IdentityBody("a", "node-a", "A", ["crm"], true), new IdentityBody("r", "runner", "R", ["run"], true) })
         {
             using var created = await _admin.PostAsJsonAsync("/api/rights/identities", identity, Web, Ct);

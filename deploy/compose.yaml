@@ -104,6 +104,7 @@ services:
       DtPipeNode__Oidc__Authority: *issuer
       DtPipeNode__Oidc__ClientId: trial-node
       DtPipeNode__Oidc__ClientSecret: trial-node-trial-secret
+      DtPipeNode__BrickKey: trial-node-trial-brick-key
       DtPipeNode__BricksFile: /etc/trial-node/bricks.json
     volumes:
       - ./trial/node-bricks.json:/etc/trial-node/bricks.json:ro

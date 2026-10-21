@@ -53,9 +53,10 @@ public class DesignValidator(BrickCatalog bricks, NodeRequests nodes)
             // A reference is the node's to compose, and dtpipe does not read it: one that names no source brick is refused here by name,
             // never copied into the runner's dry-run.
             if (BrickRef.Misuse(alias, branch) is { } misuse) { refusals.Add(misuse); continue; }
-            if (BrickRef.Of(alias, branch) is { } named && BrickOf(alias, branch, bindings) is not { Kind: BrickKind.Source })
+            if (BrickRef.Of(alias, branch) is { } named
+                && BrickOf(alias, branch, bindings)?.Kind != (named.IsSink ? BrickKind.Sink : BrickKind.Source))
             {
-                refusals.Add($"'{alias}' references {named.Key}, which no node offers as a source.");
+                refusals.Add($"'{alias}' references {named.Key}, which no node offers as a {(named.IsSink ? "sink" : "source")}.");
                 continue;
             }
             switch (BrickOf(alias, branch, bindings))

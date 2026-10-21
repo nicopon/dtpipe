@@ -3,6 +3,7 @@ using DtPipe.Coordinator.Contracts;
 using Microsoft.AspNetCore.SignalR;
 using TransportR.FlowControl;
 using TransportR.Services;
+using DtPipe.Tests.Shared;
 using Xunit;
 
 namespace DtPipe.Coordinator.Server.Tests;
@@ -69,7 +70,8 @@ public sealed class PlanModeTests : IDisposable
         File.WriteAllText(seed, """
             { "identities": [
               { "clientId": "node-r", "name": "r", "description": "", "groups": ["run"] },
-              { "clientId": "node-d", "name": "d", "description": "", "groups": ["data"] } ], "matrix": {} }
+              { "clientId": "node-d", "name": "d", "description": "", "groups": ["data"] },
+              { "clientId": "node-e", "name": "e", "description": "", "groups": ["store"] } ], "matrix": {} }
             """);
         var rights = MemoryRightsStore.Rights(new CoordinatorServerOptions
         {
@@ -151,6 +153,32 @@ public sealed class PlanModeTests : IDisposable
             Assert.False(plan.Deployable);
             Assert.DoesNotContain(plan.Fragments, f => f.Yaml.Contains("brick:", StringComparison.Ordinal) && f.Form == FragmentForm.Job);
         }
+    }
+
+    [Fact]
+    public async Task A_Sink_Reference_Is_Planned_As_A_Fragment_Of_Bricks_On_Its_Own_Node()
+    {
+        var source = TestBricks.Announced("src", BrickKind.Source, """{"input":"sqlite:a"}""");
+        var sink = TestBricks.Announced("mirror", BrickKind.Sink, """{"output":"sqlite:b"}""");
+        foreach (var (name, group, brick) in new[] { ("d", "data", source), ("e", "store", sink) })
+        {
+            var announcement = new NodeAnnouncement(name, "", [], NodeRole.Data, [brick], InstanceId: Guid.NewGuid());
+            _registry.Announce("connection-" + name, "node-" + name, announcement, [group], () => { });
+            _inventory.Announced(name, "node-" + name, announcement, [group]);
+        }
+        _matrix.Groups["data"] = new GroupAccess { CanSendTo = ["store"] };
+        var job = "a:\n  input: brick:d/src\nb:\n  from: a\n  output: brick:e/mirror\n";
+
+        var plan = await _planner.BuildAsync(
+            new PlanRequest("p", job, null, new Dictionary<string, string> { ["a"] = "d", ["b"] = "e" },
+                new Dictionary<string, string> { ["a"] = "src", ["b"] = "mirror" }), PlanMode.Library, TestContext.Current.CancellationToken);
+
+        Assert.Empty(plan.Errors);
+        Assert.True(plan.Deployable);
+        Assert.All(plan.Fragments, f => Assert.Equal(FragmentForm.Bricks, f.Form));
+        var consumer = plan.Fragments.Single(f => f.Node == "e");
+        Assert.Contains(consumer.Composition!, u => u is { Kind: FragmentUnitKind.Sink, Brick: "mirror", From: "a" });
+        Assert.Equal(FragmentJob.VersionOf(consumer.Composition!, (_, _) => sink.Version), consumer.Version);
     }
 
     [Fact]

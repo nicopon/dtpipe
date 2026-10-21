@@ -9,6 +9,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="..\Shared\TestBricks.cs" Link="Shared\TestBricks.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\DtPipe.PipelineNode\DtPipe.PipelineNode.csproj" />
     <!-- ReplicaRuns, the run protocol of a replica: the same class the host's agent drives, so a test node answers the
          coordinator as a host does. -->

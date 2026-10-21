@@ -140,6 +140,24 @@ public class DtPipeNodeBuilderTests
         Assert.Equal("/data/crm.sqlite", options.Variables["CRM_DB"]);
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("too-short")]
+    public async Task A_node_that_offers_bricks_without_a_long_enough_key_fails_at_start(string? key)
+    {
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.AddDtPipeNode(o =>
+        {
+            (o.Name, o.CoordinatorUrl, o.BrickKey) = ("n", "http://coordinator:8080", key);
+            (o.Oidc.Authority, o.Oidc.ClientId, o.Oidc.ClientSecret) = ("http://idp:5190", "n", "secret");
+        }).AddBrick("customers", BrickKind.Source, "Customers", BrickBranch);
+        using var host = builder.Build();
+
+        var error = await Assert.ThrowsAsync<OptionsValidationException>(() => host.StartAsync(TestContext.Current.CancellationToken));
+
+        Assert.Contains(error.Failures, f => f.Contains("BrickKey", StringComparison.Ordinal));
+    }
+
     [Fact]
     public async Task A_node_missing_its_settings_fails_at_start_naming_each_one()
     {

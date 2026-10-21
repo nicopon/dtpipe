@@ -3,6 +3,7 @@ using DtPipe.Coordinator.Tests.Infrastructure;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
+using DtPipe.Tests.Shared;
 
 namespace DtPipe.Coordinator.Tests;
 
@@ -302,7 +303,7 @@ public class ReplicaAdmissionSubjectTests
         Assert.Equal(RunOutcome.Succeeded, (await run.WaitAsync(Wait)).Outcome);
     }
 
-    private static BrickInfo Brick(string input) => new("src", BrickKind.Source, "source", "", $$"""{"input":"{{input}}"}""", null, null);
+    private static BrickInfo Brick(string input) => TestBricks.WithText("src", BrickKind.Source, $$"""{"input":"{{input}}"}""", "source");
 
     /// <summary>
     /// A rolling update leaves two replicas of one node at two versions of a brick. The run is placed on the one that composes

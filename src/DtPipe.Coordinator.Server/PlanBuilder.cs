@@ -284,11 +284,11 @@ public sealed class PlanBuilder(
             }
             // A fragment of bricks is versioned by the versions of its bricks, the only thing of them the coordinator holds.
             // dtpipe does not read brick:, so a reference leaves the coordinator only as a brick its own node composes.
-            // The planner has added the wiring (an arrow output) by now, so a reference is read by its input alone.
+            // The planner has added the wiring (an arrow output, a sink's feed) by now, so a reference is read by the endpoint that holds it.
             var refused = false;
             foreach (var (key, branch) in draft.Owned)
             {
-                if (JobYaml.Scalar(branch, "input") is not { } input || !input.StartsWith(BrickRef.Scheme, StringComparison.Ordinal)) continue;
+                if (new[] { "input", "output" }.Select(k => JobYaml.Scalar(branch, k)).FirstOrDefault(v => v?.StartsWith(BrickRef.Scheme, StringComparison.Ordinal) == true) is not { } input) continue;
                 if (!BrickRef.TryParse(input, out var refNode, out var refBrick))
                     errors.Add($"{draft.Name}: '{key}' has a malformed brick reference '{input}'.");
                 else if (refNode != draft.Node || form != FragmentForm.Bricks)

@@ -8,17 +8,17 @@ using YamlDotNet.RepresentationModel;
 namespace DtPipe.Coordinator.Server;
 
 /// <summary>
-/// One brick as the page sees it. <see cref="Key"/> is <c>node/id</c>; <see cref="Version"/> hashes
-/// the brick's canonical branch, so it changes exactly when what dtpipe would run changes.
+/// One brick as the page sees it. <see cref="Key"/> is <c>node/id</c>; <see cref="Version"/> is the keyed hash
+/// its node took of the brick's canonical branch, so it changes exactly when what dtpipe would run changes.
 /// </summary>
 public sealed record BrickView(
     string Key, string Node, string Id, BrickKind Kind, string Title, string Description, string Yaml, string Version,
     IReadOnlyList<BrickColumn>? Schema, string? SchemaError, bool Online);
 
 /// <summary>
-/// Every brick the nodes announce. A branch of a job <b>is</b> a brick when its content equals the
-/// brick's, never because of a name: a job stays a plain dtpipe job, and a brick its owner changed
-/// stops matching the pipelines written against its old form.
+/// Every brick the nodes announce, by its reference: a job names a brick by node and id (<c>brick:&lt;node&gt;/&lt;id&gt;</c>), and a brick its
+/// owner changed has another version, which stops the pipelines checked against the old one. A branch of a job that holds text is
+/// matched by its canonical form only against a brick announced with text, which a node does not announce.
 /// <para>
 /// What the catalog reads of each announced brick (its branch, canonical form, version and text) it keeps, and a brick
 /// announced again is read anew. The node's name and whether it is online are read from the inventory at every call.
@@ -33,7 +33,7 @@ public sealed class BrickCatalog(NodeInventory inventory)
     /// What reading an announced brick gives, which depends on the brick alone; <see cref="Branch"/> is <c>null</c> for a brick whose text
     /// is no mapping, and for a minimal brick, which has none: its branch is the reference to it.
     /// </summary>
-    private sealed record Read(YamlMappingNode? Branch, string Canonical, string Version, string Yaml);
+    private sealed record Read(YamlMappingNode? Branch, string Canonical, string Yaml);
 
     // By the announced object: a brick announced again is another object, so it is read again.
     private readonly ConditionalWeakTable<BrickInfo, Read> _read = new();
@@ -94,27 +94,27 @@ public sealed class BrickCatalog(NodeInventory inventory)
         {
             foreach (var brick in node.Bricks)
             {
+                if (string.IsNullOrWhiteSpace(brick.Version)) continue;
                 var read = _read.GetValue(brick, ReadOf);
                 // A minimal brick is read as the reference a job makes to it, which names the node as it is called now.
-                var branch = brick.IsMinimal ? new YamlMappingNode { { "input", BrickRef.Format(node.Name, brick.Id) } } : read.Branch;
-                if (branch is null || (brick.IsMinimal && read.Version.Length == 0)) continue;
+                var branch = brick.IsMinimal ? ReferenceTo(node.Name, brick) : read.Branch;
+                if (branch is null) continue;
                 resolved.Add(new Resolved(
                     new BrickView($"{node.Name}/{brick.Id}", node.Name, brick.Id, brick.Kind, brick.Title, brick.Description,
-                        brick.IsMinimal ? JobYaml.Serialize(branch) : read.Yaml, read.Version, brick.Schema, brick.SchemaError, node.Online),
+                        brick.IsMinimal ? JobYaml.Serialize(branch) : read.Yaml, brick.Version, brick.Schema, brick.SchemaError, node.Online),
                     branch, brick.IsMinimal ? null : read.Canonical, brick.IsMinimal ? JobYaml.ToJson(branch)!.ToJsonString() : brick.Branch!));
             }
         }
         return resolved;
     }
 
+    // A source is read by an input reference and a sink written by an output one.
+    private static YamlMappingNode ReferenceTo(string node, BrickInfo brick) =>
+        new() { { brick.Kind == BrickKind.Sink ? "output" : "input", BrickRef.Format(node, brick.Id) } };
+
     private static Read ReadOf(BrickInfo brick)
     {
-        // The one reading of an announced brick, the node's and the replica chooser's too.
-        if (brick.IsMinimal) return new Read(null, "", BrickRules.VersionOf(brick) ?? "", "");
-        if (FragmentJob.Declared(brick) is not { } branch) return new Read(null, "", "", "");
-        var canonical = BrickRules.Declared(brick.Kind, branch).Canonical;
-        var version = BrickRules.VersionOf(brick) ?? ContentHash.Of(canonical, 12);
-        var yaml = JobYaml.Serialize(branch);
-        return new Read(branch, canonical, version, yaml);
+        if (brick.IsMinimal || FragmentJob.Declared(brick) is not { } branch) return new Read(null, "", "");
+        return new Read(branch, BrickRules.Declared(brick.Kind, branch).Canonical, JobYaml.Serialize(branch));
     }
 }

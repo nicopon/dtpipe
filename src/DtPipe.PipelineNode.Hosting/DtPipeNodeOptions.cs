@@ -62,6 +62,14 @@ public sealed class DtPipeNodeOptions
     /// </summary>
     public bool FaultInjection { get; set; }
 
+    /// <summary>
+    /// The key a brick's version is hashed under (HMAC-SHA256 of its canonical text), required of a node that offers bricks and at least
+    /// <see cref="DtPipe.Coordinator.Contracts.BrickRules.MinKeyLength"/> characters. It is the node's, never announced and in no log: all
+    /// replicas of a node share it, since a replica under another key announces other versions and is not eligible for a plan. Changing it
+    /// changes every version of the node's bricks.
+    /// </summary>
+    public string? BrickKey { get; set; }
+
     public NodeOidcOptions Oidc { get; set; } = new();
 
     /// <summary>Variables every dtpipe child sees, which a fragment resolves through <c>${{NAME}}</c>. Their values never leave the node.</summary>

@@ -4,6 +4,7 @@ using DtPipe.Jobs;
 using DtPipe.Jobs.Coordinator;
 using Xunit;
 using YamlDotNet.RepresentationModel;
+using DtPipe.Tests.Shared;
 
 namespace DtPipe.Coordinator.Server.Tests;
 
@@ -45,12 +46,13 @@ public sealed class MinimalBrickTests : IDisposable
     }
 
     /// <summary>The brick as a node announces it: its version, never its text.</summary>
-    private static BrickInfo Minimal(string text = Text) =>
-        new("customers", BrickKind.Source, "Customers", "", null, null, null, BrickRules.VersionOf(BrickKind.Source, text));
+    private static BrickInfo Minimal(string text = Text) => TestBricks.Announced("customers", BrickKind.Source, text, "Customers");
 
-    private void Announce(BrickInfo brick)
+    private static BrickInfo MinimalSink() => TestBricks.Announced("mirror", BrickKind.Sink, """{"output":"sqlite:${{DB}}","provider-options":{"sqlite-writer":{"table":"t"}}}""");
+
+    private void Announce(params BrickInfo[] bricks)
     {
-        var announcement = new NodeAnnouncement("node-a", "", [], NodeRole.Data, [brick], InstanceId: Guid.NewGuid());
+        var announcement = new NodeAnnouncement("node-a", "", [], NodeRole.Data, bricks, InstanceId: Guid.NewGuid());
         _registry.Announce("c-a", "node-a", announcement, ["crm"], () => { });
         _inventory.Announced("node-a", "node-a", announcement, ["crm"]);
     }
@@ -113,6 +115,41 @@ public sealed class MinimalBrickTests : IDisposable
         var problem = Assert.Single(_placer.Check(Job.Replace("customers:\n  input: brick:node-a/customers", "customers:\n  input: brick:node-a/customers\n  limit: 5"), NoBindings));
 
         Assert.Equal(BindingCauses.NotABrick, problem.Cause);
+    }
+
+    private const string SinkJob = "customers:\n  input: brick:node-a/customers\nmirror:\n  from: customers\n  output: brick:node-a/mirror\n";
+
+    [Fact]
+    public void A_Sink_Is_Referenced_By_Its_Output_And_Pinned_At_The_Version_It_Was_Checked_At()
+    {
+        var (source, sink) = (Minimal(), MinimalSink());
+        Announce(source, sink);
+
+        var reference = BrickRef.Of("mirror", (YamlMappingNode)JobYaml.Parse(SinkJob).Children[new YamlScalarNode("mirror")]);
+        Assert.Equal(("node-a/mirror", true), (reference!.Key, reference.IsSink));
+        Assert.Equal("brick:node-a/mirror", Assert.Single(_catalog.Catalog(), b => b.Id == "mirror").Branch["output"]!.GetValue<string>());
+        Assert.Equal(BindingCauses.Unchecked, Assert.Single(_placer.Check(SinkJob, new Dictionary<string, Binding> { ["customers"] = new("", null, null, new BindingPin(source.Version)) })).Cause);
+
+        // A strict binding keeps the version, never the contract the sink was judged against.
+        var pins = new Dictionary<string, CheckedPin> { ["mirror"] = new("mirror", new BindingPin(sink.Version, "{}")) };
+        var bindings = Bindings.Pinned(BrickReferences.Expand(SinkJob, new Dictionary<string, Binding>()), pins, new HashSet<string> { "mirror" });
+        Assert.Equal(new BindingPin(sink.Version), bindings["mirror"].Pin);
+        Assert.Empty(_placer.Check(SinkJob, new Dictionary<string, Binding> { ["customers"] = new("", null, null, new BindingPin(source.Version)), ["mirror"] = bindings["mirror"] }));
+    }
+
+    [Theory]
+    [InlineData("mirror:\n  from: customers\n  output: brick:node-a/customers\n")]
+    [InlineData("mirror:\n  from: customers\n  output: brick:node-a/mirror\n  limit: 5\n")]
+    [InlineData("mirror:\n  output: brick:node-a/mirror\n")]
+    [InlineData("mirror:\n  from: customers,mirror2\n  output: brick:node-a/mirror\n")]
+    public void A_Reference_That_Writes_Where_It_Cannot_Or_Reads_Nothing_Is_Refused_By_Name(string sink)
+    {
+        Announce(Minimal(), MinimalSink());
+        var job = "customers:\n  input: brick:node-a/customers\nmirror2:\n  from: customers\n  output: csv:out.csv\n" + sink;
+
+        var problem = Assert.Single(_placer.Check(job, new Dictionary<string, Binding> { ["customers"] = new("", null, null, new BindingPin(Minimal().Version)) }));
+
+        Assert.Equal(("mirror", BindingCauses.NotABrick), (problem.Alias, problem.Cause));
     }
 
     [Fact]

@@ -4,6 +4,7 @@ using DtPipe.Jobs.Coordinator;
 using TransportR.FlowControl;
 using TransportR.Services;
 using Xunit;
+using DtPipe.Tests.Shared;
 
 namespace DtPipe.Coordinator.Server.Tests;
 
@@ -56,7 +57,7 @@ public sealed class BindingTests : IDisposable
         _inventory.Announced(name, name, announcement, ["crm"]);
     }
 
-    private static BrickInfo SourceBrick() => new("customers", BrickKind.Source, "t", "", Source, null, null);
+    private static BrickInfo SourceBrick() => TestBricks.WithText("customers", BrickKind.Source, Source);
 
     private static Dictionary<string, Binding> On(string node, string brick = "customers") => new() { ["customers"] = new Binding(node, brick) };
 
@@ -253,7 +254,7 @@ public sealed class BindingTests : IDisposable
     public void A_Binding_In_Another_Mode_Holds_Its_Brick_By_Id_Whatever_The_Branch_Text_Is_Now()
     {
         // The node offers the brick as its owner changed it; the job still holds the old text.
-        Announce("node-a", new BrickInfo("customers", BrickKind.Source, "t", "", """{"input":"sqlite:other"}""", null, null));
+        Announce("node-a", TestBricks.WithText("customers", BrickKind.Source, """{"input":"sqlite:other"}"""));
         var tolerant = new Dictionary<string, Binding> { ["customers"] = new Binding("node-a", "customers", "tolerant", new BindingPin("v")) };
         var strict = new Dictionary<string, Binding> { ["customers"] = new Binding("node-a", "customers") };
 
@@ -378,7 +379,7 @@ public sealed class BindingTests : IDisposable
     [Fact]
     public async Task A_Save_With_No_Bindings_Leaves_Them_As_They_Are_And_Resolves_Their_Bricks_From_The_New_Text()
     {
-        Announce("node-a", SourceBrick(), new BrickInfo("orders", BrickKind.Source, "t", "", """{"input":"sqlite:b","limit":10}""", null, null));
+        Announce("node-a", SourceBrick(), TestBricks.WithText("orders", BrickKind.Source, """{"input":"sqlite:b","limit":10}"""));
         var library = Library();
         await library.SaveAsync("p", Job, "create", Ct, bindings: On("node-a"));
 

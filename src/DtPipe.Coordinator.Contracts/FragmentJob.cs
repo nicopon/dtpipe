@@ -18,10 +18,8 @@ public static partial class FragmentJob
     public delegate YamlMappingNode? BranchOfBrick(string id, BrickKind kind);
 
     /// <summary>
-    /// The branch an announced brick declares, read the one way every side reads it: the node when it
-    /// composes, the coordinator when it asks whether a replica could. <c>null</c> when the brick's text
-    /// is no mapping. Two readings would let the coordinator call a replica eligible that then refuses
-    /// every run.
+    /// The branch a node's declaration of a brick holds, which only that node has: an announcement carries no text, so the
+    /// coordinator composes nothing from one. <c>null</c> when the declaration has no text or it is no mapping.
     /// </summary>
     public static YamlMappingNode? Declared(BrickInfo brick)
     {
@@ -39,7 +37,7 @@ public static partial class FragmentJob
 
     /// <summary>The versions a node announces as <see cref="VersionOfBrick"/>.</summary>
     public static VersionOfBrick VersionsOver(IReadOnlyList<BrickInfo> bricks) =>
-        (id, kind) => bricks.FirstOrDefault(b => b.Id == id && b.Kind == kind) is { } brick ? BrickRules.VersionOf(brick) : null;
+        (id, kind) => bricks.FirstOrDefault(b => b.Id == id && b.Kind == kind) is { } brick ? brick.Version : null;
 
     /// <summary>
     /// The job a data node composes for <paramref name="spec"/>'s units from the bricks it declares, or why it

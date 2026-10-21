@@ -35,6 +35,8 @@ var node = builder.Services.AddDtPipeNode(o =>
     o.DtPipe = Path.GetFullPath(Required("dtpipe"));
     o.StateDirectory = Path.Combine(state, name);
     o.Policy = FragmentPolicy.Bricks;
+    // A bench's key, derived from the node's name so its replicas share it: not a secret.
+    o.BrickKey = file["brickKey"] ?? $"lab-brick-key-of-{name}";
     // The coordinator's lab mode ends a fragment's child on request, to inject a fault; a host answers that only when its own
     // configuration enables it.
     o.FaultInjection = true;

@@ -5,6 +5,7 @@ using DtPipe.Coordinator.Server;
 using DtPipe.Jobs.Coordinator;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
+using DtPipe.Tests.Shared;
 
 namespace DtPipe.Coordinator.Server.Tests;
 
@@ -37,7 +38,7 @@ public sealed class StudioRoutesTests : IDisposable
         var inventory = _host.Services.GetRequiredService<NodeInventory>();
         var registry = _host.Services.GetRequiredService<ReplicaRegistry>();
         var announcement = new NodeAnnouncement("n1", "", [], NodeRole.Data,
-            [new BrickInfo("orders", BrickKind.Source, "Orders", "every order", Source, [new BrickColumn("id", "BIGINT", false)], null)],
+            [TestBricks.WithText("orders", BrickKind.Source, Source, "Orders", "every order", [new BrickColumn("id", "BIGINT", false)])],
             DtpipeVersion: "9.9.9+abc");
         registry.Announce("c1", "n1", announcement, ["g"], () => { });
         inventory.Announced("n1", "n1", announcement, ["g"]);

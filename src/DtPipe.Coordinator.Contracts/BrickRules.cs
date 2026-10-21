@@ -10,8 +10,8 @@ namespace DtPipe.Coordinator.Contracts;
 public sealed record BrickForm(BrickKind Kind, string Canonical);
 
 /// <summary>
-/// What a branch has to be for a data node to run it. The coordinator uses the same reading to
-/// recognise a brick in a job and the node host uses it to refuse anything else, so the designer can
+/// What a branch has to be for a data node to run it. The coordinator uses the same reading to refuse a branch that is no
+/// brick and the node host uses it to refuse anything else, so the designer can
 /// never call something a brick that the node then declines.
 /// <para>
 /// Two layers. <b>Structure</b>, always: a data node only reads and writes, so a branch carries no
@@ -48,19 +48,17 @@ public static class BrickRules
 
     public static BrickForm Declared(BrickKind kind, YamlMappingNode branch) => new(kind, Canonical(branch));
 
-    /// <summary>
-    /// The version of a brick declared as <paramref name="branchJson"/>: the start of the hash of its canonical text, taken once by
-    /// the node that owns the text. Variables stay as the <c>${{Name}}</c> tokens the text holds, so no value enters the hash.
-    /// </summary>
-    public static string VersionOf(BrickKind kind, string branchJson) => ContentHash.Of(Declared(kind, branchJson).Canonical, 12);
+    /// <summary>The shortest key a node keys its versions with: a shorter one can be guessed from a version.</summary>
+    public const int MinKeyLength = 16;
 
-    /// <summary>The version an announced brick carries, or the one its text gives when it carries none (a test fixture's: a node always announces one).</summary>
-    public static string? VersionOf(BrickInfo brick)
-    {
-        if (brick.Version is not null || brick.Branch is not { } text) return brick.Version;
-        try { return VersionOf(brick.Kind, text); }
-        catch (Exception) { return null; }
-    }
+    /// <summary>
+    /// The version of a brick declared as <paramref name="branchJson"/>: the start of the HMAC-SHA256 of its canonical text under
+    /// <paramref name="key"/>, taken once by the node that owns the text. The key is the node's, shared by its replicas and never
+    /// announced, so a version lets nobody guess a secret the text holds. Variables stay as the <c>${{Name}}</c> tokens the text
+    /// holds, so no value enters the hash.
+    /// </summary>
+    public static string VersionOf(BrickKind kind, string branchJson, string key) =>
+        ContentHash.Keyed(Declared(kind, branchJson).Canonical, key, 12);
 
     /// <summary>
     /// The form of a whole branch, with the wiring the planner adds around a brick set aside: a sink is

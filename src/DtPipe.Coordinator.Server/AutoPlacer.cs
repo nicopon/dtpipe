@@ -87,7 +87,7 @@ public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, Pla
 
     /// <summary>
     /// Whether <paramref name="bindings"/> hold for <paramref name="yaml"/> now: every branch that is a brick is bound to a node that
-    /// exists and offers it, the brick a binding names is the one the branch's text designates there, and the bindings name nothing
+    /// exists and offers it, the brick a binding names is the one the branch's text designates there (a reference names its own brick: <see cref="CheckReference"/>), and the bindings name nothing
     /// else. Empty for a job that is not readable, which planning reports.
     /// </summary>
     public IReadOnlyList<BindingProblem> Check(string yaml, IReadOnlyDictionary<string, Binding> bindings)
@@ -163,7 +163,8 @@ public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, Pla
 
     /// <summary>
     /// Why a referenced brick does not hold, or null. A reference names its node and its brick, so there is no text to match:
-    /// the node must be known, enabled and online, offer a source of that id, and the version a check pinned must still be the
+    /// the node must be known, enabled and online, offer a brick of that id and of the kind the reference's place says (a source read by
+    /// <c>input</c>, a sink written by <c>output</c>), and the version a check pinned must still be the
     /// brick's (strict), or the mode's own pin must hold what it compares (another mode).
     /// </summary>
     private BindingProblem? CheckReference(BrickReference reference, Binding? binding, IReadOnlyDictionary<string, NodeView> nodes)
@@ -183,8 +184,9 @@ public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, Pla
             return view.Online
                 ? new(alias, BindingCauses.NotOffered, $"'{alias}' references {bound}, which that node does not offer.", true)
                 : new(alias, BindingCauses.Offline, $"'{alias}' references {bound}, which has no connected replica.", false);
-        if (brick.Kind != BrickKind.Source)
-            return new(alias, BindingCauses.NotABrick, $"'{alias}' references {bound}, which is not a source: only a source is read by reference.", true);
+        if (brick.Kind != (reference.IsSink ? BrickKind.Sink : BrickKind.Source))
+            return new(alias, BindingCauses.NotABrick,
+                $"'{alias}' references {bound}, which is {(reference.IsSink ? "not a sink: only a sink is written" : "not a source: only a source is read")} by reference.", true);
         if (mode != BindingModes.Strict) return CheckHeld(alias, binding!, bound, mode, view);
         if (binding?.Pin is not { } pin)
             return new(alias, BindingCauses.Unchecked, $"'{alias}' references {bound} and no check has pinned its version: save the pipeline again.", true);
