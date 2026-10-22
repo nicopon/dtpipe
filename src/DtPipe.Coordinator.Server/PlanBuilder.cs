@@ -7,22 +7,19 @@ using YamlDotNet.RepresentationModel;
 
 namespace DtPipe.Coordinator.Server;
 
-public sealed record CutRequest(string Branch, int At);
-
 /// <param name="Bricks">
 /// The brick (its id on the node the alias is placed on) a binding names, by alias. An alias in it is composed from that brick as the
 /// catalog holds it now, whatever its text says; any other is the brick its text is on its node.
 /// </param>
 public sealed record PlanRequest(
-    string PipelineId, string Yaml, IReadOnlyList<CutRequest>? Cuts, IReadOnlyDictionary<string, string>? Placement,
+    string PipelineId, string Yaml, IReadOnlyDictionary<string, string>? Placement,
     IReadOnlyDictionary<string, string>? Bricks = null);
 
 /// <summary>
-/// A placeable piece of the pipeline: a branch, or the head of a branch a cut separated from it
-/// (id <c>alias^</c>). A head feeds its tail over an <c>arrow:</c> edge and nothing else.
+/// A placeable piece of the pipeline: one branch of the job.
 /// </summary>
 public sealed record UnitView(
-    string Id, string YamlKey, bool IsHead, BranchView Branch, IReadOnlyList<string> DependsOn,
+    string Id, string YamlKey, BranchView Branch, IReadOnlyList<string> DependsOn,
     string? SuggestedNode, string? Node);
 
 /// <summary>How a fragment reaches its node: <see cref="Bricks"/> composed by the node from its own declarations, or a <see cref="Job"/> as written.</summary>
@@ -49,7 +46,7 @@ public sealed record PlannedEdge(
 }
 
 public sealed record DistributionPlan(
-    string Id, string PipelineId, IReadOnlyList<CutRequest> Cuts, IReadOnlyList<UnitView> Units,
+    string Id, string PipelineId, IReadOnlyList<UnitView> Units,
     IReadOnlyList<PlannedFragment> Fragments, IReadOnlyList<PlannedEdge> Edges,
     IReadOnlyList<string> Errors, IReadOnlyList<string> Warnings, string? FlowRejection)
 {
@@ -59,34 +56,30 @@ public sealed record DistributionPlan(
 /// <summary>Who asks for a plan, which says what the planner may do for it.</summary>
 public enum PlanMode
 {
-    /// <summary>A plan the coordinator places itself, for a pipeline of the library: a data node's fragment is made of its bricks, and nothing in it is cut.</summary>
+    /// <summary>A plan the coordinator places itself, for a pipeline of the library: a data node's fragment is made of its bricks.</summary>
     Library,
 
-    /// <summary>The Lab view's planning by hand: the only plan that asks a node to cut a branch, and the only one that sends a data node a fragment written as a job.</summary>
+    /// <summary>The Lab view's planning by hand: the only plan that sends a data node a fragment written as a job.</summary>
     Manual,
 }
 
 /// <summary>
-/// Turns one monolithic job, a set of cuts and a placement into one fragment per node.
+/// Turns one monolithic job and a placement into one fragment per node.
 /// <para>
-/// A cut inside a branch is <c>dtpipe split</c>'s, run by the node whose data the branch reads; the
-/// planner keeps both halves as written, so where each option lands stays dtpipe's decision. Only the regrouping of whole
-/// branches is the planner's own: a <c>from</c>/<c>ref</c> dependency that crosses two nodes becomes an
+/// The planner only regroups whole branches: a <c>from</c>/<c>ref</c> dependency that crosses two nodes becomes an
 /// <c>arrow:-</c> input branch on the consumer's side and an <c>arrow:-</c> output on the
-/// producer's - the shape <c>dtpipe split</c> itself gives a cut. It never edits an option.
+/// producer's. It never edits an option or moves a transformer.
 /// </para>
 /// </summary>
 public sealed class PlanBuilder(
-    NodeInventory inventory, NodeRequests nodes, BrickCatalog bricks, IPlanRegistry planRegistry, RightsStore rights)
+    NodeInventory inventory, BrickCatalog bricks, IPlanRegistry planRegistry, RightsStore rights)
 {
     private const string ArrowEndpoint = "arrow:-";
-    private static readonly TimeSpan SplitTimeout = TimeSpan.FromSeconds(90);
 
     private sealed class Unit
     {
         public required string Id;
         public required string Key;
-        public required bool IsHead;
         public required YamlMappingNode Branch;
         public required IReadOnlyList<string> DependsOn;
     }
@@ -109,19 +102,17 @@ public sealed class PlanBuilder(
     /// <summary>
     /// Plans <paramref name="request"/>. A data node's fragment is made of its bricks by id; one that is not
     /// is an error naming why, unless the plan is <see cref="PlanMode.Manual"/> and the node announces that it
-    /// accepts raw fragments, when it goes as a job as written. A request that carries cuts is an error in any
-    /// other mode, before any node is asked.
+    /// accepts raw fragments, when it goes as a job as written.
     /// </summary>
-    public async Task<DistributionPlan> BuildAsync(PlanRequest request, PlanMode mode, CancellationToken ct)
+    public DistributionPlan Build(PlanRequest request, PlanMode mode)
     {
         var planId = $"{DateTime.UtcNow:HHmmss}-{Guid.NewGuid().ToString("N")[..6]}";
         var pipelineId = Sanitize(request.PipelineId);
-        var cuts = request.Cuts ?? [];
         var errors = new List<string>();
         var warnings = new List<string>();
         DistributionPlan Result(IReadOnlyList<UnitView> units, IReadOnlyList<PlannedFragment>? fragments = null,
             IReadOnlyList<PlannedEdge>? edges = null, string? flowRejection = null) =>
-            new(planId, pipelineId, cuts, units, fragments ?? [], edges ?? [], errors, warnings, flowRejection);
+            new(planId, pipelineId, units, fragments ?? [], edges ?? [], errors, warnings, flowRejection);
 
         YamlMappingNode job;
         try { job = JobYaml.Parse(request.Yaml); }
@@ -131,13 +122,8 @@ public sealed class PlanBuilder(
             return Result([]);
         }
 
-        // 1. Cuts inside branches, one dtpipe split each, applied in turn to what remains.
-        var heads = await ApplyCutsAsync(planId, request.Yaml, mode, cuts, errors, ct);
-        if (heads is null) return Result(DescribeUnits(BuildUnits(job, new Dictionary<string, YamlMappingNode>()), request.Placement));
-        var (remaining, headBranches) = heads.Value;
-
-        // 2. Units, and where each one goes.
-        var units = BuildUnits(remaining, headBranches);
+        // 1. Units, and where each one goes.
+        var units = BuildUnits(job);
         var unitViews = DescribeUnits(units, request.Placement);
         var nodes = inventory.Snapshot().ToDictionary(n => n.Name, StringComparer.Ordinal);
         var placement = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -163,7 +149,7 @@ public sealed class PlanBuilder(
         }
         if (errors.Count > 0) return Result(unitViews);
 
-        // 3. One fragment per node, whole units copied in.
+        // 2. One fragment per node, whole units copied in.
         var drafts = new Dictionary<string, FragmentDraft>(StringComparer.Ordinal);
         FragmentDraft DraftOf(string node) => drafts.TryGetValue(node, out var d)
             ? d
@@ -172,8 +158,6 @@ public sealed class PlanBuilder(
         foreach (var unit in units)
         {
             var draft = DraftOf(placement[unit.Id]);
-            // Only a cut's two halves share a key; 3a names that mistake.
-            if (draft.HasKey(unit.Key)) continue;
             draft.Owned.Add((unit.Key, JobYaml.CloneBranch(unit.Branch)));
             draft.Units.Add(unit.Id);
         }
@@ -186,25 +170,12 @@ public sealed class PlanBuilder(
             runEdges.Add((producer, producerAlias, consumer, consumerAlias));
         }
 
-        // 3a. A cut's two halves: dtpipe split already wrote arrow:- on both sides.
-        foreach (var head in units.Where(u => u.IsHead))
-        {
-            var headNode = placement[head.Id];
-            var tailNode = placement[head.Key];
-            if (headNode == tailNode)
-            {
-                errors.Add($"The cut of '{head.Key}' leaves both halves on {headNode}: place '{head.Id}' and '{head.Key}' on different nodes, or remove the cut.");
-                continue;
-            }
-            Connect(drafts[headNode], head.Key, drafts[tailNode], head.Key);
-        }
-
-        // 3b. A from/ref dependency that crosses nodes becomes an arrow edge.
-        var producerOf = units.Where(u => !u.IsHead).ToDictionary(u => u.Key, StringComparer.Ordinal);
+        // 2a. A from/ref dependency that crosses nodes becomes an arrow edge.
+        var producerOf = units.ToDictionary(u => u.Key, StringComparer.Ordinal);
         var crossings = new SortedDictionary<(string Alias, string ProducerNode), SortedSet<string>>();
-        foreach (var unit in units.Where(u => !u.IsHead))
+        foreach (var unit in units)
         {
-            foreach (var alias in unit.DependsOn.Where(a => !a.EndsWith('^')))
+            foreach (var alias in unit.DependsOn)
             {
                 if (!producerOf.TryGetValue(alias, out var producer))
                 {
@@ -224,10 +195,7 @@ public sealed class PlanBuilder(
             var producer = drafts[producerNode];
             var producerBranch = producer.Branch(alias);
             var readLocally = units.Any(u => placement[u.Id] == producerNode && u.DependsOn.Contains(alias));
-            // A cut's tail already receives its head under this alias, and a fragment declares each
-            // edge alias once: what it sends on goes out through a relay.
-            var isCutTail = units.Any(u => u.IsHead && u.Key == alias);
-            var sendDirectly = !JobYaml.Has(producerBranch, "output") && consumerNodes.Count == 1 && !readLocally && !isCutTail;
+            var sendDirectly = !JobYaml.Has(producerBranch, "output") && consumerNodes.Count == 1 && !readLocally;
 
             foreach (var consumerNode in consumerNodes)
             {
@@ -258,7 +226,7 @@ public sealed class PlanBuilder(
 
         if (errors.Count > 0) return Result(unitViews);
 
-        // 4. Assemble, then check what the planner can check before anything is deployed.
+        // 3. Assemble, then check what the planner can check before anything is deployed.
         var fragments = new List<PlannedFragment>();
         foreach (var draft in drafts.Values.OrderBy(d => d.Node, StringComparer.Ordinal))
         {
@@ -350,99 +318,13 @@ public sealed class PlanBuilder(
     private YamlMappingNode? BranchOf(string node, string id, BrickKind kind) =>
         bricks.Find($"{node}/{id}") is { } view && view.Kind == kind ? bricks.BranchOf(view) : null;
 
-    private async Task<(YamlMappingNode Remaining, Dictionary<string, YamlMappingNode> Heads)?> ApplyCutsAsync(
-        string planId, string yaml, PlanMode mode, IReadOnlyList<CutRequest> cuts, List<string> errors, CancellationToken ct)
-    {
-        if (cuts.Count > 0 && mode != PlanMode.Manual)
-        {
-            errors.Add("Cuts belong to the Lab view's planning by hand: this plan is not one, so it takes none.");
-            return null;
-        }
-
-        var heads = new Dictionary<string, YamlMappingNode>(StringComparer.Ordinal);
-
-        var current = yaml;
-        for (var i = 0; i < cuts.Count; i++)
-        {
-            var cut = cuts[i];
-            var branches = JobYaml.Branches(JobYaml.Parse(current)).ToDictionary(b => b.Alias, b => b.Branch, StringComparer.Ordinal);
-            if (heads.ContainsKey(cut.Branch))
-            {
-                errors.Add($"'{cut.Branch}' is cut more than once; the planner keeps one cut per branch.");
-                return null;
-            }
-            if (branches.TryGetValue(cut.Branch, out var referenced) && (BrickRef.Of(cut.Branch, referenced) is not null || BrickRef.Misuse(cut.Branch, referenced) is not null))
-            {
-                errors.Add($"'{cut.Branch}' references a brick, which only its node composes: it is not cut.");
-                return null;
-            }
-            if (!branches.TryGetValue(cut.Branch, out var branch) || !JobGraph.Describe(cut.Branch, branch).Cuttable)
-            {
-                errors.Add($"'{cut.Branch}' is not a branch reading a source; dtpipe split cuts only those.");
-                return null;
-            }
-
-            var split = await SplitAsync(cut, branch, errors, ct);
-            if (split is null) return null;
-
-            heads[cut.Branch] = JobYaml.Branches(JobYaml.Parse(split.Producer!)).Single().Branch;
-            // The consumer half takes the branch's place; every other branch stays as written.
-            var remaining = JobYaml.Parse(current);
-            remaining.Children[new YamlScalarNode(cut.Branch)] = JobYaml.Branches(JobYaml.Parse(split.Consumer!)).Single().Branch;
-            current = JobYaml.Serialize(remaining);
-        }
-
-        return (JobYaml.Parse(current), heads);
-    }
-
-    /// <summary>
-    /// Cuts one branch with <c>dtpipe split</c>, on the node that hosts what the branch reads, since
-    /// only that node opens its data; a branch that reads no node's data is cut here. <c>null</c>, with
-    /// the reason in <paramref name="errors"/>, when it cannot be cut.
-    /// </summary>
-    private async Task<BranchSplit?> SplitAsync(CutRequest cut, YamlMappingNode branch, List<string> errors, CancellationToken ct)
-    {
-        var single = new YamlMappingNode { { cut.Branch, JobYaml.CloneBranch(branch) } };
-        var owners = JobYaml.Variables(cut.Branch, branch).Select(nodes.HostOf).OfType<string>().Distinct().ToList();
-        if (owners.Count > 1)
-        {
-            errors.Add($"'{cut.Branch}' reaches data on {string.Join(" and ", owners)}; a cut runs on the one node whose data the branch reads.");
-            return null;
-        }
-
-        if (owners.Count == 0)
-        {
-            errors.Add($"'{cut.Branch}' reads no node's data, and the coordinator runs no dtpipe itself: a cut runs on the node whose data the branch reads.");
-            return null;
-        }
-
-        BranchSplit split;
-        try
-        {
-            split = await nodes.RequestAsync(owners[0], "lab.split", new { alias = cut.Branch, job = JobYaml.Serialize(single), at = cut.At },
-                SplitTimeout + TimeSpan.FromSeconds(10), why => new BranchSplit(null, null, why), ct);
-        }
-        catch (Exception ex) when (ex is ConflictException or TimeoutException || (ex is OperationCanceledException && !ct.IsCancellationRequested))
-        {
-            split = new BranchSplit(null, null, ex is OperationCanceledException ? "no answer in time." : ex.Message);
-        }
-        if (split.Error is null) return split;
-        var where = owners is [var node] ? $" on {node}" : "";
-        errors.Add($"dtpipe split refused to cut '{cut.Branch}' after stage {cut.At}{where}:\n{split.Error}");
-        return null;
-    }
-
-    private static List<Unit> BuildUnits(YamlMappingNode remaining, IReadOnlyDictionary<string, YamlMappingNode> heads)
+    private static List<Unit> BuildUnits(YamlMappingNode job)
     {
         var units = new List<Unit>();
-        foreach (var (alias, branch) in JobYaml.Branches(remaining))
+        foreach (var (alias, branch) in JobYaml.Branches(job))
         {
-            if (heads.TryGetValue(alias, out var head))
-                units.Add(new Unit { Id = alias + "^", Key = alias, IsHead = true, Branch = head, DependsOn = [] });
-
             var dependsOn = JobYaml.Aliases(branch, "from").Concat(JobYaml.Aliases(branch, "ref")).ToList();
-            if (heads.ContainsKey(alias)) dependsOn.Insert(0, alias + "^");
-            units.Add(new Unit { Id = alias, Key = alias, IsHead = false, Branch = branch, DependsOn = dependsOn });
+            units.Add(new Unit { Id = alias, Key = alias, Branch = branch, DependsOn = dependsOn });
         }
         return units;
     }
@@ -473,7 +355,7 @@ public sealed class PlanBuilder(
         return units.Select(u =>
         {
             var chosen = placement?.GetValueOrDefault(u.Id);
-            return new UnitView(u.Id, u.Key, u.IsHead, views[u.Id], u.DependsOn, suggested[u.Id],
+            return new UnitView(u.Id, u.Key, views[u.Id], u.DependsOn, suggested[u.Id],
                 string.IsNullOrEmpty(chosen) ? suggested[u.Id] : chosen);
         }).ToList();
     }

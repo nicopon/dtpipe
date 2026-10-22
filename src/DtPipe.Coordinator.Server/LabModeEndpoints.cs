@@ -4,7 +4,7 @@ namespace DtPipe.Coordinator.Server;
 
 /// <summary>
 /// What only a test bench needs, mapped in <see cref="CoordinatorServerOptions.LabMode"/> alone: the
-/// Lab view's scenario catalog and manual planning (cuts and a placement chosen by hand, the routes that plan in
+/// Lab view's scenario catalog and manual planning (a placement chosen by hand, the routes that plan in
 /// <see cref="PlanMode.Manual"/>), and fault injection.
 /// </summary>
 public static class LabModeEndpoints
@@ -13,12 +13,11 @@ public static class LabModeEndpoints
     {
         api.MapGet("/pipelines", (PipelineCatalog catalog) => catalog.List());
 
-        api.MapPost("/plan", async (PlanRequest request, PlanBuilder planner, CancellationToken ct) =>
-            await planner.BuildAsync(request, PlanMode.Manual, ct));
+        api.MapPost("/plan", (PlanRequest request, PlanBuilder planner) => planner.Build(request, PlanMode.Manual));
 
         api.MapPost("/deploy", async (PlanRequest request, PlanBuilder planner, DeploymentManager deployments, CancellationToken ct) =>
         {
-            var plan = await planner.BuildAsync(request, PlanMode.Manual, ct);
+            var plan = planner.Build(request, PlanMode.Manual);
             await deployments.DeployAsync(plan, "lab", ct);
             return plan;
         });

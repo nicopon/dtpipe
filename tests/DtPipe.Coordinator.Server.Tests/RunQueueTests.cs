@@ -134,14 +134,14 @@ public sealed class RunQueueTests : IDisposable
     {
         var fragment = new PlannedFragment(
             $"{pipeline}@{node}", node, ["crm"], "", FragmentJob.VersionOf(Units, FragmentJob.VersionsOver([Brick()])), [], ["src"], FragmentForm.Bricks, Composition: Units);
-        return new DistributionPlan("plan-" + pipeline, pipeline, [], [], [fragment], [], [], [], null);
+        return new DistributionPlan("plan-" + pipeline, pipeline, [], [fragment], [], [], [], null);
     }
 
     private static DistributionPlan RunnerPlan(string pipeline)
     {
         const string yaml = "x:\n  input: generate:1\n";
         var fragment = new PlannedFragment($"{pipeline}@r", "r", ["crm"], yaml, FragmentJob.VersionOf(yaml), [], ["x"], FragmentForm.Job);
-        return new DistributionPlan("plan-" + pipeline, pipeline, [], [], [fragment], [], [], [], null);
+        return new DistributionPlan("plan-" + pipeline, pipeline, [], [fragment], [], [], [], null);
     }
 
     private Task DeployAsync(DistributionPlan plan) => _deployments.DeployAsync(plan, "test", CancellationToken.None);

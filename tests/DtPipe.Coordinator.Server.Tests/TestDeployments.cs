@@ -32,7 +32,7 @@ internal static class TestDeployments
     {
         var bricks = new BrickCatalog(inventory);
         var requests = new NodeRequests(inventory, new NoHub());
-        var planner = new PlanBuilder(inventory, requests, bricks, new PlanRegistry(flow), rights);
+        var planner = new PlanBuilder(inventory, bricks, new PlanRegistry(flow), rights);
         return new DeploymentManager(
             inventory, link, runs, admission, flow, rights, bus, journal, new AutoPlacer(bricks, inventory, planner, rights), bricks,
             verifier?.Invoke(bricks, requests) ?? new BindingVerifier(bricks, requests), jobs ?? new FakeJobs(), store ?? MemoryDeploymentStore.At(options.StateDir), NullLogger<DeploymentManager>.Instance);

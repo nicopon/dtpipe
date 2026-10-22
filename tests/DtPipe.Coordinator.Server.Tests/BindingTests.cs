@@ -162,7 +162,7 @@ public sealed class BindingTests : IDisposable
         Assert.All(problems, p => Assert.True(p.Blocking));
     }
 
-    private PlanBuilder Planner() => new(_inventory, new NodeRequests(_inventory, null!), new BrickCatalog(_inventory),
+    private PlanBuilder Planner() => new(_inventory, new BrickCatalog(_inventory),
         new PlanRegistry(new DefaultFlowControlService(new FlowControlOptions())), _rights);
 
     [Fact]
@@ -175,8 +175,8 @@ public sealed class BindingTests : IDisposable
         var placer = new AutoPlacer(new BrickCatalog(_inventory), _inventory, Planner(), _rights);
         var text = "# P\ncustomers:\n  input: sqlite:b\nsink:\n  from: customers\n  output: csv:out.csv\n";
 
-        var plan = await placer.PlanAsync("p", text, new Dictionary<string, Binding> { ["customers"] = new Binding("node-a", "customers") },
-            _inventory.Snapshot().Single(n => n.Name == "runner-1"), Ct);
+        var plan = placer.Plan("p", text, new Dictionary<string, Binding> { ["customers"] = new Binding("node-a", "customers") },
+            _inventory.Snapshot().Single(n => n.Name == "runner-1"));
 
         Assert.DoesNotContain(plan.Units, u => u.Id == "customers" && u.Node == "runner-1");
         Assert.False(plan.Deployable);

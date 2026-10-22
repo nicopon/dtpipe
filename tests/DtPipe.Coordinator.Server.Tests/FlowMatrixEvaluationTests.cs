@@ -26,12 +26,6 @@ public sealed class FlowMatrixEvaluationTests : IDisposable
         }
     }
 
-    private sealed class NoHub : IHubContext<NodeChannelHub>
-    {
-        public IHubClients Clients => throw new NotSupportedException();
-        public IGroupManager Groups => throw new NotSupportedException();
-    }
-
     private sealed class NoLink : INodeLink
     {
         public Task<FragmentCheck> CheckAsync(ReplicaKey replica, FragmentSpec spec, CancellationToken ct) => throw new NotSupportedException();
@@ -70,7 +64,7 @@ public sealed class FlowMatrixEvaluationTests : IDisposable
         var rights = MemoryRightsStore.Rights(options);
         _flow = new CountingFlow(new DefaultFlowControlService(_matrix));
         _inventory = new NodeInventory(_registry);
-        _planner = new PlanBuilder(_inventory, new NodeRequests(_inventory, new NoHub()), new BrickCatalog(_inventory), new PlanRegistry(_flow), rights);
+        _planner = new PlanBuilder(_inventory, new BrickCatalog(_inventory), new PlanRegistry(_flow), rights);
         _deployments = TestDeployments.Create(
             _inventory, new NoLink(), new NoRuns(), new ReplicaAdmission(_registry, new InMemoryStateStore()), _flow, rights, new EventBus(),
             MemoryRunStore.Journal(options), options);
@@ -91,15 +85,15 @@ public sealed class FlowMatrixEvaluationTests : IDisposable
 
     private void Allow(string from, params string[] to) => _matrix.Groups[from] = new GroupAccess { CanSendTo = [.. to] };
 
-    private Task<DistributionPlan> PlanAsync(string yaml, params (string Unit, string Node)[] placement) =>
-        _planner.BuildAsync(new PlanRequest("p", yaml, null, placement.ToDictionary(p => p.Unit, p => p.Node)), PlanMode.Library, TestContext.Current.CancellationToken);
+    private DistributionPlan Plan(string yaml, params (string Unit, string Node)[] placement) =>
+        _planner.Build(new PlanRequest("p", yaml, placement.ToDictionary(p => p.Unit, p => p.Node)), PlanMode.Library);
 
     [Fact]
     public async Task A_Plan_The_Matrix_Allows_Has_No_Rejection_And_Every_Edge_Allowed()
     {
         Allow("crm", "audit");
 
-        var plan = await PlanAsync(Pair, ("a", "r1"), ("b", "r2"));
+        var plan = Plan(Pair, ("a", "r1"), ("b", "r2"));
 
         Assert.Null(plan.FlowRejection);
         Assert.True(plan.Deployable);
@@ -112,7 +106,7 @@ public sealed class FlowMatrixEvaluationTests : IDisposable
     {
         Allow("crm");
 
-        var plan = await PlanAsync(Pair, ("a", "r1"), ("b", "r2"));
+        var plan = Plan(Pair, ("a", "r1"), ("b", "r2"));
 
         Assert.Equal("Plan rejected, edge(s) not permitted by the flow control matrix: p@r1.a -> p@r2.a (crm -> audit)", plan.FlowRejection);
         Assert.False(plan.Deployable);
@@ -126,7 +120,7 @@ public sealed class FlowMatrixEvaluationTests : IDisposable
     {
         Allow("crm", "audit");
 
-        var plan = await PlanAsync(Fan, ("a", "r1"), ("b", "r2"), ("c", "r3"));
+        var plan = Plan(Fan, ("a", "r1"), ("b", "r2"), ("c", "r3"));
 
         Assert.Equal("Plan rejected, edge(s) not permitted by the flow control matrix: p@r1.a__to__r3 -> p@r3.a (crm -> ops)", plan.FlowRejection);
         Assert.Equal(["a__to__r2", "a__to__r3"], plan.Edges.Select(e => e.ProducerAlias));
@@ -139,7 +133,7 @@ public sealed class FlowMatrixEvaluationTests : IDisposable
     public async Task A_Plan_Deployed_After_The_Matrix_Changed_Is_Refused_In_The_Words_Of_The_Plan()
     {
         Allow("crm", "audit");
-        var plan = await PlanAsync(Pair, ("a", "r1"), ("b", "r2"));
+        var plan = Plan(Pair, ("a", "r1"), ("b", "r2"));
         Assert.True(plan.Deployable);
         Allow("crm");
         var before = _flow.Evaluations;

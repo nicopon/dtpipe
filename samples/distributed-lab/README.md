@@ -9,14 +9,14 @@ coordinator decides what it may do.
 Each data node offers **bricks**: reads and writes its owner preconfigured on its database. The
 coordinator's page assembles bricks and processing steps into a pipeline by drag and drop, keeps
 it in a git-backed **library**, places every brick on its node and every other step on the
-runner, deploys the fragments and runs them, live. A second page, the **Lab view**, cuts and
-places a job by hand and injects faults.
+runner, deploys the fragments and runs them, live. A second page, the **Lab view**, places a
+job by hand and injects faults.
 
 The lab **uses** dtpipe and changes nothing in it. Its coordinator is the product's server,
 `src/DtPipe.Coordinator.Server`, run in **lab mode** (the Lab view, fault injection and the query
 panel exist only then); its runner is the official `DtPipe.PipelineNode.Runner`; its data nodes are
 disposable hosts of `DtPipe.PipelineNode.Hosting`. They drive the `dtpipe` binary like a user
-(`split`, `--export-job`, `--job`). None of it is in `DtPipe.sln`: `build.yml` never builds it.
+(`--export-job`, `--job`). None of it is in `DtPipe.sln`: `build.yml` never builds it.
 
 ## Quick start
 
@@ -218,7 +218,7 @@ python3 tools/idp_check.py          # discovery, both flows, and the refusals th
 
 **A library pipeline names a brick by reference**: `input: brick:<node>/<brick>` reads a source,
 `output: brick:<node>/<brick>` with `from` writes a sink, and the node holds what it reads and writes. The
-scenarios of `pipelines/` stay plain dtpipe jobs, since a cut and a placement chosen by hand need the branch's
+scenarios of `pipelines/` stay plain dtpipe jobs, since a placement chosen by hand needs the branch's
 text. `smoke.py` runs a library job whole as the witness, with the text its nodes declare (`tools/lab_bricks.py`).
 `dtpipe studio` shows a reference as a card of its own.
 
@@ -284,7 +284,7 @@ so a throw-away `LAB_STATE` sees no other lab's runs or deployments.
 
 | Pipeline | Shows | Try |
 |---|---|---|
-| `01-customers-anonymized` | a cut inside a branch, by `dtpipe split`: read on node-1, anonymized on the runner, loaded on node-4 | move the ✂ one stage later, after `fake`: the head keeps that transformer and node-1 refuses to run it |
+| `01-customers-anonymized` | a read, an anonymizing step and a load as three branches: read on node-1, anonymized on the runner, loaded on node-4 | move `customers` to node-1: the plan is fine and the node refuses to run the transformers |
 | `02-revenue-by-country` | a three-source join on the runner, three inbound edges on one node | move `revenue` to node-3: the plan is fine and the node refuses to run a join |
 | `03-order-history` | `--merge` of a DuckDB and a SQLite source, on the runner | read the source queries: each casts to the shared schema, dtpipe converts nothing |
 | `04-slow-sensor-stream` | a 30-second throttled run | kill a fragment mid-run, cancel |
@@ -293,9 +293,9 @@ Every refusal the page shows is the coordinator's own: `PlanRegistry` for the fl
 `ReplicaAdmission` for a node with no replica that can run a fragment, `RunOrchestrator` for the
 cause of a failed run and the row counts of each edge.
 
-A job header carries three lab directives among its comments: `# lab-cut: branch@stage` and
-`# lab-place: unit=node` preload the page, `# lab-check: <SQL>` is what `smoke.py` compares
-between the witness and the lab's warehouse.
+A job header carries two lab directives among its comments: `# lab-place: unit=node` preloads
+the page, `# lab-check: <SQL>` is what `smoke.py` compares between the witness and the lab's
+warehouse.
 
 ## How it works
 
@@ -313,18 +313,12 @@ between the witness and the lab's warehouse.
       └─────────────┴─────────────┴─────────────┴─────────────┴─────────────┘
 ```
 
-**Planning** (`PlanBuilder`) turns a monolithic job into one fragment per node, in two steps; the
-Lab view gives it cuts and a placement, the Library only the placement `AutoPlacer`
-chose:
-
-1. *Cuts inside a branch* are `dtpipe split --at k`, run by the node whose data the branch reads.
-   The lab keeps both halves as dtpipe wrote them, so where each option lands, and the secret
-   check, stay dtpipe's decisions.
-2. *Regrouping whole branches* is the lab's own rewrite. A `from`/`ref` dependency that crosses two
-   nodes becomes an `arrow:-` input branch on the consumer's side and an `arrow:-` output on the
-   producer's — the shape `split` gives a cut. A branch that already writes somewhere, is also
-   read locally, or feeds several nodes gets one relay branch (`from: x`, `output: arrow:-`) per
-   remote reader. No option is edited.
+**Planning** (`PlanBuilder`) turns a monolithic job into one fragment per node, from a placement
+(the Lab view's, or the Library's, which `AutoPlacer` chose) by regrouping whole branches. A
+`from`/`ref` dependency that crosses two nodes becomes an `arrow:-` input branch on the consumer's
+side and an `arrow:-` output on the producer's. A branch that already writes somewhere, is also
+read locally, or feeds several nodes gets one relay branch (`from: x`, `output: arrow:-`) per
+remote reader. No option is edited.
 
 The plan is then checked before anything is deployed: every fragment exchanges at least one edge
 (a pipeline node completes only once all its edges are wired), every `${{VAR}}` it uses is hosted
@@ -342,7 +336,7 @@ replica ran each fragment.
 ## Limits
 
 - Everything runs on one machine, but nothing relies on it: the coordinator never opens a node's
-  database. A cut, a brick preview and a library save's check are each read by the
+  database. A brick preview and a library save's check are each read by the
   node that hosts the data; only `smoke.py`'s witness reads the seeded files directly.
 - People sign in through `DtPipe.Coordinator.TrialIdp`: `labadmin`, `labdesigner` and `labreader` (password: the name
   followed by `pwd`) hold the coordinator's three roles; any other name signs in with none. Tokens last 12 hours
@@ -387,7 +381,7 @@ sign a person in and out. `/health` is not under `/api` and takes a service's to
 | `PUT /api/library/{id}/bindings` | `{bindings: {alias: {node, brick?, mode?}}, message?}` → binds the bricks of the job; a check like a save's runs first (422 with its report); a referenced branch takes its node and its brick from the job's reference; `mode` is `strict`, `contract`, `compatible` or `tolerant`, and the check writes the pins |
 | `GET /api/library/{id}/plan` | the plan a launch would make now, with the runner it would use; nothing is written |
 | `POST /api/library/{id}/deploy` | arms the pipeline at the commit the library holds, with its bindings; a reference no check has pinned is checked and pinned first (409 if the check refuses, the bindings do not hold or no node could run the plan) |
-| `POST /api/plan` | Lab view: `{pipelineId, yaml, cuts, placement}` → units, fragments, edges, errors |
+| `POST /api/plan` | Lab view: `{pipelineId, yaml, placement}` → units, fragments, edges, errors |
 | `POST /api/deploy` | Lab view: the same body; plans, then deploys (409 if not deployable) |
 | `GET /api/deployments` · `DELETE /api/deployments/{id}` | what is deployed; undeploy |
 | `GET /api/rights` · `PUT /api/rights/matrix` | rights, the flow matrix |

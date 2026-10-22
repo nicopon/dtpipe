@@ -70,7 +70,7 @@ internal sealed class LaunchPlanner(AutoPlacer placer, BrickCatalog bricks, Node
         {
             // No runner is online: a job that needs none still launches, and one that needs it says so.
             var unplaced = new List<string>();
-            var plan = await placer.PlanAsync(pipelineId, yaml, bindings, null, ct, unplaced);
+            var plan = placer.Plan(pipelineId, yaml, bindings, null, unplaced);
             var causes = plan.Deployable ? [] : CausesOfPlan(plan, own, unplaced);
             if (plan.Deployable)
             {
@@ -85,7 +85,7 @@ internal sealed class LaunchPlanner(AutoPlacer placer, BrickCatalog bricks, Node
         var reasons = new List<LaunchCause>();
         foreach (var runner in candidates)
         {
-            var plan = await placer.PlanAsync(pipelineId, yaml, bindings, runner, ct);
+            var plan = placer.Plan(pipelineId, yaml, bindings, runner);
             first ??= plan;
             var uses = plan.Fragments.Any(f => f.Node == runner.Name);
             var (refusal, found) = plan.Deployable ? await EligibilityAsync(plan) : (null, []);

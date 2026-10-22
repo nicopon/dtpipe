@@ -1,6 +1,5 @@
 using DtPipe.Coordinator.Contracts;
 using DtPipe.PipelineNode.Hosting;
-using Lab.NodeHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -52,9 +51,6 @@ foreach (var dataset in file.GetSection("datasets").GetChildren())
     node.WithVariable(dataset["variable"]!, Path.Combine(state, name, dataset["file"]!), dataset["description"]);
 }
 node.AddBricks(file.GetSection("bricks"));
-
-// The coordinator's lab mode cuts a branch where its data is: every lab node answers it, strict or sandbox.
-node.WithRequest("lab.split", new LabRequests(name).SplitAsync);
 
 // Sandbox mode lets a lab node run a fragment that reads or writes through any reader or writer, not only
 // through its bricks: its own switch, and the one the Lab view's manual planning needs.

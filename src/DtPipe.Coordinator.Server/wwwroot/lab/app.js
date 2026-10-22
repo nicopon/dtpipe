@@ -1,5 +1,5 @@
 // The Lab view: a thin client over /api. The coordinator plans, deploys and judges; this page only
-// draws what it returns and sends the user's cuts and placement back. Other pipelines may be
+// draws what it returns and sends the user's placement back. Other pipelines may be
 // deployed and run from the coordinator's own views meanwhile: this page follows only the one it
 // deployed.
 "use strict";
@@ -8,8 +8,7 @@ const state = {
   catalog: [],
   matrix: {},
   nodes: [],
-  pipeline: null,        // { id, title, description, yaml, cuts, placement } as proposed
-  cuts: [],
+  pipeline: null,        // { id, title, description, yaml, placement } as proposed
   placement: {},
   plan: null,            // last /api/plan answer for the current layout
   deployed: null,        // the plan the coordinator holds
@@ -53,7 +52,7 @@ function toast(message) {
 // ---------------------------------------------------------------- pipeline selection and planning
 
 function planBody() {
-  return { pipelineId: state.pipeline.id, yaml: state.pipeline.yaml, cuts: state.cuts, placement: state.placement };
+  return { pipelineId: state.pipeline.id, yaml: state.pipeline.yaml, placement: state.placement };
 }
 
 function signature(plan) {
@@ -88,7 +87,6 @@ function replan(immediate = false) {
 
 function selectPipeline(entry, layout) {
   state.pipeline = { ...entry };
-  state.cuts = structuredClone(layout?.cuts ?? entry.cuts ?? []);
   state.placement = { ...(layout?.placement ?? entry.placement ?? {}) };
   $("pipeline-select").value = entry.id;
   $("pipeline-description").textContent = entry.description || "";
@@ -149,7 +147,6 @@ function renderGraph() {
   }
   const units = plan.units;
   const byId = Object.fromEntries(units.map((u) => [u.id, u]));
-  const tails = new Set(units.filter((u) => u.isHead).map((u) => u.yamlKey));
 
   // Column = longest path from a source.
   const depth = {};
@@ -167,17 +164,7 @@ function renderGraph() {
 
   const cards = units.map((u) => {
     const b = u.branch;
-    const isTail = tails.has(u.id);
-    const cut = state.cuts.find((c) => c.branch === u.yamlKey);
-    // Slots exist on an uncut source branch, and on a head (to move or remove its cut).
-    const canCut = (b.cuttable && !isTail && !u.isHead) || u.isHead;
-    const slot = (index) => {
-      if (!canCut) return "";
-      const active = u.isHead && cut && cut.at === index;
-      const title = active ? "Remove this cut" : `Cut ${u.yamlKey} after this stage (dtpipe split --at ${index})`;
-      return `<div class="cut-slot ${active ? "active" : ""}"><button data-cut="${esc(u.yamlKey)}" data-at="${index}" title="${esc(title)}">✂</button></div>`;
-    };
-    const title = u.isHead ? `${esc(u.yamlKey)} <small>head</small>` : isTail ? `${esc(u.id)} <small>tail</small>` : esc(u.id);
+    const title = esc(u.id);
     const rows = [];
     const optionRows = (predicate) => {
       const lines = b.options.filter(predicate);
@@ -188,10 +175,8 @@ function renderGraph() {
     if (b.input) rows.push(`<div class="stage io"><span class="k">in</span>${esc(b.input)}</div>`);
     if (b.input) rows.push(optionRows(isReader));
     if (b.from.length || b.ref.length) rows.push(`<div class="stage io"><span class="k">from</span>${esc(b.from.join(", "))}${b.ref.length ? ` <span class="k">ref</span>${esc(b.ref.join(", "))}` : ""}</div>`);
-    if (b.input) rows.push(slot(0));
-    b.transformers.forEach((t, i) => {
+    b.transformers.forEach((t) => {
       rows.push(`<div class="stage"><span class="k">${esc(t.type)}</span>${esc(t.summary)}</div>`);
-      rows.push(slot(i + 1));
     });
     if (b.processor) rows.push(`<div class="stage"><span class="k">${esc(b.processor)}</span>${esc(b.options.filter((o) => o.startsWith(b.processor + ".")).map((o) => o.split(" = ").slice(1).join(" = ")).join(" ") || "")}</div>`);
     rows.push(optionRows((o) => !isProcessor(o) && !(b.input && isReader(o))));
@@ -249,18 +234,17 @@ function drawEdges(inner, units, byId) {
       const x2 = b.x, y2 = b.y + 30 + i * 18;
       const mid = (x1 + x2) / 2;
       const crossing = p.node && u.node && p.node !== u.node;
-      const alias = dep.endsWith("^") ? u.yamlKey : dep;
       let kind = "memory";
       let label = "";
       let labelClass = "";
       if (crossing) {
         const pf = fragmentOf(plan, p.node), cf = fragmentOf(plan, u.node);
-        const planned = plan.edges.find((e) => e.producerFragment === pf && e.consumerFragment === cf && e.consumerAlias === alias);
+        const planned = plan.edges.find((e) => e.producerFragment === pf && e.consumerFragment === cf && e.consumerAlias === dep);
         kind = planned && !planned.allowed ? "forbidden" : "network";
-        label = kind === "forbidden" ? "refused" : alias;
-        const counts = edgeRunCounts(plan, pf, cf, alias);
+        label = kind === "forbidden" ? "refused" : dep;
+        const counts = edgeRunCounts(plan, pf, cf, dep);
         if (counts) {
-          label = `${alias} · ${fmt(counts.sent)} → ${fmt(counts.received)}`;
+          label = `${dep} · ${fmt(counts.sent)} → ${fmt(counts.received)}`;
           labelClass = counts.sent != null && counts.sent === counts.received ? "ok" : "bad";
         }
       }
@@ -445,13 +429,13 @@ function restoreDeployedLayout() {
   if (!entry) return;
   restored = true;
   const placement = Object.fromEntries(state.deployed.units.map((u) => [u.id, u.node]));
-  selectPipeline(entry, { cuts: state.deployed.cuts, placement });
+  selectPipeline(entry, { placement });
 }
 
 // ---------------------------------------------------------------- wiring
 
 function useCustomYaml(yaml, title) {
-  selectPipeline({ id: "custom", title, description: "A job typed on this page.", yaml, cuts: [], placement: {} });
+  selectPipeline({ id: "custom", title, description: "A job typed on this page.", yaml, placement: {} });
   $("pipeline-select").value = "__custom";
 }
 
@@ -468,7 +452,7 @@ function bind() {
   $("reset-layout").addEventListener("click", () => {
     const entry = state.catalog.find((x) => x.id === state.pipeline?.id);
     if (entry) selectPipeline(entry);
-    else { state.cuts = []; state.placement = {}; replan(); }
+    else { state.placement = {}; replan(); }
   });
   $("apply-yaml").addEventListener("click", () => useCustomYaml($("yaml-text").value, "Custom job"));
 
@@ -479,18 +463,6 @@ function bind() {
     else delete state.placement[unit];
     replan();
   });
-  $("graph").addEventListener("click", (e) => {
-    const button = e.target.closest("button[data-cut]");
-    if (!button) return;
-    const branch = button.dataset.cut;
-    const at = Number(button.dataset.at);
-    const existing = state.cuts.find((c) => c.branch === branch);
-    state.cuts = state.cuts.filter((c) => c.branch !== branch);
-    if (!existing || existing.at !== at) state.cuts.push({ branch, at });
-    if (!state.cuts.some((c) => c.branch === branch)) delete state.placement[branch + "^"];
-    replan();
-  });
-
   $("plan").addEventListener("click", async (e) => {
     const kill = e.target.closest("button[data-kill]");
     try {

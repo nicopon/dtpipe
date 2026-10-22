@@ -8,7 +8,7 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand"><a href="/#/library" class="back">← coordinator</a> dtpipe <span>lab view: cut, place, break</span></div>
+    <div class="brand"><a href="/#/library" class="back">← coordinator</a> dtpipe <span>lab view: place, break</span></div>
     <div class="status">
       <span id="conn" class="pill off">disconnected</span>
       <span id="deploy-state" class="pill">nothing deployed</span>
@@ -35,7 +35,7 @@
           <label for="pipeline-select">Pipeline</label>
           <select id="pipeline-select"></select>
           <button id="toggle-yaml" class="ghost">Edit YAML</button>
-          <button id="reset-layout" class="ghost" title="Back to the catalog's proposed cuts and placement">Reset layout</button>
+          <button id="reset-layout" class="ghost" title="Back to the catalog's proposed placement">Reset layout</button>
         </div>
         <p id="pipeline-description" class="hint"></p>
         <div id="yaml-editor" hidden>
@@ -51,10 +51,9 @@
             <span><i class="sw memory"></i>same node (memory)</span>
             <span><i class="sw network"></i>arrow edge between nodes</span>
             <span><i class="sw forbidden"></i>refused by the flow matrix</span>
-            <span><i class="sw cut">✂</i>cut point (dtpipe split)</span>
-          </div>
+            </div>
         </div>
-        <p class="hint">Pick a node for each branch. Click ✂ between two stages of a source branch to cut it there; its head then runs on a node of its own.</p>
+        <p class="hint">Pick a node for each branch.</p>
         <div id="graph" class="graph"></div>
       </div>
 

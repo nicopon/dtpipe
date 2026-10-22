@@ -86,7 +86,7 @@ public sealed class RunDispatchTests
     }
 
     private static DistributionPlan Plan(params string[] nodes) => new(
-        "1", "p", [], [],
+        "1", "p", [],
         nodes.Select(n => new PlannedFragment($"p@{n}", n, [], "", "v", [], [], FragmentForm.Bricks)).ToList(),
         [], [], [], null);
 }

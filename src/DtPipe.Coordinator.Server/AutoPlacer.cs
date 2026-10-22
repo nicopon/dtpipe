@@ -8,7 +8,7 @@ namespace DtPipe.Coordinator.Server;
 /// Places a job with the help of its bindings: a branch that is bound runs on the node its binding names, every branch that is
 /// neither bound nor a brick on the runner, which a binding never names. A bound branch is never sent to the runner: it is
 /// placed on its node or the plan is refused. It only chooses a placement; <see cref="PlanBuilder"/> builds the fragments from
-/// it exactly as for a placement the user picked, and cuts nothing. A source brick wired straight into a sink brick therefore
+/// it exactly as for a placement the user picked. A source brick wired straight into a sink brick therefore
 /// crosses no runner.
 /// </summary>
 public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, PlanBuilder planner, RightsStore rights)
@@ -151,8 +151,8 @@ public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, Pla
     /// <paramref name="runner"/> (null: none is available, and such a branch is an error, whose alias is added to
     /// <paramref name="unplaced"/>). Which runner is <see cref="LaunchPlanner"/>'s.
     /// </summary>
-    public async Task<DistributionPlan> PlanAsync(
-        string pipelineId, string yaml, IReadOnlyDictionary<string, Binding> bindings, NodeView? runner, CancellationToken ct,
+    public DistributionPlan Plan(
+        string pipelineId, string yaml, IReadOnlyDictionary<string, Binding> bindings, NodeView? runner,
         ICollection<string>? unplaced = null)
     {
         var errors = new List<string>();
@@ -208,7 +208,7 @@ public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, Pla
             errors.Add($"The job is not readable: {ex.Message}");
         }
 
-        var plan = await planner.BuildAsync(new PlanRequest(pipelineId, yaml, [], placed, named), PlanMode.Library, ct);
+        var plan = planner.Build(new PlanRequest(pipelineId, yaml, placed, named), PlanMode.Library);
         var warnings = problems.Where(p => !p.Blocking).Select(p => p.Message).ToList();
         return plan with { Errors = [.. errors, .. plan.Errors], Warnings = [.. warnings, .. plan.Warnings] };
     }

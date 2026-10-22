@@ -22,18 +22,6 @@ public sealed record NodeVariable(string Name, string Value, string? Description
 /// </summary>
 public delegate string? FragmentGate(FragmentSpec fragment, IReadOnlyList<BrickForm> bricks);
 
-/// <summary>What a named request hands its handler: the request's payload, and a way to run dtpipe as the node's own children do.</summary>
-public sealed class NodeRequestContext
-{
-    internal NodeRequestContext(string payload, NodeDtPipe dtpipe) { Payload = payload; DtPipe = dtpipe; }
-
-    public string Payload { get; }
-    public NodeDtPipe DtPipe { get; }
-}
-
-/// <summary>The handler of a named request: the response payload (JSON), or an exception whose message is the reason it did not answer.</summary>
-public delegate Task<string> NodeRequestHandler(NodeRequestContext request);
-
 /// <summary>What the builder accumulates beside the bound options.</summary>
 internal sealed class NodeDefinition
 {
@@ -41,7 +29,6 @@ internal sealed class NodeDefinition
     public List<NodeVariable> Variables { get; } = [];
     public FragmentPolicy? Policy { get; set; }
     public FragmentGate? Gate { get; set; }
-    public Dictionary<string, NodeRequestHandler> Requests { get; } = new(StringComparer.Ordinal);
 }
 
 /// <summary>Adds bricks and variables to the node <see cref="DtPipeNodeServiceCollectionExtensions.AddDtPipeNode(IServiceCollection, IConfiguration)"/> registered.</summary>
@@ -100,14 +87,6 @@ public sealed class DtPipeNodeBuilder
     public DtPipeNodeBuilder WithFragmentGate(FragmentGate gate)
     {
         _definition.Gate = gate;
-        return this;
-    }
-
-    /// <summary>Answers the coordinator's request <paramref name="name"/> and announces it as a capability.</summary>
-    public DtPipeNodeBuilder WithRequest(string name, NodeRequestHandler handler)
-    {
-        if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException("A request has a name.", nameof(name));
-        _definition.Requests[name] = handler;
         return this;
     }
 

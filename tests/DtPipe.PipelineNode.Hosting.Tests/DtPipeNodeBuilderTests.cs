@@ -86,35 +86,24 @@ public class DtPipeNodeBuilderTests
     }
 
     [Fact]
-    public void A_host_registers_its_own_gate_and_requests()
+    public void A_host_registers_its_own_gate()
     {
         var services = new ServiceCollection();
         services.AddDtPipeNode(o => o.Name = "lab-1")
-            .WithFragmentGate((_, _) => null)
-            .WithRequest("lab.split", _ => Task.FromResult("{}"));
+            .WithFragmentGate((_, _) => null);
 
         var definition = DefinitionOf(services);
         Assert.NotNull(definition.Gate);
-        Assert.Contains("lab.split", definition.Requests.Keys);
     }
 
     [Fact]
-    public void A_host_that_registers_nothing_has_no_gate_and_no_request()
+    public void A_host_that_registers_nothing_has_no_gate()
     {
         var services = new ServiceCollection();
         services.AddDtPipeNode(o => o.Name = "node-1");
 
         var definition = DefinitionOf(services);
         Assert.Null(definition.Gate);
-        Assert.Empty(definition.Requests);
-    }
-
-    [Fact]
-    public void A_request_has_a_name()
-    {
-        var services = new ServiceCollection();
-        var builder = services.AddDtPipeNode(o => o.Name = "node-1");
-        Assert.Throws<ArgumentException>(() => builder.WithRequest(" ", _ => Task.FromResult("{}")));
     }
 
     [Fact]

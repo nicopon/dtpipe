@@ -124,15 +124,14 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   not answers that it ended none, and the kill route answers 200 with `killed`, the count of children ended over
   every replica of the node: `0` says none was. `[local: PipelineNode.Tests FaultInjectionTests, RunQueueTests]`
 - **The server never opens a node's data.** What reads it asks the node that hosts it, through
-  `NodeRequests`: a brick preview and a cut (the named request `lab.split`, which only a lab host registers), and a
+  `NodeRequests`: a brick preview and a
   library save's check (`DesignValidator`): each source brick's node sends its first row as Arrow IPC
   (`SampleBrick`, written by the `arrow:-` writer its fragment uses, with the contract that read produced), a runner dry-runs the
   job as the runner will see it (`ValidateJob`), and each sink brick's node checks its target against the contract that
   reaches it (`CheckSink`); a binding's verdict is the same two questions (`CheckSource`, `CheckSink`) asked against a pin. A branch that reaches a node's data without being its brick is refused
   before anything runs. **The server runs no dtpipe**: a library save's check goes to a runner,
   and with none online it refuses. A node announces a
-  variable's name, never its value. `[local: the lab's smoke.py bricks — a library save's check, a sink that refuses;
-  sandbox — a cut on its node]`
+  variable's name, never its value. `[local: the lab's smoke.py bricks — a library save's check, a sink that refuses]`
 - **The coordinator manages flows and nothing around them.** It never does a schedule or a trigger (a run is started by a person, or by a service the rights
   grant `launcher`, which asks and is answered with the run's id: nothing is called back), a dependency between pipelines, an automatic retry or
   a backfill, a priority in the queue (`RunDispatch` stays a first-come admission check), or a transformation
@@ -179,7 +178,7 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   `bindings.json`. `[local: LibraryRemoteTests, BindingTests]` `[unchecked: that nothing else is written there]`
 - **The binding decides where a brick branch runs, and a bound branch never runs on the runner.** `bindings.json` maps the
   alias of each branch that references a brick to `{mode, pin}`; every branch that is neither a reference nor bound goes
-  to the runner, which is stateless and never named. `AutoPlacer.PlanAsync` places a referenced alias on its node or refuses the
+  to the runner, which is stateless and never named. `AutoPlacer.Plan` places a referenced alias on its node or refuses the
   plan, never anywhere else: a bound branch that references no brick is an error naming the alias, the node and the
   brick. `AutoPlacer.Check` is the one function that says why bindings do not hold: a node with no identity (`unknown-node`), a
   node that does not offer the brick (`not-offered`), a mode that is none of the four (`unsupported-mode`), a binding
@@ -190,7 +189,7 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   version is whatever it was when the binding was checked. **Who a node is, the rights say; whether it is here, the inventory says.**
   `unknown-node` is a name no enabled node identity carries (a monitor's name is no node's); a node with an identity that
   no replica has announced yet (after a restart, until its host announces) is `offline`, in every mode, and its bricks are
-  not known: `AutoPlacer.PlanAsync` does not place the alias and the launch says the node has no connected replica.
+  not known: `AutoPlacer.Plan` does not place the alias and the launch says the node has no connected replica.
   The bindings live beside the job. They are saved as given, an absent node included,
   through `PUT /api/library/{id}/bindings`, and a seed brings its own as `<id>.bindings.json`, which carries a mode and no pin: a pin is the node's keyed version. The list and the document carry
   the problems, the planner refuses a plan that has a blocking one, and a deployment is refused naming them. A deployment keeps
@@ -269,16 +268,10 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   reads an immutable commit without the lock once the library is open, so no launch waits for a save or for the remote; every other read waits for a
   push in flight, `Timeout` at most. `[local: LibraryRemoteTests]` `[unchecked: a git server that goes down in the middle of a push and
   applies it; an https remote with a token; Windows; the health read after an alignment, which publishes no event and so may stay stale up to Coordinator:Health:MaxAge]`
-- **Cuts inside a branch belong to `dtpipe split`**, run on the node whose data the branch reads
-  (`BranchCut`: the branch alone, its two halves back); a branch that reads no node's data is not
-  cut. `PlanBuilder` puts the consumer half in the branch's place, only regroups whole branches
-  and adds `arrow:-` endpoints or relay branches; it never edits an option or moves a transformer.
-  `AutoPlacer` only chooses a placement for `PlanBuilder` and cuts nothing. `[local: the lab's smoke.py]`
-- **Only a plan in `PlanMode.Manual` is cut, and it is the only one that sends a data node a fragment
-  written as a job.** The two planning routes of lab mode, `/api/plan` and `/api/deploy`, plan that way;
-  every other caller plans in `Library`, where a request that carries cuts is refused before any node
-  is asked. `[local: PlanModeTests; the lab's smoke.py lab (a cut through /api/deploy), sandbox (a cut
-  through /api/plan)]` `[unchecked: a new route that plans in Manual]`
+- **Only a plan in `PlanMode.Manual` sends a data node a fragment written as a job.** The two planning routes of
+  lab mode, `/api/plan` and `/api/deploy`, plan that way, and only to a host that announces `raw-fragments`; every other
+  caller plans in `Library`. `[local: PlanModeTests; the lab's smoke.py lab and sandbox (through /api/deploy), ui_check.py
+  (the Lab view plans through /api/plan)]` `[unchecked: a new route that plans in Manual]`
 - **A job names a brick by reference, a node holds its text, and the reference decides the placement.** A source is read
   by `input: brick:<node>/<brick>`, a sink written by `output: brick:<node>/<brick>` with the one branch it reads in `from`
   (`DtPipe.Jobs/BrickRef`, which only the distributed family and the designer read: the engine never sees `brick:`); a branch that
@@ -294,8 +287,8 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   no brick: nothing matches a branch against a text. The planner never takes a branch apart.
   `[local: BrickCatalogTests, MinimalBrickTests, the lab's smoke.py, ui_check.py]` `[unchecked: concurrent readers of the branch
   kept per brick; that an entry goes with its announcement]`
-- **A fragment declares each edge alias once**, so a branch that receives an edge under its own
-  alias (a cut's tail) sends on through a relay, never with `output: arrow:-` on itself.
+- **A fragment declares each edge alias once**, so a branch that writes somewhere, is read on its own node or feeds
+  several nodes sends on through a relay of its own alias, never with a second `output: arrow:-` on itself.
   `[local: the lab's smoke.py lab]`
 - **The server designs nothing.** A pipeline reaches the library by a save that is checked
   (`PUT /api/library/{id}`) from `dtpipe studio`, whose designer is `DtPipe.Jobs`' (rule in the root

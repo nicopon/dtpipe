@@ -185,7 +185,7 @@ def catalog_pass(ctx):
         started = time.time()
         try:
             check = ctx.witness(entry["id"], entry["yaml"])
-            body = {"pipelineId": entry["id"], "yaml": entry["yaml"], "cuts": entry["cuts"], "placement": entry["placement"]}
+            body = {"pipelineId": entry["id"], "yaml": entry["yaml"], "placement": entry["placement"]}
             plan = call("/api/deploy", body)
             run = call("/api/runs", {"pipelineId": plan["pipelineId"]})
             final = until(lambda: _finished(run["runId"]), RUN_TIMEOUT, f"{run['runId']} to finish")
@@ -465,7 +465,7 @@ def rights_pass():
         pipeline = "smoke-foreign-report"
         hub = None
         try:
-            call("/api/deploy", {"pipelineId": pipeline, "yaml": yaml, "cuts": [], "placement": placement,
+            call("/api/deploy", {"pipelineId": pipeline, "yaml": yaml, "placement": placement,
                                    "bricks": {"customers": "customer-countries", "load": "sensor-readings"}})
             fragment = f"{pipeline}@node-4"
             hub = announce_as_a_replica_of_node_2(access, "smoke:foreign-report")
@@ -837,12 +837,12 @@ def undeploy(pipeline):
         pass
 
 
-def refused(pipeline, yaml, cuts, placement, alias, node, why):
-    """A deployment through the Lab view's own path (a job, cuts, a placement) that `node` must refuse at
+def refused(pipeline, yaml, placement, alias, node, why):
+    """A deployment through the Lab view's own path (a job, a placement) that `node` must refuse at
     once, naming `alias` and saying `why`, and that leaves nothing deployed."""
     started = time.time()
     try:
-        call("/api/deploy", {"pipelineId": pipeline, "yaml": yaml, "cuts": cuts, "placement": placement})
+        call("/api/deploy", {"pipelineId": pipeline, "yaml": yaml, "placement": placement})
     except RuntimeError as e:
         elapsed = time.time() - started
         said = str(e)
@@ -861,12 +861,12 @@ def refused(pipeline, yaml, cuts, placement, alias, node, why):
     raise RuntimeError("the deployment was accepted")
 
 
-def planned_refusal(pipeline, yaml, cuts, placement, alias, why, bricks=None):
+def planned_refusal(pipeline, yaml, placement, alias, why, bricks=None):
     """A deployment through the Lab view's own path to strict nodes. A data node runs only the bricks its owner
     declared, by id (`bricks`: the id each alias is composed from), so a branch that is none is refused by the planner,
     naming `alias` and saying `why`, before anything is sent to a node, and nothing of that deployment exists."""
     try:
-        call("/api/deploy", {"pipelineId": pipeline, "yaml": yaml, "cuts": cuts, "placement": placement, "bricks": bricks})
+        call("/api/deploy", {"pipelineId": pipeline, "yaml": yaml, "placement": placement, "bricks": bricks})
     except RuntimeError as e:
         said = str(e)
         if "This plan cannot be deployed" not in said or f"'{alias}'" not in said or why not in said:
@@ -879,9 +879,9 @@ def planned_refusal(pipeline, yaml, cuts, placement, alias, why, bricks=None):
     raise RuntimeError("the deployment was accepted")
 
 
-def accepted(pipeline, yaml, cuts, placement, bricks=None):
+def accepted(pipeline, yaml, placement, bricks=None):
     try:
-        return call("/api/deploy", {"pipelineId": pipeline, "yaml": yaml, "cuts": cuts, "placement": placement, "bricks": bricks})
+        return call("/api/deploy", {"pipelineId": pipeline, "yaml": yaml, "placement": placement, "bricks": bricks})
     finally:
         undeploy(pipeline)
 
@@ -934,19 +934,19 @@ def bricks_pass():
         job = mirror.replace("sqlite:${{LAB_CRM_DB}}", "csv:/etc/hosts")
         if job == mirror:
             raise RuntimeError("the customers brick no longer reads sqlite:${{LAB_CRM_DB}}")
-        return planned_refusal("bricks-probe", job, [], MIRROR_PLACEMENT, "customers", "not one of this node's bricks")
+        return planned_refusal("bricks-probe", job, MIRROR_PLACEMENT, "customers", "not one of this node's bricks")
 
     def named_by_id():
         # A brick is the id its node declares: the bricks are accepted when the plan names them, and the same text, said as text, is
         # none, whether it is the declared one or a narrower read or another table of the same brick.
-        accepted("bricks-probe", mirror, [], MIRROR_PLACEMENT, MIRROR_BRICKS)
-        detail = planned_refusal("bricks-probe", mirror, [], MIRROR_PLACEMENT, "customers", "not one of this node's bricks")
-        planned_refusal("bricks-probe", narrower, [], MIRROR_PLACEMENT, "customers", "not one of this node's bricks")
-        planned_refusal("bricks-probe", elsewhere, [], MIRROR_PLACEMENT, "mirror", "not one of this node's bricks")
+        accepted("bricks-probe", mirror, MIRROR_PLACEMENT, MIRROR_BRICKS)
+        detail = planned_refusal("bricks-probe", mirror, MIRROR_PLACEMENT, "customers", "not one of this node's bricks")
+        planned_refusal("bricks-probe", narrower, MIRROR_PLACEMENT, "customers", "not one of this node's bricks")
+        planned_refusal("bricks-probe", elsewhere, MIRROR_PLACEMENT, "mirror", "not one of this node's bricks")
         return "the bricks named by id deploy; as text, the declared one, a narrower read and another table are refused: " + detail
 
     def relays():
-        plan = accepted("bricks-relay", RELAY_JOB, [], RELAY_PLACEMENT, RELAY_BRICKS)
+        plan = accepted("bricks-relay", RELAY_JOB, RELAY_PLACEMENT, RELAY_BRICKS)
         relays_on_source = next(f["yaml"] for f in plan["fragments"] if f["node"] == "node-1").count("__to__")
         if relays_on_source < 2:
             raise RuntimeError(f"node-1 relays onto {relays_on_source} edge(s), expected 2")
@@ -1270,38 +1270,17 @@ def sandbox_pass():
         return "every data node host announces itself sandbox"
 
     def any_reader():
-        accepted("sandbox-probe", narrower, [], MIRROR_PLACEMENT)
+        accepted("sandbox-probe", narrower, MIRROR_PLACEMENT)
         return "a read no brick declares is accepted"
 
     def compute():
         entry = next(e for e in call("/api/pipelines") if e["id"].startswith("02-"))
         placement = {**entry["placement"], "revenue": "node-3"}
-        return refused(entry["id"], entry["yaml"], entry["cuts"], placement, "revenue", "node-3", "does more than read or write")
-
-    def cut_leaves_a_transformer():
-        entry = next(e for e in call("/api/pipelines") if e["id"].startswith("01-"))
-        placement = {"customers^": "node-1", "customers": "runner-1", "dim": "node-4"}
-        return refused(entry["id"], entry["yaml"], [{"branch": "customers", "at": 1}], placement, "customers", "node-1",
-                       "does more than read or write")
-
-    def cut_on_its_node():
-        # The cut branch reads node-2's sales while the job joins two other nodes' data: only node-2
-        # can run dtpipe split on it, and the planner asks it to.
-        yaml = expand(open(os.path.join(LIBRARY_SEED, "revenue-by-country.yaml")).read())
-        placement = {"orders^": "node-2", "orders": "runner-1", "customers": "node-1", "products": "node-3",
-                     "revenue": "runner-1", "load": "node-4"}
-        plan = call("/api/plan", {"pipelineId": "smoke-cut", "yaml": yaml, "cuts": [{"branch": "orders", "at": 0}],
-                                  "placement": placement})
-        if plan["errors"]:
-            raise RuntimeError(f"the plan has errors: {plan['errors']}")
-        head = next((u for u in plan["units"] if u["id"] == "orders^"), None)
-        if head is None:
-            raise RuntimeError("no head for the cut branch")
-        return f"orders cut on node-2, {len(plan['fragments'])} fragments planned"
+        return refused(entry["id"], entry["yaml"], placement, "revenue", "node-3", "does more than read or write")
 
     def processor():
         job = "a:\n  input: generate:10\nb:\n  from: a\n  provider-options:\n    sql:\n      query: SELECT * FROM a\nc:\n  from: b\n  output: duck:${{LAB_WAREHOUSE_DB}}\n"
-        return refused("sandbox-probe", job, [], {"a": "node-2", "b": "node-2", "c": "node-4"}, "b", "node-2", "sql processor")
+        return refused("sandbox-probe", job, {"a": "node-2", "b": "node-2", "c": "node-4"}, "b", "node-2", "sql processor")
 
     def disjoint_together():
         # Three raw pipelines, a slow source each, queued together: P1 and P2 share only the runner, which
@@ -1313,7 +1292,7 @@ def sandbox_pass():
         runs = {}
         try:
             for pid, (source, sink) in shapes.items():
-                call("/api/deploy", {"pipelineId": pid, "yaml": job(), "cuts": [], "placement": {"gen": source, "sink": sink}})
+                call("/api/deploy", {"pipelineId": pid, "yaml": job(), "placement": {"gen": source, "sink": sink}})
             for pid in shapes:
                 runs[pid] = call("/api/runs", {"pipelineId": pid})["runId"]
             finals = {pid: until(lambda: _finished(rid), RUN_TIMEOUT, f"{rid} to finish") for pid, rid in runs.items()}
@@ -1344,8 +1323,6 @@ def sandbox_pass():
     check("disjoint nodes, together", disjoint_together)
     check("any reader or writer", any_reader)
     check("a join on a data node", compute)
-    check("a cut after a transformer", cut_leaves_a_transformer)
-    check("a cut on its node", cut_on_its_node)
     check("a processor on a data node", processor)
     return failures[0]
 
@@ -1360,7 +1337,7 @@ def faults_pass():
             yaml = expand(f.read())
         placement = {"readings": "runner-1", "enrich": "runner-1", "customers": "node-1", "load": "node-4"}
         bricks = {"customers": "customer-countries", "load": "sensor-readings"}
-        plan = call("/api/deploy", {"pipelineId": "smoke-faults", "yaml": yaml, "cuts": [], "placement": placement, "bricks": bricks})
+        plan = call("/api/deploy", {"pipelineId": "smoke-faults", "yaml": yaml, "placement": placement, "bricks": bricks})
         run = call("/api/runs", {"pipelineId": plan["pipelineId"]})
         until(lambda: any(r["runId"] == run["runId"] and r["state"] == "running" for r in call("/api/runs/queue")), 60, "the run to start")
         time.sleep(3)
@@ -1521,7 +1498,7 @@ def replicas_pass():
         hosts.extend(sorted(host_name(replica_pid(r)) for r in replicas))
         declared.update({h: "lab" for h in hosts})
         apart = declared_apart()
-        call("/api/deploy", {"pipelineId": REPLICA_PROBE, "yaml": mirror, "cuts": [], "placement": MIRROR_PLACEMENT, "bricks": MIRROR_BRICKS})
+        call("/api/deploy", {"pipelineId": REPLICA_PROBE, "yaml": mirror, "placement": MIRROR_PLACEMENT, "bricks": MIRROR_BRICKS})
         first = []  # the host of the first run, then the other
 
         def named():
@@ -1603,7 +1580,7 @@ def replicas_pass():
 
         def deployed_again():
             undeploy(REPLICA_PROBE)
-            call("/api/deploy", {"pipelineId": REPLICA_PROBE, "yaml": elsewhere, "cuts": [], "placement": MIRROR_PLACEMENT, "bricks": MIRROR_BRICKS})
+            call("/api/deploy", {"pipelineId": REPLICA_PROBE, "yaml": elsewhere, "placement": MIRROR_PLACEMENT, "bricks": MIRROR_BRICKS})
             return f"deployed again from the declaration now announced, ran on {ran_on(run_probe())}"
         check("deployed again, it runs", deployed_again)
     except Exception as e:

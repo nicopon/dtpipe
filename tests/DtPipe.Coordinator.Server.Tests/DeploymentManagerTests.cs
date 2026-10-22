@@ -85,7 +85,7 @@ public sealed class DeploymentManagerTests : IDisposable
     {
         var fragment = new PlannedFragment(
             "p@n", "n", ["crm"], "", FragmentJob.VersionOf(Units, FragmentJob.VersionsOver([Brick("sqlite:a")])), [], ["src"], FragmentForm.Bricks, Composition: Units);
-        return new DistributionPlan("plan-1", "p", [], [], [fragment], [], [], [], null);
+        return new DistributionPlan("plan-1", "p", [], [fragment], [], [], [], null);
     }
 
     /// <summary>

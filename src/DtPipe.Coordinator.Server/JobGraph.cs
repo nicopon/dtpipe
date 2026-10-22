@@ -13,11 +13,7 @@ public sealed record StageView(string Type, string Summary);
 public sealed record BranchView(
     string Alias, string? Input, string? Output, IReadOnlyList<string> From, IReadOnlyList<string> Ref,
     string? Processor, IReadOnlyList<StageView> Transformers, IReadOnlyList<string> Options,
-    IReadOnlyList<string> Variables)
-{
-    /// <summary>Only a branch that reads a source can be cut inside: that is what <c>dtpipe split</c> accepts.</summary>
-    public bool Cuttable => Input is not null && From.Count == 0;
-}
+    IReadOnlyList<string> Variables);
 
 public static class JobGraph
 {

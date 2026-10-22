@@ -19,11 +19,9 @@ none. One node per process, which is one replica of its node's identity; a secon
   whether the versions a replica announces give the plan's version (`FragmentJob.VersionRefusal`) before it places a run there.
   `[local: Hosting.Tests FragmentJobTests, FragmentIntakeTests; the lab's smoke.py bricks, sandbox]`
 - **What a host offers beyond its bricks is its own registration.** `WithFragmentGate` replaces the
-  check a data node makes of a fragment (the host's word, like the policy), and `WithRequest`
-  answers a named request of the coordinator; both are announced as capabilities, which the
-  coordinator shows and never sets. No product code answers a cut: the lab's host
-  registers `lab.split` itself, and the node says it does not answer any name it
-  did not register. `[local: Hosting.Tests DtPipeNodeBuilderTests; the lab's smoke.py lab, sandbox]`
+  check a data node makes of a fragment (the host's word, like the policy); it is announced as a
+  capability, which the coordinator shows and never sets.
+  `[local: Hosting.Tests DtPipeNodeBuilderTests; the lab's smoke.py sandbox]`
 - **A runner runs dtpipe for the coordinator, a data node never does.** `DelegatedJobs` answers
   `ValidateJob` (a library save's job dry-run over one-row samples, writers neutralised) only on a
   host that runs any fragment; any other host says it is no runner. An alias names a file in the request's own directory, so it is a plain word.
@@ -47,7 +45,6 @@ none. One node per process, which is one replica of its node's identity; a secon
   directory, which concurrent runs share). `CheckSourceAsync` is a binding's verdict on a source: that sample's contract against the
   pinned one, by hash for `contract`, by `dtpipe contract diff --json` for `compatible`, read from the JSON and never from the exit
   code (a command that fails exits as one that finds a break); a sample or a comparison that fails is `unread`, never `breaking`.
-  Checking a save and judging a binding are the product's, so none is a registered request.
   `[local: Hosting.Tests BrickPreviewTests, BrickCheckTests; the lab's smoke.py bricks — a library save's check, a brick's preview]`
 - **A node announces its dtpipe's version**, what `dtpipe --version` says once at start
   (`DtPipeCommand.VersionAsync`), or none when the binary does not answer: a version is shown beside

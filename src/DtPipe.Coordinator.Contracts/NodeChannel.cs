@@ -44,11 +44,6 @@ public static class NodeChannel
     // node reads its sample as SampleBrick does and judges the contract it produces against the pinned one.
     public const string CheckSource = nameof(CheckSource);
 
-    // Coordinator -> node host, answered: a request a host registered under a name of its own (it
-    // announces the names in NodeAnnouncement.Capabilities). The coordinator's lab mode asks a lab host to
-    // query a dataset and to cut a branch this way; a host that registered nothing answers that it does not.
-    public const string Request = nameof(Request);
-
     // Coordinator -> runner, answered: the dtpipe run the coordinator no longer makes itself. A library
     // save's job checked over one-row samples with its writers neutralised. Only a host that runs any
     // fragment answers it.
@@ -154,15 +149,6 @@ public sealed record JobCheck(string Job, IReadOnlyDictionary<string, byte[]> Sa
 
 /// <summary>What <c>ValidateJob</c> answers: whether dtpipe accepts the job, its report when it does not, and each sink's contract by alias.</summary>
 public sealed record JobCheckResult(bool Ok, string Report, IReadOnlyDictionary<string, string> Contracts);
-
-/// <summary>What a <c>Request</c> answers: the handler's payload (JSON), or why the host does not answer it.</summary>
-public sealed record NodeResponse(string? Payload, string? Error);
-
-/// <summary>
-/// What the lab's <c>lab.split</c> request answers: the cut branch's producer and consumer halves, each a one-branch
-/// job (<see cref="BranchCut.Half"/>), or why the node did not or could not cut it.
-/// </summary>
-public sealed record BranchSplit(string? Producer, string? Consumer, string? Error);
 
 public enum FragmentEdgeDirection { Inbound, Outbound }
 

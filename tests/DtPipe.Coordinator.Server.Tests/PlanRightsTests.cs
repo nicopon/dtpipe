@@ -13,12 +13,6 @@ namespace DtPipe.Coordinator.Server.Tests;
 /// </summary>
 public sealed class PlanRightsTests : IDisposable
 {
-    private sealed class NoHub : IHubContext<NodeChannelHub>
-    {
-        public IHubClients Clients => throw new NotSupportedException();
-        public IGroupManager Groups => throw new NotSupportedException();
-    }
-
     private const string Pair = "a:\n  input: sqlite:${{LAB_DB}}\nb:\n  from: a\n  output: csv:out.csv\n";
 
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "plan-rights-" + Guid.NewGuid().ToString("N"));
@@ -59,18 +53,18 @@ public sealed class PlanRightsTests : IDisposable
     }
 
     private PlanBuilder Planner(RightsStore rights) =>
-        new(_inventory, new NodeRequests(_inventory, new NoHub()), new BrickCatalog(_inventory), new PlanRegistry(new DefaultFlowControlService(_matrix)), rights);
+        new(_inventory, new BrickCatalog(_inventory), new PlanRegistry(new DefaultFlowControlService(_matrix)), rights);
 
-    private Task<DistributionPlan> PlanAsync(RightsStore rights) =>
-        Planner(rights).BuildAsync(
-            new PlanRequest("p", Pair, null, new Dictionary<string, string> { ["a"] = "d", ["b"] = "r" }), PlanMode.Manual, TestContext.Current.CancellationToken);
+    private DistributionPlan Plan(RightsStore rights) =>
+        Planner(rights).Build(
+            new PlanRequest("p", Pair, new Dictionary<string, string> { ["a"] = "d", ["b"] = "r" }), PlanMode.Manual);
 
     [Fact]
     public async Task A_Plan_Carries_The_Groups_The_Rights_Give_A_Node_Now_Not_Those_Of_Its_Last_Announcement()
     {
         var rights = Rights(("d", ["audit"], true), ("r", ["run"], true));
 
-        var plan = await PlanAsync(rights);
+        var plan = Plan(rights);
 
         Assert.Empty(plan.Errors);
         Assert.Equal(["audit"], plan.Fragments.Single(f => f.Node == "d").Groups);
@@ -85,7 +79,7 @@ public sealed class PlanRightsTests : IDisposable
     {
         var rights = Rights(("d", ["data"], false), ("r", ["run"], true));
 
-        var plan = await PlanAsync(rights);
+        var plan = Plan(rights);
 
         Assert.Equal(["'a' cannot be placed: Node 'd' is disabled: its identity may not connect, so no run is placed on it."], plan.Errors);
         Assert.Empty(plan.Fragments);
@@ -97,7 +91,7 @@ public sealed class PlanRightsTests : IDisposable
     {
         var rights = Rights(("r", ["run"], true));
 
-        var plan = await PlanAsync(rights);
+        var plan = Plan(rights);
 
         Assert.Equal(["'a' cannot be placed: Node 'd' has no identity in the rights: nothing says which groups it holds."], plan.Errors);
         Assert.Empty(plan.Fragments);
@@ -109,7 +103,7 @@ public sealed class PlanRightsTests : IDisposable
     {
         var rights = Rights(("d", ["data"], true), ("r", ["run"], false));
 
-        var plan = await PlanAsync(rights);
+        var plan = Plan(rights);
 
         Assert.Equal(["'b' cannot be placed: Node 'r' is disabled: its identity may not connect, so no run is placed on it."], plan.Errors);
         Assert.False(plan.Deployable);

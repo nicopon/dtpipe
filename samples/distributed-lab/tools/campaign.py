@@ -648,7 +648,7 @@ def pair_trial(variant, rep, with_b, lag=0.0):
         recover()
         seen = len(S.service_log("runner-1"))
         for pid, (yaml, placement) in PAIR.items():
-            S.call("/api/deploy", {"pipelineId": pid, "yaml": yaml, "cuts": [], "placement": placement})
+            S.call("/api/deploy", {"pipelineId": pid, "yaml": yaml, "placement": placement})
         run_a = submit("campaign-pair-a")
         time.sleep(4)
         if not child_of_run(run_a["runId"]):
@@ -1036,7 +1036,7 @@ def cell_F11():
             subprocess.run([lab, "nodes", "sandbox"], capture_output=True, timeout=300)
             S.until(hosts_online, 120, "the hosts in sandbox mode")
             os.mkfifo(fifo)
-            S.call("/api/deploy", {"pipelineId": "campaign-f11", "yaml": F11_YAML.format(fifo=fifo), "cuts": [], "placement": placement})
+            S.call("/api/deploy", {"pipelineId": "campaign-f11", "yaml": F11_YAML.format(fifo=fifo), "placement": placement})
             run = submit("campaign-f11")
             t_run = time.time()
             final, t_end = await_final(run["runId"], F11_BOUND + 30)

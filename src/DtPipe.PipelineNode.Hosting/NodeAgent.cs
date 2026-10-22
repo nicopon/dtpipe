@@ -27,8 +27,6 @@ internal sealed class NodeAgent : BackgroundService
     private readonly BrickHost _bricks;
     private readonly DelegatedJobs _jobs;
     private readonly FragmentGate? _gate;
-    private readonly IReadOnlyDictionary<string, NodeRequestHandler> _requests;
-    private readonly NodeDtPipe _dtpipe;
     private readonly DtPipeCommand _command;
     private string? _dtpipeVersion;
     private readonly OidcTokenClient _tokens;
@@ -79,8 +77,6 @@ internal sealed class NodeAgent : BackgroundService
         var dtpipe = new DtPipeCommand(_options.DtPipe, _stateDir, _environment);
         _bricks = new BrickHost(_options.Name, definition.Bricks, _options.BrickKey, dtpipe, _logger);
         _gate = definition.Gate;
-        _requests = new Dictionary<string, NodeRequestHandler>(definition.Requests, StringComparer.Ordinal);
-        _dtpipe = new NodeDtPipe(dtpipe);
         _command = dtpipe;
         _jobs = new DelegatedJobs(_options.Name, _policy == FragmentPolicy.AnyFragment, dtpipe);
         _tokens = new OidcTokenClient(_options.Oidc);
@@ -99,7 +95,6 @@ internal sealed class NodeAgent : BackgroundService
         hub.On<string, int, BrickSample>(NodeChannel.SampleBrick, (id, rows) => _bricks.SampleAsync(id, rows));
         hub.On<string, string, string, SourceCheck>(NodeChannel.CheckSource, (id, contract, mode) => _bricks.CheckSourceAsync(id, contract, mode));
         hub.On<string, string, SinkCheck>(NodeChannel.CheckSink, (id, contract) => _bricks.CheckSinkAsync(id, contract));
-        hub.On<string, string, NodeResponse>(NodeChannel.Request, (name, payload) => AnswerAsync(name, payload));
         hub.On<JobCheck, JobCheckResult>(NodeChannel.ValidateJob, check => _jobs.ValidateAsync(check));
         hub.Reconnecting += _ =>
         {
@@ -314,7 +309,7 @@ internal sealed class NodeAgent : BackgroundService
         {
             await _hub!.InvokeAsync(NodeChannel.Announce,
                 new NodeAnnouncement(_options.Name, _options.Description, _datasets, Role, _bricks.Bricks,
-                    Capabilities: [.. _gate is null ? [] : new[] { NodeAnnouncement.RawFragments }, .. _requests.Keys.Order(StringComparer.Ordinal)],
+                    Capabilities: [.. _gate is null ? [] : new[] { NodeAnnouncement.RawFragments }],
                     DtpipeVersion: _dtpipeVersion, InstanceId: _instanceId, Origin: $"{Environment.MachineName}:{Environment.ProcessId}",
                     DataPlaneClientId: _node?.ClientId), bounded.Token);
         }
@@ -379,21 +374,6 @@ internal sealed class NodeAgent : BackgroundService
         }
         _logger.LogWarning("The hub refused to renew the data plane registration ({Reason}): dropping its data plane client", reason.Message);
         await node.DisposeAsync();
-    }
-
-    /// <summary>A request the host registered a handler for, answered outside the command queue; any other is said not to be answered.</summary>
-    private async Task<NodeResponse> AnswerAsync(string name, string payload)
-    {
-        if (!_requests.TryGetValue(name, out var handler))
-            return new NodeResponse(null, $"{_options.Name} does not answer '{name}'.");
-        try
-        {
-            return new NodeResponse(await handler(new NodeRequestContext(payload, _dtpipe)), null);
-        }
-        catch (Exception ex)
-        {
-            return new NodeResponse(null, ex.Message);
-        }
     }
 
     /// <summary>

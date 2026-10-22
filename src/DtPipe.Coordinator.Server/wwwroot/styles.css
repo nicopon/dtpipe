@@ -138,12 +138,6 @@ input.grow { flex: 1; min-width: 200px; }
 .stage .k { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .03em; margin-right: 4px; }
 .stage.io { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 11.5px; }
 .stage .opt { color: var(--muted); font-size: 11px; display: block; }
-.cut-slot { display: flex; align-items: center; gap: 4px; padding: 0 8px; height: 16px; }
-.cut-slot::before, .cut-slot::after { content: ""; flex: 1; border-top: 1px dotted var(--border); }
-.cut-slot button { border: none; background: transparent; padding: 0 3px; font-size: 12px; line-height: 1; color: var(--muted); }
-.cut-slot button:hover { color: var(--accent); }
-.cut-slot.active::before, .cut-slot.active::after { border-top: 2px dashed var(--accent); }
-.cut-slot.active button { color: var(--accent); }
 .edge { fill: none; stroke-width: 2; }
 .edge.memory { stroke: var(--memory); }
 .edge.network { stroke: var(--network); stroke-dasharray: 7 5; }
@@ -158,7 +152,6 @@ input.grow { flex: 1; min-width: 200px; }
 .sw.memory { border-color: var(--memory); }
 .sw.network { border-color: var(--network); border-top-style: dashed; }
 .sw.forbidden { border-color: var(--bad); border-top-style: dotted; }
-.sw.cut { border: none; width: auto; color: var(--accent); }
 
 /* Plan & run */
 .msgs { margin: 6px 0; padding-left: 18px; }

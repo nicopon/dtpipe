@@ -5,7 +5,7 @@ is the product's, `src/DtPipe.Coordinator.Server` (its rules: that project's `CL
 nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Hosting/CLAUDE.md`).
 
 - **The lab uses dtpipe, it never changes it.** Nothing in `DtPipe.sln` moves for the lab. It
-  reaches the engine through the binary (`split`, `--export-job`, `--job`, `inspect`, `--dry-run`)
+  reaches the engine through the binary (`--export-job`, `--job`, `inspect`, `--dry-run`)
   and hosts the distributed family (`src/DtPipe.Coordinator*`, `src/DtPipe.PipelineNode*`) as a
   consumer: product code a lab need may shape, never code written for the lab alone. A need of the
   engine is reported to the user, not patched in. `[unchecked]`
@@ -43,7 +43,7 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
 - **A library seed names its bricks by reference, and the scenarios of `pipelines/` stay text.** A seed reads `input: brick:<node>/<brick>`
   and writes `output: brick:<node>/<brick>` with `from`; its `.bindings.json` keeps the mode and no pin, which the arming writes. The engine
   never reads `brick:`, so the witness of `smoke.py` runs a seed with the branch its node declares: `tools/lab_bricks.py` reads it from
-  `nodes/*.json`, never from the coordinator. A scenario of `pipelines/` is a plain job with a cut and a placement chosen by hand, which a
+  `nodes/*.json`, never from the coordinator. A scenario of `pipelines/` is a plain job with a placement chosen by hand, which a
   reference cannot take, so it runs on sandbox nodes as written. A strict probe through `/api/deploy` names the bricks by id (`bricks`).
   `[local: smoke.py lab, library, bricks, sandbox]`
 - **`monitor-1` is the lab's supervisor**: a client of `idp-clients.json` and an identity of kind `monitor` in
@@ -61,8 +61,7 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
 - **Lab nodes are disposable hosts of `DtPipe.PipelineNode.Hosting`.** `Lab.NodeHost` reads
   `nodes/<node>.json` into `AddDtPipeNode`; a node file whose `role` is `runner` starts the official
   `DtPipe.PipelineNode.Runner` instead, configured through its environment. `lab.sh exec-node` is
-  the one way a node starts, for `lab.sh` and `tools/campaign.py`. Every lab node registers `lab.split`
-  (`Lab.NodeHost/LabRequests.cs`). `smoke.py` reads the warehouse and its witness reads the databases
+  the one way a node starts, for `lab.sh` and `tools/campaign.py`. `smoke.py` reads the warehouse and its witness reads the databases
   `seed.sh` wrote, located from the node files, never from the coordinator. Every lab node also enables
   fault injection (`FaultInjection` in `Lab.NodeHost`'s options, `DtPipeNode__FaultInjection` in the
   environment of the runner `lab.sh exec-node` starts and of `runner-1` in `compose.yaml`), so the kill
