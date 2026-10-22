@@ -16,38 +16,44 @@ settings a node host takes are `DtPipeNode__*` (the runner) or the host team's o
 docker compose -f deploy/compose.yaml up --build --wait
 ```
 
-**Not for production.** The recipe starts a coordinator on Redis, a runner, a data node and an
-identity provider, with secrets that are written in the files. It listens in plain HTTP on the
-loopback of the host only. Every file it mounts is under `deploy/`; the images of the coordinator
-and the runner come from GHCR, and the identity provider and the data node are built from the
-checkout (the first start takes a few minutes for them).
+**Not for production.** The recipe starts a coordinator on Redis, a runner and a data node. The
+coordinator is its own identity provider (`Coordinator__InsecureTrialIdp__Password`, below), with
+a password that is written in the file. It listens in plain HTTP on the loopback of the host only.
+Every file it mounts is under `deploy/`; the images of the coordinator and the runner come from
+GHCR, and the data node is built from the checkout (the first start takes a few minutes for it).
 
 - **People.** The pages are at <http://coordinator.localtest.me:8080>. Any user name made of
-  letters, digits, `.`, `_` or `-` signs in on the trial identity provider with its name followed
-  by `pwd` as the password; `admin` (`adminpwd`) is the coordinator's administrator, and nobody
-  else may do anything. The address needs `localtest.me`, a public name that resolves to
-  `127.0.0.1`; without a network that resolves it, add `idp.localtest.me` and
-  `coordinator.localtest.me` to `/etc/hosts`.
+  letters, digits, `.`, `_` or `-` signs in with the trial password (`dtpipe-trial-password`);
+  `admin` is the coordinator's administrator, and nobody else may do anything. The address needs
+  `localtest.me`, a public name that resolves to `127.0.0.1`; without a network that resolves it,
+  add `coordinator.localtest.me` to `/etc/hosts`.
 - **A run.** The library holds one pipeline, `trial-totals`: a generated source on the data node,
   summed by the runner, written back to the data node. It runs from the pages, or as a scheduler
-  would: a `launcher-1` token (client `launcher-1`, secret `launcher-1-trial-secret`, from
-  `http://idp.localtest.me:5190/connect/token`) posted to
+  would: a `launcher-1` token (client `launcher-1`, secret the trial password, from
+  `http://coordinator.localtest.me:8080/connect/token`) posted to
   `/service/runs` with `{"pipelineId": "trial-totals"}`. The result is in the data node's
   `/state/totals.csv`. The pipeline is armed first, from its page: launched unarmed, the
   coordinator answers 409.
-- **Version.** The identity provider and the data node are built from the checkout you run the
-  recipe in, so run it from the checkout of a tag, with `DTPIPE_VERSION` set to that version
-  without the `v` (`DTPIPE_VERSION=1.11.0`).
+- **Version.** The data node is built from the checkout you run the recipe in, so run it from the
+  checkout of a tag, with `DTPIPE_VERSION` set to that version without the `v`
+  (`DTPIPE_VERSION=1.11.0`).
 - **Local images.** `DTPIPE_VERSION` picks a published version (default `latest`);
   `DTPIPE_COORDINATOR_IMAGE` and `DTPIPE_RUNNER_IMAGE` name any other image, for example one built
   as [below](#the-images). `SOURCE_REVISION` is handed to the two images the recipe builds.
 - **`Coordinator__Initialize` stays on.** The recipe is meant to start again after
   `docker compose down -v`; a deployment sets it for the first start only, as
   [below](#the-smallest-coordinator).
-- **The trial identity provider** (`src/DtPipe.Coordinator.TrialIdp`) says who a caller is and
-  nothing else, signs with a key kept in its volume, keeps no user, and accepts any name. The
-  data node (`src/DtPipe.PipelineNode.TrialNode`) is what a team's own service looks like to the
-  coordinator: it adds a node to itself and declares two bricks in a file. Neither is published.
+- **The trial identity provider** is the coordinator's own, switched on by
+  `Coordinator__InsecureTrialIdp__Password`: a secret of 16 characters at least, which is every
+  client's secret and every person's password. It needs `Coordinator__PublicUrl`, the one address
+  of its issuer, and the coordinator must reach itself there (the recipe gives its service that
+  name as a network alias); it refuses to start beside `Coordinator__Authority`. The clients are
+  the identities of the rights, so a service added in Access can ask for a token at once; any
+  user name signs in; no token carries a role or a group. The pages, the login form and the
+  studio say so on screen. It signs with a key kept in the state directory. A real deployment
+  sets `Coordinator__Authority` instead, and none of this exists in it. The data node
+  (`src/DtPipe.PipelineNode.TrialNode`) is what a team's own service looks like to the
+  coordinator: it adds a node to itself and declares two bricks in a file. It is not published.
 
 ## The images
 
@@ -159,9 +165,11 @@ both.
   anything.
 - **TLS**, by a proxy in front, and `Coordinator__PublicUrl`: see below.
 
-A node host (the runner, or a team's own) takes its coordinator's address and the provider's
-client credentials (`DtPipeNode__CoordinatorUrl`, `DtPipeNode__Oidc__*`); its rights are
-the coordinator's, never its own.
+A node host (the runner, or a team's own) takes its coordinator's address and its secret at the
+provider (`DtPipeNode__CoordinatorUrl`, `DtPipeNode__Oidc__ClientSecret`); its client is its
+name unless `DtPipeNode__Oidc__ClientId` says otherwise, and its provider is the one the
+coordinator names unless `DtPipeNode__Oidc__Authority` does. Its rights are the coordinator's,
+never its own.
 
 ## HTTPS in front
 

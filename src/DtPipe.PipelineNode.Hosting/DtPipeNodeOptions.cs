@@ -13,8 +13,13 @@ public enum FragmentPolicy
 /// <summary>How the node obtains its tokens: the client-credentials flow against an OpenID Connect provider.</summary>
 public sealed class NodeOidcOptions
 {
-    /// <summary>The provider's issuer; its token endpoint is read from its discovery document.</summary>
+    /// <summary>
+    /// The provider's issuer; its token endpoint is read from its discovery document. The provider the coordinator names in its
+    /// protected resource metadata when left out.
+    /// </summary>
     public string Authority { get; set; } = "";
+
+    /// <summary>The node's client at the provider; the node's <see cref="DtPipeNodeOptions.Name"/> when left out.</summary>
     public string ClientId { get; set; } = "";
     public string ClientSecret { get; set; } = "";
 
@@ -83,8 +88,7 @@ public sealed class DtPipeNodeOptions
     {
         if (string.IsNullOrWhiteSpace(Name)) yield return "Name is required.";
         if (!Uri.TryCreate(CoordinatorUrl, UriKind.Absolute, out _)) yield return "CoordinatorUrl must be an absolute URL.";
-        if (!Uri.TryCreate(Oidc.Authority, UriKind.Absolute, out _)) yield return "Oidc:Authority must be an absolute URL.";
-        if (string.IsNullOrWhiteSpace(Oidc.ClientId)) yield return "Oidc:ClientId is required.";
+        if (!string.IsNullOrWhiteSpace(Oidc.Authority) && !Uri.TryCreate(Oidc.Authority, UriKind.Absolute, out _)) yield return "Oidc:Authority must be an absolute URL.";
         if (string.IsNullOrEmpty(Oidc.ClientSecret)) yield return "Oidc:ClientSecret is required.";
         if (string.IsNullOrWhiteSpace(DtPipe)) yield return "DtPipe is required.";
         if (UnwiredRunTimeout <= TimeSpan.Zero) yield return "UnwiredRunTimeout must be positive.";

@@ -37,6 +37,16 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   cookie only. Only a page navigation (`TrustedIdp.IsPageNavigation`) is sent to the provider; any
   other request is told 401, with `WWW-Authenticate: Bearer resource_metadata="…"` on `/api`.
   `[local: the lab's smoke.py rights — roles and sessions]`
+- **The trial identity provider is opt-in and the server trusts it like any other.** `Coordinator:InsecureTrialIdp:Password` (16
+  characters at least) runs `DtPipe.Coordinator.TrialIdp` inside the server (`TrialIdpMode`); unset, no `/connect` route and no
+  discovery document exist, and the metadata carries no `dtpipe_trial_idp`. It is refused beside `Coordinator:Authority`, without
+  `Coordinator:PublicUrl` (the issuer is that one address, and the server reaches itself there) and beside `Coordinator:Ui:ClientSecret`.
+  `Authority` is then the public address and `TrustedIdp` validates its tokens through discovery, with no exception for them. The
+  clients are the rights' identities (secret: the password), the pages' client and the studio's; `TrialIdpClients` makes them right
+  before a token is issued after the rights change, and a client the rights drop loses every permission (the in-memory store cannot
+  cascade a delete). The login form and cookie (`/trial-idp/login`, scheme `TrialIdp`) are apart from the server's own.
+  `[local: TrialIdpModeTests; the trial recipe, deploy/compose.yaml]` `[unchecked: the refusals without `PublicUrl` and beside
+  `Ui:ClientSecret`; a client withdrawn from the rights]`
 - **A person and a service are told apart by the token's claims.** A service's token comes from
   client credentials, so its subject is its client (`sub == client_id`, RFC 9068): the default
   policy (the node channel, TransportR's hub and streams) accepts that and nothing else. `/api`

@@ -194,6 +194,7 @@ label.review { display: block; margin: 0 0 8px; }
 .dot.good { background: var(--good); }
 .dot.bad { background: var(--bad); }
 .dot.warn { background: var(--warn); }
+.trial-idp { color: var(--bad); font-weight: 600; }
 
 /* A sample's report */
 .branch { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; margin: 10px 0; }

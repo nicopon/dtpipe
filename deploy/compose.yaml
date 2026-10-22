@@ -1,42 +1,24 @@
-# The distributed pipeline's trial recipe: a coordinator, its Redis, a runner, a trial data node and a trial identity provider.
-# NOT FOR PRODUCTION: the identity provider is a stand-in with public users and secrets, and nothing here is
+# The distributed pipeline's trial recipe: a coordinator (which is its own trial identity provider), its Redis, a runner and a
+# trial data node.
+# NOT FOR PRODUCTION: the identity provider is a stand-in with one shared password, written in this file, and nothing here is
 # behind TLS. See deploy/README.md for what a real deployment provides.
 #
 #   docker compose -f deploy/compose.yaml up --wait
 #
 # DTPIPE_VERSION picks the published images (default: latest); DTPIPE_COORDINATOR_IMAGE and DTPIPE_RUNNER_IMAGE
-# replace them whole, for images built from a checkout. The identity provider and the data node are always built from
-# this checkout: they are stand-ins, and nothing publishes them.
+# replace them whole, for images built from a checkout. The data node is always built from this checkout: it is a
+# stand-in for a team's own service, and nothing publishes it.
 #
 # One issuer: a token names the address of the identity provider that signed it, so browsers and services must reach
-# it at that same address. idp.localtest.me resolves to 127.0.0.1 on the host and, by the network alias, to the
-# provider in the containers; the provider listens on 5190 in the container and on the host, so the port is part of
-# the address everywhere.
+# it at that same address. coordinator.localtest.me resolves to 127.0.0.1 on the host and, by the network alias, to the
+# coordinator in the containers; the coordinator listens on 8080 in the container and on the host, so the port is part
+# of the address everywhere.
+
+x-trial-password: &password dtpipe-trial-password
 
 name: dtpipe-trial
 
-x-issuer: &issuer http://idp.localtest.me:5190
-
 services:
-  idp:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile
-      target: trial-idp
-      args:
-        SOURCE_REVISION: ${SOURCE_REVISION:-}
-    init: true
-    ports: ["127.0.0.1:5190:5190"]
-    environment:
-      ASPNETCORE_HTTP_PORTS: "5190"
-      Idp__Issuer: *issuer
-    volumes:
-      - ./trial/idp-clients.json:/etc/trial-idp/clients.json:ro
-      - idp-state:/state
-    networks:
-      default:
-        aliases: [idp.localtest.me]
-
   redis:
     image: redis:7.4-alpine
     command: redis-server --appendonly yes --appendfsync always
@@ -55,12 +37,10 @@ services:
       # A trial keeps this on: the volumes are new on the first start and the recipe is meant to be rerun after
       # `down -v`. A deployment sets it for its first start only (deploy/README.md).
       Coordinator__Initialize: "true"
-      Coordinator__Authority: *issuer
+      Coordinator__InsecureTrialIdp__Password: *password
       Coordinator__PublicUrl: http://coordinator.localtest.me:8080
       Coordinator__Store: redis
       Coordinator__Redis__ConnectionString: redis:6379
-      Coordinator__Ui__ClientSecret: coordinator-ui-trial-secret
-      Coordinator__Studio__ClientId: dtpipe-studio
       Coordinator__Roles__Admin: admin@dtpipe.test
       Coordinator__RightsSeed: /trial/rights.json
       Coordinator__LibrarySeed: /trial/library
@@ -68,8 +48,10 @@ services:
       - coordinator-state:/state
       - ./trial/rights.json:/trial/rights.json:ro
       - ./trial/library:/trial/library:ro
+    networks:
+      default:
+        aliases: [coordinator.localtest.me]
     depends_on:
-      idp: { condition: service_healthy }
       redis: { condition: service_healthy }
 
   runner:
@@ -79,9 +61,7 @@ services:
       DtPipeNode__Name: runner-1
       DtPipeNode__Description: Runner
       DtPipeNode__CoordinatorUrl: http://coordinator:8080
-      DtPipeNode__Oidc__Authority: *issuer
-      DtPipeNode__Oidc__ClientId: runner-1
-      DtPipeNode__Oidc__ClientSecret: runner-1-trial-secret
+      DtPipeNode__Oidc__ClientSecret: *password
     volumes:
       - runner-state:/state
     depends_on:
@@ -101,9 +81,7 @@ services:
       DtPipeNode__Name: trial-node
       DtPipeNode__Description: Trial data node
       DtPipeNode__CoordinatorUrl: http://coordinator:8080
-      DtPipeNode__Oidc__Authority: *issuer
-      DtPipeNode__Oidc__ClientId: trial-node
-      DtPipeNode__Oidc__ClientSecret: trial-node-trial-secret
+      DtPipeNode__Oidc__ClientSecret: *password
       DtPipeNode__BrickKey: trial-node-trial-brick-key
       DtPipeNode__BricksFile: /etc/trial-node/bricks.json
     volumes:
@@ -113,7 +91,6 @@ services:
       coordinator: { condition: service_healthy }
 
 volumes:
-  idp-state:
   redis-data:
   coordinator-state:
   runner-state:

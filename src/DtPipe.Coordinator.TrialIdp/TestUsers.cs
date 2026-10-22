@@ -17,19 +17,22 @@ public static partial class TestUsers
     [GeneratedRegex("^[A-Za-z0-9._-]{1,64}$")]
     private static partial Regex ValidName();
 
+    /// <summary>Whether <paramref name="user"/> is a name the provider takes for a user, whatever the password.</summary>
+    public static bool IsValidName(string? user) => user is not null && ValidName().IsMatch(user);
+
     public static bool Check(string? user, string? password) =>
-        user is not null && ValidName().IsMatch(user) && string.Equals(password, user + "pwd", StringComparison.Ordinal);
+        IsValidName(user) && string.Equals(password, user + "pwd", StringComparison.Ordinal);
 
     /// <summary>
     /// The identity a signed-in user carries into OpenIddict's tokens. The name goes to the identity
     /// token under the <c>profile</c> scope, the email under <c>email</c>; the subject always.
     /// </summary>
-    public static ClaimsIdentity Identity(string user, IdpOptions options, IEnumerable<string> scopes)
+    public static ClaimsIdentity Identity(string user, string emailDomain, IEnumerable<string> scopes)
     {
         var identity = new ClaimsIdentity(OpenIddict.Server.AspNetCore.OpenIddictServerAspNetCoreDefaults.AuthenticationScheme, Claims.Name, Claims.Role);
         identity.SetClaim(Claims.Subject, user)
                 .SetClaim(Claims.Name, user)
-                .SetClaim(Claims.Email, $"{user}@{options.EmailDomain}");
+                .SetClaim(Claims.Email, $"{user}@{emailDomain}");
         identity.SetScopes(scopes);
         identity.SetDestinations(claim => claim.Type switch
         {
@@ -41,7 +44,7 @@ public static partial class TestUsers
         return identity;
     }
 
-    public static string LoginPage(string returnUrl, string antiforgeryField, string antiforgeryToken, string? user, string? error)
+    public static string LoginPage(TrialIdpSettings settings, string returnUrl, string antiforgeryField, string antiforgeryToken, string? user, string? error)
     {
         static string E(string? s) => WebUtility.HtmlEncode(s ?? "");
         var message = error is null ? "" : $"<p class=\"error\">{E(error)}</p>";
@@ -60,9 +63,9 @@ public static partial class TestUsers
             </style>
             </head>
             <body>
-            <form method="post" action="/account/login">
+            <form method="post" action="{{E(settings.LoginPath)}}">
               <h1>Trial IdP</h1>
-              <p class="hint">Trial IdP, not for production. Test users only: the password of <code>toto</code> is <code>totopwd</code>.</p>
+              <p class="hint">{{E(settings.LoginHint)}}</p>
               {{message}}
               <input type="hidden" name="{{E(antiforgeryField)}}" value="{{E(antiforgeryToken)}}">
               <input type="hidden" name="returnUrl" value="{{E(returnUrl)}}">

@@ -143,7 +143,7 @@ example to make it checked]`
 | `src/DtPipe.Coordinator.Contracts` | Node channel messages, `BrickRules`: what coordinator and nodes share |
 | `src/DtPipe.PipelineNode.Hosting` | `AddDtPipeNode`: makes any .NET host a node (bricks, fragments, tokens) |
 | `src/DtPipe.PipelineNode.Runner` | The official runner: a node that hosts no data and runs any fragment |
-| `src/DtPipe.Coordinator.TrialIdp` | The trial recipe's identity provider: a stand-in for `deploy/compose.yaml` and the lab, never for production |
+| `src/DtPipe.Coordinator.TrialIdp` | The trial identity provider: run inside the coordinator by `Coordinator__InsecureTrialIdp__Password`, and as a host of its own for the lab; never for production |
 | `src/DtPipe.PipelineNode.TrialNode` | The trial recipe's data node: two bricks declared in a file, a model of a team's own host |
 | `deploy` | The Dockerfile of the coordinator's and the runner's images, and `deploy/README.md`: what a deployment provides |
 | `tests/DtPipe.Tests` | xunit.v3 unit and integration tests |
@@ -328,11 +328,16 @@ the control plane, over each replica's node channel; TransportR carries the data
   with it (`org.opencontainers.image.revision`); left out, the build warns and the label says `unknown`. `.git` is not in the
   build context, so nothing else can supply it. The lab's stack is the strict case: its guard requires HEAD. Every image
   runs as `1654:1654` with `/state` owned by that user. The release pushes the coordinator and the runner only, to GHCR, multi-arch, tagged with
-  the version, its major.minor and `latest`; the trial recipe's identity provider and data node are built by `deploy/compose.yaml`, never pushed. The lab's images extend these and the product's names no lab; `deploy/`
+  the version, its major.minor and `latest`; the trial recipe's data node is built by `deploy/compose.yaml`, never pushed. The lab's images extend these and the product's names no lab; `deploy/`
   is scanned like `src/`. **The server listens in plain HTTP and reads no forwarded header**: a TLS proxy in front is
   told to it by `Coordinator:PublicUrl`, the address people reach it at, so it does not turn into `http://` return addresses.
   `[CI: validate_distributed_boundary.sh — deploy/ names no lab]` `[local: PublicUrlTests; the lab's smoke.py bricks - versions; the lab's tools/linux_replay.sh uid, a named volume of another uid]`
   `[unchecked: the release's push to GHCR, until a tag runs it; a Linux Docker host, where tools/linux_replay.sh is the replay; a real TLS proxy; a bind mount of another uid; deploy/README.md is in no documentation check, so keep its lines to 100 columns]`
+- **The coordinator is its own identity provider only on an explicit secret, and trusts it like any other.**
+  `Coordinator__InsecureTrialIdp__Password` (16 characters at least) turns it on; it is refused beside an external
+  `Coordinator__Authority`, and `TrustedIdp` holds no exception for its tokens. Every page, the login form and the studio
+  say it is not for production. `[local: TrialIdpModeTests; the trial recipe]` `[unchecked: the other refusals]`
+  Detail: `src/DtPipe.Coordinator.Server/CLAUDE.md`.
 - **The CLI hosts neither a node nor a hub.** `dtpipe` is the child a node drives, reached through `arrow:`;
   it references no TransportR assembly and no project of the family, maps no SignalR hub, and `dtpipe
   studio` is a client of the coordinator's `/api`, only when it is given `--coordinator`.

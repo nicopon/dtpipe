@@ -53,6 +53,7 @@ window.addEventListener("unhandledrejection", (e) => addLog({ node: "coordinator
 
 start().then(() => {
   // The Lab view is an admin's, in lab mode only.
+  $("trial-banner").hidden = !store.trialIdp;
   $("lab-link").hidden = !(store.labMode && store.me.roles.includes("admin"));
   $("me").textContent = `${store.me.email || store.me.name} · ${store.me.roles[0] || "no role"}`;
   renderPills();

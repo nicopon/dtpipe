@@ -79,7 +79,7 @@ internal sealed class NodeAgent : BackgroundService
         _gate = definition.Gate;
         _command = dtpipe;
         _jobs = new DelegatedJobs(_options.Name, _policy == FragmentPolicy.AnyFragment, dtpipe);
-        _tokens = new OidcTokenClient(_options.Oidc);
+        _tokens = new OidcTokenClient(_options.Oidc, _options.Name, _options.CoordinatorUrl);
     }
 
     private NodeRole Role => _policy == FragmentPolicy.AnyFragment ? NodeRole.Runner : NodeRole.Data;

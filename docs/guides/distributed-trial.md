@@ -19,12 +19,12 @@ as Arrow. This page starts a small one on your machine, from one command, and ru
 
 Who may do what is the coordinator's own configuration: **rights** list the nodes, the groups
 they belong to and which group may send rows to which. The identity provider only says who a
-caller is.
+caller is. In this recipe the coordinator is its own trial identity provider.
 
 ## Start the recipe
 
-You need Docker with Compose and a checkout of this repository. The recipe builds a trial identity
-provider and a trial data node from the checkout, so the first start takes a few minutes. The
+You need Docker with Compose and a checkout of this repository. The recipe builds a trial data node
+from the checkout, so the first start takes a few minutes. The
 coordinator and the runner are the images each release publishes on GHCR.
 
 ```bash
@@ -34,11 +34,15 @@ docker compose -f deploy/compose.yaml ps
 
 Wait until every service is `healthy`. Everything listens on the loopback of your machine, in
 plain HTTP. The addresses use `localtest.me`, a public name that resolves to `127.0.0.1`; without
-a network that resolves it, add `idp.localtest.me` and `coordinator.localtest.me` to `/etc/hosts`.
+a network that resolves it, add `coordinator.localtest.me` to `/etc/hosts`.
 
-Open <http://coordinator.localtest.me:8080> and sign in as `admin` with the password `adminpwd`:
-the trial identity provider accepts any name made of letters, digits, `.`, `_` or `-`, and the
-password is the name followed by `pwd`. Nobody but `admin` may do anything on this coordinator.
+Open <http://coordinator.localtest.me:8080> and sign in as `admin` with the password
+`dtpipe-trial-password`: the coordinator's trial identity provider accepts any name made of
+letters, digits, `.`, `_` or `-`, with that one password, which is also every service's secret.
+Nobody but `admin` may do anything on this coordinator. A red banner on every page says so: the
+trial identity provider is for trying the product, never for production. It starts only when
+`Coordinator__InsecureTrialIdp__Password` is set (16 characters at least), and the coordinator
+refuses to start with an external `Coordinator__Authority` beside it.
 
 - **Library** holds one pipeline, `trial-totals`: a source brick on the trial node
   (`brick:trial-node/numbers`), summed by the runner, written to a file by a sink brick on the trial
@@ -74,9 +78,9 @@ nothing else. The recipe declares one, `launcher-1`. It asks the identity provid
 posts the run to `/service/runs`; the pipeline must be armed first. This needs `curl` and `jq`:
 
 ```bash
-TOKEN=$(curl -s http://idp.localtest.me:5190/connect/token \
+TOKEN=$(curl -s http://coordinator.localtest.me:8080/connect/token \
   -d grant_type=client_credentials -d client_id=launcher-1 \
-  -d client_secret=launcher-1-trial-secret | jq -r .access_token)
+  -d client_secret=dtpipe-trial-password | jq -r .access_token)
 curl -s -X POST http://coordinator.localtest.me:8080/service/runs \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"pipelineId": "trial-totals"}'
@@ -99,7 +103,8 @@ Pointed at the recipe's coordinator, it also offers the bricks of the nodes:
 dtpipe studio ./jobs --coordinator http://coordinator.localtest.me:8080
 ```
 
-**Sign in** opens the identity provider in a new tab. The recipe registers the studio's client and
+**Sign in** opens the identity provider in a new tab (the studio shows a warning beside the
+coordinator while it is the trial one). The studio's client is registered and the recipe
 lists `admin` as the coordinator's administrator, so sign in as `admin`. **Open from library**
 writes `trial-totals` into the folder as a job file you can edit; **Publish** sends the saved job
 back, and the pipeline keeps running the version it was armed with until it is armed again. The

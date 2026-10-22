@@ -30,8 +30,26 @@ public sealed class CoordinatorServerOptions
     /// <summary>Where the library, the rights document and every plan's scratch files live.</summary>
     public required string StateDir { get; init; }
 
-    /// <summary>The issuer of every token the server accepts: an OpenID Connect provider it trusts.</summary>
+    /// <summary>
+    /// The issuer of every token the server accepts: an OpenID Connect provider it trusts. In trial mode it is the server's own
+    /// <see cref="PublicUrl"/>.
+    /// </summary>
     public required string Authority { get; init; }
+
+    /// <summary>
+    /// The password of the trial identity provider the server runs in itself (<c>Coordinator:InsecureTrialIdp:Password</c>, a secret, at
+    /// least <see cref="TrialPasswordMinLength"/> characters): every client's secret and every person's password. None when unset, and then
+    /// the server trusts the external provider <see cref="Authority"/> names. Setting both is refused, as is a trial mode with no
+    /// <see cref="PublicUrl"/>, since the issuer would not be one address.
+    /// </summary>
+    public string? TrialIdpPassword { get; init; }
+
+    public bool IsTrialIdp => TrialIdpPassword is not null;
+
+    public const int TrialPasswordMinLength = 16;
+
+    /// <summary>The studio's client of the trial identity provider, when <c>Coordinator:Studio:ClientId</c> names none.</summary>
+    public const string TrialStudioClientId = "dtpipe-studio";
 
     /// <summary>The audience a service's token must name to be accepted here.</summary>
     public required string Audience { get; init; }
@@ -122,6 +140,19 @@ public sealed class CoordinatorServerOptions
     public static CoordinatorServerOptions FromConfiguration(IConfiguration configuration)
     {
         var section = configuration.GetSection("Coordinator");
+        var trial = section["InsecureTrialIdp:Password"] is { Length: > 0 } password ? password : null;
+        var publicUrl = PublicUrlOf(section["PublicUrl"]);
+        if (trial is not null)
+        {
+            if (trial.Length < TrialPasswordMinLength)
+                throw new InvalidOperationException($"Coordinator:InsecureTrialIdp:Password must be at least {TrialPasswordMinLength} characters.");
+            if (section["Authority"] is { Length: > 0 })
+                throw new InvalidOperationException("Coordinator:InsecureTrialIdp:Password and Coordinator:Authority are both set: the trial identity provider replaces an external one, never joins it.");
+            if (publicUrl is null)
+                throw new InvalidOperationException("Coordinator:InsecureTrialIdp:Password needs Coordinator:PublicUrl: the trial identity provider's issuer is the address people reach this server at.");
+            if (section["Ui:ClientSecret"] is { Length: > 0 })
+                throw new InvalidOperationException("Coordinator:Ui:ClientSecret is set in trial mode: the pages' client is made by the trial identity provider, with a secret of its own.");
+        }
         string? PathOf(string key) => section[key] is { Length: > 0 } value ? Path.GetFullPath(value) : null;
         var store = section["Store"] is { Length: > 0 } kind
             ? Enum.TryParse<StoreKind>(kind, ignoreCase: true, out var parsed) ? parsed
@@ -133,17 +164,22 @@ public sealed class CoordinatorServerOptions
         return new CoordinatorServerOptions
         {
             StateDir = PathOf("StateDirectory") ?? Path.GetFullPath("state"),
-            Authority = (section["Authority"] ?? throw new InvalidOperationException("Coordinator:Authority is required: the issuer this server trusts.")).TrimEnd('/'),
+            Authority = trial is not null
+                ? publicUrl!.GetLeftPart(UriPartial.Authority)
+                : (section["Authority"] ?? throw new InvalidOperationException("Coordinator:Authority is required: the issuer this server trusts (or Coordinator:InsecureTrialIdp:Password, for a trial).")).TrimEnd('/'),
+            TrialIdpPassword = trial,
             Audience = section["Audience"] ?? "dtpipe-coordinator",
             UiClientId = section["Ui:ClientId"] ?? "coordinator-ui",
-            UiClientSecret = section["Ui:ClientSecret"] ?? throw new InvalidOperationException("Coordinator:Ui:ClientSecret is required: the secret of the pages' client at the provider."),
-            StudioClientId = section["Studio:ClientId"] is { Length: > 0 } studio ? studio : null,
+            UiClientSecret = trial is not null
+                ? Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32))
+                : section["Ui:ClientSecret"] ?? throw new InvalidOperationException("Coordinator:Ui:ClientSecret is required: the secret of the pages' client at the provider."),
+            StudioClientId = section["Studio:ClientId"] is { Length: > 0 } studio ? studio : trial is not null ? TrialStudioClientId : null,
             LibrarySeed = PathOf("LibrarySeed"),
             LibraryDirectory = PathOf("Library:Directory"),
             RightsSeed = PathOf("RightsSeed"),
             IdentityLabelClaims = section.GetSection("Identity:LabelClaims").Get<string[]>() ?? [],
             LabMode = section.GetValue<bool>("LabMode"),
-            PublicUrl = PublicUrlOf(section["PublicUrl"]),
+            PublicUrl = publicUrl,
             Scenarios = PathOf("Scenarios"),
             Store = store,
             Initialize = section.GetValue<bool>("Initialize"),

@@ -12,6 +12,7 @@ export const store = {
   bytes: { total: 0, activeTransfers: 0 },
   health: { status: "ok", pipelines: [] }, // whether each armed pipeline can be launched: /api/health, read again when its inputs move
   connected: false,
+  trialIdp: false, // this coordinator runs its own trial identity provider
   labMode: false, // the server's own word: the Lab view and the query panel exist only then
   me: null,       // { name, email, roles }: who is signed in, and what the server lets them do
 };
@@ -155,7 +156,7 @@ export async function start() {
   const [me, info, nodes, bricks, matrix, deployments, runs, queue] = await Promise.all([
     api("/api/me"), api("/api/info"), api("/api/nodes"), api("/api/bricks"), api("/api/flow-matrix"), api("/api/deployments"), api("/api/runs"), api("/api/runs/queue"),
   ]);
-  Object.assign(store, { me, labMode: info.labMode, nodes, bricks, matrix: matrix.groups, deployments, runs, queue });
+  Object.assign(store, { me, labMode: info.labMode, trialIdp: info.trialIdp, nodes, bricks, matrix: matrix.groups, deployments, runs, queue });
   emit("all");
   refreshHealth();
   // ?static renders once without the live stream (a headless browser waits on it forever).

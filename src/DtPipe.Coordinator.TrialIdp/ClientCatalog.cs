@@ -46,11 +46,9 @@ public sealed record ClientDefinition(
 public sealed record ClientsFile(IReadOnlyList<ClientDefinition> Clients);
 
 /// <summary>
-/// Registers the clients file with OpenIddict at start. The file is the only source: the store is in
-/// memory, so a change takes effect at the next start. The IdP says who a client or a user is, never
-/// what either may do: no client carries a group, a role or a permission beyond the protocol's.
+/// The clients file: the stand-alone provider's only source of clients, read once at start.
 /// </summary>
-public sealed class ClientCatalog(IServiceProvider services, IdpOptions options, IReadOnlyList<ClientDefinition> clients, ILogger<ClientCatalog> logger) : IHostedService
+public static class ClientsFileReader
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
@@ -81,16 +79,64 @@ public sealed class ClientCatalog(IServiceProvider services, IdpOptions options,
             : throw new InvalidOperationException($"{path}: " + string.Join(" ", errors));
     }
 
-    public async Task StartAsync(CancellationToken cancellationToken)
-    {
-        await using var scope = services.CreateAsyncScope();
-        var manager = scope.ServiceProvider.GetRequiredService<IOpenIddictApplicationManager>();
-        foreach (var client in clients)
-            await manager.CreateAsync(Describe(client, options.ExtraOrigins), cancellationToken);
-        logger.LogInformation("IdP: {Count} clients registered from {File}", clients.Count, options.ClientsFile);
-    }
+}
+
+/// <summary>Registers the clients file at start; the store is in memory, so a change takes effect at the next start.</summary>
+public sealed class ClientsFileSeed(ClientRegistrar registrar, IReadOnlyList<ClientDefinition> clients) : IHostedService
+{
+    public Task StartAsync(CancellationToken cancellationToken) => registrar.SyncAsync(clients, cancellationToken);
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+/// <summary>
+/// Keeps OpenIddict's application store equal to the clients its host wants: <see cref="SyncAsync"/> registers the ones
+/// missing and withdraws every permission of the ones no longer wanted. The store is in memory. The provider says who a client or a user is, never
+/// what either may do: no client carries a group, a role or a permission beyond the protocol's.
+/// </summary>
+public sealed class ClientRegistrar(IServiceProvider services, TrialIdpSettings settings, ILogger<ClientRegistrar> logger)
+{
+    private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly HashSet<string> _stripped = new(StringComparer.Ordinal);
+    private volatile IReadOnlyList<ClientDefinition> _current = [];
+
+    /// <summary>The clients registered now.</summary>
+    public IReadOnlyList<ClientDefinition> Current => _current;
+
+    public async Task SyncAsync(IReadOnlyList<ClientDefinition> wanted, CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            await using var scope = services.CreateAsyncScope();
+            var manager = scope.ServiceProvider.GetRequiredService<IOpenIddictApplicationManager>();
+            var known = new Dictionary<string, object>(StringComparer.Ordinal);
+            await foreach (var application in manager.ListAsync(cancellationToken: cancellationToken))
+                known[(await manager.GetClientIdAsync(application, cancellationToken))!] = application;
+
+            var ids = wanted.Select(c => c.ClientId).ToHashSet(StringComparer.Ordinal);
+            // A client no longer wanted is stripped of every permission instead of deleted: the in-memory store cannot cascade a delete
+            // to the tokens, and a client with no permission is refused at the token endpoint all the same.
+            foreach (var (id, application) in known.Where(k => !ids.Contains(k.Key) && !_stripped.Contains(k.Key)))
+            {
+                await manager.UpdateAsync(application, new OpenIddictApplicationDescriptor { ClientId = id, ClientType = ClientTypes.Public }, cancellationToken);
+                _stripped.Add(id);
+            }
+            foreach (var client in wanted)
+            {
+                if (!known.TryGetValue(client.ClientId, out var application))
+                    await manager.CreateAsync(Describe(client, settings.ExtraOrigins), cancellationToken);
+                else if (_stripped.Remove(client.ClientId))
+                    await manager.UpdateAsync(application, Describe(client, settings.ExtraOrigins), cancellationToken);
+            }
+            _current = wanted;
+            logger.LogInformation("IdP: {Count} clients registered", wanted.Count);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
 
     private static OpenIddictApplicationDescriptor Describe(ClientDefinition client, IReadOnlyList<Uri> extraOrigins)
     {

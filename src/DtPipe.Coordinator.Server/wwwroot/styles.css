@@ -70,6 +70,7 @@ input.grow { flex: 1; min-width: 200px; }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .check { display: inline-flex; gap: 4px; align-items: center; color: var(--muted); font-size: 12.5px; }
 
+.trial-banner { background: var(--bad); color: #fff; text-align: center; padding: 6px 18px; font-size: 13px; font-weight: 600; }
 .topbar {
   display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
   padding: 10px 18px; background: var(--surface); border-bottom: 1px solid var(--border);

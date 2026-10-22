@@ -15,9 +15,9 @@ public sealed class CoordinatorLinkException(string message) : Exception(message
 
 /// <summary>
 /// What the page is told of the link: the coordinator's address, whether a person is signed in, why
-/// not, and who. Never a token.
+/// not, and who; <c>TrialIdp</c> when the coordinator's metadata says its provider is its own trial one, never for production. Never a token.
 /// </summary>
-public sealed record CoordinatorStatus(string Url, string State, string? Reason, CoordinatorMe? Me, string StudioVersion, int Contract);
+public sealed record CoordinatorStatus(string Url, string State, string? Reason, CoordinatorMe? Me, string StudioVersion, int Contract, bool TrialIdp = false);
 
 /// <summary>
 /// The studio's link to one coordinator, named on the command line: the page never chooses where a
@@ -45,7 +45,7 @@ public sealed class CoordinatorLink : IDisposable
 
     private const string Scopes = "openid email profile offline_access";
 
-    private sealed record Discovery(string Issuer, string AuthorizationEndpoint, string TokenEndpoint, string ClientId);
+    private sealed record Discovery(string Issuer, string AuthorizationEndpoint, string TokenEndpoint, string ClientId, bool TrialIdp);
 
     private sealed record Pending(string State, string Verifier, string RedirectUri, DateTimeOffset Expires);
 
@@ -95,7 +95,7 @@ public sealed class CoordinatorLink : IDisposable
         lock (_lock)
         {
             var state = _tokens is not null ? SignedIn : _pending is not null && _time.GetUtcNow() < _pending.Expires ? SigningIn : SignedOut;
-            return new CoordinatorStatus(Url, state, _reason, _tokens is null ? null : _me, StudioVersion, CoordinatorApi.Contract);
+            return new CoordinatorStatus(Url, state, _reason, _tokens is null ? null : _me, StudioVersion, CoordinatorApi.Contract, _discovery?.TrialIdp ?? false);
         }
     }
 
@@ -413,7 +413,7 @@ public sealed class CoordinatorLink : IDisposable
             if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var uri) || (issuerUri.Scheme == "https" && uri.Scheme != "https"))
                 throw new CoordinatorLinkException($"The identity provider at {issuer} gives an endpoint that is no address over {issuerUri.Scheme}: '{endpoint}'.");
         }
-        var discovery = new Discovery(configuration.Issuer, configuration.AuthorizationEndpoint!, configuration.TokenEndpoint!, metadata.StudioClientId);
+        var discovery = new Discovery(configuration.Issuer, configuration.AuthorizationEndpoint!, configuration.TokenEndpoint!, metadata.StudioClientId, metadata.TrialIdp);
         lock (_lock) _discovery = discovery;
         return discovery;
     }

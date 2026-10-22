@@ -1417,7 +1417,7 @@ as described in [deploy/README.md](./deploy/README.md#backing-up-a-sqlite-coordi
 |---|---|
 | `Name` / `Description` | The name the host proposes. The coordinator names a node from its rights, not from this |
 | `CoordinatorUrl` | The coordinator's base address |
-| `Oidc__Authority` / `__ClientId` / `__ClientSecret` / `__Scope` | The client-credentials client the host authenticates as; its client id is the node's identity |
+| `Oidc__Authority` / `__ClientId` / `__ClientSecret` / `__Scope` | The client-credentials client the host authenticates as: `ClientId` is the node's `Name` and `Authority` the provider the coordinator names, unless given; the client id is the node's identity |
 | `DtPipe` | The `dtpipe` binary every fragment runs as a child process. Default: `dtpipe` on the path |
 | `StateDirectory` | Where fragment jobs are written and run from. Default: a directory under the temp directory |
 | `Policy` | `Bricks` (default: a data node runs only its own bricks) or `AnyFragment` (a runner) |

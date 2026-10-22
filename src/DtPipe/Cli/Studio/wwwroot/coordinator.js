@@ -32,12 +32,13 @@ function render() {
   if (!link) { host.hidden = true; return; }
   host.hidden = false;
   const name = new URL(link.url).host;
+  const trial = link.trialIdp ? el("strong", { class: "trial-idp", title: "This coordinator runs its own trial identity provider" }, " trial identity provider, not for production ") : "";
   if (link.state === "signed-in") {
     fill(host, el("span", { class: "dot good" }), " ", name, " · ", link.me?.email || link.me?.name || "signed in",
-      " ", el("button", { class: "small ghost", onclick: signOut, title: "Forget this studio's tokens" }, "Sign out"));
+      " ", trial, el("button", { class: "small ghost", onclick: signOut, title: "Forget this studio's tokens" }, "Sign out"));
   } else if (link.state === "signing-in") {
     fill(host, el("span", { class: "dot warn" }), " ", name, " · finish signing in in the other tab ",
-      el("button", { class: "small ghost", onclick: signIn }, "Open again"));
+      " ", trial, el("button", { class: "small ghost", onclick: signIn }, "Open again"));
   } else {
     fill(host, el("span", { class: "dot bad" }), " ", name, " · ", link.reason || "not signed in", " ",
       el("button", { class: "small", onclick: signIn }, link.reason ? "Sign in again" : "Sign in"));

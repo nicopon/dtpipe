@@ -66,7 +66,7 @@ none. One node per process, which is one replica of its node's identity; a secon
 - **The token provider returns a fresh token.** TransportR retries a stream refused with 401
   through `NodeClientOptions.AccessTokenProvider`, so `NodeAgent` binds it to
   `OidcTokenClient.GetAsync(fresh: true)`, and asks once before connecting because TransportR
-  swallows a provider that throws. The token endpoint comes from the provider's discovery document.
+  swallows a provider that throws. The The provider is `Oidc:Authority` or, left out, the one the coordinator's protected resource metadata names (never an HTTP provider for an HTTPS coordinator); the client is `Oidc:ClientId` or the node's `Name`; the token endpoint comes from the provider's discovery document.
   `[unchecked: the fresh token on retry]`
 - **A node the coordinator disconnects connects again.** SignalR's automatic reconnect does not
   cover a connection the server closes (a reconnect the coordinator asked for, an announcement it

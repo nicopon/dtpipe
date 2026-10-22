@@ -6,7 +6,8 @@ namespace DtPipe.Jobs.Coordinator;
 /// <summary>
 /// The coordinator's protected resource metadata (RFC 9728), with what a studio needs besides:
 /// the contract it speaks and the provider's client a studio signs people in with, absent when the
-/// coordinator accepts no studio. Its names are the RFC's, in snake case.
+/// coordinator accepts no studio, and whether the provider is the coordinator's own trial one (never for production). Its names are the
+/// RFC's, in snake case.
 /// </summary>
 public sealed record ResourceMetadata(
     [property: JsonPropertyName("resource")] string Resource,
@@ -14,7 +15,9 @@ public sealed record ResourceMetadata(
     [property: JsonPropertyName("bearer_methods_supported")] IReadOnlyList<string> BearerMethodsSupported,
     [property: JsonPropertyName("dtpipe_contract")] int DtpipeContract,
     [property: JsonPropertyName("dtpipe_studio_client_id"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    string? StudioClientId = null);
+    string? StudioClientId = null,
+    [property: JsonPropertyName("dtpipe_trial_idp"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    bool TrialIdp = false);
 
 /// <summary>Who a signed-in person is, and the roles the coordinator's configuration gives them.</summary>
 public sealed record CoordinatorMe(string? Name, string? Email, IReadOnlyList<string> Roles);
