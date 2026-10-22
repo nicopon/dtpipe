@@ -301,4 +301,24 @@ grep -q '^people:' named-producer.yaml || fail "the producer half lost the branc
 pass "a single branch named 'people' is sampled and cut under its name"
 
 echo ""
+echo "--- Case 17: a cursor placed on the producer advances before the consumer has written ---"
+# `split` puts cursor and state on the producing half, whose writer is the link: the state is saved
+# when the link closes, whatever the consumer does next. A consumer that cannot write leaves the
+# cursor advanced past rows no target received (the consumer writes under a regular file, which
+# fails for any user). This case states what is, so that a change of placement flips it and is seen.
+printf 'id,name\n1,a\n2,b\n3,c\n' > cur.csv
+"$DTPIPE" -i csv:cur.csv --compute "n2:row.name+'x'" --cursor id --state cur-state.json \
+          -o csv:cur-out.csv --export-job cur.yaml > /dev/null 2>&1 || fail "could not export the cursor job"
+"$DTPIPE" split cur.yaml --at 1 --out cur --acknowledge > /dev/null 2>&1 || fail "could not cut the cursor job"
+grep -q 'cursor: id' cur-producer.yaml || fail "the cursor is not on the producing half"
+grep -q 'state: cur-state.json' cur-producer.yaml || fail "the state is not on the producing half"
+rm -f cur-state.json
+sed 's#csv:cur-out.csv#csv:cur.csv/out.csv#' cur-consumer.yaml > cur-bad-consumer.yaml
+"$DTPIPE" --job cur-producer.yaml 2>/dev/null | "$DTPIPE" --job cur-bad-consumer.yaml > /dev/null 2>&1 && fail "the consumer was meant to fail"
+[ -f cur-out.csv ] && fail "the failing consumer wrote"
+[ -f cur-state.json ] || fail "the producing half no longer advances the cursor when the link closes"
+grep -q '"value": "3"' cur-state.json || fail "the cursor did not reach the highest value the producer sent"
+pass "the cursor moved to 3 with nothing written: the placement is a defect for any consumer that fails"
+
+echo ""
 echo -e "${GREEN}All split checks passed.${NC}"
