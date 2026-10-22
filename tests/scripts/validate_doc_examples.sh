@@ -363,6 +363,47 @@ BO,9
 EOF
 
 # ----------------------------------------
+# guides/incremental.md in a distributed pipeline: the fragment the node runs, by hand
+# ----------------------------------------
+echo "--- guides/incremental.md (distributed) ---"
+
+# The page runs the two bricks of a fragment as one job. A node adds the state file and the
+# coordinator hands the next run its start as DTPIPE_CURSOR_OVERRIDE.
+mkdir -p distributed_cursor && cd distributed_cursor
+"$DTPIPE" -i generate:5 --rename "GenerateIndex:OrderId" -o sqlite:shop.db --table orders --no-stats > /dev/null 2>&1
+cat > fragment.yaml <<'EOF'
+orders:
+  input: sqlite:shop.db
+  provider-options:
+    sqlite:
+      query: SELECT * FROM orders WHERE OrderId > ${{cursor://|-1}} ORDER BY OrderId
+load:
+  from: orders
+  output: sqlite:warehouse.db
+  cursor: OrderId
+  state: orders.cursor.json
+  provider-options:
+    sqlite:
+      table: orders_copy
+EOF
+"$DTPIPE" --job fragment.yaml --no-stats > /dev/null 2>&1
+"$DTPIPE" -i sqlite:warehouse.db --query "SELECT COUNT(*) AS Rows FROM orders_copy" -o count.csv --no-stats > /dev/null 2>&1
+expect_file "the first run reads every order" count.csv <<'EOF'
+Rows
+5
+EOF
+if grep -q '"value": "4"' orders.cursor.json; then pass "the child saves the highest OrderId it wrote"; else bad "the child saves the highest OrderId it wrote"; fi
+"$DTPIPE" -i generate:2 --rename "GenerateIndex:OrderId" --compute "OrderId:row.OrderId+5" -o sqlite:shop.db --table orders --no-stats > /dev/null 2>&1
+DTPIPE_CURSOR_OVERRIDE=4 "$DTPIPE" --job fragment.yaml --no-stats > /dev/null 2>&1
+"$DTPIPE" -i sqlite:warehouse.db --query "SELECT COUNT(*) AS Rows, MAX(OrderId) AS Last FROM orders_copy" \
+  -o count.csv --no-stats > /dev/null 2>&1
+expect_file "the next run reads only the two new orders" count.csv <<'EOF'
+Rows,Last
+7,6
+EOF
+cd ..
+
+# ----------------------------------------
 # guides/secrets.md — what a routing failure prints
 # ----------------------------------------
 

@@ -371,7 +371,7 @@ nodes_mode() {
 smoke_passes() {
     local switch="$1" url="$2" state="$3"; shift 3
     local pass="${1:-}"
-    case "$pass" in lab|library|rights|faults|bricks|sandbox|replicas) shift ;; *) pass="" ;; esac
+    case "$pass" in lab|library|rights|faults|bricks|cursor|sandbox|replicas) shift ;; *) pass="" ;; esac
     local code=0
     run_pass() {
         local mode="$1" name="$2"; shift 2
@@ -382,7 +382,7 @@ smoke_passes() {
         run_pass sandbox lab "$@"
         run_pass sandbox sandbox
         run_pass strict library "$@"
-        for name in rights faults bricks; do run_pass strict "$name"; done
+        for name in rights faults bricks cursor; do run_pass strict "$name"; done
     elif [[ "$pass" == lab || "$pass" == sandbox ]]; then
         run_pass sandbox "$pass" "$@"
     else

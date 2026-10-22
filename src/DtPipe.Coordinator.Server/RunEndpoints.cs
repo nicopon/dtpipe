@@ -1,10 +1,18 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
+using DtPipe.Coordinator.Contracts;
+using DtPipe.Jobs.Coordinator;
 
 namespace DtPipe.Coordinator.Server;
 
 /// <summary>The runs and the deployments: what is in flight, the queue, a run asked for or cancelled, and the stream the pages watch.</summary>
-internal static class RunEndpoints
+internal static partial class RunEndpoints
 {
+    [GeneratedRegex(@"^[A-Za-z][A-Za-z0-9_-]*\z")]
+    private static partial Regex AliasPattern();
+
+    private static CursorView ViewOf(CursorRecord c) => new(c.Alias, c.Column, c.Type, c.Value, c.RunId, c.UpdatedAt, c.SetBy);
+
     public static void MapRuns(this RouteGroupBuilder api, RouteGroupBuilder designer)
     {
         // The Lab view's snapshot: the plan deployed last and its own run, whatever else is in flight.
@@ -15,6 +23,21 @@ internal static class RunEndpoints
         });
         designer.MapPost("/runs", (RunRequest? request, DeploymentManager deployments, HttpContext http) =>
             deployments.Enqueue(request?.PipelineId, TrustedIdp.CallerOf(http)));
+        // The cursors of a pipeline: whoever sees the pipeline sees its values; the right to launch it resets or sets one.
+        api.MapGet(CoordinatorApi.CursorsRoute, (string id, DeploymentManager deployments) =>
+            CoordinatorApi.IsPipelineId(id)
+                ? Results.Ok(deployments.Cursors.Of(id).Select(ViewOf).ToList())
+                : Results.BadRequest(new { error = $"'{id}' is no pipeline id." }));
+        designer.MapDelete(CoordinatorApi.CursorRoute, (string id, string alias, DeploymentManager deployments) =>
+            !CoordinatorApi.IsPipelineId(id) || !AliasPattern().IsMatch(alias)
+                ? Results.BadRequest(new { error = "Name a pipeline and a branch." })
+                : deployments.ResetCursor(id, alias) ? Results.NoContent() : Results.NotFound(new { error = $"'{id}' keeps no cursor for '{alias}'." }));
+        designer.MapPut(CoordinatorApi.CursorRoute, (string id, string alias, CursorSet? request, DeploymentManager deployments, HttpContext http) =>
+        {
+            if (!CoordinatorApi.IsPipelineId(id) || !AliasPattern().IsMatch(alias) || string.IsNullOrEmpty(request?.Value))
+                return Results.BadRequest(new { error = "Name a pipeline, a branch and a value: {\"value\": \"…\"}." });
+            return Results.Ok(ViewOf(deployments.SetCursor(id, alias, request.Type, request.Value, TrustedIdp.CallerOf(http) ?? "")));
+        });
         api.MapGet("/runs", (string? pipeline, RunJournal journal) => journal.List(pipeline));
         api.MapGet("/runs/queue", (DeploymentManager deployments) => deployments.Queue);
         designer.MapPost("/runs/cancel", (CancelRequest? request, DeploymentManager deployments) =>

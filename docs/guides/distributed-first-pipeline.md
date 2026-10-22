@@ -69,9 +69,9 @@ In **Access**, press **Add an identity** twice:
 | `shop` | `data` |
 
 A **group** is a label; the **flow matrix** says which group may send rows to which. In the matrix
-below the identities, tick `runner` → `data` and `data` → `runner`, and press **Apply**. The pipeline
-needs both: the node sends orders to the runner, and the runner sends the counts back. A change
-applies to the next run with no restart.
+below the identities, tick `runner` → `data` and `data` → `runner`, and press **Apply**. The
+pipeline needs both: the node sends orders to the runner, and the runner sends the counts back. A
+change applies to the next run with no restart.
 
 The runner started with the coordinator and was refused until now. It retries, and **runner-1**
 shows as connected within seconds.
@@ -156,6 +156,9 @@ BO,9
   pins the new version.
 - **The check for a secret in a brick is best effort.** It reads the keys it knows as credentials
   and nothing more; keep a password out of the file with a `${{NAME}}` or `keyring://` reference.
+- **A cursor is the coordinator's too.** An incremental load keeps its position there, not in a
+  file on the node; [Incremental loading](incremental.md#in-a-distributed-pipeline) says what is
+  served and what is not.
 - **The rights you declared are the coordinator's.** They are kept in its volume and survive a
   restart; `down -v` removes them.
 

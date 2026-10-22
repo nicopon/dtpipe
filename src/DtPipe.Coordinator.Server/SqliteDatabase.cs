@@ -13,11 +13,12 @@ public sealed class SqliteDatabase : IDisposable
 {
     public const string FileName = "coordinator.db";
 
-    private const int Version = 1;
+    private const int Version = 2;
 
     private const string Schema = """
         CREATE TABLE IF NOT EXISTS rights (id INTEGER PRIMARY KEY CHECK (id = 1), doc TEXT NOT NULL, version INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS deployments (pipeline TEXT PRIMARY KEY, doc TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS cursors (pipeline TEXT NOT NULL, alias TEXT NOT NULL, doc TEXT NOT NULL, PRIMARY KEY (pipeline, alias));
         CREATE TABLE IF NOT EXISTS ignored_hosts (subject TEXT PRIMARY KEY, until_ms INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS session_keys (id INTEGER PRIMARY KEY AUTOINCREMENT, xml TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, doc TEXT NOT NULL, is_over INTEGER NOT NULL, at_ms INTEGER NOT NULL);

@@ -278,6 +278,8 @@ internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> dec
         {
             var branch = BranchOf(brick) ?? throw new InvalidOperationException($"The brick '{brick.Id}' declares no branch.");
             JobYaml.Set(branch, endpoint, BrickRules.ArrowEndpoint);
+            // A sink's cursor needs a file to be a valid job; the check writes nothing, and the file goes with the directory.
+            if (JobYaml.Has(branch, BrickRules.CursorKey)) JobYaml.Set(branch, "state", Path.Combine(dir, "cursor.json"));
             var saved = Path.Combine(dir, "saved.contract.json");
             if (saveContract) JobYaml.Set(branch, "contract-save", saved);
             var job = Path.Combine(dir, "job.yaml");

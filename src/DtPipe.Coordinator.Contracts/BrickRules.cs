@@ -34,12 +34,16 @@ public static class BrickRules
 
     // What a branch that only reads or writes may carry: where it reads and writes, and the engine
     // settings that bound how many rows or bytes move (dtpipe split writes them on every branch). A key
-    // that computes (transformers, ref) or touches the node's disk (checkpoint, cursor, state, a log or
-    // metrics path) is not on the list, so a key dtpipe adds later is refused until someone decides.
+    // that computes (transformers, ref) or touches the node's disk (checkpoint, state, a log or metrics path)
+    // is not on the list, so a key dtpipe adds later is refused until someone decides. The one exception
+    // is a sink's cursor column (CursorKey): the file that keeps it is the node's own, never the brick's.
     private static readonly HashSet<string> IoKeys = new(
         ["input", "output", "from", "provider-options", "batch-size", "max-batch-bytes", "limit", "sampling-rate", "sampling-seed"],
         StringComparer.Ordinal);
     private static readonly YamlScalarNode FromKey = new("from");
+
+    /// <summary>The column a sink brick tracks the highest value of; the node adds the file that keeps it.</summary>
+    public const string CursorKey = "cursor";
     private static readonly YamlScalarNode OutputKey = new("output");
 
     /// <summary>The form a brick has as its node declares it (its branch as JSON text).</summary>
@@ -83,7 +87,11 @@ public static class BrickRules
     {
         var keys = branch.Children.Keys.OfType<YamlScalarNode>().Select(k => k.Value ?? "").ToHashSet(StringComparer.Ordinal);
 
-        var extra = keys.Where(k => !IoKeys.Contains(k)).Order(StringComparer.Ordinal).ToList();
+        if (keys.Contains(CursorKey) && keys.Contains("input"))
+            return $"'{alias}' reads a source and sets a cursor: a cursor is the column a sink tracks, and a source is filtered by ${{{{cursor://|default}}}}.";
+        if (CursorTokenRefusal(alias, branch) is { } token) return token;
+
+        var extra = keys.Where(k => !IoKeys.Contains(k) && k != CursorKey).Order(StringComparer.Ordinal).ToList();
         if (extra.Count > 0) return $"'{alias}' does more than read or write ({string.Join(", ", extra)}): {RunnerHint}.";
 
         var processor = JobYaml.Mapping(branch, "provider-options")?.Children.Keys.OfType<YamlScalarNode>()
@@ -104,6 +112,24 @@ public static class BrickRules
         if (bricks.Any(b => b.Kind == form.Kind && b.Canonical == form.Canonical)) return null;
 
         return $"'{alias}' is not one of this node's bricks as its owner declared them, nor a bare arrow edge.";
+    }
+
+    /// <summary>
+    /// Why a branch's <c>${{cursor://…}}</c> is refused, or <c>null</c>: the value of a cursor reaches the fragment from the coordinator, so
+    /// the token names no file (<c>${{cursor://|default}}</c>) and the child reads none.
+    /// </summary>
+    public static string? CursorTokenRefusal(string alias, YamlMappingNode branch)
+    {
+        const string scheme = "cursor://";
+        foreach (var token in VariableTokens.Of(JobYaml.Serialize(new YamlMappingNode { { alias, branch } })))
+        {
+            if (!token.Expression.StartsWith(scheme, StringComparison.OrdinalIgnoreCase)) continue;
+            var body = token.Expression[scheme.Length..];
+            var path = body.Contains('|') ? body[..body.IndexOf('|')] : body;
+            if (path.Trim().Length > 0)
+                return $"'{alias}' reads the cursor file '{path.Trim()}': the coordinator gives a fragment its cursor, so write ${{{{cursor://|default}}}}.";
+        }
+        return null;
     }
 
     /// <summary>

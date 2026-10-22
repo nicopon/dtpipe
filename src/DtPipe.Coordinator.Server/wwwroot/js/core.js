@@ -192,6 +192,15 @@ export async function start() {
   };
 }
 
+/** What became of the cursors a run reported: the value each kept, or why one did not advance. */
+export function cursorsOf(run) {
+  if (!run.cursors?.length) return "";
+  const rows = run.cursors.map((c) => c.kept
+    ? `<li>cursor of <b>${esc(c.alias)}</b> kept at <code>${esc(c.value)}</code></li>`
+    : `<li class="mismatch">${esc(c.reason)}</li>`).join("");
+  return `<ul class="msgs">${rows}</ul>`;
+}
+
 // The plan a run ran, as the coordinator journaled it when the run started: the runner it chose, each fragment at its version,
 // and each binding with the brick version it met and what its mode found.
 export function ranPlan(p) {

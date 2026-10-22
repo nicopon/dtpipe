@@ -49,6 +49,7 @@ builder.Services.AddSingleton<NodeInventory>();
 builder.Services.AddSingleton<EnrollmentQueue>();
 builder.Services.AddSingleton<NodeRequests>();
 builder.Services.AddSingleton<BrickCatalog>();
+builder.Services.AddSingleton<CursorKeeper>();
 builder.Services.AddSingleton<PipelineCatalog>();
 builder.Services.AddSingleton<PlanBuilder>();
 builder.Services.AddSingleton<AutoPlacer>();

@@ -206,7 +206,7 @@ internal sealed class RunSession
         lock (_launched) _launched.Add(fragment.Name);
         try
         {
-            var result = await _services.Link.LaunchAsync(replica, new LaunchRequest(Spec.RunId, fragment.Spec, token), bound);
+            var result = await _services.Link.LaunchAsync(replica, new LaunchRequest(Spec.RunId, fragment.Spec, token, fragment.Cursor), bound);
             return result.Started ? new LaunchAttempt(fragment.Name, LaunchKind.Started)
                 : new LaunchAttempt(fragment.Name, LaunchKind.Refused, result.Refusal ?? "the replica gave no reason.");
         }

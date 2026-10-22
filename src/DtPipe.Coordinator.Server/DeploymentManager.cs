@@ -31,22 +31,33 @@ public sealed class DeploymentManager
     private readonly LabFaults _lab;
     private readonly LaunchPlanner _planner;
 
+    /// <summary>The kept cursors of the library's pipelines.</summary>
+    public CursorKeeper Cursors { get; }
+
     public DeploymentManager(
         NodeInventory inventory, INodeLink link, IRunOrchestrator orchestrator, ReplicaAdmission admission,
         IFlowControlService flowControl, RightsStore rights, EventBus bus, RunJournal journal,
-        AutoPlacer placer, BrickCatalog bricks, BindingVerifier verifier, IJobSource jobs, IDeploymentStore store, ILogger<DeploymentManager> logger)
+        AutoPlacer placer, BrickCatalog bricks, BindingVerifier verifier, IJobSource jobs, IDeploymentStore store, ILogger<DeploymentManager> logger,
+        CursorKeeper? cursors = null)
     {
         var ledger = new DeploymentLedger();
         var planner = new LaunchPlanner(placer, bricks, inventory, admission, rights);
         _planner = planner;
         _deployments = new DeploymentService(
             ledger, inventory, link, admission, new PlanRegistry(flowControl), planner, verifier, new DeploymentStore(store, logger), jobs, bus, logger);
-        _runs = new RunQueue(ledger, _deployments, planner, inventory, orchestrator, bus, journal, logger);
+        Cursors = cursors ?? new CursorKeeper(new MemoryCursorStore(), bricks, Microsoft.Extensions.Logging.Abstractions.NullLogger<CursorKeeper>.Instance);
+        _runs = new RunQueue(ledger, _deployments, planner, inventory, orchestrator, bus, journal, Cursors, logger);
         _lab = new LabFaults(ledger, inventory, link);
     }
 
     /// <summary>The plan deployed last: what the Lab view shows and what a run naming no pipeline runs.</summary>
     public DistributionPlan? ActivePlan => _deployments.ActivePlan;
+
+    /// <summary>Forgets a kept cursor; false when there was none. Refused while a run of the pipeline is queued or in flight.</summary>
+    public bool ResetCursor(string pipelineId, string alias) => _runs.ResetCursor(pipelineId, alias);
+
+    /// <summary>Sets a cursor's value. Refused while a run of the pipeline is queued or in flight.</summary>
+    public CursorRecord SetCursor(string pipelineId, string alias, string? type, string value, string by) => _runs.SetCursor(pipelineId, alias, type, value, by);
 
     /// <summary>The oldest run in flight, else the next waiting, else the last finished: of one pipeline, or of any.</summary>
     public RunView? CurrentRun(string? pipelineId = null) => _runs.CurrentRun(pipelineId);

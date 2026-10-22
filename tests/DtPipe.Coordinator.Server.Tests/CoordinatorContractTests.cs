@@ -32,7 +32,7 @@ public sealed class CoordinatorContractTests
     public void Metadata_Uses_The_Rfc_Names_And_Omits_An_Absent_Client()
     {
         Assert.Equal(
-            """{"resource":"http://c.test","authorization_servers":["http://idp.test/"],"bearer_methods_supported":["header"],"dtpipe_contract":8,"dtpipe_studio_client_id":"studio"}""",
+            """{"resource":"http://c.test","authorization_servers":["http://idp.test/"],"bearer_methods_supported":["header"],"dtpipe_contract":9,"dtpipe_studio_client_id":"studio"}""",
             Write(new ResourceMetadata("http://c.test", ["http://idp.test/"], ["header"], CoordinatorApi.Contract, "studio")));
         Assert.DoesNotContain("dtpipe_studio_client_id", Write(new ResourceMetadata("http://c.test", ["http://idp.test/"], ["header"], 1)));
     }

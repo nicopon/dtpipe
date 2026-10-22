@@ -81,6 +81,22 @@
           }
         }
       }
+    },
+    {
+      "id": "orders-incremental",
+      "kind": "sink",
+      "title": "orders_incremental, upserted on order_id, cursor on order_id",
+      "branch": {
+        "output": "duck:${{LAB_WAREHOUSE_DB}}",
+        "cursor": "order_id",
+        "provider-options": {
+          "duck-writer": {
+            "table": "orders_incremental",
+            "strategy": "Upsert",
+            "key": "order_id"
+          }
+        }
+      }
     }
   ]
 }

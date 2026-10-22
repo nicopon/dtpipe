@@ -28,13 +28,14 @@ internal static class TestDeployments
     public static DeploymentManager Create(
         NodeInventory inventory, INodeLink link, IRunOrchestrator runs, ReplicaAdmission admission, IFlowControlService flow,
         RightsStore rights, EventBus bus, RunJournal journal, CoordinatorServerOptions options, IJobSource? jobs = null,
-        Func<BrickCatalog, NodeRequests, BindingVerifier>? verifier = null, IDeploymentStore? store = null)
+        Func<BrickCatalog, NodeRequests, BindingVerifier>? verifier = null, IDeploymentStore? store = null, ICursorStore? cursors = null)
     {
         var bricks = new BrickCatalog(inventory);
         var requests = new NodeRequests(inventory, new NoHub());
         var planner = new PlanBuilder(inventory, bricks, new PlanRegistry(flow), rights);
         return new DeploymentManager(
             inventory, link, runs, admission, flow, rights, bus, journal, new AutoPlacer(bricks, inventory, planner, rights), bricks,
-            verifier?.Invoke(bricks, requests) ?? new BindingVerifier(bricks, requests), jobs ?? new FakeJobs(), store ?? MemoryDeploymentStore.At(options.StateDir), NullLogger<DeploymentManager>.Instance);
+            verifier?.Invoke(bricks, requests) ?? new BindingVerifier(bricks, requests), jobs ?? new FakeJobs(), store ?? MemoryDeploymentStore.At(options.StateDir), NullLogger<DeploymentManager>.Instance,
+            new CursorKeeper(cursors ?? new MemoryCursorStore(), bricks, NullLogger<CursorKeeper>.Instance));
     }
 }

@@ -201,6 +201,19 @@ public sealed class SqliteStoreTests : IDisposable
     }
 
     [Fact]
+    public void The_Cursors_Are_Kept_Per_Pipeline_And_Branch_Replaced_And_Deleted_Harmlessly()
+    {
+        var store = new SqliteCursorStore(Start());
+        store.Save("p", "snk", "one");
+        store.Save("q", "snk", "other");
+        store.Save("p", "snk", "two");
+        store.Delete("q", "snk");
+        store.Delete("q", "snk");
+
+        Assert.Equal([new StoredCursor("p", "snk", "two")], new SqliteCursorStore(Start()).Load());
+    }
+
+    [Fact]
     public void The_Armed_Deployments_Are_Kept_Replaced_And_Deleted_Harmlessly()
     {
         var store = new SqliteDeploymentStore(Start());

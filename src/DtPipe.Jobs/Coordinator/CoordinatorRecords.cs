@@ -118,3 +118,13 @@ public sealed record LibraryItem(string Id, string? Title, string? Description, 
 
 /// <summary>A pipeline's job as the library holds it, at <see cref="Commit"/>, the version a later <c>If-Match</c> names.</summary>
 public sealed record LibraryJob(string Id, string Yaml, string? Commit);
+
+/// <summary>
+/// A kept cursor of a library pipeline, as the pages read it: the highest value the sink branch <see cref="Alias"/> tracked on
+/// <see cref="Column"/> in the last run that succeeded as a whole, kept by <see cref="RunId"/> or set by <see cref="SetBy"/>. The
+/// next run of the pipeline starts its source from <see cref="Value"/>.
+/// </summary>
+public sealed record CursorView(string Alias, string Column, string Type, string Value, string? RunId, DateTimeOffset UpdatedAt, string? SetBy);
+
+/// <summary>Sets the value of a cursor; <see cref="Type"/> may be left out for a cursor that exists.</summary>
+public sealed record CursorSet(string Value, string? Type = null);

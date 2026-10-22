@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """End-to-end check of the lab: every pipeline, distributed, against its monolithic witness.
 
-Six passes by default and a seventh, named. The Lab view's: each pipelines/*.yaml with its catalog layout, deployed and run one
+Seven passes by default and two more, named. The Lab view's: each pipelines/*.yaml with its catalog layout, deployed and run one
 after the other. The library's: each library pipeline planned automatically, then all of them deployed at once and their runs queued together, as the page does: runs
 that share a data node must never be in flight together.
 The rights': the embedded IDP, people's sessions and the studio's bearer tokens, the flow matrix refusing a plan and then, edited under a deployed
@@ -14,6 +14,9 @@ The bricks': on strict nodes, a fragment whose branch is not a brick the plan na
 leaves nothing deployed; the same wiring built from the bricks by id deploys, relays included. The studio's routes give
 the catalog, what a job's branches are and a brick's Arrow sample. A library job names its bricks by reference, and the
 witness runs it with the text its nodes declare (tools/lab_bricks.py).
+The cursor's: an incremental pipeline (a source brick that filters with `${{cursor://|0}}`, a sink brick that follows `order_id`) run
+four times: the second run reads only the orders added since; a launch beside a run is refused by name; a run that fails advances nothing;
+a reset starts again from the default. The coordinator keeps the cursor, read through /api/library/{id}/cursors.
 The sandbox': on sandbox nodes any reader or writer is accepted, but a join or a processor on a data
 node is refused all the same: a data node only reads and writes. Runs on disjoint data nodes are in
 flight together, the runner they share notwithstanding.
@@ -32,7 +35,7 @@ the first one, and when none is left the run is refused, until the pipeline is d
 The restart's: the stack's coordinator ended and started again (`lab.sh stack restart-check [restore]`, which gives the command in
 LAB_COORDINATOR_RESTART), played only when named: what the coordinator kept comes back as it was, on whichever store it runs: a rights
 edit, an armed pipeline, a journaled run, the ids that follow, and a session cookie that is not signed in again.
-Usage: smoke.py <lab-url> <dtpipe> <state-dir> [lab|library|rights|faults|bricks|sandbox|replicas|restart] [pipeline-id-substring ...]
+Usage: smoke.py <lab-url> <dtpipe> <state-dir> [lab|library|rights|faults|bricks|cursor|sandbox|replicas|restart] [pipeline-id-substring ...]
 A leading pass name runs that pass alone.
 Against the compose stack (`lab.sh stack smoke`, LAB_TARGET=stack) the state directory is `.stack/`: the
 witness reads the databases the nodes seeded there, the library is the coordinator's own directory, its
@@ -43,7 +46,7 @@ import base64, csv, glob, io, itertools, json, os, re, signal, subprocess, sys, 
 from datetime import datetime
 
 URL, DTPIPE, STATE = sys.argv[1].rstrip("/"), sys.argv[2], sys.argv[3]
-PASSES = {"lab", "library", "rights", "faults", "bricks", "sandbox", "replicas", "restart"}
+PASSES = {"lab", "library", "rights", "faults", "bricks", "cursor", "sandbox", "replicas", "restart"}
 ONLY = sys.argv[4] if len(sys.argv) > 4 and sys.argv[4] in PASSES else None
 SELECTED = sys.argv[5:] if ONLY else sys.argv[4:]
 RUN_TIMEOUT = 180
@@ -1255,6 +1258,172 @@ def bricks_pass():
     return failures[0]
 
 
+CURSOR_PIPELINE = """# Orders, loaded incrementally
+# A source brick filtered by the pipeline's cursor, a runner step, and a sink brick that follows order_id.
+src:
+  input: brick:node-2/orders-incremental
+step:
+  from: src
+  provider-options:
+    sql:
+      query: SELECT * FROM src
+load:
+  from: step
+  output: brick:node-4/orders-incremental
+"""
+
+
+def cursor_pass():
+    """The cursor of an incremental pipeline is the coordinator's: read when a run starts, kept when the whole run has
+    succeeded. Four runs of one pipeline, with orders added to the source between them."""
+    failures = [0]
+    check = checker("cursor", failures)
+    pid = "smoke-cursor"
+    databases = seeded_databases()
+    sales, warehouse = databases["LAB_SALES_DB"], databases["LAB_WAREHOUSE_DB"]
+    token = studio_tokens(URL, "labdesigner")["access_token"]
+    state = {}
+
+    def sink_rows():
+        return int(query(f"duck:{warehouse}", "SELECT COUNT(*) FROM orders_incremental")[1][0])
+
+    def source_max():
+        return int(query(f"duck:{sales}", "SELECT MAX(order_id) FROM orders")[1][0])
+
+    def add_orders(count):
+        first = source_max() + 1
+        out = subprocess.run(
+            [DTPIPE, "-i", f"generate:{count}", "--alias", "g", "--from", "g", "--sql",
+             f"SELECT {first} + GenerateIndex AS order_id, 1 AS customer_id, 1 AS product_id, 1 AS quantity, "
+             f"DATE '2025-01-01' AS order_date, 'paid' AS status FROM g",
+             "-o", f"duck:{sales}", "--table", "orders", "--no-stats"], capture_output=True, text=True)
+        if out.returncode != 0:
+            raise RuntimeError(f"could not add orders: {out.stderr.strip().splitlines()[-1:]}")
+
+    def cursor_of():
+        found = [c for c in call(f"/api/library/{pid}/cursors") if c["alias"] == "load"]
+        return found[0] if found else None
+
+    def run_to_end():
+        run = call("/api/runs", {"pipelineId": pid})
+        return until(lambda: _finished(run["runId"]), RUN_TIMEOUT, f"{run['runId']} to finish")
+
+    def crossed(final):
+        counts = [e["received"] for e in final["result"]["edgeCounts"] if e["consumerAlias"] == "step"]
+        return counts[0] if counts else None
+
+    def armed():
+        status, body, _ = bearer(token, f"/api/library/{pid}", {"yaml": CURSOR_PIPELINE, "message": "smoke: cursor"}, "PUT")
+        if status != 200:
+            raise RuntimeError(f"saving the pipeline: HTTP {status} {body[:300]!r}")
+        call(f"/api/library/{pid}/deploy", {})
+        return "the incremental pipeline is saved, checked and armed"
+
+    def first_run():
+        everything = int(query(f"duck:{sales}", "SELECT COUNT(*) FROM orders")[1][0])
+        final = run_to_end()
+        if final["state"] != "succeeded":
+            raise RuntimeError(f"{final['state']}: {final.get('refusal') or final.get('description')}")
+        kept = cursor_of()
+        if kept is None or int(kept["value"]) != source_max() or kept["type"] != "integer":
+            raise RuntimeError(f"the cursor after the first run is {kept}, the source's highest id is {source_max()}")
+        if sink_rows() != everything or crossed(final) != everything:
+            raise RuntimeError(f"{everything} orders in the source, {sink_rows()} in the sink, {crossed(final)} crossed")
+        state["kept"] = int(kept["value"])
+        return f"{everything:,} orders read from the default, the coordinator kept order_id {kept['value']}"
+
+    def second_run():
+        before = sink_rows()
+        add_orders(3)
+        final = run_to_end()
+        if final["state"] != "succeeded":
+            raise RuntimeError(f"{final['state']}: {final.get('refusal') or final.get('description')}")
+        if crossed(final) != 3 or sink_rows() != before + 3:
+            raise RuntimeError(f"3 orders were added: {crossed(final)} crossed, the sink holds {sink_rows()} after {before}")
+        kept = cursor_of()
+        if int(kept["value"]) != source_max() or int(kept["value"]) <= state["kept"]:
+            raise RuntimeError(f"the cursor is {kept['value']}, the source's highest id is {source_max()}")
+        state["kept"] = int(kept["value"])
+        outcome = (final.get("cursors") or [{}])[0]
+        if not outcome.get("kept"):
+            raise RuntimeError(f"the run does not say its cursor was kept: {final.get('cursors')}")
+        return f"only the 3 new orders crossed; the cursor moved to {kept['value']} and the run says so"
+
+    def launch_beside_a_run():
+        add_orders(1)
+        run = call("/api/runs", {"pipelineId": pid})
+        try:
+            call("/api/runs", {"pipelineId": pid})
+        except RuntimeError as e:
+            if "409" not in str(e) or run["runId"] not in str(e) or "advances its cursor" not in str(e):
+                raise RuntimeError(f"refused, but not by name: {e}") from None
+            refused = str(e)
+        else:
+            raise RuntimeError("a second launch was accepted beside a run")
+        final = until(lambda: _finished(run["runId"]), RUN_TIMEOUT, f"{run['runId']} to finish")
+        if final["state"] != "succeeded" or int(cursor_of()["value"]) != source_max():
+            raise RuntimeError(f"the run beside which the launch was refused: {final['state']}, cursor {cursor_of()}")
+        state["kept"] = int(cursor_of()["value"])
+        return "refused with the run's id and not queued: " + refused.split(":", 1)[-1].strip()[:90]
+
+    def duck_run(sql):
+        out = subprocess.run([DTPIPE, "-i", f"duck:{warehouse}", "--duck-init", sql, "--query", "SELECT 1 AS x", "-o", "csv:-", "--no-stats"],
+                             capture_output=True, text=True)
+        if out.returncode != 0:
+            raise RuntimeError(f"{sql}: {out.stderr.strip().splitlines()[-1:]}")
+
+    def failed_run_advances_nothing():
+        # The sink's table is swapped for one whose key is text, so the writer refuses what it is sent: a failure that does not
+        # depend on timing and leaves the cursor's own value alone.
+        before = cursor_of()["value"]
+        add_orders(2)
+        duck_run("DROP TABLE orders_incremental; CREATE TABLE orders_incremental (order_id VARCHAR PRIMARY KEY)")
+        try:
+            final = run_to_end()
+            kept = cursor_of()
+        finally:
+            duck_run("DROP TABLE orders_incremental")
+        if final["state"] == "succeeded":
+            raise RuntimeError("the run succeeded into a table that cannot take its rows")
+        if kept["value"] != before or final.get("cursors"):
+            raise RuntimeError(f"a failed run changed the cursor: {kept['value']!r} after {before!r}, {final.get('cursors')}")
+        return f"the run {final['state']}; the cursor stayed at {before}"
+
+    def reset_starts_over():
+        everything = int(query(f"duck:{sales}", "SELECT COUNT(*) FROM orders")[1][0])
+        call(f"/api/library/{pid}/cursors/load", None, "DELETE")
+        if cursor_of() is not None:
+            raise RuntimeError("the cursor is still there after the reset")
+        final = run_to_end()
+        if final["state"] != "succeeded" or crossed(final) != everything or sink_rows() != everything:
+            raise RuntimeError(f"{final['state']}: {crossed(final)} crossed of {everything}, the sink holds {sink_rows()}")
+        if int(cursor_of()["value"]) != source_max():
+            raise RuntimeError(f"the cursor is {cursor_of()['value']}, the source's highest id is {source_max()}")
+        return f"read from the default again ({everything:,} orders, the sink upserts), cursor {cursor_of()['value']}"
+
+    try:
+        check("save and arm", armed)
+        if failures[0] == 0:
+            check("first run", first_run)
+            check("second run", second_run)
+            check("a launch beside a run", launch_beside_a_run)
+            check("a run that fails", failed_run_advances_nothing)
+            check("a reset", reset_starts_over)
+    finally:
+        try:
+            undeploy(pid)
+            try:
+                call(f"/api/library/{pid}/cursors/load", None, "DELETE")
+            except ApiError as e:
+                if e.status != 404:
+                    raise
+            call(f"/api/library/{pid}", None, "DELETE")
+        except Exception as e:
+            failures[0] += 1
+            print(f"FAIL  cursor   {'clean-up':28} {e}")
+    return failures[0]
+
+
 def sandbox_pass():
     """On sandbox nodes any reader or writer is run, but a data node still only reads and writes: compute
     goes to the runner, and the node refuses it."""
@@ -1722,7 +1891,7 @@ def main():
     ctx = Context()
     failures = (catalog_pass(ctx) if ONLY in (None, "lab") else 0) + (library_pass(ctx) if ONLY in (None, "library") else 0) \
         + (rights_pass() if ONLY in (None, "rights") else 0) + (faults_pass() if ONLY in (None, "faults") else 0) \
-        + (bricks_pass() if ONLY in (None, "bricks") else 0) + (sandbox_pass() if ONLY in (None, "sandbox") else 0) \
+        + (bricks_pass() if ONLY in (None, "bricks") else 0) + (cursor_pass() if ONLY in (None, "cursor") else 0) + (sandbox_pass() if ONLY in (None, "sandbox") else 0) \
         + (replicas_pass() if ONLY == "replicas" else 0) + (restart_pass() if ONLY == "restart" else 0)
     return 1 if failures else 0
 

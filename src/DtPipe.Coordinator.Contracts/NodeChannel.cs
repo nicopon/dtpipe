@@ -200,7 +200,20 @@ public sealed record FragmentSpec(
 /// minted by the coordinator for this launch alone and returned by the replica in its <c>Exited</c>: it tells the report of
 /// this child from the report of an earlier one that held the same run id, fragment and replica. It is no secret.
 /// </summary>
-public sealed record LaunchRequest(string RunId, FragmentSpec Spec, string LaunchToken);
+public sealed record LaunchRequest(string RunId, FragmentSpec Spec, string LaunchToken, CursorLaunch? Cursor = null);
+
+/// <summary>
+/// The value a pipeline's kept cursor has when a run starts, for the fragment that holds the source it filters: the node gives it to
+/// the fragment's child as the value of <c>${{cursor://|default}}</c>. <see cref="Type"/> is the one the cursor was kept with, and the
+/// node refuses a value that is not of it (<see cref="CursorValues.Refusal"/>) before the child sees it.
+/// </summary>
+public sealed record CursorLaunch(string Column, string Type, string Value);
+
+/// <summary>
+/// The highest value a sink branch tracked on its <c>cursor</c> column, as the node read it from the file its child wrote, sent with
+/// the fragment's <c>Exited</c>. Only the coordinator decides whether it is kept: when the whole run has succeeded.
+/// </summary>
+public sealed record CursorReport(string Column, string Type, string Value);
 
 /// <summary>What <c>Launch</c> answers: the child is spawned and its edges can be wired, or why the host refused to run the fragment.</summary>
 public sealed record LaunchResult(bool Started, string? Refusal = null);
@@ -210,11 +223,12 @@ public sealed record FragmentCheck(bool Ok, string? Reason = null);
 
 /// <summary>
 /// What <c>Exited</c> carries: how one run of a fragment ended, and the <see cref="LaunchToken"/> of the launch that
-/// started the child, copied from its <see cref="LaunchRequest"/>.
+/// started the child, copied from its <see cref="LaunchRequest"/>. <see cref="Cursors"/> holds, by sink alias, the cursor each sink branch
+/// tracked when the child exited with 0.
 /// </summary>
 public sealed record FragmentExit(
     string RunId, string Fragment, int ExitCode, string Origin, string? FirstFault, IReadOnlyDictionary<string, long> RowCounts,
-    string? LaunchToken = null);
+    string? LaunchToken = null, IReadOnlyDictionary<string, CursorReport>? Cursors = null);
 
 /// <summary>
 /// The two words <see cref="FragmentExit.Origin"/> carries, each by what it does to the run's verdict. The node writes

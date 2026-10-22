@@ -38,6 +38,20 @@
           }
         }
       }
+    },
+    {
+      "id": "orders-incremental",
+      "kind": "source",
+      "title": "Orders after the cursor",
+      "description": "The orders whose id is above the pipeline's cursor, for the incremental load.",
+      "branch": {
+        "input": "duck:${{LAB_SALES_DB}}",
+        "provider-options": {
+          "duck-reader": {
+            "query": "SELECT order_id, customer_id, product_id, quantity, CAST(order_date AS VARCHAR) AS order_date, status FROM orders WHERE order_id > ${{cursor://|0}} ORDER BY order_id"
+          }
+        }
+      }
     }
   ]
 }

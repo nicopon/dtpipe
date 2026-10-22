@@ -8,9 +8,10 @@ namespace DtPipe.Coordinator;
 /// One fragment a run needs. <paramref name="Node"/> is the key of the node that may host it: the subject its
 /// replicas connect under, which the caller reads from the rights and the library never infers (for a hub that
 /// attests no subject, the name its replicas announce). <paramref name="Groups"/> are the groups the rights give that
-/// node today, which its replica's TransportR client must hold exactly.
+/// node today, which its replica's TransportR client must hold exactly. <paramref name="Cursor"/> is the value the fragment's source starts
+/// from, sent with its launch and no part of its version.
 /// </summary>
-public sealed record RunFragment(FragmentSpec Spec, string? Node, IReadOnlyList<string>? Groups = null)
+public sealed record RunFragment(FragmentSpec Spec, string? Node, IReadOnlyList<string>? Groups = null, CursorLaunch? Cursor = null)
 {
     public string Name => Spec.Fragment;
 }

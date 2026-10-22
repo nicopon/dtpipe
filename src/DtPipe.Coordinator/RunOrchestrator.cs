@@ -19,7 +19,8 @@ public sealed record RunSpec(string RunId, IReadOnlyList<RunFragment> Fragments,
 
 /// <summary>What one fragment reported when its own process finished.</summary>
 public sealed record FragmentExitReport(
-    string Fragment, int ExitCode, FaultOrigin? Origin, string? FirstFault, IReadOnlyDictionary<string, long> RowCounts);
+    string Fragment, int ExitCode, FaultOrigin? Origin, string? FirstFault, IReadOnlyDictionary<string, long> RowCounts,
+    IReadOnlyDictionary<string, CursorReport>? Cursors = null);
 
 /// <summary>
 /// <see cref="Cancelled"/> mirrors the product's own 130 convention (root <c>CLAUDE.md</c>'s exit
@@ -221,7 +222,7 @@ public sealed class RunOrchestrator : IRunOrchestrator
 
         // A fragment that exited 0 carries no origin: there was no fault to attribute.
         FaultOrigin? parsedOrigin = exit.ExitCode == 0 ? null : exit.Origin == ExitOrigins.Remote ? FaultOrigin.Remote : FaultOrigin.Local;
-        tcs.TrySetResult(new FragmentExitReport(exit.Fragment, exit.ExitCode, parsedOrigin, exit.FirstFault, exit.RowCounts));
+        tcs.TrySetResult(new FragmentExitReport(exit.Fragment, exit.ExitCode, parsedOrigin, exit.FirstFault, exit.RowCounts, exit.Cursors));
 
         // A fragment whose transfer failed under it is not the cause of anything yet: its peers owe the
         // run their own report, within RemoteFailureGrace.

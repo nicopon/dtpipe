@@ -21,14 +21,15 @@ internal sealed class RunQueue
     private readonly IRunOrchestrator _orchestrator;
     private readonly EventBus _bus;
     private readonly RunJournal _journal;
+    private readonly CursorKeeper _cursors;
     private readonly ILogger _logger;
 
     public RunQueue(
         DeploymentLedger ledger, DeploymentService deployments, LaunchPlanner planner, NodeInventory inventory, IRunOrchestrator orchestrator,
-        EventBus bus, RunJournal journal, ILogger logger)
+        EventBus bus, RunJournal journal, CursorKeeper cursors, ILogger logger)
     {
-        (_ledger, _deployments, _planner, _inventory, _orchestrator, _bus, _journal, _logger) =
-            (ledger, deployments, planner, inventory, orchestrator, bus, journal, logger);
+        (_ledger, _deployments, _planner, _inventory, _orchestrator, _bus, _journal, _cursors, _logger) =
+            (ledger, deployments, planner, inventory, orchestrator, bus, journal, cursors, logger);
     }
 
     /// <summary>The oldest run in flight, else the next waiting, else the last finished: of one pipeline, or of any.</summary>
@@ -75,6 +76,10 @@ internal sealed class RunQueue
             }
             var deployment = _ledger.Deployments.GetValueOrDefault(pipelineId) ?? throw new ConflictException($"'{pipelineId}' is not deployed.");
             if (deployment.State == DeploymentState.Failed) throw new ConflictException($"The deployment of '{pipelineId}' failed: {deployment.Message}");
+            // A cursor is read when a run starts and kept when it ends: a second run beside the first would read the value it is about
+            // to replace. It is refused, never queued, and the caller tries again when the run is over.
+            if (_cursors.Has(pipelineId) && InFlightOf(pipelineId) is { } running)
+                throw new ConflictException($"Run {running.RunId} of '{pipelineId}' is {(running.State == RunState.Queued ? "waiting" : "in flight")} and advances its cursor when it ends: launch again then.");
             var now = DateTimeOffset.UtcNow;
             ticket = new Ticket(new RunView(
                 _journal.NextRunId(), deployment.PlanId, RunState.Queued, now, null, null, null, null, pipelineId, now, LaunchedBy: by, IdempotencyKey: idempotencyKey));
@@ -87,6 +92,35 @@ internal sealed class RunQueue
         _deployments.PublishDeployments();
         Dispatch();
         return new LaunchedRun(view, false);
+    }
+
+    /// <summary>The run of <paramref name="pipelineId"/> queued or in flight, if any. Under the ledger's lock.</summary>
+    private RunView? InFlightOf(string pipelineId) => _ledger.Active().Select(t => t.View).FirstOrDefault(v => v.PipelineId == pipelineId);
+
+    /// <summary>Forgets a kept cursor, refused while a run of its pipeline is queued or in flight: its end would keep a value over the reset.</summary>
+    public bool ResetCursor(string pipelineId, string alias)
+    {
+        lock (_ledger.Lock)
+        {
+            RefuseWhileRunning(pipelineId);
+            return _cursors.Reset(pipelineId, alias);
+        }
+    }
+
+    /// <summary>Sets a cursor's value, refused while a run of its pipeline is queued or in flight.</summary>
+    public CursorRecord SetCursor(string pipelineId, string alias, string? type, string value, string by)
+    {
+        lock (_ledger.Lock)
+        {
+            RefuseWhileRunning(pipelineId);
+            return _cursors.Set(pipelineId, alias, type, value, by);
+        }
+    }
+
+    private void RefuseWhileRunning(string pipelineId)
+    {
+        if (InFlightOf(pipelineId) is { } running)
+            throw new ConflictException($"Run {running.RunId} of '{pipelineId}' is {(running.State == RunState.Queued ? "waiting" : "in flight")} and keeps its cursor when it ends: change it then.");
     }
 
     private RunView? EarlierRun(string? by, string key)
@@ -213,7 +247,8 @@ internal sealed class RunQueue
             if (RunDispatch.Unheld(plan, ticket.Held, roles) is { Count: > 0 } unheld)
                 throw new ConflictException($"The plan of '{pipelineId}' reaches {string.Join(", ", unheld)}, which the run does not hold: it is not run.");
             journaled = _planner.Describe(plan, launch.Runner, bindings, verdicts);
-            fragments = _deployments.RunFragmentsOf(plan);
+            var starts = _cursors.Launches(pipelineId, plan);
+            fragments = _deployments.RunFragmentsOf(plan).Select(f => starts.TryGetValue(f.Name, out var cursor) ? f with { Cursor = cursor } : f).ToList();
         }
         catch (Exception ex)
         {
@@ -238,6 +273,9 @@ internal sealed class RunQueue
         {
             var result = await _orchestrator.RunAsync(spec, ticket.Cancel.Token);
             final = view with { State = StateOf(result.Outcome), Result = result, Description = result.Describe() };
+            // Kept at the verdict of the whole run, before the run leaves the ledger: the next run of the pipeline reads it.
+            if (result.Outcome == RunOutcome.Succeeded && _cursors.Commit(spec.RunId, pipelineId, plan, result) is { Count: > 0 } kept)
+                final = final with { Cursors = kept };
         }
         catch (Exception ex) when (ex is NoEligibleReplicaException or UnboundFragmentException)
         {

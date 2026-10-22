@@ -75,6 +75,7 @@ public sealed class CoordinatorHost(string? studioClientId = CoordinatorHost.Stu
             services.AddSingleton<IRunStore>(Runs);
             services.AddSingleton<IRightsStore>(Rights);
             services.AddSingleton<IDeploymentStore>(Deployments);
+            services.AddSingleton<ICursorStore>(new MemoryCursorStore());
             services.AddSingleton<IIgnoredHostStore>(IgnoredHosts);
             services.AddSingleton<IXmlRepository>(new MemoryXmlRepository());
             if (check is not null) services.AddSingleton<DesignValidator>(new StubValidator(check, bindings => CheckedBindings = bindings));

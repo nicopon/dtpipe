@@ -111,6 +111,10 @@ the table, `OnExitedAsync` and the pure rules (`DetermineOutcome`, `PeersOwingAR
   and `Cause` reads `<fragment> could not start on replica <id>: <reason>` with `CauseIsUnresponsive` false.
   A replica that does not answer within `ReadyTimeout`, or has no connection to ask on, is a fragment gone
   quiet instead. `[local: ReplicaAdmissionSubjectTests, CoordinatorAbortTests, RunPhasesTests]`
+- **A cursor rides on the launch and on the report, and the library keeps none.** `RunFragment.Cursor` is sent in `LaunchRequest` and is
+  no part of a fragment's version; `FragmentExit.Cursors` reaches `FragmentExitReport` under the same rule as the rest of an `Exited`: heard
+  from the replica the run placed and under the launch's token. What is kept, and when, is the host's (`CursorKeeper`).
+  `[local: Server.Tests CursorRunTests]`
 - **A 0 exit code is not proof of delivery.** `DetermineOutcome` also compares each edge's two row
   counts (`RunResult.EdgeCounts`) and fails the run, naming the edge, on a mismatch even when every
   fragment reported 0 - a fragment attests its own process, not what its peer received. A count

@@ -55,14 +55,14 @@ public sealed record RunPlan(
 /// request, when it sent one; it means something only together with <see cref="LaunchedBy"/>. <see cref="SinkMayBePartial"/> is
 /// true for a run a restart ended after it had started: its fragments had been launched and may have written part of their
 /// sinks. It ranks no recovery strategy and nothing reruns the run; a run that was only queued, or that ended any other way, is not
-/// labelled.
+/// labelled. <see cref="Cursors"/> says what became of each cursor a run that succeeded reported: kept, or not and why.
 /// </summary>
 public sealed record RunView(
     string RunId, string PlanId, [property: JsonConverter(typeof(WireEnumConverter<RunState>))] RunState State, DateTimeOffset StartedAt,
     DateTimeOffset? FinishedAt,
     RunResult? Result, string? Description, string? Refusal,
     string? PipelineId = null, DateTimeOffset? QueuedAt = null, RunPlan? Plan = null, string? LaunchedBy = null, string? IdempotencyKey = null,
-    bool SinkMayBePartial = false)
+    bool SinkMayBePartial = false, IReadOnlyList<CursorOutcome>? Cursors = null)
 {
     [JsonIgnore] public bool IsOver => State is not (RunState.Queued or RunState.Running);
 }

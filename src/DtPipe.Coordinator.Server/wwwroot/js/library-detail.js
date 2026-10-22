@@ -3,7 +3,7 @@
 // jobs, the job's text read only, and its last run with the plan that run ran. The node of each source and sink branch is
 // chosen here, among the nodes that offer its brick; the runner is never named. The bindings are saved from here, and the
 // pipeline is deployed (armed at the commit the library holds) and run.
-import { $, api, deploymentOf, duration, esc, healthChip, healthOf, isActive, lastRunOf, ranPlan, shortNode, toast } from "./core.js";
+import { $, api, deploymentOf, duration, esc, healthChip, cursorsOf, healthOf, isActive, lastRunOf, ranPlan, shortNode, toast } from "./core.js";
 import { drawLanes, fragmentJobs, legend, planProblems } from "./placement.js";
 
 let host = null;
@@ -183,6 +183,7 @@ function runPanel(run, current) {
     ${current ? "" : `<p class="hint">It ran a plan with other edges than this one.</p>`}
     ${run.refusal ? `<p class="mismatch">${esc(run.refusal)}</p>` : ""}
     ${run.sinkMayBePartial ? `<p class="mismatch">The coordinator restarted while this run was in progress: its sinks may hold part of what it wrote.</p>` : ""}
+    ${cursorsOf(run)}
     ${ranPlan(run.plan)}
     ${r?.cause ? `<p><b>Cause:</b> ${esc(shortNode(r.cause))}${r.causeIsUnresponsive ? " (unresponsive)" : ""}</p>` : ""}
     ${r?.consequences?.length ? `<p><b>Consequences:</b> ${r.consequences.map((c) => esc(shortNode(c))).join(", ")}</p>` : ""}

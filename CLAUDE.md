@@ -335,6 +335,17 @@ the control plane, over each replica's node channel; TransportR carries the data
   told to it by `Coordinator:PublicUrl`, the address people reach it at, so it does not turn into `http://` return addresses.
   `[CI: validate_distributed_boundary.sh — deploy/ names no lab]` `[local: PublicUrlTests; the lab's smoke.py bricks - versions; the lab's tools/linux_replay.sh uid, a named volume of another uid]`
   `[unchecked: the release's push to GHCR, until a tag runs it; a Linux Docker host, where tools/linux_replay.sh is the replay; a real TLS proxy; a bind mount of another uid; deploy/README.md is in no documentation check, so keep its lines to 100 columns]`
+- **A cursor is the coordinator's: read when a run starts, kept only at the verdict of the whole run.** One cursor per branch that
+  writes, keyed by (library pipeline, alias), kept by `CursorKeeper` in the store that holds its state. The child never reaches the
+  coordinator or a file a brick names: the node gives each sink branch that sets `cursor` a state file of its own, reads it once the
+  child exits with 0 and sends it in `Exited`; the coordinator hands the kept value to the fragment holding the one source upstream of
+  the sink as `DTPIPE_CURSOR_OVERRIDE`. A failed, cancelled or interrupted run advances nothing. A cursor is tied to the versions of its
+  sink brick (which holds the column) and its source brick: a change refuses the run by name. A launch beside a run of the same
+  pipeline is refused, never queued, once a cursor exists. A value is substituted into the source's SQL, so `CursorValues` is the one
+  rule the node, the coordinator and the route apply. `BrickRules` admits `cursor` on a sink, never `state`, never `cursor` on a source
+  (the half of a `dtpipe split` cut that reads advances a cursor before the sink has written), and refuses a `cursor://` token that names a
+  file. `[local: Server.Tests CursorRunTests, CursorRoutesTests, CursorRulesTests; Hosting.Tests FragmentCursorsTests; validate_doc_examples.sh]`
+  `[unchecked: an older node, which ignores the value it is handed]` Detail: `src/DtPipe.Coordinator.Server/CLAUDE.md`.
 - **The coordinator is its own identity provider only on an explicit secret, and trusts it like any other.**
   `Coordinator__InsecureTrialIdp__Password` (16 characters at least) turns it on; it is refused beside an external
   `Coordinator__Authority`, and `TrustedIdp` holds no exception for its tokens. Every page, the login form and the studio

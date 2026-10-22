@@ -1,6 +1,6 @@
 // Runs: what is deployed, the runs in flight and the queue behind them, the journal of finished runs,
 // and the live events of every node.
-import { $, api, duration, esc, fmt, nodeColor, ranPlan, shortNode, store, toast } from "./core.js";
+import { $, api, duration, esc, fmt, nodeColor, cursorsOf, ranPlan, shortNode, store, toast } from "./core.js";
 
 let host = null;
 let openRun = null;          // runId whose report is unfolded
@@ -89,6 +89,7 @@ function report(r) {
     ${res?.consequences?.length ? `<p><b>Consequences:</b> ${res.consequences.map((c) => esc(shortNode(c))).join(", ")}</p>` : ""}
     ${edges ? `<table><tr><th>from</th><th>to</th><th>sent</th><th>received</th></tr>${edges}</table>` : ""}
     ${exits ? `<h3>Exit reports</h3><table><tr><th>fragment</th><th>exit</th><th>origin</th><th>first fault</th></tr>${exits}</table>` : ""}
+    ${cursorsOf(r)}
     ${ranPlan(r.plan)}
     ${res?.replicas && Object.keys(res.replicas).length ? `<p class="hint">Ran on: ${Object.entries(res.replicas).map(([fragment, replica]) => `${esc(shortNode(fragment))} on <code title="${esc(replica.origin ?? "")}">${esc(replica.id)}</code>`).join(", ")}</p>` : ""}
   </div>`;

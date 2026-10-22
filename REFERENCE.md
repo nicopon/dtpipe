@@ -911,6 +911,9 @@ Incremental loading uses two key mechanisms:
 - `--cursor-from VALUE` — Global override to temporarily force a starting cursor value for the
   current run, ignoring the state file.
 
+In a distributed pipeline the coordinator keeps the cursor instead of a state file:
+[Incremental loading in a distributed pipeline](#incremental-loading-in-a-distributed-pipeline).
+
 ### State File Format
 
 The state file is stored as a simple, human-readable JSON file:
@@ -1461,6 +1464,40 @@ secret under another key is not seen, and a harmless `WHERE token_count = 5` is 
 file a brick reads by `@file` (a query) stays a reference in its text: give an absolute path, since
 fragments run in the node's own directory, and know that the file's content is not part of the
 brick's version. The `dtpipe` every fragment runs is the binary that started the node.
+
+#### Incremental loading in a distributed pipeline
+
+The coordinator keeps the cursor of each branch that writes, since replicas share no disk and a run
+succeeds by the coordinator's verdict, not a fragment's. Guide:
+[Incremental loading](docs/guides/incremental.md#in-a-distributed-pipeline).
+
+- **Key**: the library pipeline and the alias of the branch that writes. The column is the sink
+  brick's `cursor`; a brick never sets `state` (the node gives the child a file of its own and reads
+  the value once the child exits with 0). A source brick filters with `${{cursor://|default}}`, a
+  token that names no file: a brick whose token names one is not offered. Declare a cursor brick on
+  a command line: `dtpipe node --job` resolves its `${{…}}` at start.
+- **At launch** the coordinator hands the kept value to the fragment that holds the one source brick
+  upstream of the sink, as `DTPIPE_CURSOR_OVERRIDE` in the child's environment. A cursor that does
+  not exist yet is no error: the token's default is used.
+- **At the verdict** of a run that succeeded as a whole, it keeps the value each sink reported. A
+  failed or cancelled run, or one that lost a replica, advances nothing; so does a value out of the
+  rule below or a store that refuses the write, which the run's page says by name.
+- **Refused by name**: a launch while a run of the pipeline is queued or in flight, once a cursor
+  exists (409, not queued); a brick whose version changed since the value was kept; a cursor whose
+  sink or source is no longer in the plan; two cursors under one source; a sink fed by several
+  sources.
+- **A value** is an integer (`-?[0-9]+`), an ISO 8601 date or instant, or a text of letters, digits,
+  spaces and `_ . : + / @ -`, at most 200 characters, of the type it was kept with.
+
+| Route | Caller | Description |
+|---|---|---|
+| `GET /api/library/{id}/cursors` | reader | The pipeline's cursors: alias, column, type, value, the run that kept it or who set it |
+| `PUT /api/library/{id}/cursors/{alias}` | the right to launch (designer) | Sets a value, `{"value": "…", "type": "integer"}`; the type may be left out for a cursor that exists and must be its own: another type is refused until a reset. Refused while a run of the pipeline is in flight |
+| `DELETE /api/library/{id}/cursors/{alias}` | the right to launch (designer) | Resets: the next run starts from the token's default |
+
+`/service` has no cursor route, and a launcher's token never opens `/api`. `--cursor-from` is not
+served: it is a launch value for one run of a command line. The contract number of `dtpipe studio`'s
+API is 9.
 
 ### Rights and identities
 

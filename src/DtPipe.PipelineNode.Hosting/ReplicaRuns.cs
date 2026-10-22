@@ -17,8 +17,12 @@ namespace DtPipe.PipelineNode.Hosting;
 /// </summary>
 internal sealed class ReplicaRuns : IAsyncDisposable
 {
-    private sealed class Entry(FragmentRun run, FragmentSpec spec, string jobPath, PipelineNode node, string launchToken)
+    private sealed class Entry(
+        FragmentRun run, FragmentSpec spec, string jobPath, PipelineNode node, string launchToken, IReadOnlyDictionary<string, string> cursorFiles)
     {
+        /// <summary>The state file of each sink branch that tracks a cursor, by alias.</summary>
+        public IReadOnlyDictionary<string, string> CursorFiles { get; } = cursorFiles;
+
         public FragmentRun Run { get; } = run;
         public PipelineNode Node { get; } = node;
         public FragmentSpec Spec { get; } = spec;
@@ -114,27 +118,39 @@ internal sealed class ReplicaRuns : IAsyncDisposable
             return new LaunchResult(false, reason);
         }
 
-        var jobPath = Path.Combine(_jobsDirectory, SafeFileName($"{request.RunId}-{spec.Fragment}") + ".yaml");
+        var environment = _environment;
+        if (request.Cursor is { } cursor)
+        {
+            if (CursorValues.Refusal(cursor.Type, cursor.Value) is { } refusal)
+                return new LaunchResult(false, $"the cursor value for {spec.Fragment} is refused: {refusal}");
+            environment = new Dictionary<string, string>(_environment, StringComparer.Ordinal) { [FragmentCursors.OverrideVariable] = cursor.Value };
+        }
+
+        var stem = SafeFileName($"{request.RunId}-{spec.Fragment}");
+        var jobPath = Path.Combine(_jobsDirectory, stem + ".yaml");
+        IReadOnlyDictionary<string, string> cursorFiles = new Dictionary<string, string>();
         try
         {
+            if (spec.Units is not null) (yaml, cursorFiles) = FragmentCursors.Arm(yaml, _jobsDirectory, stem);
             await File.WriteAllTextAsync(jobPath, yaml, new UTF8Encoding(false));
             var launch = new FragmentLaunch
             {
                 DtPipeExecutable = _dtpipe,
                 FragmentJobPath = jobPath,
-                ChildEnvironment = _environment,
+                ChildEnvironment = environment,
                 Edges = spec.Edges
                     .Select(e => new EdgeBinding(e.Alias, e.Direction == FragmentEdgeDirection.Inbound ? EdgeDirection.Inbound : EdgeDirection.Outbound))
                     .ToList(),
             };
-            var entry = new Entry(node.Launch(launch, _loggerOf(spec.Fragment)), spec, jobPath, node, request.LaunchToken);
+            var entry = new Entry(node.Launch(launch, _loggerOf(spec.Fragment)), spec, jobPath, node, request.LaunchToken, cursorFiles);
             if (!_runs.TryAdd(key, entry))
             {
                 await entry.Run.DisposeAsync();
                 return new LaunchResult(false, $"{spec.Fragment} already runs in {request.RunId}.");
             }
-            _logger.LogInformation("Running {Fragment} of {RunId} ({Edges})", spec.Fragment, request.RunId,
-                string.Join(", ", spec.Edges.Select(e => $"{e.Direction} {e.Alias}")));
+            _logger.LogInformation("Running {Fragment} of {RunId} ({Edges}){Cursor}", spec.Fragment, request.RunId,
+                string.Join(", ", spec.Edges.Select(e => $"{e.Direction} {e.Alias}")),
+                request.Cursor is { } start ? $", its source starting from {start.Column} {start.Value}" : "");
             if (spec.Edges.Count == 0) StartCompletion(key, entry);
             else _ = AbandonIfUnwiredAsync(key, entry);
             return new LaunchResult(true);
@@ -143,6 +159,7 @@ internal sealed class ReplicaRuns : IAsyncDisposable
         {
             _logger.LogError(ex, "Could not start {Fragment} of {RunId}", spec.Fragment, request.RunId);
             TryDelete(jobPath);
+            foreach (var file in cursorFiles.Values) TryDelete(file);
             return new LaunchResult(false, $"could not start dtpipe: {ex.Message}");
         }
     }
@@ -258,7 +275,7 @@ internal sealed class ReplicaRuns : IAsyncDisposable
             var outcome = await entry.Run.CompleteAsync();
             await ReportAsync(new FragmentExit(
                 key.RunId, key.Fragment, outcome.ExitCode, OriginWord(outcome.Origin), outcome.FirstFault, outcome.RowCounts,
-                entry.LaunchToken));
+                entry.LaunchToken, outcome.ExitCode == 0 ? FragmentCursors.Read(entry.CursorFiles, _logger) : null));
         }
         catch (Exception ex)
         {
@@ -348,6 +365,7 @@ internal sealed class ReplicaRuns : IAsyncDisposable
         entry.Unwired.Cancel();
         try { await entry.Run.DisposeAsync(); } catch (Exception) { /* best-effort */ }
         TryDelete(entry.JobPath);
+        foreach (var file in entry.CursorFiles.Values) TryDelete(file);
         if (_runs.IsEmpty) Idle?.Invoke();
     }
 
@@ -360,6 +378,7 @@ internal sealed class ReplicaRuns : IAsyncDisposable
             entry.Unwired.Cancel();
             try { await entry.Run.DisposeAsync(); } catch (Exception) { /* shutting down */ }
             TryDelete(entry.JobPath);
+            foreach (var file in entry.CursorFiles.Values) TryDelete(file);
         }
     }
 

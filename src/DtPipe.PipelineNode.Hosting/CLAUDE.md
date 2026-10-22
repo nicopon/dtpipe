@@ -83,6 +83,12 @@ none. One node per process, which is one replica of its node's identity; a secon
   handler returns as soon as it has the message and waits for neither a run nor a transfer, because the
   node channel's client takes messages one after another: a handler that waited would hold back the next
   message, a `Cancel` included. `[local: PipelineNode.Tests ReplicaRunsTests]`
+- **A sink branch's cursor is read from a file of the node's own.** For a fragment composed from bricks, `FragmentCursors.Arm` adds a
+  `state` path (absolute, per run, fragment and alias, in the host's job directory) to every branch that sets `cursor`; the child writes
+  the file it always writes, and `ReplicaRuns` reads it once the child has exited with 0 and sends the value in `FragmentExit.Cursors`,
+  after `CursorValues` has judged it. A `LaunchRequest.Cursor` is judged by the same rule before the child starts and reaches it as
+  `DTPIPE_CURSOR_OVERRIDE`; a refused value is a refused launch. The files are deleted with the run. A fragment written as a job (a
+  runner's) is never armed. `[local: Hosting.Tests FragmentCursorsTests]`
 - **A run ends in one place: it is reported, then thrown away.** `ReplicaRuns` runs a fragment to completion,
   sends `Exited`, and drops the run with its child and its job file. A report the coordinator does not know
   the connection of, or that cannot be delivered, is held and sent once after the next announcement it

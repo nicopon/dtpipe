@@ -93,7 +93,7 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   the `account` group, `/healthz`, the metadata document, `/account/*` and the hubs. `[local: RouteTableTests]`
 - **Every rights change names its author** (`AuditEntry.By`, the signed-in email).
 - **The state is kept in one store, SQLite unless the deployment chose Redis.** `Coordinator:Store` is `sqlite` (the default) or
-  `redis`; `StoreRegistration` registers the five stores of the chosen kind, opened when the first is asked for, which the server
+  `redis`; `StoreRegistration` registers the six stores of the chosen kind, opened when the first is asked for, which the server
   does before it serves. Redis settings under the SQLite store stop the start rather than being ignored, so a coordinator meant to
   share its state does not keep it alone in silence. **SQLite**: `SqliteDatabase` is one file, `coordinator.db`, in
   `Coordinator:Sqlite:Directory` (the state directory unless set), held exclusively by one connection for the life of the process, WAL
@@ -102,7 +102,7 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   directory (`deploy/README.md`). The exclusive lock needs no shared memory, so the file can sit on a network volume. A change of the schema takes
   `PRAGMA user_version`; a newer file is refused. `Coordinator:Initialize` has one meaning for both stores: a document or counter
   that is absent begins only when it is true. A new store takes its contract from `IRunStore`, `IRightsStore`, `IDeploymentStore`,
-  `IIgnoredHostStore` and `IXmlRepository`, and its own tests, as `SqliteStoreTests` and the Redis ones. `[local: SqliteStoreTests; lab.sh stack restart-check with LAB_STACK_STORE=sqlite, restored from a copy as deploy/README.md's backup]`
+  `ICursorStore`, `IIgnoredHostStore` and `IXmlRepository`, and its own tests, as `SqliteStoreTests` and the Redis ones. `[local: SqliteStoreTests; lab.sh stack restart-check with LAB_STACK_STORE=sqlite, restored from a copy as deploy/README.md's backup]`
   `[unchecked: the file on a network volume; a power cut between a write and its sync]`
 - **The session cookie's keys are in Redis, and a start that cannot read them stops.** `TrustedIdp.AddSessionKeys` points
   DataProtection at the `IXmlRepository` the host registers (`RedisXmlRepository`: a list at `{prefix}session-keys`, one element per
@@ -450,6 +450,19 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
 - **A run records the plan it ran.** `RunView.Plan` (`RunPlan`): the plan's id, the runner it used, each fragment at its version, and
   each binding with the brick version it met and its mode's verdict. A run refused before it had a plan has none.
   `[local: ArmedDeploymentTests, RunJournalTests]`
+- **A cursor is kept per sink branch, and only at the verdict of the run.** `CursorKeeper` holds a `CursorRecord` per (pipeline, sink
+  alias) in memory (the truth, read once at start) and in `ICursorStore` (a `cursors` table, or the hash `{prefix}cursors` in Redis; the
+  store is written first). `RunQueue.RunOneAsync` asks `Launches` after the plan, which puts the kept value in the `RunFragment` of the
+  one source brick upstream of the sink (through `plan.Units` dependencies), and `Commit` after `RunOutcome.Succeeded`, before the run
+  leaves the ledger, so the next run of the pipeline reads it; the run records what became of each cursor (`RunView.Cursors`: kept, or the
+  reason it was not, a store that refuses included, which leaves the run succeeded). The record keeps the versions of the sink and source
+  bricks (`CursorBasis`); `Launches` refuses the run by name when either changed, a sink or source is gone, two cursors read from one
+  fragment, or a sink has several sources. A person's `PUT` before any run keeps no basis: the first run adopts it. `RunQueue.Launch`
+  refuses a launch while a run of a pipeline that has a cursor is queued or in flight, and so do the reset and set routes (both under
+  the ledger's lock); before the first cursor exists the dispatch's one-run-per-data-node already serialises two runs. The routes are
+  `CoordinatorApi.CursorsRoute` and `CursorRoute`: the reader group reads, the designer group (the right to launch) sets and resets, and
+  `/service` has none. `[local: CursorRunTests, CursorRoutesTests, SqliteStoreTests, RedisCursorStoreTests (needs DTPIPE_TEST_REDIS or
+  DTPIPE_TEST_REUSE_INFRA), RouteTableTests]` `[unchecked: a Redis that loses a write it acknowledged; a store write that times out and is applied]`
 - **A data node only reads and writes, and runs only its bricks, which it composes by id.**
   `PlanBuilder` gives a data node's fragment as `FragmentUnit`s and composes the job with
   `FragmentJob` (`DtPipe.Coordinator.Contracts`), the function the node calls again on its own

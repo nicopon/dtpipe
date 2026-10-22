@@ -15,7 +15,7 @@ public static partial class CoordinatorApi
     /// anything else: a studio and a coordinator deployed at different times refuse each other by name
     /// rather than misreading each other.
     /// </summary>
-    public const int Contract = 8;
+    public const int Contract = 9;
 
     /// <summary>The protected resource metadata (RFC 9728): anonymous, the one entry point a studio needs.</summary>
     public const string Metadata = "/.well-known/oauth-protected-resource";
@@ -36,6 +36,8 @@ public static partial class CoordinatorApi
     public const string PreviewRoute = "/bricks/{node}/{id}/preview";
     public const string LibraryListRoute = "/library";
     public const string LibraryRoute = "/library/{id}";
+    public const string CursorsRoute = "/library/{id}/cursors";
+    public const string CursorRoute = "/library/{id}/cursors/{alias}";
 
     public static string Me => Prefix + MeRoute;
     public static string Catalog => Prefix + CatalogRoute;
@@ -50,6 +52,11 @@ public static partial class CoordinatorApi
     public static string LibraryList => Prefix + LibraryListRoute;
 
     public static string Library(string id) => Prefix + LibraryRoute.Replace("{id}", Uri.EscapeDataString(id));
+
+    public static string Cursors(string id) => Prefix + CursorsRoute.Replace("{id}", Uri.EscapeDataString(id));
+
+    public static string Cursor(string id, string alias) =>
+        Prefix + CursorRoute.Replace("{id}", Uri.EscapeDataString(id)).Replace("{alias}", Uri.EscapeDataString(alias));
 
     /// <summary>A pipeline id of the library: lowercase letters, digits and '-', a letter or digit first.</summary>
     public static bool IsPipelineId(string? id) => id is not null && PipelineId().IsMatch(id);
