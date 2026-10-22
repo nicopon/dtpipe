@@ -65,10 +65,10 @@ A **coordinator** cuts a pipeline into fragments and runs each next to its data,
 offer **bricks** (reads and writes their owner declared on their own database); a **runner** is a
 node with no data that runs the steps between the bricks. The coordinator keeps the pipelines in a
 git-backed library, decides who may send rows to whom, and gives each run one verdict. The
-coordinator and the runner are published as container images, and `docker compose -f
-deploy/compose.yaml up -d` starts a trial of both on your machine. Start with
-[Try a distributed pipeline](./docs/guides/distributed-trial.md); to run them for real, see
-[deploy/README.md](./deploy/README.md); every setting is in
+coordinator and the runner are published as container images, and
+`docker compose -f deploy/compose.yaml up -d` starts a trial of both on your machine. Start with
+[Your first distributed pipeline](./docs/guides/distributed-first-pipeline.md); to run them for
+real, see [deploy/README.md](./deploy/README.md); every setting is in
 [REFERENCE.md](./REFERENCE.md#distributed-pipeline-experimental).
 
 ## What it connects to

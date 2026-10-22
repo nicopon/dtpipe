@@ -13,33 +13,42 @@ settings a node host takes are `DtPipeNode__*` (the runner) or the host team's o
 ## Trying it
 
 ```bash
-docker compose -f deploy/compose.yaml up --build --wait
+docker compose -f deploy/compose.yaml up --wait
 ```
 
-**Not for production.** The recipe starts a coordinator on Redis, a runner and a data node. The
-coordinator is its own identity provider (`Coordinator__InsecureTrialIdp__Password`, below), with
-a password that is written in the file. It listens in plain HTTP on the loopback of the host only.
-Every file it mounts is under `deploy/`; the images of the coordinator and the runner come from
-GHCR, and the data node is built from the checkout (the first start takes a few minutes for it).
+**Not for production.** The recipe starts a coordinator on Redis and a runner. The coordinator is
+its own identity provider (`Coordinator__InsecureTrialIdp__Password`, below), with a password that
+is written in the file. It listens in plain HTTP on the loopback of the host only. Every file it
+mounts is under `deploy/`; the images of the coordinator and the runner come from GHCR. It seeds no
+rights, as a deployment seeds none: a person declares the runner and the nodes in Access, as
+[Your first distributed pipeline](../docs/guides/distributed-first-pipeline.md) shows.
+
+To run everything in Docker, add `deploy/compose.trial.yaml`: it builds a data node from the
+checkout (the first start takes a few minutes), seeds the rights that name it and the pipeline that
+runs on it.
+
+```bash
+docker compose -f deploy/compose.yaml -f deploy/compose.trial.yaml up --build --wait
+```
 
 - **People.** The pages are at <http://coordinator.localtest.me:8080>. Any user name made of
   letters, digits, `.`, `_` or `-` signs in with the trial password (`dtpipe-trial-password`);
   `admin` is the coordinator's administrator, and nobody else may do anything. The address needs
   `localtest.me`, a public name that resolves to `127.0.0.1`; without a network that resolves it,
   add `coordinator.localtest.me` to `/etc/hosts`.
-- **A run.** The library holds one pipeline, `trial-totals`: a generated source on the data node,
-  summed by the runner, written back to the data node. It runs from the pages, or as a scheduler
+- **A run.** With the second file, the library holds `trial-totals`: a generated source on the data
+  node, summed by the runner, written back to the data node. It runs from the pages, or as a scheduler
   would: a `launcher-1` token (client `launcher-1`, secret the trial password, from
   `http://coordinator.localtest.me:8080/connect/token`) posted to
   `/service/runs` with `{"pipelineId": "trial-totals"}`. The result is in the data node's
   `/state/totals.csv`. The pipeline is armed first, from its page: launched unarmed, the
   coordinator answers 409.
-- **Version.** The data node is built from the checkout you run the recipe in, so run it from the
-  checkout of a tag, with `DTPIPE_VERSION` set to that version without the `v`
-  (`DTPIPE_VERSION=1.11.0`).
+- **Version.** The data node of the second file is built from the checkout you run the recipe in,
+  so run it from the checkout of a tag, with `DTPIPE_VERSION` set to that version without the `v`
+  (`DTPIPE_VERSION=1.11.0`). The first file alone builds nothing.
 - **Local images.** `DTPIPE_VERSION` picks a published version (default `latest`);
   `DTPIPE_COORDINATOR_IMAGE` and `DTPIPE_RUNNER_IMAGE` name any other image, for example one built
-  as [below](#the-images). `SOURCE_REVISION` is handed to the two images the recipe builds.
+  as [below](#the-images). `SOURCE_REVISION` is handed to the image the second file builds.
 - **`Coordinator__Initialize` stays on.** The recipe is meant to start again after
   `docker compose down -v`; a deployment sets it for the first start only, as
   [below](#the-smallest-coordinator).
@@ -56,7 +65,9 @@ GHCR, and the data node is built from the checkout (the first start takes a few 
   coordinator: it adds a node to itself and declares two bricks in a file. It is not published.
   A team that writes no .NET declares its bricks with `dtpipe node` instead
   ([REFERENCE.md](../REFERENCE.md#a-node-from-the-cli-dtpipe-node)): the recipe keeps the .NET host
-  because it gives its bricks a title and a description, which a command line has no place for.
+  because it gives its bricks a title and a description, which a command line has no place for. The
+  library of the first file holds `shop-orders-by-country`, which runs on a node named `shop` that
+  a person declares with `dtpipe node`.
 
 ## The images
 

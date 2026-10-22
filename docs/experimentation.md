@@ -32,8 +32,9 @@ placement, runs) are in its [CLAUDE.md](../src/DtPipe.Coordinator.Server/CLAUDE.
 ## Try it
 
 A release publishes the coordinator and the runner as container images, and `deploy/compose.yaml`
-runs them with a trial data node and a trial identity provider from one command. The walkthrough
-is [Try a distributed pipeline](guides/distributed-trial.md); running the two hosts for real is
+runs them with a trial identity provider from one command. The walkthrough is
+[Your first distributed pipeline](guides/distributed-first-pipeline.md); with everything in Docker,
+[Try a distributed pipeline](guides/distributed-trial.md); running the two hosts for real is
 [deploy/README.md](../deploy/README.md); every setting is in
 [REFERENCE.md](../REFERENCE.md#distributed-pipeline-experimental).
 

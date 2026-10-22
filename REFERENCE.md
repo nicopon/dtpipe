@@ -1373,9 +1373,9 @@ Quit from the page ends the session (exit 0); Ctrl+C ends it with exit 130.
 ## Distributed pipeline (experimental)
 
 > **Experimental.** May change or disappear without notice; see
-> [docs/experimentation.md](./docs/experimentation.md). A walkthrough that starts one from a single
-> command is [docs/guides/distributed-trial.md](./docs/guides/distributed-trial.md); running the
-> two hosts for real is [deploy/README.md](./deploy/README.md).
+> [docs/experimentation.md](./docs/experimentation.md). A walkthrough from nothing to a first run is
+> [docs/guides/distributed-first-pipeline.md](./docs/guides/distributed-first-pipeline.md); running
+> the two hosts for real is [deploy/README.md](./deploy/README.md).
 
 A **coordinator** cuts a pipeline into fragments and runs each on a **node**, a host that carries
 data; a **runner** is a node with no data that runs every step between the bricks. The coordinator

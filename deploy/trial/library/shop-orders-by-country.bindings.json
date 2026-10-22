@@ -1,0 +1,8 @@
+{
+  "orders": {
+    "mode": "strict"
+  },
+  "write": {
+    "mode": "strict"
+  }
+}

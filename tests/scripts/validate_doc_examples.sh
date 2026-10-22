@@ -333,6 +333,36 @@ main:
 EOF
 
 # ----------------------------------------
+# guides/distributed-first-pipeline.md — the database the page seeds, and what its pipeline reads
+# ----------------------------------------
+echo "--- guides/distributed-first-pipeline.md ---"
+
+# The seeded database is the page's whole premise: the first rows it prints, and the counts the
+# example pipeline of the trial library computes on the runner (the same query, run here directly).
+"$DTPIPE" -i generate:1000 --fake "Country:address.countryCode" --fake "Product:commerce.product" \
+          --fake-seed 7 --rename "GenerateIndex:OrderId" \
+          -o sqlite:shop.db --table orders --no-stats > /dev/null 2>&1
+"$DTPIPE" -i sqlite:shop.db --query "SELECT * FROM orders ORDER BY OrderId LIMIT 3" \
+          -o first_orders.csv --no-stats > /dev/null 2>&1
+expect_file "the seeded shop database starts with the rows the page prints" first_orders.csv <<'EOF'
+OrderId,Country,Product
+0,HM,Pizza
+1,NI,Car
+2,GU,Chicken
+EOF
+
+QUERY=$(sed -n 's/^      query: //p' "$PROJECT_ROOT/deploy/trial/library/shop-orders-by-country.yaml")
+"$DTPIPE" -i sqlite:shop.db --query "$QUERY" -o top_countries.csv --no-stats > /dev/null 2>&1
+expect_file "the trial library's example counts orders by country as the page prints" top_countries.csv <<'EOF'
+Country,Orders
+CC,11
+CK,10
+GF,10
+IQ,10
+BO,9
+EOF
+
+# ----------------------------------------
 # guides/secrets.md — what a routing failure prints
 # ----------------------------------------
 

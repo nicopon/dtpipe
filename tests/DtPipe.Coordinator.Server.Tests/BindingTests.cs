@@ -35,6 +35,7 @@ public sealed class BindingTests : IDisposable
               { "clientId": "node-b", "name": "node-b", "description": "", "groups": ["crm"] },
               { "clientId": "runner-1", "name": "runner-1", "description": "", "groups": ["crm"] },
               { "clientId": "node-c", "name": "node-c", "description": "", "groups": ["crm"] },
+              { "clientId": "shop", "name": "shop", "description": "", "groups": ["crm"] },
               { "clientId": "node-off", "name": "node-off", "description": "", "groups": ["crm"], "enabled": false },
               { "clientId": "watch", "name": "watch", "description": "", "kind": "monitor" } ], "matrix": {} }
             """);
@@ -183,6 +184,23 @@ public sealed class BindingTests : IDisposable
         var error = Assert.Single(plan.Errors, e => e.Contains("is bound to"));
         Assert.Contains("node-a", error);
         Assert.Contains("brick 'customers'", error);
+    }
+
+    [Fact]
+    public async Task The_Example_Of_The_Trial_Library_Holds_On_A_Node_That_Declares_The_Bricks_Of_The_First_Pipeline_Guide()
+    {
+        var seeds = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../deploy/trial/library"));
+        var library = new PipelineLibrary(new CoordinatorServerOptions
+        {
+            StateDir = _dir, LibrarySeed = seeds, Authority = "http://idp", Audience = "test", UiClientId = "ui", UiClientSecret = "secret",
+        });
+        var example = (await library.GetAsync("shop-orders-by-country", Ct))!;
+        Announce("shop", TestBricks.Announced("orders", BrickKind.Source, Source), TestBricks.Announced("report", BrickKind.Sink, """{"output":"csv:report.csv"}"""));
+
+        // Arming pins the brick versions; until then the only thing left to say is that nothing has pinned them.
+        var problems = _placer.Check(example.Yaml, example.Bindings);
+        Assert.Equal(["orders", "write"], problems.Select(p => p.Alias).Order());
+        Assert.All(problems, p => Assert.Equal(BindingCauses.Unchecked, p.Cause));
     }
 
     private PipelineLibrary Library(Func<string, IReadOnlyDictionary<string, Binding>, IReadOnlyList<BindingProblem>>? problems = null) =>

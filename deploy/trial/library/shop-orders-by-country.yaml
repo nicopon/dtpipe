@@ -1,0 +1,13 @@
+# Orders by country
+# Reads the orders brick of a node named shop, counts them per country on the runner, and writes the
+# counts through the node's report brick. docs/guides/distributed-first-pipeline.md declares both.
+orders:
+  input: brick:shop/orders
+by-country:
+  from: orders
+  provider-options:
+    sql:
+      query: SELECT Country, COUNT(*) AS Orders FROM orders GROUP BY Country ORDER BY Orders DESC, Country LIMIT 5
+write:
+  from: by-country
+  output: brick:shop/report

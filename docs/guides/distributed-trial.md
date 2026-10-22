@@ -6,7 +6,9 @@
 
 A pipeline normally runs in one process. A **distributed pipeline** is cut into fragments that run
 on different hosts, each next to the data it reads or writes, with the rows streaming between them
-as Arrow. This page starts a small one on your machine, from one command, and runs it.
+as Arrow. This page starts a small one on your machine, from one command, and runs it, with
+everything in Docker. To run one over a database of your own, with a node you declare yourself, read
+[Your first distributed pipeline](distributed-first-pipeline.md).
 
 ## What the pieces are for
 
@@ -23,13 +25,13 @@ caller is. In this recipe the coordinator is its own trial identity provider.
 
 ## Start the recipe
 
-You need Docker with Compose and a checkout of this repository. The recipe builds a trial data node
-from the checkout, so the first start takes a few minutes. The
-coordinator and the runner are the images each release publishes on GHCR.
+You need Docker with Compose and a checkout of this repository. A second Compose file adds a trial
+data node, built from the checkout, so the first start takes a few minutes, and the rights and the
+library that name it. The coordinator and the runner are the images each release publishes on GHCR.
 
 ```bash
-docker compose -f deploy/compose.yaml up -d
-docker compose -f deploy/compose.yaml ps
+docker compose -f deploy/compose.yaml -f deploy/compose.trial.yaml up -d
+docker compose -f deploy/compose.yaml -f deploy/compose.trial.yaml ps
 ```
 
 Wait until every service is `healthy`. Everything listens on the loopback of your machine, in
@@ -49,8 +51,9 @@ refuses to start with an external `Coordinator__Authority` beside it.
   node (`brick:trial-node/totals`). A job names a brick by reference; the node holds what it reads
   and writes.
 - **Runs** shows the queue and the journal of every run.
-- **Access** shows the rights: the two nodes, `trial-node` and `runner-1`, and the groups that may
-  send rows to each other.
+- **Access** shows the rights that `deploy/compose.trial.yaml` seeds: the two nodes, `trial-node`
+  and `runner-1`, and the groups that may send rows to each other. Without that file the coordinator
+  starts with none, as in [Your first distributed pipeline](distributed-first-pipeline.md).
 
 ## Run the pipeline
 
@@ -60,7 +63,7 @@ rights allow every edge, then keeps that version ready to launch. Press **Run**,
 sink wrote:
 
 ```bash
-docker compose -f deploy/compose.yaml exec node cat /state/totals.csv
+docker compose -f deploy/compose.yaml -f deploy/compose.trial.yaml exec node cat /state/totals.csv
 ```
 
 ```text
@@ -114,12 +117,12 @@ The full behaviour is in [REFERENCE.md](../../REFERENCE.md#studio-dtpipe-studio)
 ## Stop it
 
 ```bash
-docker compose -f deploy/compose.yaml down -v
+docker compose -f deploy/compose.yaml -f deploy/compose.trial.yaml down -v
 ```
 
 `-v` removes the volumes: the next start begins from the recipe's rights and library again. After
-you pull a newer checkout, run `docker compose -f deploy/compose.yaml build` before starting, or
-the trial hosts keep the old build.
+you pull a newer checkout, run `docker compose -f deploy/compose.yaml -f deploy/compose.trial.yaml
+build` before starting, or the trial node keeps the old build.
 
 ## Where to go next
 
@@ -127,7 +130,8 @@ the trial hosts keep the old build.
 |:---|:---|
 | Run the coordinator and the runner for real: volumes, Redis, TLS, secrets, backup | [deploy/README.md](../../deploy/README.md) |
 | See every setting of the coordinator and of a node host | [REFERENCE.md](../../REFERENCE.md#distributed-pipeline-experimental) |
-| Declare bricks on my own data from the command line | [`dtpipe node`](../../REFERENCE.md#a-node-from-the-cli-dtpipe-node) |
+| Declare bricks on my own data and run a pipeline over them | [Your first distributed pipeline](distributed-first-pipeline.md) |
+| See every option of `dtpipe node` | [`dtpipe node`](../../REFERENCE.md#a-node-from-the-cli-dtpipe-node) |
 | Make my own service a node that offers bricks | [`AddDtPipeNode`](../../src/DtPipe.PipelineNode.Hosting/CLAUDE.md), and the trial node in [src/DtPipe.PipelineNode.TrialNode/](../../src/DtPipe.PipelineNode.TrialNode/Program.cs) |
 | Watch four data nodes, a join across them, rights and faults | [The distributed lab](../../samples/distributed-lab/README.md) |
 | Cut a job in two at the point a pipeline could be split | [`dtpipe split`](../../REFERENCE.md#offering-the-points-a-job-could-be-cut-at) |

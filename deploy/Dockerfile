@@ -14,7 +14,7 @@
 #
 #   coordinator   the coordinator's server, with git (its library is a git repository) and no dtpipe
 #   runner        the official runner, with dtpipe in /usr/local/bin
-#   trial-node    the data node of the trial recipe (deploy/compose.yaml), with dtpipe: not for production
+#   trial-node    the data node of the trial recipe (deploy/compose.trial.yaml), with dtpipe: not for production
 #   runtime       the base of both: ASP.NET Core, curl for health checks, the unprivileged user
 #   with-dtpipe   runtime plus the dtpipe binary: the base of the runner, and of any host that runs fragments
 #

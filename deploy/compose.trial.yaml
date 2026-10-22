@@ -1,0 +1,41 @@
+# The trial recipe with everything in Docker: deploy/compose.yaml, plus a data node of the kind a team writes
+# (DtPipe.PipelineNode.Hosting) and the rights and library that name it. The node offers two bricks, a generated source and a
+# file sink, and holds no database; the runner carries the step between them.
+# NOT FOR PRODUCTION: see deploy/compose.yaml.
+#
+#   docker compose -f deploy/compose.yaml -f deploy/compose.trial.yaml up --build --wait
+#
+# The node is always built from this checkout: it is a stand-in for a team's own service, and nothing publishes it.
+
+x-trial-password: &password dtpipe-trial-password
+
+services:
+  coordinator:
+    environment:
+      Coordinator__RightsSeed: /trial/rights.json
+    volumes:
+      - ./trial/docker-node/rights.json:/trial/rights.json:ro
+      - ./trial/docker-node/library:/trial/library:ro
+
+  node:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: trial-node
+      args:
+        SOURCE_REVISION: ${SOURCE_REVISION:-}
+    init: true
+    environment:
+      DtPipeNode__Name: trial-node
+      DtPipeNode__Description: Trial data node
+      DtPipeNode__CoordinatorUrl: http://coordinator:8080
+      DtPipeNode__Oidc__ClientSecret: *password
+      DtPipeNode__BricksFile: /etc/trial-node/bricks.json
+    volumes:
+      - ./trial/docker-node/node-bricks.json:/etc/trial-node/bricks.json:ro
+      - node-state:/state
+    depends_on:
+      coordinator: { condition: service_healthy }
+
+volumes:
+  node-state:
