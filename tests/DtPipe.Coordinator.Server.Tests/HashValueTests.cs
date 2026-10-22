@@ -43,15 +43,15 @@ public sealed class HashValueTests
             TestBricks.Announced("a-sink", BrickKind.Sink, """{"output":"sqlite:b"}"""));
 
         var replica = Assert.Single(Assert.Single(_inventory.Snapshot()).Replicas);
-        Assert.Equal("67be2e1c", replica.Bricks);
+        Assert.Equal("9fab5341", replica.Bricks);
     }
 
     [Fact]
-    public void A_Bricks_Version_Is_Twelve_Characters_Of_The_Keyed_Hash_Of_Its_Canonical_Form()
+    public void A_Bricks_Version_Is_Twelve_Characters_Of_The_Hash_Of_Its_Canonical_Form()
     {
         Announce(TestBricks.Announced("customers", BrickKind.Source, Declaration));
 
         var brick = new BrickCatalog(_inventory).Find("node-x/customers");
-        Assert.Equal("a778983c7c3d", brick!.Version);
+        Assert.Equal("235ddc4e15bc", brick!.Version);
     }
 }

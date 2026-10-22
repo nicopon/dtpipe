@@ -48,17 +48,14 @@ public static class BrickRules
 
     public static BrickForm Declared(BrickKind kind, YamlMappingNode branch) => new(kind, Canonical(branch));
 
-    /// <summary>The shortest key a node keys its versions with: a shorter one can be guessed from a version.</summary>
-    public const int MinKeyLength = 16;
-
     /// <summary>
-    /// The version of a brick declared as <paramref name="branchJson"/>: the start of the HMAC-SHA256 of its canonical text under
-    /// <paramref name="key"/>, taken once by the node that owns the text. The key is the node's, shared by its replicas and never
-    /// announced, so a version lets nobody guess a secret the text holds. Variables stay as the <c>${{Name}}</c> tokens the text
-    /// holds, so no value enters the hash.
+    /// The version of a brick declared as <paramref name="branchJson"/>: the start of the SHA-256 of its canonical text, taken once
+    /// by the node that owns the text. Variables stay as the <c>${{Name}}</c> tokens the text holds, so no value enters the hash.
+    /// A secret written in the text itself would, and the version would let anyone who sees it test guesses offline: a brick keeps
+    /// its secrets in <c>${{Name}}</c> or <c>keyring://</c> references.
     /// </summary>
-    public static string VersionOf(BrickKind kind, string branchJson, string key) =>
-        ContentHash.Keyed(Declared(kind, branchJson).Canonical, key, 12);
+    public static string VersionOf(BrickKind kind, string branchJson) =>
+        ContentHash.Of(Declared(kind, branchJson).Canonical, 12);
 
     /// <summary>
     /// The form of a whole branch, with the wiring the planner adds around a brick set aside: a sink is

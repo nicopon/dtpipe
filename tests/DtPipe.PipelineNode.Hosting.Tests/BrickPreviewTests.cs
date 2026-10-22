@@ -42,7 +42,7 @@ public sealed class BrickPreviewTests : IDisposable
     [UnsupportedOSPlatform("windows")]
     private async Task<BrickHost> HostAsync(params BrickDeclaration[] bricks)
     {
-        var host = new BrickHost("n1", bricks, TestBricks.Key, Binary(), NullLogger.Instance);
+        var host = new BrickHost("n1", bricks, Binary(), NullLogger.Instance);
         await host.InspectAsync(TestContext.Current.CancellationToken);
         return host;
     }
@@ -77,7 +77,7 @@ public sealed class BrickPreviewTests : IDisposable
         File.WriteAllText(path, "#!/bin/sh\ncase \"$1\" in --job) cat \"$(dirname \"$0\")/fixture.arrows\" ;; inspect) echo '[]' ;; esac\n");
         File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         var host = new BrickHost("n1", [new BrickDeclaration("orders", BrickKind.Source, "Orders", null, Orders)],
-            TestBricks.Key, new DtPipeCommand(path, _dir, new Dictionary<string, string>()), NullLogger.Instance);
+            new DtPipeCommand(path, _dir, new Dictionary<string, string>()), NullLogger.Instance);
         await host.InspectAsync(TestContext.Current.CancellationToken);
 
         var preview = await host.PreviewAsync("orders", 5);

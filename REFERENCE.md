@@ -1380,9 +1380,9 @@ Quit from the page ends the session (exit 0); Ctrl+C ends it with exit 130.
 A **coordinator** cuts a pipeline into fragments and runs each on a **node**, a host that carries
 data; a **runner** is a node with no data that runs every step between the bricks. The coordinator
 and the runner are published as container images, `ghcr.io/nicopon/dtpipe-coordinator` and
-`ghcr.io/nicopon/dtpipe-runner`, by each release. A node that serves real data is your own .NET
-host that calls `AddDtPipeNode` and declares its **bricks**. Every setting below is read from the
-environment first (`Coordinator__Authority`), then from command-line arguments
+`ghcr.io/nicopon/dtpipe-runner`, by each release. A node that serves real data is `dtpipe node`, or
+your own .NET host that calls `AddDtPipeNode`, and declares its **bricks**. Every setting below is
+read from the environment first (`Coordinator__Authority`), then from command-line arguments
 (`--Coordinator:Authority`); a secret belongs in the environment only.
 
 ### Coordinator settings (`Coordinator__*`)
@@ -1418,12 +1418,11 @@ as described in [deploy/README.md](./deploy/README.md#backing-up-a-sqlite-coordi
 | `Name` / `Description` | The name the host proposes. The coordinator names a node from its rights, not from this |
 | `CoordinatorUrl` | The coordinator's base address |
 | `Oidc__Authority` / `__ClientId` / `__ClientSecret` / `__Scope` | The client-credentials client the host authenticates as: `ClientId` is the node's `Name` and `Authority` the provider the coordinator names, unless given; the client id is the node's identity |
-| `DtPipe` | The `dtpipe` binary every fragment runs as a child process. Default: `dtpipe` on the path |
+| `DtPipe` | The `dtpipe` binary every fragment runs as a child process. Default: `dtpipe` on the path; the binary itself under `dtpipe node` |
 | `StateDirectory` | Where fragment jobs are written and run from. Default: a directory under the temp directory |
 | `Policy` | `Bricks` (default: a data node runs only its own bricks) or `AnyFragment` (a runner) |
 | `UnwiredRunTimeout` | How long a launched run may wait for its edges to be wired. Default: five minutes |
 | `FaultInjection` | `true` lets the host end a run's child when the coordinator asks, for a test bench. Default: off |
-| `BrickKey` | The key a brick's version is hashed under, required of a node that offers bricks (16 characters at least) and the same on all its replicas. Never announced; changing it changes every version |
 | `Variables__<NAME>` | A value every fragment reads as `${{NAME}}`; it never leaves the node |
 
 A **brick** is a read or a write the node's owner declared on the node's own data. A pipeline names
@@ -1432,6 +1431,36 @@ it by reference: `input: brick:<node>/<brick>` reads a source, `output: brick:<n
 a mode (`strict`, `contract`, `compatible` or `tolerant`) that says how far the brick may change
 after it was checked, and the pin a check wrote. Arming a pipeline whose reference no check has
 pinned runs the check and writes the pin.
+
+#### A node from the CLI (`dtpipe node`)
+
+`dtpipe node` is a data node whose bricks are the branches of the [pipeline grammar](#dag-syntax): a
+branch that only reads (`-i`) is a source, one that only writes (`-o`) is a sink, and its `--alias`
+is the brick's id. `--job FILE` gives the same branches in a job file, which is how a sink sits
+beside sources: a command line holds as many sources as it likes, or one sink. A branch that reads
+another (`--from`), transforms, or both reads and writes is refused by name, since everything
+between a read and a write belongs on a runner. The node's settings are the `DtPipeNode__*` of the
+table above, from the environment; four options override them.
+
+| Option | Description |
+|---|---|
+| `--name` / `--coordinator` / `--description` | `DtPipeNode__Name`, `__CoordinatorUrl` and `__Description` |
+| `--client-secret REF` | `DtPipeNode__Oidc__ClientSecret`, as a reference: `keyring://alias`, `${{NAME}}` or `@file`. A value is refused; the environment variable takes a reference too |
+
+```bash
+DtPipeNode__Oidc__ClientSecret=keyring://node-secret \
+  dtpipe node --name crm --coordinator https://coordinator.example \
+    -i 'pg:Host=db;Database=crm;Password=${{CRM_PASSWORD}}' --alias customers
+```
+
+A brick carries no title or description: the studio shows its id. A brick's version is the hash of
+its text, so a credential written into it would let anyone who sees the version test guesses
+offline: the node refuses a brick that holds one (a `${{NAME}}` or `keyring://` reference passes).
+That check reads the keys it knows as credentials, in a connection string and in a query alike: a
+secret under another key is not seen, and a harmless `WHERE token_count = 5` is refused as one. A
+file a brick reads by `@file` (a query) stays a reference in its text: give an absolute path, since
+fragments run in the node's own directory, and know that the file's content is not part of the
+brick's version. The `dtpipe` every fragment runs is the binary that started the node.
 
 ### Rights and identities
 

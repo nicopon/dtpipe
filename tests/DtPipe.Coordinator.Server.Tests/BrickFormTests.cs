@@ -9,7 +9,7 @@ using Xunit;
 namespace DtPipe.Coordinator.Server.Tests;
 
 /// <summary>
-/// The bytes a brick is matched and versioned on. A brick's version is the keyed hash of its canonical form, and a
+/// The bytes a brick is matched and versioned on. A brick's version is the hash of its canonical form, and a
 /// node hashes the job it composes from its declarations: a change to either text, however tidy,
 /// gives every brick a new version and stops the library's pipelines matching the bricks they use.
 /// </summary>
@@ -28,16 +28,15 @@ public sealed class BrickFormTests
         Assert.Equal(
             """{"input":"pg:Host=db;Database=shop","limit":"10","provider-options":{"pg":{"fetch-size":"500","query":"SELECT id,\n  name\nFROM customers"}}}""",
             form.Canonical);
-        Assert.Equal("a778983c7c3d", BrickRules.VersionOf(BrickKind.Source, Declaration, TestBricks.Key));
+        Assert.Equal("235ddc4e15bc", BrickRules.VersionOf(BrickKind.Source, Declaration));
     }
 
     [Fact]
-    public void A_Bricks_Version_Depends_On_The_Key_And_Reveals_Nothing_Of_The_Plain_Hash()
+    public void A_Bricks_Version_Is_The_Plain_Hash_Of_Its_Canonical_Form()
     {
         var plain = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(BrickRules.Declared(BrickKind.Source, Declaration).Canonical)))[..12];
 
-        Assert.NotEqual("a778983c7c3d", BrickRules.VersionOf(BrickKind.Source, Declaration, TestBricks.Key + "x"));
-        Assert.NotEqual(plain, BrickRules.VersionOf(BrickKind.Source, Declaration, TestBricks.Key));
+        Assert.Equal(plain, BrickRules.VersionOf(BrickKind.Source, Declaration));
     }
 
     [Fact]

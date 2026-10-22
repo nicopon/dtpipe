@@ -120,17 +120,12 @@ public static class DtPipeNodeServiceCollectionExtensions
         return new DtPipeNodeBuilder(services, definition);
     }
 
-    /// <summary>
-    /// Names every missing setting at start, rather than a generic validation failure. The brick key is judged here, where the options
-    /// meet the bricks the builder added: a host that offers bricks without one does not start.
-    /// </summary>
-    private sealed class DescribedValidation(NodeDefinition definition) : IValidateOptions<DtPipeNodeOptions>
+    /// <summary>Names every missing setting at start, rather than a generic validation failure.</summary>
+    private sealed class DescribedValidation : IValidateOptions<DtPipeNodeOptions>
     {
         public ValidateOptionsResult Validate(string? name, DtPipeNodeOptions options)
         {
             var errors = options.Validate().ToList();
-            if (definition.Bricks.Count > 0 && options.BrickKey is not { Length: >= BrickRules.MinKeyLength })
-                errors.Add($"BrickKey is required of a node that offers bricks, at least {BrickRules.MinKeyLength} characters, the same on every replica.");
             return errors.Count > 0 ? ValidateOptionsResult.Fail(errors.Select(e => "DtPipeNode: " + e)) : ValidateOptionsResult.Success;
         }
     }

@@ -54,11 +54,12 @@ none. One node per process, which is one replica of its node's identity; a secon
   reading of a branch**, shared with the coordinator, so a studio never calls something a brick
   the node then declines. `BrickHost` does not announce a declared brick that fails the structure rule.
   `[unchecked: a declared brick that fails the structure rule]`
-- **A brick is announced by its version, and the key of the version never leaves the node.** `BrickHost` announces each brick
-  without its text and with `BrickRules.VersionOf(kind, text, DtPipeNodeOptions.BrickKey)`, the HMAC of its canonical text; a host
-  that offers bricks without a key of `BrickRules.MinKeyLength` characters does not start (`DescribedValidation`). All replicas of a node
-  share the key, since a replica under another announces other versions and is eligible to no plan. `[local: Hosting.Tests
-  DtPipeNodeBuilderTests; Server.Tests BrickFormTests]` `[unchecked: that two replicas share the key; that the key is in no announcement or log]`
+- **A brick is announced by its version.** `BrickHost` announces each brick without its text and with
+  `BrickRules.VersionOf(kind, text)`, the SHA-256 of its canonical text, so two replicas of a node that declare the same bricks announce
+  the same versions. The text is the owner's: a secret written into it would let anyone who sees the version test guesses offline, so a
+  brick holds `${{NAME}}` or `keyring://` references, never a value. `dtpipe node` refuses a brick that holds one; a host built on
+  this library keeps the rule itself, since the library cannot read the connection-string grammar. `[local: Hosting.Tests
+  DtPipeNodeBuilderTests; Server.Tests BrickFormTests]` `[unchecked: a brick of a .NET host that holds a secret]`
 - **A variable's value never leaves the node.** The announcement names it, with an engine for a
   database, so the coordinator never holds a path or a secret to open. Variables reach a child through `FragmentLaunch.ChildEnvironment`
   and `DtPipeCommand` (the node's own reads), never through this process's environment: the host

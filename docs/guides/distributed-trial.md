@@ -127,6 +127,7 @@ the trial hosts keep the old build.
 |:---|:---|
 | Run the coordinator and the runner for real: volumes, Redis, TLS, secrets, backup | [deploy/README.md](../../deploy/README.md) |
 | See every setting of the coordinator and of a node host | [REFERENCE.md](../../REFERENCE.md#distributed-pipeline-experimental) |
+| Declare bricks on my own data from the command line | [`dtpipe node`](../../REFERENCE.md#a-node-from-the-cli-dtpipe-node) |
 | Make my own service a node that offers bricks | [`AddDtPipeNode`](../../src/DtPipe.PipelineNode.Hosting/CLAUDE.md), and the trial node in [src/DtPipe.PipelineNode.TrialNode/](../../src/DtPipe.PipelineNode.TrialNode/Program.cs) |
 | Watch four data nodes, a join across them, rights and faults | [The distributed lab](../../samples/distributed-lab/README.md) |
 | Cut a job in two at the point a pipeline could be split | [`dtpipe split`](../../REFERENCE.md#offering-the-points-a-job-could-be-cut-at) |

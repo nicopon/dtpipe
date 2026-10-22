@@ -6,7 +6,8 @@ set -e
 # family (every project named DtPipe.Coordinator* or DtPipe.PipelineNode*), its tests and the lab; no
 # core project reaches it; the two base libraries stay libraries; the lab and its sample data stay
 # under samples/, outside the solution and the build, and the product's images (deploy/) name none of them; the family reaches the solution only through
-# DtPipe.Jobs; the CLI maps no SignalR hub.
+# DtPipe.Jobs; the CLI reaches the family through one project, DtPipe.PipelineNode.Launcher (`dtpipe node`), named in one source
+# file, so no other command loads TransportR; the CLI maps no SignalR hub.
 #
 # Scope: names and references, not behaviour. A type that crosses the line without naming TransportR
 # (a transitive use) is not seen here.
@@ -36,6 +37,8 @@ echo "========================================"
 HITS=""
 for f in $(echo "$OUTSIDE" | grep -E '\.(cs|csproj|props|targets|sln)$' || true); do
     [ -f "$f" ] || continue
+    # This test names TransportR on purpose: it proves no ordinary command loads it.
+    [ "$f" = "tests/DtPipe.Tests/Unit/Cli/NodeCommandTests.cs" ] && continue
     if grep -qE 'TransportR' "$f"; then HITS="$HITS\n  $f"; fi
 done
 if [ -n "$HITS" ]; then
@@ -44,19 +47,22 @@ if [ -n "$HITS" ]; then
 fi
 pass "TransportR is named only by the distributed family, its tests and the lab"
 
-# 2. No project outside the family (and outside the lab) references a family project or the lab.
+# 2. No project outside the family (and outside the lab) references a family project or the lab, except the CLI, which
+#    references the Launcher and nothing else of the family.
+LAUNCHER='DtPipe\.PipelineNode\.Launcher\.csproj'
 HITS=""
 for f in $(echo "$OUTSIDE" | grep -E '\.csproj$' || true); do
     [ -f "$f" ] || continue
-    if grep -qE 'ProjectReference Include="[^"]*(DtPipe\.Coordinator|DtPipe\.PipelineNode|distributed-lab)' "$f"; then
-        HITS="$HITS\n  $f"
-    fi
+    REFS=$(grep -oE 'ProjectReference Include="[^"]*(DtPipe\.Coordinator|DtPipe\.PipelineNode|distributed-lab)[^"]*"' "$f" || true)
+    [ -z "$REFS" ] && continue
+    if [ "$f" = "src/DtPipe/DtPipe.csproj" ] && ! echo "$REFS" | grep -vqE "$LAUNCHER"; then continue; fi
+    HITS="$HITS\n  $f"
 done
 if [ -n "$HITS" ]; then
     echo -e "$HITS"
     fail "a project outside the distributed family and the lab references a family project or the lab"
 fi
-pass "no core project references the distributed family or the lab"
+pass "no core project references the distributed family or the lab (the CLI reaches the Launcher alone)"
 
 # 3. The distributed family and the lab stay out of the solution.
 if grep -qE 'DtPipe\.(Coordinator|PipelineNode)|distributed-lab|Lab\.(Coordinator|NodeHost|Contracts)' DtPipe.sln; then
@@ -115,6 +121,21 @@ if [ -n "$HITS" ]; then
     fail "a project of the family references a solution project other than DtPipe.Jobs"
 fi
 pass "the family references DtPipe.Jobs and nothing else of the solution"
+
+# 7a. The CLI names the Launcher in one source file. A method that mentions its types is compiled when it is called, so
+#     the assembly, and TransportR behind it, load only when `dtpipe node` runs; a second file naming it would put the
+#     load on another path.
+HITS=""
+for f in $(echo "$FILES" | grep -E '^src/DtPipe/.*\.cs$' || true); do
+    [ -f "$f" ] || continue
+    [ "$f" = "src/DtPipe/Cli/Node/NodeHostEntry.cs" ] && continue
+    if grep -qE 'DtPipe\.PipelineNode\.Launcher' "$f"; then HITS="$HITS\n  $f"; fi
+done
+if [ -n "$HITS" ]; then
+    echo -e "$HITS"
+    fail "the CLI names the node assembly outside Cli/Node/NodeHostEntry.cs"
+fi
+pass "only Cli/Node/NodeHostEntry.cs names the node assembly"
 
 # 7. The CLI hosts no hub. The ASP.NET Core framework the studio brings carries SignalR, so no
 #    reference check sees a hub of the CLI's own.

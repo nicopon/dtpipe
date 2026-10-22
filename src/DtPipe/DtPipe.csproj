@@ -40,6 +40,8 @@
     <ProjectReference Include="..\DtPipe.Processors\DtPipe.Processors.csproj" />
     <ProjectReference Include="..\DtPipe.Transformers\DtPipe.Transformers.csproj" />
     <ProjectReference Include="..\DtPipe.Jobs\DtPipe.Jobs.csproj" />
+    <!-- `dtpipe node`, in an assembly of its own: the only one that carries the transport library. -->
+    <ProjectReference Include="..\DtPipe.PipelineNode.Launcher\DtPipe.PipelineNode.Launcher.csproj" />
   </ItemGroup>
 
   <!-- Kestrel, for dtpipe studio's local page and nothing else. -->

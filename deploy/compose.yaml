@@ -82,7 +82,6 @@ services:
       DtPipeNode__Description: Trial data node
       DtPipeNode__CoordinatorUrl: http://coordinator:8080
       DtPipeNode__Oidc__ClientSecret: *password
-      DtPipeNode__BrickKey: trial-node-trial-brick-key
       DtPipeNode__BricksFile: /etc/trial-node/bricks.json
     volumes:
       - ./trial/node-bricks.json:/etc/trial-node/bricks.json:ro

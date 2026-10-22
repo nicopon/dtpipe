@@ -89,7 +89,12 @@ class Program
 			if (args.Length > 0 && IsSubcommand(jobService, args[0]))
 			{
 				var rootCommand = jobService.BuildSubcommands();
-				return await rootCommand.Parse(args).InvokeAsync();
+				// `dtpipe node` hands its tokens to the pipeline lexer, which reads @file itself: a response-file replacer
+				// would expand them first (a secret reference, a query file) and the lexer would never see the reference.
+				var parsed = args[0].Equals("node", StringComparison.OrdinalIgnoreCase)
+					? rootCommand.Parse(args, new System.CommandLine.ParserConfiguration { ResponseFileTokenReplacer = null })
+					: rootCommand.Parse(args);
+				return await parsed.InvokeAsync();
 			}
 
 			// 3. Help Interception

@@ -15,6 +15,7 @@ and runs each on a different host, with the Arrow data streaming between them.
 | **`DtPipe.Coordinator.Server`** | The coordinator as a server: an API and pages, the placement of a pipeline's fragments on nodes, a git-backed library of pipelines, a queue of runs, and the rights that say which nodes exist and which group may send to which | `src/DtPipe.Coordinator.Server/` |
 | **`DtPipe.PipelineNode`** | Runs one fragment on its host as a `dtpipe` child process and relays its Arrow streams to the peers | `src/DtPipe.PipelineNode/` |
 | **`DtPipe.PipelineNode.Hosting`** | `AddDtPipeNode`: makes any .NET host a node, offering the **bricks** its owner declares, each a read or a write on the host's own data | `src/DtPipe.PipelineNode.Hosting/` |
+| **`DtPipe.PipelineNode.Launcher`** | The assembly of `dtpipe node`: a node whose bricks are the branches of the command line | `src/DtPipe.PipelineNode.Launcher/` |
 | **`DtPipe.PipelineNode.Runner`** | The official runner: a node that hosts no data and runs any fragment | `src/DtPipe.PipelineNode.Runner/` |
 | **The lab** | A demonstrator that hosts these libraries: a coordinator, four data nodes with their own databases and a runner, as local processes or a compose stack, with a page to assemble, place and run a pipeline | `samples/distributed-lab/` |
 

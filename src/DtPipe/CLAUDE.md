@@ -96,6 +96,29 @@ The "what is SQL" rule lives once, in `SampleModeSafetyGate.SqlBearingValues`.
 `[CI: SampleModeSafetyGateTests, SampleModeDagTests, JobSqlSafetyTests, validate_sample_safety.sh]` `[unchecked: a query that writes
 through a function — SELECT my_function() passes a verb scan, hence the server-enforced form]`
 
+## `dtpipe node`
+
+`NodeCommand` is a node whose bricks are the branches of the pipeline grammar, read by the path `--export-job` uses
+(`CommandLineJob.Export`), so `-i … --alias a` and the same branch in a `--job` file give the same text and the same version.
+System.CommandLine matches only the four options of the node (`--name`, `--coordinator`, `--description`, `--client-secret`)
+and leaves every other token to the lexer (`TreatUnmatchedTokensAsErrors = false`). `NodeBricks` takes a branch for a brick
+only if it reads (`input`) or writes (`output`), never both, never `from`; the alias is the id, a branch without one has none.
+
+- **The CLI reaches the node host through one file.** `Cli/Node/NodeHostEntry.cs` is the only source that names
+  `DtPipe.PipelineNode.Launcher`; the method that does is `NoInlining`, so the runtime compiles it, and loads the assembly and
+  the transport library behind it, when a node starts. Never name the assembly from another file, never from a constructor or
+  from help. `[CI: validate_distributed_boundary.sh, NodeCommandTests]`
+- **A secret is a reference.** `--client-secret` takes `keyring://alias`, `${{NAME}}` or `@file` and refuses a value; the
+  environment's `DtPipeNode__Oidc__ClientSecret` may hold a reference too. It is resolved once, at start, by
+  `CompositeStringContentResolver.Standard`. The host is built without the command line, and a token that names a node setting
+  (`DtPipeNode:…`, `DtPipeNode__…`) is refused, so no argument reaches a setting the options do not name.
+  `[local: PipelineNode.Tests NodeCommandTests]`
+- **A brick holds no credential as a value.** Its version is the hash of its text; `ConnectionStringSanitizer.CarriesLiteralSecret`
+  judges every scalar of the branch as written, with its key, and a hit stops the start by naming the branch. Best-effort by
+  construction, in both directions (the vocabulary is the one `Sanitize` uses): an unknown key passes, a query comparing a
+  column named like a credential is refused. The rule a brick's owner keeps is the reference.
+  `[CI: NodeCommandTests — a literal refused, a reference passing, a query]` `[unchecked: a credential under a key the vocabulary does not know]`
+
 ## Checkpoints — mechanics
 
 `--checkpoint` tees the columnar stream into the session store; `--from-checkpoint` reads it back.

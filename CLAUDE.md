@@ -142,6 +142,7 @@ example to make it checked]`
 | `src/DtPipe.Coordinator.Server` | The coordinator's server: API, pages, planner, library, rights; lab mode for benches |
 | `src/DtPipe.Coordinator.Contracts` | Node channel messages, `BrickRules`: what coordinator and nodes share |
 | `src/DtPipe.PipelineNode.Hosting` | `AddDtPipeNode`: makes any .NET host a node (bricks, fragments, tokens) |
+| `src/DtPipe.PipelineNode.Launcher` | The assembly of `dtpipe node`: the CLI's only reach into the family, loaded when a node starts and by no other command |
 | `src/DtPipe.PipelineNode.Runner` | The official runner: a node that hosts no data and runs any fragment |
 | `src/DtPipe.Coordinator.TrialIdp` | The trial identity provider: run inside the coordinator by `Coordinator__InsecureTrialIdp__Password`, and as a host of its own for the lab; never for production |
 | `src/DtPipe.PipelineNode.TrialNode` | The trial recipe's data node: two bricks declared in a file, a model of a team's own host |
@@ -150,12 +151,13 @@ example to make it checked]`
 
 `DtPipe.Core` holds abstractions, models and the engine only. The **distributed family** is every
 project named `DtPipe.Coordinator*` or `DtPipe.PipelineNode*`: it references TransportR as NuGet
-packages and stays outside `DtPipe.sln`, so `build.yml` never builds or tests it; `build.sh`
-discovers its test projects, so `agentic-ci.yml` does.
+packages and stays outside `DtPipe.sln`, so `build.yml` builds only what `src/DtPipe` reaches through
+`DtPipe.PipelineNode.Launcher` and tests none of it; `build.sh` discovers its test projects, so
+`agentic-ci.yml` does.
 `DtPipe.Coordinator` and `DtPipe.PipelineNode` are libraries; a host owns `Program`, authentication
 and the address, and an executable of the family is such a host. Nothing else in `src/` names
 TransportR; only the family, its tests and the lab do. The family references `DtPipe.Jobs` and no
-other project of the solution, so none of its hosts runs dtpipe in its own process. The lab under
+other project of the solution, so none of its hosts runs the engine in its own process: every fragment runs as a `dtpipe` child. The lab under
 `samples/distributed-lab` is a host, and it and its sample data are named nowhere else.
 `[CI: validate_distributed_boundary.sh — names, references and project shape, not behaviour]`
 
@@ -303,7 +305,7 @@ the control plane, over each replica's node channel; TransportR carries the data
 - **A replica has one TransportR client at a time for all its runs, and is the only TransportR client they
   have.** The node is a byte relay: dtpipe reaches it through `arrow:` and references no TransportR
   assembly.
-- **A node's replicas must be interchangeable**: one database, the same variables, the same `BrickKey`, the same bricks outside
+- **A node's replicas must be interchangeable**: one database, the same variables, the same bricks outside
   a rolling update. Nothing checks it; any eligible replica may run a fragment. `[unchecked]`
 - **A fragment runs on a replica of its node's identity, and only that replica speaks for it.** Admission
   places each fragment on a replica connected under the subject of its node whose bricks compose the plan's
@@ -338,10 +340,16 @@ the control plane, over each replica's node channel; TransportR carries the data
   `Coordinator__Authority`, and `TrustedIdp` holds no exception for its tokens. Every page, the login form and the studio
   say it is not for production. `[local: TrialIdpModeTests; the trial recipe]` `[unchecked: the other refusals]`
   Detail: `src/DtPipe.Coordinator.Server/CLAUDE.md`.
-- **The CLI hosts neither a node nor a hub.** `dtpipe` is the child a node drives, reached through `arrow:`;
-  it references no TransportR assembly and no project of the family, maps no SignalR hub, and `dtpipe
-  studio` is a client of the coordinator's `/api`, only when it is given `--coordinator`.
-  `[CI: validate_distributed_boundary.sh — names and references, and no SignalR hub under src/DtPipe]`
+- **The CLI hosts a node only through one assembly, and never a hub.** `dtpipe` is the child a node drives, reached through
+  `arrow:`; `dtpipe node` is a node whose bricks are the branches of the pipeline grammar (`src/DtPipe/CLAUDE.md`). The
+  ordinary CLI references no TransportR assembly: only `DtPipe.PipelineNode.Launcher` carries it, and `Cli/Node/NodeHostEntry.cs`
+  is the one file that names it, so the runtime loads it when `dtpipe node` runs and for no other command. The CLI references no
+  other project of the family, maps no SignalR hub, and `dtpipe studio` is a client of the coordinator's `/api`, only when it is
+  given `--coordinator`. A node started by the CLI takes no setting from a message and no secret from an argument: the client
+  secret is a reference (`keyring://`, `${{NAME}}`) read once at start.
+  `[CI: validate_distributed_boundary.sh — names and references, one file naming the Launcher, no SignalR hub under src/DtPipe;
+  NodeCommandTests in DtPipe.Tests — no TransportR loaded after --version, --help or node --help]`
+  `[local: DtPipe.PipelineNode.Tests NodeCommandTests — a node started by the command announces its bricks and shows its secret nowhere]`
   `[unchecked: a listener of the CLI that is no SignalR hub]`
 
 `[local: DtPipe.Coordinator.Tests, DtPipe.PipelineNode.Tests, DtPipe.Coordinator.Server.Tests, the lab's

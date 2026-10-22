@@ -71,6 +71,7 @@ public class JobService
 			new McpCommand(_serviceProvider),
 			new AgentCommand(_serviceProvider),
 			new StudioCommand(_serviceProvider),
+			new NodeCommand(_serviceProvider),
 		};
 
 	/// <param name="branchFailures">Filled with the reason each failing branch stopped, for a caller

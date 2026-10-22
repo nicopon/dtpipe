@@ -210,7 +210,7 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   brick's version moves until a person saves the pipeline again and arms it again (an armed deployment keeps the pins it was armed
   with). **An arming writes the pin of a reference that has none** (`LibraryArming`, behind `POST /api/library/{id}/deploy`): it runs the same check, saves
   the pins of those aliases alone in a commit of its own, and arms the library as it is then; a pin that exists is never moved by an arming, so a
-  `brick-changed` waits for a save, and a pipeline with any other blocking problem is refused before the check runs. Rotating a node's `BrickKey` moves every version of its bricks at once. A contract the node did
+  `brick-changed` waits for a save, and a pipeline with any other blocking problem is refused before the check runs. A contract the node did
   not send leaves a `contract` or `compatible` binding unpinned, so `unchecked`, never pinned to something that passes.
   `[local: BindingTests, ArmedDeploymentTests (the arming), LaunchRoutesTests, StudioRoutesTests]`
 - **A brick that changed since its binding was checked is judged once per version, by the node that hosts it, and a verdict that
@@ -286,9 +286,9 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   by `input: brick:<node>/<brick>`, a sink written by `output: brick:<node>/<brick>` with the one branch it reads in `from`
   (`DtPipe.Jobs/BrickRef`, which only the distributed family and the designer read: the engine never sees `brick:`); a branch that
   says more, or reads none or several, is a misuse (`BrickRef.Misuse`, `not-a-brick`). A node announces a brick by its id, kind,
-  title, description and **version**, never its text, its variables or its schema: the version is the HMAC-SHA256 of the canonical
-  text (`BrickRules.Canonical`) under the node's `BrickKey`, so it changes exactly when what dtpipe would run changes, and a
-  secret in the text gives no oracle. The coordinator composes a fragment from ids and versions it by the versions of its bricks
+  title, description and **version**, never its text, its variables or its schema: the version is the SHA-256 of the canonical
+  text (`BrickRules.Canonical`), so it changes exactly when what dtpipe would run changes. A secret written in the text would be an
+  oracle for offline guesses, so a brick keeps its secrets in `${{NAME}}` or `keyring://` references. The coordinator composes a fragment from ids and versions it by the versions of its bricks
   (`FragmentJob.VersionOf`); the node composes the job from its own declarations and compares. A reference names its node and its
   brick, so `bindings.json` keeps for it the mode and the pin only: `BrickReferences.Expand` puts the node and the brick back for
   everything that reads a `Binding`, and `Strip` takes them out before a write. `BrickCatalog` keeps what it reads of each

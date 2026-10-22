@@ -15,7 +15,7 @@ namespace DtPipe.PipelineNode.Hosting;
 /// <c>dtpipe contract diff</c>, a sink's verdict on a contract from <c>dtpipe contract check</c>.
 /// The coordinator never opens a brick's database for this.
 /// </summary>
-internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> declared, string? brickKey, DtPipeCommand dtpipe, ILogger logger)
+internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> declared, DtPipeCommand dtpipe, ILogger logger)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
@@ -26,7 +26,7 @@ internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> dec
 
     /// <summary>
     /// What the node announces: each brick as the coordinator needs it and nothing more (no text, no schema), with the
-    /// version its text gives under the node's key.
+    /// version its text gives.
     /// </summary>
     public IReadOnlyList<BrickInfo> Bricks { get; private set; } = [];
 
@@ -46,7 +46,6 @@ internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> dec
     /// </summary>
     public Task InspectAsync(CancellationToken ct)
     {
-        if (declared.Count > 0 && brickKey is null) throw new InvalidOperationException($"{node} offers bricks and has no brick key.");
         var offered = new List<Offered>();
         foreach (var brick in declared)
         {
@@ -56,7 +55,7 @@ internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> dec
                 logger.LogWarning("Brick {Brick} is not offered: {Reason}", brick.Id, refusal);
                 continue;
             }
-            var version = BrickRules.VersionOf(brick.Kind, brick.BranchJson, brickKey!);
+            var version = BrickRules.VersionOf(brick.Kind, brick.BranchJson);
             offered.Add(new Offered(brick, new BrickInfo(brick.Id, brick.Kind, brick.Title, brick.Description ?? "", version)));
         }
         _offered = offered;

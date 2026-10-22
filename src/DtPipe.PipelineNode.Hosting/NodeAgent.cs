@@ -75,7 +75,7 @@ internal sealed class NodeAgent : BackgroundService
         _hostLoggers = loggers;
         _logger = _forwarder.For(loggers, _options.Name, fragment: null).CreateLogger(typeof(NodeAgent).FullName!);
         var dtpipe = new DtPipeCommand(_options.DtPipe, _stateDir, _environment);
-        _bricks = new BrickHost(_options.Name, definition.Bricks, _options.BrickKey, dtpipe, _logger);
+        _bricks = new BrickHost(_options.Name, definition.Bricks, dtpipe, _logger);
         _gate = definition.Gate;
         _command = dtpipe;
         _jobs = new DelegatedJobs(_options.Name, _policy == FragmentPolicy.AnyFragment, dtpipe);

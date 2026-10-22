@@ -54,6 +54,9 @@ GHCR, and the data node is built from the checkout (the first start takes a few 
   sets `Coordinator__Authority` instead, and none of this exists in it. The data node
   (`src/DtPipe.PipelineNode.TrialNode`) is what a team's own service looks like to the
   coordinator: it adds a node to itself and declares two bricks in a file. It is not published.
+  A team that writes no .NET declares its bricks with `dtpipe node` instead
+  ([REFERENCE.md](../REFERENCE.md#a-node-from-the-cli-dtpipe-node)): the recipe keeps the .NET host
+  because it gives its bricks a title and a description, which a command line has no place for.
 
 ## The images
 

@@ -8,7 +8,7 @@ namespace DtPipe.Coordinator.Server;
 
 /// <summary>
 /// One brick as the page sees it. <see cref="Key"/> is <c>node/id</c>; <see cref="Yaml"/> is the reference a job makes to it;
-/// <see cref="Version"/> is the keyed hash its node took of the brick's canonical branch, so it changes exactly when what dtpipe
+/// <see cref="Version"/> is the hash its node took of the brick's canonical branch, so it changes exactly when what dtpipe
 /// would run changes.
 /// </summary>
 public sealed record BrickView(
