@@ -77,9 +77,9 @@ while [ ${#queue[@]} -gt 0 ]; do
 done
 
 # Tokens that are command names, not flags (--install/--uninstall are completion
-# subcommands), plus dotnet-tool-only flags and dynamic provider options that the
+# subcommands), plus dotnet-tool-only flags, docker compose's --wait and dynamic provider options that the
 # help intentionally does not enumerate.
-ALLOW_LIST="--project --install --uninstall --fake-list --secrets --columnar-fast-path --linux-pipes --migration --sql-processors"
+ALLOW_LIST="--wait --project --install --uninstall --fake-list --secrets --columnar-fast-path --linux-pipes --migration --sql-processors"
 FAILED=0
 
 for doc in "${DOC_FILES[@]}"; do
