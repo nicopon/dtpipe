@@ -1,0 +1,5 @@
+# Text is stored and checked out with LF on every platform; Git decides what is text.
+* text=auto eol=lf
+
+# CSV keeps its bytes: the validators compare their output with tests/scripts/baselines/*.csv, which are CRLF.
+*.csv -text
