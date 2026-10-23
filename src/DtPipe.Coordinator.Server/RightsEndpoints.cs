@@ -1,3 +1,5 @@
+using DtPipe.Coordinator.Contracts;
+
 namespace DtPipe.Coordinator.Server;
 
 /// <summary>
@@ -37,7 +39,15 @@ internal static class RightsEndpoints
             bus.Publish("rights", new { });
             return Results.Ok();
         });
-        admin.MapPost("/rights/identities", (IdentityRequest request, RightsStore rights, EnrollmentQueue enrollment, EventBus bus, HttpContext http, CoordinatorServerOptions options) =>
+        // The edges a refused plan lacks, allowed beside the matrix as it is: nothing is revoked, so this never undoes another's change.
+        admin.MapPost("/rights/matrix/edges", (EdgesRequest request, RightsStore rights, EventBus bus, HttpContext http) =>
+        {
+            rights.AllowEdges(request.Edges ?? [], TrustedIdp.CallerOf(http));
+            bus.Publish("rights", new { });
+            return Results.Ok();
+        });
+        admin.MapPost("/rights/identities", (IdentityRequest request, RightsStore rights, EnrollmentQueue enrollment, NodeInventory inventory, EventBus bus, HttpContext http,
+            CoordinatorServerOptions options) =>
         {
             if (!PipelineLibrary.IsValidId(request.ClientId)) throw new ConflictException($"'{request.ClientId}' is not a client id: lowercase letters, digits and '-'.");
             // An identity needs the issuer that verifies it, or it could never connect: a key needs the key issuer, a person's key people
@@ -49,13 +59,16 @@ internal static class RightsEndpoints
                 throw new ConflictException($"'{request.ClientId}' cannot be a person verified by a key: {refusal}.");
             if (auth == AuthModes.Idp && TrustedIdp.ProviderUnavailable(options) is { } none)
                 throw new ConflictException($"'{request.ClientId}' cannot be verified by the identity provider: {none}.");
+            var kind = request.Kind ?? IdentityKinds.Node;
+            if (request.ExchangeWithRunners == true && kind.Trim() != IdentityKinds.Node)
+                throw new ConflictException($"'{request.ClientId}' is a {kind}: only a node belongs to groups that exchange with the runners.");
             rights.AddIdentity(new Identity(request.ClientId, string.IsNullOrWhiteSpace(request.Name) ? request.ClientId : request.Name, request.Description ?? "",
-                request.Groups ?? [], request.Enabled ?? true, request.Kind ?? IdentityKinds.Node, request.Pipelines)
+                request.Groups ?? [], request.Enabled ?? true, kind, request.Pipelines)
             {
                 Auth = new IdentityAuth(auth, []),
                 Role = request.Role,
                 Account = request.Account,
-            }, TrustedIdp.CallerOf(http));
+            }, TrustedIdp.CallerOf(http), request.ExchangeWithRunners == true ? RunnerEdges(request.Groups ?? [], inventory, rights) : null);
             enrollment.Remove(request.ClientId);
             bus.Publish("rights", new { });
             return Results.Ok();
@@ -87,10 +100,12 @@ internal static class RightsEndpoints
             return Results.Accepted();
         });
         // A host no identity knows waits here: the administrator names it and gives it its groups, or sets it aside.
-        admin.MapPost("/rights/pending/{subject}/accept", (string subject, AcceptRequest request, RightsStore rights, EnrollmentQueue enrollment, EventBus bus, HttpContext http) =>
+        admin.MapPost("/rights/pending/{subject}/accept", (string subject, AcceptRequest request, RightsStore rights, EnrollmentQueue enrollment, NodeInventory inventory,
+            EventBus bus, HttpContext http) =>
         {
             var pending = enrollment.Find(subject) ?? throw new ConflictException($"'{subject}' does not wait for approval.");
-            rights.AddIdentity(new Identity(subject, request.Name ?? "", request.Description ?? pending.Description, request.Groups ?? [], true), TrustedIdp.CallerOf(http));
+            rights.AddIdentity(new Identity(subject, request.Name ?? "", request.Description ?? pending.Description, request.Groups ?? [], true), TrustedIdp.CallerOf(http),
+                request.ExchangeWithRunners == true ? RunnerEdges(request.Groups ?? [], inventory, rights) : null);
             enrollment.Remove(subject);
             bus.Publish("rights", new { });
             return Results.Ok();
@@ -134,15 +149,35 @@ internal static class RightsEndpoints
             return Results.Ok();
         });
     }
+
+    /// <summary>
+    /// The edges, both ways, between each of <paramref name="groups"/> and each group of every runner the inventory knows, connected or
+    /// not, as the rights hold it: what a node needs to exchange with whichever runner a launch chooses. The rights do not say which
+    /// node is a runner, its announcement does. Refused when no runner is known, so that a request for them adds nothing that exchanges
+    /// with nobody.
+    /// </summary>
+    private static List<GroupEdge> RunnerEdges(IReadOnlyList<string> groups, NodeInventory inventory, RightsStore rights)
+    {
+        var runners = inventory.Snapshot().Where(n => n.Role == NodeRole.Runner)
+            .SelectMany(n => rights.NodeIdentity(n.Name) is { Enabled: true } runner ? runner.Groups : (IReadOnlyList<string>)[])
+            .Distinct(StringComparer.Ordinal).ToList();
+        if (runners.Count == 0)
+            throw new ConflictException("No runner is known to this coordinator, so there is no group to exchange with: add it without, and allow its edges once a runner has announced itself.");
+        return [.. groups.Select(g => g.Trim()).Where(g => g.Length > 0).Distinct(StringComparer.Ordinal)
+            .SelectMany(g => runners.SelectMany(r => new[] { new GroupEdge(g, r), new GroupEdge(r, g) })).Distinct()];
+    }
 }
 
 internal sealed record MatrixRequest(Dictionary<string, List<string>> Matrix);
-internal sealed record AcceptRequest(string? Name, string? Description, List<string>? Groups);
+internal sealed record EdgesRequest(List<GroupEdge>? Edges);
+/// <summary>A host to accept: its node name, its groups, and whether they exchange with the runners' groups both ways.</summary>
+internal sealed record AcceptRequest(string? Name, string? Description, List<string>? Groups, bool? ExchangeWithRunners = null);
 /// <summary>
 /// An identity to add or edit. <see cref="Auth"/> is read when it is added, and an edit leaves it as it was, as it does <see cref="Kind"/>;
-/// <see cref="Role"/> is a person's, and <see cref="Account"/> a person's of the identity provider.
+/// <see cref="Role"/> is a person's, and <see cref="Account"/> a person's of the identity provider. <see cref="ExchangeWithRunners"/>, a
+/// node's when it is added, allows its groups and the runners' to send to each other in the same change.
 /// </summary>
 internal sealed record IdentityRequest(
     string ClientId, string? Name, string? Description, List<string>? Groups, bool? Enabled, string? Kind = null, List<string>? Pipelines = null, string? Auth = null,
-    string? Role = null, string? Account = null);
+    string? Role = null, string? Account = null, bool? ExchangeWithRunners = null);
 internal sealed record KeyRequest(string? Label, DateTimeOffset? Expires);

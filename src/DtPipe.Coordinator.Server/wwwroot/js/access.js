@@ -1,12 +1,14 @@
-// Access: who may send what to whom. Identities of the coordinator's own IDP (who: node name and
-// groups), the hosts waiting for approval, the flow matrix between groups (to whom, enforced by the
-// hub on every transfer), and the audit of every change.
+// Access: who may send what to whom. Identities (who: verified by a key this coordinator makes or by the IdP it trusts, a node's
+// name and groups, a person's role), their keys, the hosts waiting for approval, the flow matrix between groups (to whom, enforced
+// by the hub on every transfer), and the audit of every change.
 import { api, esc, nodeColor, store, toast } from "./core.js";
 
 let host = null;
 let rights = null;
 let matrixDraft = null;      // group -> Set(targets), while edited
 let adding = false;
+const openKeys = new Set();  // the identities whose keys are listed
+const keysOf = {};           // client id -> its keys as GET …/keys lists them: ids, last characters and dates, never a key
 
 export function mount(el) {
   host = el;
@@ -25,21 +27,74 @@ export function leave() {
 }
 
 async function load() {
-  try { rights = await api("/api/rights"); } catch (e) { toast(e.message); return; }
+  try {
+    rights = await api("/api/rights");
+    await Promise.all([...openKeys].map(listKeys));
+  } catch (e) { toast(e.message); return; }
   render();
+}
+
+async function listKeys(id) {
+  if (!rights.identities.some((i) => i.clientId === id)) { openKeys.delete(id); return; }
+  keysOf[id] = await api(`/api/rights/identities/${encodeURIComponent(id)}/keys`);
 }
 
 const setOf = (list) => new Set(list || []);
 const KIND_CHIPS = {
   monitor: `<span class="chip" title="A supervisor: it reads /health and nothing else">monitor</span>`,
   launcher: `<span class="chip" title="A scheduler: it starts the runs of the pipelines listed and reads them, nothing else">launcher</span>`,
-  person: `<span class="chip" title="Someone who signs in with a key, holding the role shown">person</span>`,
+  person: `<span class="chip" title="Someone who signs in to these pages and the studio, holding the role shown">person</span>`,
 };
+const ROLES = ["reader", "designer", "admin"];
 const groupsOf = (text) => text.split(",").map((g) => g.trim()).filter(Boolean);
+const when = (date) => (date ? new Date(date).toLocaleString() : "");
+
+// The groups of every runner the inventory knows, as the rights give them: what the server allows a new node to exchange with
+// when asked (RightsEndpoints.RunnerEdges). The page shows them; the server decides.
+function runnerGroups() {
+  const runners = (store.nodes || []).filter((n) => n.role === "Runner").map((n) => n.name);
+  return [...new Set(rights.identities.filter((i) => i.kind === "node" && i.enabled && runners.includes(i.name)).flatMap((i) => i.groups))].sort();
+}
+
+// The first group named after the node that no identity or matrix entry holds yet: a node accepted alone in a group of its own.
+function freeGroup(name) {
+  let group = name;
+  for (let n = 2; rights.groups.includes(group); n++) group = `${name}-${n}`;
+  return group;
+}
+
+function runnersCheck(attributes) {
+  const groups = runnerGroups();
+  return `<label class="check" title="${groups.length ? `Allows its groups and ${esc(groups.join(", "))} to send to each other, in the same change` : "No runner has announced itself yet"}">
+    <input type="checkbox" ${attributes} ${groups.length ? "checked" : "disabled"}> exchange with the runners both ways${groups.length ? ` (${esc(groups.join(", "))})` : ""}</label>`;
+}
 
 function matrixCell(from, to) {
   const allowed = matrixDraft ? matrixDraft[from]?.has(to) : (rights.matrix[from] || []).includes(to);
   return `<td class="${allowed ? "yes" : "no"}"><input type="checkbox" data-matrix="${esc(from)}" data-to="${esc(to)}" ${allowed ? "checked" : ""} aria-label="${esc(from)} may send to ${esc(to)}"></td>`;
+}
+
+function verification(i) {
+  if (i.auth !== "key") return `<span class="chip" title="The identity provider verifies it">idp</span>`;
+  return `${i.hasKey ? `<span class="chip ok" title="Verified by a key this coordinator made">key</span>` : `<span class="chip warn" title="Verified by a key, and none is live: it cannot sign in or connect">no live key</span>`}
+    <button class="small ghost" data-keys>${openKeys.has(i.clientId) ? "Hide keys" : "Keys"}</button>`;
+}
+
+function keysRow(i) {
+  const answer = keysOf[i.clientId];
+  if (!openKeys.has(i.clientId) || !answer) return "";
+  const rows = answer.keys.map((k) => `
+    <tr><td class="mono">${esc(k.id)}</td><td class="mono">…${esc(k.hint)}</td><td>${esc(k.label ?? "")}</td><td>${esc(when(k.created))}</td>
+      <td>${k.expires ? esc(when(k.expires)) : `<span class="hint">never</span>`}</td>
+      <td>${k.revoked ? `<span class="chip">revoked ${esc(when(k.revoked))}</span>` : k.live ? `<span class="chip ok">live</span>` : `<span class="chip warn">expired</span>`}</td>
+      <td>${k.revoked ? "" : `<button class="small ghost danger" data-revoke-key="${esc(k.id)}">Revoke</button>`}</td></tr>`).join("");
+  return `<tr class="keys-row" data-keys-of="${esc(i.clientId)}"><td colspan="8">
+    <table><tr><th>key</th><th>ends in</th><th>label</th><th>made</th><th>expires</th><th>state</th><th></th></tr>${rows || `<tr><td colspan="7" class="hint">No key yet.</td></tr>`}</table>
+    <div class="row"><input data-key-label placeholder="label (optional)" aria-label="Label of the next key of ${esc(i.clientId)}">
+      <label class="check">expires <input type="datetime-local" data-key-expires aria-label="When the next key of ${esc(i.clientId)} expires (optional)"></label>
+      <button class="small" data-make-key>${answer.hasKey ? "Rotate: make a second key" : "Make a key"}</button></div>
+    <p class="hint">A key is shown once, when it is made: the coordinator keeps its hash only. One made while another is live starts a rotation: both open until the old one is revoked, and a third is refused. Revoking a key disconnects the identity's hosts and ends a person's session at the next request.</p>
+  </td></tr>`;
 }
 
 function render() {
@@ -48,39 +103,46 @@ function render() {
 
   const identities = rights.identities.map((i) => `
     <tr data-identity="${esc(i.clientId)}">
-      <td><code>${esc(i.clientId)}</code>${KIND_CHIPS[i.kind] ?? ""}${i.role ? ` <span class="chip">${esc(i.role)}</span>` : ""}</td>
+      <td><code>${esc(i.clientId)}</code>${KIND_CHIPS[i.kind] ?? ""}${i.account ? `<div class="hint">${esc(i.account)}</div>` : ""}</td>
+      <td>${verification(i)}</td>
       <td><input class="mono narrow" data-field="name" value="${esc(i.name)}" aria-label="${i.kind === "node" ? "Node name" : "Name"} of ${esc(i.clientId)}"></td>
       <td>${i.kind === "launcher"
         ? `<input class="mono" data-field="pipelines" value="${esc((i.pipelines ?? []).join(", "))}" placeholder="none: it launches nothing" aria-label="Pipelines ${esc(i.clientId)} may launch, separated by commas">`
-        : `<input class="mono" data-field="groups" value="${esc(i.groups.join(", "))}" list="groups-list" aria-label="Groups of ${esc(i.clientId)}, separated by commas" ${i.kind === "monitor" || i.kind === "person" ? `disabled placeholder="none"` : ""}>`}</td>
+        : i.kind === "person"
+          ? `<select data-field="role" aria-label="Role of ${esc(i.clientId)}">${ROLES.map((r) => `<option ${r === i.role ? "selected" : ""}>${r}</option>`).join("")}</select>`
+          : `<input class="mono" data-field="groups" value="${esc(i.groups.join(", "))}" list="groups-list" aria-label="Groups of ${esc(i.clientId)}, separated by commas" ${i.kind === "monitor" ? `disabled placeholder="none"` : ""}>`}</td>
       <td><input data-field="description" value="${esc(i.description)}" aria-label="Description of ${esc(i.clientId)}"></td>
       <td><label class="check"><input type="checkbox" data-field="enabled" ${i.enabled ? "checked" : ""}> enabled</label></td>
-      <td>${i.connected ? `<span class="chip ok">connected</span>` : `<span class="chip">offline</span>`}</td>
+      <td>${i.connected ? `<span class="chip ok">connected</span>` : i.kind === "node" ? `<span class="chip">offline</span>` : ""}</td>
       <td class="actions-cell">
         <button class="small" data-save-identity>Save</button>
         <button class="small ghost" data-reconnect ${i.connected ? "" : "disabled"} title="Drop its control connection: its host connects again, under its current groups">Reconnect</button>
         <button class="small ghost danger" data-remove-identity>Remove</button>
       </td>
-    </tr>`).join("");
+    </tr>${keysRow(i)}`).join("");
 
   // What a host proposes for itself is untrusted text: shown escaped, and the administrator decides every field.
   const nameFrom = (proposed) => proposed.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 63);
-  const pending = (rights.pending || []).map((p) => `
+  const pending = (rights.pending || []).map((p) => {
+    const name = nameFrom(p.proposedName || p.subject);
+    return `
     <tr data-pending="${esc(p.subject)}">
       <td><code>${esc(p.subject)}</code>${Object.entries(p.labels || {}).map(([k, v]) => `<div class="hint">${esc(k)}: ${esc(v)}</div>`).join("")}</td>
       <td>${esc(p.proposedName)}<div class="hint">${esc(p.description)}</div></td>
       <td class="hint">${p.bricks.length ? p.bricks.map(esc).join(", ") : "no brick"}</td>
-      <td><input class="mono narrow" data-field="name" value="${esc(nameFrom(p.proposedName || p.subject))}" aria-label="Node name for ${esc(p.subject)}"></td>
-      <td><input class="mono" data-field="groups" placeholder="groups, separated by commas" list="groups-list" aria-label="Groups for ${esc(p.subject)}, separated by commas"></td>
+      <td><input class="mono narrow" data-field="name" value="${esc(name)}" aria-label="Node name for ${esc(p.subject)}"></td>
+      <td><input class="mono" data-field="groups" value="${esc(freeGroup(name))}" placeholder="groups, separated by commas" list="groups-list" aria-label="Groups for ${esc(p.subject)}, separated by commas">
+        ${runnersCheck(`data-field="runners"`)}</td>
       <td class="actions-cell">
         <button class="small primary" data-accept>Accept</button>
         <button class="small ghost" data-ignore title="Set it aside for 24 hours: it is not shown again until then">Ignore for 24 h</button>
       </td>
-    </tr>`).join("");
+    </tr>`;
+  }).join("");
 
   host.innerHTML = `
     <div class="view-head"><h1>Access</h1>
-      <p class="hint">Who may send what to whom. Every node authenticates with an identity provider the coordinator trusts, which says who it is; the coordinator decides its name and its groups, never the token or the node.</p></div>
+      <p class="hint">Who may send what to whom. Every identity is verified by a key this coordinator makes or by an identity provider it trusts, which says who it is; the coordinator decides its name, its groups and its role, never the token or the node.</p></div>
 
     ${rights.idp ? `<section class="card">
       <h2>Identity provider</h2>
@@ -97,21 +159,26 @@ function render() {
 
     ${pending ? `<section class="card">
       <h2>Waiting for approval <span class="hint">${rights.pending.length}</span></h2>
-      <p class="hint">A host presented a valid token that no identity knows. Its name, description and bricks are what it <i>proposes</i>: you decide its node name and its groups. Nothing runs on it, and it receives no group, until you accept it.</p>
+      <p class="hint">A host presented a valid token of the identity provider that no identity knows. Its name, description and bricks are what it <i>proposes</i>: you decide its node name and its groups, a group of its own by default. Nothing runs on it, and it receives no group, until you accept it.</p>
       <table><tr><th>client</th><th>proposes</th><th>bricks</th><th>node name</th><th>groups</th><th></th></tr>${pending}</table>
     </section>` : ""}
 
     <section class="card">
       <div class="card-head"><h2>Identities <span class="hint">who</span></h2><button data-add>${adding ? "Cancel" : "Add an identity"}</button></div>
       ${adding ? `<div class="row add-identity">
-        <input id="a-id" class="mono" placeholder="client id"><input id="a-name" class="mono" placeholder="node name (the client id by default)">
-        <select id="a-kind" aria-label="Kind"><option value="node">node</option><option value="monitor">monitor (reads /health)</option><option value="launcher">launcher (starts runs)</option></select>
-        <input id="a-groups" class="mono" placeholder="groups, separated by commas (a node's)" list="groups-list">
-        <input id="a-pipelines" class="mono" placeholder="pipelines, separated by commas (a launcher's)"><input id="a-description" placeholder="description">
+        <input id="a-id" class="mono" placeholder="client id">
+        <select id="a-kind" aria-label="Kind"><option value="node">node</option><option value="monitor">monitor (reads /health)</option><option value="launcher">launcher (starts runs)</option><option value="person">person (signs in)</option></select>
+        <select id="a-auth" aria-label="Verified by"><option value="key" ${rights.idp ? "" : "selected"}>verified by a key this coordinator makes</option>${rights.idp ? `<option value="idp" selected>verified by the identity provider</option>` : ""}</select>
+        <input id="a-name" class="mono" placeholder="name (the client id by default)">
+        <span data-for="node"><input id="a-groups" class="mono" placeholder="groups, separated by commas" list="groups-list">${runnersCheck(`id="a-runners"`)}</span>
+        <input id="a-pipelines" class="mono" data-for="launcher" placeholder="pipelines it may launch, separated by commas">
+        <select id="a-role" data-for="person" aria-label="Role">${ROLES.map((r) => `<option>${r}</option>`).join("")}</select>
+        <input id="a-account" class="mono" data-for="person-idp" placeholder="account at the provider (an email by default)">
+        <input id="a-description" placeholder="description">
         <button class="primary" data-create>Create</button></div>` : ""}
       <datalist id="groups-list">${groups.map((g) => `<option>${esc(g)}</option>`).join("")}</datalist>
-      <table><tr><th>client</th><th>node name</th><th>groups / pipelines</th><th>description</th><th></th><th>state</th><th></th></tr>${identities}</table>
-      <p class="hint">An identity is a client the IdP already knows, by its client id: its secret lives in the IdP. A monitor is the identity of a supervisor: it reads <code>/health</code> and nothing else, belongs to no group and hosts nothing. A launcher is the identity of a scheduler: it starts the runs of the pipelines listed on its row, reads them, and nothing else; with no pipeline listed it launches none. A node sends to another only if every one of its groups may send to every group of the receiver, in the matrix below. A change of name or groups, or disabling an identity, drops the control connections of its node's hosts, which connect again under the new rights. A disabled identity is refused when its hosts announce again and holds no group: the runs placed on them end. Reconnect drops the connections without changing anything.</p>
+      <table><tr><th>client</th><th>verified by</th><th>name</th><th>groups / pipelines / role</th><th>description</th><th></th><th>state</th><th></th></tr>${identities}</table>
+      <p class="hint">An identity verified by the identity provider is a client or an account the provider already knows; one verified by a key holds keys this coordinator makes, each shown once, when it is made. A person signs in to these pages and the studio with the role on its row. A monitor is the identity of a supervisor: it reads <code>/health</code> and nothing else, belongs to no group and hosts nothing. A launcher is the identity of a scheduler: it starts the runs of the pipelines listed on its row, reads them, and nothing else; with no pipeline listed it launches none. A node sends to another only if every one of its groups may send to every group of the receiver, in the matrix below. A change of name or groups, or disabling an identity, drops the control connections of its node's hosts, which connect again under the new rights. A disabled identity is refused when its hosts announce again and holds no group: the runs placed on them end. Reconnect drops the connections without changing anything.</p>
     </section>
 
     <section class="card">
@@ -125,6 +192,16 @@ function render() {
     <section class="card"><h2>Audit</h2>
       ${(rights.audit || []).slice(0, 40).map((a) => `<div class="audit"><span class="hint">${esc(new Date(a.at).toLocaleString())}${a.by ? ` · ${esc(a.by)}` : ""}</span> ${esc(a.change)}</div>`).join("") || `<p class="hint">No change yet.</p>`}
     </section>`;
+  shapeForm();
+}
+
+// The fields of the form that apply to the kind and the verification chosen; the others are hidden, never sent.
+function shapeForm() {
+  const kind = document.getElementById("a-kind")?.value;
+  if (!kind) return;
+  const auth = document.getElementById("a-auth").value;
+  for (const el of host.querySelectorAll(".add-identity [data-for]"))
+    el.hidden = el.dataset.for !== kind && !(el.dataset.for === "person-idp" && kind === "person" && auth === "idp");
 }
 
 function onChange(e) {
@@ -134,13 +211,71 @@ function onChange(e) {
     const row = (matrixDraft[t.dataset.matrix] ||= new Set());
     t.checked ? row.add(t.dataset.to) : row.delete(t.dataset.to);
     render();
+  } else if (t.id === "a-kind" || t.id === "a-auth") shapeForm();
+  else if (t.id === "a-id" || t.id === "a-name") {
+    // A node is proposed a group of its own, named after it, until someone types another.
+    const groups = document.getElementById("a-groups");
+    const name = document.getElementById("a-name").value.trim() || document.getElementById("a-id").value.trim();
+    if (groups && (!groups.value || groups.dataset.proposed === groups.value) && name) groups.value = groups.dataset.proposed = freeGroup(name);
   }
+}
+
+// How an identity of each kind uses its key, with the key nowhere in it: the key goes into a variable or a store the person
+// fills, and every command names that variable (root CLAUDE.md, "No page offers to copy a command that holds a key").
+function usageOf(identity) {
+  const origin = location.origin;
+  if (identity.kind === "node") return [
+    "Put the key in the node's environment, never on its command line:",
+    "  export DTPIPE_NODE_KEY=…   (paste the key after the =)",
+    ...(rights.idp ? [`  export DtPipeNode__Oidc__Authority=${origin}   (the key is this coordinator's, not the provider's)`] : []),
+    "Then start the node:",
+    `  dtpipe node --name ${identity.clientId} --coordinator ${origin} --client-secret '\${{DTPIPE_NODE_KEY}}'`,
+    "Or keep the key in the keyring and give --client-secret keyring://<alias>; a host of its own reads it as Oidc:ClientSecret.",
+  ].join("\n");
+  if (identity.kind === "person") return [
+    `Sign in at ${origin}/account/login with it, or open the studio with the key in a variable:`,
+    "  export DTPIPE_KEY=…   (paste the key after the =)",
+    `  dtpipe studio --coordinator ${origin} --key '\${{DTPIPE_KEY}}'`,
+  ].join("\n");
+  return [
+    `A ${identity.kind} exchanges it for a token: POST ${origin}/connect/token with grant_type=client_credentials,`,
+    `client_id=${identity.clientId} and the key as client_secret, read from its environment or a secret store, never from a command line.`,
+  ].join("\n");
+}
+
+// The key a call made is shown here once, in the one element the Copy button copies, and nowhere else: not in a command, not in
+// storage, not in the address. Closing the window empties that element and removes the window.
+function showKey(identity, made) {
+  const dialog = document.createElement("dialog");
+  dialog.className = "key-window";
+  dialog.innerHTML = `
+    <h2>Key ${esc(made.id)} of <code>${esc(identity.clientId)}</code></h2>
+    <p class="hint">Shown this once: the coordinator keeps its hash only, and closing this window forgets it here. It ends in …${esc(made.hint)}.</p>
+    <code class="mono key-secret" data-key-secret></code>
+    <div class="row"><button class="primary" data-copy-key>Copy the key</button></div>
+    <h3>How to use it</h3>
+    <pre class="usage">${esc(usageOf(identity))}</pre>
+    <div class="row"><button data-close-key>Close</button></div>`;
+  const secret = dialog.querySelector("[data-key-secret]");
+  secret.textContent = made.key;
+  const close = () => { secret.textContent = ""; dialog.remove(); };
+  dialog.addEventListener("close", close);
+  dialog.querySelector("[data-close-key]").addEventListener("click", () => dialog.close());
+  dialog.querySelector("[data-copy-key]").addEventListener("click", () =>
+    navigator.clipboard.writeText(secret.textContent).then(() => toast("Key copied.", "info"), () => toast("The browser refused to copy: select the key and copy it.")));
+  document.body.append(dialog);
+  dialog.showModal();
+}
+
+async function makeKey(identity, label, expires) {
+  showKey(identity, await api(`/api/rights/identities/${encodeURIComponent(identity.clientId)}/keys`, { label: label || null, expires: expires || null }));
 }
 
 async function onClick(e) {
   const b = e.target.closest("button");
   if (!b || b.disabled) return;
   const row = b.closest("[data-identity]");
+  const keys = b.closest("[data-keys-of]");
   const waiting = b.closest("[data-pending]");
   try {
     if (b.dataset.accept !== undefined) {
@@ -148,17 +283,41 @@ async function onClick(e) {
       await api(`/api/rights/pending/${encodeURIComponent(subject)}/accept`, {
         name: waiting.querySelector('[data-field="name"]').value.trim(),
         groups: groupsOf(waiting.querySelector('[data-field="groups"]').value),
+        exchangeWithRunners: waiting.querySelector('[data-field="runners"]').checked,
       });
       toast(`${subject} accepted: its host joins on its next attempt.`, "info");
     } else if (b.dataset.ignore !== undefined) {
       await api(`/api/rights/pending/${encodeURIComponent(waiting.dataset.pending)}/ignore`, {});
       toast(`${waiting.dataset.pending} set aside for 24 hours.`, "info");
-    } else if (b.dataset.add !== undefined) { adding = !adding; render(); }
+    } else if (b.dataset.add !== undefined) { adding = !adding; render(); return; }
     else if (b.dataset.create !== undefined) {
       const v = (id) => document.getElementById(id).value.trim();
-      await api("/api/rights/identities", { clientId: v("a-id"), name: v("a-name") || null, description: v("a-description"), groups: groupsOf(v("a-groups")), pipelines: groupsOf(v("a-pipelines")), kind: v("a-kind") });
+      const identity = { clientId: v("a-id"), name: v("a-name") || null, description: v("a-description"), kind: v("a-kind"), auth: v("a-auth") };
+      if (identity.kind === "node") Object.assign(identity, { groups: groupsOf(v("a-groups")), exchangeWithRunners: document.getElementById("a-runners").checked });
+      if (identity.kind === "launcher") identity.pipelines = groupsOf(v("a-pipelines"));
+      if (identity.kind === "person") Object.assign(identity, { role: v("a-role"), account: identity.auth === "idp" ? v("a-account") : null });
+      await api("/api/rights/identities", identity);
       adding = false;
-      toast(`${v("a-id")} created: it can obtain tokens now.`, "info");
+      if (identity.auth === "key") {
+        openKeys.add(identity.clientId);
+        await makeKey(identity);
+      } else toast(`${identity.clientId} created: the identity provider verifies it.`, "info");
+    } else if (b.dataset.keys !== undefined) {
+      const id = row.dataset.identity;
+      if (openKeys.delete(id)) { render(); return; }
+      openKeys.add(id);
+      await listKeys(id);
+      render();
+      return;
+    } else if (b.dataset.makeKey !== undefined) {
+      const id = keys.dataset.keysOf;
+      const expires = keys.querySelector("[data-key-expires]").value;
+      await makeKey(rights.identities.find((i) => i.clientId === id), keys.querySelector("[data-key-label]").value.trim(), expires ? new Date(expires).toISOString() : null);
+    } else if (b.dataset.revokeKey !== undefined) {
+      const id = keys.dataset.keysOf;
+      if (!confirm(`Revoke key ${b.dataset.revokeKey} of ${id}? It opens nothing more, its hosts are disconnected and a session it opened ends.`)) return;
+      await api(`/api/rights/identities/${encodeURIComponent(id)}/keys/${encodeURIComponent(b.dataset.revokeKey)}/revoke`, {});
+      toast(`Key ${b.dataset.revokeKey} of ${id} revoked.`, "info");
     } else if (b.dataset.saveIdentity !== undefined) {
       const id = row.dataset.identity;
       await api(`/api/rights/identities/${encodeURIComponent(id)}`, {
@@ -167,6 +326,7 @@ async function onClick(e) {
         description: row.querySelector('[data-field="description"]').value,
         groups: groupsOf(row.querySelector('[data-field="groups"]')?.value ?? ""),
         pipelines: groupsOf(row.querySelector('[data-field="pipelines"]')?.value ?? ""),
+        role: row.querySelector('[data-field="role"]')?.value ?? null,
         enabled: row.querySelector('[data-field="enabled"]').checked,
       }, "PUT");
       toast(`${id} saved.`, "info");
@@ -177,6 +337,7 @@ async function onClick(e) {
       const id = row.dataset.identity;
       if (!confirm(`Remove ${id}? It obtains no more tokens, and its node is disconnected.`)) return;
       await api(`/api/rights/identities/${encodeURIComponent(id)}`, undefined, "DELETE");
+      openKeys.delete(id);
     } else if (b.dataset.matrixSave !== undefined) {
       await api("/api/rights/matrix", { matrix: Object.fromEntries(Object.entries(matrixDraft).map(([g, s]) => [g, [...s]])) }, "PUT");
       matrixDraft = null;

@@ -68,6 +68,9 @@ public static class IdentityKinds
 /// </summary>
 public sealed record AuditEntry(DateTimeOffset At, string Change, string? By = null);
 
+/// <summary>An edge of the flow matrix: <see cref="From"/> may send to <see cref="To"/>.</summary>
+public sealed record GroupEdge(string From, string To);
+
 /// <summary>The rights document: the identities, the flow matrix between groups, and the changes made to them.</summary>
 public sealed record RightsDocument(
     List<Identity> Identities, Dictionary<string, List<string>> Matrix, List<AuditEntry>? Audit = null);
@@ -191,13 +194,38 @@ public sealed class RightsStore
         return changes.Count > 0 ? "Flow matrix: " + string.Join(", ", changes) : "Flow matrix saved, unchanged";
     });
 
-    public void AddIdentity(Identity identity, string? by = null) => Edit(by, doc =>
+    /// <summary>
+    /// Allows each of <paramref name="edges"/> beside what the matrix allows already, and revokes nothing: two administrators who allow
+    /// edges at once both keep theirs, where two whole matrices sent at once would leave the second.
+    /// </summary>
+    public void AllowEdges(IReadOnlyList<GroupEdge> edges, string? by = null) => Edit(by, doc => "Flow matrix: " + Allow(doc, edges));
+
+    /// <summary>Adds to the matrix of <paramref name="doc"/> each edge it does not allow yet, and says which it added.</summary>
+    private static string Allow(RightsDocument doc, IReadOnlyList<GroupEdge> edges)
+    {
+        if (edges.Count == 0) throw new ConflictException("No edge to allow: an edge names the group that sends and the group that receives.");
+        var added = new List<string>();
+        foreach (var edge in edges)
+        {
+            var (from, to) = (edge.From?.Trim() ?? "", edge.To?.Trim() ?? "");
+            if (from.Length == 0 || to.Length == 0) throw new ConflictException("An edge names the group that sends and the group that receives.");
+            if (Allowed(doc, from, to)) continue;
+            if (!doc.Matrix.TryGetValue(from, out var targets)) doc.Matrix[from] = targets = [];
+            targets.Add(to);
+            targets.Sort(StringComparer.Ordinal);
+            added.Add($"{from} → {to} allowed");
+        }
+        return added.Count > 0 ? string.Join(", ", added) : "every edge asked was allowed already";
+    }
+
+    /// <summary>Adds <paramref name="identity"/>, and allows <paramref name="edges"/> in the same change when there are any.</summary>
+    public void AddIdentity(Identity identity, string? by = null, IReadOnlyList<GroupEdge>? edges = null) => Edit(by, doc =>
     {
         if (doc.Identities.Any(i => i.ClientId == identity.ClientId)) throw new ConflictException($"'{identity.ClientId}' already exists.");
         var added = Normalized(identity);
         CheckUnique([.. doc.Identities, added]);
         doc.Identities.Add(added);
-        return Added(added);
+        return edges is { Count: > 0 } ? $"{Added(added)}; flow matrix: {Allow(doc, edges)}" : Added(added);
     });
 
     private static string Added(Identity added)

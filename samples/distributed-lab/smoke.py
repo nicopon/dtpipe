@@ -32,10 +32,14 @@ The replicas': node-4 carried by two hosts (LAB_REPLICAS=node-4=2), played only 
 it ran on; a replica that stops says so, is gone at once and removes its directory; one that is cut is listed disconnected,
 then lost once its grace has run out, and the next run goes to the other; a replica announcing another declaration of a brick is passed over for a plan made from
 the first one, and when none is left the run is refused, until the pipeline is deployed again. Local lab only.
+The keys': played only when named, on a coordinator that exchanges keys (its metadata's dtpipe_auth names `key`: Coordinator:PublicUrl,
+over HTTPS or with Coordinator:Auth:AllowHttpKeys, which neither lab target sets yet): a node verified by a key gets its token from the
+coordinator and its announcement is taken; a person verified by a key reads /api/me with hers; revoking each key refuses the next
+exchange, cuts the node's connection and turns the person's token away at the next request; both identities are removed.
 The restart's: the stack's coordinator ended and started again (`lab.sh stack restart-check [restore]`, which gives the command in
 LAB_COORDINATOR_RESTART), played only when named: what the coordinator kept comes back as it was, on whichever store it runs: a rights
 edit, an armed pipeline, a journaled run, the ids that follow, and a session cookie that is not signed in again.
-Usage: smoke.py <lab-url> <dtpipe> <state-dir> [lab|library|rights|faults|bricks|cursor|sandbox|replicas|restart] [pipeline-id-substring ...]
+Usage: smoke.py <lab-url> <dtpipe> <state-dir> [lab|library|rights|faults|bricks|cursor|sandbox|replicas|restart|keys] [pipeline-id-substring ...]
 A leading pass name runs that pass alone.
 Against the compose stack (`lab.sh stack smoke`, LAB_TARGET=stack) the state directory is `.stack/`: the
 witness reads the databases the nodes seeded there, the library is the coordinator's own directory, its
@@ -46,7 +50,7 @@ import base64, csv, glob, io, itertools, json, os, re, signal, subprocess, sys, 
 from datetime import datetime
 
 URL, DTPIPE, STATE = sys.argv[1].rstrip("/"), sys.argv[2], sys.argv[3]
-PASSES = {"lab", "library", "rights", "faults", "bricks", "cursor", "sandbox", "replicas", "restart"}
+PASSES = {"lab", "library", "rights", "faults", "bricks", "cursor", "sandbox", "replicas", "restart", "keys"}
 ONLY = sys.argv[4] if len(sys.argv) > 4 and sys.argv[4] in PASSES else None
 SELECTED = sys.argv[5:] if ONLY else sys.argv[4:]
 RUN_TIMEOUT = 180
@@ -1887,12 +1891,110 @@ def restart_pass():
     return failures
 
 
+def keys_pass():
+    """Identities verified by a key the coordinator makes: a node and a person, each through its whole life (made, used, revoked,
+    removed), against the coordinator's own issuer at the lab's address. The key is read once from the answer that makes it and
+    kept in this process only."""
+    failures = 0
+    metadata = json.loads(urllib.request.urlopen(URL + "/.well-known/oauth-protected-resource", timeout=20).read())
+    if "key" not in (metadata.get("dtpipe_auth") or []):
+        print("FAIL  keys     needs a coordinator that exchanges keys: Coordinator:PublicUrl, over HTTPS or with Coordinator:Auth:AllowHttpKeys")
+        return 1
+    node, person = "smoke-key-node", "smoke-key-person"
+    kept = {}
+
+    def check(name, test):
+        nonlocal failures
+        started = time.time()
+        try:
+            print(f"PASS  keys     {name:28} {test()}  ({time.time() - started:.1f}s)")
+        except Exception as e:
+            failures += 1
+            print(f"FAIL  keys     {name:28} {e}")
+
+    def claims_of(access):
+        payload = access.split(".")[1]
+        return json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+
+    def identity_with_a_key(body):
+        call("/api/rights/identities", {**body, "auth": "key"})
+        made = call(f"/api/rights/identities/{body['clientId']}/keys", {"label": "smoke"})
+        if not made["key"].startswith(f"dtp_{body['clientId']}_") or not made["key"].endswith(made["hint"]):
+            raise RuntimeError(f"the key does not have the shape dtp_<id>_<secret> ending in its hint ({made['hint']})")
+        if any(made["key"] in json.dumps(i) for i in call("/api/rights")["identities"]):
+            raise RuntimeError("the rights list the key")
+        return made
+
+    def node_key():
+        made = identity_with_a_key({"clientId": node, "name": node, "groups": ["smoke-keys"], "description": "smoke keys"})
+        kept["node"] = made
+        status, access = sec.token_for(URL, node, made["key"])
+        claims = claims_of(access) if access else {}
+        if not access or claims.get("sub") != node or claims.get("client_id") != node or claims.get("iss", "").rstrip("/") != URL:
+            raise RuntimeError(f"the exchange gave HTTP {status}, claims {claims}")
+        hub = sec.LongPollingHub(URL, sec.LAB_HUB, access).open()
+        answer = hub.invoke("Announce", {"name": "proposed", "description": "", "datasets": [], "role": 0, "bricks": [],
+                                         "capabilities": [], "instanceId": str(uuid.uuid4()), "origin": "smoke:keys"})
+        if "error" in answer:
+            hub.close()
+            raise RuntimeError(f"the announcement was refused: {answer['error']}")
+        kept["hub"] = hub
+        until(lambda: any(n["name"] == node and n["online"] for n in call("/api/nodes")), 20, f"{node} online")
+        return f"{node}'s key exchanged at the coordinator (sub = client_id = {node}, iss = its address); its announcement taken, filed as {node}"
+
+    def person_key():
+        made = identity_with_a_key({"clientId": person, "name": person, "kind": "person", "role": "reader"})
+        kept["person"] = made
+        status, access = sec.token_for(URL, person, made["key"])
+        claims = claims_of(access) if access else {}
+        if not access or claims.get("sub") != person or claims.get("client_id") == person:
+            raise RuntimeError(f"the exchange gave HTTP {status}, claims {claims}")
+        kept["person-token"] = access
+        status, body, _ = bearer(access, "/api/me")
+        roles = json.loads(body).get("roles", []) if status == 200 else []
+        if status != 200 or roles != ["reader"]:
+            raise RuntimeError(f"/api/me with the person's token -> {status}, roles {roles}")
+        return f"{person}'s key exchanged for a person's token (client_id {claims.get('client_id')}); /api/me reads its role, reader"
+
+    def revoked():
+        if "node" not in kept or "person" not in kept:
+            raise RuntimeError("nothing to revoke: an earlier check failed")
+        call(f"/api/rights/identities/{node}/keys/{kept['node']['id']}/revoke", {})
+        call(f"/api/rights/identities/{person}/keys/{kept['person']['id']}/revoke", {})
+        node_again, _ = sec.token_for(URL, node, kept["node"]["key"])
+        person_again, _ = sec.token_for(URL, person, kept["person"]["key"])
+        me, _, _ = bearer(kept["person-token"], "/api/me")
+        try:
+            cut = "error" in kept["hub"].invoke("Leave")
+        except RuntimeError:
+            cut = True
+        if node_again == 200 or person_again == 200 or me != 401 or not cut:
+            raise RuntimeError(f"after revoking: node exchange {node_again}, person exchange {person_again}, /api/me {me}, node connection cut {cut}")
+        return f"both keys revoked: exchanges refused ({node_again}, {person_again}), the person's token turned away (401), the node's connection cut"
+
+    try:
+        check("node — key, token, announce", node_key)
+        check("person — key, token, /api/me", person_key)
+        check("revoked — both closed", revoked)
+    finally:
+        if "hub" in kept:
+            kept["hub"].close()
+        for identity in (node, person):
+            try:
+                call(f"/api/rights/identities/{identity}", None, "DELETE")
+            except ApiError as e:
+                if e.status != 409:
+                    failures += 1
+                    print(f"FAIL  keys     {'clean-up':28} {e}")
+    return failures
+
+
 def main():
     ctx = Context()
     failures = (catalog_pass(ctx) if ONLY in (None, "lab") else 0) + (library_pass(ctx) if ONLY in (None, "library") else 0) \
         + (rights_pass() if ONLY in (None, "rights") else 0) + (faults_pass() if ONLY in (None, "faults") else 0) \
         + (bricks_pass() if ONLY in (None, "bricks") else 0) + (cursor_pass() if ONLY in (None, "cursor") else 0) + (sandbox_pass() if ONLY in (None, "sandbox") else 0) \
-        + (replicas_pass() if ONLY == "replicas" else 0) + (restart_pass() if ONLY == "restart" else 0)
+        + (replicas_pass() if ONLY == "replicas" else 0) + (restart_pass() if ONLY == "restart" else 0) + (keys_pass() if ONLY == "keys" else 0)
     return 1 if failures else 0
 
 

@@ -3,7 +3,7 @@
 // jobs, the job's text read only, and its last run with the plan that run ran. The node of each source and sink branch is
 // chosen here, among the nodes that offer its brick; the runner is never named. The bindings are saved from here, and the
 // pipeline is deployed (armed at the commit the library holds) and run.
-import { $, api, deploymentOf, duration, esc, healthChip, cursorsOf, healthOf, isActive, lastRunOf, ranPlan, shortNode, toast } from "./core.js";
+import { $, api, deploymentOf, duration, esc, healthChip, cursorsOf, healthOf, isActive, lastRunOf, ranPlan, shortNode, store, toast } from "./core.js";
 import { drawLanes, fragmentJobs, legend, planProblems } from "./placement.js";
 
 let host = null;
@@ -28,24 +28,30 @@ export function mount(el, params) {
 
 export function update(kind) {
   if (kind === "library") load();
+  // A change of the rights can change the plan (its groups, what the matrix allows between them), never the bindings drafted here.
+  else if (kind === "rights" && doc) loadPlan().then(render, (e) => toast(e.message));
   else if (["deployments", "runs", "nodes", "all", "health"].includes(kind)) render();
 }
 
 async function load() {
   try {
     doc = await api(`/api/library/${encodeURIComponent(id)}`);
-    const answer = await api(`/api/library/${encodeURIComponent(id)}/plan`);
-    plan = answer.plan;
-    armable = !!answer.armable;
-    runner = answer.runner;
-    brickOfUnit = answer.bricks || {};
-    offers = answer.offers || {};
+    await loadPlan();
     draft = draftOf(doc.bindings);
   } catch (e) {
     host.innerHTML = `<p class="mismatch">${esc(e.message)}</p>`;
     return;
   }
   render();
+}
+
+async function loadPlan() {
+  const answer = await api(`/api/library/${encodeURIComponent(id)}/plan`);
+  plan = answer.plan;
+  armable = !!answer.armable;
+  runner = answer.runner;
+  brickOfUnit = answer.bricks || {};
+  offers = answer.offers || {};
 }
 
 // The page chooses a binding's node and mode. A strict binding's brick is resolved by the server from the job's text; one in
@@ -155,6 +161,7 @@ function render() {
     ${healthCard()}
     ${bindingsCard()}
     ${planProblems(plan).length ? `<section class="card"><ul class="msgs errors">${planProblems(plan).map((e) => `<li>${esc(e)}</li>`).join("")}</ul></section>` : ""}
+    ${missingEdgesCard()}
     <section class="card">
       <div class="card-head"><h2>Fragments and edges</h2>
         ${legend}</div>
@@ -166,6 +173,26 @@ function render() {
     <section class="card"><div class="card-head"><h2>Job</h2><span class="hint">Read only: write it with <code>dtpipe studio</code> and publish it.</span></div>
       <pre id="x-job">${esc(doc.yaml)}</pre></section>`;
   drawLanes($("x-lanes"), plan, brickOfUnit, { run, running, current: runMatches });
+}
+
+// The edges between groups the plan needs and the flow matrix does not allow, read from the plan's refused edges: each group of
+// the sender to each group of the receiver. An administrator allows them here, beside what the matrix allows already; anyone
+// else is told who can.
+function missingEdges() {
+  const allowed = (from, to) => (store.matrix[from] || []).some((t) => t === "*" || t.toLowerCase() === to.toLowerCase());
+  const pairs = plan.edges.filter((e) => !e.allowed).flatMap((e) => e.producerGroups.flatMap((from) => e.consumerGroups.map((to) => ({ from, to }))));
+  const seen = new Set();
+  return pairs.filter(({ from, to }) => !allowed(from, to) && !seen.has(`${from}\n${to}`) && seen.add(`${from}\n${to}`));
+}
+
+function missingEdgesCard() {
+  const edges = missingEdges();
+  if (!edges.length) return "";
+  const admin = store.me?.roles?.includes("admin");
+  return `<section class="card"><div class="card-head"><h2>Missing in the flow matrix</h2>
+      ${admin ? `<span class="actions"><button id="x-allow-edges" class="primary" ${busy ? "disabled" : ""}>Allow ${edges.length > 1 ? "these edges" : "this edge"}</button></span>` : ""}</div>
+    <ul class="msgs">${edges.map((e) => `<li><span class="mono">${esc(e.from)}</span> → <span class="mono">${esc(e.to)}</span></li>`).join("")}</ul>
+    <p class="hint">${admin ? "Allowing adds these edges to the matrix and revokes nothing; the change is audited in Access." : "An administrator allows them, here or in Access."}</p></section>`;
 }
 
 // What the health read found of the armed version, the findings that matter first. The plan below is the one the library's version would make.
@@ -209,6 +236,11 @@ async function onClick(e) {
       await api(`/api/library/${encodeURIComponent(id)}/deploy`, {});
       toast(`${id} deployed: every fragment registered.`, "info");
       doc = await api(`/api/library/${encodeURIComponent(id)}`);
+    } else if (b.id === "x-allow-edges") {
+      const edges = missingEdges();
+      await api("/api/rights/matrix/edges", { edges });
+      toast(`Allowed in the flow matrix: ${edges.map((e) => `${e.from} → ${e.to}`).join(", ")}.`, "info");
+      await loadPlan();
     } else if (b.id === "x-run") {
       const run = await api("/api/runs", { pipelineId: id });
       toast(`${run.runId} ${run.state}.`, "info");
@@ -217,6 +249,8 @@ async function onClick(e) {
     }
   } catch (err) {
     toast(err.message);
+    // A refused Deploy is read again: the plan then shows what the matrix lacks now.
+    if (b.id === "x-deploy") await loadPlan().catch(() => {});
   }
   busy = false;
   render();

@@ -159,6 +159,9 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   coordinator's log, the enrollment host, the revision each node's own binary and image must carry). A new check that
   starts a process or reads a path of the local lab takes its stack form there too.
   `[local: lab.sh stack smoke, ui, studio]`
+- **`smoke.py keys` is played only when named, on a coordinator that exchanges keys** (its metadata's `dtpipe_auth` names `key`),
+  which neither target sets: it refuses any other by name. It makes a node and a person verified by a key, uses and revokes their
+  keys, and removes both identities; the key stays in its process. `[unchecked: no lab target exchanges keys]`
 - **The coordinator's restart is checked on the stack, named only.** `lab.sh stack restart-check [restore|restore-alone]` runs `smoke.py restart`:
   a rights edit, a library save, an armed pipeline, a run and a session cookie are recorded, the container is stopped and started (`restore`: on
   a copy of its state directory put back, as `deploy/README.md` describes a backup; `restore-alone`: with the library's remote emptied too), and

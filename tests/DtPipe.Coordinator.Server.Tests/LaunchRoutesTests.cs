@@ -102,6 +102,37 @@ public sealed class LaunchRoutesTests : IDisposable
         Assert.Equal(["audit"], GroupsOfA(await PlanAsync()));
     }
 
+    /// <summary>
+    /// A plan the matrix refuses names each refused edge with the groups of both its ends, which the page reads to propose what to
+    /// allow, and a Deploy is refused naming them; once they are allowed beside the matrix, the next plan's edge passes it.
+    /// </summary>
+    [Fact]
+    public async Task A_Refused_Edge_Names_The_Groups_Of_Its_Ends_And_Allowing_Them_Lets_The_Next_Plan_Through_The_Matrix()
+    {
+        await NodeAAndARunnerAsync();
+        var library = _host.Services.GetRequiredService<PipelineLibrary>();
+        await library.SaveAsync("orders", Job, "create", Ct);
+        await library.SaveBindingsAsync("orders", new Dictionary<string, Binding> { ["a"] = Checked() }, "bind", Ct);
+        using var emptied = await _admin.PutAsJsonAsync("/api/rights/matrix", new { matrix = new Dictionary<string, string[]>() }, Web, Ct);
+        emptied.EnsureSuccessStatusCode();
+
+        var refused = (await PlanAsync()).GetProperty("plan");
+        var edge = Assert.Single(refused.GetProperty("edges").EnumerateArray());
+        using var deploy = await _admin.PostAsync("/api/library/orders/deploy", null, Ct);
+        using var allowed = await _admin.PostAsJsonAsync("/api/rights/matrix/edges", new { edges = new[] { new { from = "crm", to = "run" } } }, Web, Ct);
+
+        Assert.False(refused.GetProperty("deployable").GetBoolean());
+        Assert.False(edge.GetProperty("allowed").GetBoolean());
+        Assert.Equal(["crm"], edge.GetProperty("producerGroups").EnumerateArray().Select(g => g.GetString()));
+        Assert.Equal(["run"], edge.GetProperty("consumerGroups").EnumerateArray().Select(g => g.GetString()));
+        Assert.Equal(HttpStatusCode.Conflict, deploy.StatusCode);
+        Assert.Contains("(crm -> run)", await deploy.Content.ReadAsStringAsync(Ct));
+        allowed.EnsureSuccessStatusCode();
+        var after = (await PlanAsync()).GetProperty("plan");
+        Assert.True(Assert.Single(after.GetProperty("edges").EnumerateArray()).GetProperty("allowed").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, after.GetProperty("flowRejection").ValueKind);
+    }
+
     /// <summary>A brick branch with no node names the nodes that offer it; a binding on an absent node is a problem and refuses the deployment.</summary>
     [Fact]
     public async Task A_Reference_Needs_Its_Version_Pinned_And_A_Reference_To_An_Absent_Node_Refuses_The_Deployment()

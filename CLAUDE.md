@@ -351,6 +351,10 @@ the control plane, over each replica's node channel; TransportR carries the data
   (`POST /account/login`) are the only routes that take one in. `[local: Server.Tests IdentityKeyRoutesTests, IdentityKeyTests,
   KeyIssuerTests, PersonKeyTests, KeyOnlyCoordinatorTests — the logs of a bootstrapped start and of its keys at work]`
   Detail: `src/DtPipe.Coordinator.Server/CLAUDE.md`.
+- **No page offers to copy a command that holds a key.** The Access page is the only one that asks for a key: it shows it once, in
+  the one element its Copy button copies, which closing the window empties; every command it shows names a variable or a reference
+  the person fills (`--client-secret '${{VAR}}'`, `keyring://`, `--key '${{VAR}}'`), never the key, and nothing of a page keeps it in
+  storage or in the address. `[local: Server.Tests KeyWindowTests — the pages' text, not their behaviour]`
 - **A cursor is the coordinator's: read when a run starts, kept only at the verdict of the whole run.** One cursor per branch that
   writes, keyed by (library pipeline, alias), kept by `CursorKeeper` in the store that holds its state. The child never reaches the
   coordinator or a file a brick names: the node gives each sink branch that sets `cursor` a state file of its own, reads it once the

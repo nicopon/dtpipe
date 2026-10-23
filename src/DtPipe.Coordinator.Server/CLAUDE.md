@@ -520,8 +520,12 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   it is now on every transfer, and the planner and a deployment check every edge against it, each by one
   pass of `IPlanRegistry` (`PlanFlow`) and in the same sentence, a plan made under an earlier matrix included. A
   node in several groups sends only if every one of its groups may send to every group of the
-  receiver, on both sides, and an edge carries the groups of both ends. Never add a second matrix.
-  `[local: FlowMatrixEvaluationTests, the lab's smoke.py rights]`
+  receiver, on both sides, and an edge carries the groups of both ends. Never add a second matrix. The matrix changes whole
+  (`PUT /api/rights/matrix`) or by edges added beside it, which revoke nothing, so two administrators who add at once keep both:
+  `POST /api/rights/matrix/edges` (the page sends the pairs of groups a plan's refused edges lack), and `exchangeWithRunners` on a
+  node added or accepted, in the same change as the identity, both ways between its groups and those the rights give every runner the
+  inventory knows (the rights do not say which node is a runner, its announcement does; none known refuses the request).
+  `[local: FlowMatrixEvaluationTests, MatrixEdgesTests, LaunchRoutesTests, the lab's smoke.py rights]`
 - **A library pipeline is planned when it is launched, and the runner is chosen by one function.** `RunQueue.RunOneAsync`, once
   the run is sent and outside the ledger's lock, asks `LaunchPlanner.ChooseAsync` for the plan of the armed job under the armed
   bindings, and so do `GET /api/library/{id}/plan` (the plan a launch would make now, nothing written) and arming. The

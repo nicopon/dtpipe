@@ -83,6 +83,7 @@ public sealed class RouteTableTests
         "POST /api/rights/identities/{id}/keys [reader > admin]",
         "POST /api/rights/identities/{id}/keys/{keyId}/revoke [reader > admin]",
         "POST /api/rights/identities/{id}/reconnect [reader > admin]",
+        "POST /api/rights/matrix/edges [reader > admin]",
         "POST /api/rights/pending/{subject}/accept [reader > admin]",
         "POST /api/rights/pending/{subject}/ignore [reader > admin]",
         "POST /api/runs [reader > designer]",
