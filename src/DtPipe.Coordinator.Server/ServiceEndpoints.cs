@@ -51,7 +51,8 @@ internal static partial class ServiceEndpoints
                 : Results.NotFound(new { error = $"'{id}' is not a run this identity may read." }));
 
         // A launcher cancels the runs it started, not another's: a run another identity or a person started is told apart from none by
-        // nothing. A run already over answers its state (200); otherwise the cancellation is asked (202) and the state read again.
+        // nothing. A person verified by a key is named by its id, which no other identity carries, so its runs are another's too. A run
+        // already over answers its state (200); otherwise the cancellation is asked (202) and the state read again.
         service.MapPost("/runs/{id}/cancel", (string id, HttpContext http, RightsStore rights, DeploymentManager deployments) =>
         {
             if (ReadableRun(id, http, rights, deployments) is not { } run || run.LaunchedBy != TrustedIdp.SubjectOf(http.User))

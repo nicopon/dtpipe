@@ -15,7 +15,7 @@ public static partial class CoordinatorApi
     /// anything else: a studio and a coordinator deployed at different times refuse each other by name
     /// rather than misreading each other.
     /// </summary>
-    public const int Contract = 9;
+    public const int Contract = 10;
 
     /// <summary>The protected resource metadata (RFC 9728): anonymous, the one entry point a studio needs.</summary>
     public const string Metadata = "/.well-known/oauth-protected-resource";
@@ -57,6 +57,26 @@ public static partial class CoordinatorApi
 
     public static string Cursor(string id, string alias) =>
         Prefix + CursorRoute.Replace("{id}", Uri.EscapeDataString(id)).Replace("{alias}", Uri.EscapeDataString(alias));
+
+    /// <summary>What an identity key the coordinator makes begins with: <c>dtp_{client id}_{secret}</c>.</summary>
+    public const string KeyPrefix = "dtp_";
+
+    /// <summary>The length of a key's secret: 256 random bits as base64url, so the client id reads from the end although base64url holds '_'.</summary>
+    public const int KeySecretLength = 43;
+
+    /// <summary>
+    /// The client id an identity key names, or null when <paramref name="key"/> does not have a key's shape. The coordinator finds the
+    /// identity by it and judges the key by its hash alone; the studio sends it as the <c>client_id</c> its key is exchanged under.
+    /// </summary>
+    public static string? ClientIdOfKey(string? key)
+    {
+        if (key is null || !key.StartsWith(KeyPrefix, StringComparison.Ordinal) || key.Length <= KeyPrefix.Length + KeySecretLength + 1)
+            return null;
+        var separator = key.Length - KeySecretLength - 1;
+        if (key[separator] != '_') return null;
+        var clientId = key[KeyPrefix.Length..separator];
+        return IsPipelineId(clientId) ? clientId : null;
+    }
 
     /// <summary>A pipeline id of the library: lowercase letters, digits and '-', a letter or digit first.</summary>
     public static bool IsPipelineId(string? id) => id is not null && PipelineId().IsMatch(id);

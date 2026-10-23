@@ -50,9 +50,11 @@ public sealed record RunPlan(
     string PlanId, string? Runner, IReadOnlyList<RunPlanFragment> Fragments, IReadOnlyList<RunPlanBinding> Bindings);
 
 /// <summary>
-/// <see cref="Plan"/> is the plan the run ran, journaled with it. <see cref="LaunchedBy"/> names who started it: a person's email,
-/// or a service's client id (an id never holds an <c>@</c>). <see cref="IdempotencyKey"/> is the key a service sent with the
-/// request, when it sent one; it means something only together with <see cref="LaunchedBy"/>. <see cref="SinkMayBePartial"/> is
+/// <see cref="Plan"/> is the plan the run ran, journaled with it. <see cref="LaunchedBy"/> names who started it
+/// (<see cref="TrustedIdp.CallerOf"/>): a person's email, or the id of the identity that did, a service or a person verified by a
+/// key; an id holds no <c>@</c> and is unique among the identities of every kind, so a launcher's id names its own runs only.
+/// <see cref="IdempotencyKey"/> is the key a service sent with the request, when it sent one; it means something only together
+/// with <see cref="LaunchedBy"/>. <see cref="SinkMayBePartial"/> is
 /// true for a run a restart ended after it had started: its fragments had been launched and may have written part of their
 /// sinks. It ranks no recovery strategy and nothing reruns the run; a run that was only queued, or that ended any other way, is not
 /// labelled. <see cref="Cursors"/> says what became of each cursor a run that succeeded reported: kept, or not and why.

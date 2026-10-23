@@ -92,18 +92,20 @@ public sealed class CoordinatorHost(string? studioClientId = CoordinatorHost.Stu
             };
             configuration.SigningKeys.Add(Key);
             // The test provider is the external one: the key issuer's scheme validates with the keys of the store, and nothing else.
-            foreach (var scheme in new[] { TrustedIdp.IdpServiceScheme, TrustedIdp.PersonScheme })
+            foreach (var scheme in new[] { TrustedIdp.IdpServiceScheme, TrustedIdp.IdpPersonScheme })
                 services.Configure<JwtBearerOptions>(scheme, o => o.Configuration = configuration);
             services.ConfigureAll<OpenIdConnectOptions>(o => o.Configuration = configuration);
         });
     }
 
-    /// <summary>A token signed by the test provider. <paramref name="audience"/> null leaves it without one.</summary>
-    public static string Token(string subject, string? clientId, string? audience = Audience, string? email = null, string issuer = Issuer)
+    /// <summary>A token signed by the test provider. <paramref name="audience"/> null leaves it without one; <paramref name="extra"/> adds claims.</summary>
+    public static string Token(string subject, string? clientId, string? audience = Audience, string? email = null, string issuer = Issuer,
+        IReadOnlyDictionary<string, object>? extra = null)
     {
         var claims = new Dictionary<string, object> { ["sub"] = subject };
         if (clientId is not null) claims["client_id"] = clientId;
         if (email is not null) claims["email"] = email;
+        foreach (var (type, value) in extra ?? new Dictionary<string, object>()) claims[type] = value;
         return new JsonWebTokenHandler().CreateToken(new SecurityTokenDescriptor
         {
             Issuer = issuer,

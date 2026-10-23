@@ -113,6 +113,21 @@ public sealed class RouteTableTests
         Assert.Equal(Expected, TableOf(host));
     }
 
+    private static readonly string[] KeyIssuerOnly = [
+        "GET /.well-known/jwks.json [none]",
+        "GET /.well-known/openid-configuration [none]",
+        "GET /account/login/idp [none]",
+        "POST /account/login [none]",
+        "POST /connect/token [none]",
+    ];
+
+    [Fact]
+    public void The_Key_Issuer_Adds_Its_Routes_And_The_Sign_In_With_A_Key_And_Nothing_Else()
+    {
+        using var host = new CoordinatorHost(publicUrl: "https://coordinator.test");
+        Assert.Equal(Expected.Concat(KeyIssuerOnly).Order(StringComparer.Ordinal), TableOf(host));
+    }
+
     [Fact]
     public void Lab_Mode_Adds_The_Benchs_Routes_And_Nothing_Else()
     {

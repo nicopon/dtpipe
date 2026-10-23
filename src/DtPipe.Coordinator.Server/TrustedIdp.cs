@@ -30,11 +30,14 @@ namespace DtPipe.Coordinator.Server;
 ///   hands the token to the one scheme that validates that issuer in full (<see cref="IdpServiceScheme"/>,
 ///   <see cref="KeyServiceScheme"/>). The issuer must be the one that verifies the identity: an identity
 ///   verified by a key is opened by the key issuer's tokens only, any other by the provider's only;</item>
-/// <item>a person signs in through the provider (authorization code with PKCE) and holds a session
-///   cookie, or presents a bearer token <c>dtpipe studio</c> obtained for them through
-///   <c>Coordinator:Studio:ClientId</c> (<see cref="PersonScheme"/>: that client, and a subject that is
-///   not it). Their roles come from the server's configuration (<see cref="CoordinatorRoles"/>), never
-///   from the token. <c>/api</c> accepts either (<see cref="ApiScheme"/>); the pages only the cookie.</item>
+/// <item>a person signs in through the provider (authorization code with PKCE), or with a key the coordinator made for them
+///   (the sign-in form), and holds a session cookie, or presents a bearer token <c>dtpipe studio</c> obtained for them through
+///   <c>Coordinator:Studio:ClientId</c> (<see cref="PersonScheme"/>: that client, and a subject that is not it), from the provider
+///   or from the key issuer, read by issuer as a service's is (<see cref="IdpPersonScheme"/>, <see cref="KeyPersonScheme"/>).
+///   Their roles come from the server (<see cref="CoordinatorRoles"/>): the configuration's for a person of the provider, the
+///   rights' for a person verified by a key, never from the token. A person verified by a key is judged against the rights on
+///   every request, its cookie as its token, so a revoked key or a disabled identity ends the session at the next one.
+///   <c>/api</c> accepts either (<see cref="ApiScheme"/>); the pages only the cookie.</item>
 /// </list>
 /// Each scheme refuses the other kind of token when it validates it, so a person's token never
 /// reaches the data plane, whichever endpoint reads it, and a service's never reaches <c>/api</c>.
@@ -46,7 +49,17 @@ public static class TrustedIdp
     public const string ServiceScheme = JwtBearerDefaults.AuthenticationScheme;
     public const string IdpServiceScheme = "IdpBearer";
     public const string KeyServiceScheme = "KeyBearer";
+
+    /// <summary>A person's bearer token: reads its issuer without believing it and hands it to <see cref="IdpPersonScheme"/> or <see cref="KeyPersonScheme"/>.</summary>
     public const string PersonScheme = "PersonBearer";
+    public const string IdpPersonScheme = "IdpPerson";
+    public const string KeyPersonScheme = "KeyPerson";
+
+    /// <summary>
+    /// The claim that names the key a person verified by a key signed in with (<see cref="IdentityKey.Id"/>): in the key issuer's token
+    /// and in the session cookie, issued by the key issuer, so a provider's token that carries it opens nothing.
+    /// </summary>
+    public const string KeyIdClaim = "dtpipe_key";
 
     /// <summary>What <c>/api</c> authenticates with: a person's bearer token when the request carries one, else the cookie.</summary>
     public const string ApiScheme = "Api";
@@ -85,25 +98,34 @@ public static class TrustedIdp
             });
         if (server.KeyIssuer is { } keyIssuer)
         {
-            authentication.AddJwtBearer(KeyServiceScheme, o =>
-            {
-                o.MapInboundClaims = false;
-                o.Events = ServiceEvents(byKey: true);
-            });
+            authentication
+                .AddJwtBearer(KeyServiceScheme, o =>
+                {
+                    o.MapInboundClaims = false;
+                    o.Events = ServiceEvents(byKey: true);
+                })
+                .AddJwtBearer(KeyPersonScheme, o =>
+                {
+                    o.MapInboundClaims = false;
+                    o.Events = KeyPersonEvents(server);
+                });
             // The key issuer's tokens are validated with the keys of the store, never through a request to this server's own address.
-            services.AddOptions<JwtBearerOptions>(KeyServiceScheme).Configure<IssuerKeys>((o, keys) => o.TokenValidationParameters = new TokenValidationParameters
-            {
-                ValidIssuer = keyIssuer,
-                ValidAudience = server.Audience,
-                ValidAlgorithms = [SecurityAlgorithms.RsaSha256],
-                IssuerSigningKeyResolver = (_, _, kid, _) => keys.Resolve(kid),
-                // The issuer's clock is this server's, or another instance's over the same store: a revoked key opens nothing for long.
-                ClockSkew = TimeSpan.FromSeconds(30),
-                NameClaimType = "sub",
-            });
+            foreach (var scheme in new[] { KeyServiceScheme, KeyPersonScheme })
+                services.AddOptions<JwtBearerOptions>(scheme).Configure<IssuerKeys>((o, keys) => o.TokenValidationParameters = new TokenValidationParameters
+                {
+                    ValidIssuer = keyIssuer,
+                    ValidAudience = server.Audience,
+                    ValidAlgorithms = [SecurityAlgorithms.RsaSha256],
+                    IssuerSigningKeyResolver = (_, _, kid, _) => keys.Resolve(kid),
+                    // The issuer's clock is this server's, or another instance's over the same store: a revoked key opens nothing for long.
+                    ClockSkew = TimeSpan.FromSeconds(30),
+                    NameClaimType = "sub",
+                });
         }
         authentication
-            .AddJwtBearer(PersonScheme, o =>
+            .AddPolicyScheme(PersonScheme, PersonScheme, o => o.ForwardDefaultSelector = context =>
+                server.KeyIssuer is { } issuer && IssuerOf(BearerOf(context.Request)) == issuer ? KeyPersonScheme : IdpPersonScheme)
+            .AddJwtBearer(IdpPersonScheme, o =>
             {
                 Trust(o);
                 o.TokenValidationParameters.NameClaimType = "name";
@@ -132,6 +154,16 @@ public static class TrustedIdp
                 {
                     context.Response.StatusCode = StatusCodes.Status403Forbidden;
                     return Task.CompletedTask;
+                };
+                // The session of a person verified by a key holds no key: on every request its identity must still be an enabled person
+                // and the key it signed in with still live, or the session ends there.
+                o.Events.OnValidatePrincipal = async context =>
+                {
+                    if (KeyPersonOf(context.Principal, server) is { } person && !StillSignedIn(context.HttpContext, server, person))
+                    {
+                        context.RejectPrincipal();
+                        await context.HttpContext.SignOutAsync(CookieScheme);
+                    }
                 };
             })
             .AddOpenIdConnect(OidcScheme, o =>
@@ -222,10 +254,37 @@ public static class TrustedIdp
     /// <summary>The email claim of the signed-in person, or null when there is none.</summary>
     public static string? EmailOf(HttpContext context) => context.User.FindFirst("email")?.Value;
 
-    /// <summary>Who the request is from, as a run or an arming names its author: a person's email, a service's client.</summary>
+    /// <summary>
+    /// Who the request is from, as a run, an arming, a cursor and a rights change name their author: a person's email; else the id of
+    /// the identity it is, a service or a person verified by a key, whose name is its <c>sub</c>, and an id is unique among the
+    /// identities of every kind; else the name a provider gives a person with no email.
+    /// </summary>
     public static string CallerOf(HttpContext context) => EmailOf(context) ?? context.User.Identity?.Name ?? "unknown";
 
-    /// <summary>A page a browser opens: the only requests a missing session sends to the provider.</summary>
+    /// <summary>
+    /// The id and the key of the person verified by a key that <paramref name="user"/> is, or null for anyone else. Read from the claims
+    /// the key issuer issued (<see cref="Claim.Issuer"/>), in its token or in the session it signed in, so a provider's token that names
+    /// the same subject and carries <see cref="KeyIdClaim"/> is no such person.
+    /// </summary>
+    public static (string Id, string KeyId)? KeyPersonOf(ClaimsPrincipal? user, CoordinatorServerOptions server)
+    {
+        if (server.KeyIssuer is not { } issuer || user is null) return null;
+        var id = user.FindFirst(c => c.Type == "sub" && c.Issuer == issuer)?.Value;
+        var keyId = user.FindFirst(c => c.Type == KeyIdClaim && c.Issuer == issuer)?.Value;
+        return id is { Length: > 0 } && keyId is { Length: > 0 } ? (id, keyId) : null;
+    }
+
+    /// <summary>The session a person verified by a key signs in with: its id and its key's, issued by the key issuer. Never the key.</summary>
+    public static ClaimsPrincipal KeyPersonSession(CoordinatorServerOptions server, string id, string keyId) => new(new ClaimsIdentity(
+        [new Claim("sub", id, ClaimValueTypes.String, server.KeyIssuer), new Claim(KeyIdClaim, keyId, ClaimValueTypes.String, server.KeyIssuer)],
+        authenticationType: AuthModes.Key, nameType: "sub", roleType: ClaimsIdentity.DefaultRoleClaimType));
+
+    /// <summary>Whether people may still be verified by a key here and the rights still hold <paramref name="person"/> signed in with its key.</summary>
+    private static bool StillSignedIn(HttpContext context, CoordinatorServerOptions server, (string Id, string KeyId) person) =>
+        server.PersonKeys
+        && context.RequestServices.GetRequiredService<RightsStore>().SignedInPerson(person.Id, person.KeyId, DateTimeOffset.UtcNow) is not null;
+
+    /// <summary>A page a browser opens: the only requests a missing session sends to sign in, at the form or the provider.</summary>
     public static bool IsPageNavigation(HttpRequest request) =>
         HttpMethods.IsGet(request.Method)
         && (request.Path == "/" || request.Path == "/index.html" || request.Path.StartsWithSegments("/lab")
@@ -282,12 +341,31 @@ public static class TrustedIdp
             : null;
 
     /// <summary>The token a service's scheme reads, from where its bearer events read it.</summary>
-    private static string? ServiceTokenOf(HttpRequest request)
+    private static string? ServiceTokenOf(HttpRequest request) => NodeChannelToken(request) ?? BearerOf(request);
+
+    /// <summary>The token of the request's <c>Authorization: Bearer</c> header, the only place a person's scheme reads one.</summary>
+    private static string? BearerOf(HttpRequest request)
     {
-        if (NodeChannelToken(request) is { } token) return token;
         var header = request.Headers.Authorization.ToString();
         return header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? header["Bearer ".Length..].Trim() : null;
     }
+
+    /// <summary>
+    /// What the person scheme of the key issuer checks once a token is valid, on every request: it is a person's token obtained through
+    /// the studio's client, and its subject is still an enabled person verified by a key whose key, named in the token, is live. A
+    /// token lives <c>Coordinator:Auth:PersonTokenLifetime</c>; a revocation or a disablement applies at the next request.
+    /// </summary>
+    private static JwtBearerEvents KeyPersonEvents(CoordinatorServerOptions server) => new()
+    {
+        OnTokenValidated = context =>
+        {
+            if (!IsStudioPerson(context.Principal, server.StudioClientId))
+                context.Fail("Only a person's token obtained through the studio's client reaches /api.");
+            else if (KeyPersonOf(context.Principal, server) is not { } person || !StillSignedIn(context.HttpContext, server, person))
+                context.Fail("The key this token was exchanged with no longer signs its person in.");
+            return Task.CompletedTask;
+        },
+    };
 
     /// <summary>
     /// The issuer a token names, read without validating anything: it only chooses which scheme validates the token, in full, against
@@ -304,14 +382,15 @@ public static class TrustedIdp
 }
 
 /// <summary>
-/// A person's roles on this coordinator, from its configuration: <c>Coordinator:Roles:Admin</c>,
+/// A person's roles on this coordinator. A person of the provider takes them from the configuration: <c>Coordinator:Roles:Admin</c>,
 /// <c>:Designer</c> and <c>:Reader</c> each list the people (by the claim <c>Coordinator:Roles:Claim</c>,
-/// <c>email</c> by default) who hold it, separated by commas or semicolons, compared without case.
+/// <c>email</c> by default) who hold it, separated by commas or semicolons, compared without case. A person verified by a key
+/// (<see cref="TrustedIdp.KeyPersonOf"/>) takes the role of its identity in the rights, and never a list's.
 /// Roles are cumulative (an admin is a designer, a designer a reader), and a person in no list holds
-/// none: the provider says who they are, never what they may do. Applied to every request, so a list
-/// changed in configuration takes effect without signing anyone out.
+/// none: the provider or the key says who they are, never what they may do. Applied to every request, so a list
+/// changed in configuration or a role changed in the rights takes effect without signing anyone out.
 /// </summary>
-public sealed class CoordinatorRoles(IConfiguration configuration) : IClaimsTransformation
+public sealed class CoordinatorRoles(IConfiguration configuration, RightsStore rights, CoordinatorServerOptions server) : IClaimsTransformation
 {
     public const string Admin = "admin";
     public const string Designer = "designer";
@@ -328,23 +407,35 @@ public sealed class CoordinatorRoles(IConfiguration configuration) : IClaimsTran
             || identity.HasClaim(c => c.Type == identity.RoleClaimType && c.Issuer == Issuer))
             return Task.FromResult(principal);
 
-        var section = configuration.GetSection("Coordinator:Roles");
-        var who = principal.FindFirst(section["Claim"] ?? "email")?.Value;
-        if (string.IsNullOrWhiteSpace(who)) return Task.FromResult(principal);
+        IReadOnlyList<string> granted;
+        if (TrustedIdp.KeyPersonOf(principal, server) is { } person)
+            granted = Cumulative(rights.Find(person.Id) is { Enabled: true, IsPerson: true } held && held.Auth.Mode == AuthModes.Key ? held.Role : null);
+        else
+        {
+            var section = configuration.GetSection("Coordinator:Roles");
+            var who = principal.FindFirst(section["Claim"] ?? "email")?.Value;
+            if (string.IsNullOrWhiteSpace(who)) return Task.FromResult(principal);
 
-        bool Listed(string key) => (section[key] ?? "")
-            .Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Contains(who.Trim(), StringComparer.OrdinalIgnoreCase);
+            bool Listed(string key) => (section[key] ?? "")
+                .Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Contains(who.Trim(), StringComparer.OrdinalIgnoreCase);
 
-        var granted = Listed("Admin") ? All
-            : Listed("Designer") ? [Designer, Reader]
-            : Listed("Reader") ? [Reader]
-            : [];
+            granted = Cumulative(Listed("Admin") ? Admin : Listed("Designer") ? Designer : Listed("Reader") ? Reader : null);
+        }
         var transformed = new ClaimsIdentity(identity);
         foreach (var role in granted)
             transformed.AddClaim(new Claim(transformed.RoleClaimType, role, ClaimValueTypes.String, Issuer));
         return Task.FromResult(new ClaimsPrincipal(transformed));
     }
+
+    /// <summary>The roles <paramref name="role"/> grants: itself and every role below it; none for no role.</summary>
+    private static IReadOnlyList<string> Cumulative(string? role) => role switch
+    {
+        Admin => All,
+        Designer => [Designer, Reader],
+        Reader => [Reader],
+        _ => [],
+    };
 }
 
 /// <summary>The caller's identity in the rights is an enabled service of <see cref="Kind"/>.</summary>

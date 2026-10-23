@@ -37,7 +37,10 @@ public sealed class PublicUrlTests
         using var challenged = await client.GetAsync("/api/me", Ct);
         Assert.Contains($"resource_metadata=\"{Public}{CoordinatorApi.Metadata}\"", challenged.Headers.WwwAuthenticate.ToString());
 
-        using var signIn = await client.GetAsync("/", Ct);
+        // People may hold a key here, so a page sends them to the form, a path of this server; the provider's sign-in starts there.
+        using var form = await client.GetAsync("/", Ct);
+        Assert.Equal($"{AccountPages.LoginPath}?returnUrl=%2F", form.Headers.Location?.ToString());
+        using var signIn = await client.GetAsync(AccountPages.ProviderLoginPath, Ct);
         Assert.Equal(HttpStatusCode.Redirect, signIn.StatusCode);
         Assert.Equal(Public + "/signin-oidc", System.Web.HttpUtility.ParseQueryString(signIn.Headers.Location!.Query)["redirect_uri"]);
 

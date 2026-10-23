@@ -1,6 +1,7 @@
 using System.Buffers.Text;
 using System.Security.Cryptography;
 using System.Text;
+using DtPipe.Jobs.Coordinator;
 
 namespace DtPipe.Coordinator.Server;
 
@@ -44,14 +45,14 @@ public sealed record IdentityKey(
 
 /// <summary>
 /// An identity key in clear, <c>dtp_{clientId}_{secret}</c>: 256 random bits as 43 characters of base64url, after the client id of the
-/// identity it opens. The secret has a fixed length, so the client id reads from the end although base64url holds '_'. The client id
-/// only finds the identity: the key is then judged by its hash alone. <see cref="Reveal"/> is the one way to the text, and
-/// <see cref="ToString"/> shows none of it, so a key handed to a log by mistake leaks nothing.
+/// identity it opens. The shape is the studio's contract (<see cref="CoordinatorApi.ClientIdOfKey"/>), since the studio presents a key
+/// too. The client id only finds the identity: the key is then judged by its hash alone. <see cref="Reveal"/> is the one way to the
+/// text, and <see cref="ToString"/> shows none of it, so a key handed to a log by mistake leaks nothing.
 /// </summary>
 public sealed class ClearKey
 {
-    public const string Prefix = "dtp_";
-    public const int SecretLength = 43;
+    public const string Prefix = CoordinatorApi.KeyPrefix;
+    public const int SecretLength = CoordinatorApi.KeySecretLength;
     private const int SecretBytes = 32;
     private const int HintLength = 4;
 
@@ -72,15 +73,7 @@ public sealed class ClearKey
     public override string ToString() => Prefix + "***";
 
     /// <summary>The client id <paramref name="presented"/> names, or null when it does not have a key's shape.</summary>
-    public static string? ClientIdOf(string? presented)
-    {
-        if (presented is null || !presented.StartsWith(Prefix, StringComparison.Ordinal) || presented.Length <= Prefix.Length + SecretLength + 1)
-            return null;
-        var separator = presented.Length - SecretLength - 1;
-        if (presented[separator] != '_') return null;
-        var clientId = presented[Prefix.Length..separator];
-        return PipelineLibrary.IsValidId(clientId) ? clientId : null;
-    }
+    public static string? ClientIdOf(string? presented) => CoordinatorApi.ClientIdOfKey(presented);
 
     /// <summary>Whether <paramref name="presented"/> is the key whose SHA-256 is <paramref name="hash"/>, in a time that does not depend on where they differ.</summary>
     public static bool Matches(string presented, string hash)

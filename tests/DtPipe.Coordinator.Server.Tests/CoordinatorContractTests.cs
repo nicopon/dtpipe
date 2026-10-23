@@ -32,10 +32,25 @@ public sealed class CoordinatorContractTests
     public void Metadata_Uses_The_Rfc_Names_And_Omits_An_Absent_Client()
     {
         Assert.Equal(
-            """{"resource":"http://c.test","authorization_servers":["http://idp.test/"],"bearer_methods_supported":["header"],"dtpipe_contract":9,"dtpipe_studio_client_id":"studio"}""",
-            Write(new ResourceMetadata("http://c.test", ["http://idp.test/"], ["header"], CoordinatorApi.Contract, "studio")));
+            """{"resource":"http://c.test","authorization_servers":["http://idp.test/","http://c.test"],"bearer_methods_supported":["header"],"dtpipe_contract":10,"dtpipe_studio_client_id":"studio","dtpipe_auth":["idp","key"]}""",
+            Write(new ResourceMetadata("http://c.test", ["http://idp.test/", "http://c.test"], ["header"], CoordinatorApi.Contract, "studio",
+                [PersonAuth.Idp, PersonAuth.Key])));
         Assert.DoesNotContain("dtpipe_studio_client_id", Write(new ResourceMetadata("http://c.test", ["http://idp.test/"], ["header"], 1)));
+        Assert.Equal(("idp", "trial", "key"), (PersonAuth.Idp, PersonAuth.Trial, PersonAuth.Key));
     }
+
+    /// <summary>The coordinator makes a key and the studio presents it: both read the client id it names by this one rule.</summary>
+    [Theory]
+    [InlineData("dtp_alice_0123456789abcdefghijklmnopqrstuvwxyzABCDEFG", "alice")]
+    [InlineData("dtp_a-b_0123456789abcdefghijklmnopqrstuvw_yzABCDEFG", "a-b")]
+    [InlineData("dtp_Alice_0123456789abcdefghijklmnopqrstuvwxyzABCDEFG", null)]
+    [InlineData("dtp__0123456789abcdefghijklmnopqrstuvwxyzABCDEFG", null)]
+    [InlineData("dtp_alice-0123456789abcdefghijklmnopqrstuvwxyzABCDEFG", null)]
+    [InlineData("dtp_alice_0123456789abcdefghijklmnopqrstuvwxyzABCDEF", null)]
+    [InlineData("alice_0123456789abcdefghijklmnopqrstuvwxyzABCDEFG", null)]
+    [InlineData(null, null)]
+    public void The_Client_Id_Of_A_Key_Reads_From_Its_End(string? key, string? clientId) =>
+        Assert.Equal(clientId, CoordinatorApi.ClientIdOfKey(key));
 
     [Fact]
     public void Catalog_Recognition_And_Library_Records_Keep_Their_Json()

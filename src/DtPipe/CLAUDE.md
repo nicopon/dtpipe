@@ -263,14 +263,19 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   aliases only. The keyring is opened only for a job that needs it, and its alias list is kept for the session
   (read again once when a name is missing): opening it can ask the person and wait.
 - **The command line names the coordinator, never the page.** `--coordinator <url>` gives the studio
-  a `CoordinatorLink` to that origin: the coordinator's metadata (RFC 9728) and contract number, its
+  a `CoordinatorLink` to that origin: the coordinator's metadata (RFC 9728) and contract number
+  (`CoordinatorApi.Contract`, refused by name when it differs), its
   provider's discovery (issuer equal, no HTTPS downgrade), then authorization code with PKCE through
   a new tab, back to `/callback`, the one path reached without the session's token: a GET, the
   `Host` check kept, a single-use `state` that a wrong one leaves waiting, `iss` checked when sent.
-  The tokens live in the process only, never in a response or the page; the access token is renewed
+  `--key` takes a reference (`${{NAME}}`, `keyring://`, `@file`) and refuses a value, as `--client-secret` does, and
+  is read once at start (`StudioCommand.ReadKeyAsync`): the studio then opens no tab. The metadata's `dtpipe_auth` must name
+  `key`, and the key is exchanged (client credentials) only at the token endpoint of the authorization server that is the
+  coordinator's own address, its discovery's issuer equal and the endpoint on that origin; it is presented again to renew.
+  The tokens and the key live in the process only, never in a response or the page; the access token is renewed
   two minutes ahead, a 401 renews once and sends once, a refused renewal signs out with its reason.
   The link's client sends to the coordinator's origin only, follows no redirect, and always carries
-  the CSRF header.
+  the CSRF header. `[CI: StudioCoordinatorTests, StudioKeyTests]`
 - **Without `--coordinator` the studio is whole, minus the bricks, the library and the publication.**
   `StudioTools.Coordinator` is null: `/api/coordinator` has no address, `/api/bricks` an empty catalogue,
   `GET /api/publish` no publication, and `/api/coordinator/login`, `/api/library`, `/api/library/open` and

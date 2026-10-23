@@ -1,4 +1,6 @@
 using System.CommandLine;
+using DtPipe.Cli.Expressions;
+using DtPipe.Cli.Node;
 using DtPipe.Cli.Pipeline;
 using DtPipe.Cli.Split;
 using DtPipe.Cli.Security;
@@ -10,9 +12,10 @@ using Microsoft.Extensions.DependencyInjection;
 namespace DtPipe.Cli.Commands;
 
 /// <summary>
-/// <c>dtpipe studio [folder] [--coordinator url]</c>: a local page over the YAML jobs of a folder, sampled
-/// through the same path as the MCP <c>dry-run</c> tool, and signed in to a coordinator when one is named. It ends when the page asks to (exit 0) or on Ctrl+C
-/// (exit 130: a cancellation never reads as a success).
+/// <c>dtpipe studio [folder] [--coordinator url [--key reference]]</c>: a local page over the YAML jobs of a folder, sampled
+/// through the same path as the MCP <c>dry-run</c> tool, and signed in to a coordinator when one is named, through the browser or with
+/// a key the coordinator made for the person. The key is a reference, never a value, read once at start. It ends when the page asks
+/// to (exit 0) or on Ctrl+C (exit 130: a cancellation never reads as a success).
 /// </summary>
 public sealed class StudioCommand : Command
 {
@@ -32,9 +35,14 @@ public sealed class StudioCommand : Command
         {
             Description = "A coordinator to sign in to, by its address: its bricks and its library (default: none)",
         };
+        var keyOption = new Option<string?>("--key")
+        {
+            Description = "Sign in to the coordinator with a key it made for you, as a reference: ${{NAME}}, keyring://alias or @file (default: through the browser)",
+        };
         Arguments.Add(folderArgument);
         Options.Add(portOption);
         Options.Add(coordinatorOption);
+        Options.Add(keyOption);
 
         this.SetAction(async (parseResult, ct) =>
         {
@@ -47,9 +55,26 @@ public sealed class StudioCommand : Command
                 return 1;
             }
             CoordinatorLink? link = null;
-            if (parseResult.GetValue(coordinatorOption) is { Length: > 0 } coordinator)
+            var coordinator = parseResult.GetValue(coordinatorOption);
+            string? key = null;
+            if (parseResult.GetValue(keyOption) is { } reference)
             {
-                try { link = new CoordinatorLink(Uri.TryCreate(coordinator, UriKind.Absolute, out var uri) ? uri : throw new CoordinatorLinkException($"'{coordinator}' is no address.")); }
+                if (coordinator is not { Length: > 0 })
+                {
+                    Console.Error.WriteLine("[ERROR] --key signs in to a coordinator: name it with --coordinator.");
+                    return 1;
+                }
+                string? refusal;
+                (key, refusal) = await ReadKeyAsync(reference, serviceProvider.GetRequiredService<ISecretsManager>(), ct);
+                if (refusal is not null)
+                {
+                    Console.Error.WriteLine($"[ERROR] {refusal}");
+                    return 1;
+                }
+            }
+            if (coordinator is { Length: > 0 })
+            {
+                try { link = new CoordinatorLink(Uri.TryCreate(coordinator, UriKind.Absolute, out var uri) ? uri : throw new CoordinatorLinkException($"'{coordinator}' is no address."), key: key); }
                 catch (CoordinatorLinkException ex)
                 {
                     Console.Error.WriteLine(ex.Message);
@@ -57,6 +82,12 @@ public sealed class StudioCommand : Command
                 }
             }
             using var _ = link;
+            // With a key the studio signs in at once; a refusal leaves it signed out with the reason, which the page shows too.
+            if (link is { ByKey: true })
+            {
+                try { Console.Error.WriteLine($"Signed in to {link.Origin.GetLeftPart(UriPartial.Authority)} as {await link.SignInWithKeyAsync(ct)}."); }
+                catch (CoordinatorLinkException ex) { Console.Error.WriteLine(ex.Message); }
+            }
             // A job's relative paths (a query file, a local input) resolve from where it is run:
             // from the folder, as `dtpipe --job` run there would.
             Directory.SetCurrentDirectory(folder.Root);
@@ -102,5 +133,23 @@ public sealed class StudioCommand : Command
                 }
             }
         });
+    }
+
+    /// <summary>
+    /// The key <paramref name="reference"/> names, read once (<c>${{NAME}}</c>, <c>keyring://alias</c> or <c>@file</c>), or why not. A
+    /// value is refused as <c>--client-secret</c> refuses one: an argument is listed by any process of the host, and a shell keeps it.
+    /// </summary>
+    public static async Task<(string? Key, string? Refusal)> ReadKeyAsync(string reference, ISecretsManager secrets, CancellationToken ct)
+    {
+        if (!NodeBricks.IsSecretReference(reference))
+            return (null, "--key takes a reference, never the key: ${{NAME}}, keyring://alias or @file.");
+        string? key;
+        try { key = await CompositeStringContentResolver.Standard(secrets).ResolveAsync(reference, ct); }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return (null, $"The key could not be read: {ex.Message}");
+        }
+        key = key?.Trim();
+        return string.IsNullOrEmpty(key) ? (null, "The key resolves to nothing.") : (key, null);
     }
 }

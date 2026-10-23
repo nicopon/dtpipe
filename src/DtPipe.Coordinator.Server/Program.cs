@@ -41,6 +41,8 @@ builder.Services.Replace(ServiceDescriptor.Singleton<IClientIdentityProvider, Ri
 builder.Services.AddTrustedIdp(server);
 if (server.IsTrialIdp) builder.Services.AddTrialIdpMode(server);
 if (server.KeyIssuer is not null) builder.Services.AddKeyIssuer();
+// The sign-in form of a person verified by a key carries an antiforgery token, checked by its handler.
+if (server.SignsPeopleInByKey) builder.Services.AddAntiforgery();
 
 builder.Services.AddSingleton<LoggingHubProgressMonitor>();
 builder.Services.Replace(ServiceDescriptor.Singleton<IHubProgressMonitor, EventProgressMonitor>());
@@ -69,7 +71,8 @@ builder.Services.AddSingleton<LibraryArming>();
 builder.Services.AddSingleton<PipelineHealth>();
 
 var app = builder.Build();
-// An identity verified by a key with no issuer to exchange its key could never connect: the start says so before anything is served.
+// An identity verified by a key with no issuer to exchange its key could never connect, nor a person while people may not hold a key:
+// the start says so before anything is served.
 KeyIssuer.CheckIdentities(app.Services.GetRequiredService<RightsStore>(), server);
 // First, so that every middleware and handler below sees the address the person's browser used: the sign-in's return address, the
 // protected-resource document and the cookies' Secure flag follow the request's scheme and host. No header is read.
@@ -138,7 +141,8 @@ app.UseAuthentication();
 // The Lab view's pages exist only in lab mode, like the endpoints they call.
 if (!server.LabMode)
     app.Use((context, next) => context.Request.Path.StartsWithSegments("/lab") ? Results.NotFound().ExecuteAsync(context) : next(context));
-// A page is opened by a person signed in through the provider, with a role: the Lab view an admin's.
+// A page is opened by a person signed in, with a role: the Lab view an admin's. Where a person may sign in with a key, the sign-in
+// form offers both ways; otherwise the provider's sign-in begins at once.
 app.Use(async (context, next) =>
 {
     if (!TrustedIdp.IsPageNavigation(context.Request) || context.Request.Path.StartsWithSegments("/account"))
@@ -148,21 +152,23 @@ app.Use(async (context, next) =>
     }
     if (context.User.Identity?.IsAuthenticated != true)
     {
-        await context.ChallengeAsync(TrustedIdp.OidcScheme);
+        if (server.SignsPeopleInByKey)
+            context.Response.Redirect($"{AccountPages.LoginPath}?returnUrl={Uri.EscapeDataString(context.Request.Path + context.Request.QueryString)}");
+        else
+            await context.ChallengeAsync(TrustedIdp.OidcScheme);
         return;
     }
     // A person with no role can open no page: they are signed out of the coordinator and of the
     // provider, so the next sign-in can be someone else's instead of the same refusal again.
     if (!context.User.IsInRole(CoordinatorRoles.Reader))
     {
-        await Results.SignOut(new AuthenticationProperties { RedirectUri = "/account/denied" }, [TrustedIdp.CookieScheme, TrustedIdp.OidcScheme])
-            .ExecuteAsync(context);
+        await Results.SignOut(new AuthenticationProperties { RedirectUri = "/account/denied" }, SignedInWith(context.User)).ExecuteAsync(context);
         return;
     }
     if (context.Request.Path.StartsWithSegments("/lab") && !context.User.IsInRole(CoordinatorRoles.Admin))
     {
-        var who = System.Net.WebUtility.HtmlEncode(TrustedIdp.EmailOf(context) ?? context.User.Identity.Name ?? "This account");
-        await AccessPage(server, StatusCodes.Status403Forbidden, $"{who} is not an admin of this coordinator: the Lab view is for administrators.",
+        var who = System.Net.WebUtility.HtmlEncode(TrustedIdp.CallerOf(context));
+        await AccountPages.Access(server, StatusCodes.Status403Forbidden, $"{who} is not an admin of this coordinator: the Lab view is for administrators.",
             ("/", "Back to the coordinator"), ("/account/logout", "Sign out")).ExecuteAsync(context);
         return;
     }
@@ -181,16 +187,24 @@ app.MapGet("/healthz", () => Results.Ok());
 // Anonymous: where a person signs in for dtpipe studio, and the contract this server speaks.
 app.MapGet(CoordinatorApi.Metadata, (HttpContext context, CoordinatorServerOptions options) =>
     new ResourceMetadata(OriginOf(context), options.KeyIssuer is { } issuer ? [options.Authority, issuer] : [options.Authority], ["header"],
-        CoordinatorApi.Contract, options.StudioClientId, options.IsTrialIdp));
+        CoordinatorApi.Contract, options.StudioClientId, options.PersonAuth));
 
-// A person signs in and out through the provider; the pages send them here.
-app.MapGet("/account/login", (string? returnUrl) => Results.Challenge(
-    new AuthenticationProperties { RedirectUri = returnUrl is { Length: > 0 } url && url.StartsWith('/') && !url.StartsWith("//") ? url : "/" },
-    [TrustedIdp.OidcScheme]));
-app.MapGet("/account/logout", () => Results.SignOut(new AuthenticationProperties { RedirectUri = "/" }, [TrustedIdp.CookieScheme, TrustedIdp.OidcScheme]));
+// A person signs in through the provider, or with a key where people may hold one; the pages send them here. A person verified by a key
+// signs out here only: the provider never signed them in.
+IResult ProviderSignIn(string? returnUrl) =>
+    Results.Challenge(new AuthenticationProperties { RedirectUri = AccountPages.LocalPath(returnUrl) }, [TrustedIdp.OidcScheme]);
+app.MapGet(AccountPages.LoginPath, (HttpContext context, string? returnUrl) => server.SignsPeopleInByKey
+    ? AccountPages.LoginForm(context, server, AccountPages.LocalPath(returnUrl), null, StatusCodes.Status200OK)
+    : ProviderSignIn(returnUrl));
+if (server.SignsPeopleInByKey)
+{
+    app.MapGet(AccountPages.ProviderLoginPath, ProviderSignIn);
+    app.MapPost(AccountPages.LoginPath, AccountPages.SignInAsync);
+}
+app.MapGet("/account/logout", (HttpContext context) => Results.SignOut(new AuthenticationProperties { RedirectUri = "/" }, SignedInWith(context.User)));
 // Where a person with no role lands once signed out: anonymous, it names nobody.
-app.MapGet("/account/denied", () => AccessPage(server, StatusCodes.Status200OK,
-    "That account holds no role on this coordinator, so it has been signed out, here and at the identity provider.",
+app.MapGet("/account/denied", () => AccountPages.Access(server, StatusCodes.Status200OK,
+    "That account holds no role on this coordinator, so it has been signed out here, and at the identity provider when it signed in there.",
     ("/", "Sign in with another account")));
 
 // /api serves the pages by the session cookie, and dtpipe studio by a person's bearer token, with
@@ -221,19 +235,9 @@ app.Run();
 
 static string OriginOf(HttpContext context) => $"{context.Request.Scheme}://{context.Request.Host}";
 
-// A refused page navigation: a sentence and its ways out, readable without the pages' scripts.
-// The message is HTML already encoded.
-static IResult AccessPage(CoordinatorServerOptions server, int status, string message, params (string Href, string Label)[] links) => Results.Content(
-    "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
-    + "<title>dtpipe coordinator</title><link rel=\"stylesheet\" href=\"/styles.css\"></head>"
-    + "<body style=\"max-width:40rem;margin:4rem auto;padding:0 1rem;font-family:system-ui,sans-serif;line-height:1.5\">"
-    + (server.IsTrialIdp ? "<p style=\"background:#b00020;color:#fff;padding:.4rem .8rem;font-weight:600\">Trial identity provider: not for production.</p>" : "")
-    + (server.ExchangesKeysOverHttp ? "<p style=\"background:#b00020;color:#fff;padding:.4rem .8rem;font-weight:600\">Identity keys cross the network in clear: this coordinator is reached over HTTP.</p>" : "")
-    + $"<h1 style=\"font-size:1.3rem\">dtpipe coordinator</h1><p>{message}</p><p>"
-    + string.Join(" · ", links.Select(l => $"<a href=\"{l.Href}\">{l.Label}</a>"))
-    + "</p></body></html>",
-    "text/html; charset=utf-8",
-    statusCode: status);
+// What a person signs out of: the session, and the provider's too unless the session is a key's.
+string[] SignedInWith(System.Security.Claims.ClaimsPrincipal user) =>
+    TrustedIdp.KeyPersonOf(user, server) is null ? [TrustedIdp.CookieScheme, TrustedIdp.OidcScheme] : [TrustedIdp.CookieScheme];
 
 static async ValueTask<object?> RequireCsrfHeader(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
 {

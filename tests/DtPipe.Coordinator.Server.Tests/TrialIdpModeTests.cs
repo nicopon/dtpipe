@@ -42,6 +42,6 @@ public sealed class TrialIdpModeTests
         using var discovery = await client.GetAsync("/.well-known/openid-configuration", Ct);
         Assert.Equal(HttpStatusCode.NotFound, discovery.StatusCode);
         var metadata = JsonDocument.Parse(await client.GetStringAsync(CoordinatorApi.Metadata, Ct)).RootElement;
-        Assert.False(metadata.TryGetProperty("dtpipe_trial_idp", out _));
+        Assert.Equal([PersonAuth.Idp], metadata.GetProperty("dtpipe_auth").EnumerateArray().Select(e => e.GetString()));
     }
 }

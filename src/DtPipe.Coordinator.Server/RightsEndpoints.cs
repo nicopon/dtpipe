@@ -1,6 +1,9 @@
 namespace DtPipe.Coordinator.Server;
 
-/// <summary>Rights: who may send what to whom. The page edits them; every change is audited and applies at once.</summary>
+/// <summary>
+/// Rights: who may send what to whom. The page edits them; every change is audited, naming its author by <see cref="TrustedIdp.CallerOf"/>
+/// (an email, or the id of a person verified by a key), and applies at once.
+/// </summary>
 internal static class RightsEndpoints
 {
     public static void MapRights(this RouteGroupBuilder api, RouteGroupBuilder admin)
@@ -17,7 +20,7 @@ internal static class RightsEndpoints
                 idp = new { issuer = options.Authority, audience = options.Audience, grant = "client_credentials" },
                 identities = doc.Identities.Select(i => new
                 {
-                    i.ClientId, i.Name, i.Description, i.Groups, i.Enabled, i.Kind, i.Pipelines,
+                    i.ClientId, i.Name, i.Description, i.Groups, i.Enabled, i.Kind, i.Pipelines, i.Role,
                     auth = i.Auth.Mode, hasKey = i.Auth.LiveAt(now).Any(),
                     connected = i.IsNode && online.Contains(i.Name) && inventory.ClientIdOf(i.Name) == i.ClientId,
                 }),
@@ -29,21 +32,25 @@ internal static class RightsEndpoints
         });
         admin.MapPut("/rights/matrix", (MatrixRequest request, RightsStore rights, EventBus bus, HttpContext http) =>
         {
-            rights.SetMatrix(request.Matrix, TrustedIdp.EmailOf(http));
+            rights.SetMatrix(request.Matrix, TrustedIdp.CallerOf(http));
             bus.Publish("rights", new { });
             return Results.Ok();
         });
         admin.MapPost("/rights/identities", (IdentityRequest request, RightsStore rights, EnrollmentQueue enrollment, EventBus bus, HttpContext http, CoordinatorServerOptions options) =>
         {
             if (!PipelineLibrary.IsValidId(request.ClientId)) throw new ConflictException($"'{request.ClientId}' is not a client id: lowercase letters, digits and '-'.");
-            // An identity verified by a key needs the issuer that exchanges it: without one it could never connect.
+            // An identity verified by a key needs the issuer that exchanges it: without one it could never connect. A person is verified
+            // by a key, so it needs the issuer, and people allowed to hold a key.
+            if (request.Kind?.Trim() == IdentityKinds.Person && KeyIssuer.PersonUnavailable(options) is { } refusal)
+                throw new ConflictException($"'{request.ClientId}' cannot be a person: {refusal}.");
             if (request.Auth?.Trim() == AuthModes.Key && KeyIssuer.Unavailable(options) is { } reason)
                 throw new ConflictException($"'{request.ClientId}' cannot be verified by a key: {reason}.");
             rights.AddIdentity(new Identity(request.ClientId, string.IsNullOrWhiteSpace(request.Name) ? request.ClientId : request.Name, request.Description ?? "",
                 request.Groups ?? [], request.Enabled ?? true, request.Kind ?? IdentityKinds.Node, request.Pipelines)
             {
                 Auth = new IdentityAuth(request.Auth ?? AuthModes.Idp, []),
-            }, TrustedIdp.EmailOf(http));
+                Role = request.Role,
+            }, TrustedIdp.CallerOf(http));
             enrollment.Remove(request.ClientId);
             bus.Publish("rights", new { });
             return Results.Ok();
@@ -51,7 +58,7 @@ internal static class RightsEndpoints
         admin.MapPut("/rights/identities/{id}", (string id, IdentityRequest request, RightsStore rights, NodeInventory inventory, EventBus bus, HttpContext http) =>
         {
             var before = rights.Find(id);
-            rights.UpdateIdentity(id, request.Name, request.Description, request.Groups, request.Enabled, TrustedIdp.EmailOf(http), request.Pipelines);
+            rights.UpdateIdentity(id, request.Name, request.Description, request.Groups, request.Enabled, TrustedIdp.CallerOf(http), request.Pipelines, request.Role);
             // A node renamed connects again under its new name. A node whose groups changed connects again too, and its data
             // plane client registers again: until then a replica's registration holds the groups it had, and admission
             // places no run on it. A node whose identity is disabled loses its connections: its hosts are refused when they
@@ -67,7 +74,7 @@ internal static class RightsEndpoints
         });
         admin.MapDelete("/rights/identities/{id}", (string id, RightsStore rights, NodeInventory inventory, EventBus bus, HttpContext http) =>
         {
-            rights.RemoveIdentity(id, TrustedIdp.EmailOf(http));
+            rights.RemoveIdentity(id, TrustedIdp.CallerOf(http));
             inventory.Disconnect(id);
             inventory.Forget(id);
             bus.Publish("rights", new { });
@@ -77,7 +84,7 @@ internal static class RightsEndpoints
         admin.MapPost("/rights/pending/{subject}/accept", (string subject, AcceptRequest request, RightsStore rights, EnrollmentQueue enrollment, EventBus bus, HttpContext http) =>
         {
             var pending = enrollment.Find(subject) ?? throw new ConflictException($"'{subject}' does not wait for approval.");
-            rights.AddIdentity(new Identity(subject, request.Name ?? "", request.Description ?? pending.Description, request.Groups ?? [], true), TrustedIdp.EmailOf(http));
+            rights.AddIdentity(new Identity(subject, request.Name ?? "", request.Description ?? pending.Description, request.Groups ?? [], true), TrustedIdp.CallerOf(http));
             enrollment.Remove(subject);
             bus.Publish("rights", new { });
             return Results.Ok();
@@ -96,7 +103,7 @@ internal static class RightsEndpoints
         // hash; a key is listed by its id, its last four characters and its dates. A key made while one is live starts a rotation.
         admin.MapPost("/rights/identities/{id}/keys", (string id, KeyRequest? request, RightsStore rights, EventBus bus, HttpContext http) =>
         {
-            var (key, made) = rights.AddKey(id, request?.Label, request?.Expires, TrustedIdp.EmailOf(http));
+            var (key, made) = rights.AddKey(id, request?.Label, request?.Expires, TrustedIdp.CallerOf(http));
             bus.Publish("rights", new { });
             http.Response.Headers.CacheControl = "no-store";
             return Results.Ok(new { key = key.Reveal(), made.Id, made.Hint, made.Label, made.Created, made.Expires });
@@ -115,7 +122,7 @@ internal static class RightsEndpoints
         // A revoked key opens nothing more, and the identity's replicas are cut so that none goes on under what it opened.
         admin.MapPost("/rights/identities/{id}/keys/{keyId}/revoke", (string id, string keyId, RightsStore rights, NodeInventory inventory, EventBus bus, HttpContext http) =>
         {
-            rights.RevokeKey(id, keyId, TrustedIdp.EmailOf(http));
+            rights.RevokeKey(id, keyId, TrustedIdp.CallerOf(http));
             inventory.Disconnect(id);
             bus.Publish("rights", new { });
             return Results.Ok();
@@ -125,7 +132,11 @@ internal static class RightsEndpoints
 
 internal sealed record MatrixRequest(Dictionary<string, List<string>> Matrix);
 internal sealed record AcceptRequest(string? Name, string? Description, List<string>? Groups);
-/// <summary>An identity to add or edit. <see cref="Auth"/> is read when it is added, and an edit leaves it as it was, as it does <see cref="Kind"/>.</summary>
+/// <summary>
+/// An identity to add or edit. <see cref="Auth"/> is read when it is added, and an edit leaves it as it was, as it does <see cref="Kind"/>;
+/// <see cref="Role"/> is a person's.
+/// </summary>
 internal sealed record IdentityRequest(
-    string ClientId, string? Name, string? Description, List<string>? Groups, bool? Enabled, string? Kind = null, List<string>? Pipelines = null, string? Auth = null);
+    string ClientId, string? Name, string? Description, List<string>? Groups, bool? Enabled, string? Kind = null, List<string>? Pipelines = null, string? Auth = null,
+    string? Role = null);
 internal sealed record KeyRequest(string? Label, DateTimeOffset? Expires);

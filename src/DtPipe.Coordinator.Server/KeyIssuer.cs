@@ -13,7 +13,10 @@ namespace DtPipe.Coordinator.Server;
 /// The coordinator's issuer for the identities verified by a key (<see cref="CoordinatorServerOptions.KeyIssuer"/>): a key is the client
 /// secret of a client-credentials grant, exchanged at <c>/connect/token</c> for a short token the server then trusts like any other, by
 /// its issuer (<see cref="TrustedIdp"/>). One grant, no other: no password, no authorization code, no refresh token. A node finds the
-/// token endpoint through the discovery document, as it would at any provider, so it needs no code of its own.
+/// token endpoint through the discovery document, as it would at any provider, so it needs no code of its own. The record's kind
+/// decides the token's shape: a service's names itself as its client (<c>sub == client_id</c>), a person's names the studio's client
+/// (<c>client_id</c> = <c>Coordinator:Studio:ClientId</c>, <c>sub</c> = its id), so the claims that tell a person from a service are made
+/// here, from the rights, never taken from the caller.
 /// </summary>
 public static class KeyIssuer
 {
@@ -38,16 +41,21 @@ public static class KeyIssuer
             ? "the trial identity provider issues no token for a key, and it serves the paths and the issuer of the coordinator's key issuer, so the two never run together"
             : "this coordinator issues the tokens of a key at Coordinator:PublicUrl, which is not set";
 
+    /// <summary>Why this server signs no person in by a key, or null when it does.</summary>
+    public static string? PersonUnavailable(CoordinatorServerOptions server) =>
+        Unavailable(server) ?? (server.PersonKeys ? null : "Coordinator:Auth:PersonKeys is false, so people sign in through the identity provider only");
+
     /// <summary>
-    /// Stops the start when the rights hold an identity verified by a key and this server issues no token for one: the identity could
-    /// never connect, and nothing else would say why.
+    /// Stops the start when the rights hold an identity verified by a key and this server issues no token for one, or a person while
+    /// people may not be verified by a key: the identity could never connect, and nothing else would say why.
     /// </summary>
     public static void CheckIdentities(RightsStore rights, CoordinatorServerOptions server)
     {
-        if (Unavailable(server) is not { } reason) return;
-        var keyed = rights.Snapshot().Identities.Where(i => i.Auth.Mode == AuthModes.Key).Select(i => i.ClientId).ToList();
-        if (keyed.Count > 0)
+        var identities = rights.Snapshot().Identities;
+        if (Unavailable(server) is { } reason && identities.Where(i => i.Auth.Mode == AuthModes.Key).Select(i => i.ClientId).ToList() is { Count: > 0 } keyed)
             throw new InvalidOperationException($"The rights hold identities verified by a key ({string.Join(", ", keyed)}), but {reason}.");
+        if (PersonUnavailable(server) is { } refusal && identities.Where(i => i.IsPerson).Select(i => i.ClientId).ToList() is { Count: > 0 } people)
+            throw new InvalidOperationException($"The rights hold people verified by a key ({string.Join(", ", people)}), but {refusal}.");
     }
 
     public static void MapKeyIssuer(this WebApplication app, CoordinatorServerOptions server)
@@ -60,8 +68,9 @@ public static class KeyIssuer
 
     /// <summary>
     /// A key for a token. Every answer about the client is the same <c>invalid_client</c>, whether the key names no identity, is wrong,
-    /// revoked or expired, opens a disabled identity or one the IdP verifies, or the client id is not the one the key names; a key, and
-    /// a client id that could hold one, are written in no log.
+    /// revoked or expired, opens a disabled identity or one the IdP verifies, opens a person while no studio's client is set or people
+    /// may not be verified by a key, or the client id is not the one the key names; a key, and a client id that could hold one, are
+    /// written in no log.
     /// </summary>
     private static async Task<IResult> ExchangeAsync(
         HttpContext http, CoordinatorServerOptions server, RightsStore rights, IssuerKeys keys, KeyExchangeLimits limits, ILogger<IssuerKeys> logger)
@@ -86,10 +95,18 @@ public static class KeyIssuer
         using (var lease = limits.ForIdentity(named ?? ""))
             if (!lease.IsAcquired) return TooMany(http);
         var now = DateTimeOffset.UtcNow;
-        if (named is null || rights.KeyHolder(form["client_secret"].ToString(), now) is not { } identity || identity.ClientId != named)
+        if (named is null || rights.KeyOf(form["client_secret"].ToString(), now) is not ({ } identity, { } key) || identity.ClientId != named
+            || identity.IsPerson && (!server.PersonKeys || server.StudioClientId is null))
         {
             logger.LogWarning("A key exchange for {ClientId} from {Source} was refused", named ?? "an invalid client id", source);
             return Error(StatusCodes.Status400BadRequest, "invalid_client", "The client is not known, or its key does not open it.");
+        }
+        if (identity.IsPerson)
+        {
+            var personLifetime = server.PersonTokenLifetime;
+            return Results.Json(new TokenAnswer(
+                keys.IssuePerson(identity.ClientId, server.StudioClientId!, key.Id, server.KeyIssuer!, server.Audience, now, personLifetime),
+                "Bearer", (int)personLifetime.TotalSeconds));
         }
         var lifetime = server.ServiceTokenLifetime;
         return Results.Json(new TokenAnswer(keys.Issue(identity.ClientId, server.KeyIssuer!, server.Audience, now, lifetime), "Bearer", (int)lifetime.TotalSeconds));
@@ -192,8 +209,21 @@ public sealed class IssuerKeys
     public RsaSecurityKey Signing { get; }
 
     /// <summary>A token for the service <paramref name="clientId"/>: its client is its subject (RFC 9068), which is what makes it a service's.</summary>
-    public string Issue(string clientId, string issuer, string audience, DateTimeOffset now, TimeSpan lifetime) => new JsonWebTokenHandler().CreateToken(
-        new SecurityTokenDescriptor
+    public string Issue(string clientId, string issuer, string audience, DateTimeOffset now, TimeSpan lifetime) =>
+        Create(new Dictionary<string, object> { ["sub"] = clientId, ["client_id"] = clientId }, issuer, audience, now, lifetime);
+
+    /// <summary>
+    /// A token for the person <paramref name="personId"/>, obtained through the studio's client: that client, a subject that is not it,
+    /// which is what makes it a person's (<see cref="TrustedIdp.IsStudioPerson"/>), and the id of the key it was exchanged with, by
+    /// which every request checks that key is still live. Never the key, never its hash.
+    /// </summary>
+    public string IssuePerson(string personId, string studioClientId, string keyId, string issuer, string audience, DateTimeOffset now, TimeSpan lifetime) =>
+        Create(new Dictionary<string, object> { ["sub"] = personId, ["client_id"] = studioClientId, [TrustedIdp.KeyIdClaim] = keyId }, issuer, audience, now, lifetime);
+
+    private string Create(Dictionary<string, object> claims, string issuer, string audience, DateTimeOffset now, TimeSpan lifetime)
+    {
+        claims["jti"] = Guid.NewGuid().ToString("N");
+        return new JsonWebTokenHandler().CreateToken(new SecurityTokenDescriptor
         {
             Issuer = issuer,
             Audience = audience,
@@ -201,9 +231,10 @@ public sealed class IssuerKeys
             IssuedAt = now.UtcDateTime,
             NotBefore = now.UtcDateTime,
             Expires = (now + lifetime).UtcDateTime,
-            Claims = new Dictionary<string, object> { ["sub"] = clientId, ["client_id"] = clientId, ["jti"] = Guid.NewGuid().ToString("N") },
+            Claims = claims,
             SigningCredentials = new SigningCredentials(Signing, SecurityAlgorithms.RsaSha256),
         });
+    }
 
     /// <summary>The keys a token of this issuer may be signed with: the one its <c>kid</c> names, read again from the shelf when unknown.</summary>
     public IEnumerable<SecurityKey> Resolve(string? kid)

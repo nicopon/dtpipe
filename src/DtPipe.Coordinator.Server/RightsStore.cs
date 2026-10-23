@@ -5,12 +5,15 @@ using TransportR.Interfaces;
 namespace DtPipe.Coordinator.Server;
 
 /// <summary>
-/// What the coordinator grants a client of the trusted IdP, named by the <c>sub</c> of its tokens.
+/// What the coordinator grants a client of an issuer it trusts, named by the <c>sub</c> of its tokens.
 /// <see cref="Name"/> is the one node name it may announce itself as, and belongs to the rights: a host
 /// only proposes one. <see cref="Groups"/> are the TransportR groups it belongs to. Its secret is never stored here: the IdP keeps
 /// it, or the rights keep a key's hash in <see cref="Auth"/>. <see cref="Kind"/> says what the coordinator grants it: a node (the default) hosts fragments
 /// and belongs to groups; a monitor only reads <c>/health</c>, belongs to none, and its name is a label that no node may carry; a
-/// launcher starts the runs of <see cref="Pipelines"/> and reads them, belongs to no group, and its name is a label too.
+/// launcher starts the runs of <see cref="Pipelines"/> and reads them, belongs to no group, and its name is a label too; a person
+/// signs in to the pages and the studio with the <see cref="Role"/> it holds, belongs to no group, and its name is a label too.
+/// <see cref="ClientId"/> is unique among the identities of every kind, so an id written as the author of a change or a run names
+/// one identity.
 /// </summary>
 public sealed record Identity(
     string ClientId, string Name, string Description, IReadOnlyList<string> Groups, bool Enabled = true, string Kind = IdentityKinds.Node,
@@ -18,13 +21,18 @@ public sealed record Identity(
 {
     public IdentityAuth Auth { get; init; } = IdentityAuth.Idp;
 
+    /// <summary>A person's role, cumulative as <see cref="CoordinatorRoles"/> grants it: <c>admin</c>, <c>designer</c> or <c>reader</c>; none for another kind.</summary>
+    public string? Role { get; init; }
+
     public bool IsNode => Kind == IdentityKinds.Node;
+
+    public bool IsPerson => Kind == IdentityKinds.Person;
 
     /// <summary>The identity is an enabled launcher of <paramref name="pipelineId"/>; a list that names none lets it launch none.</summary>
     public bool Launches(string pipelineId) => Enabled && Kind == IdentityKinds.Launcher && Pipelines is { } list && list.Contains(pipelineId);
 }
 
-/// <summary>What an identity of the trusted IdP is granted: the sort of service it is. A node is the only sort the node channel and the data plane know.</summary>
+/// <summary>What an identity is granted: the sort of service it is, or a person. A node is the only sort the node channel and the data plane know.</summary>
 public static class IdentityKinds
 {
     /// <summary>A host of fragments: it announces on the node channel and belongs to groups.</summary>
@@ -36,13 +44,22 @@ public static class IdentityKinds
     /// <summary>A scheduler or a CI: it starts the runs of the pipelines its identity lists and reads them, with no group and no node.</summary>
     public const string Launcher = "launcher";
 
-    public static readonly IReadOnlyList<string> All = [Node, Monitor, Launcher];
+    /// <summary>
+    /// Someone who signs in to the pages and the studio with a key, holding the role its identity gives, with no group and no node. A
+    /// person of the IdP is none: its roles are <c>Coordinator:Roles:*</c>.
+    /// </summary>
+    public const string Person = "person";
+
+    public static readonly IReadOnlyList<string> All = [Node, Monitor, Launcher, Person];
 
     /// <summary>The kinds an identity verified by a key may be of.</summary>
-    public static readonly IReadOnlyList<string> Keyed = [Node, Monitor, Launcher];
+    public static readonly IReadOnlyList<string> Keyed = [Node, Monitor, Launcher, Person];
 }
 
-/// <summary>One change to the rights, and who made it (the email of the person signed in), when known.</summary>
+/// <summary>
+/// One change to the rights, and who made it: the email of the person signed in, or the id of an identity with none (a person verified
+/// by a key), when known.
+/// </summary>
 public sealed record AuditEntry(DateTimeOffset At, string Change, string? By = null);
 
 /// <summary>The rights document: the identities, the flow matrix between groups, and the changes made to them.</summary>
@@ -172,6 +189,7 @@ public sealed class RightsStore
         CheckUnique([.. doc.Identities, added]);
         doc.Identities.Add(added);
         var verified = added.Auth.Mode == AuthModes.Key ? ", verified by a key" : "";
+        if (added.IsPerson) return $"Identity {added.ClientId} added (person {added.Name}, {added.Role}{verified})";
         return added.IsNode
             ? $"Identity {added.ClientId} added (node {added.Name}, groups {string.Join(", ", added.Groups)}{verified})"
             : added.Kind == IdentityKinds.Launcher
@@ -183,7 +201,8 @@ public sealed class RightsStore
     /// Edits an identity. An argument that is null is left as the identity has it: an edit says what it changes, and a field it
     /// leaves out is neither emptied, renamed nor enabled by the omission. The identity is read and written as one change.
     /// </summary>
-    public void UpdateIdentity(string clientId, string? name, string? description, IReadOnlyList<string>? groups, bool? enabled, string? by = null, IReadOnlyList<string>? pipelines = null) =>
+    public void UpdateIdentity(string clientId, string? name, string? description, IReadOnlyList<string>? groups, bool? enabled, string? by = null,
+        IReadOnlyList<string>? pipelines = null, string? role = null) =>
         Edit(by, doc =>
         {
             var index = doc.Identities.FindIndex(i => i.ClientId == clientId);
@@ -196,12 +215,14 @@ public sealed class RightsStore
                 Groups = groups ?? before.Groups,
                 Enabled = enabled ?? before.Enabled,
                 Pipelines = pipelines ?? before.Pipelines,
+                Role = role ?? before.Role,
             });
             CheckUnique(doc.Identities.Select((i, at) => at == index ? after : i).ToList());
             doc.Identities[index] = after;
             var changes = new List<string>();
             if (!before.Groups.SequenceEqual(after.Groups)) changes.Add($"groups {string.Join("+", before.Groups)} → {string.Join("+", after.Groups)}");
             if (!(before.Pipelines ?? []).SequenceEqual(after.Pipelines!)) changes.Add($"pipelines {string.Join("+", before.Pipelines ?? [])} → {string.Join("+", after.Pipelines!)}");
+            if (before.Role != after.Role) changes.Add($"role {before.Role} → {after.Role}");
             if (before.Name != after.Name) changes.Add($"node {before.Name} → {after.Name}");
             if (before.Enabled != after.Enabled) changes.Add(after.Enabled ? "enabled" : "disabled");
             if (before.Description != after.Description) changes.Add("described again");
@@ -263,14 +284,28 @@ public sealed class RightsStore
     /// client id the key names, one the IdP verifies, a disabled one, or a key none of its live keys matches. The client id only finds
     /// the identity; every live key is compared, in constant time, so the answer takes as long whichever matched.
     /// </summary>
-    public Identity? KeyHolder(string? presented, DateTimeOffset now)
+    public Identity? KeyHolder(string? presented, DateTimeOffset now) => KeyOf(presented, now)?.Identity;
+
+    /// <summary><see cref="KeyHolder"/>, with the record of the key that matched, which a person's session and token name.</summary>
+    public (Identity Identity, IdentityKey Key)? KeyOf(string? presented, DateTimeOffset now)
     {
         if (ClearKey.ClientIdOf(presented) is not { } clientId || Find(clientId) is not { Enabled: true } identity || identity.Auth.Mode != AuthModes.Key)
             return null;
-        var match = false;
-        foreach (var key in identity.Auth.LiveAt(now)) match |= ClearKey.Matches(presented!, key.Hash);
-        return match ? identity : null;
+        IdentityKey? matched = null;
+        foreach (var key in identity.Auth.LiveAt(now))
+            if (ClearKey.Matches(presented!, key.Hash)) matched ??= key;
+        return matched is null ? null : (identity, matched);
     }
+
+    /// <summary>
+    /// The enabled person verified by a key that <paramref name="clientId"/> names, while its key <paramref name="keyId"/> is live, or
+    /// null. A person's session and token are judged by it on every request, so a revoked key, a disabled or removed identity, or a
+    /// role taken away applies at the next one.
+    /// </summary>
+    public Identity? SignedInPerson(string? clientId, string? keyId, DateTimeOffset now) =>
+        Find(clientId) is { Enabled: true, IsPerson: true } identity && identity.Auth.Mode == AuthModes.Key && identity.Auth.LiveAt(now).Any(k => k.Id == keyId)
+            ? identity
+            : null;
 
     private static int IndexOf(RightsDocument doc, string clientId)
     {
@@ -302,6 +337,13 @@ public sealed class RightsStore
             throw new ConflictException($"'{identity.ClientId}' is verified by '{mode}': an identity is verified by {string.Join(" or ", AuthModes.All)}.");
         if (mode == AuthModes.Key && !IdentityKinds.Keyed.Contains(kind))
             throw new ConflictException($"'{identity.ClientId}' is a {kind}: a {kind} is verified by the identity provider, never by a key.");
+        // A person of the provider takes its roles from Coordinator:Roles: only a person verified by a key is one of the rights.
+        if (kind == IdentityKinds.Person && mode != AuthModes.Key)
+            throw new ConflictException($"'{identity.ClientId}' is a person verified by the identity provider: such a person takes its roles from Coordinator:Roles, and a person of the rights is verified by a key.");
+        var role = identity.Role?.Trim();
+        if (kind != IdentityKinds.Person) role = null;
+        else if (role is null || !CoordinatorRoles.All.Contains(role))
+            throw new ConflictException($"'{identity.ClientId}' is a person whose role is '{role}': a person is {string.Join(", ", CoordinatorRoles.All)}.");
         var keys = auth.Keys ?? [];
         if (mode == AuthModes.Idp && keys.Count > 0)
             throw new ConflictException($"'{identity.ClientId}' is verified by the identity provider and holds keys: such an identity has none.");
@@ -313,9 +355,14 @@ public sealed class RightsStore
             Kind = kind,
             Pipelines = pipelines,
             Auth = new IdentityAuth(mode, keys),
+            Role = role,
         };
     }
 
+    /// <summary>
+    /// Refuses two identities of one name or one client id, whatever their kinds: an id is what a run, an arming and a rights change
+    /// name their author by when it has no email, so it must name one identity.
+    /// </summary>
     private static void CheckUnique(IReadOnlyList<Identity> identities)
     {
         foreach (var duplicate in identities.GroupBy(i => i.Name, StringComparer.Ordinal).Where(g => g.Count() > 1))

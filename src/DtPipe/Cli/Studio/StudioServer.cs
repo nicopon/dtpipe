@@ -247,7 +247,16 @@ public sealed partial class StudioServer : IAsyncDisposable
                     break;
                 case ("POST", "/api/coordinator/login"):
                     var link = _tools.Coordinator ?? throw new StudioRefusal(404, "This studio was opened without --coordinator.");
-                    try { await JsonAsync(context, new { url = await link.BeginSignInAsync(Port, context.RequestAborted) }); }
+                    // With a key there is no tab to open: the studio signs in here, and the page reads the status again.
+                    try
+                    {
+                        if (link.ByKey)
+                        {
+                            await link.SignInWithKeyAsync(context.RequestAborted);
+                            await JsonAsync(context, new { url = (string?)null });
+                        }
+                        else await JsonAsync(context, new { url = await link.BeginSignInAsync(Port, context.RequestAborted) });
+                    }
                     catch (CoordinatorLinkException ex) { throw new StudioRefusal(502, ex.Message); }
                     break;
                 case ("POST", "/api/coordinator/logout"):

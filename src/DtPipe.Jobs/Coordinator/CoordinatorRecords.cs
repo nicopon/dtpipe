@@ -5,8 +5,8 @@ namespace DtPipe.Jobs.Coordinator;
 
 /// <summary>
 /// The coordinator's protected resource metadata (RFC 9728), with what a studio needs besides:
-/// the contract it speaks and the provider's client a studio signs people in with, absent when the
-/// coordinator accepts no studio, and whether the provider is the coordinator's own trial one (never for production). Its names are the
+/// the contract it speaks, the provider's client a studio signs people in with, absent when the
+/// coordinator accepts no studio, and the ways a person signs in there (<see cref="Auth"/>, among <see cref="PersonAuth"/>). Its names are the
 /// RFC's, in snake case.
 /// </summary>
 public sealed record ResourceMetadata(
@@ -16,8 +16,21 @@ public sealed record ResourceMetadata(
     [property: JsonPropertyName("dtpipe_contract")] int DtpipeContract,
     [property: JsonPropertyName("dtpipe_studio_client_id"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     string? StudioClientId = null,
-    [property: JsonPropertyName("dtpipe_trial_idp"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    bool TrialIdp = false);
+    [property: JsonPropertyName("dtpipe_auth"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<string>? Auth = null);
+
+/// <summary>The ways a person signs in to a coordinator, as its metadata lists them (<see cref="ResourceMetadata.Auth"/>).</summary>
+public static class PersonAuth
+{
+    /// <summary>Through the external identity provider, the first of the authorization servers.</summary>
+    public const string Idp = "idp";
+
+    /// <summary>Through the identity provider the coordinator runs itself for a trial, never for production.</summary>
+    public const string Trial = "trial";
+
+    /// <summary>With a key the coordinator made for the person, exchanged at the authorization server that is the coordinator's own address.</summary>
+    public const string Key = "key";
+}
 
 /// <summary>Who a signed-in person is, and the roles the coordinator's configuration gives them.</summary>
 public sealed record CoordinatorMe(string? Name, string? Email, IReadOnlyList<string> Roles);

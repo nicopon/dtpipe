@@ -152,6 +152,38 @@ public sealed class CoordinatorServerOptions
 
     public static readonly TimeSpan MinServiceTokenLifetime = TimeSpan.FromMinutes(5);
 
+    /// <summary>
+    /// Whether a person may be verified by a key (<c>Coordinator:Auth:PersonKeys</c>, true unless set false): a key has neither MFA
+    /// nor SSO, so an organisation that has an identity provider may admit people through it alone. False, an identity of kind person
+    /// is refused when it is added, a start whose rights hold one stops naming it, the sign-in form offers no key, the issuer gives a
+    /// person no token, and the metadata does not name <see cref="DtPipe.Jobs.Coordinator.PersonAuth.Key"/>.
+    /// </summary>
+    public bool PersonKeys { get; init; } = true;
+
+    /// <summary>
+    /// A person signs in here with a key: the issuer exchanges keys (<see cref="ExchangesKeys"/>: over HTTPS, or over HTTP where
+    /// <see cref="AllowHttpKeys"/> says so), and <see cref="PersonKeys"/> lets people be verified by it. Otherwise no form offers a key
+    /// and the metadata names none, since no key could be taken.
+    /// </summary>
+    public bool SignsPeopleInByKey => ExchangesKeys && PersonKeys;
+
+    /// <summary>
+    /// How long a token the issuer makes for a person lasts (<c>Coordinator:Auth:PersonTokenLifetime</c>, a time span, an hour unless
+    /// set, <see cref="MinServiceTokenLifetime"/> at least, since the studio asks for the next one two minutes before it ends). It is
+    /// judged against the rights on every request whatever its lifetime, so a revoked key opens nothing after the next request.
+    /// </summary>
+    public TimeSpan PersonTokenLifetime { get; init; } = TimeSpan.FromHours(1);
+
+    /// <summary>The ways a person signs in here, as the metadata lists them: the provider (or the trial one), and a key when <see cref="SignsPeopleInByKey"/>.</summary>
+    public IReadOnlyList<string> PersonAuth
+    {
+        get
+        {
+            var provider = IsTrialIdp ? DtPipe.Jobs.Coordinator.PersonAuth.Trial : DtPipe.Jobs.Coordinator.PersonAuth.Idp;
+            return SignsPeopleInByKey ? [provider, DtPipe.Jobs.Coordinator.PersonAuth.Key] : [provider];
+        }
+    }
+
     /// <summary>The Lab view's scenarios, one job file each; read only in <see cref="LabMode"/>.</summary>
     public string? Scenarios { get; init; }
 
@@ -198,6 +230,9 @@ public sealed class CoordinatorServerOptions
         var lifetime = section.GetValue<TimeSpan?>("Auth:ServiceTokenLifetime") ?? TimeSpan.FromMinutes(10);
         if (lifetime < MinServiceTokenLifetime)
             throw new InvalidOperationException($"Coordinator:Auth:ServiceTokenLifetime must be {MinServiceTokenLifetime.TotalMinutes} minutes at least: a node asks for its next token two minutes before its token ends.");
+        var personLifetime = section.GetValue<TimeSpan?>("Auth:PersonTokenLifetime") ?? TimeSpan.FromHours(1);
+        if (personLifetime < MinServiceTokenLifetime)
+            throw new InvalidOperationException($"Coordinator:Auth:PersonTokenLifetime must be {MinServiceTokenLifetime.TotalMinutes} minutes at least: the studio asks for its next token two minutes before its token ends.");
         return new CoordinatorServerOptions
         {
             StateDir = PathOf("StateDirectory") ?? Path.GetFullPath("state"),
@@ -205,6 +240,8 @@ public sealed class CoordinatorServerOptions
             KeyIssuer = keyIssuer,
             AllowHttpKeys = section.GetValue<bool>("Auth:AllowHttpKeys"),
             ServiceTokenLifetime = lifetime,
+            PersonTokenLifetime = personLifetime,
+            PersonKeys = section.GetValue<bool?>("Auth:PersonKeys") ?? true,
             TrialIdpPassword = trial,
             Audience = section["Audience"] ?? "dtpipe-coordinator",
             UiClientId = section["Ui:ClientId"] ?? "coordinator-ui",

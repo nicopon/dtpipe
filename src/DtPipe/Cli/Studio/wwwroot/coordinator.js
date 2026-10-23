@@ -40,15 +40,18 @@ function render() {
     fill(host, el("span", { class: "dot warn" }), " ", name, " · finish signing in in the other tab ",
       " ", trial, el("button", { class: "small ghost", onclick: signIn }, "Open again"));
   } else {
+    const label = link.byKey ? "Sign in with the key" : link.reason ? "Sign in again" : "Sign in";
     fill(host, el("span", { class: "dot bad" }), " ", name, " · ", link.reason || "not signed in", " ",
-      el("button", { class: "small", onclick: signIn }, link.reason ? "Sign in again" : "Sign in"));
+      el("button", { class: "small", onclick: signIn }, label));
   }
 }
 
-// The provider's page opens in a new tab, so the cards of this one stay as they are.
+// The provider's page opens in a new tab, so the cards of this one stay as they are. With a key the
+// studio signs in by itself and answers no address: the status is read again.
 async function signIn() {
   try {
     const { url } = await api("/api/coordinator/login", {});
+    if (!url) { await refreshCoordinator(); return; }
     // "noopener" would make window.open return null whether or not the tab opened: the opener link is
     // cut by hand instead, before the tab leaves this origin.
     const tab = window.open("about:blank", "_blank");
@@ -58,6 +61,8 @@ async function signIn() {
     poll();
   } catch (e) {
     status(e.message, "bad");
+    // A refused key signs the person out with its reason, which the status carries.
+    refreshCoordinator().catch(() => {});
   }
 }
 

@@ -33,6 +33,8 @@ internal sealed class ManualTime : TimeProvider
 /// <summary>
 /// A provider that signs "ann" in at once, and a coordinator that accepts the provider's latest access
 /// token and offers one source brick and one sink brick, built on the records the real coordinator writes.
+/// With <see cref="Key"/> the coordinator is also an issuer at its own address that exchanges that key for
+/// an access token, as the real one does for a person verified by a key.
 /// </summary>
 internal sealed class StudioFakes : IAsyncDisposable
 {
@@ -52,6 +54,12 @@ internal sealed class StudioFakes : IAsyncDisposable
     public LibraryRefused? Refusal;
     public bool Deployed;
     public int Commits;
+    public string? Key;
+    public IReadOnlyList<string>? Auth;
+    public string? KeyTokenEndpoint;
+    public bool RefuseKey;
+    public int KeyExchanges;
+    public Dictionary<string, string>? LastKeyForm;
 
     public const string SourceKey = "n1/orders", SinkKey = "n1/archive";
 
@@ -155,7 +163,32 @@ internal sealed class StudioFakes : IAsyncDisposable
         switch (context.Request.Path.Value)
         {
             case CoordinatorApi.Metadata:
-                await context.Response.WriteAsJsonAsync(new ResourceMetadata(CoordinatorUrl, [IdpUrl], ["header"], Contract, "studio"));
+                await context.Response.WriteAsJsonAsync(new ResourceMetadata(
+                    CoordinatorUrl, Key is null ? [IdpUrl] : [IdpUrl, CoordinatorUrl], ["header"], Contract, "studio", Auth));
+                break;
+            case "/.well-known/openid-configuration" when Key is not null:
+                await context.Response.WriteAsJsonAsync(new Dictionary<string, string>
+                {
+                    ["issuer"] = CoordinatorUrl,
+                    ["token_endpoint"] = KeyTokenEndpoint ?? CoordinatorUrl + "/connect/token",
+                });
+                break;
+            case "/connect/token" when Key is not null:
+                var form = await context.Request.ReadFormAsync();
+                LastKeyForm = form.ToDictionary(f => f.Key, f => f.Value.ToString());
+                KeyExchanges++;
+                if (RefuseKey || form["grant_type"] != "client_credentials" || form["client_secret"] != Key
+                    || form["client_id"] != CoordinatorApi.ClientIdOfKey(Key))
+                {
+                    context.Response.StatusCode = 400;
+                    await context.Response.WriteAsJsonAsync(new { error = "invalid_client", error_description = "The client is not known, or its key does not open it." });
+                    return;
+                }
+                ValidAccess = $"key-access-{KeyExchanges}";
+                await context.Response.WriteAsJsonAsync(new Dictionary<string, object?>
+                {
+                    ["access_token"] = ValidAccess, ["expires_in"] = ExpiresIn, ["token_type"] = "Bearer",
+                });
                 break;
             case "/api/me":
                 MeCalls++;

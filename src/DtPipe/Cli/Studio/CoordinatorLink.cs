@@ -15,19 +15,25 @@ public sealed class CoordinatorLinkException(string message) : Exception(message
 
 /// <summary>
 /// What the page is told of the link: the coordinator's address, whether a person is signed in, why
-/// not, and who; <c>TrialIdp</c> when the coordinator's metadata says its provider is its own trial one, never for production. Never a token.
+/// not, and who; <c>TrialIdp</c> when the coordinator's metadata says its provider is its own trial one, never for production;
+/// <c>ByKey</c> when the studio signs in with a key rather than through the browser. Never a token, never the key.
 /// </summary>
-public sealed record CoordinatorStatus(string Url, string State, string? Reason, CoordinatorMe? Me, string StudioVersion, int Contract, bool TrialIdp = false);
+public sealed record CoordinatorStatus(
+    string Url, string State, string? Reason, CoordinatorMe? Me, string StudioVersion, int Contract, bool TrialIdp = false, bool ByKey = false);
 
 /// <summary>
 /// The studio's link to one coordinator, named on the command line: the page never chooses where a
 /// token goes. A person signs in the way an MCP client does: the coordinator's protected resource
 /// metadata (RFC 9728) names its provider and its studio client, the provider's discovery document its
 /// endpoints, then authorization code with PKCE (S256) through the browser, back to this studio's
-/// loopback <c>/callback</c> (RFC 8252). The tokens live in this process's memory only, never in a
-/// response or the page; the access token is renewed ahead of its expiry with the refresh token, and a
-/// refused renewal signs the person out with the reason. Every request goes to the coordinator's
-/// origin only, follows no redirect and carries the CSRF header the coordinator requires.
+/// loopback <c>/callback</c> (RFC 8252). Given a key the coordinator made for the person, the studio
+/// opens no browser: the metadata must say the coordinator signs people in with a key, and the key is
+/// exchanged (client credentials) at the token endpoint of the authorization server that is the
+/// coordinator's own address, issuer equal and on that origin, and presented again to renew. The
+/// tokens and the key live in this process's memory only, never in a response or the page; the access
+/// token is renewed ahead of its expiry, and a refused renewal signs the person out with the reason.
+/// Every request goes to the coordinator's origin only, follows no redirect and carries the CSRF header
+/// the coordinator requires.
 /// </summary>
 public sealed class CoordinatorLink : IDisposable
 {
@@ -61,7 +67,13 @@ public sealed class CoordinatorLink : IDisposable
         [property: JsonPropertyName("refresh_token")] string? RefreshToken,
         [property: JsonPropertyName("expires_in")] int? ExpiresIn);
 
+    private sealed record TokenError(
+        [property: JsonPropertyName("error")] string? Error,
+        [property: JsonPropertyName("error_description")] string? Description);
+
     private readonly Uri _origin;
+    private readonly string? _key;
+    private readonly string? _keyClientId;
     private readonly HttpClient _http;
     private readonly TimeProvider _time;
     private readonly SemaphoreSlim _renewal = new(1, 1);
@@ -73,18 +85,26 @@ public sealed class CoordinatorLink : IDisposable
     private string? _reason;
     private BrickCatalogView? _catalog;
 
-    /// <param name="coordinator">The coordinator's address: its origin is the only one a token is sent to.</param>
-    public CoordinatorLink(Uri coordinator, TimeProvider? time = null)
+    /// <param name="coordinator">The coordinator's address: its origin is the only one a token or the key is sent to.</param>
+    /// <param name="key">A key the coordinator made for the person, already read from its reference; none to sign in through the browser.</param>
+    public CoordinatorLink(Uri coordinator, TimeProvider? time = null, string? key = null)
     {
         if (!coordinator.IsAbsoluteUri || coordinator.Scheme is not ("http" or "https") || coordinator.UserInfo.Length > 0
             || coordinator.AbsolutePath != "/" || coordinator.Query.Length > 0 || coordinator.Fragment.Length > 0)
             throw new CoordinatorLinkException($"'{coordinator}' is no coordinator address: give its origin, as http(s)://host[:port].");
+        if (key is not null)
+            _keyClientId = CoordinatorApi.ClientIdOfKey(key)
+                ?? throw new CoordinatorLinkException($"The key given is no key a coordinator makes ({CoordinatorApi.KeyPrefix}…): copy it again from the coordinator.");
+        _key = key;
         _origin = new Uri(coordinator.GetLeftPart(UriPartial.Authority));
         _time = time ?? TimeProvider.System;
         _http = new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false, UseCookies = false }) { Timeout = TimeSpan.FromSeconds(30) };
     }
 
     public Uri Origin => _origin;
+
+    /// <summary>The studio signs in with a key, never through the browser.</summary>
+    public bool ByKey => _key is not null;
 
     /// <summary>This dtpipe's version, as <c>dtpipe --version</c> prints it.</summary>
     public static string StudioVersion { get; } =
@@ -95,7 +115,7 @@ public sealed class CoordinatorLink : IDisposable
         lock (_lock)
         {
             var state = _tokens is not null ? SignedIn : _pending is not null && _time.GetUtcNow() < _pending.Expires ? SigningIn : SignedOut;
-            return new CoordinatorStatus(Url, state, _reason, _tokens is null ? null : _me, StudioVersion, CoordinatorApi.Contract, _discovery?.TrialIdp ?? false);
+            return new CoordinatorStatus(Url, state, _reason, _tokens is null ? null : _me, StudioVersion, CoordinatorApi.Contract, _discovery?.TrialIdp ?? false, ByKey);
         }
     }
 
@@ -107,6 +127,7 @@ public sealed class CoordinatorLink : IDisposable
     /// </summary>
     public async Task<string> BeginSignInAsync(int studioPort, CancellationToken ct)
     {
+        if (ByKey) throw new CoordinatorLinkException("This studio signs in with the key it was started with, not through the browser.");
         var discovery = await DiscoverAsync(ct);
         var verifier = Base64Url(RandomNumberGenerator.GetBytes(32));
         var state = Base64Url(RandomNumberGenerator.GetBytes(24));
@@ -158,6 +179,26 @@ public sealed class CoordinatorLink : IDisposable
             ["client_id"] = discovery.ClientId,
             ["code_verifier"] = pending.Verifier,
         }, ct) ?? throw SignOut("The identity provider refused the code: sign in again.");
+        return await SignedInAsync(tokens, ct);
+    }
+
+    /// <summary>
+    /// Signs in with the key the studio was started with: the key for a token at the coordinator's own issuer, then who that is.
+    /// A refusal signs the person out with the coordinator's reason.
+    /// </summary>
+    public async Task<string> SignInWithKeyAsync(CancellationToken ct)
+    {
+        if (!ByKey) throw new CoordinatorLinkException("This studio was started with no key: sign in through the browser.");
+        await _renewal.WaitAsync(ct);
+        Tokens tokens;
+        try { tokens = await ExchangeKeyAsync(await DiscoverAsync(ct), ct); }
+        finally { _renewal.Release(); }
+        return await SignedInAsync(tokens, ct);
+    }
+
+    /// <summary>Keeps the tokens and asks the coordinator who they name: a coordinator that refuses the person signs them out.</summary>
+    private async Task<string> SignedInAsync(Tokens tokens, CancellationToken ct)
+    {
         lock (_lock)
         {
             _tokens = tokens;
@@ -350,6 +391,12 @@ public sealed class CoordinatorLink : IDisposable
             Tokens tokens;
             lock (_lock) tokens = _tokens ?? throw new CoordinatorLinkException(_reason ?? $"Nobody is signed in to {Url}: sign in from the studio.");
             if (!fresh && _time.GetUtcNow() < tokens.Expires - Margin) return tokens.Access;
+            if (ByKey)
+            {
+                var exchanged = await ExchangeKeyAsync(await DiscoverAsync(ct), ct);
+                lock (_lock) _tokens = exchanged;
+                return exchanged.Access;
+            }
             if (tokens.Refresh is null) throw SignOut("The session has ended: sign in again.");
 
             var discovery = await DiscoverAsync(ct);
@@ -382,6 +429,41 @@ public sealed class CoordinatorLink : IDisposable
         return new Tokens(access, answer.RefreshToken, _time.GetUtcNow().AddSeconds(Math.Max(answer.ExpiresIn ?? 300, 0)));
     }
 
+    /// <summary>
+    /// The key for a token, at the token endpoint of the coordinator's own issuer: client credentials, the key as the client secret,
+    /// under the client id it names. A refusal signs the person out with the reason the coordinator gives, never with the key.
+    /// </summary>
+    private async Task<Tokens> ExchangeKeyAsync(Discovery discovery, CancellationToken ct)
+    {
+        HttpResponseMessage response;
+        try
+        {
+            response = await _http.PostAsync(discovery.TokenEndpoint, new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["grant_type"] = "client_credentials",
+                ["client_id"] = _keyClientId!,
+                ["client_secret"] = _key!,
+            }), ct);
+        }
+        catch (HttpRequestException ex) { throw new CoordinatorLinkException($"{Url} does not answer: {ex.Message}"); }
+        using (response)
+        {
+            if (response.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Unauthorized or HttpStatusCode.TooManyRequests)
+            {
+                TokenError? refusal = null;
+                try { refusal = await response.Content.ReadFromJsonAsync<TokenError>(ct); }
+                catch (JsonException) { }
+                throw SignOut($"{Url} refused this studio's key: {refusal?.Description ?? refusal?.Error ?? $"{(int)response.StatusCode} {response.ReasonPhrase}"}");
+            }
+            if (!response.IsSuccessStatusCode)
+                throw new CoordinatorLinkException($"{Url}'s token endpoint answered {(int)response.StatusCode}.");
+            var answer = await response.Content.ReadFromJsonAsync<TokenResponse>(ct);
+            if (answer?.AccessToken is not { Length: > 0 } access)
+                throw new CoordinatorLinkException($"{Url} sent no access token for the key.");
+            return new Tokens(access, null, _time.GetUtcNow().AddSeconds(Math.Max(answer.ExpiresIn ?? 300, 0)));
+        }
+    }
+
     private async Task<Discovery> DiscoverAsync(CancellationToken ct)
     {
         lock (_lock)
@@ -396,6 +478,15 @@ public sealed class CoordinatorLink : IDisposable
             throw new CoordinatorLinkException($"{Url} names itself {metadata.Resource}: open the studio with that address.");
         if (string.IsNullOrEmpty(metadata.StudioClientId))
             throw new CoordinatorLinkException($"{Url} accepts no studio: its administrator sets Coordinator:Studio:ClientId.");
+        var trial = metadata.Auth?.Contains(PersonAuth.Trial) == true;
+        if (ByKey)
+        {
+            var keyDiscovery = await DiscoverKeyIssuerAsync(metadata, ct);
+            lock (_lock) _discovery = keyDiscovery;
+            return keyDiscovery;
+        }
+        if (metadata.Auth is { } ways && !ways.Contains(PersonAuth.Idp) && !ways.Contains(PersonAuth.Trial))
+            throw new CoordinatorLinkException($"{Url} signs people in with a key only: start the studio with --key.");
         var issuer = metadata.AuthorizationServers?.FirstOrDefault()
             ?? throw new CoordinatorLinkException($"{Url} names no identity provider.");
         if (!Uri.TryCreate(issuer, UriKind.Absolute, out var issuerUri) || issuerUri.Scheme is not ("http" or "https"))
@@ -413,9 +504,29 @@ public sealed class CoordinatorLink : IDisposable
             if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var uri) || (issuerUri.Scheme == "https" && uri.Scheme != "https"))
                 throw new CoordinatorLinkException($"The identity provider at {issuer} gives an endpoint that is no address over {issuerUri.Scheme}: '{endpoint}'.");
         }
-        var discovery = new Discovery(configuration.Issuer, configuration.AuthorizationEndpoint!, configuration.TokenEndpoint!, metadata.StudioClientId, metadata.TrialIdp);
+        var discovery = new Discovery(configuration.Issuer, configuration.AuthorizationEndpoint!, configuration.TokenEndpoint!, metadata.StudioClientId, trial);
         lock (_lock) _discovery = discovery;
         return discovery;
+    }
+
+    /// <summary>
+    /// The issuer a key is exchanged at: the authorization server that is the coordinator's own address, whose discovery document names
+    /// itself and a token endpoint on that same origin, so the key goes to the coordinator and nowhere else, never over a downgrade.
+    /// </summary>
+    private async Task<Discovery> DiscoverKeyIssuerAsync(ResourceMetadata metadata, CancellationToken ct)
+    {
+        if (metadata.Auth?.Contains(PersonAuth.Key) != true)
+            throw new CoordinatorLinkException(
+                $"{Url} signs nobody in with a key: its administrator sets Coordinator:PublicUrl (https, or http with Coordinator:Auth:AllowHttpKeys) and leaves Coordinator:Auth:PersonKeys on, or the studio signs in without --key.");
+        var issuer = metadata.AuthorizationServers?.FirstOrDefault(s => SameIssuer(s, Url))
+            ?? throw new CoordinatorLinkException($"{Url} names no issuer at its own address to exchange a key at.");
+        var configuration = await GetJsonAsync<OpenIdConfiguration>(issuer.TrimEnd('/') + "/.well-known/openid-configuration", issuer, ct);
+        if (configuration.Issuer is null || !SameIssuer(configuration.Issuer, issuer))
+            throw new CoordinatorLinkException($"The issuer at {issuer} names itself {configuration.Issuer}: refused.");
+        if (!Uri.TryCreate(configuration.TokenEndpoint, UriKind.Absolute, out var endpoint)
+            || endpoint.GetLeftPart(UriPartial.Authority) != _origin.GetLeftPart(UriPartial.Authority))
+            throw new CoordinatorLinkException($"The issuer at {issuer} gives a token endpoint off the coordinator's origin: '{configuration.TokenEndpoint}'. The key is not sent there.");
+        return new Discovery(configuration.Issuer, "", configuration.TokenEndpoint!, metadata.StudioClientId!, false);
     }
 
     private async Task<T> GetJsonAsync<T>(string url, string who, CancellationToken ct)

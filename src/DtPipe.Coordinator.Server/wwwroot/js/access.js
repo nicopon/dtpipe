@@ -33,6 +33,7 @@ const setOf = (list) => new Set(list || []);
 const KIND_CHIPS = {
   monitor: `<span class="chip" title="A supervisor: it reads /health and nothing else">monitor</span>`,
   launcher: `<span class="chip" title="A scheduler: it starts the runs of the pipelines listed and reads them, nothing else">launcher</span>`,
+  person: `<span class="chip" title="Someone who signs in with a key, holding the role shown">person</span>`,
 };
 const groupsOf = (text) => text.split(",").map((g) => g.trim()).filter(Boolean);
 
@@ -47,11 +48,11 @@ function render() {
 
   const identities = rights.identities.map((i) => `
     <tr data-identity="${esc(i.clientId)}">
-      <td><code>${esc(i.clientId)}</code>${KIND_CHIPS[i.kind] ?? ""}</td>
+      <td><code>${esc(i.clientId)}</code>${KIND_CHIPS[i.kind] ?? ""}${i.role ? ` <span class="chip">${esc(i.role)}</span>` : ""}</td>
       <td><input class="mono narrow" data-field="name" value="${esc(i.name)}" aria-label="${i.kind === "node" ? "Node name" : "Name"} of ${esc(i.clientId)}"></td>
       <td>${i.kind === "launcher"
         ? `<input class="mono" data-field="pipelines" value="${esc((i.pipelines ?? []).join(", "))}" placeholder="none: it launches nothing" aria-label="Pipelines ${esc(i.clientId)} may launch, separated by commas">`
-        : `<input class="mono" data-field="groups" value="${esc(i.groups.join(", "))}" list="groups-list" aria-label="Groups of ${esc(i.clientId)}, separated by commas" ${i.kind === "monitor" ? `disabled placeholder="none"` : ""}>`}</td>
+        : `<input class="mono" data-field="groups" value="${esc(i.groups.join(", "))}" list="groups-list" aria-label="Groups of ${esc(i.clientId)}, separated by commas" ${i.kind === "monitor" || i.kind === "person" ? `disabled placeholder="none"` : ""}>`}</td>
       <td><input data-field="description" value="${esc(i.description)}" aria-label="Description of ${esc(i.clientId)}"></td>
       <td><label class="check"><input type="checkbox" data-field="enabled" ${i.enabled ? "checked" : ""}> enabled</label></td>
       <td>${i.connected ? `<span class="chip ok">connected</span>` : `<span class="chip">offline</span>`}</td>
