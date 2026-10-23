@@ -7,12 +7,15 @@ namespace DtPipe.PipelineNode.Hosting;
 /// Obtains this node's tokens from its OpenID Connect provider (client credentials), and reuses one
 /// until shortly before it expires; <c>fresh</c> asks for a new one, which is what TransportR's retry
 /// after a 401 needs. The provider is <c>Oidc:Authority</c> when given, else the one the coordinator's protected resource metadata names;
-/// its token endpoint comes from its discovery document, read once. The client is <c>Oidc:ClientId</c> when given, else the node's name. What
-/// the token entitles the node to is decided by the coordinator, never here.
+/// its token endpoint comes from its discovery document, read once. The client is <c>Oidc:ClientId</c> when given, else the node's name, and
+/// its secret <c>Oidc:ClientSecret</c>, read once when the client is made (<see cref="SecretReference"/>). What the token entitles the node
+/// to is decided by the coordinator, never here.
 /// </summary>
 internal sealed class OidcTokenClient(NodeOidcOptions options, string nodeName, string coordinatorUrl) : IDisposable
 {
     private static readonly TimeSpan Margin = TimeSpan.FromMinutes(2);
+
+    private readonly string _secret = SecretReference.Read(options.ClientSecret, "DtPipeNode:Oidc:ClientSecret");
 
     private sealed record Discovery([property: JsonPropertyName("token_endpoint")] string TokenEndpoint);
 
@@ -42,7 +45,7 @@ internal sealed class OidcTokenClient(NodeOidcOptions options, string nodeName, 
             {
                 ["grant_type"] = "client_credentials",
                 ["client_id"] = ClientId,
-                ["client_secret"] = options.ClientSecret,
+                ["client_secret"] = _secret,
             };
             if (!string.IsNullOrWhiteSpace(options.Scope)) form["scope"] = options.Scope;
             using var response = await _http.PostAsync(_tokenEndpoint, new FormUrlEncodedContent(form));

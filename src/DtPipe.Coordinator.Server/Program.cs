@@ -71,9 +71,15 @@ builder.Services.AddSingleton<LibraryArming>();
 builder.Services.AddSingleton<PipelineHealth>();
 
 var app = builder.Build();
-// An identity verified by a key with no issuer to exchange its key could never connect, nor a person while people may not hold a key:
-// the start says so before anything is served.
-KeyIssuer.CheckIdentities(app.Services.GetRequiredService<RightsStore>(), server);
+// The identities the deployment gives are added to the rights before anything is served, in one change. The log names their ids, never a key.
+var rights = app.Services.GetRequiredService<RightsStore>();
+var (bootstrapped, adminLeft) = rights.Bootstrap(server.Bootstrap);
+if (bootstrapped.Count > 0) app.Logger.LogInformation("The rights gained {Identities} from Coordinator:Bootstrap", string.Join(", ", bootstrapped));
+if (adminLeft is not null)
+    app.Logger.LogWarning("Coordinator:Bootstrap:AdminKey names {Id}, an administrator of the rights with no live key: it is left as it is, and a key of another id adds an administrator", adminLeft);
+// An identity verified by a key with no issuer to exchange its key could never connect, nor a person while people may not hold a key,
+// nor an identity of the provider without one: the start says so before anything is served.
+KeyIssuer.CheckIdentities(rights, server);
 // First, so that every middleware and handler below sees the address the person's browser used: the sign-in's return address, the
 // protected-resource document and the cookies' Secure flag follow the request's scheme and host. No header is read.
 if (server.PublicUrl is { } publicUrl)
@@ -186,11 +192,10 @@ app.MapHub<NodeChannelHub>(NodeChannel.Path).RequireAuthorization();
 app.MapGet("/healthz", () => Results.Ok());
 // Anonymous: where a person signs in for dtpipe studio, and the contract this server speaks.
 app.MapGet(CoordinatorApi.Metadata, (HttpContext context, CoordinatorServerOptions options) =>
-    new ResourceMetadata(OriginOf(context), options.KeyIssuer is { } issuer ? [options.Authority, issuer] : [options.Authority], ["header"],
-        CoordinatorApi.Contract, options.StudioClientId, options.PersonAuth));
+    new ResourceMetadata(OriginOf(context), options.AuthorizationServers, ["header"], CoordinatorApi.Contract, options.StudioClientId, options.PersonAuth));
 
 // A person signs in through the provider, or with a key where people may hold one; the pages send them here. A person verified by a key
-// signs out here only: the provider never signed them in.
+// signs out here only: the provider never signed them in. Without a provider there is the form alone, which the start made sure of.
 IResult ProviderSignIn(string? returnUrl) =>
     Results.Challenge(new AuthenticationProperties { RedirectUri = AccountPages.LocalPath(returnUrl) }, [TrustedIdp.OidcScheme]);
 app.MapGet(AccountPages.LoginPath, (HttpContext context, string? returnUrl) => server.SignsPeopleInByKey
@@ -198,13 +203,15 @@ app.MapGet(AccountPages.LoginPath, (HttpContext context, string? returnUrl) => s
     : ProviderSignIn(returnUrl));
 if (server.SignsPeopleInByKey)
 {
-    app.MapGet(AccountPages.ProviderLoginPath, ProviderSignIn);
+    if (server.HasProvider) app.MapGet(AccountPages.ProviderLoginPath, ProviderSignIn);
     app.MapPost(AccountPages.LoginPath, AccountPages.SignInAsync);
 }
 app.MapGet("/account/logout", (HttpContext context) => Results.SignOut(new AuthenticationProperties { RedirectUri = "/" }, SignedInWith(context.User)));
 // Where a person with no role lands once signed out: anonymous, it names nobody.
 app.MapGet("/account/denied", () => AccountPages.Access(server, StatusCodes.Status200OK,
-    "That account holds no role on this coordinator, so it has been signed out here, and at the identity provider when it signed in there.",
+    server.HasProvider
+        ? "That account holds no role on this coordinator, so it has been signed out here, and at the identity provider when it signed in there."
+        : "That key holds no role on this coordinator, so it has been signed out here.",
     ("/", "Sign in with another account")));
 
 // /api serves the pages by the session cookie, and dtpipe studio by a person's bearer token, with
@@ -235,9 +242,9 @@ app.Run();
 
 static string OriginOf(HttpContext context) => $"{context.Request.Scheme}://{context.Request.Host}";
 
-// What a person signs out of: the session, and the provider's too unless the session is a key's.
+// What a person signs out of: the session, and the provider's too unless there is none or the session is a key's.
 string[] SignedInWith(System.Security.Claims.ClaimsPrincipal user) =>
-    TrustedIdp.KeyPersonOf(user, server) is null ? [TrustedIdp.CookieScheme, TrustedIdp.OidcScheme] : [TrustedIdp.CookieScheme];
+    server.HasProvider && TrustedIdp.KeyPersonOf(user, server) is null ? [TrustedIdp.CookieScheme, TrustedIdp.OidcScheme] : [TrustedIdp.CookieScheme];
 
 static async ValueTask<object?> RequireCsrfHeader(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
 {

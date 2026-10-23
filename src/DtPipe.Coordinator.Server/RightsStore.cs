@@ -24,6 +24,12 @@ public sealed record Identity(
     /// <summary>A person's role, cumulative as <see cref="CoordinatorRoles"/> grants it: <c>admin</c>, <c>designer</c> or <c>reader</c>; none for another kind.</summary>
     public string? Role { get; init; }
 
+    /// <summary>
+    /// What a person of the identity provider is found by: the value the provider gives it for <c>Coordinator:Roles:Claim</c> (its email
+    /// by default), compared without case, never its <c>sub</c>. None for any other identity: a person verified by a key is found by its id.
+    /// </summary>
+    public string? Account { get; init; }
+
     public bool IsNode => Kind == IdentityKinds.Node;
 
     public bool IsPerson => Kind == IdentityKinds.Person;
@@ -45,8 +51,8 @@ public static class IdentityKinds
     public const string Launcher = "launcher";
 
     /// <summary>
-    /// Someone who signs in to the pages and the studio with a key, holding the role its identity gives, with no group and no node. A
-    /// person of the IdP is none: its roles are <c>Coordinator:Roles:*</c>.
+    /// Someone who signs in to the pages and the studio, with a key or through the IdP (found by its <see cref="Identity.Account"/>),
+    /// holding the role its identity gives, with no group and no node.
     /// </summary>
     public const string Person = "person";
 
@@ -90,15 +96,18 @@ public sealed class RightsStore
     private sealed record State(RightsDocument Doc, long Version);
 
     private readonly IRightsStore _store;
+    private readonly CoordinatorServerOptions _options;
+    private readonly IConfiguration? _configuration;
     private readonly object _write = new();
     // Replaced whole, never edited: a reader takes the reference once and needs no lock.
     private volatile State _state;
 
     public event Action? Changed;
 
-    public RightsStore(IRightsStore store, CoordinatorServerOptions options)
+    /// <param name="configuration">Where <c>Coordinator:Roles:Admin</c> is read, which counts as an administrator beside the rights' own.</param>
+    public RightsStore(IRightsStore store, CoordinatorServerOptions options, IConfiguration? configuration = null)
     {
-        _store = store;
+        (_store, _options, _configuration) = (store, options, configuration);
         // A new store starts from the seed, or from no identity and an empty matrix: nobody
         // may send anything until an administrator says so.
         if (store.Load() is not { } stored)
@@ -188,21 +197,88 @@ public sealed class RightsStore
         var added = Normalized(identity);
         CheckUnique([.. doc.Identities, added]);
         doc.Identities.Add(added);
+        return Added(added);
+    });
+
+    private static string Added(Identity added)
+    {
         var verified = added.Auth.Mode == AuthModes.Key ? ", verified by a key" : "";
-        if (added.IsPerson) return $"Identity {added.ClientId} added (person {added.Name}, {added.Role}{verified})";
+        if (added.IsPerson)
+            return $"Identity {added.ClientId} added (person {added.Name}{(added.Account is { } account ? $" ({account})" : "")}, {added.Role}{verified})";
         return added.IsNode
             ? $"Identity {added.ClientId} added (node {added.Name}, groups {string.Join(", ", added.Groups)}{verified})"
             : added.Kind == IdentityKinds.Launcher
                 ? $"Identity {added.ClientId} added ({added.Kind} {added.Name}, pipelines {string.Join(", ", added.Pipelines!)}{verified})"
                 : $"Identity {added.ClientId} added ({added.Kind} {added.Name}{verified})";
-    });
+    }
+
+    /// <summary>
+    /// Adds what <paramref name="bootstrap"/> names and the rights lack, in one change whose author is <see cref="RightsBootstrap.Author"/>,
+    /// and says what it added; a start applies it before anything is served. The administrator is added only while the rights hold no
+    /// enabled administrator with a live key; an identity of its id is never replaced: it stops the start unless it is a person whose role
+    /// is admin, and is then left as it is, which the answer names. Each other identity is added when its id is absent, and never changed
+    /// afterwards. Nothing is written when nothing is added.
+    /// </summary>
+    public (IReadOnlyList<string> Added, string? AdminLeft) Bootstrap(RightsBootstrap bootstrap)
+    {
+        if (bootstrap.IsEmpty) return ([], null);
+        var added = new List<string>();
+        string? left = null;
+        string? Additions(RightsDocument doc, DateTimeOffset now)
+        {
+            added.Clear();
+            left = null;
+            var wanted = new List<BootstrapIdentity>();
+            if (bootstrap.Admin is { } admin && !doc.Identities.Any(i => i is { Enabled: true, IsPerson: true, Role: CoordinatorRoles.Admin } && i.Auth.Mode == AuthModes.Key && i.Auth.LiveAt(now).Any()))
+            {
+                if (doc.Identities.FirstOrDefault(i => i.ClientId == admin.ClientId) is not { } held) wanted.Add(admin);
+                else if (held is not { IsPerson: true, Role: CoordinatorRoles.Admin })
+                    throw new InvalidOperationException($"Coordinator:Bootstrap:AdminKey names '{admin.ClientId}', which the rights hold as a {held.Kind}{(held.Role is { } role ? $" ({role})" : "")}: the bootstrap replaces no identity, and the rights hold no administrator with a live key. Give a key of another id.");
+                else left = held.ClientId;
+            }
+            wanted.AddRange(bootstrap.Identities.Where(b => doc.Identities.All(i => i.ClientId != b.ClientId)));
+            var changes = new List<string>();
+            foreach (var identity in wanted)
+            {
+                var normalized = Normalized(identity.ToIdentity(now));
+                CheckUnique([.. doc.Identities, normalized]);
+                doc.Identities.Add(normalized);
+                added.Add(normalized.ClientId);
+                changes.Add(Added(normalized));
+            }
+            return changes.Count > 0 ? string.Join("; ", changes) : null;
+        }
+        // Read first, so that a start which has nothing to add writes nothing.
+        if (Additions(Snapshot(), DateTimeOffset.UtcNow) is null) return ([], left);
+        try
+        {
+            Edit(RightsBootstrap.Author, doc => Additions(doc, DateTimeOffset.UtcNow)!);
+        }
+        catch (ConflictException ex)
+        {
+            throw new InvalidOperationException($"Coordinator:Bootstrap: {ex.Message}", ex);
+        }
+        return (added, left);
+    }
+
+    /// <summary>
+    /// The administrators the rights hold at <paramref name="now"/>: enabled people whose role is admin, verified by the identity provider or
+    /// by a key of which one is live.
+    /// </summary>
+    private static List<string> Administrators(RightsDocument doc, DateTimeOffset now) =>
+        [.. doc.Identities.Where(i => i is { Enabled: true, IsPerson: true, Role: CoordinatorRoles.Admin } && (i.Auth.Mode != AuthModes.Key || i.Auth.LiveAt(now).Any()))
+            .Select(i => i.ClientId)];
+
+    /// <summary>Whether <c>Coordinator:Roles:Admin</c> lists anyone while a provider can sign them in: an administrator outside the rights.</summary>
+    private bool ListsAnAdministrator() =>
+        _options.HasProvider && _configuration is not null && CoordinatorRoles.Listed(_configuration, "Admin").Count > 0;
 
     /// <summary>
     /// Edits an identity. An argument that is null is left as the identity has it: an edit says what it changes, and a field it
     /// leaves out is neither emptied, renamed nor enabled by the omission. The identity is read and written as one change.
     /// </summary>
     public void UpdateIdentity(string clientId, string? name, string? description, IReadOnlyList<string>? groups, bool? enabled, string? by = null,
-        IReadOnlyList<string>? pipelines = null, string? role = null) =>
+        IReadOnlyList<string>? pipelines = null, string? role = null, string? account = null) =>
         Edit(by, doc =>
         {
             var index = doc.Identities.FindIndex(i => i.ClientId == clientId);
@@ -216,6 +292,7 @@ public sealed class RightsStore
                 Enabled = enabled ?? before.Enabled,
                 Pipelines = pipelines ?? before.Pipelines,
                 Role = role ?? before.Role,
+                Account = account ?? before.Account,
             });
             CheckUnique(doc.Identities.Select((i, at) => at == index ? after : i).ToList());
             doc.Identities[index] = after;
@@ -223,6 +300,7 @@ public sealed class RightsStore
             if (!before.Groups.SequenceEqual(after.Groups)) changes.Add($"groups {string.Join("+", before.Groups)} → {string.Join("+", after.Groups)}");
             if (!(before.Pipelines ?? []).SequenceEqual(after.Pipelines!)) changes.Add($"pipelines {string.Join("+", before.Pipelines ?? [])} → {string.Join("+", after.Pipelines!)}");
             if (before.Role != after.Role) changes.Add($"role {before.Role} → {after.Role}");
+            if (before.Account != after.Account) changes.Add($"account {before.Account} → {after.Account}");
             if (before.Name != after.Name) changes.Add($"node {before.Name} → {after.Name}");
             if (before.Enabled != after.Enabled) changes.Add(after.Enabled ? "enabled" : "disabled");
             if (before.Description != after.Description) changes.Add("described again");
@@ -307,6 +385,13 @@ public sealed class RightsStore
             ? identity
             : null;
 
+    /// <summary>The enabled person of the identity provider whose <see cref="Identity.Account"/> is <paramref name="account"/>, compared without case, or null.</summary>
+    public Identity? ProviderPerson(string? account) =>
+        string.IsNullOrWhiteSpace(account)
+            ? null
+            : _state.Doc.Identities.FirstOrDefault(i => i is { Enabled: true, IsPerson: true } && i.Auth.Mode == AuthModes.Idp
+                && string.Equals(i.Account, account.Trim(), StringComparison.OrdinalIgnoreCase));
+
     private static int IndexOf(RightsDocument doc, string clientId)
     {
         var index = doc.Identities.FindIndex(i => i.ClientId == clientId);
@@ -337,9 +422,11 @@ public sealed class RightsStore
             throw new ConflictException($"'{identity.ClientId}' is verified by '{mode}': an identity is verified by {string.Join(" or ", AuthModes.All)}.");
         if (mode == AuthModes.Key && !IdentityKinds.Keyed.Contains(kind))
             throw new ConflictException($"'{identity.ClientId}' is a {kind}: a {kind} is verified by the identity provider, never by a key.");
-        // A person of the provider takes its roles from Coordinator:Roles: only a person verified by a key is one of the rights.
-        if (kind == IdentityKinds.Person && mode != AuthModes.Key)
-            throw new ConflictException($"'{identity.ClientId}' is a person verified by the identity provider: such a person takes its roles from Coordinator:Roles, and a person of the rights is verified by a key.");
+        // A person of the provider is found by the account the provider gives it; one verified by a key, by its id.
+        var account = identity.Account?.Trim();
+        if (kind != IdentityKinds.Person || mode == AuthModes.Key) account = null;
+        else if (string.IsNullOrEmpty(account))
+            throw new ConflictException($"'{identity.ClientId}' is a person of the identity provider with no account: it is found by the value the provider gives it for Coordinator:Roles:Claim (an email by default).");
         var role = identity.Role?.Trim();
         if (kind != IdentityKinds.Person) role = null;
         else if (role is null || !CoordinatorRoles.All.Contains(role))
@@ -356,6 +443,7 @@ public sealed class RightsStore
             Pipelines = pipelines,
             Auth = new IdentityAuth(mode, keys),
             Role = role,
+            Account = account,
         };
     }
 
@@ -369,11 +457,15 @@ public sealed class RightsStore
             throw new ConflictException($"'{duplicate.Key}' is the node name of {string.Join(" and ", duplicate.Select(i => i.ClientId))}: a node name belongs to one identity.");
         foreach (var duplicate in identities.GroupBy(i => i.ClientId, StringComparer.Ordinal).Where(g => g.Count() > 1))
             throw new ConflictException($"'{duplicate.Key}' is the client id of more than one identity.");
+        foreach (var duplicate in identities.Where(i => i.Account is not null).GroupBy(i => i.Account!, StringComparer.OrdinalIgnoreCase).Where(g => g.Count() > 1))
+            throw new ConflictException($"'{duplicate.Key}' is the account of {string.Join(" and ", duplicate.Select(i => i.ClientId))}: an account names one person.");
     }
 
     /// <summary>
     /// Applies <paramref name="edit"/>, which changes a copy of the rights and says what it changed, then writes the copy and publishes it.
-    /// An edit that is refused, or a store that cannot keep the copy, leaves the rights as they are.
+    /// An edit that is refused, or a store that cannot keep the copy, leaves the rights as they are. Whatever the route, a change that
+    /// would leave no administrator where there was one is refused, naming who was: revoking the last live key of the last one,
+    /// disabling, removing or demoting them. <c>Coordinator:Roles:Admin</c> counts beside the rights while a provider signs people in.
     /// </summary>
     private void Edit(string? by, Func<RightsDocument, string> edit)
     {
@@ -381,7 +473,12 @@ public sealed class RightsStore
         {
             var current = _state;
             var next = Copy(current.Doc);
-            next = Record(next, edit(next), by);
+            var change = edit(next);
+            var now = DateTimeOffset.UtcNow;
+            if (Administrators(current.Doc, now) is { Count: > 0 } before && Administrators(next, now).Count == 0 && !ListsAnAdministrator())
+                throw new ConflictException(
+                    $"{string.Join(" and ", before.Select(a => $"'{a}'"))} {(before.Count == 1 ? "is the last administrator" : "are the last administrators")} of this coordinator, and this change would leave none: make another administrator first.");
+            next = Record(next, change, by);
             if (_store.Replace(Serialize(next), current.Version) is not { } version)
             {
                 Reread();

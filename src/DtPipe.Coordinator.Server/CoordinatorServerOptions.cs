@@ -32,9 +32,14 @@ public sealed class CoordinatorServerOptions
 
     /// <summary>
     /// The OpenID Connect provider the server trusts for people and for the identities it verifies. In trial mode it is the server's own
-    /// <see cref="PublicUrl"/>. The tokens of the identities verified by a key are <see cref="KeyIssuer"/>'s.
+    /// <see cref="PublicUrl"/>. The tokens of the identities verified by a key are <see cref="KeyIssuer"/>'s. None when
+    /// <c>Coordinator:Authority</c> is unset outside trial mode: then every identity is verified by a key, the key issuer is the only
+    /// authorization server, and <see cref="Bootstrap"/> must name the first administrator.
     /// </summary>
-    public required string Authority { get; init; }
+    public string? Authority { get; init; }
+
+    /// <summary>The server trusts an identity provider, external or the trial one: an identity may be verified by it.</summary>
+    public bool HasProvider => Authority is not null;
 
     /// <summary>
     /// The password of the trial identity provider the server runs in itself (<c>Coordinator:InsecureTrialIdp:Password</c>, a secret, at
@@ -54,9 +59,9 @@ public sealed class CoordinatorServerOptions
     /// <summary>The audience a service's token must name to be accepted here.</summary>
     public required string Audience { get; init; }
 
-    /// <summary>The provider's client the pages sign people in with: a confidential authorization-code client.</summary>
+    /// <summary>The provider's client the pages sign people in with: a confidential authorization-code client. Its secret is none without a provider.</summary>
     public required string UiClientId { get; init; }
-    public required string UiClientSecret { get; init; }
+    public string? UiClientSecret { get; init; }
 
     /// <summary>
     /// The provider's client <c>dtpipe studio</c> signs people in with (<c>Coordinator:Studio:ClientId</c>,
@@ -174,15 +179,26 @@ public sealed class CoordinatorServerOptions
     /// </summary>
     public TimeSpan PersonTokenLifetime { get; init; } = TimeSpan.FromHours(1);
 
-    /// <summary>The ways a person signs in here, as the metadata lists them: the provider (or the trial one), and a key when <see cref="SignsPeopleInByKey"/>.</summary>
+    /// <summary>The ways a person signs in here, as the metadata lists them: the provider (or the trial one) when there is one, and a key when <see cref="SignsPeopleInByKey"/>.</summary>
     public IReadOnlyList<string> PersonAuth
     {
         get
         {
-            var provider = IsTrialIdp ? DtPipe.Jobs.Coordinator.PersonAuth.Trial : DtPipe.Jobs.Coordinator.PersonAuth.Idp;
-            return SignsPeopleInByKey ? [provider, DtPipe.Jobs.Coordinator.PersonAuth.Key] : [provider];
+            var ways = new List<string>();
+            if (HasProvider) ways.Add(IsTrialIdp ? DtPipe.Jobs.Coordinator.PersonAuth.Trial : DtPipe.Jobs.Coordinator.PersonAuth.Idp);
+            if (SignsPeopleInByKey) ways.Add(DtPipe.Jobs.Coordinator.PersonAuth.Key);
+            return ways;
         }
     }
+
+    /// <summary>
+    /// The issuers the metadata names, which the studio and a node with no <c>Oidc:Authority</c> read first: the provider, then the key
+    /// issuer; the key issuer alone without a provider.
+    /// </summary>
+    public IReadOnlyList<string> AuthorizationServers => new[] { Authority, KeyIssuer }.OfType<string>().ToList();
+
+    /// <summary>The identities a deployment gives the rights to start with (<c>Coordinator:Bootstrap</c>); none unless set.</summary>
+    public RightsBootstrap Bootstrap { get; init; } = RightsBootstrap.None;
 
     /// <summary>The Lab view's scenarios, one job file each; read only in <see cref="LabMode"/>.</summary>
     public string? Scenarios { get; init; }
@@ -222,32 +238,48 @@ public sealed class CoordinatorServerOptions
             throw new InvalidOperationException("Coordinator:Redis settings are given but Coordinator:Store is 'sqlite': set Coordinator:Store to 'redis', or remove them.");
         var authority = trial is not null
             ? publicUrl!.GetLeftPart(UriPartial.Authority)
-            : (section["Authority"] ?? throw new InvalidOperationException("Coordinator:Authority is required: the issuer this server trusts (or Coordinator:InsecureTrialIdp:Password, for a trial).")).TrimEnd('/');
+            : section["Authority"] is { Length: > 0 } external ? external.TrimEnd('/') : null;
         var keyIssuer = trial is null && publicUrl is not null ? publicUrl.GetLeftPart(UriPartial.Authority) : null;
         // The issuer is what tells the two providers' tokens apart: one address for both would let either sign for the other.
         if (keyIssuer is not null && string.Equals(authority, keyIssuer, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Coordinator:Authority is Coordinator:PublicUrl, where this server issues the tokens of the identities verified by a key: an external identity provider has an issuer of its own.");
+        var allowHttpKeys = section.GetValue<bool>("Auth:AllowHttpKeys");
+        var personKeys = section.GetValue<bool?>("Auth:PersonKeys") ?? true;
+        // Without a provider every identity is verified by a key, a person's included: the key issuer must exist and take a person's key.
+        if (authority is null)
+        {
+            if (publicUrl is null)
+                throw new InvalidOperationException("Coordinator:Authority is not set, so every identity is verified by a key whose tokens this server issues at Coordinator:PublicUrl, which is not set either: set Coordinator:PublicUrl, and Coordinator:Authority for an external identity provider.");
+            if (section["Ui:ClientSecret"] is { Length: > 0 })
+                throw new InvalidOperationException("Coordinator:Ui:ClientSecret is set but Coordinator:Authority is not: the pages' client is an identity provider's, and this server trusts none.");
+            if (!personKeys)
+                throw new InvalidOperationException("Coordinator:Auth:PersonKeys is false and Coordinator:Authority is not set: a person signs in with a key or through an identity provider, so nobody could sign in.");
+            if (publicUrl.Scheme == Uri.UriSchemeHttp && !allowHttpKeys)
+                throw new InvalidOperationException("Coordinator:PublicUrl is http, Coordinator:Auth:AllowHttpKeys is not set and Coordinator:Authority is not set: no key could be exchanged here, so nobody could sign in. Reach this server over HTTPS, or set Coordinator:Auth:AllowHttpKeys for a private network.");
+        }
         var lifetime = section.GetValue<TimeSpan?>("Auth:ServiceTokenLifetime") ?? TimeSpan.FromMinutes(10);
         if (lifetime < MinServiceTokenLifetime)
             throw new InvalidOperationException($"Coordinator:Auth:ServiceTokenLifetime must be {MinServiceTokenLifetime.TotalMinutes} minutes at least: a node asks for its next token two minutes before its token ends.");
         var personLifetime = section.GetValue<TimeSpan?>("Auth:PersonTokenLifetime") ?? TimeSpan.FromHours(1);
         if (personLifetime < MinServiceTokenLifetime)
             throw new InvalidOperationException($"Coordinator:Auth:PersonTokenLifetime must be {MinServiceTokenLifetime.TotalMinutes} minutes at least: the studio asks for its next token two minutes before its token ends.");
-        return new CoordinatorServerOptions
+        var options = new CoordinatorServerOptions
         {
             StateDir = PathOf("StateDirectory") ?? Path.GetFullPath("state"),
             Authority = authority,
             KeyIssuer = keyIssuer,
-            AllowHttpKeys = section.GetValue<bool>("Auth:AllowHttpKeys"),
+            AllowHttpKeys = allowHttpKeys,
             ServiceTokenLifetime = lifetime,
             PersonTokenLifetime = personLifetime,
-            PersonKeys = section.GetValue<bool?>("Auth:PersonKeys") ?? true,
+            PersonKeys = personKeys,
             TrialIdpPassword = trial,
             Audience = section["Audience"] ?? "dtpipe-coordinator",
             UiClientId = section["Ui:ClientId"] ?? "coordinator-ui",
             UiClientSecret = trial is not null
                 ? Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32))
+                : authority is null ? null
                 : section["Ui:ClientSecret"] ?? throw new InvalidOperationException("Coordinator:Ui:ClientSecret is required: the secret of the pages' client at the provider."),
+            Bootstrap = RightsBootstrap.FromConfiguration(configuration),
             StudioClientId = section["Studio:ClientId"] is { Length: > 0 } studio ? studio : trial is not null ? TrialStudioClientId : null,
             LibrarySeed = PathOf("LibrarySeed"),
             LibraryDirectory = PathOf("Library:Directory"),
@@ -266,5 +298,13 @@ public sealed class CoordinatorServerOptions
             LibraryRemote = LibraryRemoteSettings.FromConfiguration(section),
             HealthMaxAge = section.GetValue<TimeSpan?>("Health:MaxAge") is { } age && age > TimeSpan.Zero ? age : TimeSpan.FromMinutes(5),
         };
+        // The first administrator of a server with no provider signs in with the key the deployment gave it: the server makes none.
+        if (authority is null && options.Bootstrap.Admin is null)
+            throw new InvalidOperationException("Coordinator:Bootstrap:AdminKey is required when Coordinator:Authority is not set: it is the key of the first administrator (dtp_<id>_<secret>, given through the environment or as @path to a file), and this server makes none.");
+        if (!options.Bootstrap.IsEmpty && Server.KeyIssuer.Unavailable(options) is { } reason)
+            throw new InvalidOperationException($"Coordinator:Bootstrap names identities verified by a key, but {reason}.");
+        if (options.Bootstrap.People is { Count: > 0 } people && Server.KeyIssuer.PersonUnavailable(options) is { } refusal)
+            throw new InvalidOperationException($"Coordinator:Bootstrap names people ({string.Join(", ", people)}), but {refusal}.");
+        return options;
     }
 }

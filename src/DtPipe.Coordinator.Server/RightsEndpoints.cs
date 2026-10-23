@@ -17,10 +17,11 @@ internal static class RightsEndpoints
             var now = DateTimeOffset.UtcNow;
             return new
             {
-                idp = new { issuer = options.Authority, audience = options.Audience, grant = "client_credentials" },
+                // None without a provider: every identity is verified by a key.
+                idp = options.Authority is { } authority ? new { issuer = authority, audience = options.Audience, grant = "client_credentials" } : null,
                 identities = doc.Identities.Select(i => new
                 {
-                    i.ClientId, i.Name, i.Description, i.Groups, i.Enabled, i.Kind, i.Pipelines, i.Role,
+                    i.ClientId, i.Name, i.Description, i.Groups, i.Enabled, i.Kind, i.Pipelines, i.Role, i.Account,
                     auth = i.Auth.Mode, hasKey = i.Auth.LiveAt(now).Any(),
                     connected = i.IsNode && online.Contains(i.Name) && inventory.ClientIdOf(i.Name) == i.ClientId,
                 }),
@@ -39,17 +40,21 @@ internal static class RightsEndpoints
         admin.MapPost("/rights/identities", (IdentityRequest request, RightsStore rights, EnrollmentQueue enrollment, EventBus bus, HttpContext http, CoordinatorServerOptions options) =>
         {
             if (!PipelineLibrary.IsValidId(request.ClientId)) throw new ConflictException($"'{request.ClientId}' is not a client id: lowercase letters, digits and '-'.");
-            // An identity verified by a key needs the issuer that exchanges it: without one it could never connect. A person is verified
-            // by a key, so it needs the issuer, and people allowed to hold a key.
-            if (request.Kind?.Trim() == IdentityKinds.Person && KeyIssuer.PersonUnavailable(options) is { } refusal)
-                throw new ConflictException($"'{request.ClientId}' cannot be a person: {refusal}.");
-            if (request.Auth?.Trim() == AuthModes.Key && KeyIssuer.Unavailable(options) is { } reason)
+            // An identity needs the issuer that verifies it, or it could never connect: a key needs the key issuer, a person's key people
+            // allowed to hold one too, and an identity of the provider a provider.
+            var auth = request.Auth?.Trim() is { Length: > 0 } mode ? mode : AuthModes.Idp;
+            if (auth == AuthModes.Key && KeyIssuer.Unavailable(options) is { } reason)
                 throw new ConflictException($"'{request.ClientId}' cannot be verified by a key: {reason}.");
+            if (auth == AuthModes.Key && request.Kind?.Trim() == IdentityKinds.Person && KeyIssuer.PersonUnavailable(options) is { } refusal)
+                throw new ConflictException($"'{request.ClientId}' cannot be a person verified by a key: {refusal}.");
+            if (auth == AuthModes.Idp && TrustedIdp.ProviderUnavailable(options) is { } none)
+                throw new ConflictException($"'{request.ClientId}' cannot be verified by the identity provider: {none}.");
             rights.AddIdentity(new Identity(request.ClientId, string.IsNullOrWhiteSpace(request.Name) ? request.ClientId : request.Name, request.Description ?? "",
                 request.Groups ?? [], request.Enabled ?? true, request.Kind ?? IdentityKinds.Node, request.Pipelines)
             {
-                Auth = new IdentityAuth(request.Auth ?? AuthModes.Idp, []),
+                Auth = new IdentityAuth(auth, []),
                 Role = request.Role,
+                Account = request.Account,
             }, TrustedIdp.CallerOf(http));
             enrollment.Remove(request.ClientId);
             bus.Publish("rights", new { });
@@ -58,7 +63,8 @@ internal static class RightsEndpoints
         admin.MapPut("/rights/identities/{id}", (string id, IdentityRequest request, RightsStore rights, NodeInventory inventory, EventBus bus, HttpContext http) =>
         {
             var before = rights.Find(id);
-            rights.UpdateIdentity(id, request.Name, request.Description, request.Groups, request.Enabled, TrustedIdp.CallerOf(http), request.Pipelines, request.Role);
+            rights.UpdateIdentity(id, request.Name, request.Description, request.Groups, request.Enabled, TrustedIdp.CallerOf(http), request.Pipelines, request.Role,
+                request.Account);
             // A node renamed connects again under its new name. A node whose groups changed connects again too, and its data
             // plane client registers again: until then a replica's registration holds the groups it had, and admission
             // places no run on it. A node whose identity is disabled loses its connections: its hosts are refused when they
@@ -134,9 +140,9 @@ internal sealed record MatrixRequest(Dictionary<string, List<string>> Matrix);
 internal sealed record AcceptRequest(string? Name, string? Description, List<string>? Groups);
 /// <summary>
 /// An identity to add or edit. <see cref="Auth"/> is read when it is added, and an edit leaves it as it was, as it does <see cref="Kind"/>;
-/// <see cref="Role"/> is a person's.
+/// <see cref="Role"/> is a person's, and <see cref="Account"/> a person's of the identity provider.
 /// </summary>
 internal sealed record IdentityRequest(
     string ClientId, string? Name, string? Description, List<string>? Groups, bool? Enabled, string? Kind = null, List<string>? Pipelines = null, string? Auth = null,
-    string? Role = null);
+    string? Role = null, string? Account = null);
 internal sealed record KeyRequest(string? Label, DateTimeOffset? Expires);

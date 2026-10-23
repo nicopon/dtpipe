@@ -46,16 +46,20 @@ public static class KeyIssuer
         Unavailable(server) ?? (server.PersonKeys ? null : "Coordinator:Auth:PersonKeys is false, so people sign in through the identity provider only");
 
     /// <summary>
-    /// Stops the start when the rights hold an identity verified by a key and this server issues no token for one, or a person while
-    /// people may not be verified by a key: the identity could never connect, and nothing else would say why.
+    /// Stops the start when the rights hold an identity verified by a key and this server issues no token for one, a person verified by
+    /// a key while people may not be, or an identity of the provider while there is none: the identity could never connect, and nothing
+    /// else would say why.
     /// </summary>
     public static void CheckIdentities(RightsStore rights, CoordinatorServerOptions server)
     {
         var identities = rights.Snapshot().Identities;
         if (Unavailable(server) is { } reason && identities.Where(i => i.Auth.Mode == AuthModes.Key).Select(i => i.ClientId).ToList() is { Count: > 0 } keyed)
             throw new InvalidOperationException($"The rights hold identities verified by a key ({string.Join(", ", keyed)}), but {reason}.");
-        if (PersonUnavailable(server) is { } refusal && identities.Where(i => i.IsPerson).Select(i => i.ClientId).ToList() is { Count: > 0 } people)
+        if (PersonUnavailable(server) is { } refusal
+            && identities.Where(i => i.IsPerson && i.Auth.Mode == AuthModes.Key).Select(i => i.ClientId).ToList() is { Count: > 0 } people)
             throw new InvalidOperationException($"The rights hold people verified by a key ({string.Join(", ", people)}), but {refusal}.");
+        if (TrustedIdp.ProviderUnavailable(server) is { } none && identities.Where(i => i.Auth.Mode == AuthModes.Idp).Select(i => i.ClientId).ToList() is { Count: > 0 } provided)
+            throw new InvalidOperationException($"The rights hold identities verified by the identity provider ({string.Join(", ", provided)}), but {none}.");
     }
 
     public static void MapKeyIssuer(this WebApplication app, CoordinatorServerOptions server)

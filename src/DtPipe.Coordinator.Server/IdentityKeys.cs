@@ -63,6 +63,16 @@ public sealed class ClearKey
     public static ClearKey New(string clientId) =>
         new($"{Prefix}{clientId}_{Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(SecretBytes))}");
 
+    /// <summary>
+    /// The key <paramref name="text"/> is, or null when it does not have a key's shape: a client id, then 43 characters of base64url. For a
+    /// key the deployment gives the server (<see cref="RightsBootstrap"/>), never one a caller presents, which <see cref="RightsStore.KeyOf"/> judges.
+    /// </summary>
+    public static ClearKey? From(string? text) =>
+        ClientIdOf(text) is not null && text![^SecretLength..].All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_') ? new ClearKey(text) : null;
+
+    /// <summary>The client id of the identity the key opens.</summary>
+    public string ClientId => ClientIdOf(_text)!;
+
     /// <summary>The key's text, for the one answer that hands it over.</summary>
     public string Reveal() => _text;
 

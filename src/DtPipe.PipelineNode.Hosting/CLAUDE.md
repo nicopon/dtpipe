@@ -67,8 +67,14 @@ none. One node per process, which is one replica of its node's identity; a secon
 - **The token provider returns a fresh token.** TransportR retries a stream refused with 401
   through `NodeClientOptions.AccessTokenProvider`, so `NodeAgent` binds it to
   `OidcTokenClient.GetAsync(fresh: true)`, and asks once before connecting because TransportR
-  swallows a provider that throws. The The provider is `Oidc:Authority` or, left out, the one the coordinator's protected resource metadata names (never an HTTP provider for an HTTPS coordinator); the client is `Oidc:ClientId` or the node's `Name`; the token endpoint comes from the provider's discovery document.
-  `[unchecked: the fresh token on retry]`
+  swallows a provider that throws. The provider is `Oidc:Authority` or, left out, the first the coordinator's protected resource metadata names (never an HTTP provider for an HTTPS coordinator): its key issuer when it trusts no other; the client is `Oidc:ClientId` or the node's `Name`; the token endpoint comes from the provider's discovery document.
+  `[local: Hosting.Tests KeyTokenTests]` `[unchecked: the fresh token on retry]`
+- **A secret is the host's value or a file's, read once.** `Oidc:ClientSecret` is the secret, or `@path` to the file that holds it
+  (a coordinator's key mounted in a container), read once when `OidcTokenClient` is made (`SecretReference`, the one place): a file
+  that cannot be read, or is empty, stops the start by the setting's name, never by its path or its content. A secret that begins
+  with `@` is given in a file. `dtpipe node` resolves its own references (`src/DtPipe/CLAUDE.md`) and hands the value over, so
+  such a secret cannot pass through it (a coordinator's key never begins with `@`).
+  `[local: Hosting.Tests KeyTokenTests]`
 - **A node the coordinator disconnects connects again.** SignalR's automatic reconnect does not
   cover a connection the server closes (a reconnect the coordinator asked for, an announcement it
   refused), so `hub.Closed` only signals and `ReconnectLoopAsync` starts the connection again and

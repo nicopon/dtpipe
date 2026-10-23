@@ -28,8 +28,8 @@ internal static class AccountPages
         Page(server, status, $"<p>{message}</p><p>" + string.Join(" · ", links.Select(l => $"<a href=\"{l.Href}\">{l.Label}</a>")) + "</p>");
 
     /// <summary>
-    /// The sign-in form: a key, and the way through the provider. The key goes in a field the browser neither shows nor fills, beside
-    /// the form's antiforgery token, and no cache keeps the answer.
+    /// The sign-in form: a key, and the way through the provider when there is one. The key goes in a field the browser neither shows
+    /// nor fills, beside the form's antiforgery token, and no cache keeps the answer.
     /// </summary>
     public static IResult LoginForm(HttpContext http, CoordinatorServerOptions server, string returnUrl, string? refusal, int status)
     {
@@ -43,7 +43,7 @@ internal static class AccountPages
             + $"<input type=\"hidden\" name=\"returnUrl\" value=\"{WebUtility.HtmlEncode(returnUrl)}\">"
             + "<p><label>Your key<br><input type=\"password\" name=\"key\" required autocomplete=\"off\" spellcheck=\"false\" style=\"width:100%\"></label></p>"
             + "<p><button type=\"submit\">Sign in with a key</button></p></form>"
-            + $"<p><a href=\"{ProviderLoginPath}?returnUrl={WebUtility.UrlEncode(returnUrl)}\">Sign in with the identity provider</a></p>");
+            + (server.HasProvider ? $"<p><a href=\"{ProviderLoginPath}?returnUrl={WebUtility.UrlEncode(returnUrl)}\">Sign in with the identity provider</a></p>" : ""));
     }
 
     /// <summary>

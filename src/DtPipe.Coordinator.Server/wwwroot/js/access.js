@@ -82,7 +82,7 @@ function render() {
     <div class="view-head"><h1>Access</h1>
       <p class="hint">Who may send what to whom. Every node authenticates with an identity provider the coordinator trusts, which says who it is; the coordinator decides its name and its groups, never the token or the node.</p></div>
 
-    <section class="card">
+    ${rights.idp ? `<section class="card">
       <h2>Identity provider</h2>
       <p class="hint">An external OpenID Connect provider, trusted for the <code>${esc(rights.idp.grant)}</code> tokens it signs for this coordinator's audience. It holds the clients and their secrets; a token names its client (<code>sub</code>) and nothing more.</p>
       <table class="kv-table">
@@ -90,7 +90,10 @@ function render() {
         <tr><th>audience</th><td><code>${esc(rights.idp.audience)}</code></td></tr>
       </table>
       <p class="hint">A node host presents its token on the control channel, and gives its pipeline node a token provider (<code>NodeClientOptions.AccessTokenProvider</code>) for the data hub.</p>
-    </section>
+    </section>` : `<section class="card">
+      <h2>Identity provider</h2>
+      <p class="hint">None: this coordinator trusts no external provider, and every identity is verified by a key it makes, exchanged for a token of its own.</p>
+    </section>`}
 
     ${pending ? `<section class="card">
       <h2>Waiting for approval <span class="hint">${rights.pending.length}</span></h2>

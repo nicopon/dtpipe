@@ -21,7 +21,7 @@ public static class TrialIdpMode
         var password = Encoding.UTF8.GetBytes(server.TrialIdpPassword!);
         services.AddTrialIdp(new TrialIdpSettings
         {
-            Issuer = new Uri(server.Authority.TrimEnd('/') + "/"),
+            Issuer = new Uri(server.Authority!.TrimEnd('/') + "/"),
             Audience = server.Audience,
             SigningKeyFile = Path.Combine(server.StateDir, "trial-idp-signing-key.pem"),
             EmailDomain = "dtpipe.test",
@@ -72,7 +72,7 @@ public sealed class TrialIdpClients
 
     private List<ClientDefinition> Wanted()
     {
-        var origin = new Uri(_server.Authority.TrimEnd('/') + "/");
+        var origin = new Uri(_server.Authority!.TrimEnd('/') + "/");
         var clients = new List<ClientDefinition>
         {
             new(_server.UiClientId, ClientGrant.AuthorizationCode, _server.UiClientSecret, "Coordinator pages",
@@ -81,7 +81,8 @@ public sealed class TrialIdpClients
         if (_server.StudioClientId is { Length: > 0 } studio)
             clients.Add(new(studio, ClientGrant.AuthorizationCode, DisplayName: "dtpipe studio", RedirectUris: ["http://127.0.0.1/callback"],
                 ApplicationType: ClientApplication.Native, Audience: _server.Audience, RefreshTokens: true));
-        foreach (var identity in _rights.Snapshot().Identities.Where(i => i.Auth.Mode == AuthModes.Idp && clients.All(c => c.ClientId != i.ClientId)))
+        // A person is never a client: it signs in as a user of the provider, found by its account.
+        foreach (var identity in _rights.Snapshot().Identities.Where(i => i.Auth.Mode == AuthModes.Idp && !i.IsPerson && clients.All(c => c.ClientId != i.ClientId)))
             clients.Add(new(identity.ClientId, ClientGrant.ClientCredentials, _server.TrialIdpPassword, identity.Name));
         return clients;
     }

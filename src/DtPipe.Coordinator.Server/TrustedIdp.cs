@@ -34,8 +34,8 @@ namespace DtPipe.Coordinator.Server;
 ///   (the sign-in form), and holds a session cookie, or presents a bearer token <c>dtpipe studio</c> obtained for them through
 ///   <c>Coordinator:Studio:ClientId</c> (<see cref="PersonScheme"/>: that client, and a subject that is not it), from the provider
 ///   or from the key issuer, read by issuer as a service's is (<see cref="IdpPersonScheme"/>, <see cref="KeyPersonScheme"/>).
-///   Their roles come from the server (<see cref="CoordinatorRoles"/>): the configuration's for a person of the provider, the
-///   rights' for a person verified by a key, never from the token. A person verified by a key is judged against the rights on
+///   Their roles come from the server (<see cref="CoordinatorRoles"/>): the configuration's and the rights' for a person of the
+///   provider, the rights' for a person verified by a key, never from the token. A person verified by a key is judged against the rights on
 ///   every request, its cookie as its token, so a revoked key or a disabled identity ends the session at the next one.
 ///   <c>/api</c> accepts either (<see cref="ApiScheme"/>); the pages only the cookie.</item>
 /// </list>
@@ -71,9 +71,14 @@ public static class TrustedIdp
     /// </summary>
     public const string CsrfHeader = DtPipe.Jobs.Coordinator.CoordinatorApi.CsrfHeader;
 
+    /// <summary>
+    /// Registers the schemes of the issuers the server has: the provider's (<see cref="IdpServiceScheme"/>, <see cref="IdpPersonScheme"/>,
+    /// <see cref="OidcScheme"/>) only when <see cref="CoordinatorServerOptions.HasProvider"/>, the key issuer's when there is one. No
+    /// selector names a scheme that is not registered: without a provider every token goes to the key issuer's schemes.
+    /// </summary>
     public static void AddTrustedIdp(this IServiceCollection services, CoordinatorServerOptions server)
     {
-        var https = server.Authority.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
+        var https = server.Authority?.StartsWith("https://", StringComparison.OrdinalIgnoreCase) == true;
         void Trust(JwtBearerOptions o)
         {
             o.Authority = server.Authority;
@@ -83,19 +88,37 @@ public static class TrustedIdp
             o.MapInboundClaims = false;
             o.TokenValidationParameters = new TokenValidationParameters { NameClaimType = "sub" };
         }
+        // A token goes to the key issuer's scheme when it names that issuer, or when there is no provider for it to go to instead.
+        bool ByKey(string? token) => server.KeyIssuer is { } issuer && (!server.HasProvider || IssuerOf(token) == issuer);
 
         var authentication = services.AddAuthentication(o =>
             {
                 o.DefaultScheme = CookieScheme;
-                o.DefaultChallengeScheme = OidcScheme;
+                o.DefaultChallengeScheme = server.HasProvider ? OidcScheme : CookieScheme;
             })
             .AddPolicyScheme(ServiceScheme, ServiceScheme, o => o.ForwardDefaultSelector = context =>
-                server.KeyIssuer is { } issuer && IssuerOf(ServiceTokenOf(context.Request)) == issuer ? KeyServiceScheme : IdpServiceScheme)
-            .AddJwtBearer(IdpServiceScheme, o =>
-            {
-                Trust(o);
-                o.Events = ServiceEvents(byKey: false);
-            });
+                ByKey(ServiceTokenOf(context.Request)) ? KeyServiceScheme : IdpServiceScheme);
+        if (server.HasProvider)
+            authentication
+                .AddJwtBearer(IdpServiceScheme, o =>
+                {
+                    Trust(o);
+                    o.Events = ServiceEvents(byKey: false);
+                })
+                .AddJwtBearer(IdpPersonScheme, o =>
+                {
+                    Trust(o);
+                    o.TokenValidationParameters.NameClaimType = "name";
+                    o.Events = new JwtBearerEvents
+                    {
+                        OnTokenValidated = context =>
+                        {
+                            if (!IsStudioPerson(context.Principal, server.StudioClientId))
+                                context.Fail("Only a person's token obtained through the studio's client reaches /api.");
+                            return Task.CompletedTask;
+                        },
+                    };
+                });
         if (server.KeyIssuer is { } keyIssuer)
         {
             authentication
@@ -124,21 +147,7 @@ public static class TrustedIdp
         }
         authentication
             .AddPolicyScheme(PersonScheme, PersonScheme, o => o.ForwardDefaultSelector = context =>
-                server.KeyIssuer is { } issuer && IssuerOf(BearerOf(context.Request)) == issuer ? KeyPersonScheme : IdpPersonScheme)
-            .AddJwtBearer(IdpPersonScheme, o =>
-            {
-                Trust(o);
-                o.TokenValidationParameters.NameClaimType = "name";
-                o.Events = new JwtBearerEvents
-                {
-                    OnTokenValidated = context =>
-                    {
-                        if (!IsStudioPerson(context.Principal, server.StudioClientId))
-                            context.Fail("Only a person's token obtained through the studio's client reaches /api.");
-                        return Task.CompletedTask;
-                    },
-                };
-            })
+                ByKey(BearerOf(context.Request)) ? KeyPersonScheme : IdpPersonScheme)
             .AddPolicyScheme(ApiScheme, ApiScheme, o => o.ForwardDefaultSelector = context =>
                 context.Request.Headers.Authorization.ToString().StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? PersonScheme : CookieScheme)
             .AddCookie(CookieScheme, o =>
@@ -149,6 +158,9 @@ public static class TrustedIdp
                 o.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
                 o.ExpireTimeSpan = TimeSpan.FromHours(8);
                 o.SlidingExpiration = true;
+                // Without a provider a page's challenge is the cookie's: it goes to the sign-in form.
+                o.LoginPath = AccountPages.LoginPath;
+                o.ReturnUrlParameter = "returnUrl";
                 // An API caller is told, never redirected: only a page navigation goes to the provider.
                 o.Events.OnRedirectToAccessDenied = context =>
                 {
@@ -165,8 +177,9 @@ public static class TrustedIdp
                         await context.HttpContext.SignOutAsync(CookieScheme);
                     }
                 };
-            })
-            .AddOpenIdConnect(OidcScheme, o =>
+            });
+        if (server.HasProvider)
+            authentication.AddOpenIdConnect(OidcScheme, o =>
             {
                 o.Authority = server.Authority;
                 o.RequireHttpsMetadata = https;
@@ -251,15 +264,26 @@ public static class TrustedIdp
     /// </summary>
     public const string Launcher = "launcher";
 
+    /// <summary>Why this server verifies no identity through a provider, or null when it does.</summary>
+    public static string? ProviderUnavailable(CoordinatorServerOptions server) =>
+        server.HasProvider ? null : "this coordinator trusts no identity provider (Coordinator:Authority is not set), so an identity is verified by a key";
+
     /// <summary>The email claim of the signed-in person, or null when there is none.</summary>
     public static string? EmailOf(HttpContext context) => context.User.FindFirst("email")?.Value;
 
     /// <summary>
     /// Who the request is from, as a run, an arming, a cursor and a rights change name their author: a person's email; else the id of
     /// the identity it is, a service or a person verified by a key, whose name is its <c>sub</c>, and an id is unique among the
-    /// identities of every kind; else the name a provider gives a person with no email.
+    /// identities of every kind; else the name a provider gives a person with no email followed by <c> (idp)</c>, so that it is never
+    /// an identity's id (a launcher of that id would otherwise take that person's runs for its own).
     /// </summary>
-    public static string CallerOf(HttpContext context) => EmailOf(context) ?? context.User.Identity?.Name ?? "unknown";
+    public static string CallerOf(HttpContext context)
+    {
+        if (EmailOf(context) is { } email) return email;
+        var user = context.User;
+        if (user.Identity?.Name is not { } name) return "unknown";
+        return IsService(user) || KeyPersonOf(user, context.RequestServices.GetRequiredService<CoordinatorServerOptions>()) is not null ? name : $"{name} (idp)";
+    }
 
     /// <summary>
     /// The id and the key of the person verified by a key that <paramref name="user"/> is, or null for anyone else. Read from the claims
@@ -382,11 +406,12 @@ public static class TrustedIdp
 }
 
 /// <summary>
-/// A person's roles on this coordinator. A person of the provider takes them from the configuration: <c>Coordinator:Roles:Admin</c>,
-/// <c>:Designer</c> and <c>:Reader</c> each list the people (by the claim <c>Coordinator:Roles:Claim</c>,
-/// <c>email</c> by default) who hold it, separated by commas or semicolons, compared without case. A person verified by a key
+/// A person's roles on this coordinator. A person of the provider is named by the claim <c>Coordinator:Roles:Claim</c> (<c>email</c> by
+/// default), never by its <c>sub</c>, and takes the higher of two roles: the configuration's, where <c>Coordinator:Roles:Admin</c>,
+/// <c>:Designer</c> and <c>:Reader</c> each list the people who hold it, separated by commas or semicolons, compared without case; and
+/// the rights', where an enabled person of the provider has that value as its <see cref="Identity.Account"/>. A person verified by a key
 /// (<see cref="TrustedIdp.KeyPersonOf"/>) takes the role of its identity in the rights, and never a list's.
-/// Roles are cumulative (an admin is a designer, a designer a reader), and a person in no list holds
+/// Roles are cumulative (an admin is a designer, a designer a reader), and a person in no list and not in the rights holds
 /// none: the provider or the key says who they are, never what they may do. Applied to every request, so a list
 /// changed in configuration or a role changed in the rights takes effect without signing anyone out.
 /// </summary>
@@ -412,21 +437,26 @@ public sealed class CoordinatorRoles(IConfiguration configuration, RightsStore r
             granted = Cumulative(rights.Find(person.Id) is { Enabled: true, IsPerson: true } held && held.Auth.Mode == AuthModes.Key ? held.Role : null);
         else
         {
-            var section = configuration.GetSection("Coordinator:Roles");
-            var who = principal.FindFirst(section["Claim"] ?? "email")?.Value;
-            if (string.IsNullOrWhiteSpace(who)) return Task.FromResult(principal);
+            var who = principal.FindFirst(configuration["Coordinator:Roles:Claim"] ?? "email")?.Value?.Trim();
+            if (string.IsNullOrEmpty(who)) return Task.FromResult(principal);
 
-            bool Listed(string key) => (section[key] ?? "")
-                .Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Contains(who.Trim(), StringComparer.OrdinalIgnoreCase);
-
-            granted = Cumulative(Listed("Admin") ? Admin : Listed("Designer") ? Designer : Listed("Reader") ? Reader : null);
+            bool InList(string key) => Listed(configuration, key).Contains(who, StringComparer.OrdinalIgnoreCase);
+            var listed = InList("Admin") ? Admin : InList("Designer") ? Designer : InList("Reader") ? Reader : null;
+            granted = Cumulative(Higher(listed, rights.ProviderPerson(who)?.Role));
         }
         var transformed = new ClaimsIdentity(identity);
         foreach (var role in granted)
             transformed.AddClaim(new Claim(transformed.RoleClaimType, role, ClaimValueTypes.String, Issuer));
         return Task.FromResult(new ClaimsPrincipal(transformed));
     }
+
+    /// <summary>The people <c>Coordinator:Roles:{<paramref name="key"/>}</c> lists, separated by commas or semicolons.</summary>
+    public static IReadOnlyList<string> Listed(IConfiguration configuration, string key) =>
+        (configuration[$"Coordinator:Roles:{key}"] ?? "").Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    /// <summary>The higher of two roles, either of which may be none.</summary>
+    private static string? Higher(string? one, string? other) =>
+        new[] { Admin, Designer, Reader }.FirstOrDefault(role => role == one || role == other);
 
     /// <summary>The roles <paramref name="role"/> grants: itself and every role below it; none for no role.</summary>
     private static IReadOnlyList<string> Cumulative(string? role) => role switch

@@ -21,6 +21,8 @@ public sealed class NodeOidcOptions
 
     /// <summary>The node's client at the provider; the node's <see cref="DtPipeNodeOptions.Name"/> when left out.</summary>
     public string ClientId { get; set; } = "";
+
+    /// <summary>The client's secret, or <c>@path</c> to the file that holds it (a coordinator's key, mounted in a container), read once at start.</summary>
     public string ClientSecret { get; set; } = "";
 
     /// <summary>Space-separated scopes to ask for, if the provider needs any.</summary>

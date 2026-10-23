@@ -24,27 +24,30 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   which the rights give and the token never does: a `node` (the default) hosts fragments and belongs to
   groups; a `monitor`, a `launcher` and a `person` belong to none and their names are labels, not a node's
   (`RightsStore.NodeIdentity`, `SubjectOf` and `GroupsOf` ignore them). A `person` holds a `Role` (`admin`, `designer` or
-  `reader`, cumulative) and is verified by a key, never by the IdP. A client id is unique among the identities of every kind,
+  `reader`, cumulative) and is verified by a key, found by its id, or by the IdP, found by its `Account` (the value of
+  `Coordinator:Roles:Claim`, compared without case, never its `sub`: one person per account). A client id is unique among the identities of every kind,
   which is what lets an id name an author (`AuditEntry.By`, `RunView.LaunchedBy`). A launcher lists the **pipelines** it may launch
   (`Identity.Pipelines`, `Launches`): empty means none, and no other kind keeps a list (a monitor reads every pipeline). The
   host of such a service is refused when it announces, as a known identity that is no node, never queued, and
   `RightsIdentityProvider` gives it no group, so the data plane never admits it. Every sort of service reads its permission from here: add a sort as a kind, never as a claim.
   `[local: DtPipe.Coordinator.Server.Tests, the lab's smoke.py rights]`
-- **A person's rights are the rights, or the configuration for a person of the IdP, never the token's.** People sign in through
+- **A person's rights are the rights', and for a person of the IdP the configuration's too, never the token's.** People sign in through
   the provider (`Coordinator:Ui:ClientId`, a confidential authorization-code client, PKCE, the code
   in the query so the Lax correlation cookies ride the redirect) into the `dtpipe-coordinator`
   cookie, or with a key into the same cookie (see "A person verified by a key"). `CoordinatorRoles` (an `IClaimsTransformation`)
   reads, on every request, the role of a person verified by a key in the rights (`TrustedIdp.KeyPersonOf`: the claims the key
-  issuer issued, so a provider's token naming the same subject is no such person), and for a person of the provider
-  `Coordinator:Roles:Admin|Designer|Reader` (lists of the claim `Coordinator:Roles:Claim`, `email` by default):
-  cumulative roles, none for anyone unlisted (403, never reader by default). The pages accept the
+  issuer issued, so a provider's token naming the same subject is no such person), and for a person of the provider the higher of
+  `Coordinator:Roles:Admin|Designer|Reader` (lists of the claim `Coordinator:Roles:Claim`, `email` by default) and the role of the
+  enabled person of the rights whose `Account` is that claim (`RightsStore.ProviderPerson`): cumulative roles, none for anyone
+  unlisted and absent from the rights (403, never reader by default). Without a provider no such person exists: one is refused
+  when it is added and at start. The pages accept the
   cookie only. Only a page navigation (`TrustedIdp.IsPageNavigation`) is sent to sign in: to the form where people may hold a key,
   to the provider otherwise; any other request is told 401, with `WWW-Authenticate: Bearer resource_metadata="…"` on `/api`.
   `[local: PersonKeyTests; the lab's smoke.py rights — roles and sessions]`
 - **A person verified by a key is judged against the rights on every request.** Where a key can be taken
   (`CoordinatorServerOptions.SignsPeopleInByKey`: the issuer, over HTTPS or with `Coordinator:Auth:AllowHttpKeys`, and people
   allowed a key), `GET /account/login` shows a form (a password field, an antiforgery token, `no-store`) beside a link to the
-  provider's sign-in (`/account/login/idp`), and the metadata's `dtpipe_auth` names `key`; elsewhere the provider's sign-in begins at
+  provider's sign-in (`/account/login/idp`) where there is a provider, and the metadata's `dtpipe_auth` names `key`; elsewhere the provider's sign-in begins at
   once. `POST /account/login` (`AccountPages.SignInAsync`) takes the key under the token endpoint's rules (`KeyExchangeLimits`, a
   bounded form, one answer for every refusal, a log that names an id's shape only) and signs in a session
   holding the identity's id and the key's id, issued by the key issuer, never the key. The cookie's `OnValidatePrincipal` and the
@@ -60,7 +63,7 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   `Authority` is then the public address and `TrustedIdp` validates its tokens through discovery, with no exception for them. It
   serves the key issuer's paths under the key issuer's address, so with it the server issues no key's token: an identity verified by
   a key is refused when it is added, and a start whose rights hold one stops naming it. The
-  clients are the rights' identities the IdP verifies (secret: the password), the pages' client and the studio's; `TrialIdpClients` makes them right
+  clients are the rights' identities the IdP verifies other than people, who sign in as its users (secret: the password), the pages' client and the studio's; `TrialIdpClients` makes them right
   before a token is issued after the rights change, and a client the rights drop loses every permission (the in-memory store cannot
   cascade a delete). The login form and cookie (`/trial-idp/login`, scheme `TrialIdp`) are apart from the server's own.
   `[local: TrialIdpModeTests, KeyIssuerTests; the trial recipe, deploy/compose.yaml]` `[unchecked: the refusals without `PublicUrl` and beside
@@ -114,7 +117,13 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   on its own group, outside `/api`, for a launcher, with no CSRF filter since a service's token is bearer only; `Program.cs` keeps
   the `account` group, `/healthz`, the metadata document, `/account/*` and the hubs. `[local: RouteTableTests]`
 - **Every rights change names its author** (`AuditEntry.By`, by `TrustedIdp.CallerOf`: the signed-in email, or the identity's
-  id when it has none, a person verified by a key). `[local: PersonKeyTests]`
+  id when it has none, a person verified by a key; a person of the provider with no email by its name and ` (idp)`, which no id
+  holds; `Coordinator:Bootstrap` for what the bootstrap adds). `[local: PersonKeyTests, ProviderPersonTests, KeyOnlyCoordinatorTests]`
+- **The last administrator stays.** `RightsStore.Edit`, under the write gate and whatever the route, refuses a change that leaves
+  no administrator where there was one, naming who was: revoking the last live key of the last one, disabling, removing or
+  demoting them. An administrator is an enabled person whose role is `admin`, of the IdP or with a live key; while a provider
+  signs people in, anyone `Coordinator:Roles:Admin` lists counts too, and then nothing is refused. A key that expires changes
+  nothing: an administrator whose keys all lapsed stays, the bootstrap leaves an identity of its id as it is, and the start says so. `[local: KeyOnlyCoordinatorTests, ProviderPersonTests]`
 - **An identity is verified by the IdP or by a key, chosen when it is added.** `Identity.Auth` (`IdentityAuth`): `idp`, the default
   and what an identity written without it reads as, holds no key; `key` holds `IdentityKey` records, each the SHA-256 of a key
   (`ClearKey`: `dtp_{clientId}_{secret}`, 256 random bits as 43 base64url characters), its last four characters and its dates. An
@@ -140,7 +149,12 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   `Coordinator:Auth:PersonKeys=false`, a person's key is refused as any other client is. While `PublicUrl` is plain HTTP the exchange is refused unless
   `Coordinator:Auth:AllowHttpKeys`, and while that setting is in effect the start logs a warning and every page shows a banner
   (`/api/info` `httpKeys`, `AccessPage`). The metadata lists the issuer after `Authority`, which the studio and a node with no
-  `Oidc:Authority` read first: a node verified by a key sets `Oidc:Authority` to the coordinator's address. **Same checks, local
+  `Oidc:Authority` read first: a node verified by a key sets `Oidc:Authority` to the coordinator's address. **Without `Coordinator:Authority` (and no trial) the issuer is
+  the only one: `AddTrustedIdp` registers neither `IdpBearer`, `IdpPerson` nor OpenID Connect, every token goes to the key issuer's
+  schemes, the challenge is the cookie's (the form), the metadata lists the issuer alone and `dtpipe_auth` is `key`, the form links to
+  no provider and `/account/login/idp` is not mapped, `/api/rights` names no `idp`, and an identity of the IdP is refused when it is
+  added and at start (`KeyIssuer.CheckIdentities`). A start without a provider needs `PublicUrl`, a key exchange it can make (HTTPS, or
+  `AllowHttpKeys`), `PersonKeys` and `Coordinator:Bootstrap:AdminKey`, and refuses `Ui:ClientSecret`. **Same checks, local
   key source**: `KeyBearer` checks signature, issuer, audience and lifetime (30 seconds of skew) as `IdpBearer` does, with the keys of
   `IssuerKeys`, never through a request to the server's own address. `IssuerKeys` keeps RSA keys on a shelf of their own in the store
   (`issuer_keys`, `{prefix}issuer-keys`: an `IXmlRepository` keyed `IssuerKeys.Shelf`, since DataProtection's key manager reads every
@@ -307,7 +321,12 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
 - **A new state starts from the seeds, or empty.** `Coordinator:LibrarySeed` (one
   `.yaml` per pipeline, for a library that has no history, here or at its remote) and `Coordinator:RightsSeed` (for rights Redis does not hold); with neither, the library has no pipeline
   and the rights no identity and an empty matrix: nobody may send anything until an administrator
-  says so. The library is a git repository of its own, `library/` under the state directory unless
+  says so. **`Coordinator:Bootstrap` then adds what the deployment gives** (`RightsStore.Bootstrap`, before anything is served, in one
+  change by `Coordinator:Bootstrap`, after the seed, at every start): `AdminKey`, the first administrator, a person of the id its key
+  names, only while the rights hold no enabled administrator with a live key, and never over an identity of that id (one that is no
+  administrator stops the start); `Identities`, each verified by its key and added when its id is absent, never changed after. Each key
+  is a `SecretReference` (`@path`, or a value the environment gives: one on the command line stops the start) and names its identity;
+  one that is malformed stops the start without being written. The server makes no key, and the matrix is not bootstrapped. The library is a git repository of its own, `library/` under the state directory unless
   `Coordinator:Library:Directory` puts it elsewhere, driven by the `git` command line with a fixed identity and with
   its own directory trusted (`safe.directory`, whoever owns a mounted volume; the image needs `git`), and starts with a commit of its own (empty without seeds)
   so that a write always has a commit to go back to; armed deployments and run history are in Redis
@@ -444,7 +463,8 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   text: cut at `Announce`, the ground of no decision.
   `[local: NodeChannelHubTests, RightsRoutesTests; the lab's smoke.py rights - identity, disabled; tools/campaign.py F3, S7]`
 - **A run names who launched it, and a service may launch it only once.** `RunView.LaunchedBy` is a person's email or the id of
-  the identity that launched it, a service or a person verified by a key (an id holds no `@`, and no two identities share one, so a
+  the identity that launched it, a service or a person verified by a key, or `CallerOf`'s name for a person of the provider with
+  none (an id holds no `@`, and no two identities share one, so a
   launcher's id names its own runs only); `RunQueue.Launch` takes the author and an optional `Idempotency-Key`, which means something only
   with its author: the lookup is `(LaunchedBy, key)` among the runs queued or in flight and the journaled ones, taken under the
   ledger's lock where the run is queued, and a run is journaled before it leaves the ledger, so a retry that races the end of the

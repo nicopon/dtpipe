@@ -344,10 +344,12 @@ the control plane, over each replica's node channel; TransportR carries the data
   told to it by `Coordinator:PublicUrl`, the address people reach it at, so it does not turn into `http://` return addresses.
   `[CI: validate_distributed_boundary.sh — deploy/ names no lab]` `[local: PublicUrlTests; the lab's smoke.py bricks - versions; the lab's tools/linux_replay.sh uid, a named volume of another uid]`
   `[unchecked: the release's push to GHCR, until a tag runs it; a Linux Docker host, where tools/linux_replay.sh is the replay; a real TLS proxy; a bind mount of another uid; deploy/README.md is in no documentation check, so keep its lines to 100 columns]`
-- **An identity key is answered once and kept as its hash.** The call that makes a key is the only answer that carries it; the
-  rights keep its SHA-256, which no route answers, and no log carries the key. A presented key is judged by that hash, in constant
-  time, never by the client id it names; `/connect/token` and the sign-in form (`POST /account/login`) are the only routes
-  that take one in. `[local: Server.Tests IdentityKeyRoutesTests, IdentityKeyTests, KeyIssuerTests, PersonKeyTests]`
+- **A key is never stored, logged, returned or compared but as its hash, and the hash never leaves the store.** The call that
+  makes a key is the only answer that carries it, and a key the deployment gives (`Coordinator:Bootstrap`) is read once and hashed;
+  the rights keep its SHA-256, which no route answers, and no log carries the key, a part of it or its hash. A presented key is
+  judged by that hash, in constant time, never by the client id it names; `/connect/token` and the sign-in form
+  (`POST /account/login`) are the only routes that take one in. `[local: Server.Tests IdentityKeyRoutesTests, IdentityKeyTests,
+  KeyIssuerTests, PersonKeyTests, KeyOnlyCoordinatorTests — the logs of a bootstrapped start and of its keys at work]`
   Detail: `src/DtPipe.Coordinator.Server/CLAUDE.md`.
 - **A cursor is the coordinator's: read when a run starts, kept only at the verdict of the whole run.** One cursor per branch that
   writes, keyed by (library pipeline, alias), kept by `CursorKeeper` in the store that holds its state. The child never reaches the
@@ -371,8 +373,14 @@ the control plane, over each replica's node channel; TransportR carries the data
   `PublicUrl` is plain HTTP unless `Coordinator:Auth:AllowHttpKeys`, which the log and every page then name. **A token opens
   an identity only when its issuer is the one that verifies it**: the key issuer's a `key` identity, the provider's any
   other. The key issuer's tokens pass the same checks with the signing keys of the store, never through a request to its own
-  address. `[local: Server.Tests KeyIssuerTests, PersonKeyTests; Hosting.Tests KeyTokenTests]` `[unchecked: Redis's shelf of
-  signing keys; a real TLS proxy]` Detail: `src/DtPipe.Coordinator.Server/CLAUDE.md`.
+  address. **Without a provider** (`Coordinator:Authority` unset, no trial) it is the only issuer the server names and trusts: the
+  provider's schemes are not registered, an identity of the provider is refused when it is added and at start, and a start
+  needs `PublicUrl`, a way to exchange a key and `Coordinator:Bootstrap:AdminKey`. **The server makes no key**: what
+  `Coordinator:Bootstrap` names (the first administrator's key, identities with theirs, each `@path` or a value of the
+  environment, never of the command line) is added at start where the rights lack it, in one change the audit names
+  `Coordinator:Bootstrap`, and never replaces an identity. `[local: Server.Tests KeyIssuerTests, PersonKeyTests,
+  KeyOnlyCoordinatorTests; Hosting.Tests KeyTokenTests]` `[unchecked: Redis's shelf of signing keys; a real TLS proxy; two
+  instances that bootstrap at the same first start]` Detail: `src/DtPipe.Coordinator.Server/CLAUDE.md`.
 - **The coordinator is its own identity provider only on an explicit secret, and trusts it like any other.**
   `Coordinator__InsecureTrialIdp__Password` (16 characters at least) turns it on; it is refused beside an external
   `Coordinator__Authority`, and `TrustedIdp` holds no exception for its tokens. With it the coordinator issues no key's token,
