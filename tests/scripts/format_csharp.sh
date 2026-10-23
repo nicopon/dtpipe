@@ -21,11 +21,20 @@ case "${1:-}" in
     *) echo "usage: $0 [--verify]" >&2; exit 2 ;;
 esac
 
-if ! git ls-files -- '*.cs' \
+roots="$(git ls-files -- '*.cs' \
     | sed -E 's#/[^/]*$##' | cut -d/ -f1-2 | sort -u \
-    | sed 's#^tests/scripts$#tests/scripts/tools#' \
-    | tr '\n' '\0' \
-    | xargs -0 -P "$(getconf _NPROCESSORS_ONLN)" -I{} dotnet format whitespace {} --folder $mode -v q; then
-    [ -n "$mode" ] && echo "C# is not formatted: run tests/scripts/format_csharp.sh" >&2
+    | sed 's#^tests/scripts$#tests/scripts/tools#')"
+
+# The first dotnet command on a fresh machine sets the CLI up under a named mutex, and first
+# commands started together crash on it (Linux runners): one root runs alone, the rest in parallel.
+status=0
+dotnet format whitespace "$(head -n 1 <<< "$roots")" --folder $mode -v q || status=1
+tail -n +2 <<< "$roots" | tr '\n' '\0' \
+    | xargs -0 -P "$(getconf _NPROCESSORS_ONLN)" -I{} \
+        dotnet format whitespace {} --folder $mode -v q \
+    || status=1
+
+if [ "$status" -ne 0 ]; then
+    echo "dotnet format failed; tests/scripts/format_csharp.sh formats what it names above" >&2
     exit 1
 fi
