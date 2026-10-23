@@ -70,7 +70,7 @@ def coordinator_views(browser):
     checks = [
         ("nodes", "document.querySelectorAll('.node-card').length > 0 && document.querySelectorAll('.brick').length > 0"),
         ("library", f"document.querySelectorAll('table.library tr').length === {len(library) + 1}"),
-        (f"library/{pid}", "document.querySelectorAll('.xbox').length > 0 && document.querySelectorAll('.lanes svg path').length > 0"
+        (f"library/{pid}", "document.querySelectorAll('.xbox').length > 0 && (document.querySelectorAll('.lanes svg path').length > 0 || document.querySelectorAll('ul.msgs.errors li').length > 0)"
                            " && (document.getElementById('x-job')?.textContent || '').length > 0"),
         ("runs", "!!document.getElementById('r-journal') && !!document.getElementById('r-deployments')"),
         ("access", "document.querySelectorAll('table.matrix.edit input').length > 0 && document.querySelectorAll('[data-identity]').length > 0"),

@@ -19,11 +19,12 @@ public static class PipelineToJobConverter
         IEnumerable<IStreamReaderFactory>? readerFactories = null,
         IEnumerable<IDataWriterFactory>? writerFactories = null,
         IEnumerable<IDataTransformerFactory>? dataTransformerFactories = null,
-        FlagRegistry? lineFlags = null)
+        FlagRegistry? lineFlags = null,
+        bool interpolate = true)
     {
         // --job mode: load from YAML file and apply CLI overrides
         if (!string.IsNullOrEmpty(parsed.Globals.JobFile))
-            return ConvertFromJobFile(parsed, streamTransformerFactories, secretsManager);
+            return ConvertFromJobFile(parsed, streamTransformerFactories, secretsManager, interpolate);
 
         var jobs = new Dictionary<string, JobDefinition>(StringComparer.OrdinalIgnoreCase);
         var contexts = new Dictionary<string, CliJobContext>(StringComparer.OrdinalIgnoreCase);
@@ -105,7 +106,8 @@ public static class PipelineToJobConverter
     private static (Dictionary<string, JobDefinition> Jobs, JobDagDefinition Dag, Dictionary<string, CliJobContext> Contexts) ConvertFromJobFile(
         ParsedPipeline parsed,
         IEnumerable<IStreamTransformerFactory>? streamTransformerFactories,
-        DtPipe.Cli.Security.ISecretsManager? secretsManager)
+        DtPipe.Cli.Security.ISecretsManager? secretsManager,
+        bool interpolate)
     {
         // --export-job writes the job as written, so the export path reads it as written. A
         // ${{…}} is a reference its author placed to keep a value out of a file; resolving it
@@ -120,7 +122,7 @@ public static class PipelineToJobConverter
         var jobs = JobFileParser.Parse(
             parsed.Globals.JobFile!,
             secretsManager,
-            interpolate: string.IsNullOrEmpty(parsed.Globals.ExportJobFile));
+            interpolate: interpolate && string.IsNullOrEmpty(parsed.Globals.ExportJobFile));
         var flags = parsed.Globals.AllFlags;
 
         // Apply CLI overrides to all loaded jobs — driven by EngineOverrideFlags.All

@@ -69,6 +69,10 @@ outside — tell them apart first:
   reader, a processor and a checkpoint; `EffectiveLimit` leaves those at `--limit`, so a one-to-many
   expansion upstream arrives whole. The tap sits behind the bound in every path, direct transfer
   included: the reader stage counts what the run read.
+- **A sample inspects a target only where the real run does.** `PrepareSampleWriterAsync` reads `InspectTargetAsync` only from a
+  writer whose `RequiresTargetInspection` is true; any other target reads as one that does not exist yet. The sample therefore
+  judges what the real run judges, and a sink that has already served (a file whose header says text) keeps its verdict.
+  `contract check` is such a sample. `[CI: ContractCheckTargetTests]`
 
 Sample mode also suppresses `ValidateAndMigrateAsync` (it can CREATE/ALTER the target), **all four
 hooks** (SQL on the target connection), the cursor and the metrics file.
@@ -100,6 +104,9 @@ through a function — SELECT my_function() passes a verb scan, hence the server
 
 `NodeCommand` is a node whose bricks are the branches of the pipeline grammar, read by the path `--export-job` uses
 (`CommandLineJob.Export`), so `-i … --alias a` and the same branch in a `--job` file give the same text and the same version.
+`Export` loads a `--job` file without interpolating, as `--export-job` does: a `${{NAME}}`, a `keyring://` alias and a
+`${{cursor://|default}}` stay in the announced text, the version and the fragment's job, and only the child resolves them. A value
+resolved at start would enter the version and the announcement. `[CI: CommandLineJobTests]` `[local: PipelineNode.Tests NodeCommandTests]`
 System.CommandLine matches only the four options of the node (`--name`, `--coordinator`, `--description`, `--client-secret`)
 and leaves every other token to the lexer (`TreatUnmatchedTokensAsErrors = false`). `NodeBricks` takes a branch for a brick
 only if it reads (`input`) or writes (`output`), never both, never `from`; the alias is the id, a branch without one has none.

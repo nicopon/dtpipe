@@ -10,7 +10,8 @@ public interface ISchemaInspector
 {
 	/// <summary>
 	/// Gets a value indicating whether the target schema should be inspected.
-	/// Typically true for database appends/merges, false for file overwrites.
+	/// Typically true for database appends/merges, false for file overwrites. A target is judged only where this is true,
+	/// by the real run and by a sample run alike; otherwise it reads as a target that does not exist yet.
 	/// </summary>
 	bool RequiresTargetInspection { get; }
 

@@ -112,6 +112,21 @@ public sealed class PlanModeTests : IDisposable
     }
 
     [Fact]
+    public void A_Refused_Plan_Keeps_No_Edge_Whose_Fragment_Is_Not_In_It()
+    {
+        DataNode("d", acceptsRaw: true);
+        var job = "a:\n  input: brick:d/src\nb:\n  from: a\n  output: csv:out.csv\n";
+
+        var plan = _planner.Build(
+            new PlanRequest("p", job, new Dictionary<string, string> { ["a"] = "d", ["b"] = "r" }), PlanMode.Manual);
+
+        Assert.NotEmpty(plan.Errors);
+        var named = plan.Fragments.Select(f => f.Name).ToHashSet(StringComparer.Ordinal);
+        Assert.All(plan.Edges, e => Assert.True(
+            named.Contains(e.ProducerFragment) && named.Contains(e.ConsumerFragment), $"{e.ProducerFragment} -> {e.ConsumerFragment}"));
+    }
+
+    [Fact]
     public void A_Sink_Reference_Is_Planned_As_A_Fragment_Of_Bricks_On_Its_Own_Node()
     {
         var source = TestBricks.Announced("src", BrickKind.Source, """{"input":"sqlite:a"}""");

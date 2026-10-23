@@ -145,9 +145,9 @@ BO,9
 
 ## What to know before you build on it
 
-- **Publish before the first run.** Once the sink has written `report.csv`, the designer's check
-  refuses the same pipeline (`Column 'Orders': Type mismatch`) until that file is removed: a sink
-  that exists already is judged by what it holds.
+- **A sink is judged the same before and after it has served.** A file the sink overwrites is not
+  read by the designer's check, so publishing the same pipeline again after the first run is
+  accepted, with `report.csv` in place.
 - **A brick's title is its id.** A command line has no place for a title or a description, so the
   studio shows `orders` and `report` as they are.
 - **A command line carries sources, or one sink.** A job file with `--job` carries the mix, as here.

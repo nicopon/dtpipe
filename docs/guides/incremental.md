@@ -101,9 +101,9 @@ cannot keep the cursor. The coordinator keeps it: one cursor per branch that wri
 pipeline and the branch's alias. It hands the value to the fragment that holds the source when a run
 starts, and keeps the new one only when the whole run has succeeded.
 
-Two bricks make it: a source that filters with a token that names no file, and a sink that names
-the column to follow. Declare each from a command line, on the node that owns its database, with
-absolute paths since a fragment runs in a directory of the node's own:
+Two bricks make it: a source that filters with a token that names no file, and a sink that names the
+column to follow. Declare each from a command line or a `--job` file, on the node that owns its
+database, with absolute paths since a fragment runs in a directory of the node's own:
 
 ```bash
 dtpipe node --name shop --coordinator http://coordinator.localtest.me:8080 \
@@ -115,9 +115,8 @@ dtpipe node --name warehouse --coordinator http://coordinator.localtest.me:8080 
   -o sqlite:/srv/warehouse/warehouse.db --table orders_copy --cursor OrderId
 ```
 
-A command line is read as written, so the token reaches the fragment. A `--job` file is not: the
-node resolves its `${{…}}` when it starts, which puts the default into the brick for good. Keep a
-cursor brick on a command line, or on a host built on the library.
+A command line and a `--job` file are both read as written, so the token reaches the fragment and
+only the child resolves it.
 
 The pipeline reads the first, writes the second, and carries the step between them on a runner:
 

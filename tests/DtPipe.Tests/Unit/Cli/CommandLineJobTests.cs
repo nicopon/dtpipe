@@ -15,7 +15,7 @@ namespace DtPipe.Tests.Unit.Cli;
 /// </summary>
 public sealed class CommandLineJobTests
 {
-    private static ServiceProvider Services()
+    private static ServiceProvider Services(ISecretsManager? secrets = null)
     {
         var plain = new ServiceCollection();
         plain.AddLogging();
@@ -34,7 +34,7 @@ public sealed class CommandLineJobTests
 
         var services = new ServiceCollection();
         services.AddSingleton(registry);
-        services.AddSingleton<ISecretsManager>(new InMemorySecretsManager());
+        services.AddSingleton<ISecretsManager>(secrets ?? new InMemorySecretsManager());
         services.AddSingleton(readers.AsEnumerable());
         services.AddSingleton(writers.AsEnumerable());
         services.AddSingleton(Enumerable.Empty<IStreamTransformerFactory>());
@@ -85,6 +85,32 @@ public sealed class CommandLineJobTests
         }
         finally
         {
+            Environment.SetEnvironmentVariable("COMMAND_LINE_JOB_DIR", null);
+        }
+    }
+
+    [Fact]
+    public void A_job_file_keeps_every_reference_as_written()
+    {
+        Environment.SetEnvironmentVariable("COMMAND_LINE_JOB_DIR", "resolved-by-mistake");
+        var secrets = new InMemorySecretsManager();
+        secrets.SetSecret("job-file-alias", "resolved-by-mistake-too");
+        var file = Path.Combine(Path.GetTempPath(), $"command-line-job-{Guid.NewGuid():N}.yaml");
+        File.WriteAllText(file,
+            "numbers:\n  input: csv:${{COMMAND_LINE_JOB_DIR}}/${{cursor://|-1}}/in.csv\n" +
+            "totals:\n  output: csv:keyring://job-file-alias.csv\n");
+        try
+        {
+            using var services = Services(secrets);
+            var yaml = CommandLineJob.Export(services, ["--job", file]);
+            Assert.Contains("${{COMMAND_LINE_JOB_DIR}}", yaml);
+            Assert.Contains("${{cursor://|-1}}", yaml);
+            Assert.Contains("keyring://job-file-alias", yaml);
+            Assert.DoesNotContain("resolved-by-mistake", yaml);
+        }
+        finally
+        {
+            File.Delete(file);
             Environment.SetEnvironmentVariable("COMMAND_LINE_JOB_DIR", null);
         }
     }

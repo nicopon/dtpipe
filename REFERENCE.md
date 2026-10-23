@@ -1048,9 +1048,11 @@ dtpipe contract check --job consumer.yaml --contract contracts/orders.json
 ```
 
 This is a **sample run** whose source is the contract's schema and no rows: the consumer's
-transformers are built and initialised over the shape the producer promised, its target is
-inspected, and nothing is written. Exit `0` when the target accepts it, `1` when it does not or
-when the consumer cannot initialise at all — a projected column the contract does not carry, say.
+transformers are built and initialised over the shape the producer promised, its target is inspected
+where a real run would read it, and nothing is written. A writer that overwrites its target (a file,
+a table it recreates) has none to inspect, so the target is judged as one that does not exist yet,
+whatever it holds. Exit `0` when the target accepts it, `1` when it does not or when the consumer
+cannot initialise at all — a projected column the contract does not carry, say.
 
 `--branch <alias>` names which branch the contract feeds when the job has more than one source.
 `dtpipe contract show <path>` prints a contract's hash and columns.
@@ -1442,8 +1444,11 @@ branch that only reads (`-i`) is a source, one that only writes (`-o`) is a sink
 is the brick's id. `--job FILE` gives the same branches in a job file, which is how a sink sits
 beside sources: a command line holds as many sources as it likes, or one sink. A branch that reads
 another (`--from`), transforms, or both reads and writes is refused by name, since everything
-between a read and a write belongs on a runner. The node's settings are the `DtPipeNode__*` of the
-table above, from the environment; four options override them.
+between a read and a write belongs on a runner. A `--job` file is read as written, like a command
+line: a `${{NAME}}`, a `keyring://` alias and a `${{cursor://|default}}` stay in the brick's text,
+in its version and in the job of the fragment, and are resolved only when the child runs. The node's
+settings are the `DtPipeNode__*` of the table above, from the environment; four options override
+them.
 
 | Option | Description |
 |---|---|
@@ -1474,8 +1479,8 @@ succeeds by the coordinator's verdict, not a fragment's. Guide:
 - **Key**: the library pipeline and the alias of the branch that writes. The column is the sink
   brick's `cursor`; a brick never sets `state` (the node gives the child a file of its own and reads
   the value once the child exits with 0). A source brick filters with `${{cursor://|default}}`, a
-  token that names no file: a brick whose token names one is not offered. Declare a cursor brick on
-  a command line: `dtpipe node --job` resolves its `${{…}}` at start.
+  token that names no file: a brick whose token names one is not offered. A cursor brick is declared
+  the same way on a command line or in a `--job` file.
 - **At launch** the coordinator hands the kept value to the fragment that holds the one source brick
   upstream of the sink, as `DTPIPE_CURSOR_OVERRIDE` in the child's environment. A cursor that does
   not exist yet is no error: the token's default is used.

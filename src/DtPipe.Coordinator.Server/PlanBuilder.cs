@@ -281,8 +281,10 @@ public sealed class PlanBuilder(
             fragments.Add(new PlannedFragment(draft.Name, draft.Node, draft.Groups, yaml, version, draft.Edges, draft.Units, form, composition));
         }
 
-        // Allowed starts false: the matrix decides it, once, for the whole plan.
-        var asked = runEdges.Select(e => new PlannedEdge(
+        // An edge joins two fragments of the plan: a fragment refused above is not in it, and an edge to it would point at nothing for
+        // every reader of the plan. Allowed starts false: the matrix decides it, once, for the whole plan.
+        var planned = fragments.Select(f => f.Name).ToHashSet(StringComparer.Ordinal);
+        var asked = runEdges.Where(e => planned.Contains(e.Producer.Name) && planned.Contains(e.Consumer.Name)).Select(e => new PlannedEdge(
             e.Producer.Name, e.ProducerAlias, e.Consumer.Name, e.ConsumerAlias, e.Producer.Groups, e.Consumer.Groups, Allowed: false))
             .ToList();
         var (plannedEdges, flowRejection) = PlanFlow.Judge(planRegistry, planId, asked);

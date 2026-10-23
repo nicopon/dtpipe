@@ -109,7 +109,13 @@ internal sealed partial class ExportRunState
         CursorTracker = null;
         EffectiveWriter = SampleModeSink.Wrap(Writer);
 
-        if (Writer is ISchemaInspector inspector)
+        // The real run reads a target only where the writer says it needs to (ValidateAndMigrateAsync): a sample that read more would
+        // judge a target the real run never looks at, and a sink would give another verdict once it had served.
+        if (Writer is ISchemaInspector { RequiresTargetInspection: false })
+        {
+            InspectedTarget = new DtPipe.Core.Models.TargetSchemaInfo([], false, null, null, null);
+        }
+        else if (Writer is ISchemaInspector inspector)
         {
             try
             {

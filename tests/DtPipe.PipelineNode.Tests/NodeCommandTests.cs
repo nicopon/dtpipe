@@ -22,6 +22,7 @@ namespace DtPipe.PipelineNode.Tests;
 public sealed class NodeCommandTests
 {
     private const string Secret = "node-secret-0123456789-abcdef";
+    private const string RowsValue = "73117";
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
@@ -33,7 +34,8 @@ public sealed class NodeCommandTests
         await using var coordinator = await CoordinatorTestHost.StartAsync(_ => { });
         var dir = Directory.CreateTempSubdirectory("node-command-").FullName;
         var job = Path.Combine(dir, "bricks.yaml");
-        await File.WriteAllTextAsync(job, "numbers:\n  input: generate:5\ntotals:\n  output: csv:" + Path.Combine(dir, "totals.csv") + "\n", Ct);
+        await File.WriteAllTextAsync(job, "numbers:\n  input: generate:5\ntotals:\n  output: csv:" + Path.Combine(dir, "totals.csv") + "\n"
+            + "tokens:\n  input: generate:${{NODE_COMMAND_ROWS}}\nkept:\n  output: csv:keyring://node-command-alias.csv\n", Ct);
 
         var psi = new ProcessStartInfo(DtPipeExecutableLocator.Path)
         {
@@ -44,6 +46,7 @@ public sealed class NodeCommandTests
         foreach (var arg in new[] { "node", "--job", job, "--name", "node-cmd", "--coordinator", coordinator.Url, "--client-secret", "${{NODE_COMMAND_SECRET}}" })
             psi.ArgumentList.Add(arg);
         psi.Environment["NODE_COMMAND_SECRET"] = Secret;
+        psi.Environment["NODE_COMMAND_ROWS"] = RowsValue;
         psi.Environment["DtPipeNode__Oidc__Authority"] = idp.Url;
         psi.Environment["DtPipeNode__StateDirectory"] = dir;
 
@@ -62,8 +65,12 @@ public sealed class NodeCommandTests
 
             var replica = Assert.Single(registry.Replicas("node-cmd"));
             var bricks = replica.Announcement.Bricks.OrderBy(b => b.Id, StringComparer.Ordinal).ToList();
-            Assert.Equal(["numbers", "totals"], bricks.Select(b => b.Id));
-            Assert.Equal([BrickKind.Source, BrickKind.Sink], bricks.Select(b => b.Kind));
+            Assert.Equal(["kept", "numbers", "tokens", "totals"], bricks.Select(b => b.Id));
+            Assert.Equal([BrickKind.Sink, BrickKind.Source, BrickKind.Source, BrickKind.Sink], bricks.Select(b => b.Kind));
+            // A reference in the node's file is announced as written: the version hashes the token, never its value.
+            Assert.Equal(BrickRules.VersionOf(BrickKind.Source, "{\"input\":\"generate:${{NODE_COMMAND_ROWS}}\",\"batch-size\":32768,\"sampling-rate\":1}"), bricks.Single(b => b.Id == "tokens").Version);
+            Assert.Equal(BrickRules.VersionOf(BrickKind.Sink, "{\"output\":\"csv:keyring://node-command-alias.csv\",\"batch-size\":32768,\"sampling-rate\":1}"), bricks.Single(b => b.Id == "kept").Version);
+            Assert.DoesNotContain(RowsValue, JsonSerializer.Serialize(replica.Announcement), StringComparison.Ordinal);
             Assert.All(bricks, b => Assert.Matches("^[0-9a-f]{12}$", b.Version));
             Assert.DoesNotContain(Secret, JsonSerializer.Serialize(replica.Announcement), StringComparison.Ordinal);
             Assert.Contains(Secret, received);

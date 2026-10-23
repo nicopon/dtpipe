@@ -300,6 +300,9 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
 - **A fragment declares each edge alias once**, so a branch that writes somewhere, is read on its own node or feeds
   several nodes sends on through a relay of its own alias, never with a second `output: arrow:-` on itself.
   `[local: the lab's smoke.py lab]`
+- **A plan's edges join fragments of the plan.** A fragment the planner refuses is not in `Fragments`, and neither is an edge
+  that names it, so a plan with errors still reads as a whole to the page, the run and any client of `/plan`.
+  `[local: PlanModeTests]`
 - **The server designs nothing.** A pipeline reaches the library by a save that is checked
   (`PUT /api/library/{id}`) from `dtpipe studio`, whose designer is `DtPipe.Jobs`' (rule in the root
   `CLAUDE.md`); the pages list, read, restore, bind and run it, and show its job read only. A

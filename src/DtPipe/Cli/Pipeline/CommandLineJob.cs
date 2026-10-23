@@ -5,7 +5,8 @@ namespace DtPipe.Cli.Pipeline;
 
 /// <summary>
 /// A command line as the job file it stands for, through the parsing and conversion a run applies:
-/// what <c>--export-job</c> writes. A <c>${{NAME}}</c> in it stays as typed, since conversion resolves none.
+/// what <c>--export-job</c> writes. A <c>${{NAME}}</c> or <c>keyring://</c> in it stays as typed, whether it came from the
+/// command line or from a <c>--job</c> file: the text is read as written, and nothing is resolved before it is used.
 /// </summary>
 public static class CommandLineJob
 {
@@ -32,7 +33,8 @@ public static class CommandLineJob
             services.GetRequiredService<IEnumerable<IStreamReaderFactory>>(),
             services.GetRequiredService<IEnumerable<IDataWriterFactory>>(),
             services.GetRequiredService<IEnumerable<IDataTransformerFactory>>(),
-            registry);
+            registry,
+            interpolate: false);
         return DtPipe.Configuration.JobFileWriter.Serialize(jobs);
     }
 }
