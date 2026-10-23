@@ -75,6 +75,11 @@ Core/Abstractions declare]`
 
 Both consult the same safe list, so they never disagree about one key.
 
+A value can be a secret by its shape: a coordinator's identity key (`dtp_{client id}_{43 base64url}`)
+is masked by both wherever it stands, under any key or none, and makes `CarriesLiteralSecret` true.
+The coordinator makes it (`ClearKey`) and references no Core, so the shape is written twice: change
+both together.
+
 **Never anchor the sensitive-key pattern on `\b`**: `\b` breaks on neither `_` nor a capital, so it
 finds no `secret` in `s3_secret_access_key`, `SecretAccessKey`, `AccountKey` or
 `SharedAccessSignature` — forms this product builds itself.

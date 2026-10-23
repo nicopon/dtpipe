@@ -31,6 +31,15 @@ public static class ConnectionStringSanitizer
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     /// <summary>
+    /// An identity key a coordinator issues, <c>dtp_{client id}_{secret}</c>: recognisable by its shape alone, so it is masked
+    /// wherever it stands, under any key or none. The client id stays readable; the secret is 43 base64url characters, matched
+    /// as "43 or more" so that a longer run is masked whole rather than cut.
+    /// </summary>
+    private static readonly Regex IdentityKeyRegex = new(
+        @"(?<prefix>dtp_[a-z0-9][a-z0-9-]*_)[A-Za-z0-9_-]{43,}",
+        RegexOptions.Compiled);
+
+    /// <summary>
     /// A <c>key=value</c> pair anywhere in free text. The key is captured greedily — the sensitive
     /// test below runs on its normalised form, so a key buried in a larger token is still seen.
     /// </summary>
@@ -103,7 +112,7 @@ public static class ConnectionStringSanitizer
         if (string.IsNullOrWhiteSpace(input)) return string.Empty;
         if (input.StartsWith(KeyringPrefix, StringComparison.OrdinalIgnoreCase)) return input;
 
-        var text = UriCredentialsRegex.Replace(input, "${prefix}***${suffix}");
+        var text = IdentityKeyRegex.Replace(UriCredentialsRegex.Replace(input, "${prefix}***${suffix}"), "${prefix}***");
 
         var sb = new StringBuilder(text.Length);
         var segments = text.Split(';');
@@ -131,7 +140,7 @@ public static class ConnectionStringSanitizer
                 ? m.Groups["key"].Value + "***"
                 : m.Value);
 
-        return UriCredentialsRegex.Replace(sanitized, "${prefix}***${suffix}");
+        return IdentityKeyRegex.Replace(UriCredentialsRegex.Replace(sanitized, "${prefix}***${suffix}"), "${prefix}***");
     }
 
     /// <summary>
@@ -149,6 +158,8 @@ public static class ConnectionStringSanitizer
     public static bool CarriesLiteralSecret(string? input)
     {
         if (string.IsNullOrWhiteSpace(input)) return false;
+
+        if (IdentityKeyRegex.IsMatch(input)) return true;
 
         foreach (Match match in UriCredentialsRegex.Matches(input))
             if (!IsIndirection(match.Groups["password"].Value)) return true;

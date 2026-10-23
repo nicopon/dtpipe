@@ -1,0 +1,95 @@
+using System.Buffers.Text;
+using System.Security.Cryptography;
+using System.Text;
+
+namespace DtPipe.Coordinator.Server;
+
+/// <summary>
+/// How the coordinator knows a caller is an identity: the trusted IdP says so (<see cref="AuthModes.Idp"/>, and the identity holds
+/// no key), or the caller holds one of <see cref="Keys"/> (<see cref="AuthModes.Key"/>). Chosen when the identity is created, never
+/// changed by an edit. An identity written without one reads as <see cref="Idp"/>.
+/// </summary>
+public sealed record IdentityAuth(string Mode, IReadOnlyList<IdentityKey> Keys)
+{
+    public static readonly IdentityAuth Idp = new(AuthModes.Idp, []);
+
+    /// <summary>The keys that open the identity at <paramref name="now"/>: neither revoked nor expired.</summary>
+    public IEnumerable<IdentityKey> LiveAt(DateTimeOffset now) => Keys.Where(k => k.LiveAt(now));
+}
+
+/// <summary>What verifies an identity.</summary>
+public static class AuthModes
+{
+    /// <summary>The trusted IdP attests it; the identity has no key.</summary>
+    public const string Idp = "idp";
+
+    /// <summary>A key the coordinator made for it.</summary>
+    public const string Key = "key";
+
+    public static readonly IReadOnlyList<string> All = [Idp, Key];
+}
+
+/// <summary>
+/// One key of an identity as the rights keep it: the SHA-256 of the key, never the key, which exists in clear only in the answer that
+/// made it. <see cref="Hint"/> is its last four characters, so a person tells two keys apart. A revoked key stays, with its date, and
+/// opens nothing. <see cref="ToString"/> leaves the hash out, and no route answers it.
+/// </summary>
+public sealed record IdentityKey(
+    string Id, string Hash, string Hint, DateTimeOffset Created, string? Label = null, DateTimeOffset? Expires = null, DateTimeOffset? Revoked = null)
+{
+    public bool LiveAt(DateTimeOffset now) => Revoked is null && (Expires is null || Expires > now);
+
+    public override string ToString() => $"key {Id} (…{Hint})";
+}
+
+/// <summary>
+/// An identity key in clear, <c>dtp_{clientId}_{secret}</c>: 256 random bits as 43 characters of base64url, after the client id of the
+/// identity it opens. The secret has a fixed length, so the client id reads from the end although base64url holds '_'. The client id
+/// only finds the identity: the key is then judged by its hash alone. <see cref="Reveal"/> is the one way to the text, and
+/// <see cref="ToString"/> shows none of it, so a key handed to a log by mistake leaks nothing.
+/// </summary>
+public sealed class ClearKey
+{
+    public const string Prefix = "dtp_";
+    public const int SecretLength = 43;
+    private const int SecretBytes = 32;
+    private const int HintLength = 4;
+
+    private readonly string _text;
+
+    private ClearKey(string text) => _text = text;
+
+    public static ClearKey New(string clientId) =>
+        new($"{Prefix}{clientId}_{Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(SecretBytes))}");
+
+    /// <summary>The key's text, for the one answer that hands it over.</summary>
+    public string Reveal() => _text;
+
+    public string Hash => HashOf(_text);
+
+    public string Hint => _text[^HintLength..];
+
+    public override string ToString() => Prefix + "***";
+
+    /// <summary>The client id <paramref name="presented"/> names, or null when it does not have a key's shape.</summary>
+    public static string? ClientIdOf(string? presented)
+    {
+        if (presented is null || !presented.StartsWith(Prefix, StringComparison.Ordinal) || presented.Length <= Prefix.Length + SecretLength + 1)
+            return null;
+        var separator = presented.Length - SecretLength - 1;
+        if (presented[separator] != '_') return null;
+        var clientId = presented[Prefix.Length..separator];
+        return PipelineLibrary.IsValidId(clientId) ? clientId : null;
+    }
+
+    /// <summary>Whether <paramref name="presented"/> is the key whose SHA-256 is <paramref name="hash"/>, in a time that does not depend on where they differ.</summary>
+    public static bool Matches(string presented, string hash)
+    {
+        byte[] expected;
+        try { expected = Convert.FromHexString(hash); }
+        catch (FormatException) { return false; }
+        return CryptographicOperations.FixedTimeEquals(SHA256.HashData(Encoding.UTF8.GetBytes(presented)), expected);
+    }
+
+    private static string HashOf(string text) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
+}

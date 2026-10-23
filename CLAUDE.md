@@ -297,7 +297,9 @@ capability and **never** through `ComponentSelector`, so a hex key is never read
 Use `ConnectionStringSanitizer.Redact` for anything that *is* a connection string: it parses it and
 masks every key not on the safe list (fail-closed). Use `Sanitize` only for prose with no grammar
 (best-effort). **No site sits on the other side of that line.** **Never anchor the sensitive-key
-pattern on `\b`**: it finds no boundary at `_` or a capital, so `SecretAccessKey` passes.
+pattern on `\b`**: it finds no boundary at `_` or a capital, so `SecretAccessKey` passes. A
+coordinator's identity key (`dtp_…`) is a secret by its shape: both entry points mask it under any key
+or none, and `CarriesLiteralSecret` refuses a text that holds one.
 `[CI: ConnectionStringSanitizerTests, validate_secret_redaction.sh]` Detail:
 `src/DtPipe.Core/CLAUDE.md`.
 
@@ -341,6 +343,10 @@ the control plane, over each replica's node channel; TransportR carries the data
   told to it by `Coordinator:PublicUrl`, the address people reach it at, so it does not turn into `http://` return addresses.
   `[CI: validate_distributed_boundary.sh — deploy/ names no lab]` `[local: PublicUrlTests; the lab's smoke.py bricks - versions; the lab's tools/linux_replay.sh uid, a named volume of another uid]`
   `[unchecked: the release's push to GHCR, until a tag runs it; a Linux Docker host, where tools/linux_replay.sh is the replay; a real TLS proxy; a bind mount of another uid; deploy/README.md is in no documentation check, so keep its lines to 100 columns]`
+- **An identity key is answered once and kept as its hash.** The call that makes a key is the only answer that carries it; the
+  rights keep its SHA-256, which no route answers, and no log carries the key. A presented key is judged by that hash, in constant
+  time, never by the client id it names. `[local: Server.Tests IdentityKeyRoutesTests, IdentityKeyTests]`
+  Detail: `src/DtPipe.Coordinator.Server/CLAUDE.md`.
 - **A cursor is the coordinator's: read when a run starts, kept only at the verdict of the whole run.** One cursor per branch that
   writes, keyed by (library pipeline, alias), kept by `CursorKeeper` in the store that holds its state. The child never reaches the
   coordinator or a file a brick names: the node gives each sink branch that sets `cursor` a state file of its own, reads it once the

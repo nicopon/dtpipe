@@ -92,6 +92,17 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   on its own group, outside `/api`, for a launcher, with no CSRF filter since a service's token is bearer only; `Program.cs` keeps
   the `account` group, `/healthz`, the metadata document, `/account/*` and the hubs. `[local: RouteTableTests]`
 - **Every rights change names its author** (`AuditEntry.By`, the signed-in email).
+- **An identity is verified by the IdP or by a key, chosen when it is added.** `Identity.Auth` (`IdentityAuth`): `idp`, the default
+  and what an identity written without it reads as, holds no key; `key` holds `IdentityKey` records, each the SHA-256 of a key
+  (`ClearKey`: `dtp_{clientId}_{secret}`, 256 random bits as 43 base64url characters), its last four characters and its dates. An
+  edit never changes the verification, as it never changes the kind, and `IdentityKinds.Keyed` lists the kinds a key may verify.
+  `POST /api/rights/identities/{id}/keys` answers the key, once, with `Cache-Control: no-store`; a key made while another is live
+  starts a rotation, and a third live key is refused until the old one is revoked (`…/keys/{keyId}/revoke`, which keeps the record
+  with its date and cuts the identity's replicas). `GET …/keys` and `/api/rights` name a key by its id, its four characters and its
+  dates. `ClearKey` has no `ToString` that shows the secret. `RightsStore.KeyHolder` is the one judge of a presented key: the client
+  id it names only finds the identity, a disabled one or one the IdP verifies opens nothing, and every live key is compared in constant
+  time. No route takes a key in yet. `[local: IdentityKeyRoutesTests, IdentityKeyTests (its Redis case needs DTPIPE_TEST_REDIS or
+  DTPIPE_TEST_REUSE_INFRA)]`
 - **The state is kept in one store, SQLite unless the deployment chose Redis.** `Coordinator:Store` is `sqlite` (the default) or
   `redis`; `StoreRegistration` registers the six stores of the chosen kind, opened when the first is asked for, which the server
   does before it serves. Redis settings under the SQLite store stop the start rather than being ignored, so a coordinator meant to

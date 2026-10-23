@@ -7,8 +7,8 @@ namespace DtPipe.Coordinator.Server;
 /// <summary>
 /// What the coordinator grants a client of the trusted IdP, named by the <c>sub</c> of its tokens.
 /// <see cref="Name"/> is the one node name it may announce itself as, and belongs to the rights: a host
-/// only proposes one. <see cref="Groups"/> are the TransportR groups it belongs to. Its secret is the
-/// IdP's business, never stored here. <see cref="Kind"/> says what the coordinator grants it: a node (the default) hosts fragments
+/// only proposes one. <see cref="Groups"/> are the TransportR groups it belongs to. Its secret is never stored here: the IdP keeps
+/// it, or the rights keep a key's hash in <see cref="Auth"/>. <see cref="Kind"/> says what the coordinator grants it: a node (the default) hosts fragments
 /// and belongs to groups; a monitor only reads <c>/health</c>, belongs to none, and its name is a label that no node may carry; a
 /// launcher starts the runs of <see cref="Pipelines"/> and reads them, belongs to no group, and its name is a label too.
 /// </summary>
@@ -16,6 +16,8 @@ public sealed record Identity(
     string ClientId, string Name, string Description, IReadOnlyList<string> Groups, bool Enabled = true, string Kind = IdentityKinds.Node,
     IReadOnlyList<string>? Pipelines = null)
 {
+    public IdentityAuth Auth { get; init; } = IdentityAuth.Idp;
+
     public bool IsNode => Kind == IdentityKinds.Node;
 
     /// <summary>The identity is an enabled launcher of <paramref name="pipelineId"/>; a list that names none lets it launch none.</summary>
@@ -35,6 +37,9 @@ public static class IdentityKinds
     public const string Launcher = "launcher";
 
     public static readonly IReadOnlyList<string> All = [Node, Monitor, Launcher];
+
+    /// <summary>The kinds an identity verified by a key may be of.</summary>
+    public static readonly IReadOnlyList<string> Keyed = [Node, Monitor, Launcher];
 }
 
 /// <summary>One change to the rights, and who made it (the email of the person signed in), when known.</summary>
@@ -62,6 +67,7 @@ public sealed record RightsDocument(
 public sealed class RightsStore
 {
     private const int AuditKept = 200;
+    private const int MaxLiveKeys = 2;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
     private sealed record State(RightsDocument Doc, long Version);
@@ -165,11 +171,12 @@ public sealed class RightsStore
         var added = Normalized(identity);
         CheckUnique([.. doc.Identities, added]);
         doc.Identities.Add(added);
+        var verified = added.Auth.Mode == AuthModes.Key ? ", verified by a key" : "";
         return added.IsNode
-            ? $"Identity {added.ClientId} added (node {added.Name}, groups {string.Join(", ", added.Groups)})"
+            ? $"Identity {added.ClientId} added (node {added.Name}, groups {string.Join(", ", added.Groups)}{verified})"
             : added.Kind == IdentityKinds.Launcher
-                ? $"Identity {added.ClientId} added ({added.Kind} {added.Name}, pipelines {string.Join(", ", added.Pipelines!)})"
-                : $"Identity {added.ClientId} added ({added.Kind} {added.Name})";
+                ? $"Identity {added.ClientId} added ({added.Kind} {added.Name}, pipelines {string.Join(", ", added.Pipelines!)}{verified})"
+                : $"Identity {added.ClientId} added ({added.Kind} {added.Name}{verified})";
     });
 
     /// <summary>
@@ -207,6 +214,70 @@ public sealed class RightsStore
         return $"Identity {clientId} removed";
     });
 
+    /// <summary>
+    /// Makes a key for the identity <paramref name="clientId"/> and keeps its hash: the key itself is in the answer and nowhere else.
+    /// Refused for an identity the IdP verifies, for an expiry already past, and while the identity has two live keys: a rotation keeps
+    /// the old key live beside the new one until the old one is revoked, never a third.
+    /// </summary>
+    public (ClearKey Key, IdentityKey Record) AddKey(string clientId, string? label, DateTimeOffset? expires, string? by = null)
+    {
+        var key = ClearKey.New(clientId);
+        IdentityKey? made = null;
+        Edit(by, doc =>
+        {
+            var index = IndexOf(doc, clientId);
+            var identity = doc.Identities[index];
+            var now = DateTimeOffset.UtcNow;
+            if (identity.Auth.Mode != AuthModes.Key)
+                throw new ConflictException($"'{clientId}' is verified by the identity provider, so it has no key: an identity's verification is chosen when it is created.");
+            if (expires <= now) throw new ConflictException($"A key that expires at {expires:O} has expired already.");
+            var live = identity.Auth.LiveAt(now).ToList();
+            if (live.Count >= MaxLiveKeys)
+                throw new ConflictException($"'{clientId}' has {live.Count} live keys ({string.Join(", ", live.Select(k => k.Id))}): revoke the old one before another rotation.");
+            var id = identity.Auth.Keys.Select(k => int.TryParse(k.Id, out var n) ? n : 0).DefaultIfEmpty(0).Max() + 1;
+            made = new IdentityKey(id.ToString(System.Globalization.CultureInfo.InvariantCulture), key.Hash, key.Hint, now,
+                string.IsNullOrWhiteSpace(label) ? null : label.Trim(), expires);
+            doc.Identities[index] = identity with { Auth = identity.Auth with { Keys = [.. identity.Auth.Keys, made] } };
+            return $"Identity {clientId}: key {made.Id} made" + (live.Count > 0 ? $", key {live[0].Id} still live (rotation)" : "");
+        });
+        return (key, made!);
+    }
+
+    /// <summary>Revokes key <paramref name="keyId"/> of <paramref name="clientId"/>: it stays in the rights with its date and opens nothing.</summary>
+    public void RevokeKey(string clientId, string keyId, string? by = null) => Edit(by, doc =>
+    {
+        var index = IndexOf(doc, clientId);
+        var identity = doc.Identities[index];
+        var key = identity.Auth.Keys.FirstOrDefault(k => k.Id == keyId) ?? throw new ConflictException($"'{clientId}' has no key {keyId}.");
+        if (key.Revoked is not null) throw new ConflictException($"Key {keyId} of '{clientId}' is revoked already.");
+        var now = DateTimeOffset.UtcNow;
+        doc.Identities[index] = identity with
+        {
+            Auth = identity.Auth with { Keys = [.. identity.Auth.Keys.Select(k => k.Id == keyId ? k with { Revoked = now } : k)] },
+        };
+        return $"Identity {clientId}: key {keyId} revoked";
+    });
+
+    /// <summary>
+    /// The enabled identity <paramref name="presented"/> opens at <paramref name="now"/>, or null whatever the reason: no identity of the
+    /// client id the key names, one the IdP verifies, a disabled one, or a key none of its live keys matches. The client id only finds
+    /// the identity; every live key is compared, in constant time, so the answer takes as long whichever matched.
+    /// </summary>
+    public Identity? KeyHolder(string? presented, DateTimeOffset now)
+    {
+        if (ClearKey.ClientIdOf(presented) is not { } clientId || Find(clientId) is not { Enabled: true } identity || identity.Auth.Mode != AuthModes.Key)
+            return null;
+        var match = false;
+        foreach (var key in identity.Auth.LiveAt(now)) match |= ClearKey.Matches(presented!, key.Hash);
+        return match ? identity : null;
+    }
+
+    private static int IndexOf(RightsDocument doc, string clientId)
+    {
+        var index = doc.Identities.FindIndex(i => i.ClientId == clientId);
+        return index >= 0 ? index : throw new ConflictException($"'{clientId}' does not exist.");
+    }
+
     /// <summary>The identity with its name, groups and pipelines trimmed, sorted and distinct; refused when its name, groups or pipelines are unusable.</summary>
     private static Identity Normalized(Identity identity)
     {
@@ -224,7 +295,25 @@ public sealed class RightsStore
         if (kind != IdentityKinds.Launcher) pipelines = [];
         else if (pipelines.FirstOrDefault(p => !PipelineLibrary.IsValidId(p)) is { } bad)
             throw new ConflictException($"'{bad}' is not a pipeline id: lowercase letters, digits and '-'.");
-        return identity with { Name = name, Description = identity.Description ?? "", Groups = groups, Kind = kind, Pipelines = pipelines };
+        // An identity that names no verification is verified by the IdP, and holds no key.
+        var auth = identity.Auth ?? IdentityAuth.Idp;
+        var mode = string.IsNullOrWhiteSpace(auth.Mode) ? AuthModes.Idp : auth.Mode.Trim();
+        if (!AuthModes.All.Contains(mode))
+            throw new ConflictException($"'{identity.ClientId}' is verified by '{mode}': an identity is verified by {string.Join(" or ", AuthModes.All)}.");
+        if (mode == AuthModes.Key && !IdentityKinds.Keyed.Contains(kind))
+            throw new ConflictException($"'{identity.ClientId}' is a {kind}: a {kind} is verified by the identity provider, never by a key.");
+        var keys = auth.Keys ?? [];
+        if (mode == AuthModes.Idp && keys.Count > 0)
+            throw new ConflictException($"'{identity.ClientId}' is verified by the identity provider and holds keys: such an identity has none.");
+        return identity with
+        {
+            Name = name,
+            Description = identity.Description ?? "",
+            Groups = groups,
+            Kind = kind,
+            Pipelines = pipelines,
+            Auth = new IdentityAuth(mode, keys),
+        };
     }
 
     private static void CheckUnique(IReadOnlyList<Identity> identities)

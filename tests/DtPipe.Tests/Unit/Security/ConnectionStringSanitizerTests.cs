@@ -19,7 +19,13 @@ public class ConnectionStringSanitizerTests
         { "AccessKeyId=AKIA;SecretAccessKey=SECRET", "SECRET" },
         { "SET s3_secret_access_key='SECRET';", "SECRET" },
         { "postgresql://postgres:SECRET@localhost:5432/mydb", "SECRET" },
+        { "Description=" + IdentityKey, IdentitySecret },
     };
+
+    /// <summary>The secret of a coordinator's identity key: 43 base64url characters, '_' and '-' among them.</summary>
+    private const string IdentitySecret = "yMnKy8zNzs_Q0dLT1NXW19jZ2tvc3d7f4OHi4-Tl5uc";
+
+    private const string IdentityKey = "dtp_node-a_" + IdentitySecret;
 
     [Theory]
     [MemberData(nameof(SecretForms))]
@@ -144,6 +150,20 @@ public class ConnectionStringSanitizerTests
         "http://api_user:***@api.example.com/v1")]
     public void Sanitize_UriCredentials_MasksPasswords(string input, string expected)
         => Assert.Equal(expected, ConnectionStringSanitizer.Sanitize(input));
+
+    /// <summary>An identity key is a secret by its shape alone, under a key that looks harmless or none; its client id stays readable.</summary>
+    [Fact]
+    public void Sanitize_Masks_An_Identity_Key_And_Keeps_Its_Client_Id()
+        => Assert.Equal("the node presented dtp_node-a_*** twice", ConnectionStringSanitizer.Sanitize($"the node presented {IdentityKey} twice"));
+
+    [Theory]
+    [InlineData(IdentityKey, true)]
+    [InlineData("Description=" + IdentityKey, true)]
+    [InlineData("${{DTPIPE_NODE_KEY}}", false)]
+    [InlineData("keyring://node-a", false)]
+    [InlineData("dtp_node-a_short", false)]
+    public void CarriesLiteralSecret_Sees_An_Identity_Key_By_Its_Shape(string input, bool expected)
+        => Assert.Equal(expected, ConnectionStringSanitizer.CarriesLiteralSecret(input));
 
     [Theory]
     [InlineData("postgresql://postgres@localhost:5432/mydb")]
