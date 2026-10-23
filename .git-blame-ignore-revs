@@ -1,0 +1,7 @@
+# Commits that only reformat or rename: git blame skips them. GitHub reads this file by itself;
+# a clone needs `git config blame.ignoreRevsFile .git-blame-ignore-revs` once.
+
+# style: reformat C# to four spaces and LF
+58c1a42be3b6bc54f7c483d4d627465ae5794007
+# refactor(adapters-shared): move the DtPipe.Core namespaces to DtPipe.Adapters.Shared
+b6f2723fabdb203c83b556655da1cd479e848aec

@@ -75,6 +75,12 @@ DEBUG=1 dtpipe --input … --output …                 # per-branch logging to 
 `DtPipe.Tests` plus every other `tests/*/*.Tests.csproj`, discovered rather than listed. Prefer the
 `dtpipe-test` skill for a targeted run.
 
+**C# is formatted as `.editorconfig` says**: four spaces, LF, `dotnet format whitespace`. Run
+`tests/scripts/format_csharp.sh` before you commit; its `--verify` form is the check `build.sh` and
+`build.yml` run. List a commit that only reformats or renames in `.git-blame-ignore-revs`; a clone
+reads it after `git config blame.ignoreRevsFile .git-blame-ignore-revs`.
+`[CI: build.yml — format_csharp.sh --verify]`
+
 ### Validators CI never runs — run them before you push
 
 `build.yml` runs every `tests/scripts/validate_*.sh` **except** the scripts that source

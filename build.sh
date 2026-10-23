@@ -63,6 +63,10 @@ esac
 
 echo -e "Platform: ${YELLOW}$RID${NC}"
 
+echo ""
+echo -e "${YELLOW}Checking C# formatting...${NC}"
+bash tests/scripts/format_csharp.sh --verify
+
 # ============================================================
 # Build Release (single-file self-contained)
 # ============================================================
