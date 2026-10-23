@@ -230,6 +230,21 @@ public sealed partial class ArmedDeploymentTests : IDisposable
     }
 
     [Fact]
+    public void A_Plan_Arming_Can_Make_Deployable_Has_Only_References_No_Check_Pinned_Left_To_Block_It()
+    {
+        var unpinned = new BindingProblem("src", BindingCauses.Unchecked, "no check has pinned it", true);
+        var unknown = new BindingProblem("dst", BindingCauses.UnknownNode, "no such node", true);
+        var offline = new BindingProblem("src", BindingCauses.Offline, "no replica", false);
+
+        Assert.True(LibraryArming.Armable(true, [offline]));
+        Assert.True(LibraryArming.Armable(false, [unpinned, unpinned with { Alias = "dst" }]));
+        Assert.False(LibraryArming.Armable(false, [unpinned, unknown]));
+        Assert.False(LibraryArming.Armable(false, [unknown]));
+        Assert.False(LibraryArming.Armable(false, []));
+        Assert.False(LibraryArming.Armable(false, [offline]));
+    }
+
+    [Fact]
     public async Task A_Runner_In_Groups_The_Matrix_Refuses_Is_Skipped_And_The_Next_One_Is_Chosen()
     {
         RunnerOneIn("audit");

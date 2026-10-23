@@ -10,6 +10,7 @@ let host = null;
 let id = null;
 let doc = null;
 let plan = null;
+let armable = false;     // whether Deploy can make the plan deployable: the server decides, never the page
 let runner = null;       // the runner a launch would use now, if one passes
 let brickOfUnit = {};
 let offers = {};          // alias -> the nodes that offer the brick of that branch
@@ -35,6 +36,7 @@ async function load() {
     doc = await api(`/api/library/${encodeURIComponent(id)}`);
     const answer = await api(`/api/library/${encodeURIComponent(id)}/plan`);
     plan = answer.plan;
+    armable = !!answer.armable;
     runner = answer.runner;
     brickOfUnit = answer.bricks || {};
     offers = answer.offers || {};
@@ -128,7 +130,7 @@ function render() {
   const edgeKey = (e) => `${e.producerFragment}|${e.producerAlias}|${e.consumerFragment}|${e.consumerAlias}`;
   const planEdges = new Set(plan.edges.map(edgeKey));
   const runMatches = !!run?.result && run.result.edgeCounts.length === planEdges.size && run.result.edgeCounts.every((e) => planEdges.has(edgeKey(e)));
-  const canDeploy = plan.deployable && !isActive(run);
+  const canDeploy = armable && !isActive(run);
   const canRun = deployment && deployment.state !== "failed";
 
   const status = [
@@ -140,7 +142,7 @@ function render() {
   host.innerHTML = `
     <div class="view-head">
       <h1>${esc(doc.yaml.split("\n")[0].replace(/^#\s*/, ""))} <span class="mono muted">${esc(id)}</span></h1>
-      <p class="hint">Planned at each launch: every brick on the node it is bound to, every other step on a runner chosen then. A source wired straight into a sink crosses no runner. A launch of the version the library holds ${plan.deployable ? `would run${runner ? ` on ${esc(runner)}` : ""} now` : "would be refused now"}.</p>
+      <p class="hint">Planned at each launch: every brick on the node it is bound to, every other step on a runner chosen then. A source wired straight into a sink crosses no runner. A launch of the version the library holds ${plan.deployable ? `would run${runner ? ` on ${esc(runner)}` : ""} now` : armable ? "would be refused until Deploy pins the bricks no check has pinned" : "would be refused now"}.</p>
       <div class="row">${status}
         <span class="actions">
           <a class="button" href="#/library">← Library</a>

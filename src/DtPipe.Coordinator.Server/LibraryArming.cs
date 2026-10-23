@@ -11,6 +11,17 @@ namespace DtPipe.Coordinator.Server;
 /// </summary>
 internal sealed class LibraryArming(PipelineLibrary library, DesignValidator validator, DeploymentManager deployments, EventBus bus)
 {
+    /// <summary>
+    /// Whether arming can make a plan deployable: it already is, or the only blocking problems are references no check has
+    /// pinned, which arming pins. Any other blocking problem waits for a person.
+    /// </summary>
+    public static bool Armable(bool deployable, IEnumerable<BindingProblem> problems)
+    {
+        if (deployable) return true;
+        var blocking = problems.Where(p => p.Blocking).ToList();
+        return blocking.Count > 0 && blocking.All(p => p.Cause == BindingCauses.Unchecked);
+    }
+
     public async Task<ArmedDeployment> ArmAsync(LibraryDocument doc, string armedBy, CancellationToken ct)
     {
         var id = doc.Id;
