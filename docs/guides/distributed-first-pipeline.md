@@ -112,6 +112,7 @@ The node stays in the foreground and logs that it connected, with two bricks. **
 In a second terminal, in the same folder:
 
 ```bash
+mkdir jobs
 dtpipe studio ./jobs --coordinator http://coordinator.localtest.me:8080
 ```
 
@@ -144,6 +145,9 @@ BO,9
 
 ## What to know before you build on it
 
+- **Publish before the first run.** Once the sink has written `report.csv`, the designer's check
+  refuses the same pipeline (`Column 'Orders': Type mismatch`) until that file is removed: a sink
+  that exists already is judged by what it holds.
 - **A brick's title is its id.** A command line has no place for a title or a description, so the
   studio shows `orders` and `report` as they are.
 - **A command line carries sources, or one sink.** A job file with `--job` carries the mix, as here.
