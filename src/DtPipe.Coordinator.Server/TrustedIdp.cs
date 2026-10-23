@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.DataProtection.KeyManagement;
 using Microsoft.AspNetCore.DataProtection.Repositories;
+using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
 using TransportR.Identity;
@@ -16,15 +17,19 @@ using TransportR.Models;
 namespace DtPipe.Coordinator.Server;
 
 /// <summary>
-/// The coordinator trusts an external OpenID Connect provider to say <b>who</b> a caller is, and
-/// decides <b>what</b> it may do itself. Two kinds of caller, told apart by the token's claims, never by
-/// what a caller says of itself:
+/// The coordinator trusts an issuer to say <b>who</b> a caller is, and decides <b>what</b> it may do
+/// itself: the external OpenID Connect provider, and for the identities verified by a key its own
+/// <see cref="KeyIssuer"/>. Two kinds of caller, told apart by the claims of a token the issuer made from
+/// the identity's kind, never by what a caller says of itself:
 /// <list type="bullet">
-/// <item>a service (a node, the runner) presents a bearer token the provider signed for this
+/// <item>a service (a node, the runner) presents a bearer token an issuer signed for this
 ///   coordinator's audience through client credentials, so its subject is its client
 ///   (<c>sub == client_id</c>); its group comes from <see cref="RightsStore"/>, never from the token.
 ///   The default policy, which the node channel and TransportR's hub and streams use, accepts only
-///   this scheme (<see cref="ServiceScheme"/>);</item>
+///   this scheme (<see cref="ServiceScheme"/>), which reads the token's issuer without believing it and
+///   hands the token to the one scheme that validates that issuer in full (<see cref="IdpServiceScheme"/>,
+///   <see cref="KeyServiceScheme"/>). The issuer must be the one that verifies the identity: an identity
+///   verified by a key is opened by the key issuer's tokens only, any other by the provider's only;</item>
 /// <item>a person signs in through the provider (authorization code with PKCE) and holds a session
 ///   cookie, or presents a bearer token <c>dtpipe studio</c> obtained for them through
 ///   <c>Coordinator:Studio:ClientId</c> (<see cref="PersonScheme"/>: that client, and a subject that is
@@ -39,6 +44,8 @@ public static class TrustedIdp
     public const string CookieScheme = CookieAuthenticationDefaults.AuthenticationScheme;
     public const string OidcScheme = OpenIdConnectDefaults.AuthenticationScheme;
     public const string ServiceScheme = JwtBearerDefaults.AuthenticationScheme;
+    public const string IdpServiceScheme = "IdpBearer";
+    public const string KeyServiceScheme = "KeyBearer";
     public const string PersonScheme = "PersonBearer";
 
     /// <summary>What <c>/api</c> authenticates with: a person's bearer token when the request carries one, else the cookie.</summary>
@@ -64,31 +71,38 @@ public static class TrustedIdp
             o.TokenValidationParameters = new TokenValidationParameters { NameClaimType = "sub" };
         }
 
-        services.AddAuthentication(o =>
+        var authentication = services.AddAuthentication(o =>
             {
                 o.DefaultScheme = CookieScheme;
                 o.DefaultChallengeScheme = OidcScheme;
             })
-            .AddJwtBearer(ServiceScheme, o =>
+            .AddPolicyScheme(ServiceScheme, ServiceScheme, o => o.ForwardDefaultSelector = context =>
+                server.KeyIssuer is { } issuer && IssuerOf(ServiceTokenOf(context.Request)) == issuer ? KeyServiceScheme : IdpServiceScheme)
+            .AddJwtBearer(IdpServiceScheme, o =>
             {
                 Trust(o);
-                o.Events = new JwtBearerEvents
-                {
-                    // The node channel is SignalR, which may carry its token as the access_token query.
-                    OnMessageReceived = context =>
-                    {
-                        if (context.Request.Path.StartsWithSegments(DtPipe.Coordinator.Contracts.NodeChannel.Path)
-                            && context.Request.Query["access_token"] is { Count: > 0 } token)
-                            context.Token = token;
-                        return Task.CompletedTask;
-                    },
-                    OnTokenValidated = context =>
-                    {
-                        if (!IsService(context.Principal)) context.Fail("Only a service's token reaches the data plane.");
-                        return Task.CompletedTask;
-                    },
-                };
-            })
+                o.Events = ServiceEvents(byKey: false);
+            });
+        if (server.KeyIssuer is { } keyIssuer)
+        {
+            authentication.AddJwtBearer(KeyServiceScheme, o =>
+            {
+                o.MapInboundClaims = false;
+                o.Events = ServiceEvents(byKey: true);
+            });
+            // The key issuer's tokens are validated with the keys of the store, never through a request to this server's own address.
+            services.AddOptions<JwtBearerOptions>(KeyServiceScheme).Configure<IssuerKeys>((o, keys) => o.TokenValidationParameters = new TokenValidationParameters
+            {
+                ValidIssuer = keyIssuer,
+                ValidAudience = server.Audience,
+                ValidAlgorithms = [SecurityAlgorithms.RsaSha256],
+                IssuerSigningKeyResolver = (_, _, kid, _) => keys.Resolve(kid),
+                // The issuer's clock is this server's, or another instance's over the same store: a revoked key opens nothing for long.
+                ClockSkew = TimeSpan.FromSeconds(30),
+                NameClaimType = "sub",
+            });
+        }
+        authentication
             .AddJwtBearer(PersonScheme, o =>
             {
                 Trust(o);
@@ -232,6 +246,61 @@ public static class TrustedIdp
 
     /// <summary>The <c>sub</c> of an authenticated caller: the client id the provider issued its token to.</summary>
     public static string? SubjectOf(ClaimsPrincipal? user) => user?.FindFirst("sub")?.Value;
+
+    /// <summary>
+    /// What a service's scheme checks once a token is valid: it is a service's, and its issuer is the one that verifies the identity
+    /// it names. The key issuer's token opens only an identity verified by a key; the provider's never opens one, and opens an
+    /// identity it verifies or a subject the rights do not know (whose host waits for approval). Read on every request, so an identity
+    /// removed and added again under another verification is judged as it is now.
+    /// </summary>
+    private static JwtBearerEvents ServiceEvents(bool byKey) => new()
+    {
+        // The node channel is SignalR, which may carry its token as the access_token query.
+        OnMessageReceived = context =>
+        {
+            if (NodeChannelToken(context.Request) is { } token) context.Token = token;
+            return Task.CompletedTask;
+        },
+        OnTokenValidated = context =>
+        {
+            if (!IsService(context.Principal))
+            {
+                context.Fail("Only a service's token reaches the data plane.");
+                return Task.CompletedTask;
+            }
+            var identity = context.HttpContext.RequestServices.GetRequiredService<RightsStore>().Find(SubjectOf(context.Principal));
+            var byKeyIdentity = identity?.Auth.Mode == AuthModes.Key;
+            if (byKey && !byKeyIdentity) context.Fail("A token of the coordinator's key issuer opens only an identity verified by a key.");
+            else if (!byKey && byKeyIdentity) context.Fail("An identity verified by a key is opened only by a token of the coordinator's key issuer.");
+            return Task.CompletedTask;
+        },
+    };
+
+    private static string? NodeChannelToken(HttpRequest request) =>
+        request.Path.StartsWithSegments(DtPipe.Coordinator.Contracts.NodeChannel.Path) && request.Query["access_token"] is { Count: > 0 } token
+            ? token.ToString()
+            : null;
+
+    /// <summary>The token a service's scheme reads, from where its bearer events read it.</summary>
+    private static string? ServiceTokenOf(HttpRequest request)
+    {
+        if (NodeChannelToken(request) is { } token) return token;
+        var header = request.Headers.Authorization.ToString();
+        return header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? header["Bearer ".Length..].Trim() : null;
+    }
+
+    /// <summary>
+    /// The issuer a token names, read without validating anything: it only chooses which scheme validates the token, in full, against
+    /// that issuer's own keys, so a token that lies about its issuer fails there.
+    /// </summary>
+    private static string? IssuerOf(string? token)
+    {
+        if (string.IsNullOrEmpty(token)) return null;
+        var handler = new JsonWebTokenHandler();
+        if (!handler.CanReadToken(token)) return null;
+        try { return handler.ReadJsonWebToken(token).Issuer; }
+        catch (ArgumentException) { return null; }
+    }
 }
 
 /// <summary>
@@ -284,7 +353,10 @@ public sealed class ServiceKindRequirement(string kind) : IAuthorizationRequirem
     public string Kind { get; } = kind;
 }
 
-/// <summary>Grants <see cref="ServiceKindRequirement"/> by what the rights say of the token's subject, never by anything the token carries.</summary>
+/// <summary>
+/// Grants <see cref="ServiceKindRequirement"/> by what the rights say of the token's subject, never by anything the token carries. The
+/// token passed a service's scheme, so its issuer is the one that verifies that identity.
+/// </summary>
 public sealed class ServiceKindHandler(RightsStore rights) : AuthorizationHandler<ServiceKindRequirement>
 {
     protected override Task HandleRequirementAsync(AuthorizationHandlerContext context, ServiceKindRequirement requirement)
@@ -299,7 +371,8 @@ public sealed class ServiceKindHandler(RightsStore rights) : AuthorizationHandle
 /// the token's own scopes. TransportR reads them at <c>Connect</c>, on every stream and at each token
 /// renewal; an unknown or disabled subject resolves with no group, which TransportR refuses at
 /// <c>Connect</c> and applies as a withdrawal at renewal. Everything else (client id, expiry,
-/// subject) stays TransportR's own reading of the token.
+/// subject) stays TransportR's own reading of the token. TransportR's routes, renewal included, take the
+/// default policy, so the token passed a service's scheme and its issuer is the one that verifies that identity.
 /// </summary>
 public sealed class RightsIdentityProvider(RightsStore rights) : IClientIdentityProvider
 {

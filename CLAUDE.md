@@ -325,8 +325,9 @@ the control plane, over each replica's node channel; TransportR carries the data
 - **A node host decides what it runs**: its `FragmentPolicy` comes from its own configuration, never
   from a message the coordinator sends. So does whether it ends a run's child (`FaultInjection`): a host
   that did not enable it answers the coordinator's `Kill` with `0` and logs why.
-- **A person never reaches the data plane, a service never `/api`**: told apart by the token's own
-  claims (a service's `sub` is its `client_id`), each scheme failing the other's tokens. `dtpipe
+- **A person never reaches the data plane, a service never `/api`**: told apart by the claims of a
+  token the issuer made from the identity's kind, whichever issuer (a service's `sub` is its `client_id`),
+  each scheme failing the other's tokens. `dtpipe
   studio` reaches `/api` with a person's token, through the routes and records of
   `DtPipe.Jobs/Coordinator`, whose contract number both sides check. A service has a kind the rights
   give it: a node announces on the node channel, a **monitor** (a supervisor) reads `/health` and nothing
@@ -345,7 +346,8 @@ the control plane, over each replica's node channel; TransportR carries the data
   `[unchecked: the release's push to GHCR, until a tag runs it; a Linux Docker host, where tools/linux_replay.sh is the replay; a real TLS proxy; a bind mount of another uid; deploy/README.md is in no documentation check, so keep its lines to 100 columns]`
 - **An identity key is answered once and kept as its hash.** The call that makes a key is the only answer that carries it; the
   rights keep its SHA-256, which no route answers, and no log carries the key. A presented key is judged by that hash, in constant
-  time, never by the client id it names. `[local: Server.Tests IdentityKeyRoutesTests, IdentityKeyTests]`
+  time, never by the client id it names; `/connect/token` is the one route that takes one in.
+  `[local: Server.Tests IdentityKeyRoutesTests, IdentityKeyTests, KeyIssuerTests]`
   Detail: `src/DtPipe.Coordinator.Server/CLAUDE.md`.
 - **A cursor is the coordinator's: read when a run starts, kept only at the verdict of the whole run.** One cursor per branch that
   writes, keyed by (library pipeline, alias), kept by `CursorKeeper` in the store that holds its state. The child never reaches the
@@ -358,10 +360,20 @@ the control plane, over each replica's node channel; TransportR carries the data
   (the half of a `dtpipe split` cut that reads advances a cursor before the sink has written), and refuses a `cursor://` token that names a
   file. `[local: Server.Tests CursorRunTests, CursorRoutesTests, CursorRulesTests; Hosting.Tests FragmentCursorsTests; validate_doc_examples.sh]`
   `[unchecked: an older node, which ignores the value it is handed]` Detail: `src/DtPipe.Coordinator.Server/CLAUDE.md`.
+- **The coordinator issues the tokens of the identities a key verifies, and trusts them by their issuer like any other.**
+  Its issuer is `Coordinator:PublicUrl`, beside an external provider (another issuer) and never beside the trial one, which
+  serves the same paths under the same issuer. One grant, client credentials, the key as the client secret: every refusal of
+  the client reads the same, and a token lasts `Coordinator:Auth:ServiceTokenLifetime`. The exchange is refused while
+  `PublicUrl` is plain HTTP unless `Coordinator:Auth:AllowHttpKeys`, which the log and every page then name. **A token opens
+  an identity only when its issuer is the one that verifies it**: the key issuer's a `key` identity, the provider's any
+  other. The key issuer's tokens pass the same checks with the signing keys of the store, never through a request to its own
+  address. `[local: Server.Tests KeyIssuerTests; Hosting.Tests KeyTokenTests]` `[unchecked: Redis's shelf of signing keys; a
+  real TLS proxy]` Detail: `src/DtPipe.Coordinator.Server/CLAUDE.md`.
 - **The coordinator is its own identity provider only on an explicit secret, and trusts it like any other.**
   `Coordinator__InsecureTrialIdp__Password` (16 characters at least) turns it on; it is refused beside an external
-  `Coordinator__Authority`, and `TrustedIdp` holds no exception for its tokens. Every page, the login form and the studio
-  say it is not for production. `[local: TrialIdpModeTests; the trial recipe]` `[unchecked: the other refusals]`
+  `Coordinator__Authority`, and `TrustedIdp` holds no exception for its tokens. With it the coordinator issues no key's token,
+  and a start whose rights hold an identity verified by a key is refused by name. Every page, the login form and the studio
+  say it is not for production. `[local: TrialIdpModeTests, KeyIssuerTests; the trial recipe]` `[unchecked: the other refusals]`
   Detail: `src/DtPipe.Coordinator.Server/CLAUDE.md`.
 - **The CLI hosts a node only through one assembly, and never a hub.** `dtpipe` is the child a node drives, reached through
   `arrow:`; `dtpipe node` is a node whose bricks are the branches of the pipeline grammar (`src/DtPipe/CLAUDE.md`). The

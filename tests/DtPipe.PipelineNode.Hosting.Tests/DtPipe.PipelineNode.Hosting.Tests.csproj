@@ -14,11 +14,18 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\DtPipe.PipelineNode.Hosting\DtPipe.PipelineNode.Hosting.csproj" />
+    <!-- A real coordinator on a port, whose key issuer a node's token client reaches as it reaches any provider. -->
+    <ProjectReference Include="..\..\src\DtPipe.Coordinator.Server\DtPipe.Coordinator.Server.csproj" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.12" />
-    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.12" />
+    <!-- The coordinator's framework, as the server has it: it provides the hosting and configuration packages, and the ones its
+         dependencies pin older versions of. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.12" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
     <PackageReference Include="xunit.v3" Version="3.2.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">

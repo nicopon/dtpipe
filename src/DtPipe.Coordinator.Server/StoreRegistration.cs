@@ -4,8 +4,10 @@ namespace DtPipe.Coordinator.Server;
 internal static class StoreRegistration
 {
     /// <summary>
-    /// The rights, the run journal, the armed deployments, the cursors, the hosts set aside and the session keys, all on one store: a Redis
-    /// connection or a SQLite file, opened when the first of them is asked for, which the server does before it serves.
+    /// The rights, the run journal, the armed deployments, the cursors, the hosts set aside, the session keys and the key issuer's signing
+    /// keys, all on one store: a Redis connection or a SQLite file, opened when the first of them is asked for, which the server does before
+    /// it serves. The signing keys' shelf is keyed (<see cref="IssuerKeys.Shelf"/>): DataProtection reads the one unkeyed repository, and
+    /// would read any other element there as a key of its own.
     /// </summary>
     public static IServiceCollection AddCoordinatorStores(this IServiceCollection services, CoordinatorServerOptions server)
     {
@@ -18,6 +20,8 @@ internal static class StoreRegistration
             services.AddSingleton<ICursorStore, RedisCursorStore>();
             services.AddSingleton<IIgnoredHostStore, RedisIgnoredHostStore>();
             services.AddSingleton<Microsoft.AspNetCore.DataProtection.Repositories.IXmlRepository, RedisXmlRepository>();
+            services.AddKeyedSingleton<Microsoft.AspNetCore.DataProtection.Repositories.IXmlRepository>(IssuerKeys.Shelf, (provider, _) =>
+                new RedisXmlRepository(provider.GetRequiredService<RedisConnection>(), "issuer-keys", "signing key"));
         }
         else
         {
@@ -29,6 +33,8 @@ internal static class StoreRegistration
             services.AddSingleton<ICursorStore, SqliteCursorStore>();
             services.AddSingleton<IIgnoredHostStore, SqliteIgnoredHostStore>();
             services.AddSingleton<Microsoft.AspNetCore.DataProtection.Repositories.IXmlRepository, SqliteXmlRepository>();
+            services.AddKeyedSingleton<Microsoft.AspNetCore.DataProtection.Repositories.IXmlRepository>(IssuerKeys.Shelf, (provider, _) =>
+                new SqliteXmlRepository(provider.GetRequiredService<SqliteDatabase>(), "issuer_keys", "signing key"));
         }
         return services;
     }

@@ -31,8 +31,8 @@ public sealed class CoordinatorServerOptions
     public required string StateDir { get; init; }
 
     /// <summary>
-    /// The issuer of every token the server accepts: an OpenID Connect provider it trusts. In trial mode it is the server's own
-    /// <see cref="PublicUrl"/>.
+    /// The OpenID Connect provider the server trusts for people and for the identities it verifies. In trial mode it is the server's own
+    /// <see cref="PublicUrl"/>. The tokens of the identities verified by a key are <see cref="KeyIssuer"/>'s.
     /// </summary>
     public required string Authority { get; init; }
 
@@ -125,6 +125,33 @@ public sealed class CoordinatorServerOptions
     /// </summary>
     public Uri? PublicUrl { get; init; }
 
+    /// <summary>
+    /// The issuer of the tokens this server makes for identities verified by a key: <see cref="PublicUrl"/>, without the trial identity
+    /// provider, which serves the same paths under the same issuer. None otherwise, and then no identity may be verified by a key.
+    /// </summary>
+    public string? KeyIssuer { get; init; }
+
+    /// <summary>
+    /// Whether a key may be exchanged while <see cref="PublicUrl"/> is plain HTTP (<c>Coordinator:Auth:AllowHttpKeys</c>): the key crosses
+    /// the network at every renewal, so the exchange is refused there unless this is set, for a network that is private.
+    /// </summary>
+    public bool AllowHttpKeys { get; init; }
+
+    /// <summary>Keys are exchanged here: there is an issuer, and it is reached over HTTPS or HTTP is allowed.</summary>
+    public bool ExchangesKeys => KeyIssuer is not null && (PublicUrl!.Scheme == Uri.UriSchemeHttps || AllowHttpKeys);
+
+    /// <summary>Keys are exchanged over plain HTTP because <see cref="AllowHttpKeys"/> says so: the log and every page say it.</summary>
+    public bool ExchangesKeysOverHttp => KeyIssuer is not null && PublicUrl!.Scheme == Uri.UriSchemeHttp && AllowHttpKeys;
+
+    /// <summary>
+    /// How long a token the issuer makes for a service lasts (<c>Coordinator:Auth:ServiceTokenLifetime</c>, a time span, 10 minutes unless
+    /// set, <see cref="MinServiceTokenLifetime"/> at least): a revoked key opens nothing after it, and a node asks for its next token two
+    /// minutes before it ends.
+    /// </summary>
+    public TimeSpan ServiceTokenLifetime { get; init; } = TimeSpan.FromMinutes(10);
+
+    public static readonly TimeSpan MinServiceTokenLifetime = TimeSpan.FromMinutes(5);
+
     /// <summary>The Lab view's scenarios, one job file each; read only in <see cref="LabMode"/>.</summary>
     public string? Scenarios { get; init; }
 
@@ -161,12 +188,23 @@ public sealed class CoordinatorServerOptions
         // Redis settings under the SQLite store would be ignored in silence, and a coordinator meant to share its state would keep it alone.
         if (store == StoreKind.Sqlite && (section["Redis:ConnectionString"] is { Length: > 0 } || section["Redis:KeyPrefix"] is { Length: > 0 }))
             throw new InvalidOperationException("Coordinator:Redis settings are given but Coordinator:Store is 'sqlite': set Coordinator:Store to 'redis', or remove them.");
+        var authority = trial is not null
+            ? publicUrl!.GetLeftPart(UriPartial.Authority)
+            : (section["Authority"] ?? throw new InvalidOperationException("Coordinator:Authority is required: the issuer this server trusts (or Coordinator:InsecureTrialIdp:Password, for a trial).")).TrimEnd('/');
+        var keyIssuer = trial is null && publicUrl is not null ? publicUrl.GetLeftPart(UriPartial.Authority) : null;
+        // The issuer is what tells the two providers' tokens apart: one address for both would let either sign for the other.
+        if (keyIssuer is not null && string.Equals(authority, keyIssuer, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Coordinator:Authority is Coordinator:PublicUrl, where this server issues the tokens of the identities verified by a key: an external identity provider has an issuer of its own.");
+        var lifetime = section.GetValue<TimeSpan?>("Auth:ServiceTokenLifetime") ?? TimeSpan.FromMinutes(10);
+        if (lifetime < MinServiceTokenLifetime)
+            throw new InvalidOperationException($"Coordinator:Auth:ServiceTokenLifetime must be {MinServiceTokenLifetime.TotalMinutes} minutes at least: a node asks for its next token two minutes before its token ends.");
         return new CoordinatorServerOptions
         {
             StateDir = PathOf("StateDirectory") ?? Path.GetFullPath("state"),
-            Authority = trial is not null
-                ? publicUrl!.GetLeftPart(UriPartial.Authority)
-                : (section["Authority"] ?? throw new InvalidOperationException("Coordinator:Authority is required: the issuer this server trusts (or Coordinator:InsecureTrialIdp:Password, for a trial).")).TrimEnd('/'),
+            Authority = authority,
+            KeyIssuer = keyIssuer,
+            AllowHttpKeys = section.GetValue<bool>("Auth:AllowHttpKeys"),
+            ServiceTokenLifetime = lifetime,
             TrialIdpPassword = trial,
             Audience = section["Audience"] ?? "dtpipe-coordinator",
             UiClientId = section["Ui:ClientId"] ?? "coordinator-ui",

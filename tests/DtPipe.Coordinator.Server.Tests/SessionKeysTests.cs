@@ -10,7 +10,12 @@ namespace DtPipe.Coordinator.Server.Tests;
 /// <summary>An <see cref="IXmlRepository"/> in memory, for the hosts of tests that are not about Redis.</summary>
 public sealed class MemoryXmlRepository : IXmlRepository
 {
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, MemoryXmlRepository> Shelves = new();
+
     private readonly List<XElement> _elements = [];
+
+    /// <summary>The repository a test names; the same one every time it is asked for the same name, as a store outlives a restart.</summary>
+    public static MemoryXmlRepository At(string name) => Shelves.GetOrAdd(name, _ => new MemoryXmlRepository());
 
     public IReadOnlyCollection<XElement> GetAllElements()
     {

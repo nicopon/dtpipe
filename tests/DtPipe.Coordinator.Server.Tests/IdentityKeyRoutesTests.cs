@@ -21,7 +21,8 @@ public sealed class IdentityKeyRoutesTests : IDisposable
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    private readonly CoordinatorHost _host = new();
+    // An identity verified by a key needs the issuer, which PublicUrl turns on.
+    private readonly CoordinatorHost _host = new(publicUrl: "https://coordinator.test");
     private readonly CapturedLog _log = new();
     private readonly WebApplicationFactory<Program> _logged;
     private readonly HttpClient _admin;
@@ -274,32 +275,5 @@ public sealed class IdentityKeyRoutesTests : IDisposable
         Assert.DoesNotContain("dtp_", await refused.Content.ReadAsStringAsync(Ct));
         _host.Rights.Down = false;
         Assert.Empty(Rights.Find("a")!.Auth.Keys);
-    }
-
-    /// <summary>What every logger of the host wrote, as text.</summary>
-    private sealed class CapturedLog : ILoggerProvider
-    {
-        private readonly List<string> _entries = [];
-
-        public IReadOnlyList<string> Entries
-        {
-            get { lock (_entries) return [.. _entries]; }
-        }
-
-        public ILogger CreateLogger(string categoryName) => new Capture(this);
-
-        public void Dispose() { }
-
-        private sealed class Capture(CapturedLog owner) : ILogger
-        {
-            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-
-            public bool IsEnabled(LogLevel logLevel) => true;
-
-            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
-            {
-                lock (owner._entries) owner._entries.Add(formatter(state, exception) + exception);
-            }
-        }
     }
 }

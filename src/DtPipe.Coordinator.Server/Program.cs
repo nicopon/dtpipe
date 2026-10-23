@@ -40,6 +40,7 @@ builder.Services.Replace(ServiceDescriptor.Singleton<IFlowControlService, Rights
 builder.Services.Replace(ServiceDescriptor.Singleton<IClientIdentityProvider, RightsIdentityProvider>());
 builder.Services.AddTrustedIdp(server);
 if (server.IsTrialIdp) builder.Services.AddTrialIdpMode(server);
+if (server.KeyIssuer is not null) builder.Services.AddKeyIssuer();
 
 builder.Services.AddSingleton<LoggingHubProgressMonitor>();
 builder.Services.Replace(ServiceDescriptor.Singleton<IHubProgressMonitor, EventProgressMonitor>());
@@ -68,6 +69,8 @@ builder.Services.AddSingleton<LibraryArming>();
 builder.Services.AddSingleton<PipelineHealth>();
 
 var app = builder.Build();
+// An identity verified by a key with no issuer to exchange its key could never connect: the start says so before anything is served.
+KeyIssuer.CheckIdentities(app.Services.GetRequiredService<RightsStore>(), server);
 // First, so that every middleware and handler below sees the address the person's browser used: the sign-in's return address, the
 // protected-resource document and the cookies' Secure flag follow the request's scheme and host. No header is read.
 if (server.PublicUrl is { } publicUrl)
@@ -90,6 +93,10 @@ if (server.IsTrialIdp)
 }
 // The session keys are read before anything is served: Redis down stops the start instead of the first sign-in.
 TrustedIdp.EnsureSessionKeys(app.Services);
+// The issuer's signing keys are opened with the session keys, so they are read after them, and a store that cannot give them stops the start.
+if (server.KeyIssuer is not null) app.Services.GetRequiredService<IssuerKeys>();
+if (server.ExchangesKeysOverHttp)
+    app.Logger.LogWarning("Coordinator:Auth:AllowHttpKeys is set and Coordinator:PublicUrl is http: identity keys cross the network in clear at every token request.");
 // The armed deployments and the hosts set aside are read now too: a Redis that cannot be read stops the start.
 app.Services.GetRequiredService<DeploymentManager>();
 app.Services.GetRequiredService<EnrollmentQueue>();
@@ -155,7 +162,7 @@ app.Use(async (context, next) =>
     if (context.Request.Path.StartsWithSegments("/lab") && !context.User.IsInRole(CoordinatorRoles.Admin))
     {
         var who = System.Net.WebUtility.HtmlEncode(TrustedIdp.EmailOf(context) ?? context.User.Identity.Name ?? "This account");
-        await AccessPage(server.IsTrialIdp, StatusCodes.Status403Forbidden, $"{who} is not an admin of this coordinator: the Lab view is for administrators.",
+        await AccessPage(server, StatusCodes.Status403Forbidden, $"{who} is not an admin of this coordinator: the Lab view is for administrators.",
             ("/", "Back to the coordinator"), ("/account/logout", "Sign out")).ExecuteAsync(context);
         return;
     }
@@ -173,7 +180,8 @@ app.MapHub<NodeChannelHub>(NodeChannel.Path).RequireAuthorization();
 app.MapGet("/healthz", () => Results.Ok());
 // Anonymous: where a person signs in for dtpipe studio, and the contract this server speaks.
 app.MapGet(CoordinatorApi.Metadata, (HttpContext context, CoordinatorServerOptions options) =>
-    new ResourceMetadata(OriginOf(context), [options.Authority], ["header"], CoordinatorApi.Contract, options.StudioClientId, options.IsTrialIdp));
+    new ResourceMetadata(OriginOf(context), options.KeyIssuer is { } issuer ? [options.Authority, issuer] : [options.Authority], ["header"],
+        CoordinatorApi.Contract, options.StudioClientId, options.IsTrialIdp));
 
 // A person signs in and out through the provider; the pages send them here.
 app.MapGet("/account/login", (string? returnUrl) => Results.Challenge(
@@ -181,7 +189,7 @@ app.MapGet("/account/login", (string? returnUrl) => Results.Challenge(
     [TrustedIdp.OidcScheme]));
 app.MapGet("/account/logout", () => Results.SignOut(new AuthenticationProperties { RedirectUri = "/" }, [TrustedIdp.CookieScheme, TrustedIdp.OidcScheme]));
 // Where a person with no role lands once signed out: anonymous, it names nobody.
-app.MapGet("/account/denied", () => AccessPage(server.IsTrialIdp, StatusCodes.Status200OK,
+app.MapGet("/account/denied", () => AccessPage(server, StatusCodes.Status200OK,
     "That account holds no role on this coordinator, so it has been signed out, here and at the identity provider.",
     ("/", "Sign in with another account")));
 
@@ -192,7 +200,7 @@ app.MapGet("/account/denied", () => AccessPage(server.IsTrialIdp, StatusCodes.St
 var account = app.MapGroup("/api").RequireAuthorization(TrustedIdp.SignedIn).AddEndpointFilter(RequireCsrfHeader);
 account.MapGet(CoordinatorApi.MeRoute, (HttpContext context) => new CoordinatorMe(
     context.User.Identity?.Name, context.User.FindFirst("email")?.Value, [.. CoordinatorRoles.All.Where(context.User.IsInRole)]));
-account.MapGet("/info", (CoordinatorServerOptions options) => new { labMode = options.LabMode, trialIdp = options.IsTrialIdp });
+account.MapGet("/info", (CoordinatorServerOptions options) => new { labMode = options.LabMode, trialIdp = options.IsTrialIdp, httpKeys = options.ExchangesKeysOverHttp });
 
 var api = app.MapGroup("/api").RequireAuthorization(CoordinatorRoles.Reader).AddEndpointFilter(RequireCsrfHeader);
 var designer = api.MapGroup("").RequireAuthorization(CoordinatorRoles.Designer);
@@ -206,6 +214,7 @@ app.MapHealth(api);
 app.MapService();
 
 if (server.IsTrialIdp) app.MapTrialIdp();
+if (server.KeyIssuer is not null) app.MapKeyIssuer(server);
 if (server.LabMode) admin.MapLabMode();
 
 app.Run();
@@ -214,11 +223,12 @@ static string OriginOf(HttpContext context) => $"{context.Request.Scheme}://{con
 
 // A refused page navigation: a sentence and its ways out, readable without the pages' scripts.
 // The message is HTML already encoded.
-static IResult AccessPage(bool trial, int status, string message, params (string Href, string Label)[] links) => Results.Content(
+static IResult AccessPage(CoordinatorServerOptions server, int status, string message, params (string Href, string Label)[] links) => Results.Content(
     "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
     + "<title>dtpipe coordinator</title><link rel=\"stylesheet\" href=\"/styles.css\"></head>"
     + "<body style=\"max-width:40rem;margin:4rem auto;padding:0 1rem;font-family:system-ui,sans-serif;line-height:1.5\">"
-    + (trial ? "<p style=\"background:#b00020;color:#fff;padding:.4rem .8rem;font-weight:600\">Trial identity provider: not for production.</p>" : "")
+    + (server.IsTrialIdp ? "<p style=\"background:#b00020;color:#fff;padding:.4rem .8rem;font-weight:600\">Trial identity provider: not for production.</p>" : "")
+    + (server.ExchangesKeysOverHttp ? "<p style=\"background:#b00020;color:#fff;padding:.4rem .8rem;font-weight:600\">Identity keys cross the network in clear: this coordinator is reached over HTTP.</p>" : "")
     + $"<h1 style=\"font-size:1.3rem\">dtpipe coordinator</h1><p>{message}</p><p>"
     + string.Join(" · ", links.Select(l => $"<a href=\"{l.Href}\">{l.Label}</a>"))
     + "</p></body></html>",

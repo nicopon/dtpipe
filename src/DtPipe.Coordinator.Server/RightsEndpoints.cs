@@ -33,9 +33,12 @@ internal static class RightsEndpoints
             bus.Publish("rights", new { });
             return Results.Ok();
         });
-        admin.MapPost("/rights/identities", (IdentityRequest request, RightsStore rights, EnrollmentQueue enrollment, EventBus bus, HttpContext http) =>
+        admin.MapPost("/rights/identities", (IdentityRequest request, RightsStore rights, EnrollmentQueue enrollment, EventBus bus, HttpContext http, CoordinatorServerOptions options) =>
         {
             if (!PipelineLibrary.IsValidId(request.ClientId)) throw new ConflictException($"'{request.ClientId}' is not a client id: lowercase letters, digits and '-'.");
+            // An identity verified by a key needs the issuer that exchanges it: without one it could never connect.
+            if (request.Auth?.Trim() == AuthModes.Key && KeyIssuer.Unavailable(options) is { } reason)
+                throw new ConflictException($"'{request.ClientId}' cannot be verified by a key: {reason}.");
             rights.AddIdentity(new Identity(request.ClientId, string.IsNullOrWhiteSpace(request.Name) ? request.ClientId : request.Name, request.Description ?? "",
                 request.Groups ?? [], request.Enabled ?? true, request.Kind ?? IdentityKinds.Node, request.Pipelines)
             {

@@ -6,9 +6,10 @@ namespace DtPipe.Coordinator.Server;
 
 /// <summary>
 /// The trial identity provider run inside the coordinator (<see cref="CoordinatorServerOptions.TrialIdpPassword"/>), never for production.
-/// Its clients are the identities of the rights, each with the trial password for secret, plus the pages' client and the studio's; its
-/// people are any valid name with that same password. The server trusts it exactly as it trusts an external provider: through
-/// <see cref="TrustedIdp"/>, by the token's issuer and keys, with no exception for its own tokens.
+/// Its clients are the identities of the rights the IdP verifies, each with the trial password for secret, plus the pages' client and the
+/// studio's; its people are any valid name with that same password. The server trusts it exactly as it trusts an external provider: through
+/// <see cref="TrustedIdp"/>, by the token's issuer and keys, with no exception for its own tokens. It serves the paths and the issuer of the
+/// coordinator's <see cref="KeyIssuer"/>, so the two never run together.
 /// </summary>
 public static class TrialIdpMode
 {
@@ -37,7 +38,8 @@ public static class TrialIdpMode
 }
 
 /// <summary>
-/// Keeps the trial provider's clients equal to the rights: a service the rights name can ask for a token, one they no longer name cannot.
+/// Keeps the trial provider's clients equal to the rights: a service the rights name can ask for a token, one they no longer name cannot,
+/// and one verified by a key is none of its clients.
 /// A change to the rights only marks the clients stale; they are made right before the next token is issued.
 /// </summary>
 public sealed class TrialIdpClients
@@ -79,7 +81,7 @@ public sealed class TrialIdpClients
         if (_server.StudioClientId is { Length: > 0 } studio)
             clients.Add(new(studio, ClientGrant.AuthorizationCode, DisplayName: "dtpipe studio", RedirectUris: ["http://127.0.0.1/callback"],
                 ApplicationType: ClientApplication.Native, Audience: _server.Audience, RefreshTokens: true));
-        foreach (var identity in _rights.Snapshot().Identities.Where(i => clients.All(c => c.ClientId != i.ClientId)))
+        foreach (var identity in _rights.Snapshot().Identities.Where(i => i.Auth.Mode == AuthModes.Idp && clients.All(c => c.ClientId != i.ClientId)))
             clients.Add(new(identity.ClientId, ClientGrant.ClientCredentials, _server.TrialIdpPassword, identity.Name));
         return clients;
     }

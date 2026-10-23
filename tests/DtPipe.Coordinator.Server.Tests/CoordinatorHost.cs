@@ -17,10 +17,12 @@ namespace DtPipe.Coordinator.Server.Tests;
 /// The coordinator's server in memory, trusting a test provider: its configuration is handed over
 /// directly, with a key generated here, so nothing is discovered over the network. The state
 /// directory is a fresh temporary one, and lab mode is off unless asked. <c>check</c> stands for the designer's check, which needs a runner and
-/// the bricks' nodes; without it the real one runs. <c>publicUrl</c> is the address the server is told people reach it at.
+/// the bricks' nodes; without it the real one runs. <c>publicUrl</c> is the address the server is told people reach it at, and the issuer of the
+/// tokens of a key. <c>state</c> names a state directory, and the stores in memory behind it, that another host used: a restart.
+/// <c>settings</c> are further <c>Coordinator</c> settings, by their key under that section.
 /// </summary>
 public sealed class CoordinatorHost(string? studioClientId = CoordinatorHost.StudioClient, Func<string, DesignCheck>? check = null, bool labMode = false,
-    string? publicUrl = null)
+    string? publicUrl = null, string? state = null, IReadOnlyDictionary<string, string>? settings = null)
     : WebApplicationFactory<Program>
 {
     /// <summary>The bindings the stand-in check was last asked to judge, as the route merged them.</summary>
@@ -35,7 +37,7 @@ public sealed class CoordinatorHost(string? studioClientId = CoordinatorHost.Stu
 
     private static readonly RsaSecurityKey Key = new(RSA.Create(2048)) { KeyId = "test" };
 
-    private readonly string _state = Path.Combine(Path.GetTempPath(), "coordinator-host-" + Guid.NewGuid().ToString("N"));
+    private readonly string _state = state ?? Path.Combine(Path.GetTempPath(), "coordinator-host-" + Guid.NewGuid().ToString("N"));
 
     /// <summary>The run journal's store; <c>Down</c> makes every call fail as an unreachable Redis does.</summary>
     internal FailingRunStore Runs => _runs ??= new FailingRunStore(MemoryRunStore.At(_state));
@@ -68,6 +70,7 @@ public sealed class CoordinatorHost(string? studioClientId = CoordinatorHost.Stu
         builder.UseSetting("Coordinator:Studio:ClientId", studioClientId ?? "");
         builder.UseSetting("Coordinator:LabMode", labMode ? "true" : "false");
         if (publicUrl is not null) builder.UseSetting("Coordinator:PublicUrl", publicUrl);
+        foreach (var (key, value) in settings ?? new Dictionary<string, string>()) builder.UseSetting("Coordinator:" + key, value);
         builder.ConfigureTestServices(services =>
         {
             // What the coordinator keeps beyond the process is in memory: the real store is Redis, which these tests are not about.
@@ -77,7 +80,8 @@ public sealed class CoordinatorHost(string? studioClientId = CoordinatorHost.Stu
             services.AddSingleton<IDeploymentStore>(Deployments);
             services.AddSingleton<ICursorStore>(new MemoryCursorStore());
             services.AddSingleton<IIgnoredHostStore>(IgnoredHosts);
-            services.AddSingleton<IXmlRepository>(new MemoryXmlRepository());
+            services.AddSingleton<IXmlRepository>(MemoryXmlRepository.At(_state + "#session-keys"));
+            services.AddKeyedSingleton<IXmlRepository>(IssuerKeys.Shelf, MemoryXmlRepository.At(_state + "#issuer-keys"));
             if (check is not null) services.AddSingleton<DesignValidator>(new StubValidator(check, bindings => CheckedBindings = bindings));
             var configuration = new OpenIdConnectConfiguration
             {
@@ -87,7 +91,9 @@ public sealed class CoordinatorHost(string? studioClientId = CoordinatorHost.Stu
                 EndSessionEndpoint = Issuer + "connect/logout",
             };
             configuration.SigningKeys.Add(Key);
-            services.ConfigureAll<JwtBearerOptions>(o => o.Configuration = configuration);
+            // The test provider is the external one: the key issuer's scheme validates with the keys of the store, and nothing else.
+            foreach (var scheme in new[] { TrustedIdp.IdpServiceScheme, TrustedIdp.PersonScheme })
+                services.Configure<JwtBearerOptions>(scheme, o => o.Configuration = configuration);
             services.ConfigureAll<OpenIdConnectOptions>(o => o.Configuration = configuration);
         });
     }

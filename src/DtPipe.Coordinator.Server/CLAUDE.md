@@ -9,8 +9,8 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
 `Coordinator` configuration section (`CoordinatorServerOptions`), from the environment first.
 
 - **The server trusts an IdP for who, and decides what.** `TrustedIdp` validates the tokens of
-  `Coordinator:Authority` for `Coordinator:Audience`; a token names its client (`sub`) and grants
-  nothing. `RightsIdentityProvider` replaces TransportR's `IClientIdentityProvider` and gives the
+  `Coordinator:Authority` for `Coordinator:Audience`, and those of its own key issuer (see "An identity is verified by the IdP
+  or by a key"); a token names its client (`sub`) and grants nothing. `RightsIdentityProvider` replaces TransportR's `IClientIdentityProvider` and gives the
   subject its identity's groups in `RightsStore`, none for an unknown or disabled one. TransportR
   records those groups at `Connect` and at each token renewal, so an identity edit applies when the
   node connects again. The node name belongs to the rights, never to the host: `NodeChannelHub`
@@ -41,13 +41,16 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   characters at least) runs `DtPipe.Coordinator.TrialIdp` inside the server (`TrialIdpMode`); unset, no `/connect` route and no
   discovery document exist, and the metadata carries no `dtpipe_trial_idp`. It is refused beside `Coordinator:Authority`, without
   `Coordinator:PublicUrl` (the issuer is that one address, and the server reaches itself there) and beside `Coordinator:Ui:ClientSecret`.
-  `Authority` is then the public address and `TrustedIdp` validates its tokens through discovery, with no exception for them. The
-  clients are the rights' identities (secret: the password), the pages' client and the studio's; `TrialIdpClients` makes them right
+  `Authority` is then the public address and `TrustedIdp` validates its tokens through discovery, with no exception for them. It
+  serves the key issuer's paths under the key issuer's address, so with it the server issues no key's token: an identity verified by
+  a key is refused when it is added, and a start whose rights hold one stops naming it. The
+  clients are the rights' identities the IdP verifies (secret: the password), the pages' client and the studio's; `TrialIdpClients` makes them right
   before a token is issued after the rights change, and a client the rights drop loses every permission (the in-memory store cannot
   cascade a delete). The login form and cookie (`/trial-idp/login`, scheme `TrialIdp`) are apart from the server's own.
-  `[local: TrialIdpModeTests; the trial recipe, deploy/compose.yaml]` `[unchecked: the refusals without `PublicUrl` and beside
+  `[local: TrialIdpModeTests, KeyIssuerTests; the trial recipe, deploy/compose.yaml]` `[unchecked: the refusals without `PublicUrl` and beside
   `Ui:ClientSecret`; a client withdrawn from the rights]`
-- **A person and a service are told apart by the token's claims.** A service's token comes from
+- **A person and a service are told apart by the claims of a token the issuer made from the identity's kind, whichever
+  issuer.** A service's token comes from
   client credentials, so its subject is its client (`sub == client_id`, RFC 9068): the default
   policy (the node channel, TransportR's hub and streams) accepts that and nothing else. `/api`
   accepts the cookie or a person's bearer token obtained through `Coordinator:Studio:ClientId`
@@ -101,8 +104,31 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   with its date and cuts the identity's replicas). `GET …/keys` and `/api/rights` name a key by its id, its four characters and its
   dates. `ClearKey` has no `ToString` that shows the secret. `RightsStore.KeyHolder` is the one judge of a presented key: the client
   id it names only finds the identity, a disabled one or one the IdP verifies opens nothing, and every live key is compared in constant
-  time. No route takes a key in yet. `[local: IdentityKeyRoutesTests, IdentityKeyTests (its Redis case needs DTPIPE_TEST_REDIS or
-  DTPIPE_TEST_REUSE_INFRA)]`
+  time. `[local: IdentityKeyRoutesTests, IdentityKeyTests (its Redis case needs DTPIPE_TEST_REDIS or DTPIPE_TEST_REUSE_INFRA)]`
+- **The server issues the tokens of a key, and trusts them as it trusts the provider's.** `KeyIssuer`'s issuer is
+  `Coordinator:PublicUrl`; there is none without it or beside the trial provider, and then an identity verified by a key is refused
+  when it is added and a start whose rights hold one stops naming it. An `Authority` equal to the issuer stops the start: the issuer
+  is what tells the two apart. It maps `GET /.well-known/openid-configuration`, `GET /.well-known/jwks.json` and `POST
+  /connect/token`, client credentials only, the key as the form's `client_secret`; the client id must be the one the key names, and
+  `KeyHolder` judges. Every refusal of the client is the same `invalid_client` (400) and every answer is `no-store`; a refusal logs
+  the client id only when it has an id's shape, so a key sent in its place reaches no log. `KeyExchangeLimits` counts per source and
+  per client id, known or not, in windows of a minute (the server reads no forwarded header, so behind a proxy the source is the
+  proxy). The token is a service's: `sub == client_id ==` the identity's id, `aud` the audience, lasting
+  `Coordinator:Auth:ServiceTokenLifetime` (10 minutes, 5 at least). While `PublicUrl` is plain HTTP the exchange is refused unless
+  `Coordinator:Auth:AllowHttpKeys`, and while that setting is in effect the start logs a warning and every page shows a banner
+  (`/api/info` `httpKeys`, `AccessPage`). The metadata lists the issuer after `Authority`, which the studio and a node with no
+  `Oidc:Authority` read first: a node verified by a key sets `Oidc:Authority` to the coordinator's address. **Same checks, local
+  key source**: `KeyBearer` checks signature, issuer, audience and lifetime (30 seconds of skew) as `IdpBearer` does, with the keys of
+  `IssuerKeys`, never through a request to the server's own address. `IssuerKeys` keeps RSA keys on a shelf of their own in the store
+  (`issuer_keys`, `{prefix}issuer-keys`: an `IXmlRepository` keyed `IssuerKeys.Shelf`, since DataProtection's key manager reads every
+  element of its own repository as one of its keys), each protected by DataProtection, so a restored store or a second instance
+  validates the same tokens, and a key the session keys cannot open is skipped with a warning. **The issuer must be the one that
+  verifies the identity**: the service scheme (`Bearer`) reads a token's `iss` without believing it and hands the token to
+  `KeyBearer` or `IdpBearer`, which validate it in full and fail, on every request, a key issuer's token for an identity not
+  verified by a key and a provider's token for one that is (a subject the rights do not know stays the provider's, for enrollment).
+  `RightsIdentityProvider`, `ServiceKindHandler` and the announcement sit behind it, TransportR's renewal included.
+  `[local: KeyIssuerTests, IdentityKeyRoutesTests; Hosting.Tests KeyTokenTests — a node's token client, a real SQLite store]`
+  `[unchecked: Redis's shelf; two instances that make a key at the same first start]`
 - **The state is kept in one store, SQLite unless the deployment chose Redis.** `Coordinator:Store` is `sqlite` (the default) or
   `redis`; `StoreRegistration` registers the six stores of the chosen kind, opened when the first is asked for, which the server
   does before it serves. Redis settings under the SQLite store stop the start rather than being ignored, so a coordinator meant to
@@ -489,7 +515,7 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   bricks, sandbox]`
 - The pages are served from the `wwwroot` published beside the binary (`dotnet publish`): `index.html`
   + `js/` (the coordinator's views, ES modules, no build) and `lab/` (the Lab view, lab mode only).
-  `window.lab.store` exists for the lab's `tools/ui_check.py`. `/healthz` and the protected resource
-  metadata (`CoordinatorApi.Metadata`, RFC 9728: the provider, the contract, the studio's client) are
-  the only anonymous routes; `/health` is a monitor's and `/service` a launcher's. Verify a change with the lab's `./lab.sh smoke`, and a page change with
+  `window.lab.store` exists for the lab's `tools/ui_check.py`. `/healthz`, the protected resource
+  metadata (`CoordinatorApi.Metadata`, RFC 9728: the provider, the contract, the studio's client) and
+  the routes of an issuer (the key issuer's, the trial provider's) are the only anonymous routes; `/health` is a monitor's and `/service` a launcher's. Verify a change with the lab's `./lab.sh smoke`, and a page change with
   `./lab.sh ui` too.
