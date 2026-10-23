@@ -21,8 +21,8 @@ echo "    DtPipe Core Boundary Validation"
 echo "========================================"
 
 # 1. Concrete SQL/dialect/cursor-store code in Core?
-if grep -rlE "class (BaseSqlDataWriter|[A-Za-z]*SqlDialect|DatabaseRetryPolicy|CursorStateStore)\b" "$PROJECT_ROOT/src/DtPipe.Core/" --include="*.cs" 2>/dev/null | grep -v bin > /dev/null; then
-    fail "concrete SQL/dialect/retry/cursor-store code found in DtPipe.Core"
+if grep -rlE "class (BaseSqlDataWriter|[A-Za-z]*SqlDialect|CursorStateStore)\b" "$PROJECT_ROOT/src/DtPipe.Core/" --include="*.cs" 2>/dev/null | grep -v bin > /dev/null; then
+    fail "concrete SQL/dialect/cursor-store code found in DtPipe.Core"
 fi
 pass "no concrete SQL/dialect infrastructure in DtPipe.Core"
 

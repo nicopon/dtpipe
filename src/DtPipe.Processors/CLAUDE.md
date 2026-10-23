@@ -10,7 +10,6 @@ execution. The fetch goes through the shared DuckDB read path; never reimplement
 
 - `DuckHubConnectionParser` parses `duck+{provider}:` strings and issues `INSTALL` / `LOAD` /
   `ATTACH`.
-- `--retry` uses Polly v8 (`DatabaseRetryPolicy`).
 - `--duck-init` / `--compute` / `--expand` values resolve through `IStringContentResolver`
   (`CliStringContentResolver` for the CLI, `DefaultStringContentResolver` headless).
 - `DuckInitSqlRunner` (Core) is the single init-SQL runner for reader, writer and processor.

@@ -5,7 +5,7 @@ namespace DtPipe.Tests.Unit.Core;
 /// <summary>
 /// F10 — Core boundary deny-list. Concrete infrastructure types must NOT live in the
 /// DtPipe.Core assembly: they belong to DtPipe.Adapters.Shared (SQL writers, dialects,
-/// retry policy, cursor persistence) or, for Arrow bridges, outside Core entirely.
+/// cursor persistence) or, for Arrow bridges, outside Core entirely.
 /// Each name must also be found in DtPipe.Adapters.Shared, or a stale name passes vacuously.
 /// </summary>
 public class CoreBoundaryTests
@@ -18,7 +18,6 @@ public class CoreBoundaryTests
     [InlineData("DtPipe.Adapters.Shared.Dialects.SqlServerDialect")]
     [InlineData("DtPipe.Adapters.Shared.Dialects.SqliteDialect")]
     [InlineData("DtPipe.Adapters.Shared.Dialects.DuckDbDialect")]
-    [InlineData("DtPipe.Adapters.Shared.Infrastructure.Retry.DatabaseRetryPolicy")]
     [InlineData("DtPipe.Adapters.Shared.Cursor.CursorStateStore")]
     public void Core_Assembly_Does_Not_Contain_Concrete_Infrastructure(string typeName)
     {

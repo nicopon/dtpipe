@@ -48,25 +48,23 @@ surprise at three in the morning.
 key that is really the command-line flag — `throttle` where the key is `rows-per-second` — which
 warns interactively and is then lost in a log nobody reads.
 
-## A run that must survive a flaky link
+## When a run fails
 
-`--retry` wraps database and network work in an exponential backoff with jitter: **3 attempts**,
-starting at one second. It handles what is genuinely transient — a dropped connection, a timeout,
-an I/O error, a failed HTTP request:
+dtpipe runs an export once. A dropped connection, a timeout or an I/O error ends it with exit `1`,
+and the scheduler that started it decides whether to start it again, as it decided when to start
+it at all.
 
-```bash
-dtpipe --job nightly.yaml --retry --metrics-path run.json
-```
+**A second run starts from the top.** The source is read again and the pre-hook runs again, while
+whatever the failed run already committed is still in the target. Two settings decide what that
+costs:
 
-**What it retries is the whole branch, not the failed call.** The source is reopened, the target
-re-initialised and the pre-hook runs again, from the top — so anything the failed attempt already
-committed is still there when the second one starts.
+- **A write strategy that tolerates rows written twice**: `Upsert` over `Append` lands them once.
+  See [Writing to a database](write-strategies.md).
+- **A cursor**: its mark advances only on success, so the second run reads again from the last run
+  that succeeded, not from the beginning of the source. See [Incremental loading](incremental.md).
 
-That makes the write strategy the thing to get right, not the retry count. Pair `--retry` with a
-strategy that tolerates being run twice — `Upsert` over `Append`, see
-[Writing to a database](write-strategies.md) — or with a cursor, so a re-run resumes rather than
-repeats ([Incremental loading](incremental.md)). On a target where neither is possible, a failed
-run is better cleaned up than retried.
+A cursor bounds what is read again; only the write strategy decides whether it is written twice.
+On a target where neither helps, a failed run is better cleaned up than started again.
 
 ## Secrets on an agent
 
@@ -105,7 +103,6 @@ guarantees, and their limits:
 
 ```bash
 dtpipe --job nightly.yaml \
-       --retry \
        --metrics-path metrics.json \
        --log run.log \
        --strict-bindings

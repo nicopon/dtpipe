@@ -44,7 +44,6 @@ dtpipe --job FILE [OVERRIDES]
 | `-o`, `--output DEST` | Target ADO.NET connection string or file path |
 | `-q`, `--query SQL` | SQL query (required for database sources) |
 | `--dry-run [N]` | Preview N rows without writing (default: 10) |
-| `--retry` | Enable Polly database retry policy with exponential backoff & jitter |
 | `--job FILE`, `-j FILE` | Load a pipeline from a YAML job file |
 | `--export-job FILE` | Serialize the current CLI pipeline to YAML and exit |
 | `--alias NAME` | Name the current branch for DAG references |

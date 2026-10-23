@@ -15,7 +15,6 @@ using DtPipe.Core.Pipelines;
 using DtPipe.Configuration;
 using Apache.Arrow.Types;
 using DtPipe.Services;
-using DtPipe.Core.Infrastructure.Retry;
 
 namespace DtPipe.Services.Pipeline;
 
@@ -124,25 +123,25 @@ internal sealed partial class ExportRunState
     private ILogger Logger => _svc._logger;
     private IExportObserver Observer => _svc._observer;
 
-    internal async Task RunAsync(CancellationToken retryCt)
+    internal async Task RunAsync(CancellationToken ct)
     {
         // ── Preflight ──────────────────────────────────────────────────────
         Logger.LogDebug("[Preflight] starting export from {Provider} branch {Alias}", ProviderName, Alias ?? "(main)");
-        await LoadPersistedSchemaAsync(retryCt);
+        await LoadPersistedSchemaAsync(ct);
 
         Reader = ReaderFactory.Create(Registry);
         try
         {
             try
             {
-                await Reader.OpenAsync(retryCt);
+                await Reader.OpenAsync(ct);
             }
             catch (Exception ex) when (AutoBuiltQueryHint(ex) is { } hint)
             {
                 throw new InvalidOperationException(hint, ex);
             }
 
-            await RunCoreAsync(retryCt);
+            await RunCoreAsync(ct);
         }
         finally
         {
@@ -167,7 +166,7 @@ internal sealed partial class ExportRunState
                "Pass --query to write the statement yourself, or check the name and its schema.";
     }
 
-    private async Task RunCoreAsync(CancellationToken retryCt)
+    private async Task RunCoreAsync(CancellationToken ct)
     {
         var columns = Reader.Columns;
         if (columns is null || columns.Count == 0)
@@ -187,20 +186,20 @@ internal sealed partial class ExportRunState
 
         // ── Schema ─────────────────────────────────────────────────────────
         Logger.LogDebug("[Schema] initializing transformers and segmenting pipeline");
-        await InitializeTransformersAsync(retryCt);
+        await InitializeTransformersAsync(ct);
         Segments = PipelineSegmenter.GetSegments(Pipeline);
         FillSegmentSchemas();
         PublishBranchSchema();
-        await InferAdvisoryAsync(retryCt);
+        await InferAdvisoryAsync(ct);
 
         // ── Execution ──────────────────────────────────────────────────────
         // Sample mode is not a branch here. It is the same execution with the writer
         // neutralised and the reader bounded — which is the whole point: a preview that took
         // a different path could disagree with the run it previews, and used to.
         Logger.LogDebug("[Execution] target '{Writer}', {Columns} columns", WriterFactory.ComponentName, CurrentSchema.Count);
-        await PrepareWriterAsync(retryCt);
-        await ExecutePipelineAsync(retryCt);
+        await PrepareWriterAsync(ct);
+        await ExecutePipelineAsync(ct);
 
-        if (IsSampleMode) await RenderSampleReportAsync(retryCt);
+        if (IsSampleMode) await RenderSampleReportAsync(ct);
     }
 }

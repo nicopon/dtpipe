@@ -17,7 +17,7 @@ namespace DtPipe.Services.Pipeline;
 //    branch schema publication and dry-run inference advisory. ──────────────
 internal sealed partial class ExportRunState
 {
-    internal async Task LoadPersistedSchemaAsync(CancellationToken retryCt)
+    internal async Task LoadPersistedSchemaAsync(CancellationToken ct)
     {
         var readerSchemaPersist = Registry.Get(ReaderFactory.OptionsType) as ISchemaPersistenceAware;
         var schemaLoadName = readerSchemaPersist?.SchemaLoad;
@@ -30,7 +30,7 @@ internal sealed partial class ExportRunState
             _svc._logger.LogWarning("Schema file '{Name}' not found — falling back to inference.", schemaLoadName);
     }
 
-    internal async Task InitializeTransformersAsync(CancellationToken retryCt)
+    internal async Task InitializeTransformersAsync(CancellationToken ct)
     {
         CurrentSchema = Reader.Columns ?? System.Array.Empty<PipeColumnInfo>();
         TransformerSchemas = new Dictionary<IDataTransformer, (IReadOnlyList<PipeColumnInfo> In, IReadOnlyList<PipeColumnInfo> Out)>();
@@ -43,7 +43,7 @@ internal sealed partial class ExportRunState
         foreach (var t in Pipeline)
         {
             var inputSchema = CurrentSchema;
-            CurrentSchema = await t.InitializeAsync(CurrentSchema, retryCt);
+            CurrentSchema = await t.InitializeAsync(CurrentSchema, ct);
             TransformerSchemas[t] = (inputSchema, CurrentSchema);
         }
     }
@@ -77,13 +77,13 @@ internal sealed partial class ExportRunState
         _svc._channelRegistry.UpdateChannelColumns(Alias, CurrentSchema ?? System.Array.Empty<PipeColumnInfo>());
     }
 
-    internal async Task InferAdvisoryAsync(CancellationToken retryCt)
+    internal async Task InferAdvisoryAsync(CancellationToken ct)
     {
         if (Options.DryRunCount <= 0 || Reader is not IColumnTypeInferenceCapable inferCapable) return;
         try
         {
             var sampleCount = Math.Max(Options.DryRunCount, 100);
-            var suggested = await inferCapable.InferColumnTypesAsync(sampleCount, retryCt);
+            var suggested = await inferCapable.InferColumnTypesAsync(sampleCount, ct);
             if (suggested.Count > 0 && !SilenceInternal)
                 Observer.ShowColumnTypeInferenceSuggestion(suggested, sampleCount);
         }
@@ -126,7 +126,7 @@ internal sealed partial class ExportRunState
     /// inspection captured during writer preparation, the tap's capture, and the validators.
     /// Nothing re-reads the source.
     /// </summary>
-    internal async Task RenderSampleReportAsync(CancellationToken retryCt)
+    internal async Task RenderSampleReportAsync(CancellationToken ct)
     {
         if (SampleResult is null) return;
 
@@ -148,6 +148,6 @@ internal sealed partial class ExportRunState
         bool isInteractive = string.IsNullOrEmpty(Options.DryRunInteractiveBranch)
             || string.Equals(Alias, Options.DryRunInteractiveBranch, StringComparison.OrdinalIgnoreCase);
 
-        await Observer.RenderSampleReportAsync(report, executionPlan, isInteractive && !SilenceInternal, retryCt);
+        await Observer.RenderSampleReportAsync(report, executionPlan, isInteractive && !SilenceInternal, ct);
     }
 }

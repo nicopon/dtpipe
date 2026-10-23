@@ -89,7 +89,7 @@ See [Secrets](secrets.md).
 ## In CI
 
 A job file is what you put under review; the flags that make a run legible to a machine — exit
-codes, metrics, logs, `--strict-bindings`, `--retry` — are in
+codes, metrics, logs, `--strict-bindings` — and what to do when a run fails are in
 [Running in production](production.md).
 
 ---

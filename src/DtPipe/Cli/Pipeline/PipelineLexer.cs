@@ -21,6 +21,18 @@ public class PipelineLexer
 
     private readonly FlagRegistry _registry;
 
+    /// <summary>
+    /// Flags dtpipe no longer declares, refused by name with what replaces them. An undeclared
+    /// switch is otherwise tolerated without <c>--strict-bindings</c>, so a command line that still
+    /// carries one would run, exit 0 and do less than it says.
+    /// </summary>
+    private static readonly Dictionary<string, string> RetiredFlags = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["--retry"] = "dtpipe does not run a failed export again. The scheduler that started it runs it again, "
+                    + "and a write strategy of Upsert or a cursor makes that run resume rather than repeat "
+                    + "(docs/guides/production.md).",
+    };
+
     public PipelineLexer(FlagRegistry registry)
     {
         _registry = registry;
@@ -140,6 +152,9 @@ public class PipelineLexer
             {
                 if (token.StartsWith('-'))
                 {
+                    if (RetiredFlags.TryGetValue(token, out var retired))
+                        throw new InvalidOperationException($"Flag '{token}' does not exist any more: {retired}");
+
                     // `--flag=value` is not a spelling the grammar has: the whole token is an
                     // unknown flag, which binds nothing and exits 0 with the option unchanged.
                     var equals = token.IndexOf('=');

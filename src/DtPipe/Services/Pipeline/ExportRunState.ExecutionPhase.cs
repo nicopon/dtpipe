@@ -14,7 +14,7 @@ namespace DtPipe.Services.Pipeline;
 //    pre-hook, progress) and the segmented pipeline execution with hooks/metrics. ──
 internal sealed partial class ExportRunState
 {
-    internal async Task PrepareWriterAsync(CancellationToken retryCt)
+    internal async Task PrepareWriterAsync(CancellationToken ct)
     {
         if (ShowStatusMessages && !SilenceInternal)
             Observer.ShowTarget(WriterFactory.ComponentName, OutputPath);
@@ -34,7 +34,7 @@ internal sealed partial class ExportRunState
             EnforceSampleSafety();
             if (NeutralisesWriter)
             {
-                await PrepareSampleWriterAsync(exportableSchema, retryCt);
+                await PrepareSampleWriterAsync(exportableSchema, ct);
                 return;
             }
         }
@@ -69,18 +69,18 @@ internal sealed partial class ExportRunState
         WriterHooks = Registry.Get(WriterFactory.OptionsType) as IHookAware;
 
         // Schema Validation
-        await _svc._schemaValidator.ValidateAndMigrateAsync(Writer, exportableSchema, writerSchemaSettings, retryCt);
+        await _svc._schemaValidator.ValidateAndMigrateAsync(Writer, exportableSchema, writerSchemaSettings, ct);
 
         // Execute Pre-Hook (from writer options)
-        await _svc._hookExecutor.ExecuteAsync(Writer, "Pre-Hook", WriterHooks?.PreExec, retryCt);
+        await _svc._hookExecutor.ExecuteAsync(Writer, "Pre-Hook", WriterHooks?.PreExec, ct);
 
-        await EffectiveWriter.InitializeAsync(exportableSchema, retryCt);
+        await EffectiveWriter.InitializeAsync(exportableSchema, ct);
 
         if (IsSampleMode) BeginSampleCapture();
 
         Progress = CreateProgress();
 
-        LinkedCts = CancellationTokenSource.CreateLinkedTokenSource(retryCt);
+        LinkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
 
         PropagateSegmentArrowSchemas();
     }
@@ -104,7 +104,7 @@ internal sealed partial class ExportRunState
     /// call is what creates the file. A writer that does not leave the process (the channel to
     /// another branch) is not replaced: it takes the ordinary path, minus the cursor.
     /// </summary>
-    private async Task PrepareSampleWriterAsync(IReadOnlyList<PipeColumnInfo> exportableSchema, CancellationToken retryCt)
+    private async Task PrepareSampleWriterAsync(IReadOnlyList<PipeColumnInfo> exportableSchema, CancellationToken ct)
     {
         CursorTracker = null;
         EffectiveWriter = SampleModeSink.Wrap(Writer);
@@ -119,7 +119,7 @@ internal sealed partial class ExportRunState
         {
             try
             {
-                InspectedTarget = await inspector.InspectTargetAsync(retryCt);
+                InspectedTarget = await inspector.InspectTargetAsync(ct);
             }
             catch (Exception ex)
             {
@@ -129,12 +129,12 @@ internal sealed partial class ExportRunState
             }
         }
 
-        await EffectiveWriter.InitializeAsync(exportableSchema, retryCt);
+        await EffectiveWriter.InitializeAsync(exportableSchema, ct);
 
         BeginSampleCapture();
 
         Progress = CreateProgress();
-        LinkedCts = CancellationTokenSource.CreateLinkedTokenSource(retryCt);
+        LinkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
 
         PropagateSegmentArrowSchemas();
     }
@@ -242,7 +242,7 @@ internal sealed partial class ExportRunState
                 suppressCompletionOutput: ResultsCollector != null);
     }
 
-    internal async Task ExecutePipelineAsync(CancellationToken retryCt)
+    internal async Task ExecutePipelineAsync(CancellationToken ct)
     {
         var exportableSchema = CurrentSchema ?? throw new InvalidOperationException("Exportable schema is null.");
         var effectiveCt = LinkedCts.Token;
@@ -299,7 +299,7 @@ internal sealed partial class ExportRunState
                 // transaction — the sink's is a no-op and the real writer never sees one. The
                 // channel to the next branch is not such a writer: it stays open until completed,
                 // and the branch reading it waits for that.
-                if (!NeutralisesWriter) await Writer.CompleteAsync(retryCt);
+                if (!NeutralisesWriter) await Writer.CompleteAsync(ct);
                 SampleResult = SampleTap!.Build(
                     Progress.GetMetrics().ReadCount,
                     (EffectiveWriter as ISampleModeSink)?.RowsWritten ?? Progress.GetMetrics().WriteCount);
@@ -307,7 +307,7 @@ internal sealed partial class ExportRunState
                 return;
             }
 
-            await Writer.CompleteAsync(retryCt);
+            await Writer.CompleteAsync(ct);
             Logger.LogDebug("[Cursor] persisting state if tracked");
 
             // Persist cursor state after successful CompleteAsync
@@ -337,9 +337,9 @@ internal sealed partial class ExportRunState
                 Logger.LogInformation("Export completed in {Elapsed}. Written {Rows} rows ({Speed:F1} rows/s).", elapsed, Progress.GetMetrics().WriteCount, rowsPerSecond);
 
             // ── POST-EXEC HOOK + METRICS ──
-            await _svc._hookExecutor.ExecuteAsync(Writer, "Post-Hook", WriterHooks?.PostExec, retryCt);
+            await _svc._hookExecutor.ExecuteAsync(Writer, "Post-Hook", WriterHooks?.PostExec, ct);
             Logger.LogDebug("[Metrics] saving run metrics");
-            await _svc._metricsService.SaveMetricsAsync(Progress, Options.MetricsPath, retryCt);
+            await _svc._metricsService.SaveMetricsAsync(Progress, Options.MetricsPath, ct);
         }
         catch (OperationCanceledException)
         {

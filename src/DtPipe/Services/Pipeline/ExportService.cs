@@ -1,5 +1,4 @@
 using System.Threading.Channels;
-using DtPipe.Adapters.Shared.Infrastructure.Retry;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
@@ -15,7 +14,6 @@ using DtPipe.Core.Pipelines;
 using DtPipe.Configuration;
 using Apache.Arrow.Types;
 using DtPipe.Services;
-using DtPipe.Core.Infrastructure.Retry;
 using DtPipe.Services.Pipeline;
 
 namespace DtPipe;
@@ -97,15 +95,9 @@ public class ExportService
             _observer.ShowConnectionStatus(false, null);
         }
 
-        var retryPolicy = options.Retry
-            ? new DatabaseRetryPolicy(3, TimeSpan.FromSeconds(1))
-            : (IRetryPolicy)NoRetryPolicy.Instance;
-        await retryPolicy.ExecuteAsync(async retryCt =>
-        {
-            var state = new ExportRunState(this, options, providerName, outputPath, pipeline, readerFactory, writerFactory,
-                registry, alias, resultsCollector, showStatusMessages, silenceInternal, outputIsStdio);
-            await state.RunAsync(retryCt);
-        }, ct);
+        var state = new ExportRunState(this, options, providerName, outputPath, pipeline, readerFactory, writerFactory,
+            registry, alias, resultsCollector, showStatusMessages, silenceInternal, outputIsStdio);
+        await state.RunAsync(ct);
     }
 
     /// <summary>

@@ -34,9 +34,6 @@ public sealed record PipelineOptions : IOptionSet
     [ComponentOption("--ignore-nulls", Description = "Skip null values in processing")]
     public bool IgnoreNulls { get; init; }
 
-    [ComponentOption("--retry", Description = "Enable exponential backoff retry policy for transient database/network errors (3 attempts)")]
-    public bool Retry { get; init; } = false;
-
     // --- Execution controls (not CLI flags; set by LinearPipelineService from JobDefinition) ---
     public string? MetricsPath { get; init; }
     public bool NoStats { get; init; } = false;

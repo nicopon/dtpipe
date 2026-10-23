@@ -365,6 +365,18 @@ public class PipelineLexerTests
         Assert.Contains("--custom-flag", pipeline.Branches[0].RawArgs);
     }
 
+    /// <summary>A retired switch is refused by name, with or without --strict-bindings: tolerated as
+    /// an unknown boolean, the run would go on without what the command line asks for.</summary>
+    [Fact]
+    public void A_Retired_Flag_Is_Refused_By_Name()
+    {
+        var ex = Assert.Throws<InvalidOperationException>(
+            () => _lexer.Parse(new[] { "-i", "a.csv", "-o", "out.csv", "--retry" }));
+
+        Assert.Contains("--retry", ex.Message);
+        Assert.Contains("production.md", ex.Message);
+    }
+
     // ── Reader flags in a branch that has no reader ─────────────────────
 
     [Theory]
