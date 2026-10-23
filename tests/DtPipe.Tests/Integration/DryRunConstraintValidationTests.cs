@@ -14,7 +14,7 @@ public class DryRunConstraintValidationTests
 {
     private class MockSchemaInspector : ISchemaInspector, IHasSqlDialect
     {
-        public ISqlDialect Dialect { get; set; } = new DtPipe.Core.Dialects.PostgreSqlDialect(); // Default to PG
+        public ISqlDialect Dialect { get; set; } = new DtPipe.Adapters.Shared.Dialects.PostgreSqlDialect(); // Default to PG
         public List<TargetColumnInfo> TargetColumns { get; set; } = new();
         public List<string>? TargetPKs { get; set; } = null;
         public List<string>? TargetUniqueCols { get; set; } = null;

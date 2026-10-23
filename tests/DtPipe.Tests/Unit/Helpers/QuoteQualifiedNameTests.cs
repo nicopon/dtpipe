@@ -1,5 +1,5 @@
 using AwesomeAssertions;
-using DtPipe.Core.Dialects;
+using DtPipe.Adapters.Shared.Dialects;
 using DtPipe.Core.Helpers;
 using Xunit;
 

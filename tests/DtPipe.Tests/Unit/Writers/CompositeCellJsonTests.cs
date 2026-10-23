@@ -1,6 +1,7 @@
 using Apache.Arrow;
 using Apache.Arrow.Types;
 using AwesomeAssertions;
+using DtPipe.Adapters.Shared.Infrastructure;
 using DtPipe.Core.Helpers;
 using DtPipe.Tests.Helpers;
 using Xunit;

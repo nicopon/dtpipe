@@ -3,6 +3,7 @@ using System.Data;
 using System.Text;
 using Apache.Arrow;
 using Apache.Arrow.Ado;
+using DtPipe.Adapters.Shared.Infrastructure;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Helpers;
 using DtPipe.Core.Infrastructure.Arrow;
@@ -25,7 +26,7 @@ public sealed class DuckDbDataWriter : IColumnarDataWriter, ISchemaInspector, IK
     private readonly DuckDbWriterOptions _options;
     private readonly ILogger<DuckDbDataWriter> _logger;
     private readonly ITypeMapper _typeMapper;
-    private readonly ISqlDialect _dialect = new DtPipe.Core.Dialects.DuckDbDialect();
+    private readonly ISqlDialect _dialect = new DtPipe.Adapters.Shared.Dialects.DuckDbDialect();
 
     public bool RequiresTargetInspection => _options.Strategy != DuckDbWriteStrategy.Recreate;
 

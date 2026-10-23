@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Threading.Tasks;
+using DtPipe.Adapters.Shared.Cursor;
 using DtPipe.Core.Cursor;
 using Xunit;
 

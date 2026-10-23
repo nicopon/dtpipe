@@ -2,6 +2,8 @@ using System.Data;
 using System.Data.Common;
 using System.Text;
 using System.Text.RegularExpressions;
+using DtPipe.Adapters.Shared.Abstractions;
+using DtPipe.Adapters.Shared.Infrastructure;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Helpers;
 using DtPipe.Core.Models;
@@ -17,7 +19,7 @@ public sealed class SqliteDataWriter : BaseSqlDataWriter
     private readonly ITypeMapper _typeMapper;
     private List<string> _keyColumns = new();
 
-    private readonly ISqlDialect _dialect = new DtPipe.Core.Dialects.SqliteDialect();
+    private readonly ISqlDialect _dialect = new DtPipe.Adapters.Shared.Dialects.SqliteDialect();
     public override ISqlDialect Dialect => _dialect;
 
     public override bool RequiresTargetInspection => _options.Strategy != SqliteWriteStrategy.Recreate;

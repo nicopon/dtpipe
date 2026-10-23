@@ -1,6 +1,6 @@
 using DtPipe.Core.Abstractions;
 
-namespace DtPipe.Core.Dialects;
+namespace DtPipe.Adapters.Shared.Dialects;
 
 public class SqlServerDialect : BaseSqlDialect
 {

@@ -1,6 +1,6 @@
 using AwesomeAssertions;
 using DtPipe.Core.Abstractions;
-using DtPipe.Core.Dialects;
+using DtPipe.Adapters.Shared.Dialects;
 using Xunit;
 
 namespace DtPipe.Tests.Unit.Helpers;

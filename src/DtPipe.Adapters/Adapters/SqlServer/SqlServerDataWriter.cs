@@ -1,6 +1,8 @@
 using System.Data;
 using System.Text;
 using Apache.Arrow;
+using DtPipe.Adapters.Shared.Abstractions;
+using DtPipe.Adapters.Shared.Infrastructure;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Helpers;
 using DtPipe.Core.Models;
@@ -19,7 +21,7 @@ public class SqlServerDataWriter : BaseSqlDataWriter, IColumnarDataWriter
     private readonly ILogger<SqlServerDataWriter> _logger;
 
     // Explicit backing field for dialect to implement abstract property
-    private readonly ISqlDialect _dialect = new DtPipe.Core.Dialects.SqlServerDialect();
+    private readonly ISqlDialect _dialect = new DtPipe.Adapters.Shared.Dialects.SqlServerDialect();
     public override ISqlDialect Dialect => _dialect;
 
     public override bool RequiresTargetInspection => _options.Strategy != SqlServerWriteStrategy.Recreate;

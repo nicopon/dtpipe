@@ -1,3 +1,4 @@
+using DtPipe.Adapters.Shared.Cursor;
 using DtPipe.Core.Cursor;
 using DtPipe.Core.Expressions;
 

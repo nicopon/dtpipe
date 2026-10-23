@@ -4,7 +4,7 @@ using DtPipe.Core.Options;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
-using DtPipe.Core.Dialects;
+using DtPipe.Adapters.Shared.Dialects;
 
 namespace DtPipe.Adapters.Oracle;
 

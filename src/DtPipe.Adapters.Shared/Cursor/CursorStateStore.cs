@@ -1,9 +1,10 @@
-namespace DtPipe.Core.Cursor;
+namespace DtPipe.Adapters.Shared.Cursor;
 
 using System;
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using DtPipe.Core.Cursor;
 
 /// <summary>
 /// Reads and writes cursor state files (JSON).

@@ -3,8 +3,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using Polly;
 using Polly.Retry;
+using IRetryPolicy = DtPipe.Core.Infrastructure.Retry.IRetryPolicy;
 
-namespace DtPipe.Core.Infrastructure.Retry;
+namespace DtPipe.Adapters.Shared.Infrastructure.Retry;
 
 public class DatabaseRetryPolicy : IRetryPolicy
 {

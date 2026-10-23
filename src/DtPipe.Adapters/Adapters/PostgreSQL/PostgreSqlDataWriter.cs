@@ -4,6 +4,8 @@ using System.Data.Common;
 using System.Text;
 using Apache.Arrow;
 using Apache.Arrow.Arrays;
+using DtPipe.Adapters.Shared.Abstractions;
+using DtPipe.Adapters.Shared.Infrastructure;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Core.Models;
@@ -32,7 +34,7 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter, IColumnarD
     // Action<array, rowIndex, importer> — sync Npgsql Write<T>(), zero boxing, zero Task allocation
     private Action<IArrowArray, int, NpgsqlBinaryImporter>[]? _arrowColumnWriters;
 
-    private readonly ISqlDialect _dialect = new DtPipe.Core.Dialects.PostgreSqlDialect();
+    private readonly ISqlDialect _dialect = new DtPipe.Adapters.Shared.Dialects.PostgreSqlDialect();
     public override ISqlDialect Dialect => _dialect;
 
     public override bool RequiresTargetInspection => _options.Strategy != PostgreSqlWriteStrategy.Recreate;

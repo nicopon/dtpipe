@@ -126,12 +126,12 @@ public class SampleModeSafetyGateTests
     [Fact]
     public void The_Real_Dialects_Declare_What_They_Can_Actually_Enforce()
     {
-        new DtPipe.Core.Dialects.PostgreSqlDialect().ReadOnlySessionSql.Should().Contain("READ ONLY");
-        new DtPipe.Core.Dialects.OracleDialect().ReadOnlySessionSql.Should().Contain("READ ONLY");
-        new DtPipe.Core.Dialects.MySqlDialect().ReadOnlySessionSql.Should().Contain("READ ONLY");
-        new DtPipe.Core.Dialects.SqliteDialect().ReadOnlySessionSql.Should().Contain("query_only");
+        new DtPipe.Adapters.Shared.Dialects.PostgreSqlDialect().ReadOnlySessionSql.Should().Contain("READ ONLY");
+        new DtPipe.Adapters.Shared.Dialects.OracleDialect().ReadOnlySessionSql.Should().Contain("READ ONLY");
+        new DtPipe.Adapters.Shared.Dialects.MySqlDialect().ReadOnlySessionSql.Should().Contain("READ ONLY");
+        new DtPipe.Adapters.Shared.Dialects.SqliteDialect().ReadOnlySessionSql.Should().Contain("query_only");
 
-        new DtPipe.Core.Dialects.SqlServerDialect().ReadOnlySessionSql.Should().BeNull(
+        new DtPipe.Adapters.Shared.Dialects.SqlServerDialect().ReadOnlySessionSql.Should().BeNull(
             "ApplicationIntent=ReadOnly routes to a replica; it does not make a session read-only, and claiming otherwise would be the lie this gate exists to prevent");
     }
 

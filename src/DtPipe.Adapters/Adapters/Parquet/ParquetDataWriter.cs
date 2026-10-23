@@ -1,4 +1,5 @@
 using Apache.Arrow;
+using DtPipe.Adapters.Shared.Infrastructure;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Helpers;
 using DtPipe.Core.Models;

@@ -1,8 +1,9 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using DtPipe.Core.Infrastructure.Retry;
 
-namespace DtPipe.Core.Infrastructure.Retry;
+namespace DtPipe.Adapters.Shared.Infrastructure.Retry;
 
 public class NoRetryPolicy : IRetryPolicy
 {

@@ -840,9 +840,9 @@ public class IncrementalLoadingIntegrationTests : IAsyncLifetime
             var cursor = new DtPipe.Core.Cursor.CursorValue("updated_at", "2026-06-16T14:00:00.000", DtPipe.Core.Cursor.CursorType.DateTime);
             var meta = new DtPipe.Core.Cursor.CursorRunMetadata(DateTime.UtcNow.AddMinutes(-1), DateTime.UtcNow, 42, "success");
 
-            DtPipe.Core.Cursor.CursorStateStore.Save(path, cursor, meta);
+            DtPipe.Adapters.Shared.Cursor.CursorStateStore.Save(path, cursor, meta);
 
-            var readCursor = DtPipe.Core.Cursor.CursorStateStore.Read(path);
+            var readCursor = DtPipe.Adapters.Shared.Cursor.CursorStateStore.Read(path);
             readCursor.Should().NotBeNull();
             readCursor!.Column.Should().Be("updated_at");
             readCursor.Value.Should().Be("2026-06-16T14:00:00.000");

@@ -58,7 +58,7 @@ internal sealed partial class ExportRunState
                 EffectiveWriter = rowDecorator;
             }
 
-            var currentCursor = DtPipe.Core.Cursor.CursorStateStore.Read(Options.State);
+            var currentCursor = DtPipe.Adapters.Shared.Cursor.CursorStateStore.Read(Options.State);
             if (currentCursor != null && !SilenceInternal)
                 Observer.LogMessage($"[grey]   Cursor loaded: {currentCursor.Column} = {currentCursor.Value} (from {Options.State})[/]");
             else if (!SilenceInternal)
@@ -318,7 +318,7 @@ internal sealed partial class ExportRunState
                     CompletedAt: DateTime.UtcNow,
                     RowsTransferred: Progress.GetMetrics().WriteCount,
                     Status: "success");
-                DtPipe.Core.Cursor.CursorStateStore.Save(Options.State, CursorTracker.TrackedMaxValue, runMeta);
+                DtPipe.Adapters.Shared.Cursor.CursorStateStore.Save(Options.State, CursorTracker.TrackedMaxValue, runMeta);
                 if (!SilenceInternal)
                     Observer.LogMessage($"[grey]   Cursor saved: {Options.Cursor} = {CursorTracker.TrackedMaxValue.Value} → {Options.State}[/]");
             }

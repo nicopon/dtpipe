@@ -196,7 +196,7 @@ joined:
         var path = Path.Combine(Path.GetTempPath(), "test_yaml_cursor_" + Guid.NewGuid().ToString("N") + ".sync").Replace("\\", "/");
         var cursor = new DtPipe.Core.Cursor.CursorValue("updated_at", "2026-06-16T12:00:00Z", DtPipe.Core.Cursor.CursorType.DateTime);
         var meta = new DtPipe.Core.Cursor.CursorRunMetadata(DateTime.UtcNow, DateTime.UtcNow, 100, "success");
-        DtPipe.Core.Cursor.CursorStateStore.Save(path, cursor, meta);
+        DtPipe.Adapters.Shared.Cursor.CursorStateStore.Save(path, cursor, meta);
 
         var yaml = $@"main:
   input: select * from t where updated_at >= '${{{{cursor://{path}|1970-01-01}}}}'

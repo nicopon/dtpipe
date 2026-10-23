@@ -2,6 +2,8 @@ using System.Data;
 using System.Text;
 using Apache.Arrow;
 using Apache.Arrow.Ado;
+using DtPipe.Adapters.Shared.Abstractions;
+using DtPipe.Adapters.Shared.Infrastructure;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Helpers;
 using DtPipe.Core.Models;
@@ -16,7 +18,7 @@ public sealed partial class MySqlDataWriter : BaseSqlDataWriter, IColumnarDataWr
     private readonly ILogger<MySqlDataWriter> _logger;
     private readonly ITypeMapper _typeMapper;
 
-    private readonly ISqlDialect _dialect = new DtPipe.Core.Dialects.MySqlDialect();
+    private readonly ISqlDialect _dialect = new DtPipe.Adapters.Shared.Dialects.MySqlDialect();
     public override ISqlDialect Dialect => _dialect;
 
     private readonly List<string> _keyColumns = new();

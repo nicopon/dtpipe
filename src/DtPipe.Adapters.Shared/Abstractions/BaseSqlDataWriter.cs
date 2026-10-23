@@ -2,9 +2,9 @@ using System.Data;
 using DtPipe.Core.Models;
 using DtPipe.Core.Helpers;
 using System.Text;
-using DtPipe.Adapters.Shared.Abstractions;
+using DtPipe.Core.Abstractions;
 
-namespace DtPipe.Core.Abstractions;
+namespace DtPipe.Adapters.Shared.Abstractions;
 
 /// <summary>
 /// Abstract base class for SQL-based DataWriters that share common lifecycle logic:

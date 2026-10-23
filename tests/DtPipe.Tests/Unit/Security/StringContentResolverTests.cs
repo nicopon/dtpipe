@@ -238,7 +238,7 @@ public class CompositeStringContentResolverTests : IAsyncLifetime
         {
             var cursor = new DtPipe.Core.Cursor.CursorValue("updated_at", "2026-06-16T12:00:00Z", DtPipe.Core.Cursor.CursorType.DateTime);
             var meta = new DtPipe.Core.Cursor.CursorRunMetadata(DateTime.UtcNow, DateTime.UtcNow, 100, "success");
-            DtPipe.Core.Cursor.CursorStateStore.Save(path, cursor, meta);
+            DtPipe.Adapters.Shared.Cursor.CursorStateStore.Save(path, cursor, meta);
 
             var input = "SELECT * FROM orders WHERE updated_at >= '${{cursor://" + path + "}}'";
             var result = await _resolver.ResolveAsync(input);
@@ -277,7 +277,7 @@ public class CompositeStringContentResolverTests : IAsyncLifetime
         {
             var cursor = new DtPipe.Core.Cursor.CursorValue("id", "500", DtPipe.Core.Cursor.CursorType.Integer);
             var meta = new DtPipe.Core.Cursor.CursorRunMetadata(DateTime.UtcNow, DateTime.UtcNow, 100, "success");
-            DtPipe.Core.Cursor.CursorStateStore.Save(path, cursor, meta);
+            DtPipe.Adapters.Shared.Cursor.CursorStateStore.Save(path, cursor, meta);
 
             var input = "SELECT * FROM ${{DTPIPE_TEST_RESOLVER_VAR}} WHERE id > ${{cursor://" + path + "}}";
             var result = await _resolver.ResolveAsync(input);

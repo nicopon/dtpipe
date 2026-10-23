@@ -1,7 +1,7 @@
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 
-namespace DtPipe.Core.Dialects;
+namespace DtPipe.Adapters.Shared.Dialects;
 
 public class SqliteDialect : BaseSqlDialect
 {

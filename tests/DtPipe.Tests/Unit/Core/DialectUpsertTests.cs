@@ -1,5 +1,5 @@
 using DtPipe.Core.Abstractions;
-using DtPipe.Core.Dialects;
+using DtPipe.Adapters.Shared.Dialects;
 using DtPipe.Core.Models;
 using Xunit;
 

@@ -1,3 +1,5 @@
+using DtPipe.Adapters.Shared.Abstractions;
+using DtPipe.Adapters.Shared.Infrastructure;
 using Oracle.ManagedDataAccess.Client;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
@@ -28,7 +30,7 @@ public sealed class OracleDataWriter : BaseSqlDataWriter
     private List<string> _keyColumns = new();
     private List<int> _keyIndices = new();
 
-    public override ISqlDialect Dialect => new DtPipe.Core.Dialects.OracleDialect();
+    public override ISqlDialect Dialect => new DtPipe.Adapters.Shared.Dialects.OracleDialect();
 
     public override bool RequiresTargetInspection => _options.Strategy != OracleWriteStrategy.Recreate;
 

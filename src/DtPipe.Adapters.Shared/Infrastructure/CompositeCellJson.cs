@@ -4,7 +4,7 @@ using Apache.Arrow;
 using Apache.Arrow.Types;
 using DtPipe.Core.Infrastructure.Arrow;
 
-namespace DtPipe.Core.Helpers;
+namespace DtPipe.Adapters.Shared.Infrastructure;
 
 /// <summary>
 /// Renders a composite cell — a JSON object, an Arrow struct, a list, an array column — as JSON

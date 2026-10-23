@@ -1,4 +1,4 @@
-namespace DtPipe.Core.Dialects;
+namespace DtPipe.Adapters.Shared.Dialects;
 
 public class PostgreSqlDialect : BaseSqlDialect
 {

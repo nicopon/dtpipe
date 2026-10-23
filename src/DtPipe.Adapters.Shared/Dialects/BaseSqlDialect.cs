@@ -2,7 +2,7 @@ using System.Text.RegularExpressions;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 
-namespace DtPipe.Core.Dialects;
+namespace DtPipe.Adapters.Shared.Dialects;
 
 /// <summary>
 /// Base class for SQL dialects implementing common behavior.

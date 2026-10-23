@@ -76,7 +76,7 @@ public class DryRunKeyValidationTests
         {
             IsRequired = true,
             RequestedKeys = new List<string> { "id" },
-            Dialect = new DtPipe.Core.Dialects.PostgreSqlDialect(),
+            Dialect = new DtPipe.Adapters.Shared.Dialects.PostgreSqlDialect(),
             TargetPKs = new List<string> { "id" } // Target agrees
         };
         writer.TargetColumns = new List<PipeColumnInfo>
@@ -111,7 +111,7 @@ public class DryRunKeyValidationTests
         {
             IsRequired = true,
             RequestedKeys = new List<string> { "invalid_col" },
-            Dialect = new DtPipe.Core.Dialects.PostgreSqlDialect()
+            Dialect = new DtPipe.Adapters.Shared.Dialects.PostgreSqlDialect()
         };
         writer.TargetColumns = new List<PipeColumnInfo>
         {
@@ -144,7 +144,7 @@ public class DryRunKeyValidationTests
         {
             IsRequired = true,
             RequestedKeys = new List<string> { "ID" },
-            Dialect = new DtPipe.Core.Dialects.PostgreSqlDialect(),
+            Dialect = new DtPipe.Adapters.Shared.Dialects.PostgreSqlDialect(),
             TargetPKs = new List<string> { "id" }
         };
         writer.TargetColumns = new List<PipeColumnInfo> { new("id", typeof(int), false) };
@@ -166,7 +166,7 @@ public class DryRunKeyValidationTests
         {
             IsRequired = false,
             RequestedKeys = new List<string>(),
-            Dialect = new DtPipe.Core.Dialects.PostgreSqlDialect()
+            Dialect = new DtPipe.Adapters.Shared.Dialects.PostgreSqlDialect()
         };
         writer.TargetColumns = new List<PipeColumnInfo> { new("id", typeof(int), false) };
 
@@ -187,7 +187,7 @@ public class DryRunKeyValidationTests
         {
             IsRequired = true,
             RequestedKeys = new List<string>(),
-            Dialect = new DtPipe.Core.Dialects.PostgreSqlDialect()
+            Dialect = new DtPipe.Adapters.Shared.Dialects.PostgreSqlDialect()
         };
         writer.TargetColumns = new List<PipeColumnInfo> { new("id", typeof(int), false) };
 
@@ -211,7 +211,7 @@ public class DryRunKeyValidationTests
         {
             IsRequired = true,
             RequestedKeys = new List<string> { "id", "tenant_id" },
-            Dialect = new DtPipe.Core.Dialects.PostgreSqlDialect(),
+            Dialect = new DtPipe.Adapters.Shared.Dialects.PostgreSqlDialect(),
             TargetPKs = new List<string> { "id", "tenant_id" } // Exact match
         };
         writer.TargetColumns = new List<PipeColumnInfo>
@@ -238,7 +238,7 @@ public class DryRunKeyValidationTests
         {
             IsRequired = true,
             RequestedKeys = new List<string> { "id" },
-            Dialect = new DtPipe.Core.Dialects.PostgreSqlDialect(),
+            Dialect = new DtPipe.Adapters.Shared.Dialects.PostgreSqlDialect(),
             TargetPKs = new List<string> { "id", "tenant_id" } // Mismatch
         };
         writer.TargetColumns = new List<PipeColumnInfo>
@@ -265,7 +265,7 @@ public class DryRunKeyValidationTests
         {
             IsRequired = true,
             RequestedKeys = new List<string> { "id", "tenant_id" },
-            Dialect = new DtPipe.Core.Dialects.PostgreSqlDialect(),
+            Dialect = new DtPipe.Adapters.Shared.Dialects.PostgreSqlDialect(),
             TargetPKs = new List<string> { "id" } // Target is simpler
         };
         writer.TargetColumns = new List<PipeColumnInfo>
@@ -294,7 +294,7 @@ public class DryRunKeyValidationTests
         {
             IsRequired = true,
             RequestedKeys = new List<string> { "id" },
-            Dialect = new DtPipe.Core.Dialects.PostgreSqlDialect(),
+            Dialect = new DtPipe.Adapters.Shared.Dialects.PostgreSqlDialect(),
             TargetPKs = new List<string>() // Empty!
         };
         writer.TargetColumns = new List<PipeColumnInfo>
