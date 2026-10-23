@@ -62,9 +62,9 @@ public class McpToolReflectorTests
     {
         var dummy = new DummyMcpTools();
         using var argsDoc = JsonDocument.Parse(@"{ ""input"": ""test.csv"", ""limit"": 10 }");
-        
+
         var resultJson = await McpToolReflector.InvokeToolAsync(dummy, "sample-tool", argsDoc.RootElement, CancellationToken.None);
-        
+
         Assert.Contains("test.csv", resultJson);
         Assert.Contains("10", resultJson);
     }

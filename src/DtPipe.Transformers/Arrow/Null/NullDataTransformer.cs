@@ -12,66 +12,66 @@ namespace DtPipe.Transformers.Arrow.Null;
 /// </summary>
 public class NullDataTransformer : BaseColumnarTransformer, IRequiresOptions<DtPipe.Transformers.Arrow.Null.NullOptions>
 {
-	private readonly HashSet<string> _nullColumns;
-	private int[]? _targetIndices;
+    private readonly HashSet<string> _nullColumns;
+    private int[]? _targetIndices;
 
-	public override bool CanProcessColumnar => true;
+    public override bool CanProcessColumnar => true;
 
-	public NullDataTransformer(DtPipe.Transformers.Arrow.Null.NullOptions options)
-	{
-		_nullColumns = new HashSet<string>(options.Columns.Select(c => c.Trim()), StringComparer.OrdinalIgnoreCase);
-	}
+    public NullDataTransformer(DtPipe.Transformers.Arrow.Null.NullOptions options)
+    {
+        _nullColumns = new HashSet<string>(options.Columns.Select(c => c.Trim()), StringComparer.OrdinalIgnoreCase);
+    }
 
-	public override async ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
-	{
-		await base.InitializeAsync(columns, ct);
-		if (_nullColumns.Count == 0)
-		{
-			_targetIndices = null;
-			return columns;
-		}
+    public override async ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
+    {
+        await base.InitializeAsync(columns, ct);
+        if (_nullColumns.Count == 0)
+        {
+            _targetIndices = null;
+            return columns;
+        }
 
-		var indices = new List<int>();
-		for (var i = 0; i < columns.Count; i++)
-		{
-			if (_nullColumns.Contains(columns[i].Name))
-			{
-				indices.Add(i);
-			}
-		}
+        var indices = new List<int>();
+        for (var i = 0; i < columns.Count; i++)
+        {
+            if (_nullColumns.Contains(columns[i].Name))
+            {
+                indices.Add(i);
+            }
+        }
 
-		_targetIndices = indices.Count > 0 ? indices.ToArray() : null;
-		return columns;
-	}
+        _targetIndices = indices.Count > 0 ? indices.ToArray() : null;
+        return columns;
+    }
 
-	protected override ValueTask<RecordBatch?> TransformBatchSafeAsync(RecordBatch batch, CancellationToken ct = default)
-	{
-		if (_targetIndices == null) return new ValueTask<RecordBatch?>(batch);
+    protected override ValueTask<RecordBatch?> TransformBatchSafeAsync(RecordBatch batch, CancellationToken ct = default)
+    {
+        if (_targetIndices == null) return new ValueTask<RecordBatch?>(batch);
 
-		var arrays = new IArrowArray[batch.Schema.FieldsList.Count];
-		for (int i = 0; i < arrays.Length; i++)
-		{
-			// Aliased columns reused in the output batch — retain so the segment runner can
-			// dispose the input without freeing buffers this output still points at. The
-			// target indices are overwritten with fresh null arrays just below.
-			arrays[i] = ArrowOwnership.RetainArray(batch.Column(i));
-		}
+        var arrays = new IArrowArray[batch.Schema.FieldsList.Count];
+        for (int i = 0; i < arrays.Length; i++)
+        {
+            // Aliased columns reused in the output batch — retain so the segment runner can
+            // dispose the input without freeing buffers this output still points at. The
+            // target indices are overwritten with fresh null arrays just below.
+            arrays[i] = ArrowOwnership.RetainArray(batch.Column(i));
+        }
 
-		foreach (var idx in _targetIndices)
-		{
-			var field = batch.Schema.FieldsList[idx];
-			arrays[idx].Dispose();
-			arrays[idx] = CreateNullArray(field.DataType, batch.Length);
-		}
+        foreach (var idx in _targetIndices)
+        {
+            var field = batch.Schema.FieldsList[idx];
+            arrays[idx].Dispose();
+            arrays[idx] = CreateNullArray(field.DataType, batch.Length);
+        }
 
-		return new ValueTask<RecordBatch?>(new RecordBatch(batch.Schema, arrays, batch.Length));
-	}
+        return new ValueTask<RecordBatch?>(new RecordBatch(batch.Schema, arrays, batch.Length));
+    }
 
-	private static IArrowArray CreateNullArray(IArrowType type, int length)
-	{
-		var builder = ArrowTypeMapper.CreateBuilder(type);
-		for (int i = 0; i < length; i++)
-			ArrowTypeMapper.AppendNull(builder);
-		return ArrowTypeMapper.BuildArray(builder);
-	}
+    private static IArrowArray CreateNullArray(IArrowType type, int length)
+    {
+        var builder = ArrowTypeMapper.CreateBuilder(type);
+        for (int i = 0; i < length; i++)
+            ArrowTypeMapper.AppendNull(builder);
+        return ArrowTypeMapper.BuildArray(builder);
+    }
 }

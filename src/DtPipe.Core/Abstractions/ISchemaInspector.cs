@@ -8,18 +8,18 @@ using DtPipe.Core.Models;
 /// </summary>
 public interface ISchemaInspector
 {
-	/// <summary>
-	/// Gets a value indicating whether the target schema should be inspected.
-	/// Typically true for database appends/merges, false for file overwrites. A target is judged only where this is true,
-	/// by the real run and by a sample run alike; otherwise it reads as a target that does not exist yet.
-	/// </summary>
-	bool RequiresTargetInspection { get; }
+    /// <summary>
+    /// Gets a value indicating whether the target schema should be inspected.
+    /// Typically true for database appends/merges, false for file overwrites. A target is judged only where this is true,
+    /// by the real run and by a sample run alike; otherwise it reads as a target that does not exist yet.
+    /// </summary>
+    bool RequiresTargetInspection { get; }
 
-	/// <summary>
-	/// Inspects the target schema (table, file).
-	/// Returns null if the target does not exist yet.
-	/// </summary>
-	/// <param name="ct">Cancellation token</param>
-	/// <returns>Target schema information, or null if target doesn't exist</returns>
-	Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default);
+    /// <summary>
+    /// Inspects the target schema (table, file).
+    /// Returns null if the target does not exist yet.
+    /// </summary>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Target schema information, or null if target doesn't exist</returns>
+    Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default);
 }

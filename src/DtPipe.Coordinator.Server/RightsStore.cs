@@ -184,8 +184,11 @@ public sealed class RightsStore
             var before = doc.Identities[index];
             var after = Normalized(before with
             {
-                Name = name ?? before.Name, Description = description ?? before.Description,
-                Groups = groups ?? before.Groups, Enabled = enabled ?? before.Enabled, Pipelines = pipelines ?? before.Pipelines,
+                Name = name ?? before.Name,
+                Description = description ?? before.Description,
+                Groups = groups ?? before.Groups,
+                Enabled = enabled ?? before.Enabled,
+                Pipelines = pipelines ?? before.Pipelines,
             });
             CheckUnique(doc.Identities.Select((i, at) => at == index ? after : i).ToList());
             doc.Identities[index] = after;

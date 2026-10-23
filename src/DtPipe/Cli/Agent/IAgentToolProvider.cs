@@ -10,15 +10,15 @@ namespace DtPipe.Cli.Agent;
 /// Allows decoupling the agent execution loop from DtPipeMcpTools.
 /// </summary>
 public interface IAgentToolProvider
- {
+{
     /// <summary>Return all available tool definitions.</summary>
     List<ToolDefinition> GetToolDefinitions();
 
-        /// <summary>
-        /// Return the tool definitions allowed in a given <see cref="AgentMode"/>.
-        /// In <see cref="AgentMode.Plan"/> every tool that declares it writes to a target is
-        /// excluded; the LLM only plans and validates.
-        /// </summary>
+    /// <summary>
+    /// Return the tool definitions allowed in a given <see cref="AgentMode"/>.
+    /// In <see cref="AgentMode.Plan"/> every tool that declares it writes to a target is
+    /// excluded; the LLM only plans and validates.
+    /// </summary>
     List<ToolDefinition> GetToolDefinitions(AgentMode mode);
 
     Task<ToolResult> InvokeToolAsync(string toolName, JsonElement args, CancellationToken ct);

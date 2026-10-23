@@ -19,12 +19,12 @@ public class TransformerYamlTests
         var services = new ServiceCollection();
         services.AddSingleton<OptionsRegistry>();
         services.AddSingleton<IJsEngineProvider, JsEngineProvider>();
-        
+
         // Register factories
         services.AddSingleton<DtPipe.Core.Abstractions.IDataTransformerFactory, WindowDataTransformerFactory>();
         services.AddSingleton<DtPipe.Core.Abstractions.IDataTransformerFactory, ComputeDataTransformerFactory>();
         services.AddSingleton<DtPipe.Core.Abstractions.IDataTransformerFactory, ExpandDataTransformerFactory>();
-        
+
         _sp = services.BuildServiceProvider();
     }
 
@@ -52,14 +52,14 @@ public class TransformerYamlTests
 
             var factory = _sp.GetRequiredService<IEnumerable<DtPipe.Core.Abstractions.IDataTransformerFactory>>()
                 .OfType<WindowDataTransformerFactory>().First();
-            
+
             var transformer = DtPipe.Cli.Pipeline.YamlTransformerBuilder.Build(factory, config) as WindowDataTransformer;
 
             // Assert
             transformer.Should().NotBeNull();
             var options = typeof(WindowDataTransformer).GetField("_options", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
                 ?.GetValue(transformer) as WindowOptions;
-            
+
             options.Should().NotBeNull();
             options!.Script.Should().Be("return rows.map(r => ({ ...r, total: 100 }));");
             options.Count.Should().Be(10);
@@ -92,13 +92,13 @@ public class TransformerYamlTests
             var config = jobs["main"].Transformers!.First();
             var factory = _sp.GetRequiredService<IEnumerable<DtPipe.Core.Abstractions.IDataTransformerFactory>>()
                 .OfType<WindowDataTransformerFactory>().First();
-            
+
             var transformer = DtPipe.Cli.Pipeline.YamlTransformerBuilder.Build(factory, config) as WindowDataTransformer;
 
             // Assert
             var options = typeof(WindowDataTransformer).GetField("_options", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
                 ?.GetValue(transformer) as WindowOptions;
-            
+
             options!.Script.Should().Be("line1;\nline2;");
         }
         finally
@@ -128,13 +128,13 @@ public class TransformerYamlTests
             var config = jobs["main"].Transformers!.First();
             var factory = _sp.GetRequiredService<IEnumerable<DtPipe.Core.Abstractions.IDataTransformerFactory>>()
                 .OfType<ComputeDataTransformerFactory>().First();
-            
+
             var transformer = DtPipe.Cli.Pipeline.YamlTransformerBuilder.Build(factory, config) as ComputeDataTransformer;
 
             // Assert
             var options = typeof(ComputeDataTransformer).GetField("_options", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
                 ?.GetValue(transformer) as ComputeOptions;
-            
+
             options!.Compute.Should().Contain("Val:r.Price * 2");
         }
         finally

@@ -9,62 +9,62 @@ namespace DtPipe.Transformers.Arrow.Fake;
 /// </summary>
 public sealed class PagedFakeValueCache
 {
-	private const int PAGE_SIZE = 1024;
-	private const int MAX_CACHED_VALUES = 65536;
+    private const int PAGE_SIZE = 1024;
+    private const int MAX_CACHED_VALUES = 65536;
 
-	private readonly string _locale;
-	private readonly Func<Faker, object?> _generator;
-	private readonly uint _fakerHash;
-	private readonly int _globalSeedOffset;
-	private readonly Dictionary<int, object?[]> _pages = [];
+    private readonly string _locale;
+    private readonly Func<Faker, object?> _generator;
+    private readonly uint _fakerHash;
+    private readonly int _globalSeedOffset;
+    private readonly Dictionary<int, object?[]> _pages = [];
 
-	public PagedFakeValueCache(string locale, Func<Faker, object?> generator, uint fakerHash, int? globalSeed)
-	{
-		_locale = locale;
-		_generator = generator;
-		_fakerHash = fakerHash;
-		
-		// Mix the global seed with a prime multiplier to distribute seeds effectively.
-		// If no global seed is provided, default offset to 0 to maintain backward compatibility.
-		_globalSeedOffset = globalSeed.HasValue ? unchecked(globalSeed.Value * 31337) : 0;
-	}
+    public PagedFakeValueCache(string locale, Func<Faker, object?> generator, uint fakerHash, int? globalSeed)
+    {
+        _locale = locale;
+        _generator = generator;
+        _fakerHash = fakerHash;
 
-	/// <summary>
-	/// Gets a deterministic fake value for the given index.
-	/// Same index always returns the same value.
-	/// </summary>
-	public object? GetValue(int index)
-	{
-		// Apply modulo to limit total cached values
-		// This bounds memory while maintaining determinism (same index → same value)
-		var boundedIndex = ((index % MAX_CACHED_VALUES) + MAX_CACHED_VALUES) % MAX_CACHED_VALUES;
+        // Mix the global seed with a prime multiplier to distribute seeds effectively.
+        // If no global seed is provided, default offset to 0 to maintain backward compatibility.
+        _globalSeedOffset = globalSeed.HasValue ? unchecked(globalSeed.Value * 31337) : 0;
+    }
 
-		var pageIndex = boundedIndex / PAGE_SIZE;
-		var offset = boundedIndex % PAGE_SIZE;
+    /// <summary>
+    /// Gets a deterministic fake value for the given index.
+    /// Same index always returns the same value.
+    /// </summary>
+    public object? GetValue(int index)
+    {
+        // Apply modulo to limit total cached values
+        // This bounds memory while maintaining determinism (same index → same value)
+        var boundedIndex = ((index % MAX_CACHED_VALUES) + MAX_CACHED_VALUES) % MAX_CACHED_VALUES;
 
-		if (!_pages.TryGetValue(pageIndex, out var page))
-		{
-			page = GeneratePage(pageIndex);
-			_pages[pageIndex] = page;
-		}
+        var pageIndex = boundedIndex / PAGE_SIZE;
+        var offset = boundedIndex % PAGE_SIZE;
 
-		return page[offset];
-	}
+        if (!_pages.TryGetValue(pageIndex, out var page))
+        {
+            page = GeneratePage(pageIndex);
+            _pages[pageIndex] = page;
+        }
 
-	private object?[] GeneratePage(int pageIndex)
-	{
-		// Compute a deterministic seed for this page.
-		// Combine global seed offset + fakerHash + pageIndex to ensure different pages and configurations have different seeds.
-		var pageSeed = unchecked((int)(_globalSeedOffset + _fakerHash + (uint)pageIndex * 397));
+        return page[offset];
+    }
 
-		var faker = new Faker(_locale) { Random = new Randomizer(pageSeed) };
-		var page = new object?[PAGE_SIZE];
+    private object?[] GeneratePage(int pageIndex)
+    {
+        // Compute a deterministic seed for this page.
+        // Combine global seed offset + fakerHash + pageIndex to ensure different pages and configurations have different seeds.
+        var pageSeed = unchecked((int)(_globalSeedOffset + _fakerHash + (uint)pageIndex * 397));
 
-		for (int i = 0; i < PAGE_SIZE; i++)
-		{
-			page[i] = _generator(faker);
-		}
+        var faker = new Faker(_locale) { Random = new Randomizer(pageSeed) };
+        var page = new object?[PAGE_SIZE];
 
-		return page;
-	}
+        for (int i = 0; i < PAGE_SIZE; i++)
+        {
+            page[i] = _generator(faker);
+        }
+
+        return page;
+    }
 }

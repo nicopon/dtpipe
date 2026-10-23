@@ -11,13 +11,13 @@ namespace DtPipe.Core.Models;
 /// <param name="UniqueColumns">List of columns with a UNIQUE constraint</param>
 /// <param name="IsRowCountEstimate">True if RowCount is based on statistics (Oracle, PostgreSQL), false if exact (DuckDB, SQLite)</param>
 public sealed record TargetSchemaInfo(
-	IReadOnlyList<TargetColumnInfo> Columns,
-	bool Exists,
-	long? RowCount,
-	long? SizeBytes,
-	IReadOnlyList<string>? PrimaryKeyColumns,
-	IReadOnlyList<string>? UniqueColumns = null,
-	bool IsRowCountEstimate = false  // Default false for backward compatibility
+    IReadOnlyList<TargetColumnInfo> Columns,
+    bool Exists,
+    long? RowCount,
+    long? SizeBytes,
+    IReadOnlyList<string>? PrimaryKeyColumns,
+    IReadOnlyList<string>? UniqueColumns = null,
+    bool IsRowCountEstimate = false  // Default false for backward compatibility
 );
 
 /// <summary>
@@ -34,14 +34,14 @@ public sealed record TargetSchemaInfo(
 /// <param name="Scale">Scale for numeric types (null if not applicable)</param>
 /// <param name="IsCaseSensitive">Whether the column identifier is explicitly case sensitive</param>
 public sealed record TargetColumnInfo(
-	string Name,
-	string NativeType,
-	Type? InferredClrType,
-	bool IsNullable,
-	bool IsPrimaryKey,
-	bool IsUnique,
-	int? MaxLength = null,
-	int? Precision = null,
-	int? Scale = null,
-	bool IsCaseSensitive = false
+    string Name,
+    string NativeType,
+    Type? InferredClrType,
+    bool IsNullable,
+    bool IsPrimaryKey,
+    bool IsUnique,
+    int? MaxLength = null,
+    int? Precision = null,
+    int? Scale = null,
+    bool IsCaseSensitive = false
 );

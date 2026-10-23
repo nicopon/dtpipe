@@ -10,7 +10,7 @@ namespace DtPipe.Cli.Commands;
 
 public class AgentCommand : Command
 {
-    public AgentCommand(IServiceProvider serviceProvider) 
+    public AgentCommand(IServiceProvider serviceProvider)
         : base("agent", "Start an interactive or automated ReAct AI agent loop for data integration tasks")
     {
         var promptArgument = new Argument<string?>("prompt")
@@ -128,51 +128,51 @@ public class AgentCommand : Command
         interactiveOption.Aliases.Add("-i");
 
         var temperatureOption = new Option<double>("--temperature")
-          {
+        {
             Description = "Sampling temperature. 0 is greedy decoding, which weaker quantized models degenerate on; --seed fixes the sampling either way."
-          };
+        };
         temperatureOption.DefaultValueFactory = _ => 1.0;
 
         var seedOption = new Option<int?>("--seed")
-          {
+        {
             Description = "Fixed seed for reproducible sampling. A fixed seed makes the run deterministic."
-          };
+        };
         seedOption.DefaultValueFactory = _ => 0;
 
         var repeatOption = new Option<int>("--repeat")
-           {
+        {
             Description = "Number of replications of the validated plan for determinism/variance measurement (default: 1)."
-           };
+        };
         repeatOption.DefaultValueFactory = _ => 1;
 
         var sequentialOption = new Option<bool>("--sequential")
-            {
+        {
             Description = "Execute tool calls one at a time instead of running independent calls in parallel (default: parallel)."
-            };
+        };
         sequentialOption.DefaultValueFactory = _ => false;
 
         var modeOption = new Option<AgentMode>("--mode")
-              {
-             Description = "Operating mode. 'plan' (default) only designs & validates a pipeline; 'execute'/'autonomous' may run it through the guardrails."
-              };
+        {
+            Description = "Operating mode. 'plan' (default) only designs & validates a pipeline; 'execute'/'autonomous' may run it through the guardrails."
+        };
         modeOption.DefaultValueFactory = _ => AgentMode.Plan;
 
         var applyOption = new Option<bool>("--apply")
-              {
-             Description = "Perform a real write when executing a pipeline. Default (off) => dry-run only; writes also require approval."
-              };
+        {
+            Description = "Perform a real write when executing a pipeline. Default (off) => dry-run only; writes also require approval."
+        };
         applyOption.DefaultValueFactory = _ => false;
 
         var allowDestructiveOption = new Option<bool>("--allow-destructive")
-              {
-             Description = "Allow destructive SQL verbs (DROP/DELETE/TRUNCATE/UPDATE/ALTER/INSERT/ATTACH). Default deny."
-              };
+        {
+            Description = "Allow destructive SQL verbs (DROP/DELETE/TRUNCATE/UPDATE/ALTER/INSERT/ATTACH). Default deny."
+        };
         allowDestructiveOption.DefaultValueFactory = _ => false;
 
         var allowNetworkOption = new Option<bool>("--allow-network")
-              {
-             Description = "Allow network access in SQL (LOAD httpfs/azure, remote read_parquet). Default deny."
-              };
+        {
+            Description = "Allow network access in SQL (LOAD httpfs/azure, remote read_parquet). Default deny."
+        };
         allowNetworkOption.DefaultValueFactory = _ => false;
 
         Arguments.Add(promptArgument);
@@ -222,12 +222,12 @@ public class AgentCommand : Command
             var numCtx = Math.Max(2048, parseResult.GetValue(numCtxOption));
             var temperature = parseResult.GetValue(temperatureOption);
             var seed = parseResult.GetValue(seedOption);
-             var repeat = parseResult.GetValue(repeatOption);
-              var sequential = parseResult.GetValue(sequentialOption);
-              var mode = parseResult.GetValue(modeOption);
-              var apply = parseResult.GetValue(applyOption);
-              var allowDestructive = parseResult.GetValue(allowDestructiveOption);
-              var allowNetwork = parseResult.GetValue(allowNetworkOption);
+            var repeat = parseResult.GetValue(repeatOption);
+            var sequential = parseResult.GetValue(sequentialOption);
+            var mode = parseResult.GetValue(modeOption);
+            var apply = parseResult.GetValue(applyOption);
+            var allowDestructive = parseResult.GetValue(allowDestructiveOption);
+            var allowNetwork = parseResult.GetValue(allowNetworkOption);
 
             if (string.IsNullOrWhiteSpace(url))
             {
@@ -309,13 +309,13 @@ public class AgentCommand : Command
                 ExternalServerInstructions = external?.ServerInstructions,
             };
 
-              var agentOptions = new AgentOptions
-                      {
+            var agentOptions = new AgentOptions
+            {
                 Mode = mode,
                 Temperature = temperature,
                 Seed = seed,
                 Repeat = repeat,
-                 Sequential = sequential,
+                Sequential = sequential,
                 Apply = apply,
                 AllowDestructive = allowDestructive,
                 AllowNetwork = allowNetwork,
@@ -324,143 +324,143 @@ public class AgentCommand : Command
                 Detail = detail,
                 NumCtx = numCtx,
                 MaxOutputTokens = maxOutputTokens
-                       };
+            };
 
-                // F2: share the agent guardrail options with the execution tool so execute-yaml-job
-               // honors --apply / --allow-destructive / --allow-network (fail-closed by default).
-              mcpTools.AgentOptions = agentOptions;
+            // F2: share the agent guardrail options with the execution tool so execute-yaml-job
+            // honors --apply / --allow-destructive / --allow-network (fail-closed by default).
+            mcpTools.AgentOptions = agentOptions;
 
-                // Execute initial turn
-              var exitCode = 0;
-              try
-              {
-                  // The full-screen surface owns the whole conversation: turns, the input line
-                  // between them and the commands that replace the menu below all live inside one
-                  // application. The Spectre prompts further down are unreachable then — nothing
-                  // may write through Spectre while the toolkit holds the terminal.
-                  if (AgentExecutor.WantsFullScreen(console, llmClient, agentOptions,
-                      Console.IsInputRedirected, Console.IsOutputRedirected))
-                  {
-                      // A missing mission is not asked for here: the surface has an input line and
-                      // opens on it. Asking through Spectre first would put the first prompt of the
-                      // session in scrollback, on the terminal the toolkit is about to take over.
-                      return await new DtPipe.Cli.Agent.Tui.TuiSession(console, tui, executor)
-                          .RunAsync(prompt, model, url, agentOptions, maxIterations, ct);
-                  }
+            // Execute initial turn
+            var exitCode = 0;
+            try
+            {
+                // The full-screen surface owns the whole conversation: turns, the input line
+                // between them and the commands that replace the menu below all live inside one
+                // application. The Spectre prompts further down are unreachable then — nothing
+                // may write through Spectre while the toolkit holds the terminal.
+                if (AgentExecutor.WantsFullScreen(console, llmClient, agentOptions,
+                    Console.IsInputRedirected, Console.IsOutputRedirected))
+                {
+                    // A missing mission is not asked for here: the surface has an input line and
+                    // opens on it. Asking through Spectre first would put the first prompt of the
+                    // session in scrollback, on the terminal the toolkit is about to take over.
+                    return await new DtPipe.Cli.Agent.Tui.TuiSession(console, tui, executor)
+                        .RunAsync(prompt, model, url, agentOptions, maxIterations, ct);
+                }
 
-                  if (string.IsNullOrWhiteSpace(prompt))
-                  {
-                      prompt = tui.PromptUserMission();
-                      if (string.IsNullOrWhiteSpace(prompt))
-                      {
-                          console.MarkupLine("[red]Error:[/] Mission prompt cannot be empty.");
-                          return 1;
-                      }
-                  }
+                if (string.IsNullOrWhiteSpace(prompt))
+                {
+                    prompt = tui.PromptUserMission();
+                    if (string.IsNullOrWhiteSpace(prompt))
+                    {
+                        console.MarkupLine("[red]Error:[/] Mission prompt cannot be empty.");
+                        return 1;
+                    }
+                }
 
-                  exitCode = await executor.RunTurnAsync(prompt, model, url, agentOptions, maxIterations, ct);
+                exitCode = await executor.RunTurnAsync(prompt, model, url, agentOptions, maxIterations, ct);
 
-                  // The post-mission menu is an ANSI selection prompt; it throws on a piped or
-                  // dumb terminal (CI, `script`, a redirect). A one-shot run there is complete —
-                  // its exit code stands.
-                  bool interactive = console.Profile.Capabilities.Interactive
-                      && console.Profile.Capabilities.Ansi
-                      && !Console.IsOutputRedirected && !Console.IsInputRedirected;
+                // The post-mission menu is an ANSI selection prompt; it throws on a piped or
+                // dumb terminal (CI, `script`, a redirect). A one-shot run there is complete —
+                // its exit code stands.
+                bool interactive = console.Profile.Capabilities.Interactive
+                    && console.Profile.Capabilities.Ansi
+                    && !Console.IsOutputRedirected && !Console.IsInputRedirected;
 
-                  // Interactive post-mission conversation loop
-                  while (interactive && !ct.IsCancellationRequested)
-                  {
-                      // The agent stopped to ask something: answer it directly rather than
-                      // going through the menu. An empty answer falls through to the menu.
-                      if (executor.LastTurnOutcome == DtPipe.Cli.Agent.TurnOutcome.AwaitingUserInput
-                          && !string.IsNullOrWhiteSpace(executor.PendingQuestion?.Text))
-                      {
-                          var answer = tui.PromptFollowUp(executor.PendingQuestion);
-                          if (!string.IsNullOrWhiteSpace(answer))
-                          {
-                              exitCode = await executor.RunTurnAsync(answer, model, url, agentOptions, maxIterations, ct);
-                              continue;
-                          }
-                      }
+                // Interactive post-mission conversation loop
+                while (interactive && !ct.IsCancellationRequested)
+                {
+                    // The agent stopped to ask something: answer it directly rather than
+                    // going through the menu. An empty answer falls through to the menu.
+                    if (executor.LastTurnOutcome == DtPipe.Cli.Agent.TurnOutcome.AwaitingUserInput
+                        && !string.IsNullOrWhiteSpace(executor.PendingQuestion?.Text))
+                    {
+                        var answer = tui.PromptFollowUp(executor.PendingQuestion);
+                        if (!string.IsNullOrWhiteSpace(answer))
+                        {
+                            exitCode = await executor.RunTurnAsync(answer, model, url, agentOptions, maxIterations, ct);
+                            continue;
+                        }
+                    }
 
-                      bool hasYaml = !string.IsNullOrEmpty(executor.Trajectory.LastGeneratedYaml);
-                      PostMissionAction action;
-                      try
-                      {
-                          action = tui.ShowPostMissionMenu(hasYaml, agentOptions.Apply, executor.Mode);
-                      }
-                      catch (Exception ex) when (ex is NotSupportedException or InvalidOperationException)
-                      {
-                          // The terminal cannot host the prompt after all — stop cleanly.
-                          break;
-                      }
+                    bool hasYaml = !string.IsNullOrEmpty(executor.Trajectory.LastGeneratedYaml);
+                    PostMissionAction action;
+                    try
+                    {
+                        action = tui.ShowPostMissionMenu(hasYaml, agentOptions.Apply, executor.Mode);
+                    }
+                    catch (Exception ex) when (ex is NotSupportedException or InvalidOperationException)
+                    {
+                        // The terminal cannot host the prompt after all — stop cleanly.
+                        break;
+                    }
 
-                      if (action == PostMissionAction.Exit)
-                      {
-                          break;
-                      }
+                    if (action == PostMissionAction.Exit)
+                    {
+                        break;
+                    }
 
-                      switch (action)
-                      {
-                           case PostMissionAction.ContinueDiscussion:
-                               var followUp = tui.PromptFollowUp();
-                               if (!string.IsNullOrWhiteSpace(followUp))
-                                {
-                                    exitCode = await executor.RunTurnAsync(followUp, model, url, agentOptions, maxIterations, ct);
-                                }
-                               break;
+                    switch (action)
+                    {
+                        case PostMissionAction.ContinueDiscussion:
+                            var followUp = tui.PromptFollowUp();
+                            if (!string.IsNullOrWhiteSpace(followUp))
+                            {
+                                exitCode = await executor.RunTurnAsync(followUp, model, url, agentOptions, maxIterations, ct);
+                            }
+                            break;
 
-                          case PostMissionAction.SwitchMode:
-                              // F1 stays a per-turn invariant: the next RunTurnAsync rebuilds the
-                              // role prompt and tool allow-list from executor.Mode. No write gate moves.
-                              tui.RenderModeSwitch(executor.CycleMode(), agentOptions.Apply);
-                              break;
+                        case PostMissionAction.SwitchMode:
+                            // F1 stays a per-turn invariant: the next RunTurnAsync rebuilds the
+                            // role prompt and tool allow-list from executor.Mode. No write gate moves.
+                            tui.RenderModeSwitch(executor.CycleMode(), agentOptions.Apply);
+                            break;
 
-                          case PostMissionAction.ExecutePlan:
-                              {
-                                  // Deterministic: the reviewed YAML runs straight through the engine,
-                                  // not back through the model. Present → confirm iff --apply → execute
-                                  // is PlanExecution's policy, shared with the full-screen surface; the
-                                  // tool's own F2 guardrails still apply.
-                                  var planResult = await PlanExecution.RunAsync(executor, agentOptions,
-                                      present: yaml => { tui.RenderPipelineDag(yaml, serviceProvider); return Task.CompletedTask; },
-                                      confirm: _ => Task.FromResult(tui.ConfirmRealWrite()),
-                                      ct);
-                                  if (planResult is not null)
-                                      tui.RenderExecutionResult(planResult.Content, planResult.IsError);
-                              }
-                              break;
+                        case PostMissionAction.ExecutePlan:
+                            {
+                                // Deterministic: the reviewed YAML runs straight through the engine,
+                                // not back through the model. Present → confirm iff --apply → execute
+                                // is PlanExecution's policy, shared with the full-screen surface; the
+                                // tool's own F2 guardrails still apply.
+                                var planResult = await PlanExecution.RunAsync(executor, agentOptions,
+                                    present: yaml => { tui.RenderPipelineDag(yaml, serviceProvider); return Task.CompletedTask; },
+                                    confirm: _ => Task.FromResult(tui.ConfirmRealWrite()),
+                                    ct);
+                                if (planResult is not null)
+                                    tui.RenderExecutionResult(planResult.Content, planResult.IsError);
+                            }
+                            break;
 
-                          case PostMissionAction.ViewDag:
-                              if (executor.Trajectory.LastGeneratedYaml != null)
-                              {
-                                  tui.RenderPipelineDag(executor.Trajectory.LastGeneratedYaml, serviceProvider);
-                              }
-                              break;
+                        case PostMissionAction.ViewDag:
+                            if (executor.Trajectory.LastGeneratedYaml != null)
+                            {
+                                tui.RenderPipelineDag(executor.Trajectory.LastGeneratedYaml, serviceProvider);
+                            }
+                            break;
 
-                          case PostMissionAction.InspectTrajectory:
-                              tui.ReviewSession(executor.Trajectory);
-                              break;
+                        case PostMissionAction.InspectTrajectory:
+                            tui.ReviewSession(executor.Trajectory);
+                            break;
 
-                          case PostMissionAction.SaveYaml:
-                              if (executor.Trajectory.LastGeneratedYaml != null)
-                              {
-                                  tui.SaveYamlToFile(executor.Trajectory.LastGeneratedYaml);
-                              }
-                              break;
-                      }
-                  }
+                        case PostMissionAction.SaveYaml:
+                            if (executor.Trajectory.LastGeneratedYaml != null)
+                            {
+                                tui.SaveYamlToFile(executor.Trajectory.LastGeneratedYaml);
+                            }
+                            break;
+                    }
+                }
 
-                  return exitCode;
-              }
-              catch (OperationCanceledException)
-              {
-                  // F16: user cancellation must not mask as success — report the POSIX SIGINT
-                  // convention. A slow or dead endpoint no longer lands here: the LLM clients turn
-                  // a request timeout into a stated error instead of a bare cancellation.
-                  console.MarkupLine("[yellow]Interrupted — stopping.[/]");
-                  return 130;
-              }
-          });
+                return exitCode;
+            }
+            catch (OperationCanceledException)
+            {
+                // F16: user cancellation must not mask as success — report the POSIX SIGINT
+                // convention. A slow or dead endpoint no longer lands here: the LLM clients turn
+                // a request timeout into a stated error instead of a bare cancellation.
+                console.MarkupLine("[yellow]Interrupted — stopping.[/]");
+                return 130;
+            }
+        });
     }
 }

@@ -8,22 +8,22 @@ namespace DtPipe.Transformers.Arrow.Project;
 
 public class ProjectDataTransformerFactory : TransformerFactoryBase<ProjectOptions>
 {
-	public ProjectDataTransformerFactory(OptionsRegistry registry) : base(registry) { }
+    public ProjectDataTransformerFactory(OptionsRegistry registry) : base(registry) { }
 
-	public override string ComponentName => "project";
+    public override string ComponentName => "project";
 
 
-	public override string Category => "Transformers";
-	public override Type OptionsType => typeof(DtPipe.Transformers.Arrow.Project.ProjectOptions);
+    public override string Category => "Transformers";
+    public override Type OptionsType => typeof(DtPipe.Transformers.Arrow.Project.ProjectOptions);
 
-	protected override IDataTransformer? CreateFromTypedOptions(ProjectOptions options)
-	{
-		return new ProjectDataTransformer(options);
-	}
+    protected override IDataTransformer? CreateFromTypedOptions(ProjectOptions options)
+    {
+        return new ProjectDataTransformer(options);
+    }
 
-	public override IDataTransformer CreateFromConfiguration(IEnumerable<(string Option, string Value)> configuration)
-	{
-		var options = new ProjectOptions();
+    public override IDataTransformer CreateFromConfiguration(IEnumerable<(string Option, string Value)> configuration)
+    {
+        var options = new ProjectOptions();
         var projects = new List<string>();
         var drops = new List<string>();
         var renames = new List<string>();
@@ -42,16 +42,16 @@ public class ProjectDataTransformerFactory : TransformerFactoryBase<ProjectOptio
         options.Drop = drops;
         options.Rename = renames;
 
-		return new ProjectDataTransformer(options);
-	}
+        return new ProjectDataTransformer(options);
+    }
 
-	public override object? CreateOptionsFromYaml(TransformerConfig config)
-	{
-		// A mapping names a column to keep; project, drop and rename are also plain options.
-		var options = new ProjectOptions();
-		if (config.Mappings is { Count: > 0 })
-			options.Project = config.Mappings.Keys;
+    public override object? CreateOptionsFromYaml(TransformerConfig config)
+    {
+        // A mapping names a column to keep; project, drop and rename are also plain options.
+        var options = new ProjectOptions();
+        if (config.Mappings is { Count: > 0 })
+            options.Project = config.Mappings.Keys;
 
-		return options;
-	}
+        return options;
+    }
 }

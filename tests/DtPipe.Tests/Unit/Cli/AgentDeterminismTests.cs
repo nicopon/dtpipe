@@ -10,7 +10,7 @@ namespace DtPipe.Tests.Unit.Cli;
 
 public class AgentDeterminismTests
 {
-     /// <summary>An empty, non-executing tool provider for planning-only runs.</summary>
+    /// <summary>An empty, non-executing tool provider for planning-only runs.</summary>
     private sealed class EmptyToolProvider : IAgentToolProvider
     {
         public List<ToolDefinition> GetToolDefinitions() => new();
@@ -19,13 +19,13 @@ public class AgentDeterminismTests
             => Task.FromResult(ToolResult.Success("{}"));
     }
 
-      /// <summary>
-      /// A scripting fake that records the temperature/seed it was called with and returns a
-      /// fixed response. When <c>toolYaml</c> is set, the response carries a 'validate-yaml-job'
-      /// tool call whose <c>yamlContent</c> argument is the plan (the F6 single path).
-      /// </summary>
-      private sealed class ScriptedLlmClient : ILlmClient
-       {
+    /// <summary>
+    /// A scripting fake that records the temperature/seed it was called with and returns a
+    /// fixed response. When <c>toolYaml</c> is set, the response carries a 'validate-yaml-job'
+    /// tool call whose <c>yamlContent</c> argument is the plan (the F6 single path).
+    /// </summary>
+    private sealed class ScriptedLlmClient : ILlmClient
+    {
         public double? LastTemperature { get; private set; }
         public int? LastSeed { get; private set; }
         public int CallCount { get; private set; }
@@ -34,10 +34,10 @@ public class AgentDeterminismTests
         private readonly string? _toolYaml;
 
         public ScriptedLlmClient(string? content = null, string? toolYaml = null)
-          {
+        {
             _content = content;
             _toolYaml = toolYaml;
-          }
+        }
 
         public string ProviderName => "scripted";
 
@@ -53,32 +53,32 @@ public class AgentDeterminismTests
             double temperature = 0.7,
             int? seed = null,
             CancellationToken ct = default)
-          {
+        {
             LastTemperature = temperature;
             LastSeed = seed;
             CallCount++;
 
             if (_toolYaml == null)
             {
-               var response = new LlmResponse(new ChatMessage("assistant", _content ?? "done"), true, null);
-               return Task.FromResult(response);
+                var response = new LlmResponse(new ChatMessage("assistant", _content ?? "done"), true, null);
+                return Task.FromResult(response);
             }
 
             var args = System.Text.Json.JsonDocument.Parse(
                 $"{{\"yamlContent\": {System.Text.Json.JsonSerializer.Serialize(_toolYaml)}}}").RootElement.Clone();
-            var toolCalls = new List<ToolCall> { new ("call-1", "validate-yaml-job", args) };
+            var toolCalls = new List<ToolCall> { new("call-1", "validate-yaml-job", args) };
             var toolResponse = new LlmResponse(new ChatMessage("assistant", _content ?? "done", null, toolCalls), true, null);
             return Task.FromResult(toolResponse);
-           }
-       }
+        }
+    }
 
     private static AgentExecutor BuildExecutor(ScriptedLlmClient llm)
-       {
-           // A non-interactive Spectre console keeps the run headless under `dotnet test`.
+    {
+        // A non-interactive Spectre console keeps the run headless under `dotnet test`.
         IAnsiConsole console = Spectre.Console.AnsiConsole.Create(new Spectre.Console.AnsiConsoleSettings());
         var tui = new AgentTui(console);
         return new AgentExecutor(new EmptyToolProvider(), llm, tui, console);
-       }
+    }
 
     /// <summary>
     /// The shipped default is 1, and F3's determinism is a capability rather than a default.
@@ -135,12 +135,12 @@ public class AgentDeterminismTests
         Assert.True(report.IsDeterministic);
     }
 
-       [Fact]
+    [Fact]
     public async Task Repeat_With_Identical_Yaml_Blocks_Reports_Zero_Variance()
-        {
+    {
         string yaml = "input: csv:a.csv\noutput: csv:b.csv\n";
-             // With the single YAML path (F6), the plan arrives through the yamlContent tool
-             // argument, not free-text content.
+        // With the single YAML path (F6), the plan arrives through the yamlContent tool
+        // argument, not free-text content.
         var llm = new ScriptedLlmClient(toolYaml: yaml);
         var executor = BuildExecutor(llm);
 
@@ -152,5 +152,5 @@ public class AgentDeterminismTests
         Assert.Single(report.DistinctYaml);
         Assert.Equal(0, report.Variance);
         Assert.True(report.IsDeterministic);
-        }
+    }
 }

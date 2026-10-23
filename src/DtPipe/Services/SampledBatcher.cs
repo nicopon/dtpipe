@@ -32,8 +32,8 @@ internal class SampledBatcher
         _batchSize = batchSize;
         _limit = limit;
         _samplingRate = samplingRate;
-        _sampler = samplingRate > 0 && samplingRate < 1.0 
-            ? (samplingSeed.HasValue ? new Random(samplingSeed.Value) : Random.Shared) 
+        _sampler = samplingRate > 0 && samplingRate < 1.0
+            ? (samplingSeed.HasValue ? new Random(samplingSeed.Value) : Random.Shared)
             : null;
         _progress = progress ?? throw new ArgumentNullException(nameof(progress));
         _reportReads = reportReads;

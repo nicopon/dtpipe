@@ -62,7 +62,7 @@ public class AdoBinaryIntegrationTests : IAsyncLifetime
 
         var binaryCol = firstBatch.Column(1) as BinaryArray;
         binaryCol.Should().NotBeNull();
-        
+
         // Row 1: Valid data
         binaryCol!.IsNull(0).Should().BeFalse();
         binaryCol.GetBytes(0).ToArray().Should().Equal(new byte[] { 0xDE, 0xAD, 0xBE, 0xEF });

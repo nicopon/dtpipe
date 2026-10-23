@@ -17,40 +17,40 @@ namespace DtPipe.Tests.Unit.Adapters.Common;
 /// </summary>
 public class SqlReaderDescriptorQueryValidationTests
 {
-	private static readonly IServiceProvider EmptyServiceProvider = new ServiceCollection().BuildServiceProvider();
+    private static readonly IServiceProvider EmptyServiceProvider = new ServiceCollection().BuildServiceProvider();
 
-	public static TheoryData<IProviderDescriptor<IStreamReader>, object> RequiresQueryDescriptors()
-	{
-		var descriptorInterface = typeof(IProviderDescriptor<IStreamReader>);
-		var assembly = typeof(CsvReaderDescriptor).Assembly; // DtPipe.Adapters
+    public static TheoryData<IProviderDescriptor<IStreamReader>, object> RequiresQueryDescriptors()
+    {
+        var descriptorInterface = typeof(IProviderDescriptor<IStreamReader>);
+        var assembly = typeof(CsvReaderDescriptor).Assembly; // DtPipe.Adapters
 
-		var descriptors = assembly.GetTypes()
-			.Where(t => !t.IsAbstract && descriptorInterface.IsAssignableFrom(t) && t.GetConstructor(Type.EmptyTypes) != null)
-			.Select(t => (IProviderDescriptor<IStreamReader>)Activator.CreateInstance(t)!)
-			.Where(d => d.RequiresQuery);
+        var descriptors = assembly.GetTypes()
+            .Where(t => !t.IsAbstract && descriptorInterface.IsAssignableFrom(t) && t.GetConstructor(Type.EmptyTypes) != null)
+            .Select(t => (IProviderDescriptor<IStreamReader>)Activator.CreateInstance(t)!)
+            .Where(d => d.RequiresQuery);
 
-		var data = new TheoryData<IProviderDescriptor<IStreamReader>, object>();
-		foreach (var descriptor in descriptors)
-			data.Add(descriptor, Activator.CreateInstance(descriptor.OptionsType)!);
-		return data;
-	}
+        var data = new TheoryData<IProviderDescriptor<IStreamReader>, object>();
+        foreach (var descriptor in descriptors)
+            data.Add(descriptor, Activator.CreateInstance(descriptor.OptionsType)!);
+        return data;
+    }
 
-	[Theory]
-	[MemberData(nameof(RequiresQueryDescriptors))]
-	public void Create_Throws_WhenRequiresQueryAndNoneWasBound(IProviderDescriptor<IStreamReader> descriptor, object options)
-	{
-		options.Should().BeAssignableTo<IQueryAwareOptions>(
-			"a RequiresQuery reader's options must implement IQueryAwareOptions so --query/--table can bind");
+    [Theory]
+    [MemberData(nameof(RequiresQueryDescriptors))]
+    public void Create_Throws_WhenRequiresQueryAndNoneWasBound(IProviderDescriptor<IStreamReader> descriptor, object options)
+    {
+        options.Should().BeAssignableTo<IQueryAwareOptions>(
+            "a RequiresQuery reader's options must implement IQueryAwareOptions so --query/--table can bind");
 
-		var registry = new OptionsRegistry();
-		registry.RegisterByType(descriptor.OptionsType, options);
-		registry.Register(new ConnectionRoute("dummy-connection", string.Empty));
+        var registry = new OptionsRegistry();
+        registry.RegisterByType(descriptor.OptionsType, options);
+        registry.Register(new ConnectionRoute("dummy-connection", string.Empty));
 
-		var factory = new CliStreamReaderFactory(descriptor, registry, EmptyServiceProvider);
+        var factory = new CliStreamReaderFactory(descriptor, registry, EmptyServiceProvider);
 
-		var act = () => factory.Create(registry);
+        var act = () => factory.Create(registry);
 
-		act.Should().Throw<InvalidOperationException>()
-			.WithMessage($"*{descriptor.ComponentName}*");
-	}
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage($"*{descriptor.ComponentName}*");
+    }
 }

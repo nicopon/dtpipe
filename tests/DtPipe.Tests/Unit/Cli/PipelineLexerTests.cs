@@ -20,7 +20,7 @@ public class PipelineLexerTests
 
         // Reader-specific flags (FlagStage.Reader)
         _registry.Register(new FlagDef("--fake", new[] { "-f" }, FlagArity.Scalar, FlagScope.PerBranch, "fake transformer", FlagStage.Pipeline));
-        _registry.Register(new FlagDef("--sql",  Array.Empty<string>(), FlagArity.Scalar,  FlagScope.PerBranch, "sql processor",   FlagStage.Pipeline, ProcessorTrigger: true));
+        _registry.Register(new FlagDef("--sql", Array.Empty<string>(), FlagArity.Scalar, FlagScope.PerBranch, "sql processor", FlagStage.Pipeline, ProcessorTrigger: true));
         _registry.Register(new FlagDef("--merge", Array.Empty<string>(), FlagArity.Boolean, FlagScope.PerBranch, "merge processor", FlagStage.Pipeline, ProcessorTrigger: true));
         // Registered at runtime from FilterOptions. Left out, it was an unknown flag here, which
         // now refuses the expression that follows it.
@@ -153,12 +153,12 @@ public class PipelineLexerTests
         var pipeline = _lexer.Parse(args);
 
         Assert.Equal(3, pipeline.Branches.Count);
-        Assert.Equal("a.csv",   pipeline.Branches[0].Input);
-        Assert.Equal("s",       pipeline.Branches[0].Alias);
-        Assert.Equal("s",       pipeline.Branches[1].From[0]);
-        Assert.Equal("out1.csv",pipeline.Branches[1].Output);
-        Assert.Equal("s",       pipeline.Branches[2].From[0]);
-        Assert.Equal("out2.csv",pipeline.Branches[2].Output);
+        Assert.Equal("a.csv", pipeline.Branches[0].Input);
+        Assert.Equal("s", pipeline.Branches[0].Alias);
+        Assert.Equal("s", pipeline.Branches[1].From[0]);
+        Assert.Equal("out1.csv", pipeline.Branches[1].Output);
+        Assert.Equal("s", pipeline.Branches[2].From[0]);
+        Assert.Equal("out2.csv", pipeline.Branches[2].Output);
     }
 
     [Fact]
@@ -169,10 +169,10 @@ public class PipelineLexerTests
 
         Assert.Equal(2, pipeline.Branches.Count);
         Assert.Equal("a.csv", pipeline.Branches[0].Input);
-        Assert.Equal("src",   pipeline.Branches[0].Alias);
+        Assert.Equal("src", pipeline.Branches[0].Alias);
 
         Assert.Equal("src", pipeline.Branches[1].From[0]);
-        Assert.Contains("--sql",            pipeline.Branches[1].RawArgs);
+        Assert.Contains("--sql", pipeline.Branches[1].RawArgs);
         Assert.Contains("SELECT * FROM src", pipeline.Branches[1].RawArgs);
         Assert.Equal("out.csv", pipeline.Branches[1].Output);
     }
@@ -188,8 +188,8 @@ public class PipelineLexerTests
         var pipeline = _lexer.Parse(args);
 
         Assert.Equal(3, pipeline.Branches.Count);
-        Assert.Equal("m",   pipeline.Branches[2].From[0]);
-        Assert.Equal("r",   pipeline.Branches[2].Ref[0]);
+        Assert.Equal("m", pipeline.Branches[2].From[0]);
+        Assert.Equal("r", pipeline.Branches[2].Ref[0]);
         Assert.Contains("SELECT * FROM m JOIN r", pipeline.Branches[2].RawArgs);
     }
 

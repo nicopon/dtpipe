@@ -142,17 +142,17 @@ public static class PipelineToJobConverter
         {
             var job = jobs[alias];
             if (parsed.Globals.DryRunCount > 0) job = job with { DryRunCount = parsed.Globals.DryRunCount };
-            if (limitOverride is > 0)           job = job with { Limit = limitOverride.Value };
-            if (batchOverride is > 0)           job = job with { BatchSize = batchOverride.Value };
-            if (maxBatchBytesOverride is > 0)   job = job with { MaxBatchBytes = maxBatchBytesOverride.Value };
-            if (!string.IsNullOrEmpty(logOverride))     job = job with { LogPath = logOverride };
+            if (limitOverride is > 0) job = job with { Limit = limitOverride.Value };
+            if (batchOverride is > 0) job = job with { BatchSize = batchOverride.Value };
+            if (maxBatchBytesOverride is > 0) job = job with { MaxBatchBytes = maxBatchBytesOverride.Value };
+            if (!string.IsNullOrEmpty(logOverride)) job = job with { LogPath = logOverride };
             if (!string.IsNullOrEmpty(metricsOverride)) job = job with { MetricsPath = metricsOverride };
-            if (!string.IsNullOrEmpty(prefixOverride))  job = job with { Prefix = prefixOverride };
-            if (!string.IsNullOrEmpty(cursorOverride))  job = job with { Cursor = cursorOverride };
-            if (!string.IsNullOrEmpty(stateOverride))   job = job with { State = stateOverride };
+            if (!string.IsNullOrEmpty(prefixOverride)) job = job with { Prefix = prefixOverride };
+            if (!string.IsNullOrEmpty(cursorOverride)) job = job with { Cursor = cursorOverride };
+            if (!string.IsNullOrEmpty(stateOverride)) job = job with { State = stateOverride };
             if (!string.IsNullOrEmpty(parsed.Globals.Session)) job = job with { Session = parsed.Globals.Session };
-            if (samplingRateOverride is > 0)    job = job with { SamplingRate = samplingRateOverride.Value };
-            if (samplingSeedOverride.HasValue)  job = job with { SamplingSeed = samplingSeedOverride.Value };
+            if (samplingRateOverride is > 0) job = job with { SamplingRate = samplingRateOverride.Value };
+            if (samplingSeedOverride.HasValue) job = job with { SamplingSeed = samplingSeedOverride.Value };
             jobs[alias] = job;
         }
 
@@ -170,7 +170,7 @@ public static class PipelineToJobConverter
         var engine = DeriveEngineSettings(globals, branch.Flags);
         var job = new JobDefinition
         {
-            Input  = branch.Input,
+            Input = branch.Input,
             Output = branch.Output,
 
             // Global, but carried on every branch: each one resolves its own store, and they
@@ -179,10 +179,10 @@ public static class PipelineToJobConverter
 
             // Empty means "this branch has no upstream", which is the absence of the key, not an
             // empty string: string.Join over no aliases wrote "from: ''" on every source branch.
-            From     = branch.From.Count > 0 ? string.Join(",", branch.From) : null,
-            Ref      = branch.Ref.ToArray(),
+            From = branch.From.Count > 0 ? string.Join(",", branch.From) : null,
+            Ref = branch.Ref.ToArray(),
 
-            Transformers    = null,
+            Transformers = null,
             ProviderOptions = null
         };
         return engine.ApplyTo(job);

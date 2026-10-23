@@ -18,18 +18,18 @@ public class DynamicSerializationTests
         // Arrange - similar to complex_data.jsonl
         var data = new List<Dictionary<string, object?>>
         {
-            new() { 
-                ["id"] = 1, 
+            new() {
+                ["id"] = 1,
                 ["user"] = new Dictionary<string, object?> { ["name"] = "Alice", ["points"] = 100.0 },
-                ["items"] = new List<object?> { 
+                ["items"] = new List<object?> {
                     new Dictionary<string, object?> { ["id"] = "A1", ["price"] = 10.5 },
                     new Dictionary<string, object?> { ["id"] = "A2", ["price"] = 5.0 }
                 }
             },
-            new() { 
-                ["id"] = 2, 
+            new() {
+                ["id"] = 2,
                 ["user"] = new Dictionary<string, object?> { ["name"] = "Bob", ["points"] = 200.0 },
-                ["items"] = new List<object?> { 
+                ["items"] = new List<object?> {
                     new Dictionary<string, object?> { ["id"] = "B1", ["price"] = 20.0 }
                 }
             }
@@ -63,7 +63,7 @@ public class DynamicSerializationTests
 
         var nameField = (StringArray)userStruct.Fields[nameIdx];
         var pointsField = (DoubleArray)userStruct.Fields[pointsIdx];
-        
+
         nameField.GetString(0).Should().Be("Alice");
         pointsField.GetValue(0).Should().Be(100.0);
 
@@ -99,7 +99,7 @@ public class DynamicSerializationTests
         // Assert
         recordBatch.Length.Should().Be(2);
         recordBatch.Schema.FieldsList[1].DataType.Should().BeOfType<StructType>();
-        
+
         var userStruct = (StructArray)recordBatch.Column(1);
         userStruct.IsNull(0).Should().BeTrue();
         userStruct.IsNull(1).Should().BeFalse();

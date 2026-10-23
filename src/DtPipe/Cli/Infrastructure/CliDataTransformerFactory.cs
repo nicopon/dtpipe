@@ -8,28 +8,28 @@ namespace DtPipe.Cli.Infrastructure;
 
 public class CliDataTransformerFactory : IDataTransformerFactory, ICliContributor
 {
-	private readonly IDataTransformerFactory _inner;
+    private readonly IDataTransformerFactory _inner;
 
-	public CliDataTransformerFactory(IDataTransformerFactory inner)
-	{
-		_inner = inner;
-	}
+    public CliDataTransformerFactory(IDataTransformerFactory inner)
+    {
+        _inner = inner;
+    }
 
-	public string ComponentName => _inner.ComponentName;
-	public string Category => _inner.Category;
-	public Type OptionsType => _inner.OptionsType;
+    public string ComponentName => _inner.ComponentName;
+    public string Category => _inner.Category;
+    public Type OptionsType => _inner.OptionsType;
 
-	public bool CanHandle(string connectionString) => _inner.CanHandle(connectionString);
+    public bool CanHandle(string connectionString) => _inner.CanHandle(connectionString);
 
-	public IDataTransformer CreateFromConfiguration(IEnumerable<(string Option, string Value)> configuration)
-		=> _inner.CreateFromConfiguration(configuration);
+    public IDataTransformer CreateFromConfiguration(IEnumerable<(string Option, string Value)> configuration)
+        => _inner.CreateFromConfiguration(configuration);
 
-	public object? CreateOptionsFromYaml(TransformerConfig config)
-		=> _inner.CreateOptionsFromYaml(config);
+    public object? CreateOptionsFromYaml(TransformerConfig config)
+        => _inner.CreateOptionsFromYaml(config);
 
-	public IDataTransformer? CreateFromOptions(object options)
-		=> _inner.CreateFromOptions(options);
+    public IDataTransformer? CreateFromOptions(object options)
+        => _inner.CreateFromOptions(options);
 
-	public IEnumerable<FlagDef> GetFlagDefs()
-		=> CliOptionBuilder.GenerateFlagDefsForType(OptionsType);
+    public IEnumerable<FlagDef> GetFlagDefs()
+        => CliOptionBuilder.GenerateFlagDefsForType(OptionsType);
 }

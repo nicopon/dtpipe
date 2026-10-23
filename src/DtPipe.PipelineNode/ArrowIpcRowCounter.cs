@@ -79,30 +79,30 @@ public sealed class ArrowIpcRowCounter
                     break;
 
                 case State.Metadata:
-                {
-                    var meta = _metadata!;
-                    int take = Math.Min(meta.Length - _metadataFilled, data.Length);
-                    data[..take].CopyTo(meta.AsSpan(_metadataFilled));
-                    _metadataFilled += take;
-                    data = data[take..];
-                    if (_metadataFilled == meta.Length)
                     {
-                        ParseMessageMetadata(meta);
-                        _metadata = null;
-                        _state = _bodyRemaining > 0 ? State.Body : State.Continuation;
+                        var meta = _metadata!;
+                        int take = Math.Min(meta.Length - _metadataFilled, data.Length);
+                        data[..take].CopyTo(meta.AsSpan(_metadataFilled));
+                        _metadataFilled += take;
+                        data = data[take..];
+                        if (_metadataFilled == meta.Length)
+                        {
+                            ParseMessageMetadata(meta);
+                            _metadata = null;
+                            _state = _bodyRemaining > 0 ? State.Body : State.Continuation;
+                        }
+                        break;
                     }
-                    break;
-                }
 
                 case State.Body:
-                {
-                    long take = Math.Min(_bodyRemaining, data.Length);
-                    data = data[(int)take..];
-                    _bodyRemaining -= take;
-                    if (_bodyRemaining == 0)
-                        _state = State.Continuation;
-                    break;
-                }
+                    {
+                        long take = Math.Min(_bodyRemaining, data.Length);
+                        data = data[(int)take..];
+                        _bodyRemaining -= take;
+                        if (_bodyRemaining == 0)
+                            _state = State.Continuation;
+                        break;
+                    }
             }
         }
     }

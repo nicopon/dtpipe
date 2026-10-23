@@ -52,31 +52,31 @@ public class SqlServerTypeConverter : ITypeMapper
         };
     }
 
-    	public string BuildNativeType(string dataType, int? dataLength, int? precision, int? scale, int? charLength)
-	{
-		var typeLower = dataType.ToLowerInvariant();
-		var fullType = dataType;
-		var length = charLength ?? dataLength;
+    public string BuildNativeType(string dataType, int? dataLength, int? precision, int? scale, int? charLength)
+    {
+        var typeLower = dataType.ToLowerInvariant();
+        var fullType = dataType;
+        var length = charLength ?? dataLength;
 
-		// Handle char/varchar/binary/varbinary
-		if (length.HasValue && (typeLower.Contains("char") || typeLower.Contains("binary")))
-		{
-			var lenStr = length.Value == -1 ? "MAX" : length.Value.ToString();
-			return $"{fullType}({lenStr})";
-		}
+        // Handle char/varchar/binary/varbinary
+        if (length.HasValue && (typeLower.Contains("char") || typeLower.Contains("binary")))
+        {
+            var lenStr = length.Value == -1 ? "MAX" : length.Value.ToString();
+            return $"{fullType}({lenStr})";
+        }
 
-		// Handle decimal/numeric
-		if (precision.HasValue && scale.HasValue && (typeLower == "decimal" || typeLower == "numeric"))
-		{
-			return $"{fullType}({precision.Value},{scale.Value})";
-		}
+        // Handle decimal/numeric
+        if (precision.HasValue && scale.HasValue && (typeLower == "decimal" || typeLower == "numeric"))
+        {
+            return $"{fullType}({precision.Value},{scale.Value})";
+        }
 
-		// Handle datetime types with precision
-		if (precision.HasValue && (typeLower.Contains("datetime2") || typeLower.Contains("datetimeoffset") || typeLower.Contains("time")))
-		{
-			return $"{fullType}({precision.Value})";
-		}
+        // Handle datetime types with precision
+        if (precision.HasValue && (typeLower.Contains("datetime2") || typeLower.Contains("datetimeoffset") || typeLower.Contains("time")))
+        {
+            return $"{fullType}({precision.Value})";
+        }
 
-		return fullType;
-	}
+        return fullType;
+    }
 }

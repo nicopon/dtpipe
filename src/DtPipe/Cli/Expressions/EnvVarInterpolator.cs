@@ -12,7 +12,7 @@ public sealed class EnvVarInterpolator : IStringInterpolator
         {
             return Task.FromResult<string?>(envValue);
         }
-        
+
         return Task.FromResult<string?>(null);
     }
 }

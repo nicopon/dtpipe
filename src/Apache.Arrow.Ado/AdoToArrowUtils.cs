@@ -77,8 +77,8 @@ public static class AdoToArrowUtils
             IReadOnlyDictionary<string, string>? finalMetadata = baseMetadata;
             if (config.IncludeMetadata)
             {
-                var metaDict = baseMetadata != null 
-                    ? new Dictionary<string, string>(baseMetadata) 
+                var metaDict = baseMetadata != null
+                    ? new Dictionary<string, string>(baseMetadata)
                     : new Dictionary<string, string>();
                 if (!string.IsNullOrEmpty(col.DataTypeName)) metaDict["ado:DataTypeName"] = col.DataTypeName;
                 if (col.ColumnSize.HasValue) metaDict["ado:ColumnSize"] = col.ColumnSize.Value.ToString();

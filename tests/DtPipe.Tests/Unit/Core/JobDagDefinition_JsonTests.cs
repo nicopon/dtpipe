@@ -44,7 +44,7 @@ public class JobDagDefinition_JsonTests
     {
         var json = original.ToJson();
         var deserialized = JobDagDefinition.FromJson(json);
-        
+
         Assert.NotNull(deserialized);
         Assert.Equal(original.Branches.Count, deserialized.Branches.Count);
         for (int i = 0; i < original.Branches.Count; i++)

@@ -82,7 +82,7 @@ public sealed class RecordBatchDataReader : DbDataReader
     // ── Value access ─────────────────────────────────────────────────────────
 
     public override object this[int ordinal] => GetValue(ordinal);
-    public override object this[string name]  => GetValue(GetOrdinal(name));
+    public override object this[string name] => GetValue(GetOrdinal(name));
 
     public override object GetValue(int ordinal)
         => ArrowTypeMap.GetValue(_batch.Column(ordinal), _row, _schema.FieldsList[ordinal]) ?? DBNull.Value;
@@ -100,18 +100,18 @@ public sealed class RecordBatchDataReader : DbDataReader
     // SqlBulkCopy uses GetValue() which boxes; these typed methods are available for callers
     // that support the DbDataReader typed API.
 
-    public override bool    GetBoolean(int ordinal) => (bool)GetValue(ordinal);
-    public override byte    GetByte   (int ordinal) => (byte)GetValue(ordinal);
-    public override short   GetInt16  (int ordinal) => (short)GetValue(ordinal);
-    public override int     GetInt32  (int ordinal) => (int)GetValue(ordinal);
-    public override long    GetInt64  (int ordinal) => (long)GetValue(ordinal);
-    public override float   GetFloat  (int ordinal) => (float)GetValue(ordinal);
-    public override double  GetDouble (int ordinal) => (double)GetValue(ordinal);
+    public override bool GetBoolean(int ordinal) => (bool)GetValue(ordinal);
+    public override byte GetByte(int ordinal) => (byte)GetValue(ordinal);
+    public override short GetInt16(int ordinal) => (short)GetValue(ordinal);
+    public override int GetInt32(int ordinal) => (int)GetValue(ordinal);
+    public override long GetInt64(int ordinal) => (long)GetValue(ordinal);
+    public override float GetFloat(int ordinal) => (float)GetValue(ordinal);
+    public override double GetDouble(int ordinal) => (double)GetValue(ordinal);
     public override decimal GetDecimal(int ordinal) => (decimal)GetValue(ordinal);
-    public override string  GetString (int ordinal) => (string)GetValue(ordinal);
+    public override string GetString(int ordinal) => (string)GetValue(ordinal);
 
     public override DateTime GetDateTime(int ordinal) => (DateTime)GetValue(ordinal);
-    public override Guid     GetGuid    (int ordinal) => (Guid)GetValue(ordinal);
+    public override Guid GetGuid(int ordinal) => (Guid)GetValue(ordinal);
 
     // These are rarely needed by SqlBulkCopy but required by the abstract contract:
     public override char GetChar(int ordinal) => throw new NotSupportedException();

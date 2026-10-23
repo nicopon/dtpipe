@@ -85,7 +85,7 @@ class Program
         }
         finally
         {
-            try { if (File.Exists(dbPath)) File.Delete(dbPath); } catch {}
+            try { if (File.Exists(dbPath)) File.Delete(dbPath); } catch { }
             // keep output for inspection
         }
     }

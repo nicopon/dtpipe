@@ -13,58 +13,58 @@ namespace DtPipe.Tests;
 [Collection("Docker Integration Tests")]
 public class OracleSchemaInspectorTests : IAsyncLifetime
 {
-	private readonly DtPipe.Tests.Fixtures.GlobalDatabaseFixture _fixture;
-	private string? _connectionString;
+    private readonly DtPipe.Tests.Fixtures.GlobalDatabaseFixture _fixture;
+    private string? _connectionString;
 
-	public OracleSchemaInspectorTests(DtPipe.Tests.Fixtures.GlobalDatabaseFixture fixture)
-	{
-		_fixture = fixture;
-	}
+    public OracleSchemaInspectorTests(DtPipe.Tests.Fixtures.GlobalDatabaseFixture fixture)
+    {
+        _fixture = fixture;
+    }
 
-	public ValueTask InitializeAsync()
-	{
-		_connectionString = _fixture.OracleConnectionString;
-		return ValueTask.CompletedTask;
-	}
+    public ValueTask InitializeAsync()
+    {
+        _connectionString = _fixture.OracleConnectionString;
+        return ValueTask.CompletedTask;
+    }
 
-	public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
-	private async Task ExecuteSql(string sql)
-	{
-		await using var connection = new OracleConnection(_connectionString!);
-		await connection.OpenAsync();
-		await using var cmd = connection.CreateCommand();
-		cmd.CommandText = sql;
-		await cmd.ExecuteNonQueryAsync();
-	}
+    private async Task ExecuteSql(string sql)
+    {
+        await using var connection = new OracleConnection(_connectionString!);
+        await connection.OpenAsync();
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = sql;
+        await cmd.ExecuteNonQueryAsync();
+    }
 
-	#region Schema Inspection Tests
+    #region Schema Inspection Tests
 
-	[Fact]
-	public async Task Oracle_InspectTargetAsync_WhenTableDoesNotExist_ReturnsNotExists()
-	{
-		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
+    [Fact]
+    public async Task Oracle_InspectTargetAsync_WhenTableDoesNotExist_ReturnsNotExists()
+    {
+        if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
-		var options = new OracleWriterOptions { Table = "NON_EXISTENT" };
+        var options = new OracleWriterOptions { Table = "NON_EXISTENT" };
 
-		await using var writer = new OracleDataWriter(_connectionString, options, NullLogger<OracleDataWriter>.Instance, OracleTypeConverter.Instance);
-		var inspector = writer as ISchemaInspector;
+        await using var writer = new OracleDataWriter(_connectionString, options, NullLogger<OracleDataWriter>.Instance, OracleTypeConverter.Instance);
+        var inspector = writer as ISchemaInspector;
 
-		Assert.NotNull(inspector);
+        Assert.NotNull(inspector);
 
-		var result = await inspector.InspectTargetAsync();
+        var result = await inspector.InspectTargetAsync();
 
-		Assert.NotNull(result);
-		Assert.False(result.Exists);
-		Assert.Empty(result.Columns);
-	}
+        Assert.NotNull(result);
+        Assert.False(result.Exists);
+        Assert.Empty(result.Columns);
+    }
 
-	[Fact]
-	public async Task Oracle_InspectTargetAsync_DetectsColumnsAndTypes()
-	{
-		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
+    [Fact]
+    public async Task Oracle_InspectTargetAsync_DetectsColumnsAndTypes()
+    {
+        if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
-		await ExecuteSql(@"
+        await ExecuteSql(@"
             CREATE TABLE TYPE_TEST (
                 ID NUMBER(10) PRIMARY KEY,
                 NAME VARCHAR2(100) NOT NULL,
@@ -72,88 +72,88 @@ public class OracleSchemaInspectorTests : IAsyncLifetime
                 CREATED DATE
             )");
 
-		var options = new OracleWriterOptions { Table = "TYPE_TEST" };
+        var options = new OracleWriterOptions { Table = "TYPE_TEST" };
 
-		await using var writer = new OracleDataWriter(_connectionString, options, NullLogger<OracleDataWriter>.Instance, OracleTypeConverter.Instance);
-		var inspector = (ISchemaInspector)writer;
+        await using var writer = new OracleDataWriter(_connectionString, options, NullLogger<OracleDataWriter>.Instance, OracleTypeConverter.Instance);
+        var inspector = (ISchemaInspector)writer;
 
-		var result = await inspector.InspectTargetAsync();
+        var result = await inspector.InspectTargetAsync();
 
-		Assert.NotNull(result);
-		Assert.True(result.Exists);
-		Assert.Equal(4, result.Columns.Count);
+        Assert.NotNull(result);
+        Assert.True(result.Exists);
+        Assert.Equal(4, result.Columns.Count);
 
-		var idCol = result.Columns.First(c => c.Name == "ID");
-		Assert.True(idCol.IsPrimaryKey);
-		Assert.Equal(typeof(decimal), idCol.InferredClrType);
+        var idCol = result.Columns.First(c => c.Name == "ID");
+        Assert.True(idCol.IsPrimaryKey);
+        Assert.Equal(typeof(decimal), idCol.InferredClrType);
 
-		var nameCol = result.Columns.First(c => c.Name == "NAME");
-		Assert.False(nameCol.IsNullable);
-		Assert.Equal(typeof(string), nameCol.InferredClrType);
-		Assert.Equal(100, nameCol.MaxLength);
+        var nameCol = result.Columns.First(c => c.Name == "NAME");
+        Assert.False(nameCol.IsNullable);
+        Assert.Equal(typeof(string), nameCol.InferredClrType);
+        Assert.Equal(100, nameCol.MaxLength);
 
-		var valueCol = result.Columns.First(c => c.Name == "VALUE");
-		Assert.Equal(typeof(decimal), valueCol.InferredClrType);
+        var valueCol = result.Columns.First(c => c.Name == "VALUE");
+        Assert.Equal(typeof(decimal), valueCol.InferredClrType);
 
-		var dateCol = result.Columns.First(c => c.Name == "CREATED");
-		Assert.True(dateCol.IsNullable);
-		Assert.Equal(typeof(DateTime), dateCol.InferredClrType);
-	}
+        var dateCol = result.Columns.First(c => c.Name == "CREATED");
+        Assert.True(dateCol.IsNullable);
+        Assert.Equal(typeof(DateTime), dateCol.InferredClrType);
+    }
 
-	#endregion
+    #endregion
 
-	#region Schema Compatibility Tests
+    #region Schema Compatibility Tests
 
-	[Fact]
-	public async Task Oracle_SchemaCompatibility_CompatibleSchema()
-	{
-		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
+    [Fact]
+    public async Task Oracle_SchemaCompatibility_CompatibleSchema()
+    {
+        if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
-		await ExecuteSql("CREATE TABLE COMPAT_TEST (ID NUMBER(10), NAME VARCHAR2(50))");
+        await ExecuteSql("CREATE TABLE COMPAT_TEST (ID NUMBER(10), NAME VARCHAR2(50))");
 
-		var sourceSchema = new List<PipeColumnInfo>
-		{
-			new("ID", typeof(decimal), false),
-			new("NAME", typeof(string), true)
-		};
+        var sourceSchema = new List<PipeColumnInfo>
+        {
+            new("ID", typeof(decimal), false),
+            new("NAME", typeof(string), true)
+        };
 
-		var options = new OracleWriterOptions { Table = "COMPAT_TEST" };
+        var options = new OracleWriterOptions { Table = "COMPAT_TEST" };
 
-		await using var writer = new OracleDataWriter(_connectionString, options, NullLogger<OracleDataWriter>.Instance, OracleTypeConverter.Instance);
-		var inspector = (ISchemaInspector)writer;
+        await using var writer = new OracleDataWriter(_connectionString, options, NullLogger<OracleDataWriter>.Instance, OracleTypeConverter.Instance);
+        var inspector = (ISchemaInspector)writer;
 
-		var targetSchema = await inspector.InspectTargetAsync();
-		var report = SchemaCompatibilityAnalyzer.Analyze(sourceSchema, targetSchema);
+        var targetSchema = await inspector.InspectTargetAsync();
+        var report = SchemaCompatibilityAnalyzer.Analyze(sourceSchema, targetSchema);
 
-		Assert.True(report.IsCompatible);
-		Assert.Empty(report.Errors);
-	}
+        Assert.True(report.IsCompatible);
+        Assert.Empty(report.Errors);
+    }
 
-	[Fact]
-	public async Task Oracle_SchemaCompatibility_MissingColumn()
-	{
-		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
+    [Fact]
+    public async Task Oracle_SchemaCompatibility_MissingColumn()
+    {
+        if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
-		await ExecuteSql("CREATE TABLE MISSING_TEST (ID NUMBER(10))");
+        await ExecuteSql("CREATE TABLE MISSING_TEST (ID NUMBER(10))");
 
-		var sourceSchema = new List<PipeColumnInfo>
-		{
-			new("ID", typeof(decimal), false),
-			new("EXTRA_COLUMN", typeof(string), true)
-		};
+        var sourceSchema = new List<PipeColumnInfo>
+        {
+            new("ID", typeof(decimal), false),
+            new("EXTRA_COLUMN", typeof(string), true)
+        };
 
-		var options = new OracleWriterOptions { Table = "MISSING_TEST" };
+        var options = new OracleWriterOptions { Table = "MISSING_TEST" };
 
-		await using var writer = new OracleDataWriter(_connectionString, options, NullLogger<OracleDataWriter>.Instance, OracleTypeConverter.Instance);
-		var inspector = (ISchemaInspector)writer;
+        await using var writer = new OracleDataWriter(_connectionString, options, NullLogger<OracleDataWriter>.Instance, OracleTypeConverter.Instance);
+        var inspector = (ISchemaInspector)writer;
 
-		var targetSchema = await inspector.InspectTargetAsync();
-		var report = SchemaCompatibilityAnalyzer.Analyze(sourceSchema, targetSchema);
+        var targetSchema = await inspector.InspectTargetAsync();
+        var report = SchemaCompatibilityAnalyzer.Analyze(sourceSchema, targetSchema);
 
-		Assert.False(report.IsCompatible);
-		Assert.Contains(report.Columns, c =>
-			c.ColumnName == "EXTRA_COLUMN" && c.Status == CompatibilityStatus.MissingInTarget);
-	}
+        Assert.False(report.IsCompatible);
+        Assert.Contains(report.Columns, c =>
+            c.ColumnName == "EXTRA_COLUMN" && c.Status == CompatibilityStatus.MissingInTarget);
+    }
 
-	#endregion
+    #endregion
 }

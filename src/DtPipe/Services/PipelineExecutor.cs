@@ -294,7 +294,7 @@ public sealed class PipelineExecutor
             }
             else
             {
-                 throw new InvalidOperationException($"Writer '{writer.GetType().Name}' supports neither IRowDataWriter nor IColumnarDataWriter.");
+                throw new InvalidOperationException($"Writer '{writer.GetType().Name}' supports neither IRowDataWriter nor IColumnarDataWriter.");
             }
         }
     }

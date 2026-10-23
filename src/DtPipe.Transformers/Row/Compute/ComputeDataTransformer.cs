@@ -13,224 +13,224 @@ namespace DtPipe.Transformers.Row.Compute;
 /// </summary>
 public sealed class ComputeDataTransformer : IDataTransformer, IRequiresOptions<DtPipe.Transformers.Row.Compute.ComputeOptions>
 {
-	private readonly ComputeOptions _options;
-	private readonly IJsEngineProvider _jsEngineProvider;
-	private readonly List<string> _initializationScripts = new();
-	private readonly Dictionary<string, string> _mappings;
-	private readonly Dictionary<string, Type> _typeHints;
+    private readonly ComputeOptions _options;
+    private readonly IJsEngineProvider _jsEngineProvider;
+    private readonly List<string> _initializationScripts = new();
+    private readonly Dictionary<string, string> _mappings;
+    private readonly Dictionary<string, Type> _typeHints;
 
-	// State initialized in InitializeAsync
-	private Dictionary<string, int>? _columnNameToIndex;
-	private string[]? _columnNames;
-	private ScriptColumnProcessor[]? _processors;
-	private int _inputColumnCount; // number of columns in the original input schema (before new virtual columns)
+    // State initialized in InitializeAsync
+    private Dictionary<string, int>? _columnNameToIndex;
+    private string[]? _columnNames;
+    private ScriptColumnProcessor[]? _processors;
+    private int _inputColumnCount; // number of columns in the original input schema (before new virtual columns)
 
-	private readonly bool _skipNull;
+    private readonly bool _skipNull;
 
-	public ComputeDataTransformer(ComputeOptions options, IJsEngineProvider jsEngineProvider)
-	{
-		_options = options;
-		_jsEngineProvider = jsEngineProvider;
-		_mappings = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-		_typeHints = new Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase);
+    public ComputeDataTransformer(ComputeOptions options, IJsEngineProvider jsEngineProvider)
+    {
+        _options = options;
+        _jsEngineProvider = jsEngineProvider;
+        _mappings = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        _typeHints = new Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase);
 
-		foreach (var (col, typeStr) in options.ComputeTypes)
-		{
-			_typeHints[col] = DtPipe.Core.Helpers.TypeHelper.RequireTypeHint("--compute-types", col, typeStr);
-		}
+        foreach (var (col, typeStr) in options.ComputeTypes)
+        {
+            _typeHints[col] = DtPipe.Core.Helpers.TypeHelper.RequireTypeHint("--compute-types", col, typeStr);
+        }
 
-		foreach (var mapping in options.Compute)
-		{
-			var parts = mapping.Split(':', 3);
-			if (parts.Length == 3 && DtPipe.Core.Helpers.TypeHelper.ParseTypeHint(parts[1]) is { } t)
-			{
-				_typeHints[parts[0]] = t;
-				_mappings[parts[0]] = parts[2];
-			}
-			else if (mapping.Split(':', 2) is { Length: 2 } p2)
-			{
-				_mappings[p2[0]] = p2[1];
-			}
-		}
+        foreach (var mapping in options.Compute)
+        {
+            var parts = mapping.Split(':', 3);
+            if (parts.Length == 3 && DtPipe.Core.Helpers.TypeHelper.ParseTypeHint(parts[1]) is { } t)
+            {
+                _typeHints[parts[0]] = t;
+                _mappings[parts[0]] = parts[2];
+            }
+            else if (mapping.Split(':', 2) is { Length: 2 } p2)
+            {
+                _mappings[p2[0]] = p2[1];
+            }
+        }
 
-		_skipNull = options.SkipNull;
-	}
+        _skipNull = options.SkipNull;
+    }
 
-	public bool HasScript => _mappings.Count > 0;
+    public bool HasScript => _mappings.Count > 0;
 
-	public ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
-	{
-		if (!HasScript)
-		{
-			return new ValueTask<IReadOnlyList<PipeColumnInfo>>(columns);
-		}
+    public ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
+    {
+        if (!HasScript)
+        {
+            return new ValueTask<IReadOnlyList<PipeColumnInfo>>(columns);
+        }
 
-		_inputColumnCount = columns.Count;
+        _inputColumnCount = columns.Count;
 
-		// Build mutable name→index mapping (we may extend it for new virtual columns)
-		var nameToIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-		for (var i = 0; i < columns.Count; i++)
-			nameToIndex[columns[i].Name] = i;
+        // Build mutable name→index mapping (we may extend it for new virtual columns)
+        var nameToIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (var i = 0; i < columns.Count; i++)
+            nameToIndex[columns[i].Name] = i;
 
-		var outputColumns = new List<PipeColumnInfo>(columns);
-		var processors = new List<ScriptColumnProcessor>();
-		var engine = _jsEngineProvider.GetEngine();
+        var outputColumns = new List<PipeColumnInfo>(columns);
+        var processors = new List<ScriptColumnProcessor>();
+        var engine = _jsEngineProvider.GetEngine();
 
-		foreach (var (colName, script) in _mappings)
-		{
-			// If column doesn't exist yet, create it as a new virtual column
-			if (!nameToIndex.TryGetValue(colName, out var colIndex))
-			{
-				colIndex = outputColumns.Count;
-				nameToIndex[colName] = colIndex;
-				// Default to string; may be overridden by _typeHints below
-				outputColumns.Add(new PipeColumnInfo(colName, typeof(string), IsNullable: true));
-			}
-			else
-			{
-				// The script writes this column's values now, so whatever numeric width the source
-				// declared no longer describes them: a DECIMAL(10,2) whose script returns a
-				// third decimal digit would be refused by a builder held to the source's scale.
-				outputColumns[colIndex] = outputColumns[colIndex] with { Precision = null, Scale = null };
-			}
+        foreach (var (colName, script) in _mappings)
+        {
+            // If column doesn't exist yet, create it as a new virtual column
+            if (!nameToIndex.TryGetValue(colName, out var colIndex))
+            {
+                colIndex = outputColumns.Count;
+                nameToIndex[colName] = colIndex;
+                // Default to string; may be overridden by _typeHints below
+                outputColumns.Add(new PipeColumnInfo(colName, typeof(string), IsNullable: true));
+            }
+            else
+            {
+                // The script writes this column's values now, so whatever numeric width the source
+                // declared no longer describes them: a DECIMAL(10,2) whose script returns a
+                // third decimal digit would be refused by a builder held to the source's scale.
+                outputColumns[colIndex] = outputColumns[colIndex] with { Precision = null, Scale = null };
+            }
 
-			var (function, wrappedScript) = CompileBody(engine, script);
-			var uniqueFunctionName = $"proc_{colIndex}_{Guid.NewGuid():N}";
-			engine.SetValue(uniqueFunctionName, function);
+            var (function, wrappedScript) = CompileBody(engine, script);
+            var uniqueFunctionName = $"proc_{colIndex}_{Guid.NewGuid():N}";
+            engine.SetValue(uniqueFunctionName, function);
 
-			processors.Add(new ScriptColumnProcessor(colIndex, uniqueFunctionName, wrappedScript));
-		}
+            processors.Add(new ScriptColumnProcessor(colIndex, uniqueFunctionName, wrappedScript));
+        }
 
-		// Apply type hints to existing or new columns
-		foreach (KeyValuePair<string, Type> entry in _typeHints)
-		{
-			var col = entry.Key;
-			var type = entry.Value;
-			if (nameToIndex.TryGetValue(col, out var idx))
-				outputColumns[idx] = outputColumns[idx] with { ClrType = type };
-		}
+        // Apply type hints to existing or new columns
+        foreach (KeyValuePair<string, Type> entry in _typeHints)
+        {
+            var col = entry.Key;
+            var type = entry.Value;
+            if (nameToIndex.TryGetValue(col, out var idx))
+                outputColumns[idx] = outputColumns[idx] with { ClrType = type };
+        }
 
-		_columnNameToIndex = nameToIndex;
-		_columnNames = outputColumns.Select(c => c.Name).ToArray();
-		_processors = processors.ToArray();
+        _columnNameToIndex = nameToIndex;
+        _columnNames = outputColumns.Select(c => c.Name).ToArray();
+        _processors = processors.ToArray();
 
-		return new ValueTask<IReadOnlyList<PipeColumnInfo>>(outputColumns);
-	}
+        return new ValueTask<IReadOnlyList<PipeColumnInfo>>(outputColumns);
+    }
 
-	public object?[]? Transform(IReadOnlyList<object?> row)
-	{
-		if (_processors == null || _processors.Length == 0 || _columnNames == null)
+    public object?[]? Transform(IReadOnlyList<object?> row)
+    {
+        if (_processors == null || _processors.Length == 0 || _columnNames == null)
             return row as object?[] ?? row.ToArray();
 
-		var engine = _jsEngineProvider.GetEngine();
-		EnsureFunctionsCompiled(engine);
+        var engine = _jsEngineProvider.GetEngine();
+        EnsureFunctionsCompiled(engine);
 
-		// Expand the row if new virtual columns were added during InitializeAsync
-		var outputLength = _columnNames.Length;
+        // Expand the row if new virtual columns were added during InitializeAsync
+        var outputLength = _columnNames.Length;
         object?[] rowArray;
 
-		if (outputLength > row.Count)
-		{
-			rowArray = new object?[outputLength];
+        if (outputLength > row.Count)
+        {
+            rowArray = new object?[outputLength];
             for (int i = 0; i < row.Count; i++) rowArray[i] = row[i];
-		}
+        }
         else
         {
             rowArray = row as object?[] ?? row.ToArray();
         }
 
-		// Build a JS object representing the input row (input columns only)
-		var jsSource = new JsObject(engine);
-		for (int i = 0; i < _inputColumnCount && i < _columnNames.Length; i++)
-		{
-			jsSource.Set(_columnNames[i], JsValue.FromObject(engine, rowArray[i]));
-		}
+        // Build a JS object representing the input row (input columns only)
+        var jsSource = new JsObject(engine);
+        for (int i = 0; i < _inputColumnCount && i < _columnNames.Length; i++)
+        {
+            jsSource.Set(_columnNames[i], JsValue.FromObject(engine, rowArray[i]));
+        }
 
         // Create Proxy using Jint Engine API for robust schema validation
         engine.SetValue("__source", jsSource);
         var jsRow = engine.Evaluate("new Proxy(__source, { get: (target, prop) => { if (typeof prop === 'string' && !(prop in target)) throw new ReferenceError(`Column '${prop}' not found in schema`); return target[prop]; } })");
 
-		engine.SetValue("row", jsRow);
+        engine.SetValue("row", jsRow);
 
-		foreach (var processor in _processors)
-		{
-			if (_skipNull && processor.ColumnIndex < _inputColumnCount && rowArray[processor.ColumnIndex] is null)
-				continue;
+        foreach (var processor in _processors)
+        {
+            if (_skipNull && processor.ColumnIndex < _inputColumnCount && rowArray[processor.ColumnIndex] is null)
+                continue;
 
-			try
-			{
-				var result = engine.Evaluate($"{processor.FunctionName}(row)");
+            try
+            {
+                var result = engine.Evaluate($"{processor.FunctionName}(row)");
 
-				// null is a value a script may mean; undefined is the absence of one. Writing it as NULL
-				// would drop the data without a trace, so it stops the run and names the column.
-				if (result.IsUndefined())
-					throw new InvalidOperationException(
-						"the script returned undefined. Return a value, or null for an empty one: a body with "
-						+ "statements needs an explicit 'return', and a function must be called to give its result.");
+                // null is a value a script may mean; undefined is the absence of one. Writing it as NULL
+                // would drop the data without a trace, so it stops the run and names the column.
+                if (result.IsUndefined())
+                    throw new InvalidOperationException(
+                        "the script returned undefined. Return a value, or null for an empty one: a body with "
+                        + "statements needs an explicit 'return', and a function must be called to give its result.");
 
-				rowArray[processor.ColumnIndex] = result.IsNull() ? null : result.ToObject();
+                rowArray[processor.ColumnIndex] = result.IsNull() ? null : result.ToObject();
 
                 if (rowArray[processor.ColumnIndex] is double d && (double.IsInfinity(d) || double.IsNaN(d)))
                 {
-                     throw new InvalidOperationException($"Compute script for column '{_columnNames[processor.ColumnIndex]}' resulted in {d} (possible division by zero).");
+                    throw new InvalidOperationException($"Compute script for column '{_columnNames[processor.ColumnIndex]}' resulted in {d} (possible division by zero).");
                 }
-			}
-			catch (Exception ex)
-			{
-				throw new InvalidOperationException($"Error evaluating compute script for column '{_columnNames[processor.ColumnIndex]}': {ex.Message}", ex);
-			}
-		}
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"Error evaluating compute script for column '{_columnNames[processor.ColumnIndex]}': {ex.Message}", ex);
+            }
+        }
 
-		return rowArray;
-	}
+        return rowArray;
+    }
 
-	/// <summary>
-	/// Compiles a column's script as <c>function(row)</c>. A body that parses as one expression is
-	/// returned as such, so an expression containing the word "return" (an immediately invoked
-	/// function) still yields its value; anything else is taken as the statements of the function.
-	/// </summary>
-	private static (JsValue Function, string WrappedScript) CompileBody(Engine engine, string script)
-	{
-		var body = script.Trim();
-		var expression = body.TrimEnd(';').Trim();
+    /// <summary>
+    /// Compiles a column's script as <c>function(row)</c>. A body that parses as one expression is
+    /// returned as such, so an expression containing the word "return" (an immediately invoked
+    /// function) still yields its value; anything else is taken as the statements of the function.
+    /// </summary>
+    private static (JsValue Function, string WrappedScript) CompileBody(Engine engine, string script)
+    {
+        var body = script.Trim();
+        var expression = body.TrimEnd(';').Trim();
 
-		if (expression.Length > 0)
-		{
-			var asExpression = $"function(row) {{ return ({expression}\n); }}";
-			try
-			{
-				return (engine.Evaluate($"({asExpression})"), asExpression);
-			}
-			catch (JavaScriptException)
-			{
-				// Defining a function runs nothing, so the only failure here is a syntax error: the
-				// body is not one expression. Fall through to the statement form below.
-			}
-		}
+        if (expression.Length > 0)
+        {
+            var asExpression = $"function(row) {{ return ({expression}\n); }}";
+            try
+            {
+                return (engine.Evaluate($"({asExpression})"), asExpression);
+            }
+            catch (JavaScriptException)
+            {
+                // Defining a function runs nothing, so the only failure here is a syntax error: the
+                // body is not one expression. Fall through to the statement form below.
+            }
+        }
 
-		var asStatements = $"function(row) {{ {body} }}";
-		return (engine.Evaluate($"({asStatements})"), asStatements);
-	}
+        var asStatements = $"function(row) {{ {body} }}";
+        return (engine.Evaluate($"({asStatements})"), asStatements);
+    }
 
-	// Dispose handled by DI scope? No, provider is singleton/scoped.
-	// ComputeDataTransformer does not own the engine anymore.
+    // Dispose handled by DI scope? No, provider is singleton/scoped.
+    // ComputeDataTransformer does not own the engine anymore.
 
-	private void EnsureFunctionsCompiled(Engine engine)
-	{
-		if (_processors != null && _processors.Length > 0)
-		{
-			var firstFunc = _processors[0].FunctionName;
-			var val = engine.GetValue(firstFunc);
-			if (val.IsUndefined())
-			{
-				foreach (var p in _processors)
-				{
-					// Re-register using SetValue/Evaluate
-					engine.SetValue(p.FunctionName, engine.Evaluate($"({p.WrappedScript})"));
-				}
-			}
-		}
-	}
+    private void EnsureFunctionsCompiled(Engine engine)
+    {
+        if (_processors != null && _processors.Length > 0)
+        {
+            var firstFunc = _processors[0].FunctionName;
+            var val = engine.GetValue(firstFunc);
+            if (val.IsUndefined())
+            {
+                foreach (var p in _processors)
+                {
+                    // Re-register using SetValue/Evaluate
+                    engine.SetValue(p.FunctionName, engine.Evaluate($"({p.WrappedScript})"));
+                }
+            }
+        }
+    }
 
-	private record struct ScriptColumnProcessor(int ColumnIndex, string FunctionName, string WrappedScript);
+    private record struct ScriptColumnProcessor(int ColumnIndex, string FunctionName, string WrappedScript);
 }

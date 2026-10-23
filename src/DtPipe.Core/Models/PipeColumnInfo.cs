@@ -11,11 +11,11 @@ namespace DtPipe.Core.Models;
 /// <param name="Precision">Numeric precision the source declares, null when it declares none</param>
 /// <param name="Scale">Numeric scale the source declares, null when it declares none</param>
 public sealed record PipeColumnInfo(
-	string Name,
-	Type ClrType,
-	bool IsNullable,
-	bool IsCaseSensitive = false,
-	string? OriginalName = null,
-	int? Precision = null,
-	int? Scale = null
+    string Name,
+    Type ClrType,
+    bool IsNullable,
+    bool IsCaseSensitive = false,
+    string? OriginalName = null,
+    int? Precision = null,
+    int? Scale = null
 );

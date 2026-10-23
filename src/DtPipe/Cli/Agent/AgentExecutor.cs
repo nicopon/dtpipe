@@ -19,73 +19,73 @@ public class AgentExecutor
     private readonly DtPipe.Cli.Pipeline.DagTopologyService? _dagTopology;
     private readonly ConversationWindowManager _windowManager = new();
 
-      /// <summary>
-       /// Fact store that survives conversation compaction (F4 — non-destructive context). Cached
-       /// "fact" tool results (inspected schemas, sample rows, recent errors) are reloaded into the
-       /// compacted window instead of being discarded. Exposed so callers/tests can inspect it.
-       /// </summary>
-     public AgentContextStore ContextStore { get; }
+    /// <summary>
+    /// Fact store that survives conversation compaction (F4 — non-destructive context). Cached
+    /// "fact" tool results (inspected schemas, sample rows, recent errors) are reloaded into the
+    /// compacted window instead of being discarded. Exposed so callers/tests can inspect it.
+    /// </summary>
+    public AgentContextStore ContextStore { get; }
 
-     public AgentTrajectory Trajectory { get; } = new();
-     public List<ChatMessage> Messages { get; } = new();
+    public AgentTrajectory Trajectory { get; } = new();
+    public List<ChatMessage> Messages { get; } = new();
 
-     /// <summary>Why the most recent turn ended (null before the first turn). Drives the exit code
-     /// and the reason line in the session summary.</summary>
-     public TurnOutcome? LastTurnOutcome { get; private set; }
+    /// <summary>Why the most recent turn ended (null before the first turn). Drives the exit code
+    /// and the reason line in the session summary.</summary>
+    public TurnOutcome? LastTurnOutcome { get; private set; }
 
-     /// <summary>
-     /// The question the model asked with <c>ask-user</c>, when the last turn ended on
-     /// <see cref="TurnOutcome.AwaitingUserInput"/>. Cleared at the start of the next turn — the
-     /// user's answer becomes that turn's prompt.
-     /// </summary>
-     public AgentQuestion? PendingQuestion { get; private set; }
+    /// <summary>
+    /// The question the model asked with <c>ask-user</c>, when the last turn ended on
+    /// <see cref="TurnOutcome.AwaitingUserInput"/>. Cleared at the start of the next turn — the
+    /// user's answer becomes that turn's prompt.
+    /// </summary>
+    public AgentQuestion? PendingQuestion { get; private set; }
 
-     private AgentMode? _mode;
-     private long _turnTokens;
-     private readonly Stopwatch _turnClock = new();
-     private readonly AgentTrace? _trace;
+    private AgentMode? _mode;
+    private long _turnTokens;
+    private readonly Stopwatch _turnClock = new();
+    private readonly AgentTrace? _trace;
 
-     /// <summary>The session's diagnostic record, when one was asked for.</summary>
-     internal AgentTrace? Trace => _trace;
-     private bool _traceOpened;
+    /// <summary>The session's diagnostic record, when one was asked for.</summary>
+    internal AgentTrace? Trace => _trace;
+    private bool _traceOpened;
 
-     /// <summary>
-     /// The session's live operating mode. Seeded from the first turn's <see cref="AgentOptions.Mode"/>
-     /// and thereafter the authority for the role prompt and the tool allow-list — the model sees
-     /// the tools for <em>this</em> value at the top of every turn (F1 is a per-turn invariant), so
-     /// switching it between turns is safe by construction. It never loosens a write gate: <c>--apply</c>
-     /// and the <c>--allow-*</c> flags stay launch-time only.
-     /// </summary>
-     public AgentMode Mode => _mode ?? AgentMode.Plan;
+    /// <summary>
+    /// The session's live operating mode. Seeded from the first turn's <see cref="AgentOptions.Mode"/>
+    /// and thereafter the authority for the role prompt and the tool allow-list — the model sees
+    /// the tools for <em>this</em> value at the top of every turn (F1 is a per-turn invariant), so
+    /// switching it between turns is safe by construction. It never loosens a write gate: <c>--apply</c>
+    /// and the <c>--allow-*</c> flags stay launch-time only.
+    /// </summary>
+    public AgentMode Mode => _mode ?? AgentMode.Plan;
 
-     /// <summary>The next mode in the cycle plan → execute → autonomous → plan.</summary>
-     internal static AgentMode NextMode(AgentMode mode) => mode switch
-     {
-         AgentMode.Plan => AgentMode.Execute,
-         AgentMode.Execute => AgentMode.Autonomous,
-         _ => AgentMode.Plan,
-     };
+    /// <summary>The next mode in the cycle plan → execute → autonomous → plan.</summary>
+    internal static AgentMode NextMode(AgentMode mode) => mode switch
+    {
+        AgentMode.Plan => AgentMode.Execute,
+        AgentMode.Execute => AgentMode.Autonomous,
+        _ => AgentMode.Plan,
+    };
 
-     /// <summary>Advances <see cref="Mode"/> one step around the cycle and returns the new value.</summary>
-     public AgentMode CycleMode()
-     {
-         _mode = NextMode(Mode);
-         return _mode.Value;
-     }
+    /// <summary>Advances <see cref="Mode"/> one step around the cycle and returns the new value.</summary>
+    public AgentMode CycleMode()
+    {
+        _mode = NextMode(Mode);
+        return _mode.Value;
+    }
 
-     public AgentExecutor(IAgentToolProvider toolProvider, ILlmClient llmClient, AgentTui tui, IAnsiConsole console, AgentContextStore? contextStore = null, DtPipe.Cli.Pipeline.DagTopologyService? dagTopology = null, AgentTrace? trace = null)
-        {
-            _toolProvider = toolProvider;
-            _llmClient = llmClient;
-            _tui = tui;
-            _console = console;
-           ContextStore = contextStore ?? new AgentContextStore();
-           _dagTopology = dagTopology;
-           _trace = trace;
-           if (_trace is not null) Trajectory.StepAdded += _trace.Step;
+    public AgentExecutor(IAgentToolProvider toolProvider, ILlmClient llmClient, AgentTui tui, IAnsiConsole console, AgentContextStore? contextStore = null, DtPipe.Cli.Pipeline.DagTopologyService? dagTopology = null, AgentTrace? trace = null)
+    {
+        _toolProvider = toolProvider;
+        _llmClient = llmClient;
+        _tui = tui;
+        _console = console;
+        ContextStore = contextStore ?? new AgentContextStore();
+        _dagTopology = dagTopology;
+        _trace = trace;
+        if (_trace is not null) Trajectory.StepAdded += _trace.Step;
 
-         Messages.Add(new ChatMessage("system", AgentSystemPrompt.DefaultSystemPrompt));
-        }
+        Messages.Add(new ChatMessage("system", AgentSystemPrompt.DefaultSystemPrompt));
+    }
 
     /// <summary>
     /// The turn view a full-screen session renders into. Built here because the plan panel needs
@@ -141,7 +141,7 @@ public class AgentExecutor
         AgentOptions? options = null,
         int maxIterations = 25,
         CancellationToken ct = default)
-     {
+    {
         var opts = options ?? new AgentOptions();
         var summary = await RunTurnCoreAsync(userPrompt, model, baseUrl, opts, maxIterations,
             surface: null, softCancel: CancellationToken.None, ct);
@@ -151,7 +151,7 @@ public class AgentExecutor
         // AwaitingUserInput is a pause interactively but still a non-zero exit — an agent that
         // stopped for want of an answer did not finish. Fail-closed: piped / CI reads it as 1.
         return summary.ExitCode;
-     }
+    }
 
     /// <summary>
     /// Runs one turn inside a surface that already owns the screen, and returns the verdict as
@@ -180,10 +180,10 @@ public class AgentExecutor
         ITurnView? surface,
         CancellationToken softCancel,
         CancellationToken ct)
-     {
+    {
         _mode ??= opts.Mode;
         PendingQuestion = null;   // this turn's prompt is the answer to any previous ask-user
-          // F1: select the role prompt for the live operating mode (PLAN forbids execution).
+                                  // F1: select the role prompt for the live operating mode (PLAN forbids execution).
         Messages[0] = new ChatMessage("system", SystemPrompt);
         Messages.Add(new ChatMessage("user", userPrompt));
 
@@ -236,8 +236,8 @@ public class AgentExecutor
         // temperature/seed and compare the generated YAML to measure variance.
         int repls = Math.Max(1, opts.Repeat);
         for (int r = 1; r < repls; r++)
-         {
-             var fresh = new List<ChatMessage>
+        {
+            var fresh = new List<ChatMessage>
                {
                  new("system", SystemPrompt),
                  new("user", userPrompt)
@@ -246,7 +246,7 @@ public class AgentExecutor
                 recordTrajectory: false, renderTui: false, view: null, CancellationToken.None, ct);
             if (!string.IsNullOrWhiteSpace(repl.Yaml))
                 observedYamls.Add(repl.Yaml);
-         }
+        }
 
         Trajectory.Determinism = BuildDeterminismReport(repls, observedYamls);
 
@@ -257,7 +257,7 @@ public class AgentExecutor
             Temperature: opts.Temperature);
         _trace?.Verdict(summary);
         return summary;
-     }
+    }
 
     /// <summary>Outcome of one run of the planning loop, including why it stopped.</summary>
     private sealed record PlanningLoopResult(
@@ -281,12 +281,12 @@ public class AgentExecutor
         ITurnView? view,
         CancellationToken softCancel,
         CancellationToken ct)
-     {
+    {
         var toolCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         // What each call already answered in this turn — see AnsweredCall.
         var answered = new Dictionary<string, AnsweredCall>(StringComparer.Ordinal);
-           // F1: the LLM only sees the tools allowed for the current mode (in PLAN mode,
-          // 'execute-yaml-job' is filtered out so the model cannot drive execution).
+        // F1: the LLM only sees the tools allowed for the current mode (in PLAN mode,
+        // 'execute-yaml-job' is filtered out so the model cannot drive execution).
         var availableTools = _toolProvider.GetToolDefinitions(Mode);
         string? producedYaml = null;     // resolved plan, sourced from the yamlContent tool-call argument
         string? argYaml = null;          // from the yamlContent tool-call argument (the sole source, F6)
@@ -315,7 +315,7 @@ public class AgentExecutor
         var turnOutcome = TurnOutcome.MaxIterationsReached;
 
         while (turnIterations <= maxIterations)
-         {
+        {
             int currentStepNum = Trajectory.Steps.Count + 1;
             string? currentReasoning = null;
             string? currentThinking = null;
@@ -326,28 +326,28 @@ public class AgentExecutor
 
             LlmResponse response;
             try
-              {
+            {
                 if (useStreaming)
-                  {
+                {
                     var streaming = (IStreamingLlmClient)_llmClient;
                     response = await view!.StreamingStepAsync(currentStepNum, maxIterations, opts.Detail,
                         obs => streaming.ChatStreamAsync(baseUrl, model, compactedMessages, availableTools, obs,
                             opts.NumCtx, opts.Temperature, opts.Seed, llmCt));
-                  }
-                 else if (renderTui)
-                  {
+                }
+                else if (renderTui)
+                {
                     response = await view!.BlockingStepAsync(currentStepNum,
                         c => _llmClient.ChatAsync(baseUrl, model, compactedMessages, availableTools,
                             opts.NumCtx, temperature: opts.Temperature, seed: opts.Seed, c), llmCt);
-                  }
-                 else
-                  {
+                }
+                else
+                {
                     response = await _llmClient.ChatAsync(baseUrl, model, compactedMessages, availableTools,
                         opts.NumCtx, temperature: opts.Temperature, seed: opts.Seed, llmCt);
-                  }
-              }
-             catch (OperationCanceledException) when (softCancel.IsCancellationRequested && !ct.IsCancellationRequested)
-              {
+                }
+            }
+            catch (OperationCanceledException) when (softCancel.IsCancellationRequested && !ct.IsCancellationRequested)
+            {
                 // The user pressed Esc. The session lives on, so this must not escape as the
                 // cancellation the CLI turns into exit 130 — it is a stated outcome like any other,
                 // and the steps taken so far stay in the trajectory.
@@ -357,13 +357,13 @@ public class AgentExecutor
                 success = false;
                 turnOutcome = TurnOutcome.UserInterrupted;
                 break;
-              }
+            }
 
-             iterationSw.Stop();
-             _turnTokens += response.Usage?.CompletionTokens ?? 0;
+            iterationSw.Stop();
+            _turnTokens += response.Usage?.CompletionTokens ?? 0;
 
-             if (!string.IsNullOrEmpty(response.Error))
-             {
+            if (!string.IsNullOrEmpty(response.Error))
+            {
                 string errMsg = response.Error!;
                 var failure = errMsg switch
                 {
@@ -387,27 +387,27 @@ public class AgentExecutor
                 success = false;
                 turnOutcome = failure;
                 break;
-             }
+            }
 
-             messages.Add(response.Message);
-             currentReasoning = response.Message.Content;
-             currentThinking = response.Thinking;
-             currentUsage = response.Usage;
+            messages.Add(response.Message);
+            currentReasoning = response.Message.Content;
+            currentThinking = response.Thinking;
+            currentUsage = response.Usage;
 
-             // The streaming step renders its own digest once the stream ends; the blocking step
-             // does not, so the digest is written here.
-             if (renderTui && !useStreaming)
-                 view!.Digest(currentStepNum, maxIterations, iterationSw.Elapsed, response, opts.Detail);
+            // The streaming step renders its own digest once the stream ends; the blocking step
+            // does not, so the digest is written here.
+            if (renderTui && !useStreaming)
+                view!.Digest(currentStepNum, maxIterations, iterationSw.Elapsed, response, opts.Detail);
 
             var lastMsg = messages[^1];
             if (lastMsg.ToolCalls == null || lastMsg.ToolCalls.Count == 0)
-             {
+            {
                 if (!string.IsNullOrWhiteSpace(lastMsg.Content))
-                 {
-                     // The model finished the turn with a deliberate textual answer — unless that
-                     // answer IS the ask-user call, written out instead of emitted. A weak model
-                     // does that, and the turn then reported success while the agent waited for a
-                     // reply nobody had been asked for.
+                {
+                    // The model finished the turn with a deliberate textual answer — unless that
+                    // answer IS the ask-user call, written out instead of emitted. A weak model
+                    // does that, and the turn then reported success while the agent waited for a
+                    // reply nobody had been asked for.
                     if (renderTui)
                         view!.AgentResponse(lastMsg.Content!);
                     if (recordTrajectory)
@@ -417,140 +417,140 @@ public class AgentExecutor
                     pendingQuestion = AgentQuestion.FromTextualCall(lastMsg.Content);
                     success = pendingQuestion is null;
                     turnOutcome = pendingQuestion is null ? TurnOutcome.Succeeded : TurnOutcome.AwaitingUserInput;
-                 }
+                }
                 else
-                 {
-                     // No tool call and no text: the model stopped with nothing to show. Not a
-                     // success — this path used to report one, so an empty turn read as "done".
+                {
+                    // No tool call and no text: the model stopped with nothing to show. Not a
+                    // success — this path used to report one, so an empty turn read as "done".
                     if (recordTrajectory)
                         Trajectory.AddStep(currentStepNum, "Model returned an empty response with no tool call.", isError: true, thinking: currentThinking, usage: currentUsage);
                     success = false;
                     turnOutcome = TurnOutcome.EmptyResponse;
-                 }
+                }
                 break;
-             }
+            }
 
-             // Execute every tool call in this turn (F5). Independent calls run in parallel by
-             // default; --sequential forces one-at-a-time execution. Results are appended in the
-             // same order as the calls so each "tool" message stays correlated with its call id.
-             var allCalls = lastMsg.ToolCalls!;
+            // Execute every tool call in this turn (F5). Independent calls run in parallel by
+            // default; --sequential forces one-at-a-time execution. Results are appended in the
+            // same order as the calls so each "tool" message stays correlated with its call id.
+            var allCalls = lastMsg.ToolCalls!;
 
-             // 'ask-user' is a turn terminator, not a tool: the model needs a decision only the
-             // user can make. It is never dispatched — the user's next message is the answer — but
-             // any other calls in the same turn still run (F5). Extract it, run the rest, then stop.
-             var askUserCall = allCalls.FirstOrDefault(c => McpToolProvider.IsAskUser(c.Name));
-             var calls = askUserCall is null
-                 ? allCalls
-                 : allCalls.Where(c => !ReferenceEquals(c, askUserCall)).ToList();
+            // 'ask-user' is a turn terminator, not a tool: the model needs a decision only the
+            // user can make. It is never dispatched — the user's next message is the answer — but
+            // any other calls in the same turn still run (F5). Extract it, run the rest, then stop.
+            var askUserCall = allCalls.FirstOrDefault(c => McpToolProvider.IsAskUser(c.Name));
+            var calls = askUserCall is null
+                ? allCalls
+                : allCalls.Where(c => !ReferenceEquals(c, askUserCall)).ToList();
 
-                       // F6: the yamlContent tool-call argument is the sole source of the plan YAML.
-                    // Collect it across all calls so the last one wins.
-             string? yamlBeforeThisIteration = argYaml;
-             foreach (var call in allCalls)
-               {
-                 if (call.Arguments.ValueKind == JsonValueKind.Object &&
-                     call.Arguments.TryGetProperty("yamlContent", out var yamlProp) &&
-                     yamlProp.ValueKind == JsonValueKind.String)
-                   {
-                      argYaml = yamlProp.GetString();
-                   }
-               }
+            // F6: the yamlContent tool-call argument is the sole source of the plan YAML.
+            // Collect it across all calls so the last one wins.
+            string? yamlBeforeThisIteration = argYaml;
+            foreach (var call in allCalls)
+            {
+                if (call.Arguments.ValueKind == JsonValueKind.Object &&
+                    call.Arguments.TryGetProperty("yamlContent", out var yamlProp) &&
+                    yamlProp.ValueKind == JsonValueKind.String)
+                {
+                    argYaml = yamlProp.GetString();
+                }
+            }
 
-               // E1: surface a fresh plan to the turn view (no-op on the scrollback path). The
-               // replication pass has view == null and skips it — nothing else to do there.
-             if (renderTui && !string.IsNullOrWhiteSpace(argYaml)
-                 && !string.Equals(argYaml, yamlBeforeThisIteration, StringComparison.Ordinal))
-                 view!.PlanUpdated(argYaml!);
+            // E1: surface a fresh plan to the turn view (no-op on the scrollback path). The
+            // replication pass has view == null and skips it — nothing else to do there.
+            if (renderTui && !string.IsNullOrWhiteSpace(argYaml)
+                && !string.Equals(argYaml, yamlBeforeThisIteration, StringComparison.Ordinal))
+                view!.PlanUpdated(argYaml!);
 
-             var outcomes = new List<ToolInvocationOutcome>(calls.Count);
-             if (opts.Sequential)
-               {
-                 foreach (var call in calls)
-                   {
+            var outcomes = new List<ToolInvocationOutcome>(calls.Count);
+            if (opts.Sequential)
+            {
+                foreach (var call in calls)
+                {
                     outcomes.Add(await InvokeToolInto(call.Name, call.Arguments, ct));
                     toolCounts[call.Name] = toolCounts.GetValueOrDefault(call.Name, 0) + 1;
-                   }
-               }
-             else
-               {
-                 var tasks = calls
-                       .Select(c => InvokeToolInto(c.Name, c.Arguments, ct))
-                       .ToArray();
-                 await Task.WhenAll(tasks);
-                 foreach (var (c, t) in calls.Zip(tasks))
-                   {
+                }
+            }
+            else
+            {
+                var tasks = calls
+                      .Select(c => InvokeToolInto(c.Name, c.Arguments, ct))
+                      .ToArray();
+                await Task.WhenAll(tasks);
+                foreach (var (c, t) in calls.Zip(tasks))
+                {
                     var outcome = await t;
                     outcomes.Add(outcome);
                     toolCounts[c.Name] = toolCounts.GetValueOrDefault(c.Name, 0) + 1;
-                   }
-               }
+                }
+            }
 
-             for (int i = 0; i < calls.Count; i++)
-               {
-                 var call = calls[i];
-                 var outcome = outcomes[i];
-                 string answer = outcome.Content ?? "{}";
-                 string argsFormatted = call.Arguments.ValueKind != JsonValueKind.Undefined ? call.Arguments.ToString() : "{}";
+            for (int i = 0; i < calls.Count; i++)
+            {
+                var call = calls[i];
+                var outcome = outcomes[i];
+                string answer = outcome.Content ?? "{}";
+                string argsFormatted = call.Arguments.ValueKind != JsonValueKind.Undefined ? call.Arguments.ToString() : "{}";
 
-                 // A repeat is established on the pair, not on the question: the call ran, and the
-                 // answer came back the same. Predicting instead — replaying a cached answer for a
-                 // question already asked — would have dtpipe assert "this cannot return anything
-                 // new" about a source another process is free to change, which is the one thing
-                 // this whole surface must never do.
-                 var callKey = AnsweredCall.KeyOf(call);
-                 string toolResultRaw = answer;
-                 if (answered.TryGetValue(callKey, out var prior) && prior.Answer == answer)
-                     toolResultRaw = prior.Advise(answer);
-                 else
-                     answered[callKey] = new AnsweredCall(Trajectory.Steps.Count + 1, answer);
+                // A repeat is established on the pair, not on the question: the call ran, and the
+                // answer came back the same. Predicting instead — replaying a cached answer for a
+                // question already asked — would have dtpipe assert "this cannot return anything
+                // new" about a source another process is free to change, which is the one thing
+                // this whole surface must never do.
+                var callKey = AnsweredCall.KeyOf(call);
+                string toolResultRaw = answer;
+                if (answered.TryGetValue(callKey, out var prior) && prior.Answer == answer)
+                    toolResultRaw = prior.Advise(answer);
+                else
+                    answered[callKey] = new AnsweredCall(Trajectory.Steps.Count + 1, answer);
 
-                 if (renderTui)
-                     view!.ToolResult(call.Name, toolResultRaw, outcome.IsError);
-                 if (recordTrajectory)
-                     Trajectory.AddStep(Trajectory.Steps.Count + 1, currentReasoning ?? "", call.Name, argsFormatted, toolResultRaw, outcome.IsError,
-                         thinking: i == 0 ? currentThinking : null, usage: i == 0 ? currentUsage : null);
+                if (renderTui)
+                    view!.ToolResult(call.Name, toolResultRaw, outcome.IsError);
+                if (recordTrajectory)
+                    Trajectory.AddStep(Trajectory.Steps.Count + 1, currentReasoning ?? "", call.Name, argsFormatted, toolResultRaw, outcome.IsError,
+                        thinking: i == 0 ? currentThinking : null, usage: i == 0 ? currentUsage : null);
 
-                  messages.Add(new ChatMessage("tool", toolResultRaw, call.Name, ToolCallId: call.Id));
+                messages.Add(new ChatMessage("tool", toolResultRaw, call.Name, ToolCallId: call.Id));
 
-                   // F4: cache "fact" tool results so they survive conversation compaction. The
-                   // fact key is derived from the call's arguments so re-inspections of the same
-                   // input overwrite rather than accumulate. The fact is the answer; the advice
-                   // wrapped around it is not one.
-                  RecordFactFor(call, answer, outcome.IsError);
-                 }
+                // F4: cache "fact" tool results so they survive conversation compaction. The
+                // fact key is derived from the call's arguments so re-inspections of the same
+                // input overwrite rather than accumulate. The fact is the answer; the advice
+                // wrapped around it is not one.
+                RecordFactFor(call, answer, outcome.IsError);
+            }
 
-             producedYaml = argYaml;
+            producedYaml = argYaml;
 
-             if (askUserCall is not null)
-               {
-                 pendingQuestion = AgentQuestion.From(askUserCall.Arguments);
-                 const string ack = "{\"status\":\"question delivered to the user; awaiting their reply\"}";
+            if (askUserCall is not null)
+            {
+                pendingQuestion = AgentQuestion.From(askUserCall.Arguments);
+                const string ack = "{\"status\":\"question delivered to the user; awaiting their reply\"}";
 
-                 if (renderTui)
-                     view!.ToolResult("ask-user", ack, isError: false);
-                 if (recordTrajectory)
-                     Trajectory.AddStep(Trajectory.Steps.Count + 1, currentReasoning ?? "",
-                         "ask-user", askUserCall.Arguments.ToString(), ack, isError: false);
+                if (renderTui)
+                    view!.ToolResult("ask-user", ack, isError: false);
+                if (recordTrajectory)
+                    Trajectory.AddStep(Trajectory.Steps.Count + 1, currentReasoning ?? "",
+                        "ask-user", askUserCall.Arguments.ToString(), ack, isError: false);
 
-                 // The conversation stays valid for the next turn: every tool call gets a 'tool'
-                 // reply, and the user's answer follows as the next 'user' message.
-                 messages.Add(new ChatMessage("tool", ack, "ask-user", ToolCallId: askUserCall.Id));
-                 toolCounts["ask-user"] = toolCounts.GetValueOrDefault("ask-user", 0) + 1;
+                // The conversation stays valid for the next turn: every tool call gets a 'tool'
+                // reply, and the user's answer follows as the next 'user' message.
+                messages.Add(new ChatMessage("tool", ack, "ask-user", ToolCallId: askUserCall.Id));
+                toolCounts["ask-user"] = toolCounts.GetValueOrDefault("ask-user", 0) + 1;
 
-                 success = false;
-                 turnOutcome = TurnOutcome.AwaitingUserInput;
-                 break;
-               }
+                success = false;
+                turnOutcome = TurnOutcome.AwaitingUserInput;
+                break;
+            }
 
-             turnIterations++;
-           }
+            turnIterations++;
+        }
 
         // Promote the primary run's YAML to the instance trajectory for interactive / inspection flows.
         if (recordTrajectory && !string.IsNullOrWhiteSpace(producedYaml))
             Trajectory.LastGeneratedYaml = producedYaml;
 
         return new PlanningLoopResult(success, producedYaml, turnIterations, toolCounts, turnOutcome, pendingQuestion, closingWords);
-     }
+    }
 
     /// <summary>
     /// Runs the validated plan the planner produced — the YAML on <see cref="AgentTrajectory.LastGeneratedYaml"/>
@@ -595,17 +595,17 @@ public class AgentExecutor
             : $"{t.TotalSeconds:F0}s";
 
     private async Task<ToolInvocationOutcome> InvokeToolInto(string toolName, JsonElement args, CancellationToken ct)
-      {
+    {
         try
-          {
+        {
             var parsedResult = await _toolProvider.InvokeToolAsync(toolName, args, ct);
             return new ToolInvocationOutcome(parsedResult.Content, parsedResult.IsError);
-          }
+        }
         catch (Exception ex)
-          {
+        {
             return new ToolInvocationOutcome(JsonSerializer.Serialize(new { error = ex.Message }), true);
-          }
-      }
+        }
+    }
 
     /// <summary>
     /// Builds the <see cref="DeterminismReport"/> from the YAMLs observed across replications.
@@ -613,88 +613,88 @@ public class AgentExecutor
     /// definition) so the trajectory always carries a determinism signal.
     /// </summary>
     private static DeterminismReport BuildDeterminismReport(int repetitions, List<string> observedYamls)
-     {
+    {
         var distinct = new List<string>();
         foreach (var y in observedYamls)
-         {
+        {
             if (!distinct.Contains(y))
                 distinct.Add(y);
-         }
+        }
 
         return new DeterminismReport
-          {
+        {
             Repetitions = repetitions,
             DistinctYaml = distinct
-          };
-      }
+        };
+    }
 
-        /// <summary>
-          /// Records a tool result as a surviving "fact" when the tool is one that produces reusable
-          /// knowledge (F4). Only fact-producing tools are cached; their result key is derived from
-          /// the call's arguments so re-inspecting the same target overwrites the previous fact.
-        /// </summary>
-     private void RecordFactFor(ToolCall call, string result, bool isError)
-         {
-         if (!IsFactProducingTool(call.Name))
-             return;
+    /// <summary>
+    /// Records a tool result as a surviving "fact" when the tool is one that produces reusable
+    /// knowledge (F4). Only fact-producing tools are cached; their result key is derived from
+    /// the call's arguments so re-inspecting the same target overwrites the previous fact.
+    /// </summary>
+    private void RecordFactFor(ToolCall call, string result, bool isError)
+    {
+        if (!IsFactProducingTool(call.Name))
+            return;
 
-         string key = BuildFactKey(call);
-         ContextStore.RecordFact(key, call.Name, result, isError);
-          }
+        string key = BuildFactKey(call);
+        ContextStore.RecordFact(key, call.Name, result, isError);
+    }
 
-       /// <summary>
-        /// The tools whose results are reusable facts (schemas, samples, skeletons, errors). Named
-        /// here rather than inline so a guard can hold them against the live catalogue: a renamed
-        /// tool would otherwise stop being cached with nothing to show for it.
-        /// </summary>
-     internal static readonly IReadOnlySet<string> FactProducingTools =
-          new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-             {
+    /// <summary>
+    /// The tools whose results are reusable facts (schemas, samples, skeletons, errors). Named
+    /// here rather than inline so a guard can hold them against the live catalogue: a renamed
+    /// tool would otherwise stop being cached with nothing to show for it.
+    /// </summary>
+    internal static readonly IReadOnlySet<string> FactProducingTools =
+         new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
               "inspect", "preview-data", "dry-run",
               "list-providers", "get-adapter-help", "get-transformer-help", "get-dag-topology",
-             };
+            };
 
-     private static bool IsFactProducingTool(string toolName) => FactProducingTools.Contains(toolName);
+    private static bool IsFactProducingTool(string toolName) => FactProducingTools.Contains(toolName);
 
-       /// <summary>
-        /// Derives a stable fact key from a tool call's args. For input/query-bearing tools the
-        /// key is "<tool> @ <input>[ #<query>]" so that, e.g., re-inspecting the same source
-        /// overwrites the prior inspection rather than piling up duplicates.
-        /// </summary>
-     private static string BuildFactKey(ToolCall call)
-          {
-         if (call.Arguments.ValueKind == JsonValueKind.Object)
-             {
-             var sb = new System.Text.StringBuilder();
-             sb.Append(call.Name).Append(" @");
+    /// <summary>
+    /// Derives a stable fact key from a tool call's args. For input/query-bearing tools the
+    /// key is "<tool> @ <input>[ #<query>]" so that, e.g., re-inspecting the same source
+    /// overwrites the prior inspection rather than piling up duplicates.
+    /// </summary>
+    private static string BuildFactKey(ToolCall call)
+    {
+        if (call.Arguments.ValueKind == JsonValueKind.Object)
+        {
+            var sb = new System.Text.StringBuilder();
+            sb.Append(call.Name).Append(" @");
 
             string? input = FirstArgProperty(call.Arguments, "input", "source", "connection", "connectionString", "file");
-             if (input != null)
-                 sb.Append(' ').Append(input);
+            if (input != null)
+                sb.Append(' ').Append(input);
 
-             string? query = FirstArgProperty(call.Arguments, "query", "sql");
-             if (query != null)
-                 sb.Append(" #").Append(query.Length > 40 ? query[..40] : query);
+            string? query = FirstArgProperty(call.Arguments, "query", "sql");
+            if (query != null)
+                sb.Append(" #").Append(query.Length > 40 ? query[..40] : query);
 
-              if (sb.Length > 2)
-                  return sb.ToString().Trim();
-             }
+            if (sb.Length > 2)
+                return sb.ToString().Trim();
+        }
 
-          return call.Name;
-          }
+        return call.Name;
+    }
 
-       private static string? FirstArgProperty(JsonElement args, params string[] names)
-          {
-         foreach (var n in names)
+    private static string? FirstArgProperty(JsonElement args, params string[] names)
+    {
+        foreach (var n in names)
+        {
+            if (args.TryGetProperty(n, out var v) && (v.ValueKind == JsonValueKind.String || v.ValueKind != JsonValueKind.Undefined))
             {
-             if (args.TryGetProperty(n, out var v) && (v.ValueKind == JsonValueKind.String || v.ValueKind != JsonValueKind.Undefined))
-                 {
-                  if (v.ValueKind == JsonValueKind.String)
-                      return v.GetString();
-                  return v.GetRawText();
-                  }
-             }
+                if (v.ValueKind == JsonValueKind.String)
+                    return v.GetString();
+                return v.GetRawText();
+            }
+        }
 
-          return null;
-          }
-     }
+        return null;
+    }
+}

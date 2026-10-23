@@ -8,367 +8,367 @@ namespace DtPipe.Tests.Unit.Transformers;
 
 public class ComputeDataTransformerTests : IDisposable
 {
-	private readonly ComputeOptions _options;
-	private readonly IJsEngineProvider _jsEngineProvider;
+    private readonly ComputeOptions _options;
+    private readonly IJsEngineProvider _jsEngineProvider;
 
-	public ComputeDataTransformerTests()
-	{
-		_options = new ComputeOptions();
-		_jsEngineProvider = new JsEngineProvider();
-	}
+    public ComputeDataTransformerTests()
+    {
+        _options = new ComputeOptions();
+        _jsEngineProvider = new JsEngineProvider();
+    }
 
-	public void Dispose()
-	{
-		_jsEngineProvider?.Dispose();
-	}
+    public void Dispose()
+    {
+        _jsEngineProvider?.Dispose();
+    }
 
-	[Fact]
-	public async Task Initialize_WithScript_PreparesProcessors()
-	{
-		// Arrange
-		var options = new ComputeOptions
-		{
-			Compute = new[] { "Name:row.Name.substring(0,2)" }
-		};
-		var transformer = new ComputeDataTransformer(options, _jsEngineProvider);
-		var columns = new List<PipeColumnInfo>
-		{
-			new("Name", typeof(string), false)
-		};
+    [Fact]
+    public async Task Initialize_WithScript_PreparesProcessors()
+    {
+        // Arrange
+        var options = new ComputeOptions
+        {
+            Compute = new[] { "Name:row.Name.substring(0,2)" }
+        };
+        var transformer = new ComputeDataTransformer(options, _jsEngineProvider);
+        var columns = new List<PipeColumnInfo>
+        {
+            new("Name", typeof(string), false)
+        };
 
-		// Act
-		var result = await transformer.InitializeAsync(columns);
+        // Act
+        var result = await transformer.InitializeAsync(columns);
 
-		// Assert
-		result.Should().BeEquivalentTo(columns);
-	}
+        // Assert
+        result.Should().BeEquivalentTo(columns);
+    }
 
-	[Fact]
-	public async Task Transform_ModifiesValue_UsingScript()
-	{
-		// Arrange
-		var options = new ComputeOptions
-		{
-			Compute = new[] { "Name:row.Name.toUpperCase()" }
-		};
-		var transformer = new ComputeDataTransformer(options, _jsEngineProvider);
-		var columns = new List<PipeColumnInfo>
-		{
-			new("Id", typeof(int), false),
-			new("Name", typeof(string), false)
-		};
+    [Fact]
+    public async Task Transform_ModifiesValue_UsingScript()
+    {
+        // Arrange
+        var options = new ComputeOptions
+        {
+            Compute = new[] { "Name:row.Name.toUpperCase()" }
+        };
+        var transformer = new ComputeDataTransformer(options, _jsEngineProvider);
+        var columns = new List<PipeColumnInfo>
+        {
+            new("Id", typeof(int), false),
+            new("Name", typeof(string), false)
+        };
 
-		await transformer.InitializeAsync(columns);
-		var row = new object?[] { 1, "Alice" };
+        await transformer.InitializeAsync(columns);
+        var row = new object?[] { 1, "Alice" };
 
-		// Act
-		transformer.Transform(row);
+        // Act
+        transformer.Transform(row);
 
-		// Assert
-		row[1].Should().Be("ALICE");
-	}
+        // Assert
+        row[1].Should().Be("ALICE");
+    }
 
-	[Fact]
-	public async Task Transform_SequentialExecution_MaintainsState_IfScriptAllows()
-	{
-		// Verify parallelism is safe with engine locking (handled by provider via ThreadLocal or new instance per thread)
+    [Fact]
+    public async Task Transform_SequentialExecution_MaintainsState_IfScriptAllows()
+    {
+        // Verify parallelism is safe with engine locking (handled by provider via ThreadLocal or new instance per thread)
 
-		var options = new ComputeOptions
-		{
-			Compute = new[] { "Val:row.Val * 2" }
-		};
-		// Note: Transformer instance is shared across threads?
-		// If parallelism happens, Transform is called concurrently.
-		// JsEngineProvider uses ThreadLocal, so each thread gets its own engine.
+        var options = new ComputeOptions
+        {
+            Compute = new[] { "Val:row.Val * 2" }
+        };
+        // Note: Transformer instance is shared across threads?
+        // If parallelism happens, Transform is called concurrently.
+        // JsEngineProvider uses ThreadLocal, so each thread gets its own engine.
 
-		var transformer = new ComputeDataTransformer(options, _jsEngineProvider);
-		var columns = new[] { new PipeColumnInfo("Val", typeof(int), false) };
-		await transformer.InitializeAsync(columns);
+        var transformer = new ComputeDataTransformer(options, _jsEngineProvider);
+        var columns = new[] { new PipeColumnInfo("Val", typeof(int), false) };
+        await transformer.InitializeAsync(columns);
 
-		// Sequential execution
-		for (int i = 0; i < 100; i++)
-		{
-			var row = new object?[] { i };
-			transformer.Transform(row);
-			((double)row[0]!).Should().Be(i * 2);
-		}
-	}
+        // Sequential execution
+        for (int i = 0; i < 100; i++)
+        {
+            var row = new object?[] { i };
+            transformer.Transform(row);
+            ((double)row[0]!).Should().Be(i * 2);
+        }
+    }
 
-	[Fact]
-	public async Task Transform_Security_CannotAccessSystem()
-	{
-		// Require Jint to be in strict mode / sandbox
-		var options = new ComputeOptions
-		{
-			Compute = new[] { "Val:System.IO.File.Exists('foo')" }
-		};
-		var transformer = new ComputeDataTransformer(options, _jsEngineProvider);
-		var columns = new[] { new PipeColumnInfo("Val", typeof(string), false) };
-		await transformer.InitializeAsync(columns);
+    [Fact]
+    public async Task Transform_Security_CannotAccessSystem()
+    {
+        // Require Jint to be in strict mode / sandbox
+        var options = new ComputeOptions
+        {
+            Compute = new[] { "Val:System.IO.File.Exists('foo')" }
+        };
+        var transformer = new ComputeDataTransformer(options, _jsEngineProvider);
+        var columns = new[] { new PipeColumnInfo("Val", typeof(string), false) };
+        await transformer.InitializeAsync(columns);
 
-		var row = new object?[] { "test" };
+        var row = new object?[] { "test" };
 
-		// Act & Assert
-		// Should throw Jint.Runtime.JavaScriptException or similar, or return undefined/error
-		// Because System is not defined in Jint strict mode by default unless CLR allowed.
+        // Act & Assert
+        // Should throw Jint.Runtime.JavaScriptException or similar, or return undefined/error
+        // Because System is not defined in Jint strict mode by default unless CLR allowed.
 
-		var act = () => transformer.Transform(row);
+        var act = () => transformer.Transform(row);
 
-		// Changed: ComputeDataTransformer now wraps execution errors in InvalidOperationException
-		act.Should().Throw<InvalidOperationException>()
-		   .WithInnerException<Jint.Runtime.JavaScriptException>();
-	}
+        // Changed: ComputeDataTransformer now wraps execution errors in InvalidOperationException
+        act.Should().Throw<InvalidOperationException>()
+           .WithInnerException<Jint.Runtime.JavaScriptException>();
+    }
 
-	[Fact]
-	public async Task Transform_SkipNull_DoesNotExecuteScript()
-	{
-		// Arrange
-		var options = new ComputeOptions
-		{
-			Compute = new[] { "Val:row.Val + '_processed'" },
-			SkipNull = true
-		};
-		var transformer = new ComputeDataTransformer(options, _jsEngineProvider);
-		var columns = new[] { new PipeColumnInfo("Val", typeof(string), true) };
-		await transformer.InitializeAsync(columns);
+    [Fact]
+    public async Task Transform_SkipNull_DoesNotExecuteScript()
+    {
+        // Arrange
+        var options = new ComputeOptions
+        {
+            Compute = new[] { "Val:row.Val + '_processed'" },
+            SkipNull = true
+        };
+        var transformer = new ComputeDataTransformer(options, _jsEngineProvider);
+        var columns = new[] { new PipeColumnInfo("Val", typeof(string), true) };
+        await transformer.InitializeAsync(columns);
 
-		var row = new object?[] { null };
+        var row = new object?[] { null };
 
-		// Act
-		transformer.Transform(row);
+        // Act
+        transformer.Transform(row);
 
-		// Assert
-		row[0].Should().BeNull(); // Should remain null
+        // Assert
+        row[0].Should().BeNull(); // Should remain null
 
-		// Safety check: if it ran, it would likely ideally throw or return "null_processed" (if Jint handles null as null value in JS)
-		// Let's verify with non-null matches
+        // Safety check: if it ran, it would likely ideally throw or return "null_processed" (if Jint handles null as null value in JS)
+        // Let's verify with non-null matches
 
-		var row2 = new object?[] { "test" };
-		transformer.Transform(row2);
-		row2[0].Should().Be("test_processed");
-	}
+        var row2 = new object?[] { "test" };
+        transformer.Transform(row2);
+        row2[0].Should().Be("test_processed");
+    }
 
-	[Fact]
-	public async Task Transform_CanAccessOtherColumns_UsingRow()
-	{
-		// Arrange
-		var options = new ComputeOptions
-		{
-			Compute = new[] { "FullName:return row.FirstName + ' ' + row.LastName;" }
-		};
-		var transformer = new ComputeDataTransformer(options, _jsEngineProvider);
-		var columns = new List<PipeColumnInfo>
-		{
-			new("FirstName", typeof(string), false),
-			new("LastName", typeof(string), false),
-			new("FullName", typeof(string), false)
-		};
+    [Fact]
+    public async Task Transform_CanAccessOtherColumns_UsingRow()
+    {
+        // Arrange
+        var options = new ComputeOptions
+        {
+            Compute = new[] { "FullName:return row.FirstName + ' ' + row.LastName;" }
+        };
+        var transformer = new ComputeDataTransformer(options, _jsEngineProvider);
+        var columns = new List<PipeColumnInfo>
+        {
+            new("FirstName", typeof(string), false),
+            new("LastName", typeof(string), false),
+            new("FullName", typeof(string), false)
+        };
 
-		await transformer.InitializeAsync(columns);
-		var row = new object?[] { "Alice", "Smith", "" };
+        await transformer.InitializeAsync(columns);
+        var row = new object?[] { "Alice", "Smith", "" };
 
-		// Act
-		transformer.Transform(row);
+        // Act
+        transformer.Transform(row);
 
-		// Assert
-		row[2].Should().Be("Alice Smith");
-	}
+        // Assert
+        row[2].Should().Be("Alice Smith");
+    }
 
-	[Fact]
-	public async Task InitializeAsync_NewColumnName_AppearsInOutputSchema()
-	{
-		// Arrange — NUM_DBL does not exist in the input schema
-		var options = new ComputeOptions
-		{
-			Compute = new[] { "NUM_DBL:row.NUM * 2" }
-		};
-		var transformer = new ComputeDataTransformer(options, _jsEngineProvider);
-		var columns = new List<PipeColumnInfo>
-		{
-			new("NUM", typeof(int), false)
-		};
+    [Fact]
+    public async Task InitializeAsync_NewColumnName_AppearsInOutputSchema()
+    {
+        // Arrange — NUM_DBL does not exist in the input schema
+        var options = new ComputeOptions
+        {
+            Compute = new[] { "NUM_DBL:row.NUM * 2" }
+        };
+        var transformer = new ComputeDataTransformer(options, _jsEngineProvider);
+        var columns = new List<PipeColumnInfo>
+        {
+            new("NUM", typeof(int), false)
+        };
 
-		// Act
-		var result = await transformer.InitializeAsync(columns);
+        // Act
+        var result = await transformer.InitializeAsync(columns);
 
-		// Assert — schema must have grown
-		result.Should().HaveCount(2);
-		result.Should().Contain(c => c.Name == "NUM_DBL");
-	}
+        // Assert — schema must have grown
+        result.Should().HaveCount(2);
+        result.Should().Contain(c => c.Name == "NUM_DBL");
+    }
 
-	[Fact]
-	public async Task Transform_NewVirtualColumn_IsPopulatedInExpandedRow()
-	{
-		// Arrange — NUM_DBL is a new virtual column not in the input schema
-		var options = new ComputeOptions
-		{
-			Compute = new[] { "NUM_DBL:row.NUM * 2" }
-		};
-		var transformer = new ComputeDataTransformer(options, _jsEngineProvider);
-		var columns = new List<PipeColumnInfo>
-		{
-			new("NUM", typeof(int), false)
-		};
+    [Fact]
+    public async Task Transform_NewVirtualColumn_IsPopulatedInExpandedRow()
+    {
+        // Arrange — NUM_DBL is a new virtual column not in the input schema
+        var options = new ComputeOptions
+        {
+            Compute = new[] { "NUM_DBL:row.NUM * 2" }
+        };
+        var transformer = new ComputeDataTransformer(options, _jsEngineProvider);
+        var columns = new List<PipeColumnInfo>
+        {
+            new("NUM", typeof(int), false)
+        };
 
-		await transformer.InitializeAsync(columns);
-		var row = new object?[] { 42 };
+        await transformer.InitializeAsync(columns);
+        var row = new object?[] { 42 };
 
-		// Act
-		var result = transformer.Transform(row);
+        // Act
+        var result = transformer.Transform(row);
 
-		// Assert — row must be extended and new column must be computed
-		result.Should().NotBeNull();
-		result!.Should().HaveCount(2);
-		// JS evaluates 42 * 2 = 84 (as double in JS)
-		Convert.ToDouble(result[1]).Should().Be(84.0);
-	}
+        // Assert — row must be extended and new column must be computed
+        result.Should().NotBeNull();
+        result!.Should().HaveCount(2);
+        // JS evaluates 42 * 2 = 84 (as double in JS)
+        Convert.ToDouble(result[1]).Should().Be(84.0);
+    }
 
-	[Fact]
-	public async Task Transform_MultipleNewColumns_AllPopulated()
-	{
-		// Arrange — both NUM_DBL and STR_UPPER are new virtual columns
-		var options = new ComputeOptions
-		{
-			Compute = new[] { "NUM_DBL:row.NUM * 2", "STR_UPPER:row.STR.toUpperCase()" }
-		};
-		var transformer = new ComputeDataTransformer(options, _jsEngineProvider);
-		var columns = new List<PipeColumnInfo>
-		{
-			new("NUM", typeof(int), false),
-			new("STR", typeof(string), false)
-		};
+    [Fact]
+    public async Task Transform_MultipleNewColumns_AllPopulated()
+    {
+        // Arrange — both NUM_DBL and STR_UPPER are new virtual columns
+        var options = new ComputeOptions
+        {
+            Compute = new[] { "NUM_DBL:row.NUM * 2", "STR_UPPER:row.STR.toUpperCase()" }
+        };
+        var transformer = new ComputeDataTransformer(options, _jsEngineProvider);
+        var columns = new List<PipeColumnInfo>
+        {
+            new("NUM", typeof(int), false),
+            new("STR", typeof(string), false)
+        };
 
-		await transformer.InitializeAsync(columns);
-		var row = new object?[] { 10, "hello" };
+        await transformer.InitializeAsync(columns);
+        var row = new object?[] { 10, "hello" };
 
-		// Act
-		var result = transformer.Transform(row);
+        // Act
+        var result = transformer.Transform(row);
 
-		// Assert
-		result.Should().NotBeNull();
-		result!.Should().HaveCount(4);
-		Convert.ToDouble(result[2]).Should().Be(20.0); // NUM_DBL
-		result[3].Should().Be("HELLO");               // STR_UPPER
-	}
+        // Assert
+        result.Should().NotBeNull();
+        result!.Should().HaveCount(4);
+        Convert.ToDouble(result[2]).Should().Be(20.0); // NUM_DBL
+        result[3].Should().Be("HELLO");               // STR_UPPER
+    }
 
-	[Fact]
-	public async Task InitializeAsync_TypeHint_AppliedToNewVirtualColumn()
-	{
-		// Arrange — NUM_DBL is new, with an explicit type hint
-		var options = new ComputeOptions
-		{
-			Compute = new[] { "NUM_DBL:row.NUM * 2" },
-			ComputeTypes = new Dictionary<string, string> { { "NUM_DBL", "double" } }
-		};
-		var transformer = new ComputeDataTransformer(options, _jsEngineProvider);
-		var columns = new List<PipeColumnInfo>
-		{
-			new("NUM", typeof(int), false)
-		};
+    [Fact]
+    public async Task InitializeAsync_TypeHint_AppliedToNewVirtualColumn()
+    {
+        // Arrange — NUM_DBL is new, with an explicit type hint
+        var options = new ComputeOptions
+        {
+            Compute = new[] { "NUM_DBL:row.NUM * 2" },
+            ComputeTypes = new Dictionary<string, string> { { "NUM_DBL", "double" } }
+        };
+        var transformer = new ComputeDataTransformer(options, _jsEngineProvider);
+        var columns = new List<PipeColumnInfo>
+        {
+            new("NUM", typeof(int), false)
+        };
 
-		// Act
-		var result = await transformer.InitializeAsync(columns);
+        // Act
+        var result = await transformer.InitializeAsync(columns);
 
-		// Assert — NUM_DBL must have ClrType = double, not default string
-		var newCol = result.Should().ContainSingle(c => c.Name == "NUM_DBL").Subject;
-		newCol.ClrType.Should().Be(typeof(double));
-	}
+        // Assert — NUM_DBL must have ClrType = double, not default string
+        var newCol = result.Should().ContainSingle(c => c.Name == "NUM_DBL").Subject;
+        newCol.ClrType.Should().Be(typeof(double));
+    }
 
-	[Fact]
-	public async Task Transform_CanAccessColumns_UsingDictionarySyntax()
-	{
-		// Arrange: Handle columns with spaces using row["Col Name"]
-		var options = new ComputeOptions
-		{
-			Compute = new[] { "Code:row['Product Code']" }
-		};
-		var transformer = new ComputeDataTransformer(options, _jsEngineProvider);
-		var columns = new List<PipeColumnInfo>
-		{
-			new("Product Code", typeof(string), false),
-			new("Code", typeof(string), false)
-		};
+    [Fact]
+    public async Task Transform_CanAccessColumns_UsingDictionarySyntax()
+    {
+        // Arrange: Handle columns with spaces using row["Col Name"]
+        var options = new ComputeOptions
+        {
+            Compute = new[] { "Code:row['Product Code']" }
+        };
+        var transformer = new ComputeDataTransformer(options, _jsEngineProvider);
+        var columns = new List<PipeColumnInfo>
+        {
+            new("Product Code", typeof(string), false),
+            new("Code", typeof(string), false)
+        };
 
-		await transformer.InitializeAsync(columns);
-		var row = new object?[] { "ABC-123", "" };
+        await transformer.InitializeAsync(columns);
+        var row = new object?[] { "ABC-123", "" };
 
-		// Act
-		transformer.Transform(row);
+        // Act
+        transformer.Transform(row);
 
-		// Assert
-		row[1].Should().Be("ABC-123");
-	}
+        // Assert
+        row[1].Should().Be("ABC-123");
+    }
 
-	[Fact]
-	public async Task Initialize_DropsTheDeclaredWidthOfAColumnItRewrites()
-	{
-		// The script decides the values now, so a builder held to the source's scale would refuse
-		// the third decimal digit this one produces.
-		var options = new ComputeOptions { Compute = new[] { "Amount:row.Amount * 1.1" } };
-		var transformer = new ComputeDataTransformer(options, _jsEngineProvider);
-		var columns = new List<PipeColumnInfo>
-		{
-			new("Amount", typeof(decimal), false, Precision: 10, Scale: 2),
-			new("Untouched", typeof(decimal), false, Precision: 10, Scale: 2)
-		};
+    [Fact]
+    public async Task Initialize_DropsTheDeclaredWidthOfAColumnItRewrites()
+    {
+        // The script decides the values now, so a builder held to the source's scale would refuse
+        // the third decimal digit this one produces.
+        var options = new ComputeOptions { Compute = new[] { "Amount:row.Amount * 1.1" } };
+        var transformer = new ComputeDataTransformer(options, _jsEngineProvider);
+        var columns = new List<PipeColumnInfo>
+        {
+            new("Amount", typeof(decimal), false, Precision: 10, Scale: 2),
+            new("Untouched", typeof(decimal), false, Precision: 10, Scale: 2)
+        };
 
-		var result = await transformer.InitializeAsync(columns);
+        var result = await transformer.InitializeAsync(columns);
 
-		result[0].Precision.Should().BeNull();
-		result[0].Scale.Should().BeNull();
-		result[1].Precision.Should().Be(10, "a column no script writes keeps what its source declared");
-		result[1].Scale.Should().Be(2);
-	}
+        result[0].Precision.Should().BeNull();
+        result[0].Scale.Should().BeNull();
+        result[1].Precision.Should().Be(10, "a column no script writes keeps what its source declared");
+        result[1].Scale.Should().Be(2);
+    }
 
-	private async Task<object?> RunOnce(string script)
-	{
-		var transformer = new ComputeDataTransformer(new ComputeOptions { Compute = new[] { script } }, _jsEngineProvider);
-		await transformer.InitializeAsync(new[] { new PipeColumnInfo("Id", typeof(int), false) });
-		return transformer.Transform(new object?[] { 3 })![^1];
-	}
+    private async Task<object?> RunOnce(string script)
+    {
+        var transformer = new ComputeDataTransformer(new ComputeOptions { Compute = new[] { script } }, _jsEngineProvider);
+        await transformer.InitializeAsync(new[] { new PipeColumnInfo("Id", typeof(int), false) });
+        return transformer.Transform(new object?[] { 3 })![^1];
+    }
 
-	[Theory]
-	[InlineData("X:row.Id + 4", 7L)]
-	[InlineData("X:return row.Id + 4;", 7L)]
-	[InlineData("X:row.Id + 4;", 7L)]
-	[InlineData("X:(function(){ return 7; })()", 7L)]
-	[InlineData("X:function(){ return 7; }()", 7L)]
-	[InlineData("X:(() => row.Id * 2)()", 6L)]
-	[InlineData("X:if (row.Id > 1) { return 'big'; } else { return 'small'; }", "big")]
-	[InlineData("X:const a = row.Id; return a + 1;", 4L)]
-	[InlineData("X:row.Id // a comment", 3L)]
-	public async Task A_Body_Gives_Its_Value_Whatever_Its_Form(string script, object expected)
-	{
-		var value = await RunOnce(script);
+    [Theory]
+    [InlineData("X:row.Id + 4", 7L)]
+    [InlineData("X:return row.Id + 4;", 7L)]
+    [InlineData("X:row.Id + 4;", 7L)]
+    [InlineData("X:(function(){ return 7; })()", 7L)]
+    [InlineData("X:function(){ return 7; }()", 7L)]
+    [InlineData("X:(() => row.Id * 2)()", 6L)]
+    [InlineData("X:if (row.Id > 1) { return 'big'; } else { return 'small'; }", "big")]
+    [InlineData("X:const a = row.Id; return a + 1;", 4L)]
+    [InlineData("X:row.Id // a comment", 3L)]
+    public async Task A_Body_Gives_Its_Value_Whatever_Its_Form(string script, object expected)
+    {
+        var value = await RunOnce(script);
 
-		Convert.ToString(value).Should().Be(Convert.ToString(expected));
-	}
+        Convert.ToString(value).Should().Be(Convert.ToString(expected));
+    }
 
-	[Fact]
-	public async Task An_Explicit_Null_Is_A_Value()
-	{
-		(await RunOnce("X:null")).Should().BeNull();
-	}
+    [Fact]
+    public async Task An_Explicit_Null_Is_A_Value()
+    {
+        (await RunOnce("X:null")).Should().BeNull();
+    }
 
-	[Theory]
-	[InlineData("X:undefined")]
-	[InlineData("X:const a = row.Id;")]
-	[InlineData("X:if (row.Id > 5) { return 1; }")]
-	public async Task A_Script_Returning_Undefined_Is_An_Error_Naming_The_Column(string script)
-	{
-		var act = async () => await RunOnce(script);
+    [Theory]
+    [InlineData("X:undefined")]
+    [InlineData("X:const a = row.Id;")]
+    [InlineData("X:if (row.Id > 5) { return 1; }")]
+    public async Task A_Script_Returning_Undefined_Is_An_Error_Naming_The_Column(string script)
+    {
+        var act = async () => await RunOnce(script);
 
-		(await act.Should().ThrowAsync<InvalidOperationException>())
-			.WithMessage("*column 'X'*returned undefined*");
-	}
+        (await act.Should().ThrowAsync<InvalidOperationException>())
+            .WithMessage("*column 'X'*returned undefined*");
+    }
 
-	[Fact]
-	public async Task A_Syntax_Error_Is_Still_Refused_At_Initialisation()
-	{
-		var transformer = new ComputeDataTransformer(new ComputeOptions { Compute = new[] { "X:row.Id +" } }, _jsEngineProvider);
+    [Fact]
+    public async Task A_Syntax_Error_Is_Still_Refused_At_Initialisation()
+    {
+        var transformer = new ComputeDataTransformer(new ComputeOptions { Compute = new[] { "X:row.Id +" } }, _jsEngineProvider);
 
-		var act = async () => await transformer.InitializeAsync(new[] { new PipeColumnInfo("Id", typeof(int), false) });
+        var act = async () => await transformer.InitializeAsync(new[] { new PipeColumnInfo("Id", typeof(int), false) });
 
-		await act.Should().ThrowAsync<Exception>();
-	}
+        await act.Should().ThrowAsync<Exception>();
+    }
 }

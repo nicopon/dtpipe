@@ -21,7 +21,7 @@ namespace DtPipe.Core.Infrastructure.Arrow;
 /// </summary>
 public static class ArrowSchemaSerializer
 {
-    private static readonly JsonSerializerOptions _pretty  = new() { WriteIndented = true };
+    private static readonly JsonSerializerOptions _pretty = new() { WriteIndented = true };
     private static readonly JsonSerializerOptions _compact = new() { WriteIndented = false };
 
     // ── Public API ───────────────────────────────────────────────────────────
@@ -59,7 +59,7 @@ public static class ArrowSchemaSerializer
     private static JsonObject FieldToNode(Field field)
     {
         var node = new JsonObject();
-        node["name"]     = field.Name;
+        node["name"] = field.Name;
         node["nullable"] = field.IsNullable;
 
         var (typeName, children) = TypeToString(field.DataType);
@@ -93,8 +93,8 @@ public static class ArrowSchemaSerializer
                 ? ($"timestamp:{u}", null)
                 : ($"timestamp:{u}:{ts.Timezone}", null);
         }
-        if (t is Time32Type t32)  return ($"time32:{UnitStr(t32.Unit)}", null);
-        if (t is Time64Type t64)  return ($"time64:{UnitStr(t64.Unit)}", null);
+        if (t is Time32Type t32) return ($"time32:{UnitStr(t32.Unit)}", null);
+        if (t is Time64Type t64) return ($"time64:{UnitStr(t64.Unit)}", null);
         if (t is DurationType dur) return ($"duration:{UnitStr(dur.Unit)}", null);
 
         if (t is ListType lst)
@@ -121,26 +121,26 @@ public static class ArrowSchemaSerializer
 
         return t switch
         {
-            BooleanType    => ("bool",        null),
-            Int8Type       => ("int8",        null),
-            Int16Type      => ("int16",       null),
-            Int32Type      => ("int32",       null),
-            Int64Type      => ("int64",       null),
-            UInt8Type      => ("uint8",       null),
-            UInt16Type     => ("uint16",      null),
-            UInt32Type     => ("uint32",      null),
-            UInt64Type     => ("uint64",      null),
-            HalfFloatType  => ("float16",     null),
-            FloatType      => ("float32",     null),
-            DoubleType     => ("float64",     null),
-            StringType     => ("utf8",        null),
-            LargeStringType => ("largeutf8",  null),
-            BinaryType     => ("binary",      null),
-            LargeBinaryType => ("largebinary",null),
-            Date32Type     => ("date32",      null),
-            Date64Type     => ("date64",      null),
-            NullType       => ("null",        null),
-            _              => ("utf8",        null)   // safe fallback
+            BooleanType => ("bool", null),
+            Int8Type => ("int8", null),
+            Int16Type => ("int16", null),
+            Int32Type => ("int32", null),
+            Int64Type => ("int64", null),
+            UInt8Type => ("uint8", null),
+            UInt16Type => ("uint16", null),
+            UInt32Type => ("uint32", null),
+            UInt64Type => ("uint64", null),
+            HalfFloatType => ("float16", null),
+            FloatType => ("float32", null),
+            DoubleType => ("float64", null),
+            StringType => ("utf8", null),
+            LargeStringType => ("largeutf8", null),
+            BinaryType => ("binary", null),
+            LargeBinaryType => ("largebinary", null),
+            Date32Type => ("date32", null),
+            Date64Type => ("date64", null),
+            NullType => ("null", null),
+            _ => ("utf8", null)   // safe fallback
         };
     }
 
@@ -177,7 +177,7 @@ public static class ArrowSchemaSerializer
 
     private static Field ParseField(JsonNode node)
     {
-        var name     = node["name"]?.GetValue<string>() ?? "";
+        var name = node["name"]?.GetValue<string>() ?? "";
         var nullable = node["nullable"]?.GetValue<bool>() ?? true;
         var typeName = node["type"]?.GetValue<string>() ?? "utf8";
 
@@ -187,7 +187,7 @@ public static class ArrowSchemaSerializer
                 if (item != null) children.Add(ParseField(item));
 
         var arrowType = ParseArrowType(typeName, children);
-        var meta      = ParseMetadata(node["metadata"]);
+        var meta = ParseMetadata(node["metadata"]);
 
         return meta?.Count > 0
             ? new Field(name, arrowType, nullable, meta)
@@ -212,8 +212,8 @@ public static class ArrowSchemaSerializer
         }
         if (typeName.StartsWith("timestamp:", StringComparison.Ordinal))
         {
-            var p  = typeName.Split(':');
-            var u  = ParseUnit(p[1]);
+            var p = typeName.Split(':');
+            var u = ParseUnit(p[1]);
             var tz = p.Length > 2 ? string.Join(":", p[2..]) : null; // handle "America/New_York"
             return new TimestampType(u, tz);
         }
@@ -225,47 +225,47 @@ public static class ArrowSchemaSerializer
         {
             return ParseUnit(typeName.Split(':')[1]) switch
             {
-                TimeUnit.Second      => DurationType.Second,
+                TimeUnit.Second => DurationType.Second,
                 TimeUnit.Millisecond => DurationType.Millisecond,
-                TimeUnit.Nanosecond  => DurationType.Nanosecond,
-                _                    => DurationType.Microsecond
+                TimeUnit.Nanosecond => DurationType.Nanosecond,
+                _ => DurationType.Microsecond
             };
         }
 
         return typeName switch
         {
-            "bool"        => BooleanType.Default,
-            "int8"        => Int8Type.Default,
-            "int16"       => Int16Type.Default,
-            "int32"       => Int32Type.Default,
-            "int64"       => Int64Type.Default,
-            "uint8"       => UInt8Type.Default,
-            "uint16"      => UInt16Type.Default,
-            "uint32"      => UInt32Type.Default,
-            "uint64"      => UInt64Type.Default,
-            "float16"     => HalfFloatType.Default,
-            "float32"     => FloatType.Default,
-            "float64"     => DoubleType.Default,
-            "utf8"        => StringType.Default,
-            "largeutf8"   => LargeStringType.Default,
-            "binary"      => BinaryType.Default,
+            "bool" => BooleanType.Default,
+            "int8" => Int8Type.Default,
+            "int16" => Int16Type.Default,
+            "int32" => Int32Type.Default,
+            "int64" => Int64Type.Default,
+            "uint8" => UInt8Type.Default,
+            "uint16" => UInt16Type.Default,
+            "uint32" => UInt32Type.Default,
+            "uint64" => UInt64Type.Default,
+            "float16" => HalfFloatType.Default,
+            "float32" => FloatType.Default,
+            "float64" => DoubleType.Default,
+            "utf8" => StringType.Default,
+            "largeutf8" => LargeStringType.Default,
+            "binary" => BinaryType.Default,
             "largebinary" => LargeBinaryType.Default,
-            "date32"      => Date32Type.Default,
-            "date64"      => Date64Type.Default,
-            "null"        => NullType.Default,
+            "date32" => Date32Type.Default,
+            "date64" => Date64Type.Default,
+            "null" => NullType.Default,
             // Use the IArrowType constructor (not Field) to match the path taken by InferListType,
             // so ArrowSerializer.SerializeAsync sees the same type structure.
-            "list"        => children.Count > 0
+            "list" => children.Count > 0
                                  ? new ListType(children[0].DataType)
                                  : new ListType(StringType.Default),
-            "largelist"   => children.Count > 0
+            "largelist" => children.Count > 0
                                  ? new LargeListType(children[0].DataType)
                                  : new LargeListType(StringType.Default),
-            "struct"      => new StructType(children),
-            "map"         => children.Count >= 2
+            "struct" => new StructType(children),
+            "map" => children.Count >= 2
                                  ? new MapType(children[0], children[1])
                                  : new MapType(StringType.Default, StringType.Default),
-            _             => StringType.Default
+            _ => StringType.Default
         };
     }
 
@@ -279,19 +279,19 @@ public static class ArrowSchemaSerializer
 
     private static string UnitStr(TimeUnit u) => u switch
     {
-        TimeUnit.Second      => "s",
+        TimeUnit.Second => "s",
         TimeUnit.Millisecond => "ms",
         TimeUnit.Microsecond => "us",
-        TimeUnit.Nanosecond  => "ns",
-        _                    => "us"
+        TimeUnit.Nanosecond => "ns",
+        _ => "us"
     };
 
     private static TimeUnit ParseUnit(string s) => s switch
     {
-        "s"  => TimeUnit.Second,
+        "s" => TimeUnit.Second,
         "ms" => TimeUnit.Millisecond,
         "us" => TimeUnit.Microsecond,
         "ns" => TimeUnit.Nanosecond,
-        _    => TimeUnit.Microsecond
+        _ => TimeUnit.Microsecond
     };
 }

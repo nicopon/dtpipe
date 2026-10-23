@@ -91,17 +91,17 @@ public record BranchDefinition
         IEnumerable<Abstractions.IStreamTransformerFactory>? processorFactories = null,
         string[]? arguments = null,
         string? processorName = null) => new()
-    {
-        Alias = alias,
-        Input = job.Input,
-        Output = job.Output,
-        StreamingAliases = SplitAliases(job.From),
-        RefAliases = job.Ref ?? Array.Empty<string>(),
-        Arguments = arguments ?? Array.Empty<string>(),
-        ProcessorName = processorName
+        {
+            Alias = alias,
+            Input = job.Input,
+            Output = job.Output,
+            StreamingAliases = SplitAliases(job.From),
+            RefAliases = job.Ref ?? Array.Empty<string>(),
+            Arguments = arguments ?? Array.Empty<string>(),
+            ProcessorName = processorName
             ?? processorFactories?.FirstOrDefault(f => f.IsApplicable(job))?.ComponentName,
-        PreParsedJob = job
-    };
+            PreParsedJob = job
+        };
 
     /// <summary>
     /// <c>from</c> carries the aliases comma-separated; absent means no upstream, which is the

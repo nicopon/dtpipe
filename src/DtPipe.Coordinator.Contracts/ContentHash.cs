@@ -13,4 +13,5 @@ public static class ContentHash
     public const int Full = 64;
 
     public static string Of(string text, int length = Full) =>
-        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text)))[..length];}
+        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text)))[..length];
+}

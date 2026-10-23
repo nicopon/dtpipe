@@ -49,8 +49,8 @@ public static class ArrowSerializer
 
         public TypedSerializer()
         {
-            _isDynamic = typeof(T) == typeof(object) || 
-                         typeof(T).Name == "JsonObject" || 
+            _isDynamic = typeof(T) == typeof(object) ||
+                         typeof(T).Name == "JsonObject" ||
                          typeof(IDictionary).IsAssignableFrom(typeof(T));
             if (!_isDynamic)
             {
@@ -61,12 +61,12 @@ public static class ArrowSerializer
 
         public TypedSerializer(Schema schema)
         {
-            _isDynamic = typeof(T) == typeof(object) || 
-                         typeof(T).Name == "JsonObject" || 
+            _isDynamic = typeof(T) == typeof(object) ||
+                         typeof(T).Name == "JsonObject" ||
                          typeof(IDictionary).IsAssignableFrom(typeof(T));
             _schema = schema;
-            _rootAccessor = _isDynamic 
-                ? (TypeAccessor)new DynamicStructTypeAccessor(schema) 
+            _rootAccessor = _isDynamic
+                ? (TypeAccessor)new DynamicStructTypeAccessor(schema)
                 : TypeAccessor.Create(typeof(T));
         }
 
@@ -79,7 +79,7 @@ public static class ArrowSerializer
             {
                 var first = list.FirstOrDefault(x => x != null);
                 if (first == null) throw new InvalidOperationException("Cannot infer schema from empty/null dynamic collection.");
-                
+
                 IDictionary? dict = first as IDictionary;
                 if (dict == null)
                 {
@@ -133,8 +133,8 @@ public static class ArrowSerializer
 
             foreach (var kvp in sample.Children)
             {
-                var childGlobal = new CapacityInfo 
-                { 
+                var childGlobal = new CapacityInfo
+                {
                     Count = (int)Math.Ceiling(kvp.Value.Count * scale)
                 };
                 global.Children[kvp.Key] = childGlobal;
@@ -147,9 +147,12 @@ public static class ArrowSerializer
 
         private CapacityInfo ExtrapolateNested(CapacityInfo sample, int sampleParentCount, int globalParentCount)
         {
-            var global = new CapacityInfo { Count = globalParentCount > 0 && sampleParentCount > 0 
-                ? (int)Math.Ceiling(sample.Count * ((double)globalParentCount / sampleParentCount)) 
-                : 0 };
+            var global = new CapacityInfo
+            {
+                Count = globalParentCount > 0 && sampleParentCount > 0
+                ? (int)Math.Ceiling(sample.Count * ((double)globalParentCount / sampleParentCount))
+                : 0
+            };
             foreach (var kvp in sample.Children)
                 global.Children[kvp.Key] = ExtrapolateNested(kvp.Value, sample.Count, global.Count);
             return global;
@@ -207,8 +210,8 @@ public static class ArrowSerializer
             case TimestampArray.Builder b: b.Reserve(count); break;
             case DurationArray.Builder b: b.Reserve(count); break;
             case FixedSizeBinaryArrayBuilder b: b.Reserve(count); break;
-            // List/Map/Struct manual builders don't have a native Reserve yet, 
-            // but their internal lists are already pre-dimensioned in their constructors.
+                // List/Map/Struct manual builders don't have a native Reserve yet, 
+                // but their internal lists are already pre-dimensioned in their constructors.
         }
     }
 
@@ -356,7 +359,8 @@ public static class ArrowSerializer
                 return Expression.Lambda<Action<object, IArrowArrayBuilder>>(call, valueParam, builderParam).Compile();
             }
 
-            return (val, builder) => {
+            return (val, builder) =>
+            {
                 var m = builder.GetType().GetMethod("Append", new[] { val.GetType() });
                 if (m == null) throw new NotSupportedException($"Builder {builder.GetType().Name} does not have Append({val.GetType().Name})");
                 m.Invoke(builder, new[] { val });
@@ -484,7 +488,7 @@ public static class ArrowSerializer
                 var prop = props[i];
                 var accessor = ChildAccessors[i];
                 var childInfoExpr = Expression.Call(typeof(StructTypeAccessor).GetMethod("GetOrAddChildInfo", BindingFlags.NonPublic | BindingFlags.Static)!, infoParam, Expression.Constant(prop.Name));
-                
+
                 var propAccess = Expression.Property(castedValue, prop);
                 var collectMethod = typeof(TypeAccessor).GetMethod("CollectCapacity")!;
                 body.Add(Expression.Call(Expression.Constant(accessor), collectMethod, Expression.Convert(propAccess, typeof(object)), childInfoExpr));
@@ -522,7 +526,7 @@ public static class ArrowSerializer
             {
                 var propAccess = Expression.Property(castedValue, props[i]);
                 var builderAccess = Expression.Call(buildersParam, typeof(List<IArrowArrayBuilder>).GetMethod("get_Item")!, Expression.Constant(i));
-                
+
                 var childAccessor = ChildAccessors[i];
                 var appendMethod = typeof(TypeAccessor).GetMethod("Append")!;
                 body.Add(Expression.Call(Expression.Constant(childAccessor), appendMethod, Expression.Convert(propAccess, typeof(object)), builderAccess));
@@ -626,7 +630,7 @@ public static class ArrowSerializer
             return child;
         }
 
-        public override IArrowArrayBuilder CreateBuilder(MemoryAllocator? allocator, CapacityInfo? capacity) 
+        public override IArrowArrayBuilder CreateBuilder(MemoryAllocator? allocator, CapacityInfo? capacity)
         {
             CapacityInfo? elementCap = null;
             capacity?.Children.TryGetValue("_items", out elementCap);
@@ -681,7 +685,7 @@ public static class ArrowSerializer
             return child;
         }
 
-        public override IArrowArrayBuilder CreateBuilder(MemoryAllocator? allocator, CapacityInfo? capacity) 
+        public override IArrowArrayBuilder CreateBuilder(MemoryAllocator? allocator, CapacityInfo? capacity)
         {
             CapacityInfo? keyCap = null;
             CapacityInfo? valCap = null;
@@ -813,11 +817,11 @@ public static class ArrowSerializer
             var validBuf = new byte[(length + 7) / 8];
             for (int i = 0; i < length; i++) if (_validity[i]) validBuf[i / 8] |= (byte)(1 << (i % 8));
             var validBuilder = new ArrowBuffer.Builder<byte>((length + 7) / 8).AppendRange(validBuf);
-            
+
             // MapArray expects a StructArray as its items
             var structType = new StructType(new[] { _type.KeyField, _type.ValueField });
             var structArray = new StructArray(structType, keys.Length, new[] { keys, values }, ArrowBuffer.Empty, 0);
-            
+
             return new MapArray(_type, length, offsetBuf, structArray, validBuilder.Build(), _nullCount);
         }
 

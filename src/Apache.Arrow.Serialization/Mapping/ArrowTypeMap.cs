@@ -156,7 +156,7 @@ public static class ArrowTypeMap
     /// </summary>
     public static Field GetField(string name, ArrowTypeResult logicalType, bool isNullable = true)
     {
-        return new Field(name, logicalType.ArrowType, isNullable, 
+        return new Field(name, logicalType.ArrowType, isNullable,
             logicalType.Metadata?.Select(kvp => new KeyValuePair<string, string>(kvp.Key, kvp.Value)));
     }
 

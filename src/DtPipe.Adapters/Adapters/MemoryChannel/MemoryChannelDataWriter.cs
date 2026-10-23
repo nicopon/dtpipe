@@ -35,7 +35,7 @@ public class MemoryChannelDataWriter : IRowDataWriter
     public async ValueTask InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
     {
         _logger.LogDebug("MemoryChannelDataWriter '{Alias}' initialized with {ColumnCount} columns. Data buffered in RAM via Arrow bridge.", _alias, columns.Count);
-        
+
         // Metadata is registered upfront by the orchestrator (empty), but now we dynamically update it.
         _registry.UpdateChannelColumns(_alias, columns);
 
@@ -68,8 +68,8 @@ public class MemoryChannelDataWriter : IRowDataWriter
         }
 
         // Bridge expects Memory<object?[]>. Convert if necessary.
-        object? [] [] array;
-        if (rows is object? [][] direct)
+        object?[][] array;
+        if (rows is object?[][] direct)
         {
             array = direct;
         }

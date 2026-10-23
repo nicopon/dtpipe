@@ -23,7 +23,7 @@ public class DryRunColumnarTests
             {
                 builder.Append(firstCol.GetValue(i)!.Value + 1);
             }
-            
+
             var newSchema = new Schema(new[] { new Field("id", Int32Type.Default, false) }, null);
             return new ValueTask<RecordBatch?>(new RecordBatch(newSchema, new[] { builder.Build() }, batch.Length));
         }
@@ -36,10 +36,10 @@ public class DryRunColumnarTests
     {
         // Arrange
         var readerMock = new Mock<IStreamReader>();
-        
+
         var columns = new List<PipeColumnInfo> { new("id", typeof(int), false) };
         readerMock.Setup(r => r.Columns).Returns(columns);
-        
+
         var rows = new object?[][] { new object?[] { 10 } };
         readerMock.Setup(r => r.ReadBatchesAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
                   .Returns(ToAsyncEnumerable(rows));

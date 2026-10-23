@@ -8,240 +8,240 @@ namespace DtPipe.Core.Validation;
 /// </summary>
 public static class SchemaCompatibilityAnalyzer
 {
-	/// <summary>
-	/// Analyzes compatibility between source and target schemas.
-	/// </summary>
-	/// <param name="sourceSchema">Schema of the data being written (after transformations)</param>
-	/// <param name="targetSchema">Schema of the target (null if target doesn't exist)</param>
-	/// <param name="dialect">SQL Dialect for identifier matching (optional)</param>
-	/// <returns>Compatibility report with warnings and errors</returns>
-	public static SchemaCompatibilityReport Analyze(
-		IReadOnlyList<PipeColumnInfo> sourceSchema,
-		TargetSchemaInfo? targetSchema,
-		DtPipe.Core.Abstractions.ISqlDialect? dialect = null)
-	{
-		var columns = new List<ColumnCompatibility>();
-		var warnings = new List<string>();
-		var errors = new List<string>();
-		var missingColumnErrors = new List<string>();
+    /// <summary>
+    /// Analyzes compatibility between source and target schemas.
+    /// </summary>
+    /// <param name="sourceSchema">Schema of the data being written (after transformations)</param>
+    /// <param name="targetSchema">Schema of the target (null if target doesn't exist)</param>
+    /// <param name="dialect">SQL Dialect for identifier matching (optional)</param>
+    /// <returns>Compatibility report with warnings and errors</returns>
+    public static SchemaCompatibilityReport Analyze(
+        IReadOnlyList<PipeColumnInfo> sourceSchema,
+        TargetSchemaInfo? targetSchema,
+        DtPipe.Core.Abstractions.ISqlDialect? dialect = null)
+    {
+        var columns = new List<ColumnCompatibility>();
+        var warnings = new List<string>();
+        var errors = new List<string>();
+        var missingColumnErrors = new List<string>();
 
-		// If target doesn't exist, all columns are new (will be created)
-		if (targetSchema is null || !targetSchema.Exists)
-		{
-			foreach (var srcCol in sourceSchema)
-			{
-				columns.Add(new ColumnCompatibility(
-					srcCol.Name,
-					srcCol,
-					null,
-					CompatibilityStatus.WillBeCreated,
-					"Column will be created in new table"));
-			}
+        // If target doesn't exist, all columns are new (will be created)
+        if (targetSchema is null || !targetSchema.Exists)
+        {
+            foreach (var srcCol in sourceSchema)
+            {
+                columns.Add(new ColumnCompatibility(
+                    srcCol.Name,
+                    srcCol,
+                    null,
+                    CompatibilityStatus.WillBeCreated,
+                    "Column will be created in new table"));
+            }
 
-			return new SchemaCompatibilityReport(targetSchema, columns, warnings, errors);
-		}
+            return new SchemaCompatibilityReport(targetSchema, columns, warnings, errors);
+        }
 
-		// Build lookup for target columns
-		// Target columns are PHYSICAL names (usually).
-		// If we have a dialect, we should simulate how the DB resolves the source name to a physical name.
-		// If no dialect, fallback to fuzzy OrdinalIgnoreCase.
+        // Build lookup for target columns
+        // Target columns are PHYSICAL names (usually).
+        // If we have a dialect, we should simulate how the DB resolves the source name to a physical name.
+        // If no dialect, fallback to fuzzy OrdinalIgnoreCase.
 
-		// Use a mutable list of target columns to track matched ones.
-		var remainingTargetCols = targetSchema.Columns.ToList();
+        // Use a mutable list of target columns to track matched ones.
+        var remainingTargetCols = targetSchema.Columns.ToList();
 
-		// Check each source column
-		foreach (var srcCol in sourceSchema)
-		{
-			TargetColumnInfo? tgtCol = null;
+        // Check each source column
+        foreach (var srcCol in sourceSchema)
+        {
+            TargetColumnInfo? tgtCol = null;
 
-			// CRITICAL: Use ColumnMatcher as single source of truth
-			if (dialect != null)
-			{
-				tgtCol = Core.Helpers.ColumnMatcher.FindMatchingColumn(
-					srcCol.Name,
-					srcCol.IsCaseSensitive,
-					remainingTargetCols,
-					c => c.Name,
-					dialect);
-			}
-			// Fallback: Robust Fuzzy match (Always try this as a safety net - T45/T98)
-			if (tgtCol == null)
-			{
-				tgtCol = remainingTargetCols.FirstOrDefault(c => IsFuzzyMatch(srcCol.Name, c.Name));
-			}
+            // CRITICAL: Use ColumnMatcher as single source of truth
+            if (dialect != null)
+            {
+                tgtCol = Core.Helpers.ColumnMatcher.FindMatchingColumn(
+                    srcCol.Name,
+                    srcCol.IsCaseSensitive,
+                    remainingTargetCols,
+                    c => c.Name,
+                    dialect);
+            }
+            // Fallback: Robust Fuzzy match (Always try this as a safety net - T45/T98)
+            if (tgtCol == null)
+            {
+                tgtCol = remainingTargetCols.FirstOrDefault(c => IsFuzzyMatch(srcCol.Name, c.Name));
+            }
 
-			if (tgtCol != null)
-			{
-				var (status, message) = CheckColumnCompatibility(srcCol, tgtCol);
-				columns.Add(new ColumnCompatibility(srcCol.Name, srcCol, tgtCol, status, message));
+            if (tgtCol != null)
+            {
+                var (status, message) = CheckColumnCompatibility(srcCol, tgtCol);
+                columns.Add(new ColumnCompatibility(srcCol.Name, srcCol, tgtCol, status, message));
 
-				if (status == CompatibilityStatus.TypeMismatch)
-				{
-					errors.Add($"Column '{srcCol.Name}': {message}");
-				}
-				else if (status != CompatibilityStatus.Compatible)
-				{
-					warnings.Add($"Column '{srcCol.Name}': {message}");
-				}
+                if (status == CompatibilityStatus.TypeMismatch)
+                {
+                    errors.Add($"Column '{srcCol.Name}': {message}");
+                }
+                else if (status != CompatibilityStatus.Compatible)
+                {
+                    warnings.Add($"Column '{srcCol.Name}': {message}");
+                }
 
-				remainingTargetCols.Remove(tgtCol);
-			}
-			else
-			{
-				// Column missing in target
-				columns.Add(new ColumnCompatibility(
-					srcCol.Name,
-					srcCol,
-					null,
-					CompatibilityStatus.MissingInTarget,
-					"Column does not exist in target - data for this column will be skipped"));
+                remainingTargetCols.Remove(tgtCol);
+            }
+            else
+            {
+                // Column missing in target
+                columns.Add(new ColumnCompatibility(
+                    srcCol.Name,
+                    srcCol,
+                    null,
+                    CompatibilityStatus.MissingInTarget,
+                    "Column does not exist in target - data for this column will be skipped"));
 
-				var msg = $"Column '{srcCol.Name}': Missing in target schema (Checked as '{(dialect != null ? (srcCol.IsCaseSensitive || dialect.NeedsQuoting(srcCol.Name) ? srcCol.Name : dialect.Normalize(srcCol.Name)) : srcCol.Name)}') - data for this column will be skipped";
-				errors.Add(msg); // Treat missing columns as errors for StrictSchema enforcement
-				missingColumnErrors.Add(msg);
-			}
-		}
+                var msg = $"Column '{srcCol.Name}': Missing in target schema (Checked as '{(dialect != null ? (srcCol.IsCaseSensitive || dialect.NeedsQuoting(srcCol.Name) ? srcCol.Name : dialect.Normalize(srcCol.Name)) : srcCol.Name)}') - data for this column will be skipped";
+                errors.Add(msg); // Treat missing columns as errors for StrictSchema enforcement
+                missingColumnErrors.Add(msg);
+            }
+        }
 
-		// Check for extra columns in target
-		foreach (var tgtCol in remainingTargetCols)
-		{
-			var status = tgtCol.IsNullable
-				? CompatibilityStatus.ExtraInTarget
-				: CompatibilityStatus.ExtraInTargetNotNull;
+        // Check for extra columns in target
+        foreach (var tgtCol in remainingTargetCols)
+        {
+            var status = tgtCol.IsNullable
+                ? CompatibilityStatus.ExtraInTarget
+                : CompatibilityStatus.ExtraInTargetNotNull;
 
-			var message = tgtCol.IsNullable
-				? "Exists in target but not in source (will be NULL)"
-				: "Exists in target but not in source - NOT NULL constraint may fail";
+            var message = tgtCol.IsNullable
+                ? "Exists in target but not in source (will be NULL)"
+                : "Exists in target but not in source - NOT NULL constraint may fail";
 
-			columns.Add(new ColumnCompatibility(tgtCol.Name, null, tgtCol, status, message));
+            columns.Add(new ColumnCompatibility(tgtCol.Name, null, tgtCol, status, message));
 
-			if (!tgtCol.IsNullable)
-			{
-				errors.Add($"Column '{tgtCol.Name}': {message}");
-			}
-			else
-			{
-				warnings.Add($"Column '{tgtCol.Name}': {message}");
-			}
-		}
+            if (!tgtCol.IsNullable)
+            {
+                errors.Add($"Column '{tgtCol.Name}': {message}");
+            }
+            else
+            {
+                warnings.Add($"Column '{tgtCol.Name}': {message}");
+            }
+        }
 
-		// Add warning if table has existing data
-		if (targetSchema.RowCount.HasValue && targetSchema.RowCount.Value > 0)
-		{
-			var sizeInfo = targetSchema.SizeBytes.HasValue
-				? $" • {FormatSize(targetSchema.SizeBytes.Value)}"
-				: "";
-			warnings.Insert(0, $"Target table already contains {targetSchema.RowCount:N0} rows{sizeInfo}");
-		}
+        // Add warning if table has existing data
+        if (targetSchema.RowCount.HasValue && targetSchema.RowCount.Value > 0)
+        {
+            var sizeInfo = targetSchema.SizeBytes.HasValue
+                ? $" • {FormatSize(targetSchema.SizeBytes.Value)}"
+                : "";
+            warnings.Insert(0, $"Target table already contains {targetSchema.RowCount:N0} rows{sizeInfo}");
+        }
 
-		return new SchemaCompatibilityReport(targetSchema, columns, warnings, errors)
-		{
-			MissingColumnErrors = missingColumnErrors
-		};
-	}
+        return new SchemaCompatibilityReport(targetSchema, columns, warnings, errors)
+        {
+            MissingColumnErrors = missingColumnErrors
+        };
+    }
 
-	private static (CompatibilityStatus, string?) CheckColumnCompatibility(PipeColumnInfo source, TargetColumnInfo target)
-	{
-		// Check nullability conflict
-		if (source.IsNullable && !target.IsNullable && !target.IsPrimaryKey)
-		{
-			return (CompatibilityStatus.NullabilityConflict,
-				$"Source is nullable but target has NOT NULL constraint");
-		}
+    private static (CompatibilityStatus, string?) CheckColumnCompatibility(PipeColumnInfo source, TargetColumnInfo target)
+    {
+        // Check nullability conflict
+        if (source.IsNullable && !target.IsNullable && !target.IsPrimaryKey)
+        {
+            return (CompatibilityStatus.NullabilityConflict,
+                $"Source is nullable but target has NOT NULL constraint");
+        }
 
-		// Check type compatibility
-		if (target.InferredClrType is not null)
-		{
-			var srcType = Nullable.GetUnderlyingType(source.ClrType) ?? source.ClrType;
-			var tgtType = Nullable.GetUnderlyingType(target.InferredClrType) ?? target.InferredClrType;
+        // Check type compatibility
+        if (target.InferredClrType is not null)
+        {
+            var srcType = Nullable.GetUnderlyingType(source.ClrType) ?? source.ClrType;
+            var tgtType = Nullable.GetUnderlyingType(target.InferredClrType) ?? target.InferredClrType;
 
-			// Direct match
-			if (srcType == tgtType)
-			{
-				return (CompatibilityStatus.Compatible, null);
-			}
+            // Direct match
+            if (srcType == tgtType)
+            {
+                return (CompatibilityStatus.Compatible, null);
+            }
 
-			// Check for safe conversions
-			if (IsNumericUpcast(srcType, tgtType))
-			{
-				return (CompatibilityStatus.Compatible, null);
-			}
+            // Check for safe conversions
+            if (IsNumericUpcast(srcType, tgtType))
+            {
+                return (CompatibilityStatus.Compatible, null);
+            }
 
-			// String to Guid compatibility (common for CSV/String sources to DB UUIDs)
-			if ((srcType == typeof(string) && tgtType == typeof(Guid)) ||
-			    (srcType == typeof(Guid) && tgtType == typeof(string)))
-			{
-				return (CompatibilityStatus.Compatible, null);
-			}
+            // String to Guid compatibility (common for CSV/String sources to DB UUIDs)
+            if ((srcType == typeof(string) && tgtType == typeof(Guid)) ||
+                (srcType == typeof(Guid) && tgtType == typeof(string)))
+            {
+                return (CompatibilityStatus.Compatible, null);
+            }
 
-			// Guid <-> byte[] (16) compatibility (common for Oracle RAW(16) or others)
-			if ((srcType == typeof(Guid) && tgtType == typeof(byte[])) ||
-			    (srcType == typeof(byte[]) && tgtType == typeof(Guid)))
-			{
-				if (target.MaxLength == 16 || !target.MaxLength.HasValue)
-				{
-					return (CompatibilityStatus.Compatible, null);
-				}
-			}
+            // Guid <-> byte[] (16) compatibility (common for Oracle RAW(16) or others)
+            if ((srcType == typeof(Guid) && tgtType == typeof(byte[])) ||
+                (srcType == typeof(byte[]) && tgtType == typeof(Guid)))
+            {
+                if (target.MaxLength == 16 || !target.MaxLength.HasValue)
+                {
+                    return (CompatibilityStatus.Compatible, null);
+                }
+            }
 
-			// String to smaller string (truncation risk)
-			if (srcType == typeof(string) && tgtType == typeof(string) && target.MaxLength.HasValue)
-			{
-				return (CompatibilityStatus.PossibleTruncation,
-					$"Source String may exceed {target.NativeType} limit");
-			}
+            // String to smaller string (truncation risk)
+            if (srcType == typeof(string) && tgtType == typeof(string) && target.MaxLength.HasValue)
+            {
+                return (CompatibilityStatus.PossibleTruncation,
+                    $"Source String may exceed {target.NativeType} limit");
+            }
 
-			// Type mismatch
-			return (CompatibilityStatus.TypeMismatch,
-				$"Type mismatch: {srcType.Name} → {target.NativeType}");
-		}
+            // Type mismatch
+            return (CompatibilityStatus.TypeMismatch,
+                $"Type mismatch: {srcType.Name} → {target.NativeType}");
+        }
 
-		// Cannot determine - assume compatible with warning
-		return (CompatibilityStatus.Compatible, null);
-	}
+        // Cannot determine - assume compatible with warning
+        return (CompatibilityStatus.Compatible, null);
+    }
 
-	/// <summary>
-	/// Whether a value of <paramref name="source"/> fits in <paramref name="target"/> without loss.
-	/// </summary>
-	/// <remarks>
-	/// Public because it is the repository's ONE widening rule, and it now has two callers: this
-	/// analyzer, comparing a pipeline's output to a target table, and <c>ContractDiff</c>, comparing
-	/// two versions of a contract. A second copy would drift — the two would disagree about whether
-	/// a producer's change is breaking, and only one of them gates a pull request.
-	/// </remarks>
-	public static bool IsNumericUpcast(Type source, Type target)
-	{
-		// Safe numeric conversions
-		var numericOrder = new Dictionary<Type, int>
-		{
-			[typeof(byte)] = 1,
-			[typeof(short)] = 2,
-			[typeof(int)] = 3,
-			[typeof(long)] = 4,
-			[typeof(float)] = 5,
-			[typeof(double)] = 6,
-			[typeof(decimal)] = 7
-		};
+    /// <summary>
+    /// Whether a value of <paramref name="source"/> fits in <paramref name="target"/> without loss.
+    /// </summary>
+    /// <remarks>
+    /// Public because it is the repository's ONE widening rule, and it now has two callers: this
+    /// analyzer, comparing a pipeline's output to a target table, and <c>ContractDiff</c>, comparing
+    /// two versions of a contract. A second copy would drift — the two would disagree about whether
+    /// a producer's change is breaking, and only one of them gates a pull request.
+    /// </remarks>
+    public static bool IsNumericUpcast(Type source, Type target)
+    {
+        // Safe numeric conversions
+        var numericOrder = new Dictionary<Type, int>
+        {
+            [typeof(byte)] = 1,
+            [typeof(short)] = 2,
+            [typeof(int)] = 3,
+            [typeof(long)] = 4,
+            [typeof(float)] = 5,
+            [typeof(double)] = 6,
+            [typeof(decimal)] = 7
+        };
 
-		if (numericOrder.TryGetValue(source, out var srcOrder) &&
-			numericOrder.TryGetValue(target, out var tgtOrder))
-		{
-			return tgtOrder >= srcOrder;
-		}
+        if (numericOrder.TryGetValue(source, out var srcOrder) &&
+            numericOrder.TryGetValue(target, out var tgtOrder))
+        {
+            return tgtOrder >= srcOrder;
+        }
 
-		return false;
-	}
+        return false;
+    }
 
-	private static bool IsFuzzyMatch(string name1, string name2)
-		=> ColumnHelper.IsFuzzyMatch(name1, name2);
+    private static bool IsFuzzyMatch(string name1, string name2)
+        => ColumnHelper.IsFuzzyMatch(name1, name2);
 
-	private static string FormatSize(long bytes)
-	{
-		if (bytes < 1024) return $"{bytes} B";
-		if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
-		if (bytes < 1024 * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} MB";
-		return $"{bytes / (1024.0 * 1024 * 1024):F1} GB";
-	}
+    private static string FormatSize(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        if (bytes < 1024 * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} MB";
+        return $"{bytes / (1024.0 * 1024 * 1024):F1} GB";
+    }
 }
 
 /// <summary>
@@ -252,23 +252,23 @@ public static class SchemaCompatibilityAnalyzer
 /// <param name="Warnings">List of warning messages</param>
 /// <param name="Errors">List of error messages</param>
 public sealed record SchemaCompatibilityReport(
-	TargetSchemaInfo? TargetInfo,
-	IReadOnlyList<ColumnCompatibility> Columns,
-	IReadOnlyList<string> Warnings,
-	IReadOnlyList<string> Errors
+    TargetSchemaInfo? TargetInfo,
+    IReadOnlyList<ColumnCompatibility> Columns,
+    IReadOnlyList<string> Warnings,
+    IReadOnlyList<string> Errors
 )
 {
-	/// <summary>
-	/// The subset of <see cref="Errors"/> raised only because a source column is absent from the
-	/// target. They gate StrictSchema like any other error, but auto-migration resolves them —
-	/// a caller that is about to migrate must not report them as failures.
-	/// </summary>
-	public IReadOnlyList<string> MissingColumnErrors { get; init; } = [];
+    /// <summary>
+    /// The subset of <see cref="Errors"/> raised only because a source column is absent from the
+    /// target. They gate StrictSchema like any other error, but auto-migration resolves them —
+    /// a caller that is about to migrate must not report them as failures.
+    /// </summary>
+    public IReadOnlyList<string> MissingColumnErrors { get; init; } = [];
 
-	/// <summary>
-	/// Returns true if there are no errors (warnings are acceptable).
-	/// </summary>
-	public bool IsCompatible => Errors.Count == 0;
+    /// <summary>
+    /// Returns true if there are no errors (warnings are acceptable).
+    /// </summary>
+    public bool IsCompatible => Errors.Count == 0;
 }
 
 /// <summary>
@@ -280,11 +280,11 @@ public sealed record SchemaCompatibilityReport(
 /// <param name="Status">Compatibility status</param>
 /// <param name="Message">Optional message explaining the status</param>
 public sealed record ColumnCompatibility(
-	string ColumnName,
-	PipeColumnInfo? SourceColumn,
-	TargetColumnInfo? TargetColumn,
-	CompatibilityStatus Status,
-	string? Message
+    string ColumnName,
+    PipeColumnInfo? SourceColumn,
+    TargetColumnInfo? TargetColumn,
+    CompatibilityStatus Status,
+    string? Message
 );
 
 /// <summary>
@@ -292,27 +292,27 @@ public sealed record ColumnCompatibility(
 /// </summary>
 public enum CompatibilityStatus
 {
-	/// <summary>Types match perfectly or with safe conversion.</summary>
-	Compatible,
+    /// <summary>Types match perfectly or with safe conversion.</summary>
+    Compatible,
 
-	/// <summary>Column will be created (target doesn't exist).</summary>
-	WillBeCreated,
+    /// <summary>Column will be created (target doesn't exist).</summary>
+    WillBeCreated,
 
-	/// <summary>Source string may be larger than target allows.</summary>
-	PossibleTruncation,
+    /// <summary>Source string may be larger than target allows.</summary>
+    PossibleTruncation,
 
-	/// <summary>Incompatible types that may cause data loss or errors.</summary>
-	TypeMismatch,
+    /// <summary>Incompatible types that may cause data loss or errors.</summary>
+    TypeMismatch,
 
-	/// <summary>Column exists in source but not in target.</summary>
-	MissingInTarget,
+    /// <summary>Column exists in source but not in target.</summary>
+    MissingInTarget,
 
-	/// <summary>Column exists in target but not in source (nullable, will be NULL).</summary>
-	ExtraInTarget,
+    /// <summary>Column exists in target but not in source (nullable, will be NULL).</summary>
+    ExtraInTarget,
 
-	/// <summary>Column exists in target but not in source (NOT NULL - will fail).</summary>
-	ExtraInTargetNotNull,
+    /// <summary>Column exists in target but not in source (NOT NULL - will fail).</summary>
+    ExtraInTargetNotNull,
 
-	/// <summary>Source allows NULL but target has NOT NULL constraint.</summary>
-	NullabilityConflict
+    /// <summary>Source allows NULL but target has NOT NULL constraint.</summary>
+    NullabilityConflict
 }

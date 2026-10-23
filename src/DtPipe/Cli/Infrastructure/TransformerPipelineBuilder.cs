@@ -159,8 +159,8 @@ public class TransformerPipelineBuilder
                     }
                     else if (flag.Arity == FlagArity.Scalar)
                     {
-                         // Missing required value for scalar
-                         throw new InvalidOperationException($"Flag '{arg}' requires a value.");
+                        // Missing required value for scalar
+                        throw new InvalidOperationException($"Flag '{arg}' requires a value.");
                     }
                 }
                 else

@@ -8,7 +8,7 @@ namespace DtPipe.Cli.Agent;
 /// </summary>
 public static class AgentSystemPrompt
 {
-     public const string DefaultSystemPrompt = @"You are an expert data integration agent for dtpipe, a streaming ETL CLI.
+    public const string DefaultSystemPrompt = @"You are an expert data integration agent for dtpipe, a streaming ETL CLI.
  Analyze user requests and use the available dtpipe tools to complete data integration, schema discovery, data anonymization, filtering, computation, and transformation tasks end-to-end.
 
  WHEN A CALL COMES BACK WRONG:
@@ -30,12 +30,12 @@ public static class AgentSystemPrompt
  4. Invite the user to provide feedback, ask follow-up questions, or request adjustments to the pipeline.
  ";
 
-      /// <summary>
-       /// Planner role (F1): the model discovers, designs, validates and dry-runs a pipeline but must
-       /// NOT execute it. The authoritative YAML is produced via the <c>yamlContent</c> tool argument
-       /// so the engine can execute it deterministically afterwards.
-       /// </summary>
-     public const string PlannerSystemPrompt = @"You are the PLANNER role of a dtpipe data-integration agent.
+    /// <summary>
+    /// Planner role (F1): the model discovers, designs, validates and dry-runs a pipeline but must
+    /// NOT execute it. The authoritative YAML is produced via the <c>yamlContent</c> tool argument
+    /// so the engine can execute it deterministically afterwards.
+    /// </summary>
+    public const string PlannerSystemPrompt = @"You are the PLANNER role of a dtpipe data-integration agent.
  Your job is to DISCOVER, DESIGN, VALIDATE and DRY-RUN a pipeline — and to STOP one step before execution.
  You must NOT execute anything. The tool 'execute-yaml-job' is intentionally unavailable to you.
 
@@ -56,11 +56,11 @@ public static class AgentSystemPrompt
  YOU ARE FORBIDDEN FROM EXECUTING THE PIPELINE. Do not look for or call 'execute-yaml-job'.
  ";
 
-      /// <summary>
-       /// Executor role (F1): the model may drive execution end-to-end, but every write passes
-       /// through the guardrails (dry-run by default, approval gate, SQL safety policy — F2).
-       /// </summary>
-     public const string ExecutorSystemPrompt = @"You are the EXECUTOR role of a dtpipe data-integration agent.
+    /// <summary>
+    /// Executor role (F1): the model may drive execution end-to-end, but every write passes
+    /// through the guardrails (dry-run by default, approval gate, SQL safety policy — F2).
+    /// </summary>
+    public const string ExecutorSystemPrompt = @"You are the EXECUTOR role of a dtpipe data-integration agent.
  You may discover, plan, validate, dry-run AND execute pipelines end-to-end.
  Execution is gated by guardrails: runs are dry-run by default; writes require explicit approval;
  destructive SQL and network access are denied unless explicitly allowed.
@@ -71,14 +71,14 @@ public static class AgentSystemPrompt
  If a decision is genuinely missing and only the user can make it — a target, an ambiguous column, a business rule — call 'ask-user' with ONE focused question and stop. When the answer is a pick between a few values you already know, list them in the 'options' argument. Ask only what blocks you; do not guess a value the user is better placed to give.
  ";
 
-      /// <summary>
-       /// The frame for a session driving a foreign MCP server. The three prompts above name dtpipe
-       /// tools by hand, so sending one to another server's catalogue measures a model fighting a
-       /// briefing about tools it was never offered. A real host uses the server's own instructions
-       /// as its system message; <see cref="ForExternalServer"/> does the same, and falls back to
-       /// this when the server sent none.
-       /// </summary>
-     public const string ExternalServerFallbackPrompt = @"You are driving an MCP server through its tools.
+    /// <summary>
+    /// The frame for a session driving a foreign MCP server. The three prompts above name dtpipe
+    /// tools by hand, so sending one to another server's catalogue measures a model fighting a
+    /// briefing about tools it was never offered. A real host uses the server's own instructions
+    /// as its system message; <see cref="ForExternalServer"/> does the same, and falls back to
+    /// this when the server sent none.
+    /// </summary>
+    public const string ExternalServerFallbackPrompt = @"You are driving an MCP server through its tools.
  The server did not describe itself, so its tool list is all you have: read the descriptions before
  calling anything, and prefer a tool that reports over one that changes something.
 
@@ -87,27 +87,27 @@ public static class AgentSystemPrompt
  spends a turn for nothing.
  ";
 
-      /// <summary>
-       /// The system message for a foreign server: what it said about itself at the handshake, or
-       /// <see cref="ExternalServerFallbackPrompt"/> when it said nothing. Never a dtpipe role
-       /// prompt — naming tools the catalogue does not carry is the one thing that would make the
-       /// measurement unreadable.
-       /// </summary>
-     public static string ForExternalServer(string? serverInstructions)
-          => string.IsNullOrWhiteSpace(serverInstructions)
-             ? ExternalServerFallbackPrompt
-             : serverInstructions!;
+    /// <summary>
+    /// The system message for a foreign server: what it said about itself at the handshake, or
+    /// <see cref="ExternalServerFallbackPrompt"/> when it said nothing. Never a dtpipe role
+    /// prompt — naming tools the catalogue does not carry is the one thing that would make the
+    /// measurement unreadable.
+    /// </summary>
+    public static string ForExternalServer(string? serverInstructions)
+         => string.IsNullOrWhiteSpace(serverInstructions)
+            ? ExternalServerFallbackPrompt
+            : serverInstructions!;
 
-      /// <summary>
-       /// Returns the system prompt for an operating mode. PLAN uses the planner prompt; EXECUTE and
-       /// AUTONOMOUS use the executor prompt (autonomous = plan then execute through the guardrails).
-       /// </summary>
-     public static string Select(AgentMode mode)
-          => mode switch
-             {
-               AgentMode.Plan => PlannerSystemPrompt,
-               AgentMode.Execute => ExecutorSystemPrompt,
-               AgentMode.Autonomous => ExecutorSystemPrompt,
-               _ => DefaultSystemPrompt
-             };
+    /// <summary>
+    /// Returns the system prompt for an operating mode. PLAN uses the planner prompt; EXECUTE and
+    /// AUTONOMOUS use the executor prompt (autonomous = plan then execute through the guardrails).
+    /// </summary>
+    public static string Select(AgentMode mode)
+         => mode switch
+         {
+             AgentMode.Plan => PlannerSystemPrompt,
+             AgentMode.Execute => ExecutorSystemPrompt,
+             AgentMode.Autonomous => ExecutorSystemPrompt,
+             _ => DefaultSystemPrompt
+         };
 }

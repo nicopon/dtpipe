@@ -241,9 +241,9 @@ public class DuckDBSqlProcessorTests
     public async Task AggregateOnString_MixedSchema_DoesNotCrash()
     {
         // Schema: UUID-like (FixedSizeBinary) + String + Timestamp
-        var uuidField  = new Field("id",         new FixedSizeBinaryType(16), nullable: false);
-        var nameField  = new Field("username",    StringType.Default,          nullable: false);
-        var tsField    = new Field("last_login",  new TimestampType(TimeUnit.Microsecond, "UTC"), nullable: false);
+        var uuidField = new Field("id", new FixedSizeBinaryType(16), nullable: false);
+        var nameField = new Field("username", StringType.Default, nullable: false);
+        var tsField = new Field("last_login", new TimestampType(TimeUnit.Microsecond, "UTC"), nullable: false);
         var schema = new Schema(new[] { uuidField, nameField, tsField }, null);
 
         var uuidBuilder = new Apache.Arrow.Serialization.Reflection.FixedSizeBinaryArrayBuilder(16);
@@ -292,8 +292,8 @@ public class DuckDBSqlProcessorTests
     [Fact]
     public async Task AggregateWithStringConcat_MixedSchema_DoesNotCrash()
     {
-        var uuidField = new Field("id",       new FixedSizeBinaryType(16), nullable: false);
-        var nameField = new Field("username", StringType.Default,          nullable: false);
+        var uuidField = new Field("id", new FixedSizeBinaryType(16), nullable: false);
+        var nameField = new Field("username", StringType.Default, nullable: false);
         var schema = new Schema(new[] { uuidField, nameField }, null);
 
         var uuidBuilder = new Apache.Arrow.Serialization.Reflection.FixedSizeBinaryArrayBuilder(16);
@@ -340,13 +340,13 @@ public class DuckDBSqlProcessorTests
     public async Task Projection_MultiColumn_OutputOrderMatchesQueryOrder_NotSchemaOrder()
     {
         // Schema order: num first, text second
-        var numField  = new Field("num",  Int32Type.Default,  nullable: false);
+        var numField = new Field("num", Int32Type.Default, nullable: false);
         var textField = new Field("text", StringType.Default, nullable: false);
         var schema = new Schema(new[] { numField, textField }, null);
 
-        var numArr  = new Int32Array.Builder().AppendRange(new[] { 10, 20, 30 }).Build();
+        var numArr = new Int32Array.Builder().AppendRange(new[] { 10, 20, 30 }).Build();
         var textArr = new StringArray.Builder().AppendRange(new[] { "alpha", "beta", "gamma" }).Build();
-        var batch   = new RecordBatch(schema, new IArrowArray[] { numArr, textArr }, 3);
+        var batch = new RecordBatch(schema, new IArrowArray[] { numArr, textArr }, 3);
 
         const string alias = "src";
         var registry = BuildRegistry(alias, schema, new[] { batch });
@@ -366,13 +366,13 @@ public class DuckDBSqlProcessorTests
         // Output schema must have text first, num second
         Assert.Equal(2, processor.Schema!.FieldsList.Count);
         Assert.Equal("text", processor.Schema.FieldsList[0].Name);
-        Assert.Equal("num",  processor.Schema.FieldsList[1].Name);
+        Assert.Equal("num", processor.Schema.FieldsList[1].Name);
 
         // Data: text column must contain strings ("alpha"/"beta"/"gamma"), not integers
         Assert.Equal(3, resultBatches.Sum(b => b.Length));
-        var firstBatch   = resultBatches[0];
-        var textColumn   = Assert.IsType<StringArray>(firstBatch.Column(0));
-        var numColumn    = Assert.IsType<Int32Array>(firstBatch.Column(1));
+        var firstBatch = resultBatches[0];
+        var textColumn = Assert.IsType<StringArray>(firstBatch.Column(0));
+        var numColumn = Assert.IsType<Int32Array>(firstBatch.Column(1));
 
         // Verify text values are the original strings (not integers cast to strings)
         var textValues = Enumerable.Range(0, textColumn.Length).Select(i => textColumn.GetString(i)).ToList();
@@ -392,9 +392,9 @@ public class DuckDBSqlProcessorTests
     [Fact]
     public async Task Projection_PartialAndReordered_CorrectOutput()
     {
-        var aField = new Field("a", Int32Type.Default,  nullable: false);
+        var aField = new Field("a", Int32Type.Default, nullable: false);
         var bField = new Field("b", StringType.Default, nullable: false);
-        var cField = new Field("c", Int64Type.Default,  nullable: false);
+        var cField = new Field("c", Int64Type.Default, nullable: false);
         var schema = new Schema(new[] { aField, bField, cField }, null);
 
         var aArr = new Int32Array.Builder().AppendRange(new[] { 1, 2, 3 }).Build();
@@ -652,7 +652,7 @@ public class DuckDBSqlProcessorTests
         var idField = new Field("Id", Int32Type.Default, nullable: false);
         var roleField = new Field("Role", StringType.Default, nullable: false);
         var userStructType = new StructType(new[] { idField, roleField });
-        
+
         var userField = new Field("User", userStructType, nullable: false);
         var schema = new Schema(new[] { userField }, null);
 
@@ -688,7 +688,7 @@ public class DuckDBSqlProcessorTests
         Assert.Single(resultBatches);
         var firstBatch = resultBatches[0];
         Assert.Equal(2, firstBatch.Length);
-        
+
         var roleColumn = Assert.IsType<StringArray>(firstBatch.Column(0));
         Assert.Equal("Admin", roleColumn.GetString(0));
         Assert.Equal("Guest", roleColumn.GetString(1));

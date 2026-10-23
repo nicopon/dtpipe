@@ -10,446 +10,446 @@ namespace DtPipe.Transformers.Arrow.Format;
 
 public sealed partial class FormatDataTransformer : BaseColumnarTransformer, IRequiresOptions<DtPipe.Transformers.Arrow.Format.FormatOptions>
 {
-	private readonly Dictionary<string, string> _mappings = new(StringComparer.OrdinalIgnoreCase);
-	private readonly bool _skipNull;
-	private int[]? _generationOrder;
-	private ColumnProcessor[]? _processors;
-	private Dictionary<string, int>? _columnNameToIndex;
-	private int _realColumnCount;
+    private readonly Dictionary<string, string> _mappings = new(StringComparer.OrdinalIgnoreCase);
+    private readonly bool _skipNull;
+    private int[]? _generationOrder;
+    private ColumnProcessor[]? _processors;
+    private Dictionary<string, int>? _columnNameToIndex;
+    private int _realColumnCount;
 
-	public override bool CanProcessColumnar { get; protected set; }
+    public override bool CanProcessColumnar { get; protected set; }
 
-	// Unified pattern for {COLUMN} or {COLUMN:format}
-	[GeneratedRegex(@"\{([^{}:]+)(?::([^{}]+))?\}", RegexOptions.Compiled)]
-	private static partial Regex PlaceholderPattern();
+    // Unified pattern for {COLUMN} or {COLUMN:format}
+    [GeneratedRegex(@"\{([^{}:]+)(?::([^{}]+))?\}", RegexOptions.Compiled)]
+    private static partial Regex PlaceholderPattern();
 
-	public FormatDataTransformer(DtPipe.Transformers.Arrow.Format.FormatOptions options)
-	{
-		_skipNull = options.SkipNull;
-		foreach (var mapping in options.Format)
-		{
-			var parts = mapping.Split(':', 2);
-			if (parts.Length == 2)
-			{
-				_mappings[parts[0].Trim()] = parts[1]; // Value is template
-			}
-		}
-	}
+    public FormatDataTransformer(DtPipe.Transformers.Arrow.Format.FormatOptions options)
+    {
+        _skipNull = options.SkipNull;
+        foreach (var mapping in options.Format)
+        {
+            var parts = mapping.Split(':', 2);
+            if (parts.Length == 2)
+            {
+                _mappings[parts[0].Trim()] = parts[1]; // Value is template
+            }
+        }
+    }
 
-	private int _virtualColumnCount;
+    private int _virtualColumnCount;
 
-	public bool HasFormat => _mappings.Count > 0;
+    public bool HasFormat => _mappings.Count > 0;
 
-	public override async ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
-	{
-		await base.InitializeAsync(columns, ct);
-		if (!HasFormat)
-		{
-			return columns;
-		}
+    public override async ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
+    {
+        await base.InitializeAsync(columns, ct);
+        if (!HasFormat)
+        {
+            return columns;
+        }
 
-		var inputNames = columns.Select(c => c.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
-		// Identify virtual columns (mappings key NOT in input)
-		var virtualColumns = _mappings.Keys.Where(k => !inputNames.Contains(k)).ToList();
+        var inputNames = columns.Select(c => c.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // Identify virtual columns (mappings key NOT in input)
+        var virtualColumns = _mappings.Keys.Where(k => !inputNames.Contains(k)).ToList();
 
-		_virtualColumnCount = virtualColumns.Count;
-		_realColumnCount = columns.Count;
-		var totalCount = columns.Count + _virtualColumnCount;
+        _virtualColumnCount = virtualColumns.Count;
+        _realColumnCount = columns.Count;
+        var totalCount = columns.Count + _virtualColumnCount;
 
-		// Map names to indices (Inputs + Virtuals)
-		_columnNameToIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-		for (int i = 0; i < columns.Count; i++) _columnNameToIndex[columns[i].Name] = i;
-		for (int i = 0; i < virtualColumns.Count; i++) _columnNameToIndex[virtualColumns[i]] = columns.Count + i;
+        // Map names to indices (Inputs + Virtuals)
+        _columnNameToIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < columns.Count; i++) _columnNameToIndex[columns[i].Name] = i;
+        for (int i = 0; i < virtualColumns.Count; i++) _columnNameToIndex[virtualColumns[i]] = columns.Count + i;
 
-		_processors = new ColumnProcessor[totalCount];
-		var targetIndices = new List<int>();
+        _processors = new ColumnProcessor[totalCount];
+        var targetIndices = new List<int>();
 
-		// Register processors for Input columns (Overwrite)
-		for (int i = 0; i < columns.Count; i++)
-		{
-			if (_mappings.TryGetValue(columns[i].Name, out var template))
-			{
-				var segments = ParseTemplate(template);
-				var refs = ExtractReferencedColumns(segments);
-				var refIndices = ResolveReferencedIndices(refs, _columnNameToIndex);
-				_processors[i] = new ColumnProcessor(i, segments, refs, refIndices);
-				targetIndices.Add(i);
-			}
-		}
+        // Register processors for Input columns (Overwrite)
+        for (int i = 0; i < columns.Count; i++)
+        {
+            if (_mappings.TryGetValue(columns[i].Name, out var template))
+            {
+                var segments = ParseTemplate(template);
+                var refs = ExtractReferencedColumns(segments);
+                var refIndices = ResolveReferencedIndices(refs, _columnNameToIndex);
+                _processors[i] = new ColumnProcessor(i, segments, refs, refIndices);
+                targetIndices.Add(i);
+            }
+        }
 
-		// Register processors for Virtual columns (Creation)
-		for (int i = 0; i < virtualColumns.Count; i++)
-		{
-			var name = virtualColumns[i];
-			var template = _mappings[name];
-			var idx = columns.Count + i;
+        // Register processors for Virtual columns (Creation)
+        for (int i = 0; i < virtualColumns.Count; i++)
+        {
+            var name = virtualColumns[i];
+            var template = _mappings[name];
+            var idx = columns.Count + i;
 
-			var segments = ParseTemplate(template);
-			var refs = ExtractReferencedColumns(segments);
-			var refIndices = ResolveReferencedIndices(refs, _columnNameToIndex);
-			_processors[idx] = new ColumnProcessor(idx, segments, refs, refIndices);
-			targetIndices.Add(idx);
-		}
+            var segments = ParseTemplate(template);
+            var refs = ExtractReferencedColumns(segments);
+            var refIndices = ResolveReferencedIndices(refs, _columnNameToIndex);
+            _processors[idx] = new ColumnProcessor(idx, segments, refs, refIndices);
+            targetIndices.Add(idx);
+        }
 
-		// Topological Sort
-		_generationOrder = TopologicalSort(targetIndices, _processors);
+        // Topological Sort
+        _generationOrder = TopologicalSort(targetIndices, _processors);
 
-		// Determine Smart Hybrid capability:
-		// Can process columnar if all processors only reference themselves or no one.
-		bool allSelfReferenced = true;
-		foreach (var idx in targetIndices)
-		{
-			var proc = _processors[idx];
-			foreach (var refIdx in proc.ReferencedIndices)
-			{
-				if (refIdx != idx)
-				{
-					allSelfReferenced = false;
-					break;
-				}
-			}
-			if (!allSelfReferenced) break;
-		}
-		CanProcessColumnar = allSelfReferenced;
+        // Determine Smart Hybrid capability:
+        // Can process columnar if all processors only reference themselves or no one.
+        bool allSelfReferenced = true;
+        foreach (var idx in targetIndices)
+        {
+            var proc = _processors[idx];
+            foreach (var refIdx in proc.ReferencedIndices)
+            {
+                if (refIdx != idx)
+                {
+                    allSelfReferenced = false;
+                    break;
+                }
+            }
+            if (!allSelfReferenced) break;
+        }
+        CanProcessColumnar = allSelfReferenced;
 
-		// Build Output Schema
-		var newColumns = new List<PipeColumnInfo>(totalCount);
+        // Build Output Schema
+        var newColumns = new List<PipeColumnInfo>(totalCount);
 
-		// Add Inputs (changed to string if overwritten)
-		for (int i = 0; i < columns.Count; i++)
-		{
-			if (_mappings.ContainsKey(columns[i].Name))
-			{
-				newColumns.Add(new PipeColumnInfo(columns[i].Name, typeof(string), columns[i].IsNullable));
-			}
-			else
-			{
-				newColumns.Add(columns[i]);
-			}
-		}
+        // Add Inputs (changed to string if overwritten)
+        for (int i = 0; i < columns.Count; i++)
+        {
+            if (_mappings.ContainsKey(columns[i].Name))
+            {
+                newColumns.Add(new PipeColumnInfo(columns[i].Name, typeof(string), columns[i].IsNullable));
+            }
+            else
+            {
+                newColumns.Add(columns[i]);
+            }
+        }
 
-		// Add Virtuals (always String, assuming nullable for safety)
-		foreach (var name in virtualColumns)
-		{
-			newColumns.Add(new PipeColumnInfo(name, typeof(string), true));
-		}
+        // Add Virtuals (always String, assuming nullable for safety)
+        foreach (var name in virtualColumns)
+        {
+            newColumns.Add(new PipeColumnInfo(name, typeof(string), true));
+        }
 
-		_outputSchema = ArrowSchemaFactory.Create(newColumns);
-		return newColumns;
-	}
+        _outputSchema = ArrowSchemaFactory.Create(newColumns);
+        return newColumns;
+    }
 
-	private Schema? _outputSchema;
+    private Schema? _outputSchema;
 
-	protected override ValueTask<RecordBatch?> TransformBatchSafeAsync(RecordBatch batch, CancellationToken ct = default)
-	{
-		if (!CanProcessColumnar || _processors == null || _outputSchema == null)
-			return new ValueTask<RecordBatch?>(batch);
+    protected override ValueTask<RecordBatch?> TransformBatchSafeAsync(RecordBatch batch, CancellationToken ct = default)
+    {
+        if (!CanProcessColumnar || _processors == null || _outputSchema == null)
+            return new ValueTask<RecordBatch?>(batch);
 
-		int rowCount = batch.Length;
-		int totalColumns = _processors.Length;
-		var resultArrays = new IArrowArray[totalColumns];
+        int rowCount = batch.Length;
+        int totalColumns = _processors.Length;
+        var resultArrays = new IArrowArray[totalColumns];
 
-		var sb = new System.Text.StringBuilder(128);
+        var sb = new System.Text.StringBuilder(128);
 
-		for (int colIdx = 0; colIdx < totalColumns; colIdx++)
-		{
-			var proc = _processors[colIdx];
-			// If no processor for this column (and it's not virtual), just copy it
-			if (proc.Segments == null)
-			{
-				if (colIdx < _realColumnCount)
-				{
-					// Aliased column reused in the output batch — retain so the segment runner
-					// can dispose the input without freeing buffers this output still points at.
-					resultArrays[colIdx] = ArrowOwnership.RetainArray(batch.Column(colIdx));
-				}
-				continue;
-			}
+        for (int colIdx = 0; colIdx < totalColumns; colIdx++)
+        {
+            var proc = _processors[colIdx];
+            // If no processor for this column (and it's not virtual), just copy it
+            if (proc.Segments == null)
+            {
+                if (colIdx < _realColumnCount)
+                {
+                    // Aliased column reused in the output batch — retain so the segment runner
+                    // can dispose the input without freeing buffers this output still points at.
+                    resultArrays[colIdx] = ArrowOwnership.RetainArray(batch.Column(colIdx));
+                }
+                continue;
+            }
 
-			// We know it's self-referencing or constant
-			var builder = new StringArray.Builder();
-			for (int i = 0; i < rowCount; i++)
-			{
-				// Handle skipNull
-				bool shouldSkip = false;
-				if (_skipNull && proc.ReferencedIndices.Length > 0)
-				{
-					// Since it's self-referencing, check the exact row in the batch
-					var val = ArrowTypeMapper.GetValueForField(batch.Column(proc.ReferencedIndices[0]), batch.Schema.GetFieldByIndex(proc.ReferencedIndices[0]), i);
-					if (val == null) shouldSkip = true;
-				}
+            // We know it's self-referencing or constant
+            var builder = new StringArray.Builder();
+            for (int i = 0; i < rowCount; i++)
+            {
+                // Handle skipNull
+                bool shouldSkip = false;
+                if (_skipNull && proc.ReferencedIndices.Length > 0)
+                {
+                    // Since it's self-referencing, check the exact row in the batch
+                    var val = ArrowTypeMapper.GetValueForField(batch.Column(proc.ReferencedIndices[0]), batch.Schema.GetFieldByIndex(proc.ReferencedIndices[0]), i);
+                    if (val == null) shouldSkip = true;
+                }
 
-				if (shouldSkip)
-				{
-					builder.AppendNull();
-					continue;
-				}
+                if (shouldSkip)
+                {
+                    builder.AppendNull();
+                    continue;
+                }
 
-				sb.Clear();
-				foreach (var segment in proc.Segments)
-				{
-					if (segment.IsLiteral)
-					{
-						sb.Append(segment.Value);
-					}
-					else
-					{
-						// It's a self-reference (refIdx == colIdx)
-						var val = ArrowTypeMapper.GetValueForField(batch.Column(segment.ColumnIndex), batch.Schema.GetFieldByIndex(segment.ColumnIndex), i);
-						if (val != null)
-						{
-							if (segment.Format != null)
-							{
-								try { sb.AppendFormat(System.Globalization.CultureInfo.InvariantCulture, $"{{0:{segment.Format}}}", val); }
-								catch { sb.Append(val); }
-							}
-							else sb.Append(val);
-						}
-					}
-				}
-				builder.Append(sb.ToString());
-			}
-			resultArrays[colIdx] = builder.Build();
-		}
+                sb.Clear();
+                foreach (var segment in proc.Segments)
+                {
+                    if (segment.IsLiteral)
+                    {
+                        sb.Append(segment.Value);
+                    }
+                    else
+                    {
+                        // It's a self-reference (refIdx == colIdx)
+                        var val = ArrowTypeMapper.GetValueForField(batch.Column(segment.ColumnIndex), batch.Schema.GetFieldByIndex(segment.ColumnIndex), i);
+                        if (val != null)
+                        {
+                            if (segment.Format != null)
+                            {
+                                try { sb.AppendFormat(System.Globalization.CultureInfo.InvariantCulture, $"{{0:{segment.Format}}}", val); }
+                                catch { sb.Append(val); }
+                            }
+                            else sb.Append(val);
+                        }
+                    }
+                }
+                builder.Append(sb.ToString());
+            }
+            resultArrays[colIdx] = builder.Build();
+        }
 
-		return new ValueTask<RecordBatch?>(new RecordBatch(_outputSchema, resultArrays, rowCount));
-	}
+        return new ValueTask<RecordBatch?>(new RecordBatch(_outputSchema, resultArrays, rowCount));
+    }
 
-	public override object?[]? Transform(IReadOnlyList<object?> row)
-	{
-		var result = row as object?[] ?? row.ToArray();
-		if (_generationOrder == null)
-		{
-			return result;
-		}
-        
-		var workingRow = result;
+    public override object?[]? Transform(IReadOnlyList<object?> row)
+    {
+        var result = row as object?[] ?? row.ToArray();
+        if (_generationOrder == null)
+        {
+            return result;
+        }
 
-		// Handle resizing for virtual columns
-		if (_virtualColumnCount > 0)
-		{
-			workingRow = new object?[row.Count + _virtualColumnCount];
-			for (int i = 0; i < row.Count; i++) workingRow[i] = row[i];
-		}
+        var workingRow = result;
 
-		var sb = new System.Text.StringBuilder(128); // Small allocation
+        // Handle resizing for virtual columns
+        if (_virtualColumnCount > 0)
+        {
+            workingRow = new object?[row.Count + _virtualColumnCount];
+            for (int i = 0; i < row.Count; i++) workingRow[i] = row[i];
+        }
 
-		foreach (var idx in _generationOrder)
-		{
-			// Skip check based on source columns if SkipNull is enabled
-			var proc = _processors![idx];
-			bool shouldSkip = false;
+        var sb = new System.Text.StringBuilder(128); // Small allocation
 
-			if (_skipNull && proc.ReferencedIndices.Length > 0)
-			{
-				shouldSkip = true;
-				foreach (var refIdx in proc.ReferencedIndices)
-				{
-					// If ANY referenced column is NOT null, we do NOT skip
-					if (workingRow[refIdx] is not null)
-					{
-						shouldSkip = false;
-						break;
-					}
-				}
-			}
+        foreach (var idx in _generationOrder)
+        {
+            // Skip check based on source columns if SkipNull is enabled
+            var proc = _processors![idx];
+            bool shouldSkip = false;
 
-			if (shouldSkip)
-			{
-				workingRow[idx] = null;
-				continue;
-			}
-			sb.Clear();
+            if (_skipNull && proc.ReferencedIndices.Length > 0)
+            {
+                shouldSkip = true;
+                foreach (var refIdx in proc.ReferencedIndices)
+                {
+                    // If ANY referenced column is NOT null, we do NOT skip
+                    if (workingRow[refIdx] is not null)
+                    {
+                        shouldSkip = false;
+                        break;
+                    }
+                }
+            }
 
-			foreach (var segment in proc.Segments)
-			{
-				if (segment.IsLiteral)
-				{
-					sb.Append(segment.Value);
-				}
-				else
-				{
-					// Column Reference
-					// Ensure we don't access out of bounds if bad config
-					if (segment.ColumnIndex < workingRow.Length)
-					{
-						var val = workingRow[segment.ColumnIndex];
-						if (val != null)
-						{
-							if (segment.Format != null)
-							{
-								try
-								{
-									sb.AppendFormat(System.Globalization.CultureInfo.InvariantCulture, $"{{0:{segment.Format}}}", val);
-								}
-								catch (FormatException)
-								{
-									sb.Append(val);
-								}
-							}
-							else
-							{
-								sb.Append(val);
-							}
-						}
-					}
-				}
-			}
-			workingRow[idx] = sb.ToString();
-		}
+            if (shouldSkip)
+            {
+                workingRow[idx] = null;
+                continue;
+            }
+            sb.Clear();
 
-		return workingRow;
-	}
+            foreach (var segment in proc.Segments)
+            {
+                if (segment.IsLiteral)
+                {
+                    sb.Append(segment.Value);
+                }
+                else
+                {
+                    // Column Reference
+                    // Ensure we don't access out of bounds if bad config
+                    if (segment.ColumnIndex < workingRow.Length)
+                    {
+                        var val = workingRow[segment.ColumnIndex];
+                        if (val != null)
+                        {
+                            if (segment.Format != null)
+                            {
+                                try
+                                {
+                                    sb.AppendFormat(System.Globalization.CultureInfo.InvariantCulture, $"{{0:{segment.Format}}}", val);
+                                }
+                                catch (FormatException)
+                                {
+                                    sb.Append(val);
+                                }
+                            }
+                            else
+                            {
+                                sb.Append(val);
+                            }
+                        }
+                    }
+                }
+            }
+            workingRow[idx] = sb.ToString();
+        }
 
-	private TemplateSegment[] ParseTemplate(string template)
-	{
-		var segments = new List<TemplateSegment>();
-		var matches = PlaceholderPattern().Matches(template);
-		int lastIndex = 0;
+        return workingRow;
+    }
 
-		foreach (Match match in matches)
-		{
-			if (match.Index > lastIndex)
-			{
-				// Literal before match
-				segments.Add(TemplateSegment.CreateLiteral(template.Substring(lastIndex, match.Index - lastIndex)));
-			}
+    private TemplateSegment[] ParseTemplate(string template)
+    {
+        var segments = new List<TemplateSegment>();
+        var matches = PlaceholderPattern().Matches(template);
+        int lastIndex = 0;
 
-			var colName = match.Groups[1].Value;
-			var format = match.Groups[2].Success ? match.Groups[2].Value : null;
+        foreach (Match match in matches)
+        {
+            if (match.Index > lastIndex)
+            {
+                // Literal before match
+                segments.Add(TemplateSegment.CreateLiteral(template.Substring(lastIndex, match.Index - lastIndex)));
+            }
 
-			if (_columnNameToIndex!.TryGetValue(colName, out var idx))
-			{
-				segments.Add(TemplateSegment.CreateColumn(idx, format, colName));
-			}
-			else
-			{
-				// Unresolved column -> Treat as literal text (original match)
-				segments.Add(TemplateSegment.CreateLiteral(match.Value));
-			}
+            var colName = match.Groups[1].Value;
+            var format = match.Groups[2].Success ? match.Groups[2].Value : null;
 
-			lastIndex = match.Index + match.Length;
-		}
+            if (_columnNameToIndex!.TryGetValue(colName, out var idx))
+            {
+                segments.Add(TemplateSegment.CreateColumn(idx, format, colName));
+            }
+            else
+            {
+                // Unresolved column -> Treat as literal text (original match)
+                segments.Add(TemplateSegment.CreateLiteral(match.Value));
+            }
 
-		if (lastIndex < template.Length)
-		{
-			segments.Add(TemplateSegment.CreateLiteral(template.Substring(lastIndex)));
-		}
+            lastIndex = match.Index + match.Length;
+        }
 
-		return segments.ToArray();
-	}
+        if (lastIndex < template.Length)
+        {
+            segments.Add(TemplateSegment.CreateLiteral(template.Substring(lastIndex)));
+        }
 
-	private int[] TopologicalSort(List<int> targets, ColumnProcessor[] processors)
-	{
-		// Simple Kahn's algorithm or DFS
-		// Nodes are indices in `targets`.
-		// Dependency: If A refers to B, and B is in `targets`, B -> A (B must be processed before A)
+        return segments.ToArray();
+    }
 
-		var visited = new HashSet<int>();
-		var sorted = new List<int>();
-		var recursionStack = new HashSet<int>();
+    private int[] TopologicalSort(List<int> targets, ColumnProcessor[] processors)
+    {
+        // Simple Kahn's algorithm or DFS
+        // Nodes are indices in `targets`.
+        // Dependency: If A refers to B, and B is in `targets`, B -> A (B must be processed before A)
 
-		void Visit(int u)
-		{
-			if (recursionStack.Contains(u)) throw new InvalidOperationException($"Cycle detected in format dependencies for column index {u}");
-			if (visited.Contains(u)) return;
+        var visited = new HashSet<int>();
+        var sorted = new List<int>();
+        var recursionStack = new HashSet<int>();
 
-			recursionStack.Add(u);
+        void Visit(int u)
+        {
+            if (recursionStack.Contains(u)) throw new InvalidOperationException($"Cycle detected in format dependencies for column index {u}");
+            if (visited.Contains(u)) return;
 
-			// Depends on...
-			if (processors[u].ReferencedColumns != null)
-			{
-				foreach (var refColName in processors[u].ReferencedColumns!)
-				{
-					if (_columnNameToIndex!.TryGetValue(refColName, out var refIdx))
-					{
-						// If the referenced column is also a target, visit it first
-						// Ignore self-references (A -> A) as they simply use the original value
-						if (targets.Contains(refIdx) && refIdx != u)
-						{
-							Visit(refIdx);
-						}
-					}
-				}
-			}
+            recursionStack.Add(u);
 
-			recursionStack.Remove(u);
-			visited.Add(u);
-			sorted.Add(u);
-		}
+            // Depends on...
+            if (processors[u].ReferencedColumns != null)
+            {
+                foreach (var refColName in processors[u].ReferencedColumns!)
+                {
+                    if (_columnNameToIndex!.TryGetValue(refColName, out var refIdx))
+                    {
+                        // If the referenced column is also a target, visit it first
+                        // Ignore self-references (A -> A) as they simply use the original value
+                        if (targets.Contains(refIdx) && refIdx != u)
+                        {
+                            Visit(refIdx);
+                        }
+                    }
+                }
+            }
 
-		foreach (var t in targets)
-		{
-			Visit(t);
-		}
+            recursionStack.Remove(u);
+            visited.Add(u);
+            sorted.Add(u);
+        }
 
-		return sorted.ToArray();
-	}
+        foreach (var t in targets)
+        {
+            Visit(t);
+        }
 
-	private static HashSet<string> ExtractReferencedColumns(TemplateSegment[] segments)
-	{
-		var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-		foreach (var segment in segments)
-		{
-			// If it has a SourceColumnName (we stored it for dependency resolution)
-			if (!segment.IsLiteral && segment.SourceColumnName != null)
-			{
-				result.Add(segment.SourceColumnName);
-			}
-		}
-		return result;
-	}
+        return sorted.ToArray();
+    }
 
-	private static int[] ResolveReferencedIndices(HashSet<string> refs, Dictionary<string, int> nameToIndex)
-	{
-		var indices = new List<int>(refs.Count);
-		foreach (var r in refs)
-		{
-			if (nameToIndex.TryGetValue(r, out var idx))
-			{
-				indices.Add(idx);
-			}
-		}
-		return indices.ToArray();
-	}
+    private static HashSet<string> ExtractReferencedColumns(TemplateSegment[] segments)
+    {
+        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var segment in segments)
+        {
+            // If it has a SourceColumnName (we stored it for dependency resolution)
+            if (!segment.IsLiteral && segment.SourceColumnName != null)
+            {
+                result.Add(segment.SourceColumnName);
+            }
+        }
+        return result;
+    }
 
-	// Private helper methods
+    private static int[] ResolveReferencedIndices(HashSet<string> refs, Dictionary<string, int> nameToIndex)
+    {
+        var indices = new List<int>(refs.Count);
+        foreach (var r in refs)
+        {
+            if (nameToIndex.TryGetValue(r, out var idx))
+            {
+                indices.Add(idx);
+            }
+        }
+        return indices.ToArray();
+    }
+
+    // Private helper methods
 
 
-	private readonly struct TemplateSegment
-	{
-		public readonly bool IsLiteral;
-		public readonly string? Value; // Literal text OR Format specifier
-		public readonly int ColumnIndex;
-		public readonly string? SourceColumnName; // For dependency resolution
-		public string? Format => !IsLiteral ? Value : null;
+    private readonly struct TemplateSegment
+    {
+        public readonly bool IsLiteral;
+        public readonly string? Value; // Literal text OR Format specifier
+        public readonly int ColumnIndex;
+        public readonly string? SourceColumnName; // For dependency resolution
+        public string? Format => !IsLiteral ? Value : null;
 
-		private TemplateSegment(bool isLiteral, string? value, int columnIndex, string? sourceColumnName)
-		{
-			IsLiteral = isLiteral;
-			Value = value;
-			ColumnIndex = columnIndex;
-			SourceColumnName = sourceColumnName;
-		}
+        private TemplateSegment(bool isLiteral, string? value, int columnIndex, string? sourceColumnName)
+        {
+            IsLiteral = isLiteral;
+            Value = value;
+            ColumnIndex = columnIndex;
+            SourceColumnName = sourceColumnName;
+        }
 
-		public static TemplateSegment CreateLiteral(string text) => new(true, text, -1, null);
-		public static TemplateSegment CreateColumn(int index, string? format, string colName) => new(false, format, index, colName);
-	}
+        public static TemplateSegment CreateLiteral(string text) => new(true, text, -1, null);
+        public static TemplateSegment CreateColumn(int index, string? format, string colName) => new(false, format, index, colName);
+    }
 
-	private readonly struct ColumnProcessor
-	{
-		public readonly int Index;
-		public readonly TemplateSegment[] Segments;
-		public readonly HashSet<string> ReferencedColumns;
+    private readonly struct ColumnProcessor
+    {
+        public readonly int Index;
+        public readonly TemplateSegment[] Segments;
+        public readonly HashSet<string> ReferencedColumns;
 
-		public readonly int[] ReferencedIndices;
+        public readonly int[] ReferencedIndices;
 
-		public ColumnProcessor(int index, TemplateSegment[] segments, HashSet<string> referencedColumns, int[] referencedIndices)
-		{
-			Index = index;
-			Segments = segments;
-			ReferencedColumns = referencedColumns;
-			ReferencedIndices = referencedIndices;
-		}
-	}
+        public ColumnProcessor(int index, TemplateSegment[] segments, HashSet<string> referencedColumns, int[] referencedIndices)
+        {
+            Index = index;
+            Segments = segments;
+            ReferencedColumns = referencedColumns;
+            ReferencedIndices = referencedIndices;
+        }
+    }
 }

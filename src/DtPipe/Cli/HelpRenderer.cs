@@ -30,45 +30,45 @@ public static class HelpRenderer
         console.WriteLine("  Run 'dtpipe providers' to list all supported prefixes.");
         console.WriteLine();
 
-         // Subcommands (derived from the command registry — single source of truth)
-         console.WriteLine("SUBCOMMANDS:");
-         foreach (var cmd in sp.GetRequiredService<JobService>().Subcommands)
-          {
-             var padded = cmd.Name?.PadRight(16) ?? "";
-             console.WriteLine($"  {padded}{cmd.Description ?? ""}");
-          }
-         console.WriteLine();
+        // Subcommands (derived from the command registry — single source of truth)
+        console.WriteLine("SUBCOMMANDS:");
+        foreach (var cmd in sp.GetRequiredService<JobService>().Subcommands)
+        {
+            var padded = cmd.Name?.PadRight(16) ?? "";
+            console.WriteLine($"  {padded}{cmd.Description ?? ""}");
+        }
+        console.WriteLine();
 
         // Structural / global flags from CoreFlagRegistry
         console.WriteLine("GLOBAL OPTIONS:");
-        WriteFlag(console, "--input, -i <source>",    "Input source (prefixed ADO.NET, file path, or '-' for stdin)");
-        WriteFlag(console, "--output, -o <target>",   "Output target (prefixed ADO.NET, file path, or '-' for stdout)");
-        WriteFlag(console, "--from <alias>",          "Read from upstream branch alias (fan-out/tee)");
-        WriteFlag(console, "--alias <name>",          "Alias for the current DAG branch");
-        WriteFlag(console, "--ref <alias>",           "Secondary source alias for SQL JOINs (preloaded)");
-        WriteFlag(console, "--job, -j <file>",        "YAML job file path");
-        WriteFlag(console, "--dry-run [N]",           "Run over N source rows with the writer neutralised (default: 1)");
-        WriteFlag(console, "--no-stats",              "Disable progress bars and statistics");
-        WriteFlag(console, "--log <path>",            "Log file path");
-        WriteFlag(console, "--export-job <file>",     "Export current CLI as YAML job file");
-        WriteFlag(console, "--metrics-path <path>",   "Path to save JSON metrics");
-        WriteFlag(console, "--cursor <column>",       "Cursor column for incremental loading (writer-side)");
-        WriteFlag(console, "--state <path>",          "State file path for cursor persistence (writer-side)");
-        WriteFlag(console, "--cursor-from <value>",   "Override starting cursor value for this run");
-        WriteFlag(console, "--session <name>",        "Session that materialised artefacts belong to");
-        WriteFlag(console, "--checkpoint [<name>]",   "Materialise this branch's output in the session store");
+        WriteFlag(console, "--input, -i <source>", "Input source (prefixed ADO.NET, file path, or '-' for stdin)");
+        WriteFlag(console, "--output, -o <target>", "Output target (prefixed ADO.NET, file path, or '-' for stdout)");
+        WriteFlag(console, "--from <alias>", "Read from upstream branch alias (fan-out/tee)");
+        WriteFlag(console, "--alias <name>", "Alias for the current DAG branch");
+        WriteFlag(console, "--ref <alias>", "Secondary source alias for SQL JOINs (preloaded)");
+        WriteFlag(console, "--job, -j <file>", "YAML job file path");
+        WriteFlag(console, "--dry-run [N]", "Run over N source rows with the writer neutralised (default: 1)");
+        WriteFlag(console, "--no-stats", "Disable progress bars and statistics");
+        WriteFlag(console, "--log <path>", "Log file path");
+        WriteFlag(console, "--export-job <file>", "Export current CLI as YAML job file");
+        WriteFlag(console, "--metrics-path <path>", "Path to save JSON metrics");
+        WriteFlag(console, "--cursor <column>", "Cursor column for incremental loading (writer-side)");
+        WriteFlag(console, "--state <path>", "State file path for cursor persistence (writer-side)");
+        WriteFlag(console, "--cursor-from <value>", "Override starting cursor value for this run");
+        WriteFlag(console, "--session <name>", "Session that materialised artefacts belong to");
+        WriteFlag(console, "--checkpoint [<name>]", "Materialise this branch's output in the session store");
         WriteFlag(console, "--from-checkpoint <key>", "Resume this branch from a stored checkpoint");
-        WriteFlag(console, "--contract-save <path>",  "Write the schema this branch produces to a contract file");
-        WriteFlag(console, "--from-contract <path>",  "Take this branch's source schema from a contract, with no rows");
-        WriteFlag(console, "--strict-bindings",       "Fail on an undeclared flag that consumes no value, or an unknown job-file option key");
-        WriteFlag(console, "--version",                "Print version and exit");
+        WriteFlag(console, "--contract-save <path>", "Write the schema this branch produces to a contract file");
+        WriteFlag(console, "--from-contract <path>", "Take this branch's source schema from a contract, with no rows");
+        WriteFlag(console, "--strict-bindings", "Fail on an undeclared flag that consumes no value, or an unknown job-file option key");
+        WriteFlag(console, "--version", "Print version and exit");
         console.WriteLine();
 
         // Component-contributed flags, grouped by category
-        var readers      = sp.GetRequiredService<IEnumerable<IStreamReaderFactory>>().OfType<ICliContributor>().ToList();
-        var writers      = sp.GetRequiredService<IEnumerable<IDataWriterFactory>>().OfType<ICliContributor>().ToList();
+        var readers = sp.GetRequiredService<IEnumerable<IStreamReaderFactory>>().OfType<ICliContributor>().ToList();
+        var writers = sp.GetRequiredService<IEnumerable<IDataWriterFactory>>().OfType<ICliContributor>().ToList();
         var transformers = sp.GetRequiredService<IEnumerable<IDataTransformerFactory>>().OfType<ICliContributor>().ToList();
-        var processors   = sp.GetRequiredService<IEnumerable<IStreamTransformerFactory>>().ToList();
+        var processors = sp.GetRequiredService<IEnumerable<IStreamTransformerFactory>>().ToList();
 
         // Pipeline engine controls
         var pipelineContributor = new PipelineOptionsCliContributor();
@@ -121,10 +121,10 @@ public static class HelpRenderer
                 var aliases = flag.Aliases.Length > 0 ? $", {string.Join(", ", flag.Aliases)}" : "";
                 var arity = flag.Arity switch
                 {
-                    FlagArity.Boolean    => "",
-                    FlagArity.Scalar     => flag.BooleanValued ? " <true|false>" : " <value>",
+                    FlagArity.Boolean => "",
+                    FlagArity.Scalar => flag.BooleanValued ? " <true|false>" : " <value>",
                     FlagArity.Repeatable => " <value...>",
-                    _                    => ""
+                    _ => ""
                 };
                 var desc = flag.Description ?? "";
                 WriteFlag(console, $"  {flag.Name}{aliases}{arity}", desc);

@@ -24,8 +24,8 @@ public sealed class AdoToArrowConfigBuilder
     private readonly Dictionary<string, Apache.Arrow.Serialization.Mapping.ArrowTypeResult> _dataTypeNameOverrides =
         new(StringComparer.OrdinalIgnoreCase)
         {
-            ["timestamptz"]                    = TimestampUtc,  // PostgreSQL shorthand
-            ["timestamp with time zone"]       = TimestampUtc,  // standard SQL / PostgreSQL longhand
+            ["timestamptz"] = TimestampUtc,  // PostgreSQL shorthand
+            ["timestamp with time zone"] = TimestampUtc,  // standard SQL / PostgreSQL longhand
             ["timestamp with local time zone"] = TimestampUtc,  // Oracle
         };
 

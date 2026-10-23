@@ -26,7 +26,7 @@ public partial class DtPipeMcpTools
     [McpServerTool(Name = "inspect")]
     [System.ComponentModel.Description("Inspect the schema of a data source. For database sources (e.g. 'sqlite:file.db', 'pg:Host=...'), if no query/table is passed, it automatically discovers and lists available tables and views in the database.")]
     public async Task<string> Inspect(
-        [System.ComponentModel.Description("Connection string or file path with provider prefix")] string input, 
+        [System.ComponentModel.Description("Connection string or file path with provider prefix")] string input,
         [System.ComponentModel.Description("Optional SQL query for database sources")] string? query = null,
         CancellationToken ct = default)
     {
@@ -92,7 +92,8 @@ public partial class DtPipeMcpTools
             }
 
             return JsonSerializer.Serialize(
-                reader.Columns.Select(c => new {
+                reader.Columns.Select(c => new
+                {
                     c.Name, Type = c.ClrType?.Name ?? "unknown",
                     c.IsNullable
                 }),

@@ -115,7 +115,7 @@ internal class DynamicStructTypeAccessor : ArrowSerializer.StructTypeAccessorBas
     }
 
     public override IArrowArray Build(IArrowArrayBuilder builder) => ((ArrowSerializer.StructArrayManualBuilder)builder).Build();
-    
+
     public override void CollectCapacity(object? value, ArrowSerializer.CapacityInfo info)
     {
         if (value == null) return;
@@ -126,7 +126,7 @@ internal class DynamicStructTypeAccessor : ArrowSerializer.StructTypeAccessorBas
             if (value is System.Text.Json.Nodes.JsonObject jo) dict = new JsonObjectWrapper(jo);
             else if (value is IDictionary<string, object?> gd) dict = new DictionaryWrapper(gd);
         }
-        
+
         if (dict == null) return;
         foreach (DictionaryEntry entry in dict)
         {

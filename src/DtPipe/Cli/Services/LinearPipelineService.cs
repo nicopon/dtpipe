@@ -212,24 +212,24 @@ public class LinearPipelineService
         // their factory OptionsType to PipelineOptions, so an early Get would miss and warn.
         var pipelineOptions = new PipelineOptions
         {
-            MetricsPath  = job.MetricsPath,
-            Limit        = job.Limit,
+            MetricsPath = job.MetricsPath,
+            Limit = job.Limit,
             SamplingRate = job.SamplingRate,
             SamplingSeed = job.SamplingSeed,
-            BatchSize    = job.BatchSize,
+            BatchSize = job.BatchSize,
             MaxBatchBytes = job.MaxBatchBytes,
-            DryRunCount  = job.DryRunCount,
-            NoStats      = job.NoStats,
+            DryRunCount = job.DryRunCount,
+            NoStats = job.NoStats,
             DryRunInteractiveBranch = dryRunInteractiveBranch,
-            Cursor       = job.Cursor,
-            State        = job.State,
-            Checkpoint   = job.Checkpoint,
+            Cursor = job.Cursor,
+            State = job.State,
+            Checkpoint = job.Checkpoint,
             FromCheckpoint = job.FromCheckpoint,
             DefinitionFingerprint = ctx?.DefinitionFingerprint
                 ?? BranchFingerprint.Of(job, context, System.Array.Empty<(string, string)>(), namesInputs: false),
             ContractSave = job.ContractSave,
             FromContract = job.FromContract,
-            Session      = job.Session
+            Session = job.Session
         };
         _optionsRegistry.Register(pipelineOptions);
 

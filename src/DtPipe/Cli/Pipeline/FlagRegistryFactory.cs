@@ -22,12 +22,12 @@ public static class FlagRegistryFactory
         RegisterWithStage(registry, new PipelineOptionsCliContributor(), FlagStage.All);
 
         // 3. Component-contributed flags — readers, writers, transformers
-        var readers      = sp.GetRequiredService<IEnumerable<IStreamReaderFactory>>().OfType<ICliContributor>();
-        var writers      = sp.GetRequiredService<IEnumerable<IDataWriterFactory>>().OfType<ICliContributor>();
+        var readers = sp.GetRequiredService<IEnumerable<IStreamReaderFactory>>().OfType<ICliContributor>();
+        var writers = sp.GetRequiredService<IEnumerable<IDataWriterFactory>>().OfType<ICliContributor>();
         var transformers = sp.GetRequiredService<IEnumerable<IDataTransformerFactory>>().OfType<ICliContributor>();
 
-        foreach (var c in readers)      RegisterWithStage(registry, c, FlagStage.Reader, ((IDataFactory)c).ComponentName);
-        foreach (var c in writers)      RegisterWithStage(registry, c, FlagStage.Writer, ((IDataFactory)c).ComponentName);
+        foreach (var c in readers) RegisterWithStage(registry, c, FlagStage.Reader, ((IDataFactory)c).ComponentName);
+        foreach (var c in writers) RegisterWithStage(registry, c, FlagStage.Writer, ((IDataFactory)c).ComponentName);
         foreach (var c in transformers) RegisterWithStage(registry, c, FlagStage.Pipeline, ((IDataTransformerFactory)c).ComponentName);
 
         // 4. Stream processor trigger flags (--sql, --merge, etc.)

@@ -132,7 +132,7 @@ public sealed partial class StudioServer
             ["real"] = state.Real && state.Levels.Count > 0,
             ["watch"] = new JsonArray(state.Watch.Select(w => (JsonNode)new JsonObject { ["branch"] = w.Branch, ["at"] = AtName(w.At), ["card"] = w.Card }).ToArray()),
             ["levels"] = new JsonArray(state.Levels.Select(l => (JsonNode)new JsonObject
-                { ["branch"] = l.Branch, ["level"] = l.Level, ["digest"] = l.Digest, ["key"] = l.Key, ["rows"] = l.Rows }).ToArray()),
+            { ["branch"] = l.Branch, ["level"] = l.Level, ["digest"] = l.Digest, ["key"] = l.Key, ["rows"] = l.Rows }).ToArray()),
         });
     }
 
@@ -210,36 +210,36 @@ public sealed partial class StudioServer
     /// </summary>
     private object DebugView(
         DebugPlan plan, DebugState state, IReadOnlyList<DebugPiece>? pieces, DebugCut? cut = null, IReadOnlySet<string>? ran = null, DebugPlan? suspended = null) => new
-    {
-        real = state.Real,
-        branches = plan.Branches.Select(b => new { branch = b.Branch, transformers = b.Transformers, cuttable = b.Cuttable, writes = b.Writes }),
-        // Where a suspended run waits: every branch that writes, with the rows it holds before its writer when it holds them.
-        queue = !state.Real ? new List<object>() : (suspended ?? plan).Branches.Where(b => b.Writes).Select(b =>
         {
-            var held = state.Levels.FirstOrDefault(h => Same(h.Branch, b.Branch) && h.Level == b.Transformers);
-            return (object)new { branch = b.Branch, key = held?.Key, rows = held?.Rows };
-        }).ToList(),
-        places = plan.Branches.SelectMany(b => new[] { DebugAt.Read, DebugAt.End }.Select(at => new
-        {
-            branch = b.Branch,
-            at = AtName(at),
-            digest = plan.DigestAt(b.Branch, at),
-            alias = cut is null || ran is null ? null : Locate(cut, ran, b, at),
-        })),
-        watch = state.Watch.Select(w =>
-        {
-            var level = plan.Resolve(w);
-            return new
+            real = state.Real,
+            branches = plan.Branches.Select(b => new { branch = b.Branch, transformers = b.Transformers, cuttable = b.Cuttable, writes = b.Writes }),
+            // Where a suspended run waits: every branch that writes, with the rows it holds before its writer when it holds them.
+            queue = !state.Real ? new List<object>() : (suspended ?? plan).Branches.Where(b => b.Writes).Select(b =>
             {
-                branch = w.Branch,
-                at = AtName(w.At),
-                card = w.Card,
-                level,
-                key = level is null ? null : state.Levels.FirstOrDefault(h => Same(h.Branch, w.Branch) && h.Level == level)?.Key,
-                alias = level is null ? null : pieces?.FirstOrDefault(p => Same(p.Branch, w.Branch) && p.Level == level)?.Alias,
-            };
-        }),
-    };
+                var held = state.Levels.FirstOrDefault(h => Same(h.Branch, b.Branch) && h.Level == b.Transformers);
+                return (object)new { branch = b.Branch, key = held?.Key, rows = held?.Rows };
+            }).ToList(),
+            places = plan.Branches.SelectMany(b => new[] { DebugAt.Read, DebugAt.End }.Select(at => new
+            {
+                branch = b.Branch,
+                at = AtName(at),
+                digest = plan.DigestAt(b.Branch, at),
+                alias = cut is null || ran is null ? null : Locate(cut, ran, b, at),
+            })),
+            watch = state.Watch.Select(w =>
+            {
+                var level = plan.Resolve(w);
+                return new
+                {
+                    branch = w.Branch,
+                    at = AtName(w.At),
+                    card = w.Card,
+                    level,
+                    key = level is null ? null : state.Levels.FirstOrDefault(h => Same(h.Branch, w.Branch) && h.Level == level)?.Key,
+                    alias = level is null ? null : pieces?.FirstOrDefault(p => Same(p.Branch, w.Branch) && p.Level == level)?.Alias,
+                };
+            }),
+        };
 
     /// <summary>
     /// The piece of the cut whose report holds a branch's read or end, or null when the run did not produce it. A read

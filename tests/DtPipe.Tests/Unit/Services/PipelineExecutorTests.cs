@@ -247,13 +247,13 @@ public class PipelineExecutorTests
         using var linkedCts = new CancellationTokenSource();
 
         await _executor.ExecuteSegmentedPipelineAsync(
-            mockReader.Object, 
-            (IDataWriter)mockWriter.Object, 
-            segments, 
-            columns, 
-            options, 
-            mockProgress.Object, 
-            linkedCts, 
+            mockReader.Object,
+            (IDataWriter)mockWriter.Object,
+            segments,
+            columns,
+            options,
+            mockProgress.Object,
+            linkedCts,
             default);
 
         Assert.NotNull(writtenBatch);

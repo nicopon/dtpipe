@@ -59,9 +59,9 @@ public record BranchSpec
     // ReaderArgs   : flags from start up to first Pipeline-stage trigger or -o
     // PipelineArgs : flags from first Pipeline-stage trigger to -o (transformer scope)
     // WriterArgs   : flags from -o to end
-    public string[] ReaderArgs   { get; init; } = System.Array.Empty<string>();
+    public string[] ReaderArgs { get; init; } = System.Array.Empty<string>();
     public string[] PipelineArgs { get; init; } = System.Array.Empty<string>();
-    public string[] WriterArgs   { get; init; } = System.Array.Empty<string>();
+    public string[] WriterArgs { get; init; } = System.Array.Empty<string>();
 
     // Full flat args (union of the three above — kept for components that iterate all tokens)
     public string[] RawArgs { get; init; } = System.Array.Empty<string>();

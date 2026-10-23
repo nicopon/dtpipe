@@ -341,37 +341,37 @@ public class ParquetReaderCellBenchmarks
         switch (data)
         {
             case Guid?[] guids:
-            {
-                var width = ((FixedSizeBinaryType)ArrowTypeMapper.GetLogicalType(typeof(Guid)).ArrowType).ByteWidth;
-                var builder = new FixedSizeBinaryArrayBuilder(width);
-                foreach (var value in guids)
                 {
-                    if (value.HasValue) builder.Append(ArrowTypeMapper.ToArrowUuidBytes(value.Value));
-                    else builder.AppendNull();
+                    var width = ((FixedSizeBinaryType)ArrowTypeMapper.GetLogicalType(typeof(Guid)).ArrowType).ByteWidth;
+                    var builder = new FixedSizeBinaryArrayBuilder(width);
+                    foreach (var value in guids)
+                    {
+                        if (value.HasValue) builder.Append(ArrowTypeMapper.ToArrowUuidBytes(value.Value));
+                        else builder.AppendNull();
+                    }
+                    return builder.Build();
                 }
-                return builder.Build();
-            }
             case decimal?[] amounts:
-            {
-                var type = (Decimal128Type)ArrowTypeMapper.GetLogicalType(typeof(decimal)).ArrowType;
-                var builder = new Decimal128Array.Builder(type);
-                foreach (var value in amounts)
                 {
-                    if (value.HasValue) builder.Append(value.Value);
-                    else builder.AppendNull();
+                    var type = (Decimal128Type)ArrowTypeMapper.GetLogicalType(typeof(decimal)).ArrowType;
+                    var builder = new Decimal128Array.Builder(type);
+                    foreach (var value in amounts)
+                    {
+                        if (value.HasValue) builder.Append(value.Value);
+                        else builder.AppendNull();
+                    }
+                    return builder.Build();
                 }
-                return builder.Build();
-            }
             case string?[] texts:
-            {
-                var builder = new StringArray.Builder();
-                foreach (var value in texts)
                 {
-                    if (value is null) builder.AppendNull();
-                    else builder.Append(value);
+                    var builder = new StringArray.Builder();
+                    foreach (var value in texts)
+                    {
+                        if (value is null) builder.AppendNull();
+                        else builder.Append(value);
+                    }
+                    return builder.Build();
                 }
-                return builder.Build();
-            }
             default:
                 throw new NotSupportedException($"No typed builder for {data.GetType().Name}.");
         }

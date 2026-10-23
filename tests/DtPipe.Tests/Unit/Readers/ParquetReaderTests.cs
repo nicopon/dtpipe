@@ -11,124 +11,124 @@ namespace DtPipe.Tests.Unit.Readers;
 
 public class ParquetReaderTests : IAsyncLifetime
 {
-	private string _testParquetPath = null!;
+    private string _testParquetPath = null!;
 
-	public async ValueTask InitializeAsync()
-	{
-		_testParquetPath = Path.Combine(Path.GetTempPath(), $"test_{Guid.NewGuid()}.parquet");
+    public async ValueTask InitializeAsync()
+    {
+        _testParquetPath = Path.Combine(Path.GetTempPath(), $"test_{Guid.NewGuid()}.parquet");
 
-		// Create test Parquet file
-		var schema = new ParquetSchema(
-			new DataField<int>("Id"),
-			new DataField<string>("Name"),
-			new DataField<double>("Score")
-		);
+        // Create test Parquet file
+        var schema = new ParquetSchema(
+            new DataField<int>("Id"),
+            new DataField<string>("Name"),
+            new DataField<double>("Score")
+        );
 
-		var idColumn = new int[] { 1, 2, 3 };
-		var nameColumn = new string[] { "Alice", "Bob", "Charlie" };
-		var scoreColumn = new double[] { 95.5, 87.3, 92.0 };
+        var idColumn = new int[] { 1, 2, 3 };
+        var nameColumn = new string[] { "Alice", "Bob", "Charlie" };
+        var scoreColumn = new double[] { 95.5, 87.3, 92.0 };
 
-		await using var stream = File.OpenWrite(_testParquetPath);
-		await using var writer = await ParquetWriter.CreateAsync(schema, stream);
-		using var rowGroup = writer.CreateRowGroup();
-		await rowGroup.WriteAsync<int>(schema.DataFields[0], idColumn);
-		await rowGroup.WriteAsync(schema.DataFields[1], (IReadOnlyCollection<string>)nameColumn);
-		await rowGroup.WriteAsync<double>(schema.DataFields[2], scoreColumn);
-	}
+        await using var stream = File.OpenWrite(_testParquetPath);
+        await using var writer = await ParquetWriter.CreateAsync(schema, stream);
+        using var rowGroup = writer.CreateRowGroup();
+        await rowGroup.WriteAsync<int>(schema.DataFields[0], idColumn);
+        await rowGroup.WriteAsync(schema.DataFields[1], (IReadOnlyCollection<string>)nameColumn);
+        await rowGroup.WriteAsync<double>(schema.DataFields[2], scoreColumn);
+    }
 
-	public ValueTask DisposeAsync()
-	{
-		if (File.Exists(_testParquetPath)) File.Delete(_testParquetPath);
-		return ValueTask.CompletedTask;
-	}
+    public ValueTask DisposeAsync()
+    {
+        if (File.Exists(_testParquetPath)) File.Delete(_testParquetPath);
+        return ValueTask.CompletedTask;
+    }
 
-	[Fact]
-	public async Task ParquetReader_ShouldReadSchema()
-	{
-		// Arrange
-		var reader = new ParquetStreamReader(_testParquetPath);
+    [Fact]
+    public async Task ParquetReader_ShouldReadSchema()
+    {
+        // Arrange
+        var reader = new ParquetStreamReader(_testParquetPath);
 
-		// Act
-		await reader.OpenAsync();
-		var columns = reader.Columns;
-		await reader.DisposeAsync();
+        // Act
+        await reader.OpenAsync();
+        var columns = reader.Columns;
+        await reader.DisposeAsync();
 
-		// Assert
-		columns.Should().HaveCount(3);
-		columns![0].Name.Should().Be("Id");
-		columns[0].ClrType.Should().Be(typeof(int));
-		columns[1].Name.Should().Be("Name");
-		columns[1].ClrType.Should().Be(typeof(string));
-		columns[2].Name.Should().Be("Score");
-		columns[2].ClrType.Should().Be(typeof(double));
-	}
+        // Assert
+        columns.Should().HaveCount(3);
+        columns![0].Name.Should().Be("Id");
+        columns[0].ClrType.Should().Be(typeof(int));
+        columns[1].Name.Should().Be("Name");
+        columns[1].ClrType.Should().Be(typeof(string));
+        columns[2].Name.Should().Be("Score");
+        columns[2].ClrType.Should().Be(typeof(double));
+    }
 
-	[Fact]
-	public async Task ParquetReader_ShouldReadData()
-	{
-		// Arrange
-		var reader = new ParquetStreamReader(_testParquetPath);
+    [Fact]
+    public async Task ParquetReader_ShouldReadData()
+    {
+        // Arrange
+        var reader = new ParquetStreamReader(_testParquetPath);
 
-		// Act
-		await reader.OpenAsync();
-		var rows = new List<object?[]>();
-		await foreach (var batch in reader.ReadBatchesAsync(100))
-		{
-			foreach (var row in batch.ToArray())
-			{
-				rows.Add(row);
-			}
-		}
-		await reader.DisposeAsync();
+        // Act
+        await reader.OpenAsync();
+        var rows = new List<object?[]>();
+        await foreach (var batch in reader.ReadBatchesAsync(100))
+        {
+            foreach (var row in batch.ToArray())
+            {
+                rows.Add(row);
+            }
+        }
+        await reader.DisposeAsync();
 
-		// Assert
-		rows.Should().HaveCount(3);
-		rows[0][0].Should().Be(1);
-		rows[0][1].Should().Be("Alice");
-		rows[0][2].Should().Be(95.5);
-		rows[1][1].Should().Be("Bob");
-		rows[2][1].Should().Be("Charlie");
-	}
+        // Assert
+        rows.Should().HaveCount(3);
+        rows[0][0].Should().Be(1);
+        rows[0][1].Should().Be("Alice");
+        rows[0][2].Should().Be(95.5);
+        rows[1][1].Should().Be("Bob");
+        rows[2][1].Should().Be("Charlie");
+    }
 
-	[Fact]
-	public async Task ParquetReader_ShouldReadRecordBatches()
-	{
-		// Arrange
-		var reader = new ParquetStreamReader(_testParquetPath);
+    [Fact]
+    public async Task ParquetReader_ShouldReadRecordBatches()
+    {
+        // Arrange
+        var reader = new ParquetStreamReader(_testParquetPath);
 
-		// Act
-		await reader.OpenAsync();
-		var batches = new List<Apache.Arrow.RecordBatch>();
-		await foreach (var batch in reader.ReadRecordBatchesAsync())
-		{
-			batches.Add(batch);
-		}
-		await reader.DisposeAsync();
+        // Act
+        await reader.OpenAsync();
+        var batches = new List<Apache.Arrow.RecordBatch>();
+        await foreach (var batch in reader.ReadRecordBatchesAsync())
+        {
+            batches.Add(batch);
+        }
+        await reader.DisposeAsync();
 
-		// Assert
-		batches.Should().HaveCount(1); // One row group
-		var firstBatch = batches[0];
-		firstBatch.Length.Should().Be(3);
-		firstBatch.ColumnCount.Should().Be(3);
+        // Assert
+        batches.Should().HaveCount(1); // One row group
+        var firstBatch = batches[0];
+        firstBatch.Length.Should().Be(3);
+        firstBatch.ColumnCount.Should().Be(3);
 
-		var idCol = firstBatch.Column(0) as Apache.Arrow.Int32Array;
-		idCol!.GetValue(0).Should().Be(1);
-		idCol.GetValue(1).Should().Be(2);
+        var idCol = firstBatch.Column(0) as Apache.Arrow.Int32Array;
+        idCol!.GetValue(0).Should().Be(1);
+        idCol.GetValue(1).Should().Be(2);
 
-		var nameCol = firstBatch.Column(1) as Apache.Arrow.StringArray;
-		nameCol!.GetString(0).Should().Be("Alice");
-	}
+        var nameCol = firstBatch.Column(1) as Apache.Arrow.StringArray;
+        nameCol!.GetString(0).Should().Be("Alice");
+    }
 
-	[Fact]
-	public void ParquetReaderFactory_ShouldDetectParquetFiles()
-	{
-		var registry = new OptionsRegistry();
-		var factory = new CliStreamReaderFactory(new ParquetReaderDescriptor(), registry, null!);
+    [Fact]
+    public void ParquetReaderFactory_ShouldDetectParquetFiles()
+    {
+        var registry = new OptionsRegistry();
+        var factory = new CliStreamReaderFactory(new ParquetReaderDescriptor(), registry, null!);
 
-		factory.CanHandle("parquet:data.parquet").Should().BeTrue();
-		factory.CanHandle("data.parquet").Should().BeTrue();
-		factory.CanHandle("path/to/file.PARQUET").Should().BeTrue();
-		factory.CanHandle("data.csv").Should().BeFalse();
-		factory.CanHandle("sqlite:test.db").Should().BeFalse();
-	}
+        factory.CanHandle("parquet:data.parquet").Should().BeTrue();
+        factory.CanHandle("data.parquet").Should().BeTrue();
+        factory.CanHandle("path/to/file.PARQUET").Should().BeTrue();
+        factory.CanHandle("data.csv").Should().BeFalse();
+        factory.CanHandle("sqlite:test.db").Should().BeFalse();
+    }
 }

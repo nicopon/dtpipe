@@ -74,6 +74,6 @@ internal class StructArrayManualBuilder : IArrowArrayBuilder
         return new StructArray(_type, length, children, validBuilder.Build(), _nullCount);
     }
 
-    public void Clear() { _validity.Clear(); _nullCount = 0; foreach(var b in _builders) { /* Clear not in interface, skip */ } }
+    public void Clear() { _validity.Clear(); _nullCount = 0; foreach (var b in _builders) { /* Clear not in interface, skip */ } }
     public int Length => _validity.Count;
 }

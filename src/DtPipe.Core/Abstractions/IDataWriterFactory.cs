@@ -6,13 +6,13 @@ namespace DtPipe.Core.Abstractions;
 /// </summary>
 public interface IDataWriterFactory : IDataFactory
 {
-	/// <summary>
-	/// Creates a writer for the given options registry.
-	/// </summary>
-	IDataWriter Create(OptionsRegistry registry);
+    /// <summary>
+    /// Creates a writer for the given options registry.
+    /// </summary>
+    IDataWriter Create(OptionsRegistry registry);
 
-	/// <summary>
-	/// Gets the option types supported by this writer.
-	/// </summary>
-	IEnumerable<Type> GetSupportedOptionTypes();
+    /// <summary>
+    /// Gets the option types supported by this writer.
+    /// </summary>
+    IEnumerable<Type> GetSupportedOptionTypes();
 }

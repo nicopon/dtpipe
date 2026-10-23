@@ -30,9 +30,9 @@ public sealed class OracleDataWriter : BaseSqlDataWriter
 
     public override ISqlDialect Dialect => new DtPipe.Core.Dialects.OracleDialect();
 
-	public override bool RequiresTargetInspection => _options.Strategy != OracleWriteStrategy.Recreate;
+    public override bool RequiresTargetInspection => _options.Strategy != OracleWriteStrategy.Recreate;
 
-	protected override ITypeMapper GetTypeMapper() => _typeMapper;
+    protected override ITypeMapper GetTypeMapper() => _typeMapper;
 
     public OracleDataWriter(string connectionString, OracleWriterOptions options, ILogger<OracleDataWriter> logger, ITypeMapper typeMapper)
         : base(connectionString)
@@ -40,7 +40,7 @@ public sealed class OracleDataWriter : BaseSqlDataWriter
         _options = options;
         _logger = logger;
         _typeMapper = typeMapper;
-        if(_logger.IsEnabled(LogLevel.Debug)) _logger.LogDebug("OracleDataWriter created");
+        if (_logger.IsEnabled(LogLevel.Debug)) _logger.LogDebug("OracleDataWriter created");
     }
 
     #region BaseSqlDataWriter Implementation
@@ -165,7 +165,7 @@ public sealed class OracleDataWriter : BaseSqlDataWriter
         }
     }
 
-	protected override string GetTruncateTableSql(string tableName)
+    protected override string GetTruncateTableSql(string tableName)
         => $"TRUNCATE TABLE {tableName}";
 
     protected override string GetDropTableSql(string tableName)
@@ -179,12 +179,12 @@ public sealed class OracleDataWriter : BaseSqlDataWriter
 
         if (_options.Strategy == OracleWriteStrategy.Upsert || _options.Strategy == OracleWriteStrategy.Ignore)
         {
-             if (_mergeCommand == null || _mergeParameters == null) throw new InvalidOperationException("Merge command not initialized");
+            if (_mergeCommand == null || _mergeParameters == null) throw new InvalidOperationException("Merge command not initialized");
 
-             if(_logger.IsEnabled(LogLevel.Debug))
-                 _logger.LogDebug("Executing Merge for batch of {Count} rows", rows.Count);
-             await BindAndExecuteAsync(_mergeCommand, _mergeParameters, rows, ct);
-             return;
+            if (_logger.IsEnabled(LogLevel.Debug))
+                _logger.LogDebug("Executing Merge for batch of {Count} rows", rows.Count);
+            await BindAndExecuteAsync(_mergeCommand, _mergeParameters, rows, ct);
+            return;
         }
 
         var effectiveMode = _options.InsertMode ?? OracleInsertMode.Standard;
@@ -193,7 +193,7 @@ public sealed class OracleDataWriter : BaseSqlDataWriter
         {
             // Standard/Append INSERT using Array Binding
             if (_insertCommand == null || _insertParameters == null)
-                 throw new InvalidOperationException("Insert command not initialized");
+                throw new InvalidOperationException("Insert command not initialized");
 
             int rowCount = rows.Count;
             _insertCommand.ArrayBindCount = rowCount;
@@ -202,7 +202,7 @@ public sealed class OracleDataWriter : BaseSqlDataWriter
             try
             {
                 await _insertCommand.ExecuteNonQueryAsync(ct);
-                if(_logger.IsEnabled(LogLevel.Debug))
+                if (_logger.IsEnabled(LogLevel.Debug))
                     _logger.LogDebug("Inserted {Count} rows via Array Binding ({Mode})...", rowCount, effectiveMode);
             }
             catch (Exception ex)
@@ -223,7 +223,7 @@ public sealed class OracleDataWriter : BaseSqlDataWriter
             if (_bulkCopy == null) throw new InvalidOperationException("BulkCopy not initialized");
 
             _bulkCopy.BatchSize = rows.Count;
-            if(_logger.IsEnabled(LogLevel.Debug))
+            if (_logger.IsEnabled(LogLevel.Debug))
                 _logger.LogDebug("Starting BulkCopy for batch of {Count} rows into {Table}", rows.Count, _quotedTargetTableName);
             var watch = System.Diagnostics.Stopwatch.StartNew();
 
@@ -235,7 +235,7 @@ public sealed class OracleDataWriter : BaseSqlDataWriter
             }
             catch (Exception ex)
             {
-                if(_logger.IsEnabled(LogLevel.Warning))
+                if (_logger.IsEnabled(LogLevel.Warning))
                     _logger.LogWarning(ex, "OracleBulkCopy failed. Starting in-depth analysis of the batch...");
                 var analysis = await BatchFailureAnalyzer.AnalyzeAsync(this, rows, _columns, ct);
                 if (!string.IsNullOrEmpty(analysis))
@@ -245,7 +245,7 @@ public sealed class OracleDataWriter : BaseSqlDataWriter
                 throw; // Rethrow original if we couldn't find the specific culprit
             }
             watch.Stop();
-            if(_logger.IsEnabled(LogLevel.Debug))
+            if (_logger.IsEnabled(LogLevel.Debug))
                 _logger.LogDebug("BulkCopy finished in {ElapsedMs}ms", watch.ElapsedMilliseconds);
         }
     }
@@ -346,41 +346,41 @@ public sealed class OracleDataWriter : BaseSqlDataWriter
 
         if (_options.Strategy == OracleWriteStrategy.Upsert || _options.Strategy == OracleWriteStrategy.Ignore)
         {
-             bool isUpsert = _options.Strategy == OracleWriteStrategy.Upsert;
-             var (mergeSql, types) = OracleSqlBuilder.BuildMergeSql(
-                 _quotedTargetTableName,
-                 _columns!,
-                 _keyColumns,
-                 Dialect,
-                 isUpsert,
-                 _options.DateTimeMapping);
+            bool isUpsert = _options.Strategy == OracleWriteStrategy.Upsert;
+            var (mergeSql, types) = OracleSqlBuilder.BuildMergeSql(
+                _quotedTargetTableName,
+                _columns!,
+                _keyColumns,
+                Dialect,
+                isUpsert,
+                _options.DateTimeMapping);
 
-             if(_logger.IsEnabled(LogLevel.Debug))
-                 _logger.LogDebug("Generated MERGE SQL: {Sql}", mergeSql);
+            if (_logger.IsEnabled(LogLevel.Debug))
+                _logger.LogDebug("Generated MERGE SQL: {Sql}", mergeSql);
 
-             _mergeCommand = OracleConnection.CreateCommand();
-             _mergeCommand.BindByName = true;
-             _mergeCommand.CommandText = mergeSql;
+            _mergeCommand = OracleConnection.CreateCommand();
+            _mergeCommand.BindByName = true;
+            _mergeCommand.CommandText = mergeSql;
 
-             _mergeParameters = new OracleParameter[_columns!.Count];
-             for(int i=0; i<_columns.Count; i++)
-             {
-                 var p = _mergeCommand.CreateParameter();
-                 p.ParameterName = $"v{i}";
+            _mergeParameters = new OracleParameter[_columns!.Count];
+            for (int i = 0; i < _columns.Count; i++)
+            {
+                var p = _mergeCommand.CreateParameter();
+                p.ParameterName = $"v{i}";
 
-                 // Override type if target is known (e.g. RAW vs BLOB)
-                 if (_targetColumnTypes != null && _targetColumnTypes.TryGetValue(_columns[i].Name, out var targetType))
-                 {
-                     p.OracleDbType = targetType;
-                 }
-                 else
-                 {
-                     p.OracleDbType = types[i];
-                 }
+                // Override type if target is known (e.g. RAW vs BLOB)
+                if (_targetColumnTypes != null && _targetColumnTypes.TryGetValue(_columns[i].Name, out var targetType))
+                {
+                    p.OracleDbType = targetType;
+                }
+                else
+                {
+                    p.OracleDbType = types[i];
+                }
 
-                 _mergeCommand.Parameters.Add(p);
-                 _mergeParameters[i] = p;
-             }
+                _mergeCommand.Parameters.Add(p);
+                _mergeParameters[i] = p;
+            }
         }
         else if (_options.InsertMode == OracleInsertMode.Bulk)
         {
@@ -422,7 +422,7 @@ public sealed class OracleDataWriter : BaseSqlDataWriter
                 useAppendHint,
                 _options.DateTimeMapping);
 
-            if(_logger.IsEnabled(LogLevel.Debug))
+            if (_logger.IsEnabled(LogLevel.Debug))
                 _logger.LogDebug("Generated Insert SQL: {Sql}", insertSql);
 
             _insertCommand = OracleConnection.CreateCommand();

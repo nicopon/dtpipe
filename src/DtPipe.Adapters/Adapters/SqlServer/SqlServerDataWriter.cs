@@ -12,470 +12,470 @@ namespace DtPipe.Adapters.SqlServer;
 
 public class SqlServerDataWriter : BaseSqlDataWriter, IColumnarDataWriter
 {
-	private readonly SqlServerWriterOptions _options;
-	private SqlBulkCopy? _bulkCopy;
-	private DataTable? _bufferTable;
-	private bool _isDbCaseSensitive = false;
-	private readonly ILogger<SqlServerDataWriter> _logger;
+    private readonly SqlServerWriterOptions _options;
+    private SqlBulkCopy? _bulkCopy;
+    private DataTable? _bufferTable;
+    private bool _isDbCaseSensitive = false;
+    private readonly ILogger<SqlServerDataWriter> _logger;
 
-	// Explicit backing field for dialect to implement abstract property
-	private readonly ISqlDialect _dialect = new DtPipe.Core.Dialects.SqlServerDialect();
-	public override ISqlDialect Dialect => _dialect;
+    // Explicit backing field for dialect to implement abstract property
+    private readonly ISqlDialect _dialect = new DtPipe.Core.Dialects.SqlServerDialect();
+    public override ISqlDialect Dialect => _dialect;
 
-	public override bool RequiresTargetInspection => _options.Strategy != SqlServerWriteStrategy.Recreate;
-	private Type[]? _targetTypes;
-	private string[]? _targetColumnNames;
-	private int[]? _sourceIndices;       // pre-computed target-col → source-col index mapping
-	private Func<object?, object?>[]? _converters; // per-column delegates
+    public override bool RequiresTargetInspection => _options.Strategy != SqlServerWriteStrategy.Recreate;
+    private Type[]? _targetTypes;
+    private string[]? _targetColumnNames;
+    private int[]? _sourceIndices;       // pre-computed target-col → source-col index mapping
+    private Func<object?, object?>[]? _converters; // per-column delegates
 
-	protected override ITypeMapper GetTypeMapper() => _typeMapper;
+    protected override ITypeMapper GetTypeMapper() => _typeMapper;
 
-	private readonly ITypeMapper _typeMapper;
+    private readonly ITypeMapper _typeMapper;
 
-	public SqlServerDataWriter(string connectionString, SqlServerWriterOptions options, ILogger<SqlServerDataWriter> logger, ITypeMapper typeMapper) : base(connectionString)
-	{
-		_options = options;
-		_logger = logger;
-		_typeMapper = typeMapper;
-	}
+    public SqlServerDataWriter(string connectionString, SqlServerWriterOptions options, ILogger<SqlServerDataWriter> logger, ITypeMapper typeMapper) : base(connectionString)
+    {
+        _options = options;
+        _logger = logger;
+        _typeMapper = typeMapper;
+    }
 
-	protected override IDbConnection CreateConnection(string connectionString)
-	{
-		return new SqlConnection(connectionString);
-	}
+    protected override IDbConnection CreateConnection(string connectionString)
+    {
+        return new SqlConnection(connectionString);
+    }
 
 
-	protected override async Task<(string Schema, string Table)> ResolveTargetTableAsync(CancellationToken ct)
-	{
-		// 1. Try native resolution using OBJECT_SCHEMA_NAME/OBJECT_NAME
-		var resolved = await ResolveTableNativeAsync(_connection as SqlConnection, _options.Table, ct);
-		if (resolved != null)
-		{
-			return resolved.Value;
-		}
+    protected override async Task<(string Schema, string Table)> ResolveTargetTableAsync(CancellationToken ct)
+    {
+        // 1. Try native resolution using OBJECT_SCHEMA_NAME/OBJECT_NAME
+        var resolved = await ResolveTableNativeAsync(_connection as SqlConnection, _options.Table, ct);
+        if (resolved != null)
+        {
+            return resolved.Value;
+        }
 
-		// 2. Fallback parsing for non-existent tables
-		return ParseTableName(_options.Table);
-	}
+        // 2. Fallback parsing for non-existent tables
+        return ParseTableName(_options.Table);
+    }
 
-	private static async Task<(string Schema, string Table)?> ResolveTableNativeAsync(SqlConnection? connection, string inputName, CancellationToken ct)
-	{
-		if (connection == null) return null;
+    private static async Task<(string Schema, string Table)?> ResolveTableNativeAsync(SqlConnection? connection, string inputName, CancellationToken ct)
+    {
+        if (connection == null) return null;
 
-		var sql = @"
+        var sql = @"
             SELECT
                 OBJECT_SCHEMA_NAME(OBJECT_ID(@input)),
                 OBJECT_NAME(OBJECT_ID(@input))
             WHERE OBJECT_ID(@input) IS NOT NULL";
 
-		using var cmd = new SqlCommand(sql, connection);
-		cmd.CommandTimeout = 600;
-		cmd.Parameters.AddWithValue("@input", inputName);
+        using var cmd = new SqlCommand(sql, connection);
+        cmd.CommandTimeout = 600;
+        cmd.Parameters.AddWithValue("@input", inputName);
 
-		using var reader = await cmd.ExecuteReaderAsync(ct);
-		if (await reader.ReadAsync(ct))
-		{
-			if (!reader.IsDBNull(0) && !reader.IsDBNull(1))
-			{
-				return (reader.GetString(0), reader.GetString(1));
-			}
-		}
-		return null;
-	}
+        using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (await reader.ReadAsync(ct))
+        {
+            if (!reader.IsDBNull(0) && !reader.IsDBNull(1))
+            {
+                return (reader.GetString(0), reader.GetString(1));
+            }
+        }
+        return null;
+    }
 
-	private static (string Schema, string Table) ParseTableName(string tableName)
-	{
-		// Simple fallback parser
-		if (string.IsNullOrWhiteSpace(tableName)) return ("dbo", tableName); // dbo is default
-		var parts = tableName.Split('.');
-		if (parts.Length == 2) return (parts[0].Trim('[', ']'), parts[1].Trim('[', ']'));
-		return ("dbo", tableName.Trim('[', ']'));
-	}
+    private static (string Schema, string Table) ParseTableName(string tableName)
+    {
+        // Simple fallback parser
+        if (string.IsNullOrWhiteSpace(tableName)) return ("dbo", tableName); // dbo is default
+        var parts = tableName.Split('.');
+        if (parts.Length == 2) return (parts[0].Trim('[', ']'), parts[1].Trim('[', ']'));
+        return ("dbo", tableName.Trim('[', ']'));
+    }
 
-	private async Task EnsureBulkCopyInitializedAsync(CancellationToken ct)
-	{
-		if (_bulkCopy != null) return;
+    private async Task EnsureBulkCopyInitializedAsync(CancellationToken ct)
+    {
+        if (_bulkCopy != null) return;
 
-		var targetInfo = await InspectTargetAsync(ct);
-		_bufferTable = new DataTable();
+        var targetInfo = await InspectTargetAsync(ct);
+        _bufferTable = new DataTable();
 
-		bool useTargetCols = targetInfo != null && targetInfo.Columns.Count > 0;
-		int colCount = useTargetCols ? targetInfo!.Columns.Count : _columns!.Count;
+        bool useTargetCols = targetInfo != null && targetInfo.Columns.Count > 0;
+        int colCount = useTargetCols ? targetInfo!.Columns.Count : _columns!.Count;
 
-		_targetTypes = new Type[colCount];
-		_targetColumnNames = new string[colCount];
+        _targetTypes = new Type[colCount];
+        _targetColumnNames = new string[colCount];
 
-		if (useTargetCols)
-		{
-			var targetCols = targetInfo!.Columns;
-			for (int i = 0; i < targetCols.Count; i++)
-			{
-				var targetCol = targetCols[i];
-				_targetColumnNames[i] = targetCol.Name;
-				_targetTypes[i] = targetCol.InferredClrType ?? typeof(string);
+        if (useTargetCols)
+        {
+            var targetCols = targetInfo!.Columns;
+            for (int i = 0; i < targetCols.Count; i++)
+            {
+                var targetCol = targetCols[i];
+                _targetColumnNames[i] = targetCol.Name;
+                _targetTypes[i] = targetCol.InferredClrType ?? typeof(string);
 
-				var underlying = Nullable.GetUnderlyingType(_targetTypes[i]) ?? _targetTypes[i];
-				_bufferTable.Columns.Add(targetCol.Name, underlying);
-			}
-		}
-		else
-		{
-			// Fallback to source columns
-			for (int i = 0; i < _columns!.Count; i++)
-			{
-				var col = _columns[i];
-				_targetColumnNames[i] = col.Name;
-				_targetTypes[i] = col.ClrType;
-				var underlying = Nullable.GetUnderlyingType(col.ClrType) ?? col.ClrType;
-				_bufferTable.Columns.Add(col.Name, underlying);
-			}
-		}
+                var underlying = Nullable.GetUnderlyingType(_targetTypes[i]) ?? _targetTypes[i];
+                _bufferTable.Columns.Add(targetCol.Name, underlying);
+            }
+        }
+        else
+        {
+            // Fallback to source columns
+            for (int i = 0; i < _columns!.Count; i++)
+            {
+                var col = _columns[i];
+                _targetColumnNames[i] = col.Name;
+                _targetTypes[i] = col.ClrType;
+                var underlying = Nullable.GetUnderlyingType(col.ClrType) ?? col.ClrType;
+                _bufferTable.Columns.Add(col.Name, underlying);
+            }
+        }
 
-		// Pre-compute source index mapping and per-column converters
-		_sourceIndices = new int[colCount];
-		_converters = new Func<object?, object?>[colCount];
-		for (int i = 0; i < colCount; i++)
-		{
-			var colName = _bufferTable.Columns[i].ColumnName;
-			int srcIdx = -1;
-			Type srcClrType = typeof(object);
-			for (int s = 0; s < _columns!.Count; s++)
-			{
-				if (string.Equals(_columns[s].Name, colName, StringComparison.OrdinalIgnoreCase))
-				{
-					srcIdx = s;
-					srcClrType = _columns[s].ClrType;
-					break;
-				}
-			}
-			_sourceIndices[i] = srcIdx;
-			_converters[i] = CompositeCellJson.Wrap(ColumnConverterFactory.Build(srcClrType, _targetTypes[i]));
-		}
+        // Pre-compute source index mapping and per-column converters
+        _sourceIndices = new int[colCount];
+        _converters = new Func<object?, object?>[colCount];
+        for (int i = 0; i < colCount; i++)
+        {
+            var colName = _bufferTable.Columns[i].ColumnName;
+            int srcIdx = -1;
+            Type srcClrType = typeof(object);
+            for (int s = 0; s < _columns!.Count; s++)
+            {
+                if (string.Equals(_columns[s].Name, colName, StringComparison.OrdinalIgnoreCase))
+                {
+                    srcIdx = s;
+                    srcClrType = _columns[s].ClrType;
+                    break;
+                }
+            }
+            _sourceIndices[i] = srcIdx;
+            _converters[i] = CompositeCellJson.Wrap(ColumnConverterFactory.Build(srcClrType, _targetTypes[i]));
+        }
 
-		_bulkCopy = new SqlBulkCopy((SqlConnection)_connection!, SqlBulkCopyOptions.TableLock | SqlBulkCopyOptions.UseInternalTransaction, null)
-		{
-			DestinationTableName = _quotedTargetTableName,
-			BatchSize = 0,
-			BulkCopyTimeout = 0
-		};
+        _bulkCopy = new SqlBulkCopy((SqlConnection)_connection!, SqlBulkCopyOptions.TableLock | SqlBulkCopyOptions.UseInternalTransaction, null)
+        {
+            DestinationTableName = _quotedTargetTableName,
+            BatchSize = 0,
+            BulkCopyTimeout = 0
+        };
 
-		// Map columns by name
-		foreach (DataColumn dc in _bufferTable.Columns)
-		{
-			_bulkCopy.ColumnMappings.Add(dc.ColumnName, dc.ColumnName);
-		}
-	}
+        // Map columns by name
+        foreach (DataColumn dc in _bufferTable.Columns)
+        {
+            _bulkCopy.ColumnMappings.Add(dc.ColumnName, dc.ColumnName);
+        }
+    }
 
-	protected override async Task<TargetSchemaInfo?> ApplyWriteStrategyAsync(string resolvedSchema, string resolvedTable, CancellationToken ct)
-	{
-		if (_options.Strategy == SqlServerWriteStrategy.Recreate)
-		{
-			return await ApplyRecreateStrategyAsync(ct);
-		}
-		else if (_options.Strategy == SqlServerWriteStrategy.Truncate)
-		{
-			return await ApplyTruncateStrategyAsync(ct);
-		}
-		else if (_options.Strategy == SqlServerWriteStrategy.DeleteThenInsert)
-		{
-			return await ApplyDeleteThenInsertStrategyAsync(ct);
-		}
-		else
-		{
-			// Append/Upsert/Ignore
-			var schemaInfo = await ApplyAppendStrategyAsync(ct);
-			if (_options.Strategy == SqlServerWriteStrategy.Upsert || _options.Strategy == SqlServerWriteStrategy.Ignore)
-			{
-				await AnalyzeKeysAsync(ct);
-			}
-			return schemaInfo;
-		}
-	}
+    protected override async Task<TargetSchemaInfo?> ApplyWriteStrategyAsync(string resolvedSchema, string resolvedTable, CancellationToken ct)
+    {
+        if (_options.Strategy == SqlServerWriteStrategy.Recreate)
+        {
+            return await ApplyRecreateStrategyAsync(ct);
+        }
+        else if (_options.Strategy == SqlServerWriteStrategy.Truncate)
+        {
+            return await ApplyTruncateStrategyAsync(ct);
+        }
+        else if (_options.Strategy == SqlServerWriteStrategy.DeleteThenInsert)
+        {
+            return await ApplyDeleteThenInsertStrategyAsync(ct);
+        }
+        else
+        {
+            // Append/Upsert/Ignore
+            var schemaInfo = await ApplyAppendStrategyAsync(ct);
+            if (_options.Strategy == SqlServerWriteStrategy.Upsert || _options.Strategy == SqlServerWriteStrategy.Ignore)
+            {
+                await AnalyzeKeysAsync(ct);
+            }
+            return schemaInfo;
+        }
+    }
 
-	protected override async Task EnsureTableExistsBaseAsync(CancellationToken ct)
-	{
-		var existing = await InspectTargetAsync(ct);
-		if (existing?.Exists != true)
-		{
-			var createSql = GetCreateTableSql(_quotedTargetTableName, _columns!);
-			try
-			{
-				await ExecuteNonQueryAsync(createSql, ct);
-				InvalidateSchemaCache();
-			}
-			catch (SqlException ex) when (ex.Number == 2714) { /* Ignore race */ }
-		}
-	}
+    protected override async Task EnsureTableExistsBaseAsync(CancellationToken ct)
+    {
+        var existing = await InspectTargetAsync(ct);
+        if (existing?.Exists != true)
+        {
+            var createSql = GetCreateTableSql(_quotedTargetTableName, _columns!);
+            try
+            {
+                await ExecuteNonQueryAsync(createSql, ct);
+                InvalidateSchemaCache();
+            }
+            catch (SqlException ex) when (ex.Number == 2714) { /* Ignore race */ }
+        }
+    }
 
-	private List<string> _keyColumns = new();
+    private List<string> _keyColumns = new();
 
-	private async Task AnalyzeKeysAsync(CancellationToken ct)
-	{
-		await base.ResolveKeysAsync(_keyColumns, ct);
-	}
+    private async Task AnalyzeKeysAsync(CancellationToken ct)
+    {
+        await base.ResolveKeysAsync(_keyColumns, ct);
+    }
 
-	public override async ValueTask ExecuteCommandAsync(string command, CancellationToken ct = default)
-	{
-		await EnsureConnectionOpenAsync(ct);
-		using var cmd = new SqlCommand(command, (SqlConnection)_connection!);
-		cmd.CommandTimeout = 0; // Disable timeout for maintenance commands
-		await cmd.ExecuteNonQueryAsync(ct);
-	}
+    public override async ValueTask ExecuteCommandAsync(string command, CancellationToken ct = default)
+    {
+        await EnsureConnectionOpenAsync(ct);
+        using var cmd = new SqlCommand(command, (SqlConnection)_connection!);
+        cmd.CommandTimeout = 0; // Disable timeout for maintenance commands
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
 
-	protected override ValueTask DisposeResourcesAsync()
-	{
-		if (_bulkCopy is IDisposable d) d.Dispose();
-		_bufferTable?.Dispose();
-		return ValueTask.CompletedTask;
-	}
+    protected override ValueTask DisposeResourcesAsync()
+    {
+        if (_bulkCopy is IDisposable d) d.Dispose();
+        _bufferTable?.Dispose();
+        return ValueTask.CompletedTask;
+    }
 
-	protected override string GetTruncateTableSql(string tableName) => $"TRUNCATE TABLE {tableName}";
-	protected override string GetDropTableSql(string tableName) => $"DROP TABLE {tableName}";
+    protected override string GetTruncateTableSql(string tableName) => $"TRUNCATE TABLE {tableName}";
+    protected override string GetDropTableSql(string tableName) => $"DROP TABLE {tableName}";
 
-	protected override string AddColumnKeyword => "ADD";
+    protected override string AddColumnKeyword => "ADD";
 
-	protected override async ValueTask OnInitializedAsync(CancellationToken ct)
-	{
-		await DetectDatabaseCollationAsync(ct);
-	}
+    protected override async ValueTask OnInitializedAsync(CancellationToken ct)
+    {
+        await DetectDatabaseCollationAsync(ct);
+    }
 
-	/// <summary>
-	/// Columnar write path: receives an Arrow RecordBatch, extracts values via
-	/// <c>ArrowTypeMapper.GetValueForField</c> (resolving arrow.uuid extension metadata
-	/// to Guid), applies <c>_converters[]</c> for target type coercion, and feeds the DataTable
-	/// into SqlBulkCopy. This ensures DtPipe type conventions are applied correctly.
-	/// </summary>
-	public async ValueTask WriteRecordBatchAsync(RecordBatch batch, CancellationToken ct = default)
-	{
-		// The writer owns the batch (IColumnarDataWriter contract) and disposes it here.
-		using (batch)
-		{
-			if (batch.Length == 0) return;
+    /// <summary>
+    /// Columnar write path: receives an Arrow RecordBatch, extracts values via
+    /// <c>ArrowTypeMapper.GetValueForField</c> (resolving arrow.uuid extension metadata
+    /// to Guid), applies <c>_converters[]</c> for target type coercion, and feeds the DataTable
+    /// into SqlBulkCopy. This ensures DtPipe type conventions are applied correctly.
+    /// </summary>
+    public async ValueTask WriteRecordBatchAsync(RecordBatch batch, CancellationToken ct = default)
+    {
+        // The writer owns the batch (IColumnarDataWriter contract) and disposes it here.
+        using (batch)
+        {
+            if (batch.Length == 0) return;
 
-			await EnsureBulkCopyInitializedAsync(ct);
+            await EnsureBulkCopyInitializedAsync(ct);
 
-			// SqlBulkCopy reads cells through RecordBatchDataReader, which hands a struct column
-			// over as a Dictionary the driver has no mapping for. Render those to JSON first.
-			using var payload = CompositeCellJson.RenderComposites(batch);
+            // SqlBulkCopy reads cells through RecordBatchDataReader, which hands a struct column
+            // over as a Dictionary the driver has no mapping for. Render those to JSON first.
+            using var payload = CompositeCellJson.RenderComposites(batch);
 
-			using var reader = new RecordBatchDataReader(payload.Batch);
-			if (_options.Strategy is SqlServerWriteStrategy.Upsert or SqlServerWriteStrategy.Ignore)
-				await ExecuteMergeFromReaderAsync(reader, ct);
-			else
-				await _bulkCopy!.WriteToServerAsync(reader, ct);
-		}
-	}
+            using var reader = new RecordBatchDataReader(payload.Batch);
+            if (_options.Strategy is SqlServerWriteStrategy.Upsert or SqlServerWriteStrategy.Ignore)
+                await ExecuteMergeFromReaderAsync(reader, ct);
+            else
+                await _bulkCopy!.WriteToServerAsync(reader, ct);
+        }
+    }
 
-	private async Task ExecuteMergeFromReaderAsync(IDataReader reader, CancellationToken ct)
-	{
-		var stageTable = $"#Stage_{Guid.NewGuid():N}";
-		await ExecuteNonQueryAsync($"SELECT TOP 0 * INTO [{stageTable}] FROM {_quotedTargetTableName}", ct);
+    private async Task ExecuteMergeFromReaderAsync(IDataReader reader, CancellationToken ct)
+    {
+        var stageTable = $"#Stage_{Guid.NewGuid():N}";
+        await ExecuteNonQueryAsync($"SELECT TOP 0 * INTO [{stageTable}] FROM {_quotedTargetTableName}", ct);
 
-		try
-		{
-			using var stageBulk = new SqlBulkCopy(
-				(SqlConnection)_connection!,
-				SqlBulkCopyOptions.TableLock | SqlBulkCopyOptions.UseInternalTransaction,
-				null)
-			{
-				DestinationTableName = stageTable,
-				BatchSize = 0,
-				BulkCopyTimeout = 0
-			};
+        try
+        {
+            using var stageBulk = new SqlBulkCopy(
+                (SqlConnection)_connection!,
+                SqlBulkCopyOptions.TableLock | SqlBulkCopyOptions.UseInternalTransaction,
+                null)
+            {
+                DestinationTableName = stageTable,
+                BatchSize = 0,
+                BulkCopyTimeout = 0
+            };
 
-			foreach (var col in _targetColumnNames!)
-				stageBulk.ColumnMappings.Add(col, col);
+            foreach (var col in _targetColumnNames!)
+                stageBulk.ColumnMappings.Add(col, col);
 
-			await stageBulk.WriteToServerAsync(reader, ct);
-			await MergeFromStagingAsync(stageTable, ct);
-		}
-		finally
-		{
-			try { await ExecuteNonQueryAsync($"DROP TABLE IF EXISTS [{stageTable}]", ct); } catch { }
-		}
-	}
+            await stageBulk.WriteToServerAsync(reader, ct);
+            await MergeFromStagingAsync(stageTable, ct);
+        }
+        finally
+        {
+            try { await ExecuteNonQueryAsync($"DROP TABLE IF EXISTS [{stageTable}]", ct); } catch { }
+        }
+    }
 
-	public override async ValueTask WriteBatchAsync(IReadOnlyList<object?[]> rows, CancellationToken ct = default)
-	{
-		if (rows.Count == 0) return;
+    public override async ValueTask WriteBatchAsync(IReadOnlyList<object?[]> rows, CancellationToken ct = default)
+    {
+        if (rows.Count == 0) return;
 
-		await EnsureBulkCopyInitializedAsync(ct);
+        await EnsureBulkCopyInitializedAsync(ct);
 
-		_bufferTable!.Rows.Clear();
+        _bufferTable!.Rows.Clear();
 
-		if (_options.Strategy == SqlServerWriteStrategy.Upsert || _options.Strategy == SqlServerWriteStrategy.Ignore)
-		{
-			await ExecuteMergeAsync(rows, ct);
-			return;
-		}
+        if (_options.Strategy == SqlServerWriteStrategy.Upsert || _options.Strategy == SqlServerWriteStrategy.Ignore)
+        {
+            await ExecuteMergeAsync(rows, ct);
+            return;
+        }
 
-		await ExecuteBulkInsertAsync(rows, ct);
-	}
+        await ExecuteBulkInsertAsync(rows, ct);
+    }
 
-	private async Task ExecuteBulkInsertAsync(IEnumerable<object?[]> rows, CancellationToken ct)
-	{
-		FillBufferRows(rows);
-		await _bulkCopy!.WriteToServerAsync(_bufferTable, ct);
-	}
+    private async Task ExecuteBulkInsertAsync(IEnumerable<object?[]> rows, CancellationToken ct)
+    {
+        FillBufferRows(rows);
+        await _bulkCopy!.WriteToServerAsync(_bufferTable, ct);
+    }
 
-	// P2-11: single implementation of the row→staging-buffer mapping (was copy-pasted
-	// between bulk insert and merge staging).
-	private void FillBufferRows(IEnumerable<object?[]> rows)
-	{
-		_bufferTable!.Clear();
-		foreach (var row in rows)
-		{
-			var dataRow = _bufferTable.NewRow();
-			for (int i = 0; i < _converters!.Length; i++)
-			{
-				int srcIdx = _sourceIndices![i];
-				dataRow[i] = srcIdx >= 0 ? _converters[i](row[srcIdx]) : DBNull.Value;
-			}
-			_bufferTable.Rows.Add(dataRow);
-		}
-	}
+    // P2-11: single implementation of the row→staging-buffer mapping (was copy-pasted
+    // between bulk insert and merge staging).
+    private void FillBufferRows(IEnumerable<object?[]> rows)
+    {
+        _bufferTable!.Clear();
+        foreach (var row in rows)
+        {
+            var dataRow = _bufferTable.NewRow();
+            for (int i = 0; i < _converters!.Length; i++)
+            {
+                int srcIdx = _sourceIndices![i];
+                dataRow[i] = srcIdx >= 0 ? _converters[i](row[srcIdx]) : DBNull.Value;
+            }
+            _bufferTable.Rows.Add(dataRow);
+        }
+    }
 
-	private async Task ExecuteMergeAsync(IReadOnlyList<object?[]> rows, CancellationToken ct)
-	{
-		// 1. Create Staging Table for Merge
-		// utilizing a local temporary table (#Stage_...) ensuring isolation
-		var stageTable = $"#Stage_{Guid.NewGuid():N}";
+    private async Task ExecuteMergeAsync(IReadOnlyList<object?[]> rows, CancellationToken ct)
+    {
+        // 1. Create Staging Table for Merge
+        // utilizing a local temporary table (#Stage_...) ensuring isolation
+        var stageTable = $"#Stage_{Guid.NewGuid():N}";
 
-		// Select into strict syntax to create empty staging table structure
-		await ExecuteNonQueryAsync($"SELECT TOP 0 * INTO [{stageTable}] FROM {_quotedTargetTableName}", ct);
+        // Select into strict syntax to create empty staging table structure
+        await ExecuteNonQueryAsync($"SELECT TOP 0 * INTO [{stageTable}] FROM {_quotedTargetTableName}", ct);
 
-		try
-		{
-			// 2. Bulk Copy to Stage
-			using var stageBulk = new SqlBulkCopy((SqlConnection)_connection!, SqlBulkCopyOptions.TableLock | SqlBulkCopyOptions.UseInternalTransaction, null)
-			{
-				DestinationTableName = stageTable,
-				BatchSize = 0,
-				BulkCopyTimeout = 0
-			};
+        try
+        {
+            // 2. Bulk Copy to Stage
+            using var stageBulk = new SqlBulkCopy((SqlConnection)_connection!, SqlBulkCopyOptions.TableLock | SqlBulkCopyOptions.UseInternalTransaction, null)
+            {
+                DestinationTableName = stageTable,
+                BatchSize = 0,
+                BulkCopyTimeout = 0
+            };
 
-			foreach (DataColumn dc in _bufferTable!.Columns)
-			{
-				stageBulk.ColumnMappings.Add(dc.ColumnName, dc.ColumnName);
-			}
+            foreach (DataColumn dc in _bufferTable!.Columns)
+            {
+                stageBulk.ColumnMappings.Add(dc.ColumnName, dc.ColumnName);
+            }
 
-			FillBufferRows(rows);
-			await stageBulk.WriteToServerAsync(_bufferTable, ct);
+            FillBufferRows(rows);
+            await stageBulk.WriteToServerAsync(_bufferTable, ct);
 
-			// 3. Perform Merge
-			await MergeFromStagingAsync(stageTable, ct);
-		}
-		finally
-		{
-			await ExecuteNonQueryAsync($"DROP TABLE IF EXISTS [{stageTable}]", ct);
-		}
-	}
+            // 3. Perform Merge
+            await MergeFromStagingAsync(stageTable, ct);
+        }
+        finally
+        {
+            await ExecuteNonQueryAsync($"DROP TABLE IF EXISTS [{stageTable}]", ct);
+        }
+    }
 
-	private async Task MergeFromStagingAsync(string stagingTable, CancellationToken ct)
-	{
-		// F9: MERGE generation is dialect-owned.
-		var mode = _options.Strategy switch
-		{
-			SqlServerWriteStrategy.Upsert => MergeMode.Upsert,
-			SqlServerWriteStrategy.Ignore => MergeMode.Ignore,
-			_ => MergeMode.Insert,
-		};
-		var spec = new MergeSpec(
-			QuotedTargetTable: _quotedTargetTableName,
-			SourceTable: stagingTable,
-			KeyColumns: _keyColumns,
-			Columns: _columns!,
-			Mode: mode);
+    private async Task MergeFromStagingAsync(string stagingTable, CancellationToken ct)
+    {
+        // F9: MERGE generation is dialect-owned.
+        var mode = _options.Strategy switch
+        {
+            SqlServerWriteStrategy.Upsert => MergeMode.Upsert,
+            SqlServerWriteStrategy.Ignore => MergeMode.Ignore,
+            _ => MergeMode.Insert,
+        };
+        var spec = new MergeSpec(
+            QuotedTargetTable: _quotedTargetTableName,
+            SourceTable: stagingTable,
+            KeyColumns: _keyColumns,
+            Columns: _columns!,
+            Mode: mode);
 
-		await ExecuteNonQueryAsync(_dialect.BuildStagingMerge(spec), ct);
-	}
+        await ExecuteNonQueryAsync(_dialect.BuildStagingMerge(spec), ct);
+    }
 
 
-	#region Helpers (Introspection & Collation) - Kept from original
+    #region Helpers (Introspection & Collation) - Kept from original
 
-	private async Task DetectDatabaseCollationAsync(CancellationToken ct)
-	{
-		if (_connection == null) return;
-		try
-		{
-			var dbCmd = _connection.CreateCommand();
-			dbCmd.CommandTimeout = 600;
-			dbCmd.CommandText = "SELECT collation_name FROM sys.databases WHERE name = DB_NAME()";
-			if (dbCmd is SqlCommand sqlCmd)
-			{
-				var result = await sqlCmd.ExecuteScalarAsync(ct);
-				if (result != null && result != DBNull.Value)
-				{
-					var collation = (string)result;
-					_isDbCaseSensitive = collation.Contains("_CS", StringComparison.OrdinalIgnoreCase);
-				}
-			}
-		}
-		catch { _isDbCaseSensitive = false; }
-	}
+    private async Task DetectDatabaseCollationAsync(CancellationToken ct)
+    {
+        if (_connection == null) return;
+        try
+        {
+            var dbCmd = _connection.CreateCommand();
+            dbCmd.CommandTimeout = 600;
+            dbCmd.CommandText = "SELECT collation_name FROM sys.databases WHERE name = DB_NAME()";
+            if (dbCmd is SqlCommand sqlCmd)
+            {
+                var result = await sqlCmd.ExecuteScalarAsync(ct);
+                if (result != null && result != DBNull.Value)
+                {
+                    var collation = (string)result;
+                    _isDbCaseSensitive = collation.Contains("_CS", StringComparison.OrdinalIgnoreCase);
+                }
+            }
+        }
+        catch { _isDbCaseSensitive = false; }
+    }
 
-	// ISchemaInspector ... (Kept similar to original but using _connection from base)
-	protected override async Task<TargetSchemaInfo?> InspectTargetInternalAsync(CancellationToken ct = default)
-	{
-		// Create NEW connection for inspection to avoid interference with main connection state/transaction if any
-		await using var connection = new SqlConnection(_connectionString);
-		await connection.OpenAsync(ct);
+    // ISchemaInspector ... (Kept similar to original but using _connection from base)
+    protected override async Task<TargetSchemaInfo?> InspectTargetInternalAsync(CancellationToken ct = default)
+    {
+        // Create NEW connection for inspection to avoid interference with main connection state/transaction if any
+        await using var connection = new SqlConnection(_connectionString);
+        await connection.OpenAsync(ct);
 
-		// Resolve target using native logic
-		var resolved = await ResolveTableNativeAsync(connection, _options.Table, ct);
-		if (resolved == null) return new TargetSchemaInfo([], false, null, null, null);
+        // Resolve target using native logic
+        var resolved = await ResolveTableNativeAsync(connection, _options.Table, ct);
+        if (resolved == null) return new TargetSchemaInfo([], false, null, null, null);
 
-		var (schema, table) = resolved.Value;
+        var (schema, table) = resolved.Value;
 
-		await DetectDatabaseCollationAsync(ct); // Update local state for CS check
+        await DetectDatabaseCollationAsync(ct); // Update local state for CS check
 
-		// 2. Get Columns
-		var cols = new List<TargetColumnInfo>();
-		{
-			var colCmd = new SqlCommand(@"
+        // 2. Get Columns
+        var cols = new List<TargetColumnInfo>();
+        {
+            var colCmd = new SqlCommand(@"
                 SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, CHARACTER_MAXIMUM_LENGTH, NUMERIC_PRECISION, NUMERIC_SCALE, COLLATION_NAME, DATETIME_PRECISION
                 FROM INFORMATION_SCHEMA.COLUMNS
                 WHERE TABLE_SCHEMA = @Schema AND TABLE_NAME = @Table
                 ORDER BY ORDINAL_POSITION", connection);
-			colCmd.CommandTimeout = 600;
-			colCmd.Parameters.AddWithValue("@Schema", schema);
-			colCmd.Parameters.AddWithValue("@Table", table);
+            colCmd.CommandTimeout = 600;
+            colCmd.Parameters.AddWithValue("@Schema", schema);
+            colCmd.Parameters.AddWithValue("@Table", table);
 
-			using var reader = await colCmd.ExecuteReaderAsync(ct);
-			int nameIdx = reader.GetOrdinal("COLUMN_NAME");
-			int typeIdx = reader.GetOrdinal("DATA_TYPE");
-			int nullIdx = reader.GetOrdinal("IS_NULLABLE");
-			int maxIdx = reader.GetOrdinal("CHARACTER_MAXIMUM_LENGTH");
-			int precIdx = reader.GetOrdinal("NUMERIC_PRECISION");
-			int scaleIdx = reader.GetOrdinal("NUMERIC_SCALE");
-			int collIdx = reader.GetOrdinal("COLLATION_NAME");
-			int dtPrecIdx = reader.FieldCount > 7 ? reader.GetOrdinal("DATETIME_PRECISION") : -1;
+            using var reader = await colCmd.ExecuteReaderAsync(ct);
+            int nameIdx = reader.GetOrdinal("COLUMN_NAME");
+            int typeIdx = reader.GetOrdinal("DATA_TYPE");
+            int nullIdx = reader.GetOrdinal("IS_NULLABLE");
+            int maxIdx = reader.GetOrdinal("CHARACTER_MAXIMUM_LENGTH");
+            int precIdx = reader.GetOrdinal("NUMERIC_PRECISION");
+            int scaleIdx = reader.GetOrdinal("NUMERIC_SCALE");
+            int collIdx = reader.GetOrdinal("COLLATION_NAME");
+            int dtPrecIdx = reader.FieldCount > 7 ? reader.GetOrdinal("DATETIME_PRECISION") : -1;
 
-			while (await reader.ReadAsync(ct))
-			{
-				var name = reader.GetString(nameIdx);
-				var type = reader.GetString(typeIdx);
-				var nullable = reader.GetString(nullIdx) == "YES";
-				var maxLength = reader.IsDBNull(maxIdx) ? null : (int?)Convert.ToInt32(reader[maxIdx]);
-				var precision = reader.IsDBNull(precIdx) ? null : (int?)Convert.ToInt32(reader[precIdx]);
-				var scale = reader.IsDBNull(scaleIdx) ? null : (int?)Convert.ToInt32(reader[scaleIdx]);
-				var collation = reader.IsDBNull(collIdx) ? null : reader.GetString(collIdx);
-				var datetimePrecision = (dtPrecIdx != -1 && !reader.IsDBNull(dtPrecIdx)) ? (int?)Convert.ToInt32(reader[dtPrecIdx]) : null;
-				var finalPrecision = precision ?? datetimePrecision;
-				bool isColCaseSensitive = collation != null
-					? collation.Contains("_CS", StringComparison.OrdinalIgnoreCase)
-					: _isDbCaseSensitive;
+            while (await reader.ReadAsync(ct))
+            {
+                var name = reader.GetString(nameIdx);
+                var type = reader.GetString(typeIdx);
+                var nullable = reader.GetString(nullIdx) == "YES";
+                var maxLength = reader.IsDBNull(maxIdx) ? null : (int?)Convert.ToInt32(reader[maxIdx]);
+                var precision = reader.IsDBNull(precIdx) ? null : (int?)Convert.ToInt32(reader[precIdx]);
+                var scale = reader.IsDBNull(scaleIdx) ? null : (int?)Convert.ToInt32(reader[scaleIdx]);
+                var collation = reader.IsDBNull(collIdx) ? null : reader.GetString(collIdx);
+                var datetimePrecision = (dtPrecIdx != -1 && !reader.IsDBNull(dtPrecIdx)) ? (int?)Convert.ToInt32(reader[dtPrecIdx]) : null;
+                var finalPrecision = precision ?? datetimePrecision;
+                bool isColCaseSensitive = collation != null
+                    ? collation.Contains("_CS", StringComparison.OrdinalIgnoreCase)
+                    : _isDbCaseSensitive;
 
-				cols.Add(new TargetColumnInfo(
-					name, type, _typeMapper.MapFromProviderType(type), nullable, false, false, maxLength, finalPrecision, scale, IsCaseSensitive: isColCaseSensitive
-				));
-			}
-		}
+                cols.Add(new TargetColumnInfo(
+                    name, type, _typeMapper.MapFromProviderType(type), nullable, false, false, maxLength, finalPrecision, scale, IsCaseSensitive: isColCaseSensitive
+                ));
+            }
+        }
 
-		// Get Primary Key
-		var pkCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-		{
-			var pkCmd = new SqlCommand(@"
+        // Get Primary Key
+        var pkCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        {
+            var pkCmd = new SqlCommand(@"
                 SELECT KCU.COLUMN_NAME
                 FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS TC
                 JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE KCU ON TC.CONSTRAINT_NAME = KCU.CONSTRAINT_NAME
@@ -484,17 +484,17 @@ public class SqlServerDataWriter : BaseSqlDataWriter, IColumnarDataWriter
                   AND TC.TABLE_SCHEMA = @Schema
                   AND TC.TABLE_NAME = @Table
                 ORDER BY KCU.ORDINAL_POSITION", connection);
-			pkCmd.CommandTimeout = 600;
-			pkCmd.Parameters.AddWithValue("@Schema", schema);
-			pkCmd.Parameters.AddWithValue("@Table", table);
-			using var pkReader = await pkCmd.ExecuteReaderAsync(ct);
-			while (await pkReader.ReadAsync(ct)) pkCols.Add(pkReader.GetString(0));
-		}
+            pkCmd.CommandTimeout = 600;
+            pkCmd.Parameters.AddWithValue("@Schema", schema);
+            pkCmd.Parameters.AddWithValue("@Table", table);
+            using var pkReader = await pkCmd.ExecuteReaderAsync(ct);
+            while (await pkReader.ReadAsync(ct)) pkCols.Add(pkReader.GetString(0));
+        }
 
-		// Get Unique Columns
-		var uniqueCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-		{
-			var uqCmd = new SqlCommand(@"
+        // Get Unique Columns
+        var uniqueCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        {
+            var uqCmd = new SqlCommand(@"
                 SELECT KCU.COLUMN_NAME
                 FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS TC
                 JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE KCU ON TC.CONSTRAINT_NAME = KCU.CONSTRAINT_NAME
@@ -503,78 +503,78 @@ public class SqlServerDataWriter : BaseSqlDataWriter, IColumnarDataWriter
                   AND TC.TABLE_SCHEMA = @Schema
                   AND TC.TABLE_NAME = @Table
                 ORDER BY KCU.ORDINAL_POSITION", connection);
-			uqCmd.CommandTimeout = 600;
-			uqCmd.Parameters.AddWithValue("@Schema", schema);
-			uqCmd.Parameters.AddWithValue("@Table", table);
-			using var uqReader = await uqCmd.ExecuteReaderAsync(ct);
-			while (await uqReader.ReadAsync(ct)) uniqueCols.Add(uqReader.GetString(0));
-		}
+            uqCmd.CommandTimeout = 600;
+            uqCmd.Parameters.AddWithValue("@Schema", schema);
+            uqCmd.Parameters.AddWithValue("@Table", table);
+            using var uqReader = await uqCmd.ExecuteReaderAsync(ct);
+            while (await uqReader.ReadAsync(ct)) uniqueCols.Add(uqReader.GetString(0));
+        }
 
-		// Get Row Count Estimate
-		var countCmd = new SqlCommand(@"
+        // Get Row Count Estimate
+        var countCmd = new SqlCommand(@"
             SELECT SUM(p.rows)
             FROM sys.partitions p
             JOIN sys.tables t ON p.object_id = t.object_id
             JOIN sys.schemas s ON t.schema_id = s.schema_id
             WHERE t.name = @Table AND s.name = @Schema AND p.index_id < 2", connection);
-		countCmd.CommandTimeout = 600;
-		countCmd.Parameters.AddWithValue("@Schema", schema);
-		countCmd.Parameters.AddWithValue("@Table", table);
-		var countResult = await countCmd.ExecuteScalarAsync(ct);
-		long? rowCount = countResult != null && countResult != DBNull.Value ? Convert.ToInt64(countResult) : null;
+        countCmd.CommandTimeout = 600;
+        countCmd.Parameters.AddWithValue("@Schema", schema);
+        countCmd.Parameters.AddWithValue("@Table", table);
+        var countResult = await countCmd.ExecuteScalarAsync(ct);
+        long? rowCount = countResult != null && countResult != DBNull.Value ? Convert.ToInt64(countResult) : null;
 
-		return new TargetSchemaInfo(cols, true, rowCount, null, pkCols.Count > 0 ? pkCols.ToList() : null, uniqueCols.Count > 0 ? uniqueCols.ToList() : null, IsRowCountEstimate: true);
-	}
+        return new TargetSchemaInfo(cols, true, rowCount, null, pkCols.Count > 0 ? pkCols.ToList() : null, uniqueCols.Count > 0 ? uniqueCols.ToList() : null, IsRowCountEstimate: true);
+    }
 
 
-	#endregion
+    #endregion
 
-	/// <summary>
-	/// SQL Server does not allow NVARCHAR(MAX) as a PRIMARY KEY / index key column (900-byte limit).
-	/// For key columns, substitute NVARCHAR(450) — the largest NVARCHAR length that fits in an index.
-	/// Non-key string columns keep NVARCHAR(MAX).
-	/// </summary>
-	protected override string GetCreateTableSql(string tableName, IEnumerable<PipeColumnInfo> columns)
-	{
-		var requestedKeys = GetRequestedPrimaryKeys();
-		var keySet = requestedKeys != null
-			? new HashSet<string>(requestedKeys, StringComparer.OrdinalIgnoreCase)
-			: new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    /// <summary>
+    /// SQL Server does not allow NVARCHAR(MAX) as a PRIMARY KEY / index key column (900-byte limit).
+    /// For key columns, substitute NVARCHAR(450) — the largest NVARCHAR length that fits in an index.
+    /// Non-key string columns keep NVARCHAR(MAX).
+    /// </summary>
+    protected override string GetCreateTableSql(string tableName, IEnumerable<PipeColumnInfo> columns)
+    {
+        var requestedKeys = GetRequestedPrimaryKeys();
+        var keySet = requestedKeys != null
+            ? new HashSet<string>(requestedKeys, StringComparer.OrdinalIgnoreCase)
+            : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-		var colList = columns.ToList();
-		var sb = new StringBuilder();
-		sb.Append($"CREATE TABLE {tableName} (");
+        var colList = columns.ToList();
+        var sb = new StringBuilder();
+        sb.Append($"CREATE TABLE {tableName} (");
 
-		for (int i = 0; i < colList.Count; i++)
-		{
-			if (i > 0) sb.Append(", ");
-			var col = colList[i];
-			var safeName = SqlIdentifierHelper.GetSafeIdentifier(Dialect, col);
-			var nativeType = GetTypeMapper().MapToProviderType(col);
-			if (keySet.Contains(col.Name) && nativeType.Equals("NVARCHAR(MAX)", StringComparison.OrdinalIgnoreCase))
-				nativeType = "NVARCHAR(450)";
-			sb.Append($"{safeName} {nativeType}");
-		}
+        for (int i = 0; i < colList.Count; i++)
+        {
+            if (i > 0) sb.Append(", ");
+            var col = colList[i];
+            var safeName = SqlIdentifierHelper.GetSafeIdentifier(Dialect, col);
+            var nativeType = GetTypeMapper().MapToProviderType(col);
+            if (keySet.Contains(col.Name) && nativeType.Equals("NVARCHAR(MAX)", StringComparison.OrdinalIgnoreCase))
+                nativeType = "NVARCHAR(450)";
+            sb.Append($"{safeName} {nativeType}");
+        }
 
-		if (requestedKeys != null && requestedKeys.Count > 0)
-		{
-			var resolvedKeys = ColumnHelper.ResolveKeyColumns(string.Join(",", requestedKeys), colList);
-			var safeKeys = resolvedKeys.Select(keyName =>
-			{
-				var col = colList.First(c => c.Name == keyName);
-				return SqlIdentifierHelper.GetSafeIdentifier(Dialect, col);
-			});
-			sb.Append($", PRIMARY KEY ({string.Join(", ", safeKeys)})");
-		}
+        if (requestedKeys != null && requestedKeys.Count > 0)
+        {
+            var resolvedKeys = ColumnHelper.ResolveKeyColumns(string.Join(",", requestedKeys), colList);
+            var safeKeys = resolvedKeys.Select(keyName =>
+            {
+                var col = colList.First(c => c.Name == keyName);
+                return SqlIdentifierHelper.GetSafeIdentifier(Dialect, col);
+            });
+            sb.Append($", PRIMARY KEY ({string.Join(", ", safeKeys)})");
+        }
 
-		sb.Append(")");
-		return sb.ToString();
-	}
+        sb.Append(")");
+        return sb.ToString();
+    }
 
-	// IKeyValidator methods
-	public override string? GetWriteStrategy() => _options.Strategy.ToString();
-	protected override string? GetRequestedKeySpec() => _options.Key;
+    // IKeyValidator methods
+    public override string? GetWriteStrategy() => _options.Strategy.ToString();
+    protected override string? GetRequestedKeySpec() => _options.Key;
 
-	protected override string? GetRequestedTableSpec() => _options.Table;
-	public override bool RequiresPrimaryKey() => _options.Strategy is SqlServerWriteStrategy.Upsert or SqlServerWriteStrategy.Ignore;
+    protected override string? GetRequestedTableSpec() => _options.Table;
+    public override bool RequiresPrimaryKey() => _options.Strategy is SqlServerWriteStrategy.Upsert or SqlServerWriteStrategy.Ignore;
 }

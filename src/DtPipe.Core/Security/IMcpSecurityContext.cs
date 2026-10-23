@@ -6,8 +6,8 @@ namespace DtPipe.Core.Security;
 /// </summary>
 public interface IMcpSecurityContext
 {
-	/// <summary>
-	/// Gets or sets whether the current session is an MCP session.
-	/// </summary>
-	bool IsMcpSession { get; set; }
+    /// <summary>
+    /// Gets or sets whether the current session is an MCP session.
+    /// </summary>
+    bool IsMcpSession { get; set; }
 }

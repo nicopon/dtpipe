@@ -56,7 +56,7 @@ public class SampledBatcherTests
         public void ReportWrite(int count) => WritesReported += count;
         public void ReportTransform(string name, int count) { }
         public void Complete() { }
-        public DtPipe.Core.Models.ExportMetrics GetMetrics() => 
+        public DtPipe.Core.Models.ExportMetrics GetMetrics() =>
             new(DateTime.UtcNow, DateTime.UtcNow, ReadsReported, WritesReported, 0, 0, new Dictionary<string, long>());
         public void Dispose() { }
     }
@@ -93,7 +93,7 @@ public class SampledBatcherTests
         var batcher = new SampledBatcher(writer, batchSize: 10, limit: 2, samplingRate: 1.0, samplingSeed: null, progress: progress);
 
         await batcher.ProcessRowAsync(new object?[] { 1 }, CancellationToken.None);
-        
+
         await Assert.ThrowsAsync<LimitReachedException>(() =>
             batcher.ProcessRowAsync(new object?[] { 2 }, CancellationToken.None));
 

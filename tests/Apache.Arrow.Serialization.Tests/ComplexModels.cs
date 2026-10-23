@@ -30,7 +30,7 @@ internal static class EqualityHelper
         if (l1 == null || l2 == null) return false;
         return l1.SequenceEqual(l2);
     }
-    
+
     public static int GetDictionaryHashCode<K, V>(IDictionary<K, V>? dict)
     {
         if (dict == null) return 0;
@@ -82,11 +82,11 @@ public class IoTTelemetry : IEquatable<IoTTelemetry>
     public bool Equals(IoTTelemetry? other)
     {
         if (other is null) return false;
-        return DeviceId == other.DeviceId && 
-               DeviceName == other.DeviceName && 
-               Timestamp.Equals(other.Timestamp) && 
-               Readings.SequenceEqual(other.Readings) && 
-               EqualityHelper.DictionaryEqual(Metadata, other.Metadata) && 
+        return DeviceId == other.DeviceId &&
+               DeviceName == other.DeviceName &&
+               Timestamp.Equals(other.Timestamp) &&
+               Readings.SequenceEqual(other.Readings) &&
+               EqualityHelper.DictionaryEqual(Metadata, other.Metadata) &&
                SensorInfo.Equals(other.SensorInfo);
     }
     public override bool Equals(object? obj) => Equals(obj as IoTTelemetry);
@@ -120,11 +120,11 @@ public class ECommerceOrder : IEquatable<ECommerceOrder>
     public bool Equals(ECommerceOrder? other)
     {
         if (other is null) return false;
-        return OrderId == other.OrderId && 
-               Status == other.Status && 
-               Items.SequenceEqual(other.Items) && 
-               TotalAmount == other.TotalAmount && 
-               Currency == other.Currency && 
+        return OrderId == other.OrderId &&
+               Status == other.Status &&
+               Items.SequenceEqual(other.Items) &&
+               TotalAmount == other.TotalAmount &&
+               Currency == other.Currency &&
                OrderedAt.Equals(other.OrderedAt);
     }
     public override bool Equals(object? obj) => Equals(obj as ECommerceOrder);
@@ -143,11 +143,11 @@ public class UserAccount : IEquatable<UserAccount>
     public bool Equals(UserAccount? other)
     {
         if (other is null) return false;
-        return AccountId == other.AccountId && 
-               Email == other.Email && 
-               IsActive == other.IsActive && 
-               Roles.SetEquals(other.Roles) && 
-               CreatedAt.Equals(other.CreatedAt) && 
+        return AccountId == other.AccountId &&
+               Email == other.Email &&
+               IsActive == other.IsActive &&
+               Roles.SetEquals(other.Roles) &&
+               CreatedAt.Equals(other.CreatedAt) &&
                Nullable.Equals(SessionTimeout, other.SessionTimeout);
     }
     public override bool Equals(object? obj) => Equals(obj as UserAccount);
@@ -164,9 +164,9 @@ public class LogEntry : IEquatable<LogEntry>
     public bool Equals(LogEntry? other)
     {
         if (other is null) return false;
-        return Timestamp.Equals(other.Timestamp) && 
-               Level == other.Level && 
-               Message == other.Message && 
+        return Timestamp.Equals(other.Timestamp) &&
+               Level == other.Level &&
+               Message == other.Message &&
                EqualityHelper.DictionaryEqual(Properties, other.Properties);
     }
     public override bool Equals(object? obj) => Equals(obj as LogEntry);

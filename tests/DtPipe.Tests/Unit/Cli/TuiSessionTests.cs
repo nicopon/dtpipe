@@ -167,7 +167,8 @@ public class TuiSessionTests
             {
                 Assert.Equal(0, client.Calls);              // nothing ran on its own
                 Submit(app, s, "now do something");
-            }),
+            }
+        ),
             (s => client.Calls >= 1 && s.Accepting, (app, s) => Submit(app, s, "/quit")));
 
         Assert.Equal(0, exit);
@@ -218,7 +219,8 @@ public class TuiSessionTests
             {
                 Assert.Equal(TurnOutcome.UserInterrupted, executor.LastTurnOutcome);
                 Submit(app, s, "try again");
-            }),
+            }
+        ),
             (s => client.Calls >= 2 && s.Accepting, (app, s) => Submit(app, s, "/quit")));
 
         Assert.Equal(0, exit);                                   // the last turn succeeded
@@ -293,7 +295,8 @@ public class TuiSessionTests
                 Assert.Contains("What should the output file be called?", s.StatusText);
                 Assert.True(s.Accepting, "the input line must be open for the answer");
                 Submit(app, s, "invoices.csv");
-            }),
+            }
+        ),
             (s => client.Calls >= 2 && s.Accepting, (app, s) => Submit(app, s, "/quit")));
 
         Assert.Equal(0, exit);                                   // the answered turn succeeded

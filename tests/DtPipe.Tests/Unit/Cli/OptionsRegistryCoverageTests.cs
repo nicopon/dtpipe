@@ -19,50 +19,50 @@ namespace DtPipe.Tests.Unit.Cli;
 /// </summary>
 public class OptionsRegistryCoverageTests
 {
-	/// <summary>
-	/// Derived from the catalogue, never listed, so a new adapter is covered by existing.
-	/// </summary>
-	private static ComponentCatalog DiscoverCatalog()
-		=> ComponentCatalog.Discover(
-			typeof(DtPipe.Program).Assembly,
-			typeof(DtPipe.Adapters.Csv.CsvReaderDescriptor).Assembly,
-			typeof(DtPipe.Processors.Sql.CompositeSqlTransformerFactory).Assembly,
-			typeof(DtPipe.Transformers.Services.JsEngineProvider).Assembly);
+    /// <summary>
+    /// Derived from the catalogue, never listed, so a new adapter is covered by existing.
+    /// </summary>
+    private static ComponentCatalog DiscoverCatalog()
+        => ComponentCatalog.Discover(
+            typeof(DtPipe.Program).Assembly,
+            typeof(DtPipe.Adapters.Csv.CsvReaderDescriptor).Assembly,
+            typeof(DtPipe.Processors.Sql.CompositeSqlTransformerFactory).Assembly,
+            typeof(DtPipe.Transformers.Services.JsEngineProvider).Assembly);
 
-	[Fact]
-	public void A_Configuration_Pass_Leaves_No_Component_Unregistered()
-	{
-		var catalog = DiscoverCatalog();
-		Assert.NotEmpty(catalog.Readers);
-		Assert.NotEmpty(catalog.Writers);
+    [Fact]
+    public void A_Configuration_Pass_Leaves_No_Component_Unregistered()
+    {
+        var catalog = DiscoverCatalog();
+        Assert.NotEmpty(catalog.Readers);
+        Assert.NotEmpty(catalog.Writers);
 
-		var services = new ServiceCollection();
-		services.AddLogging();
-		var registry = new OptionsRegistry();
-		services.AddSingleton(registry);
-		var sp = services.BuildServiceProvider();
+        var services = new ServiceCollection();
+        services.AddLogging();
+        var registry = new OptionsRegistry();
+        services.AddSingleton(registry);
+        var sp = services.BuildServiceProvider();
 
-		var contributors = new List<ICliContributor>();
-		foreach (var entry in catalog.Readers)
-			contributors.Add(new CliStreamReaderFactory(
-				(IProviderDescriptor<IStreamReader>)Activator.CreateInstance(entry.ImplementationType)!, registry, sp));
-		foreach (var entry in catalog.Writers)
-			contributors.Add(new CliDataWriterFactory(
-				(IProviderDescriptor<IDataWriter>)Activator.CreateInstance(entry.ImplementationType)!, registry, sp));
+        var contributors = new List<ICliContributor>();
+        foreach (var entry in catalog.Readers)
+            contributors.Add(new CliStreamReaderFactory(
+                (IProviderDescriptor<IStreamReader>)Activator.CreateInstance(entry.ImplementationType)!, registry, sp));
+        foreach (var entry in catalog.Writers)
+            contributors.Add(new CliDataWriterFactory(
+                (IProviderDescriptor<IDataWriter>)Activator.CreateInstance(entry.ImplementationType)!, registry, sp));
 
-		new DtPipe.Cli.Services.ProviderConfigurationService(contributors, registry)
-			.BindOptions(new JobDefinition { Input = "csv:in.csv", Output = "csv:out.csv" });
+        new DtPipe.Cli.Services.ProviderConfigurationService(contributors, registry)
+            .BindOptions(new JobDefinition { Input = "csv:in.csv", Output = "csv:out.csv" });
 
-		var unregistered = contributors
-			.OfType<IDataFactory>()
-			.Where(f => !registry.TryGetByType(f.OptionsType, out _))
-			.Select(f => $"{f.ComponentName} ({f.OptionsType.Name})")
-			.Distinct()
-			.ToList();
+        var unregistered = contributors
+            .OfType<IDataFactory>()
+            .Where(f => !registry.TryGetByType(f.OptionsType, out _))
+            .Select(f => $"{f.ComponentName} ({f.OptionsType.Name})")
+            .Distinct()
+            .ToList();
 
-		Assert.True(unregistered.Count == 0,
-			"A configuration pass must register every component's options type, active or not — "
-			+ "that is what lets a miss mean 'no pass reached this flow'. Unregistered: "
-			+ string.Join(", ", unregistered));
-	}
+        Assert.True(unregistered.Count == 0,
+            "A configuration pass must register every component's options type, active or not — "
+            + "that is what lets a miss mean 'no pass reached this flow'. Unregistered: "
+            + string.Join(", ", unregistered));
+    }
 }

@@ -24,11 +24,11 @@ public enum FlagScope
 [Flags]
 public enum FlagStage
 {
-    Reader   = 1,          // valid in reader scope (before first transformer trigger or -o)
+    Reader = 1,          // valid in reader scope (before first transformer trigger or -o)
     Pipeline = 2,          // valid in transformer scope (transformer triggers + transformer options)
-    Writer   = 4,          // valid in writer scope (after -o)
-    Any      = Reader | Writer,         // valid in reader and writer, but NOT pipeline (e.g. --table, --query, --key)
-    All      = Reader | Pipeline | Writer  // valid anywhere (engine controls, DAG routing flags)
+    Writer = 4,          // valid in writer scope (after -o)
+    Any = Reader | Writer,         // valid in reader and writer, but NOT pipeline (e.g. --table, --query, --key)
+    All = Reader | Pipeline | Writer  // valid anywhere (engine controls, DAG routing flags)
 }
 
 /// <param name="BooleanValued">

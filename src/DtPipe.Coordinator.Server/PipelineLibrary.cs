@@ -89,7 +89,7 @@ public sealed partial class PipelineLibrary : IJobSource, ILibraryHeads
         _seedDir = options.LibrarySeed;
         (_remote, _mayBegin, _log) = (options.LibraryRemote, options.Initialize, logger);
         _bindingProblems = bindingProblems ?? ((_, _) => []);
-            }
+    }
 
     public async Task<IReadOnlyList<LibraryEntry>> ListAsync(CancellationToken ct) => await Locked(async () =>
     {

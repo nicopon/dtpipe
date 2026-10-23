@@ -11,71 +11,71 @@ namespace DtPipe.Adapters.Arrow;
 
 public class ArrowAdapterStreamReader : IColumnarStreamReader
 {
-	// A pipeline node's own excess edge always creates the pipe before launching the child that
-	// reads this side of it, so under normal operation the connect is near-instant; the bound
-	// exists only to fail loudly, naming the pipe, instead of hanging on a misconfigured one.
-	private static readonly TimeSpan PipeConnectTimeout = TimeSpan.FromSeconds(10);
+    // A pipeline node's own excess edge always creates the pipe before launching the child that
+    // reads this side of it, so under normal operation the connect is near-instant; the bound
+    // exists only to fail loudly, naming the pipe, instead of hanging on a misconfigured one.
+    private static readonly TimeSpan PipeConnectTimeout = TimeSpan.FromSeconds(10);
 
-	private readonly string _path;
-	private readonly ArrowReaderOptions _options;
-	private readonly ILogger _logger;
+    private readonly string _path;
+    private readonly ArrowReaderOptions _options;
+    private readonly ILogger _logger;
 
-	private Stream? _inputStream;
-	private ArrowStreamTerminationProbe? _probe;
-	private Apache.Arrow.Ipc.ArrowStreamReader? _arrowReader;
-	private ArrowFileReader? _arrowFileReader;
+    private Stream? _inputStream;
+    private ArrowStreamTerminationProbe? _probe;
+    private Apache.Arrow.Ipc.ArrowStreamReader? _arrowReader;
+    private ArrowFileReader? _arrowFileReader;
     private bool _isIpcFile;
 
-	public IReadOnlyList<PipeColumnInfo>? Columns { get; private set; }
-	public Schema? Schema => _isIpcFile ? _arrowFileReader?.Schema : _arrowReader?.Schema;
+    public IReadOnlyList<PipeColumnInfo>? Columns { get; private set; }
+    public Schema? Schema => _isIpcFile ? _arrowFileReader?.Schema : _arrowReader?.Schema;
 
-	private string Source => string.IsNullOrEmpty(_path) || _path == "-" ? "STDIN" : _path;
+    private string Source => string.IsNullOrEmpty(_path) || _path == "-" ? "STDIN" : _path;
 
-	public ArrowAdapterStreamReader(string path, ArrowReaderOptions options, ILogger? logger = null)
-	{
-		_path = path;
-		_options = options;
-		_logger = logger ?? NullLogger.Instance;
-	}
+    public ArrowAdapterStreamReader(string path, ArrowReaderOptions options, ILogger? logger = null)
+    {
+        _path = path;
+        _options = options;
+        _logger = logger ?? NullLogger.Instance;
+    }
 
-	public async Task OpenAsync(CancellationToken ct = default)
-	{
-		if (string.IsNullOrEmpty(_path) || _path == "-")
-		{
-			if (!Console.IsInputRedirected)
-			{
-				throw new InvalidOperationException("Structure input (STDIN) is not redirected.");
-			}
-			_inputStream = Console.OpenStandardInput();
+    public async Task OpenAsync(CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(_path) || _path == "-")
+        {
+            if (!Console.IsInputRedirected)
+            {
+                throw new InvalidOperationException("Structure input (STDIN) is not redirected.");
+            }
+            _inputStream = Console.OpenStandardInput();
             _isIpcFile = false;
-		}
-		else if (ArrowPipeLocation.TryParse(_path, out var pipeName))
-		{
-			var client = new NamedPipeClientStream(".", pipeName, PipeDirection.In, PipeOptions.Asynchronous);
-			try
-			{
-				await client.ConnectAsync((int)PipeConnectTimeout.TotalMilliseconds, ct);
-			}
-			catch (TimeoutException ex)
-			{
-				client.Dispose();
-				throw new TimeoutException(
-					$"Arrow reader could not connect to named pipe '{pipeName}' within {PipeConnectTimeout.TotalSeconds:F0}s. " +
-					"Nothing was listening as a server on it.", ex);
-			}
-			_inputStream = client;
-			_isIpcFile = false;
-		}
-		else
-		{
-			if (!File.Exists(_path))
-				throw new FileNotFoundException($"Arrow file not found: {_path}", _path);
+        }
+        else if (ArrowPipeLocation.TryParse(_path, out var pipeName))
+        {
+            var client = new NamedPipeClientStream(".", pipeName, PipeDirection.In, PipeOptions.Asynchronous);
+            try
+            {
+                await client.ConnectAsync((int)PipeConnectTimeout.TotalMilliseconds, ct);
+            }
+            catch (TimeoutException ex)
+            {
+                client.Dispose();
+                throw new TimeoutException(
+                    $"Arrow reader could not connect to named pipe '{pipeName}' within {PipeConnectTimeout.TotalSeconds:F0}s. " +
+                    "Nothing was listening as a server on it.", ex);
+            }
+            _inputStream = client;
+            _isIpcFile = false;
+        }
+        else
+        {
+            if (!File.Exists(_path))
+                throw new FileNotFoundException($"Arrow file not found: {_path}", _path);
 
-			_inputStream = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, FileOptions.Asynchronous);
+            _inputStream = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, FileOptions.Asynchronous);
 
             _isIpcFile = _path.EndsWith(".arrow", StringComparison.OrdinalIgnoreCase) ||
                          _path.EndsWith(".arrowfile", StringComparison.OrdinalIgnoreCase);
-		}
+        }
 
         if (_isIpcFile)
         {
@@ -90,7 +90,7 @@ public class ArrowAdapterStreamReader : IColumnarStreamReader
             var schema = _arrowReader.Schema;
             Columns = MapSchema(schema);
         }
-	}
+    }
 
     /// <summary>
     /// The one loop that pulls batches out of whichever reader was opened, and the one place that
@@ -157,10 +157,10 @@ public class ArrowAdapterStreamReader : IColumnarStreamReader
         => ArrowSchemaFactory.ToPipeColumns(schema).ToList();
 
 
-	public async IAsyncEnumerable<ReadOnlyMemory<object?[]>> ReadBatchesAsync(
-		int batchSize,
-		[System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
-	{
+    public async IAsyncEnumerable<ReadOnlyMemory<object?[]>> ReadBatchesAsync(
+        int batchSize,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
         // Row-mode consumer: FlattenBatch fully materialises each row into object?[], so the batch
         // can be disposed here once its rows have been yielded.
         await foreach (var batch in ReadAllAsync(ct))
@@ -173,15 +173,15 @@ public class ArrowAdapterStreamReader : IColumnarStreamReader
                 }
             }
         }
-	}
+    }
 
 
-	public async ValueTask DisposeAsync()
-	{
-		if (_inputStream != null)
-		{
-			await _inputStream.DisposeAsync();
-			_inputStream = null;
-		}
-	}
+    public async ValueTask DisposeAsync()
+    {
+        if (_inputStream != null)
+        {
+            await _inputStream.DisposeAsync();
+            _inputStream = null;
+        }
+    }
 }

@@ -17,380 +17,380 @@ namespace DtPipe.Tests;
 [Collection("Docker Integration Tests")]
 public class OracleIntegrationTests : IAsyncLifetime
 {
-	private readonly DtPipe.Tests.Fixtures.GlobalDatabaseFixture _fixture;
-	private string? _connectionString;
+    private readonly DtPipe.Tests.Fixtures.GlobalDatabaseFixture _fixture;
+    private string? _connectionString;
 
-	public OracleIntegrationTests(DtPipe.Tests.Fixtures.GlobalDatabaseFixture fixture)
-	{
-		_fixture = fixture;
-	}
+    public OracleIntegrationTests(DtPipe.Tests.Fixtures.GlobalDatabaseFixture fixture)
+    {
+        _fixture = fixture;
+    }
 
-	public async ValueTask InitializeAsync()
-	{
-		_connectionString = _fixture.OracleConnectionString;
+    public async ValueTask InitializeAsync()
+    {
+        _connectionString = _fixture.OracleConnectionString;
 
-		if (_connectionString is null) return;
+        if (_connectionString is null) return;
 
-		await using var connection = new OracleConnection(_connectionString);
-		await connection.OpenAsync();
+        await using var connection = new OracleConnection(_connectionString);
+        await connection.OpenAsync();
 
-		await using var cmd = connection.CreateCommand();
-		cmd.CommandText = "BEGIN EXECUTE IMMEDIATE 'DROP TABLE test_data PURGE'; EXCEPTION WHEN OTHERS THEN IF SQLCODE != -942 THEN RAISE; END IF; END;";
-		await cmd.ExecuteNonQueryAsync();
-		cmd.CommandText = TestDataSeeder.GenerateTableDDL(connection, "test_data");
-		await cmd.ExecuteNonQueryAsync();
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = "BEGIN EXECUTE IMMEDIATE 'DROP TABLE test_data PURGE'; EXCEPTION WHEN OTHERS THEN IF SQLCODE != -942 THEN RAISE; END IF; END;";
+        await cmd.ExecuteNonQueryAsync();
+        cmd.CommandText = TestDataSeeder.GenerateTableDDL(connection, "test_data");
+        await cmd.ExecuteNonQueryAsync();
 
-		await TestDataSeeder.SeedAsync(connection, "test_data");
-	}
+        await TestDataSeeder.SeedAsync(connection, "test_data");
+    }
 
-	public ValueTask DisposeAsync()
-	{
-		return ValueTask.CompletedTask;
-	}
+    public ValueTask DisposeAsync()
+    {
+        return ValueTask.CompletedTask;
+    }
 
-	[Fact]
-	public async Task OracleReader_ReadsAllRows()
-	{
-		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
+    [Fact]
+    public async Task OracleReader_ReadsAllRows()
+    {
+        if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
-		// Arrange
-		var connectionString = _connectionString;
+        // Arrange
+        var connectionString = _connectionString;
 
-		// Act
-		await using var reader = new OracleReader(
-			connectionString,
-			"SELECT id, name FROM test_data ORDER BY id",
-			new OracleReaderOptions { FetchSize = 65536 });
+        // Act
+        await using var reader = new OracleReader(
+            connectionString,
+            "SELECT id, name FROM test_data ORDER BY id",
+            new OracleReaderOptions { FetchSize = 65536 });
 
-		await reader.OpenAsync(TestContext.Current.CancellationToken);
+        await reader.OpenAsync(TestContext.Current.CancellationToken);
 
-		var rows = new List<object?[]>();
-		await foreach (var batch in reader.ReadBatchesAsync(100, TestContext.Current.CancellationToken))
-		{
-			for (int i = 0; i < batch.Length; i++)
-			{
-				rows.Add(batch.Span[i]);
-			}
-		}
+        var rows = new List<object?[]>();
+        await foreach (var batch in reader.ReadBatchesAsync(100, TestContext.Current.CancellationToken))
+        {
+            for (int i = 0; i < batch.Length; i++)
+            {
+                rows.Add(batch.Span[i]);
+            }
+        }
 
-		// Assert
-		Assert.Equal(4, rows.Count);
-		Assert.Equal(2, reader.Columns!.Count);
-		Assert.Equal("ID", reader.Columns[0].Name);
-	}
+        // Assert
+        Assert.Equal(4, rows.Count);
+        Assert.Equal(2, reader.Columns!.Count);
+        Assert.Equal("ID", reader.Columns[0].Name);
+    }
 
-	[Fact]
-	public async Task ParquetWriter_CreatesValidFile()
-	{
-		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
+    [Fact]
+    public async Task ParquetWriter_CreatesValidFile()
+    {
+        if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
-		// Arrange
-		var connectionString = _connectionString;
-		var outputPath = Path.Combine(Path.GetTempPath(), $"test_{Guid.NewGuid()}.parquet");
+        // Arrange
+        var connectionString = _connectionString;
+        var outputPath = Path.Combine(Path.GetTempPath(), $"test_{Guid.NewGuid()}.parquet");
 
-		try
-		{
-			// Act
-			await using var reader = new OracleReader(
-				connectionString,
-				"SELECT id, name FROM test_data ORDER BY id",
-				new OracleReaderOptions { FetchSize = 65536 });
+        try
+        {
+            // Act
+            await using var reader = new OracleReader(
+                connectionString,
+                "SELECT id, name FROM test_data ORDER BY id",
+                new OracleReaderOptions { FetchSize = 65536 });
 
-			await reader.OpenAsync(TestContext.Current.CancellationToken);
+            await reader.OpenAsync(TestContext.Current.CancellationToken);
 
-			await using var writer = new ParquetDataWriter(outputPath);
-			await writer.InitializeAsync(reader.Columns!, TestContext.Current.CancellationToken);
+            await using var writer = new ParquetDataWriter(outputPath);
+            await writer.InitializeAsync(reader.Columns!, TestContext.Current.CancellationToken);
 
-			var batch = new List<object?[]>();
-			await foreach (var batchChunk in reader.ReadBatchesAsync(100, TestContext.Current.CancellationToken))
-			{
-				for (int i = 0; i < batchChunk.Length; i++)
-				{
-					batch.Add(batchChunk.Span[i]);
-				}
-			}
+            var batch = new List<object?[]>();
+            await foreach (var batchChunk in reader.ReadBatchesAsync(100, TestContext.Current.CancellationToken))
+            {
+                for (int i = 0; i < batchChunk.Length; i++)
+                {
+                    batch.Add(batchChunk.Span[i]);
+                }
+            }
 
-			await writer.WriteRecordBatchAsync(ArrowTestHelper.ToRecordBatch(batch, reader.Columns!), TestContext.Current.CancellationToken);
-			await writer.CompleteAsync(TestContext.Current.CancellationToken);
+            await writer.WriteRecordBatchAsync(ArrowTestHelper.ToRecordBatch(batch, reader.Columns!), TestContext.Current.CancellationToken);
+            await writer.CompleteAsync(TestContext.Current.CancellationToken);
 
-			// Assert
-			Assert.True(File.Exists(outputPath));
-			Assert.True(new FileInfo(outputPath).Length > 0);
-		}
-		finally
-		{
-			if (File.Exists(outputPath))
-				File.Delete(outputPath);
-		}
-	}
+            // Assert
+            Assert.True(File.Exists(outputPath));
+            Assert.True(new FileInfo(outputPath).Length > 0);
+        }
+        finally
+        {
+            if (File.Exists(outputPath))
+                File.Delete(outputPath);
+        }
+    }
 
-	[Fact]
-	public async Task CsvWriter_CreatesValidFile()
-	{
-		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
+    [Fact]
+    public async Task CsvWriter_CreatesValidFile()
+    {
+        if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
-		// Arrange
-		var connectionString = _connectionString;
-		var outputPath = Path.Combine(Path.GetTempPath(), $"test_{Guid.NewGuid()}.csv");
+        // Arrange
+        var connectionString = _connectionString;
+        var outputPath = Path.Combine(Path.GetTempPath(), $"test_{Guid.NewGuid()}.csv");
 
-		try
-		{
-			// Act - write data
-			await using (var reader = new OracleReader(
-				connectionString,
-				"SELECT id, name FROM test_data ORDER BY id",
-				new OracleReaderOptions { FetchSize = 65536 }))
-			{
-				await reader.OpenAsync(TestContext.Current.CancellationToken);
+        try
+        {
+            // Act - write data
+            await using (var reader = new OracleReader(
+                connectionString,
+                "SELECT id, name FROM test_data ORDER BY id",
+                new OracleReaderOptions { FetchSize = 65536 }))
+            {
+                await reader.OpenAsync(TestContext.Current.CancellationToken);
 
-				await using (var writer = new CsvDataWriter(outputPath))
-				{
-					await writer.InitializeAsync(reader.Columns!, TestContext.Current.CancellationToken);
+                await using (var writer = new CsvDataWriter(outputPath))
+                {
+                    await writer.InitializeAsync(reader.Columns!, TestContext.Current.CancellationToken);
 
-					var batch = new List<object?[]>();
-					await foreach (var batchChunk in reader.ReadBatchesAsync(100, TestContext.Current.CancellationToken))
-					{
-						for (int i = 0; i < batchChunk.Length; i++)
-						{
-							batch.Add(batchChunk.Span[i]);
-						}
-					}
+                    var batch = new List<object?[]>();
+                    await foreach (var batchChunk in reader.ReadBatchesAsync(100, TestContext.Current.CancellationToken))
+                    {
+                        for (int i = 0; i < batchChunk.Length; i++)
+                        {
+                            batch.Add(batchChunk.Span[i]);
+                        }
+                    }
 
-					await writer.WriteBatchAsync(batch, TestContext.Current.CancellationToken);
-					await writer.CompleteAsync(TestContext.Current.CancellationToken);
-				}
-			}
+                    await writer.WriteBatchAsync(batch, TestContext.Current.CancellationToken);
+                    await writer.CompleteAsync(TestContext.Current.CancellationToken);
+                }
+            }
 
-			// Assert - after writer is disposed
-			Assert.True(File.Exists(outputPath));
-			var lines = await File.ReadAllLinesAsync(outputPath, TestContext.Current.CancellationToken);
-			Assert.Equal(5, lines.Length); // Header + 4 data rows
-		}
-		finally
-		{
-			if (File.Exists(outputPath))
-				File.Delete(outputPath);
-		}
-	}
+            // Assert - after writer is disposed
+            Assert.True(File.Exists(outputPath));
+            var lines = await File.ReadAllLinesAsync(outputPath, TestContext.Current.CancellationToken);
+            Assert.Equal(5, lines.Length); // Header + 4 data rows
+        }
+        finally
+        {
+            if (File.Exists(outputPath))
+                File.Delete(outputPath);
+        }
+    }
 
-	[Fact]
-	public async Task OracleDataWriter_BulkCopy_FromDuckDb_ToOracle()
-	{
-		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
+    [Fact]
+    public async Task OracleDataWriter_BulkCopy_FromDuckDb_ToOracle()
+    {
+        if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
-		// Arrange: Create in-memory DuckDB source with test data
-		var duckDbPath = Path.Combine(Path.GetTempPath(), $"test_source_{Guid.NewGuid()}.duckdb");
-		var duckConnectionString = $"Data Source={duckDbPath}";
+        // Arrange: Create in-memory DuckDB source with test data
+        var duckDbPath = Path.Combine(Path.GetTempPath(), $"test_source_{Guid.NewGuid()}.duckdb");
+        var duckConnectionString = $"Data Source={duckDbPath}";
 
-		try
-		{
-			// Seed DuckDB source
-			await using (var duckConnection = new DuckDB.NET.Data.DuckDBConnection(duckConnectionString))
-			{
-				await duckConnection.OpenAsync(TestContext.Current.CancellationToken);
-				await using var cmd = duckConnection.CreateCommand();
-				cmd.CommandText = TestDataSeeder.GenerateTableDDL(duckConnection, "source_data");
-				await cmd.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
-				await TestDataSeeder.SeedAsync(duckConnection, "source_data");
-			}
+        try
+        {
+            // Seed DuckDB source
+            await using (var duckConnection = new DuckDB.NET.Data.DuckDBConnection(duckConnectionString))
+            {
+                await duckConnection.OpenAsync(TestContext.Current.CancellationToken);
+                await using var cmd = duckConnection.CreateCommand();
+                cmd.CommandText = TestDataSeeder.GenerateTableDDL(duckConnection, "source_data");
+                await cmd.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+                await TestDataSeeder.SeedAsync(duckConnection, "source_data");
+            }
 
-			// Act: Read from DuckDB, write to Oracle
-			var targetTable = $"TARGET_{Guid.NewGuid():N}".Substring(0, 20).ToUpperInvariant();
+            // Act: Read from DuckDB, write to Oracle
+            var targetTable = $"TARGET_{Guid.NewGuid():N}".Substring(0, 20).ToUpperInvariant();
 
-			await using var reader = new DuckDataSourceReader(
-				duckConnectionString,
-				"SELECT Id, Name, Score FROM source_data ORDER BY Id",
-				new DuckDbReaderOptions());
+            await using var reader = new DuckDataSourceReader(
+                duckConnectionString,
+                "SELECT Id, Name, Score FROM source_data ORDER BY Id",
+                new DuckDbReaderOptions());
 
-			await reader.OpenAsync(TestContext.Current.CancellationToken);
-			var columns = reader.Columns!;
+            await reader.OpenAsync(TestContext.Current.CancellationToken);
+            var columns = reader.Columns!;
 
-			var writerOptions = new OracleWriterOptions
-			{
-				Table = targetTable,
-				Strategy = OracleWriteStrategy.Recreate
-			};
+            var writerOptions = new OracleWriterOptions
+            {
+                Table = targetTable,
+                Strategy = OracleWriteStrategy.Recreate
+            };
 
-			await using var writer = new OracleDataWriter(_connectionString, writerOptions, Microsoft.Extensions.Logging.Abstractions.NullLogger<OracleDataWriter>.Instance, OracleTypeConverter.Instance);
-			await writer.InitializeAsync(columns, TestContext.Current.CancellationToken);
+            await using var writer = new OracleDataWriter(_connectionString, writerOptions, Microsoft.Extensions.Logging.Abstractions.NullLogger<OracleDataWriter>.Instance, OracleTypeConverter.Instance);
+            await writer.InitializeAsync(columns, TestContext.Current.CancellationToken);
 
-			// Read all rows and write in batches
-			await foreach (var batch in reader.ReadBatchesAsync(100, TestContext.Current.CancellationToken))
-			{
-				await writer.WriteBatchAsync(batch.ToArray(), TestContext.Current.CancellationToken);
-			}
+            // Read all rows and write in batches
+            await foreach (var batch in reader.ReadBatchesAsync(100, TestContext.Current.CancellationToken))
+            {
+                await writer.WriteBatchAsync(batch.ToArray(), TestContext.Current.CancellationToken);
+            }
 
-			await writer.CompleteAsync(TestContext.Current.CancellationToken);
+            await writer.CompleteAsync(TestContext.Current.CancellationToken);
 
-			// Assert: Verify data in Oracle
-			await using var verifyConnection = new OracleConnection(_connectionString);
-			await verifyConnection.OpenAsync(TestContext.Current.CancellationToken);
+            // Assert: Verify data in Oracle
+            await using var verifyConnection = new OracleConnection(_connectionString);
+            await verifyConnection.OpenAsync(TestContext.Current.CancellationToken);
 
-			await using var countCmd = verifyConnection.CreateCommand();
-			countCmd.CommandText = $"SELECT COUNT(*) FROM \"{targetTable}\"";
-			var count = Convert.ToInt32(await countCmd.ExecuteScalarAsync(TestContext.Current.CancellationToken));
-			Assert.Equal(4, count); // 4 rows from test-data.json
+            await using var countCmd = verifyConnection.CreateCommand();
+            countCmd.CommandText = $"SELECT COUNT(*) FROM \"{targetTable}\"";
+            var count = Convert.ToInt32(await countCmd.ExecuteScalarAsync(TestContext.Current.CancellationToken));
+            Assert.Equal(4, count); // 4 rows from test-data.json
 
-			// Verify sample data integrity — unquoted, which is the point. The source columns are
-			// Id, Name and Score; Oracle folds an unquoted identifier up, so they land as ID, NAME
-			// and SCORE and this query reaches them the way SQL*Plus or any other tool would.
-			// Quoting them here would pass only while dtpipe created "Id", a column nothing but
-			// dtpipe could address.
-			await using var selectCmd = verifyConnection.CreateCommand();
-			selectCmd.CommandText = $"SELECT NAME, SCORE FROM \"{targetTable}\" WHERE ID = 1";
-			await using var resultReader = await selectCmd.ExecuteReaderAsync(TestContext.Current.CancellationToken);
-			Assert.True(await resultReader.ReadAsync(TestContext.Current.CancellationToken));
-			Assert.Equal("Alice", resultReader.GetString(0));
-			Assert.Equal(95.50m, resultReader.GetDecimal(1));
-		}
-		finally
-		{
-			if (File.Exists(duckDbPath))
-				File.Delete(duckDbPath);
-		}
-	}
+            // Verify sample data integrity — unquoted, which is the point. The source columns are
+            // Id, Name and Score; Oracle folds an unquoted identifier up, so they land as ID, NAME
+            // and SCORE and this query reaches them the way SQL*Plus or any other tool would.
+            // Quoting them here would pass only while dtpipe created "Id", a column nothing but
+            // dtpipe could address.
+            await using var selectCmd = verifyConnection.CreateCommand();
+            selectCmd.CommandText = $"SELECT NAME, SCORE FROM \"{targetTable}\" WHERE ID = 1";
+            await using var resultReader = await selectCmd.ExecuteReaderAsync(TestContext.Current.CancellationToken);
+            Assert.True(await resultReader.ReadAsync(TestContext.Current.CancellationToken));
+            Assert.Equal("Alice", resultReader.GetString(0));
+            Assert.Equal(95.50m, resultReader.GetDecimal(1));
+        }
+        finally
+        {
+            if (File.Exists(duckDbPath))
+                File.Delete(duckDbPath);
+        }
+    }
 
-	[Fact]
-	public async Task OracleDataWriter_BulkCopy_WithDifferentColumnOrder_MapsCorrectly()
-	{
-		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
+    [Fact]
+    public async Task OracleDataWriter_BulkCopy_WithDifferentColumnOrder_MapsCorrectly()
+    {
+        if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
-		// Arrange
-		var connectionString = _connectionString;
-		var tableName = $"TEST_MAPPING_{Guid.NewGuid():N}".Substring(0, 20).ToUpperInvariant();
+        // Arrange
+        var connectionString = _connectionString;
+        var tableName = $"TEST_MAPPING_{Guid.NewGuid():N}".Substring(0, 20).ToUpperInvariant();
 
-		// 1. Manually create target table with mixed order: Name (VARCHAR), Score (NUMBER), Id (NUMBER)
-		// Source will be: Id, Name, Score
-		await using (var connection = new OracleConnection(connectionString))
-		{
-			await connection.OpenAsync();
-			using var cmd = connection.CreateCommand();
-			cmd.CommandText = $"BEGIN EXECUTE IMMEDIATE 'DROP TABLE {tableName}'; EXCEPTION WHEN OTHERS THEN IF SQLCODE != -942 THEN RAISE; END IF; END;";
-			await cmd.ExecuteNonQueryAsync();
-			// Oracle default is uppercase.
-			cmd.CommandText = $"CREATE TABLE {tableName} (\"Name\" VARCHAR2(100), \"Score\" NUMBER(10,2), \"Id\" NUMBER(10))";
-			await cmd.ExecuteNonQueryAsync();
-		}
+        // 1. Manually create target table with mixed order: Name (VARCHAR), Score (NUMBER), Id (NUMBER)
+        // Source will be: Id, Name, Score
+        await using (var connection = new OracleConnection(connectionString))
+        {
+            await connection.OpenAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = $"BEGIN EXECUTE IMMEDIATE 'DROP TABLE {tableName}'; EXCEPTION WHEN OTHERS THEN IF SQLCODE != -942 THEN RAISE; END IF; END;";
+            await cmd.ExecuteNonQueryAsync();
+            // Oracle default is uppercase.
+            cmd.CommandText = $"CREATE TABLE {tableName} (\"Name\" VARCHAR2(100), \"Score\" NUMBER(10,2), \"Id\" NUMBER(10))";
+            await cmd.ExecuteNonQueryAsync();
+        }
 
-		// 2. Setup Source Data
-		var columns = new List<PipeColumnInfo>
-		{
-			new("Id", typeof(int), false, true),
-			new("Name", typeof(string), true, true),
-			new("Score", typeof(decimal), false, true)
-		};
+        // 2. Setup Source Data
+        var columns = new List<PipeColumnInfo>
+        {
+            new("Id", typeof(int), false, true),
+            new("Name", typeof(string), true, true),
+            new("Score", typeof(decimal), false, true)
+        };
 
-		var row1 = new object?[] { 1, "Alice", 95.5m };
-		var row2 = new object?[] { 2, "Bob", 80.0m };
-		var batch = new List<object?[]> { row1, row2 };
+        var row1 = new object?[] { 1, "Alice", 95.5m };
+        var row2 = new object?[] { 2, "Bob", 80.0m };
+        var batch = new List<object?[]> { row1, row2 };
 
-		var writerOptions = new OracleWriterOptions
-		{
-			Table = tableName,
-			Strategy = OracleWriteStrategy.Truncate, // Or Append
-		};
+        var writerOptions = new OracleWriterOptions
+        {
+            Table = tableName,
+            Strategy = OracleWriteStrategy.Truncate, // Or Append
+        };
 
-		// Act
-		// Use NullLogger to avoid test output noise
-		await using var writer = new OracleDataWriter(connectionString, writerOptions, Microsoft.Extensions.Logging.Abstractions.NullLogger<OracleDataWriter>.Instance, OracleTypeConverter.Instance);
-		await writer.InitializeAsync(columns, TestContext.Current.CancellationToken);
-		await writer.WriteBatchAsync(batch, TestContext.Current.CancellationToken);
-		await writer.CompleteAsync(TestContext.Current.CancellationToken);
+        // Act
+        // Use NullLogger to avoid test output noise
+        await using var writer = new OracleDataWriter(connectionString, writerOptions, Microsoft.Extensions.Logging.Abstractions.NullLogger<OracleDataWriter>.Instance, OracleTypeConverter.Instance);
+        await writer.InitializeAsync(columns, TestContext.Current.CancellationToken);
+        await writer.WriteBatchAsync(batch, TestContext.Current.CancellationToken);
+        await writer.CompleteAsync(TestContext.Current.CancellationToken);
 
-		// Assert
-		await using (var connection = new OracleConnection(connectionString))
-		{
-			await connection.OpenAsync();
-			using var cmd = connection.CreateCommand();
-			cmd.CommandText = $"SELECT \"Id\", \"Name\", \"Score\" FROM {tableName} ORDER BY \"Id\"";
-			using var reader = await cmd.ExecuteReaderAsync();
+        // Assert
+        await using (var connection = new OracleConnection(connectionString))
+        {
+            await connection.OpenAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = $"SELECT \"Id\", \"Name\", \"Score\" FROM {tableName} ORDER BY \"Id\"";
+            using var reader = await cmd.ExecuteReaderAsync();
 
-			Assert.True(await reader.ReadAsync());
-			Assert.Equal(1, Convert.ToInt32(reader["Id"])); // Should be 1, not "Alice" or 95.5
-			Assert.Equal("Alice", reader["Name"]);
-			Assert.Equal(95.5m, Convert.ToDecimal(reader["Score"]));
+            Assert.True(await reader.ReadAsync());
+            Assert.Equal(1, Convert.ToInt32(reader["Id"])); // Should be 1, not "Alice" or 95.5
+            Assert.Equal("Alice", reader["Name"]);
+            Assert.Equal(95.5m, Convert.ToDecimal(reader["Score"]));
 
-			Assert.True(await reader.ReadAsync());
-			Assert.Equal(2, Convert.ToInt32(reader["Id"]));
-			Assert.Equal("Bob", reader["Name"]);
-			Assert.Equal(80.0m, Convert.ToDecimal(reader["Score"]));
-		}
-	}
+            Assert.True(await reader.ReadAsync());
+            Assert.Equal(2, Convert.ToInt32(reader["Id"]));
+            Assert.Equal("Bob", reader["Name"]);
+            Assert.Equal(80.0m, Convert.ToDecimal(reader["Score"]));
+        }
+    }
 
-	[Fact]
-	public async Task OracleDataWriter_Recreate_DropsAndCreatesTable()
-	{
-		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
+    [Fact]
+    public async Task OracleDataWriter_Recreate_DropsAndCreatesTable()
+    {
+        if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
-		// Arrange
-		var connectionString = _connectionString;
-		var tableName = ($"TEST_RECREATE_{Guid.NewGuid():N}").Substring(0, 20).ToUpperInvariant();
+        // Arrange
+        var connectionString = _connectionString;
+        var tableName = ($"TEST_RECREATE_{Guid.NewGuid():N}").Substring(0, 20).ToUpperInvariant();
 
-		// 1. Manually create table with incompatible schema (Name as NUMBER) to prove drop happened
-		await using (var connection = new OracleConnection(connectionString))
-		{
-			await connection.OpenAsync();
-			using var cmd = connection.CreateCommand();
-			cmd.CommandText = $"BEGIN EXECUTE IMMEDIATE 'DROP TABLE {tableName}'; EXCEPTION WHEN OTHERS THEN IF SQLCODE != -942 THEN RAISE; END IF; END;";
-			await cmd.ExecuteNonQueryAsync();
-			cmd.CommandText = $"CREATE TABLE {tableName} (\"Id\" NUMBER(10), \"Name\" VARCHAR2(100))";
-			await cmd.ExecuteNonQueryAsync();
-			cmd.CommandText = $"INSERT INTO {tableName} VALUES (1, 100)";
-			await cmd.ExecuteNonQueryAsync();
-		}
+        // 1. Manually create table with incompatible schema (Name as NUMBER) to prove drop happened
+        await using (var connection = new OracleConnection(connectionString))
+        {
+            await connection.OpenAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = $"BEGIN EXECUTE IMMEDIATE 'DROP TABLE {tableName}'; EXCEPTION WHEN OTHERS THEN IF SQLCODE != -942 THEN RAISE; END IF; END;";
+            await cmd.ExecuteNonQueryAsync();
+            cmd.CommandText = $"CREATE TABLE {tableName} (\"Id\" NUMBER(10), \"Name\" VARCHAR2(100))";
+            await cmd.ExecuteNonQueryAsync();
+            cmd.CommandText = $"INSERT INTO {tableName} VALUES (1, 100)";
+            await cmd.ExecuteNonQueryAsync();
+        }
 
-		var writerOptions = new OracleWriterOptions
-		{
-			Table = tableName,
-			Strategy = OracleWriteStrategy.Recreate
-		};
+        var writerOptions = new OracleWriterOptions
+        {
+            Table = tableName,
+            Strategy = OracleWriteStrategy.Recreate
+        };
 
-		// Source defines Name as String
-		var columns = new List<PipeColumnInfo> { new("Id", typeof(int), false), new("Name", typeof(string), true) };
-		var rows = new List<object?[]> { new object?[] { 1, "NewData" } };
+        // Source defines Name as String
+        var columns = new List<PipeColumnInfo> { new("Id", typeof(int), false), new("Name", typeof(string), true) };
+        var rows = new List<object?[]> { new object?[] { 1, "NewData" } };
 
-		// Act
-		await using var writer = new OracleDataWriter(connectionString, writerOptions, Microsoft.Extensions.Logging.Abstractions.NullLogger<OracleDataWriter>.Instance, OracleTypeConverter.Instance);
-		await writer.InitializeAsync(columns, TestContext.Current.CancellationToken); // Should Drop and Recreate
-		await writer.WriteBatchAsync(rows, TestContext.Current.CancellationToken);
-		await writer.CompleteAsync(TestContext.Current.CancellationToken);
+        // Act
+        await using var writer = new OracleDataWriter(connectionString, writerOptions, Microsoft.Extensions.Logging.Abstractions.NullLogger<OracleDataWriter>.Instance, OracleTypeConverter.Instance);
+        await writer.InitializeAsync(columns, TestContext.Current.CancellationToken); // Should Drop and Recreate
+        await writer.WriteBatchAsync(rows, TestContext.Current.CancellationToken);
+        await writer.CompleteAsync(TestContext.Current.CancellationToken);
 
-		// Assert
-		await using (var connection = new OracleConnection(connectionString))
-		{
-			await connection.OpenAsync();
-			using var cmd = connection.CreateCommand();
-			cmd.CommandText = $"SELECT * FROM {tableName}";
-			using (var reader = await cmd.ExecuteReaderAsync())
-			{
-				Assert.True(await reader.ReadAsync());
-				Assert.Equal("NewData", reader.GetString(1)); // Name is the second column (Id, Name)
-			}
-		}
-	}
+        // Assert
+        await using (var connection = new OracleConnection(connectionString))
+        {
+            await connection.OpenAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = $"SELECT * FROM {tableName}";
+            using (var reader = await cmd.ExecuteReaderAsync())
+            {
+                Assert.True(await reader.ReadAsync());
+                Assert.Equal("NewData", reader.GetString(1)); // Name is the second column (Id, Name)
+            }
+        }
+    }
 
-	[Fact]
-	public async Task OracleDataWriter_Recreate_RebuildsFromTheSourceSchema()
-	{
-		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
+    [Fact]
+    public async Task OracleDataWriter_Recreate_RebuildsFromTheSourceSchema()
+    {
+        if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
-		var connectionString = _connectionString;
-		// Use unquoted name to verify case handling (Oracle uppercases this)
-		var tableNamePrefix = "TEST_REC_P_";
-		var tableNameRaw = $"{tableNamePrefix}{Guid.NewGuid():N}".Substring(0, 25);
+        var connectionString = _connectionString;
+        // Use unquoted name to verify case handling (Oracle uppercases this)
+        var tableNamePrefix = "TEST_REC_P_";
+        var tableNameRaw = $"{tableNamePrefix}{Guid.NewGuid():N}".Substring(0, 25);
 
-		// 1. Manually create table with specific structure AND data
-		// We use a mix of quoted and unquoted identifiers to test robustness
-		// - Code: CHAR(10) - Fixed length, unquoted (becomes CODE)
-		// - "MixedCase": VARCHAR2(50) - Quoted, specific case
-		// - Score: NUMBER(7,3) - Specific precision/scale
-		// - Flag: CHAR(1) - Boolean-ish
-		// - GenericNum: NUMBER - No precision (should be preserved as such)
-		await using (var connection = new OracleConnection(connectionString))
-		{
-			await connection.OpenAsync();
-			using var cmd = connection.CreateCommand();
-			cmd.CommandText = $@"
+        // 1. Manually create table with specific structure AND data
+        // We use a mix of quoted and unquoted identifiers to test robustness
+        // - Code: CHAR(10) - Fixed length, unquoted (becomes CODE)
+        // - "MixedCase": VARCHAR2(50) - Quoted, specific case
+        // - Score: NUMBER(7,3) - Specific precision/scale
+        // - Flag: CHAR(1) - Boolean-ish
+        // - GenericNum: NUMBER - No precision (should be preserved as such)
+        await using (var connection = new OracleConnection(connectionString))
+        {
+            await connection.OpenAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = $@"
                 CREATE TABLE {tableNameRaw} (
                     Code CHAR(10) NOT NULL,
                     ""MixedCase"" VARCHAR2(50),
@@ -400,262 +400,262 @@ public class OracleIntegrationTests : IAsyncLifetime
                     Extra NUMBER(5),
                     PRIMARY KEY (Code)
                 )";
-			await cmd.ExecuteNonQueryAsync();
+            await cmd.ExecuteNonQueryAsync();
 
-			// Insert initial data
-			cmd.CommandText = $"INSERT INTO {tableNameRaw} (Code, \"MixedCase\", Score, Flag, GenericNum, Extra) VALUES ('OLD', 'OldVal', 10.123, 'Y', 12345, 5)";
-			await cmd.ExecuteNonQueryAsync();
-		}
+            // Insert initial data
+            cmd.CommandText = $"INSERT INTO {tableNameRaw} (Code, \"MixedCase\", Score, Flag, GenericNum, Extra) VALUES ('OLD', 'OldVal', 10.123, 'Y', 12345, 5)";
+            await cmd.ExecuteNonQueryAsync();
+        }
 
-		var writerOptions = new OracleWriterOptions
-		{
-			Table = tableNameRaw, // Pass unquoted, writer should resolve it to TEST_REC_P_...
-			Strategy = OracleWriteStrategy.Recreate
-		};
+        var writerOptions = new OracleWriterOptions
+        {
+            Table = tableNameRaw, // Pass unquoted, writer should resolve it to TEST_REC_P_...
+            Strategy = OracleWriteStrategy.Recreate
+        };
 
-		// Source defines columns with simple types: the rebuilt table takes exactly these, and the old table's extra column is dropped
-		var columns = new List<PipeColumnInfo>
-		{
-			new("Code", typeof(string), true),
-			new("MixedCase", typeof(string), true),
-			new("Score", typeof(decimal), false),
-			new("Flag", typeof(string), true), // Source says string, target is CHAR(1)
+        // Source defines columns with simple types: the rebuilt table takes exactly these, and the old table's extra column is dropped
+        var columns = new List<PipeColumnInfo>
+        {
+            new("Code", typeof(string), true),
+            new("MixedCase", typeof(string), true),
+            new("Score", typeof(decimal), false),
+            new("Flag", typeof(string), true), // Source says string, target is CHAR(1)
             new("GenericNum", typeof(decimal), true)
-		};
+        };
 
-		var rows = new List<object?[]> { new object?[] { "NEW", "NewVal", 99.999m, "N", 67890m } };
+        var rows = new List<object?[]> { new object?[] { "NEW", "NewVal", 99.999m, "N", 67890m } };
 
-		// Act
-		// Recreate drops the table and builds it from the source columns
-		await using var writer = new OracleDataWriter(connectionString, writerOptions, Microsoft.Extensions.Logging.Abstractions.NullLogger<OracleDataWriter>.Instance, OracleTypeConverter.Instance);
-		await writer.InitializeAsync(columns, TestContext.Current.CancellationToken);
-		await writer.WriteBatchAsync(rows, TestContext.Current.CancellationToken);
-		await writer.CompleteAsync(TestContext.Current.CancellationToken);
+        // Act
+        // Recreate drops the table and builds it from the source columns
+        await using var writer = new OracleDataWriter(connectionString, writerOptions, Microsoft.Extensions.Logging.Abstractions.NullLogger<OracleDataWriter>.Instance, OracleTypeConverter.Instance);
+        await writer.InitializeAsync(columns, TestContext.Current.CancellationToken);
+        await writer.WriteBatchAsync(rows, TestContext.Current.CancellationToken);
+        await writer.CompleteAsync(TestContext.Current.CancellationToken);
 
-		// Assert
-		// Inspect table structure to verify it was rebuilt from the source, not from the old table
-		await using (var connection = new OracleConnection(connectionString))
-		{
-			await connection.OpenAsync();
+        // Assert
+        // Inspect table structure to verify it was rebuilt from the source, not from the old table
+        await using (var connection = new OracleConnection(connectionString))
+        {
+            await connection.OpenAsync();
 
-			// Check Data
-			using var cmd = connection.CreateCommand();
-			cmd.CommandText = $"SELECT Code, MixedCase, Score, Flag, GenericNum FROM {tableNameRaw}";
-			using (var reader = await cmd.ExecuteReaderAsync())
-			{
-				Assert.True(await reader.ReadAsync());
-				Assert.Equal("NEW", reader.GetString(0)); // the source says string, not CHAR(10)
-				Assert.Equal("NewVal", reader.GetString(1));
-				Assert.Equal(99.999m, reader.GetDecimal(2));
-				Assert.Equal("N", reader.GetString(3));
-				Assert.Equal(67890m, reader.GetDecimal(4));
-			}
+            // Check Data
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = $"SELECT Code, MixedCase, Score, Flag, GenericNum FROM {tableNameRaw}";
+            using (var reader = await cmd.ExecuteReaderAsync())
+            {
+                Assert.True(await reader.ReadAsync());
+                Assert.Equal("NEW", reader.GetString(0)); // the source says string, not CHAR(10)
+                Assert.Equal("NewVal", reader.GetString(1));
+                Assert.Equal(99.999m, reader.GetDecimal(2));
+                Assert.Equal("N", reader.GetString(3));
+                Assert.Equal(67890m, reader.GetDecimal(4));
+            }
 
-			// Check Metadata using Oracle system views
-			// Note: USER_TAB_COLUMNS stores names in UPPERCASE unless quoted during creation
-			using var meta = connection.CreateCommand();
-			meta.CommandText = $"SELECT COLUMN_NAME, DATA_TYPE FROM USER_TAB_COLUMNS WHERE TABLE_NAME = UPPER('{tableNameRaw}')";
-			var types = new Dictionary<string, string>();
-			using (var r = await meta.ExecuteReaderAsync())
-			{
-				while (await r.ReadAsync())
-					types[r.GetString(0)] = r.GetString(1);
-			}
+            // Check Metadata using Oracle system views
+            // Note: USER_TAB_COLUMNS stores names in UPPERCASE unless quoted during creation
+            using var meta = connection.CreateCommand();
+            meta.CommandText = $"SELECT COLUMN_NAME, DATA_TYPE FROM USER_TAB_COLUMNS WHERE TABLE_NAME = UPPER('{tableNameRaw}')";
+            var types = new Dictionary<string, string>();
+            using (var r = await meta.ExecuteReaderAsync())
+            {
+                while (await r.ReadAsync())
+                    types[r.GetString(0)] = r.GetString(1);
+            }
 
-			// Names are folded the way the engine folds them (the old quoted "MixedCase" is now MIXEDCASE),
-			// the column the source lacks is gone, and no native type survives.
-			Assert.Equal(new[] { "CODE", "FLAG", "GENERICNUM", "MIXEDCASE", "SCORE" }, types.Keys.OrderBy(k => k, StringComparer.Ordinal).ToArray());
-			Assert.NotEqual("CHAR", types["CODE"]);
-			Assert.NotEqual("CHAR", types["FLAG"]);
-		}
-	}
+            // Names are folded the way the engine folds them (the old quoted "MixedCase" is now MIXEDCASE),
+            // the column the source lacks is gone, and no native type survives.
+            Assert.Equal(new[] { "CODE", "FLAG", "GENERICNUM", "MIXEDCASE", "SCORE" }, types.Keys.OrderBy(k => k, StringComparer.Ordinal).ToArray());
+            Assert.NotEqual("CHAR", types["CODE"]);
+            Assert.NotEqual("CHAR", types["FLAG"]);
+        }
+    }
 
-	[Fact]
-	public async Task OracleDataWriter_DeleteThenInsert_ClearsAndInserts()
-	{
-		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
+    [Fact]
+    public async Task OracleDataWriter_DeleteThenInsert_ClearsAndInserts()
+    {
+        if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
-		var connectionString = _connectionString;
-		var tableName = $"TEST_DEL_INS_{Guid.NewGuid():N}".Substring(0, 25).ToUpperInvariant();
+        var connectionString = _connectionString;
+        var tableName = $"TEST_DEL_INS_{Guid.NewGuid():N}".Substring(0, 25).ToUpperInvariant();
 
-		await using (var connection = new OracleConnection(connectionString))
-		{
-			await connection.OpenAsync();
-			using var cmd = connection.CreateCommand();
-			cmd.CommandText = $"BEGIN EXECUTE IMMEDIATE 'DROP TABLE {tableName} PURGE'; EXCEPTION WHEN OTHERS THEN IF SQLCODE != -942 THEN RAISE; END IF; END;";
-			await cmd.ExecuteNonQueryAsync();
-			cmd.CommandText = $"CREATE TABLE {tableName} (\"Id\" NUMBER(10), \"Name\" VARCHAR2(100))";
-			await cmd.ExecuteNonQueryAsync();
-			cmd.CommandText = $"INSERT INTO {tableName} VALUES (1, 'Old1')";
-			await cmd.ExecuteNonQueryAsync();
-			cmd.CommandText = $"INSERT INTO {tableName} VALUES (2, 'Old2')";
-			await cmd.ExecuteNonQueryAsync();
-		}
+        await using (var connection = new OracleConnection(connectionString))
+        {
+            await connection.OpenAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = $"BEGIN EXECUTE IMMEDIATE 'DROP TABLE {tableName} PURGE'; EXCEPTION WHEN OTHERS THEN IF SQLCODE != -942 THEN RAISE; END IF; END;";
+            await cmd.ExecuteNonQueryAsync();
+            cmd.CommandText = $"CREATE TABLE {tableName} (\"Id\" NUMBER(10), \"Name\" VARCHAR2(100))";
+            await cmd.ExecuteNonQueryAsync();
+            cmd.CommandText = $"INSERT INTO {tableName} VALUES (1, 'Old1')";
+            await cmd.ExecuteNonQueryAsync();
+            cmd.CommandText = $"INSERT INTO {tableName} VALUES (2, 'Old2')";
+            await cmd.ExecuteNonQueryAsync();
+        }
 
-		var writerOptions = new OracleWriterOptions { Table = tableName, Strategy = OracleWriteStrategy.DeleteThenInsert };
-		var columns = new List<PipeColumnInfo> { new("Id", typeof(int), false, true), new("Name", typeof(string), true, true) };
-		var rows = new List<object?[]> { new object?[] { 3, "NewData" } };
+        var writerOptions = new OracleWriterOptions { Table = tableName, Strategy = OracleWriteStrategy.DeleteThenInsert };
+        var columns = new List<PipeColumnInfo> { new("Id", typeof(int), false, true), new("Name", typeof(string), true, true) };
+        var rows = new List<object?[]> { new object?[] { 3, "NewData" } };
 
-		await using var writer = new OracleDataWriter(connectionString, writerOptions, Microsoft.Extensions.Logging.Abstractions.NullLogger<OracleDataWriter>.Instance, OracleTypeConverter.Instance);
-		try
-		{
-			await writer.InitializeAsync(columns, TestContext.Current.CancellationToken);
-			await writer.WriteBatchAsync(rows, TestContext.Current.CancellationToken);
-			await writer.CompleteAsync(TestContext.Current.CancellationToken);
+        await using var writer = new OracleDataWriter(connectionString, writerOptions, Microsoft.Extensions.Logging.Abstractions.NullLogger<OracleDataWriter>.Instance, OracleTypeConverter.Instance);
+        try
+        {
+            await writer.InitializeAsync(columns, TestContext.Current.CancellationToken);
+            await writer.WriteBatchAsync(rows, TestContext.Current.CancellationToken);
+            await writer.CompleteAsync(TestContext.Current.CancellationToken);
 
-			await using (var connection = new OracleConnection(connectionString))
-			{
-				await connection.OpenAsync();
-				using var cmd = connection.CreateCommand();
-				cmd.CommandText = $"SELECT \"Id\", \"Name\" FROM {tableName} ORDER BY \"Id\"";
-				using var reader = await cmd.ExecuteReaderAsync();
+            await using (var connection = new OracleConnection(connectionString))
+            {
+                await connection.OpenAsync();
+                using var cmd = connection.CreateCommand();
+                cmd.CommandText = $"SELECT \"Id\", \"Name\" FROM {tableName} ORDER BY \"Id\"";
+                using var reader = await cmd.ExecuteReaderAsync();
 
-				Assert.True(await reader.ReadAsync());
-				Assert.Equal(3, Convert.ToInt32(reader["Id"]));
-				Assert.Equal("NewData", reader["Name"]);
-				Assert.False(await reader.ReadAsync()); // Only 1 row remains
-			}
-		}
-		finally
-		{
-			await using (var connection = new OracleConnection(connectionString))
-			{
-				await connection.OpenAsync();
-				using var cmd = connection.CreateCommand();
-				cmd.CommandText = $"BEGIN EXECUTE IMMEDIATE 'DROP TABLE {tableName} PURGE'; EXCEPTION WHEN OTHERS THEN IF SQLCODE != -942 THEN RAISE; END IF; END;";
-				await cmd.ExecuteNonQueryAsync();
-			}
-		}
-	}
+                Assert.True(await reader.ReadAsync());
+                Assert.Equal(3, Convert.ToInt32(reader["Id"]));
+                Assert.Equal("NewData", reader["Name"]);
+                Assert.False(await reader.ReadAsync()); // Only 1 row remains
+            }
+        }
+        finally
+        {
+            await using (var connection = new OracleConnection(connectionString))
+            {
+                await connection.OpenAsync();
+                using var cmd = connection.CreateCommand();
+                cmd.CommandText = $"BEGIN EXECUTE IMMEDIATE 'DROP TABLE {tableName} PURGE'; EXCEPTION WHEN OTHERS THEN IF SQLCODE != -942 THEN RAISE; END IF; END;";
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+    }
 
-	[Fact]
-	public async Task OracleDataWriter_Append_AddsToTable()
-	{
-		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
+    [Fact]
+    public async Task OracleDataWriter_Append_AddsToTable()
+    {
+        if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
-		var connectionString = _connectionString;
-		var tableName = $"TEST_APPEND_{Guid.NewGuid():N}".Substring(0, 25).ToUpperInvariant();
+        var connectionString = _connectionString;
+        var tableName = $"TEST_APPEND_{Guid.NewGuid():N}".Substring(0, 25).ToUpperInvariant();
 
-		await using (var connection = new OracleConnection(connectionString))
-		{
-			await connection.OpenAsync();
-			using var cmd = connection.CreateCommand();
-			cmd.CommandText = $"BEGIN EXECUTE IMMEDIATE 'DROP TABLE {tableName} PURGE'; EXCEPTION WHEN OTHERS THEN IF SQLCODE != -942 THEN RAISE; END IF; END;";
-			await cmd.ExecuteNonQueryAsync();
-			cmd.CommandText = $"CREATE TABLE {tableName} (\"Id\" NUMBER(10), \"Name\" VARCHAR2(100))";
-			await cmd.ExecuteNonQueryAsync();
-			cmd.CommandText = $"INSERT INTO {tableName} VALUES (1, 'Old1')";
-			await cmd.ExecuteNonQueryAsync();
-			cmd.CommandText = $"INSERT INTO {tableName} VALUES (2, 'Old2')";
-			await cmd.ExecuteNonQueryAsync();
-		}
+        await using (var connection = new OracleConnection(connectionString))
+        {
+            await connection.OpenAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = $"BEGIN EXECUTE IMMEDIATE 'DROP TABLE {tableName} PURGE'; EXCEPTION WHEN OTHERS THEN IF SQLCODE != -942 THEN RAISE; END IF; END;";
+            await cmd.ExecuteNonQueryAsync();
+            cmd.CommandText = $"CREATE TABLE {tableName} (\"Id\" NUMBER(10), \"Name\" VARCHAR2(100))";
+            await cmd.ExecuteNonQueryAsync();
+            cmd.CommandText = $"INSERT INTO {tableName} VALUES (1, 'Old1')";
+            await cmd.ExecuteNonQueryAsync();
+            cmd.CommandText = $"INSERT INTO {tableName} VALUES (2, 'Old2')";
+            await cmd.ExecuteNonQueryAsync();
+        }
 
-		var writerOptions = new OracleWriterOptions { Table = tableName, Strategy = OracleWriteStrategy.Append };
-		var columns = new List<PipeColumnInfo> { new("Id", typeof(int), false, true), new("Name", typeof(string), true, true) };
-		var rows = new List<object?[]> { new object?[] { 3, "NewData" } };
+        var writerOptions = new OracleWriterOptions { Table = tableName, Strategy = OracleWriteStrategy.Append };
+        var columns = new List<PipeColumnInfo> { new("Id", typeof(int), false, true), new("Name", typeof(string), true, true) };
+        var rows = new List<object?[]> { new object?[] { 3, "NewData" } };
 
-		await using var writer = new OracleDataWriter(connectionString, writerOptions, Microsoft.Extensions.Logging.Abstractions.NullLogger<OracleDataWriter>.Instance, OracleTypeConverter.Instance);
-		try
-		{
-			await writer.InitializeAsync(columns, TestContext.Current.CancellationToken);
-			await writer.WriteBatchAsync(rows, TestContext.Current.CancellationToken);
-			await writer.CompleteAsync(TestContext.Current.CancellationToken);
+        await using var writer = new OracleDataWriter(connectionString, writerOptions, Microsoft.Extensions.Logging.Abstractions.NullLogger<OracleDataWriter>.Instance, OracleTypeConverter.Instance);
+        try
+        {
+            await writer.InitializeAsync(columns, TestContext.Current.CancellationToken);
+            await writer.WriteBatchAsync(rows, TestContext.Current.CancellationToken);
+            await writer.CompleteAsync(TestContext.Current.CancellationToken);
 
-			await using (var connection = new OracleConnection(connectionString))
-			{
-				await connection.OpenAsync();
-				using var cmd = connection.CreateCommand();
-				cmd.CommandText = $"SELECT \"Id\", \"Name\" FROM {tableName} ORDER BY \"Id\"";
-				using var reader = await cmd.ExecuteReaderAsync();
+            await using (var connection = new OracleConnection(connectionString))
+            {
+                await connection.OpenAsync();
+                using var cmd = connection.CreateCommand();
+                cmd.CommandText = $"SELECT \"Id\", \"Name\" FROM {tableName} ORDER BY \"Id\"";
+                using var reader = await cmd.ExecuteReaderAsync();
 
-				Assert.True(await reader.ReadAsync());
-				Assert.Equal(1, Convert.ToInt32(reader["Id"]));
-				Assert.True(await reader.ReadAsync());
-				Assert.Equal(2, Convert.ToInt32(reader["Id"]));
-				Assert.True(await reader.ReadAsync());
-				Assert.Equal(3, Convert.ToInt32(reader["Id"]));
-				Assert.Equal("NewData", reader["Name"]);
-				Assert.False(await reader.ReadAsync());
-			}
-		}
-		finally
-		{
-			await using (var connection = new OracleConnection(connectionString))
-			{
-				await connection.OpenAsync();
-				using var cmd = connection.CreateCommand();
-				cmd.CommandText = $"BEGIN EXECUTE IMMEDIATE 'DROP TABLE {tableName} PURGE'; EXCEPTION WHEN OTHERS THEN IF SQLCODE != -942 THEN RAISE; END IF; END;";
-				await cmd.ExecuteNonQueryAsync();
-			}
-		}
-	}
+                Assert.True(await reader.ReadAsync());
+                Assert.Equal(1, Convert.ToInt32(reader["Id"]));
+                Assert.True(await reader.ReadAsync());
+                Assert.Equal(2, Convert.ToInt32(reader["Id"]));
+                Assert.True(await reader.ReadAsync());
+                Assert.Equal(3, Convert.ToInt32(reader["Id"]));
+                Assert.Equal("NewData", reader["Name"]);
+                Assert.False(await reader.ReadAsync());
+            }
+        }
+        finally
+        {
+            await using (var connection = new OracleConnection(connectionString))
+            {
+                await connection.OpenAsync();
+                using var cmd = connection.CreateCommand();
+                cmd.CommandText = $"BEGIN EXECUTE IMMEDIATE 'DROP TABLE {tableName} PURGE'; EXCEPTION WHEN OTHERS THEN IF SQLCODE != -942 THEN RAISE; END IF; END;";
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+    }
 
-	[Fact]
-	public async Task OracleReader_LongAndLongRaw_ReturnTheirContent_NeverEmpty()
-	{
-		if (!DockerHelper.IsAvailable() || _connectionString is null) return;
+    [Fact]
+    public async Task OracleReader_LongAndLongRaw_ReturnTheirContent_NeverEmpty()
+    {
+        if (!DockerHelper.IsAvailable() || _connectionString is null) return;
 
-		var tableName = $"TEST_LONG_{Guid.NewGuid():N}".Substring(0, 25).ToUpperInvariant();
-		var large = new string('y', 200_000);
-		byte[] bytes = [0xDE, 0xAD, 0xBE, 0xEF];
+        var tableName = $"TEST_LONG_{Guid.NewGuid():N}".Substring(0, 25).ToUpperInvariant();
+        var large = new string('y', 200_000);
+        byte[] bytes = [0xDE, 0xAD, 0xBE, 0xEF];
 
-		await using (var connection = new OracleConnection(_connectionString))
-		{
-			await connection.OpenAsync();
-			// A table holds a single LONG-family column, so each type gets its own table.
-			using var cmd = connection.CreateCommand();
-			cmd.CommandText = $"CREATE TABLE {tableName} (txt LONG, id NUMBER(10))";
-			await cmd.ExecuteNonQueryAsync();
-			cmd.CommandText = $"CREATE TABLE {tableName}_R (id NUMBER(10), bin LONG RAW)";
-			await cmd.ExecuteNonQueryAsync();
+        await using (var connection = new OracleConnection(_connectionString))
+        {
+            await connection.OpenAsync();
+            // A table holds a single LONG-family column, so each type gets its own table.
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = $"CREATE TABLE {tableName} (txt LONG, id NUMBER(10))";
+            await cmd.ExecuteNonQueryAsync();
+            cmd.CommandText = $"CREATE TABLE {tableName}_R (id NUMBER(10), bin LONG RAW)";
+            await cmd.ExecuteNonQueryAsync();
 
-			foreach (var (id, text) in new (int, string?)[] { (1, "hello long"), (2, null), (3, large) })
-			{
-				using var insert = connection.CreateCommand();
-				insert.CommandText = $"INSERT INTO {tableName} (txt, id) VALUES (:t, :i)";
-				insert.Parameters.Add("t", OracleDbType.Long).Value = (object?)text ?? DBNull.Value;
-				insert.Parameters.Add("i", OracleDbType.Int32).Value = id;
-				await insert.ExecuteNonQueryAsync();
-			}
+            foreach (var (id, text) in new (int, string?)[] { (1, "hello long"), (2, null), (3, large) })
+            {
+                using var insert = connection.CreateCommand();
+                insert.CommandText = $"INSERT INTO {tableName} (txt, id) VALUES (:t, :i)";
+                insert.Parameters.Add("t", OracleDbType.Long).Value = (object?)text ?? DBNull.Value;
+                insert.Parameters.Add("i", OracleDbType.Int32).Value = id;
+                await insert.ExecuteNonQueryAsync();
+            }
 
-			using var insertRaw = connection.CreateCommand();
-			insertRaw.CommandText = $"INSERT INTO {tableName}_R (id, bin) VALUES (1, :b)";
-			insertRaw.Parameters.Add("b", OracleDbType.LongRaw).Value = bytes;
-			await insertRaw.ExecuteNonQueryAsync();
-		}
+            using var insertRaw = connection.CreateCommand();
+            insertRaw.CommandText = $"INSERT INTO {tableName}_R (id, bin) VALUES (1, :b)";
+            insertRaw.Parameters.Add("b", OracleDbType.LongRaw).Value = bytes;
+            await insertRaw.ExecuteNonQueryAsync();
+        }
 
-		try
-		{
-			// The LONG comes first, so the read cannot rely on column order.
-			var longRows = await ReadAllAsync($"SELECT txt, id FROM {tableName} ORDER BY id");
-			Assert.Equal(3, longRows.Count);
-			Assert.Equal("hello long", longRows[0][0]);
-			Assert.Null(longRows[1][0]);
-			Assert.Equal(large, longRows[2][0]);
+        try
+        {
+            // The LONG comes first, so the read cannot rely on column order.
+            var longRows = await ReadAllAsync($"SELECT txt, id FROM {tableName} ORDER BY id");
+            Assert.Equal(3, longRows.Count);
+            Assert.Equal("hello long", longRows[0][0]);
+            Assert.Null(longRows[1][0]);
+            Assert.Equal(large, longRows[2][0]);
 
-			var rawRows = await ReadAllAsync($"SELECT id, bin FROM {tableName}_R");
-			Assert.Equal(bytes, Assert.IsType<byte[]>(rawRows[0][1]));
-		}
-		finally
-		{
-			await using var connection = new OracleConnection(_connectionString);
-			await connection.OpenAsync();
-			using var cmd = connection.CreateCommand();
-			cmd.CommandText = $"DROP TABLE {tableName} PURGE";
-			await cmd.ExecuteNonQueryAsync();
-			cmd.CommandText = $"DROP TABLE {tableName}_R PURGE";
-			await cmd.ExecuteNonQueryAsync();
-		}
+            var rawRows = await ReadAllAsync($"SELECT id, bin FROM {tableName}_R");
+            Assert.Equal(bytes, Assert.IsType<byte[]>(rawRows[0][1]));
+        }
+        finally
+        {
+            await using var connection = new OracleConnection(_connectionString);
+            await connection.OpenAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = $"DROP TABLE {tableName} PURGE";
+            await cmd.ExecuteNonQueryAsync();
+            cmd.CommandText = $"DROP TABLE {tableName}_R PURGE";
+            await cmd.ExecuteNonQueryAsync();
+        }
 
-		async Task<List<object?[]>> ReadAllAsync(string query)
-		{
-			await using var reader = new OracleReader(_connectionString!, query, new OracleReaderOptions { FetchSize = 65536 });
-			await reader.OpenAsync(TestContext.Current.CancellationToken);
-			var rows = new List<object?[]>();
-			await foreach (var batch in reader.ReadBatchesAsync(100, TestContext.Current.CancellationToken))
-				for (var i = 0; i < batch.Length; i++)
-					rows.Add(batch.Span[i]);
-			return rows;
-		}
-	}
+        async Task<List<object?[]>> ReadAllAsync(string query)
+        {
+            await using var reader = new OracleReader(_connectionString!, query, new OracleReaderOptions { FetchSize = 65536 });
+            await reader.OpenAsync(TestContext.Current.CancellationToken);
+            var rows = new List<object?[]>();
+            await foreach (var batch in reader.ReadBatchesAsync(100, TestContext.Current.CancellationToken))
+                for (var i = 0; i < batch.Length; i++)
+                    rows.Add(batch.Span[i]);
+            return rows;
+        }
+    }
 }

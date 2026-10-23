@@ -36,7 +36,8 @@ public static class ArrowDeserializer
 
     private static Delegate GetCompiledGetter(Type type)
     {
-        return _getterCache.GetOrAdd(type, t => {
+        return _getterCache.GetOrAdd(type, t =>
+        {
             var arrayParam = Expression.Parameter(typeof(IArrowArray), "array");
             var indexParam = Expression.Parameter(typeof(int), "index");
             var body = GetValueExpression(t, arrayParam, indexParam);
@@ -48,7 +49,7 @@ public static class ArrowDeserializer
     private static Expression GetValueExpression(Type targetType, Expression arrayExpr, Expression indexExpr)
     {
         var underlyingType = Nullable.GetUnderlyingType(targetType) ?? targetType;
-        
+
         // Handle Nullable wrapper
         if (targetType != underlyingType)
         {
@@ -95,7 +96,7 @@ public static class ArrowDeserializer
             return Expression.Call(castedArray, arrayType.GetMethod("GetString", new[] { typeof(int), typeof(System.Text.Encoding) })!, indexExpr, Expression.Constant(System.Text.Encoding.UTF8));
 
         if (underlyingType.IsPrimitive)
-             return Expression.Convert(Expression.Call(castedArray, arrayType.GetMethod("GetValue", new[] { typeof(int) })!, indexExpr), targetType);
+            return Expression.Convert(Expression.Call(castedArray, arrayType.GetMethod("GetValue", new[] { typeof(int) })!, indexExpr), targetType);
 
         // Nested Complex Types
         if (arrowType is StructType)
@@ -103,18 +104,18 @@ public static class ArrowDeserializer
             var structArray = Expression.Convert(arrayExpr, typeof(StructArray));
             var bindings = new List<MemberBinding>();
             var innerProps = underlyingType.GetProperties(BindingFlags.Public | BindingFlags.Instance).OrderBy(p => p.Name).ToArray();
-            
+
             for (int i = 0; i < innerProps.Length; i++)
             {
                 var p = innerProps[i];
                 var fieldsAccess = Expression.Property(structArray, "Fields");
                 var fieldAccess = Expression.Call(fieldsAccess, typeof(IReadOnlyList<IArrowArray>).GetMethod("get_Item")!, Expression.Constant(i));
                 var valExpr = GetValueExpression(p.PropertyType, fieldAccess, indexExpr);
-                
+
                 // If it's a class or nullable, we might need a null check for the field itself
                 var isNullField = Expression.Call(fieldAccess, typeof(IArrowArray).GetMethod("IsNull")!, indexExpr);
                 var assignedValue = p.PropertyType.IsValueType && Nullable.GetUnderlyingType(p.PropertyType) == null
-                    ? valExpr 
+                    ? valExpr
                     : (Expression)Expression.Condition(isNullField, Expression.Constant(null, p.PropertyType), valExpr);
 
                 bindings.Add(Expression.Bind(p, assignedValue));
@@ -141,8 +142,8 @@ public static class ArrowDeserializer
             }
             else
             {
-                elementType = (underlyingType.IsGenericType && underlyingType.GetGenericTypeDefinition() == typeof(List<>)) 
-                    ? underlyingType.GetGenericArguments()[0] 
+                elementType = (underlyingType.IsGenericType && underlyingType.GetGenericTypeDefinition() == typeof(List<>))
+                    ? underlyingType.GetGenericArguments()[0]
                     : underlyingType.GetInterfaces().First(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEnumerable<>)).GetGenericArguments()[0];
                 helperMethodName = "BuildList";
             }
@@ -154,17 +155,17 @@ public static class ArrowDeserializer
 
         if (arrowType is MapType)
         {
-            var dictInterface = underlyingType.IsGenericType && underlyingType.GetGenericTypeDefinition() == typeof(IDictionary<,>) 
-                ? underlyingType 
+            var dictInterface = underlyingType.IsGenericType && underlyingType.GetGenericTypeDefinition() == typeof(IDictionary<,>)
+                ? underlyingType
                 : underlyingType.GetInterfaces().First(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IDictionary<,>));
-            
+
             var keyType = dictInterface.GetGenericArguments()[0];
             var valueType = dictInterface.GetGenericArguments()[1];
-            
+
             var keyGetter = GetCompiledGetter(keyType);
             var valueGetter = GetCompiledGetter(valueType);
             var helperMethod = typeof(CollectionHelper).GetMethod("BuildMap")!.MakeGenericMethod(keyType, valueType);
-            
+
             return Expression.Call(helperMethod, arrayExpr, indexExpr, Expression.Constant(keyGetter), Expression.Constant(valueGetter));
         }
 

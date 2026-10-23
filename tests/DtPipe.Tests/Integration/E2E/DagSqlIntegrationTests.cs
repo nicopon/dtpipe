@@ -39,13 +39,13 @@ public class DagSqlIntegrationTests : IAsyncLifetime
         var args = new[]
         {
             "--input", "generate:10", "--alias", "test",
-            "--from", "test", 
-            "select GenerateIndex from test where GenerateIndex < 5", 
+            "--from", "test",
+            "select GenerateIndex from test where GenerateIndex < 5",
             "--output", $"csv:{outputPath}"
         };
 
         var exitCode = await DtPipe.Program.Main(args);
-        
+
         exitCode.Should().Be(0, "the pipeline should execute successfully");
         File.Exists(outputPath).Should().BeTrue("the output CSV file should be created");
 
@@ -137,8 +137,8 @@ public class DagSqlIntegrationTests : IAsyncLifetime
         var args = new[]
         {
             "--input", $"jsonl:{inputJsonPath}", "--alias", "src",
-            "--from", "src", 
-            "SELECT Product.Metadata.Price FROM src ORDER BY Id", 
+            "--from", "src",
+            "SELECT Product.Metadata.Price FROM src ORDER BY Id",
             "--output", $"csv:{outputPath}"
         };
 
@@ -147,7 +147,7 @@ public class DagSqlIntegrationTests : IAsyncLifetime
 
         var lines = await File.ReadAllLinesAsync(outputPath);
         lines.Should().HaveCount(3, "1 header + 2 data rows");
-        
+
         lines[0].Should().Be("Price");
         lines[1].Should().Be("1200.5");
         lines[2].Should().Be("25.5");

@@ -83,10 +83,10 @@ public class ArrowAdoBenchmarks
         await tx.CommitAsync();
 
         // Pre-built RecordBatch for write-side benchmarks.
-        var int32Builder  = new Int32Array.Builder();
-        var int64Builder  = new Int64Array.Builder();
+        var int32Builder = new Int32Array.Builder();
+        var int64Builder = new Int64Array.Builder();
         var stringBuilder = new StringArray.Builder();
-        var boolBuilder   = new BooleanArray.Builder();
+        var boolBuilder = new BooleanArray.Builder();
 
         for (int i = 0; i < RowCount; i++)
         {
@@ -113,7 +113,7 @@ public class ArrowAdoBenchmarks
         ], RowCount);
 
         _int32Array = (Int32Array)_recordBatch.Column(0);
-        _param      = new SqliteParameter();
+        _param = new SqliteParameter();
         _int32Binder = new Int32Binder();
     }
 

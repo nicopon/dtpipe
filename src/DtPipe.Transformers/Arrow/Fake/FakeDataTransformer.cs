@@ -16,364 +16,364 @@ namespace DtPipe.Transformers.Arrow.Fake;
 /// </summary>
 public sealed partial class FakeDataTransformer : BaseColumnarTransformer, IRequiresOptions<DtPipe.Transformers.Arrow.Fake.FakeOptions>
 {
-	private List<DtPipe.Transformers.Arrow.Fake.FakeColumnProcessor>? _processors;
-	private readonly DtPipe.Transformers.Arrow.Fake.FakerRegistry _fakerRegistry;
-	private readonly DtPipe.Transformers.Arrow.Fake.FakeMappingParser _mappingParser;
-	private readonly DtPipe.Transformers.Arrow.Fake.FakeOptions _options;
-	private readonly string _locale;
-	private readonly Faker _faker;
+    private List<DtPipe.Transformers.Arrow.Fake.FakeColumnProcessor>? _processors;
+    private readonly DtPipe.Transformers.Arrow.Fake.FakerRegistry _fakerRegistry;
+    private readonly DtPipe.Transformers.Arrow.Fake.FakeMappingParser _mappingParser;
+    private readonly DtPipe.Transformers.Arrow.Fake.FakeOptions _options;
+    private readonly string _locale;
+    private readonly Faker _faker;
 
-	// Seed modes fields
-	private readonly IReadOnlyList<string> _seedColumns;
-	private readonly bool _seedRow;
-	private readonly bool _skipNull;
-	private int[]? _seedColumnIndices;
-	private long _rowCounter = 0;
+    // Seed modes fields
+    private readonly IReadOnlyList<string> _seedColumns;
+    private readonly bool _seedRow;
+    private readonly bool _skipNull;
+    private int[]? _seedColumnIndices;
+    private long _rowCounter = 0;
 
-	// Paged caches for deterministic mode
-	private Dictionary<int, DtPipe.Transformers.Arrow.Fake.PagedFakeValueCache>? _pagedCaches;
+    // Paged caches for deterministic mode
+    private Dictionary<int, DtPipe.Transformers.Arrow.Fake.PagedFakeValueCache>? _pagedCaches;
 
-	// State initialized in InitializeAsync
-	private int[]? _generationOrder;
-	private Dictionary<string, int>? _columnNameToIndex;
-	private readonly List<string> _virtualColumns = [];
-	private int _realColumnCount;
-	private Schema? _outputSchema;
+    // State initialized in InitializeAsync
+    private int[]? _generationOrder;
+    private Dictionary<string, int>? _columnNameToIndex;
+    private readonly List<string> _virtualColumns = [];
+    private int _realColumnCount;
+    private Schema? _outputSchema;
 
-	// Regex for template substitution
-	[GeneratedRegex(@"\{([^{}]+)\}", RegexOptions.Compiled)]
-	private static partial Regex TemplatePattern();
+    // Regex for template substitution
+    [GeneratedRegex(@"\{([^{}]+)\}", RegexOptions.Compiled)]
+    private static partial Regex TemplatePattern();
 
-	public override bool CanProcessColumnar => true;
+    public override bool CanProcessColumnar => true;
 
-	public FakeDataTransformer(DtPipe.Transformers.Arrow.Fake.FakeOptions options)
-	{
-		_options = options;
-		_fakerRegistry = new DtPipe.Transformers.Arrow.Fake.FakerRegistry();
-		_mappingParser = new DtPipe.Transformers.Arrow.Fake.FakeMappingParser(_fakerRegistry);
-		_locale = options.Locale;
-		_seedColumns = options.SeedColumn;
-		_seedRow = options.SeedRow;
-		_skipNull = options.SkipNull;
+    public FakeDataTransformer(DtPipe.Transformers.Arrow.Fake.FakeOptions options)
+    {
+        _options = options;
+        _fakerRegistry = new DtPipe.Transformers.Arrow.Fake.FakerRegistry();
+        _mappingParser = new DtPipe.Transformers.Arrow.Fake.FakeMappingParser(_fakerRegistry);
+        _locale = options.Locale;
+        _seedColumns = options.SeedColumn;
+        _seedRow = options.SeedRow;
+        _skipNull = options.SkipNull;
 
-		_faker = options.Seed.HasValue
-			? new Faker(options.Locale) { Random = new Randomizer(options.Seed.Value) }
-			: new Faker(options.Locale);
+        _faker = options.Seed.HasValue
+            ? new Faker(options.Locale) { Random = new Randomizer(options.Seed.Value) }
+            : new Faker(options.Locale);
 
-		if (_seedRow && _seedColumns.Count > 0)
-		{
-			throw new ArgumentException("Options --fake-seed-row and --fake-seed-column cannot be used together.");
-		}
+        if (_seedRow && _seedColumns.Count > 0)
+        {
+            throw new ArgumentException("Options --fake-seed-row and --fake-seed-column cannot be used together.");
+        }
 
-		_mappingParser.ParseAll(options.Fake);
-	}
+        _mappingParser.ParseAll(options.Fake);
+    }
 
-	public bool HasFake => _mappingParser.HasMappings;
-	public DtPipe.Transformers.Arrow.Fake.FakerRegistry Registry => _fakerRegistry;
+    public bool HasFake => _mappingParser.HasMappings;
+    public DtPipe.Transformers.Arrow.Fake.FakerRegistry Registry => _fakerRegistry;
 
-	public override async ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
-	{
-		await base.InitializeAsync(columns, ct);
-		if (!HasFake)
-		{
-			_processors = null;
-			_generationOrder = null;
-			return columns;
-		}
+    public override async ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
+    {
+        await base.InitializeAsync(columns, ct);
+        if (!HasFake)
+        {
+            _processors = null;
+            _generationOrder = null;
+            return columns;
+        }
 
-		// Build column name to index map
-		_columnNameToIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-		_realColumnCount = columns.Count;
-		for (var i = 0; i < columns.Count; i++)
-		{
-			_columnNameToIndex[columns[i].Name] = i;
-		}
+        // Build column name to index map
+        _columnNameToIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        _realColumnCount = columns.Count;
+        for (var i = 0; i < columns.Count; i++)
+        {
+            _columnNameToIndex[columns[i].Name] = i;
+        }
 
-		// Detect virtual columns
-		_virtualColumns.Clear();
-		foreach (var colName in _mappingParser.Mappings.Keys)
-		{
-			if (!_columnNameToIndex.ContainsKey(colName))
-			{
-				var virtualIndex = _realColumnCount + _virtualColumns.Count;
-				_columnNameToIndex[colName] = virtualIndex;
-				_virtualColumns.Add(colName);
-			}
-		}
+        // Detect virtual columns
+        _virtualColumns.Clear();
+        foreach (var colName in _mappingParser.Mappings.Keys)
+        {
+            if (!_columnNameToIndex.ContainsKey(colName))
+            {
+                var virtualIndex = _realColumnCount + _virtualColumns.Count;
+                _columnNameToIndex[colName] = virtualIndex;
+                _virtualColumns.Add(colName);
+            }
+        }
 
-		var totalColumns = _realColumnCount + _virtualColumns.Count;
+        var totalColumns = _realColumnCount + _virtualColumns.Count;
 
-		// Build processors
-		var processors = new DtPipe.Transformers.Arrow.Fake.FakeColumnProcessor[totalColumns];
-		var templateColumns = new List<int>();
-		var nonTemplateColumns = new List<int>();
+        // Build processors
+        var processors = new DtPipe.Transformers.Arrow.Fake.FakeColumnProcessor[totalColumns];
+        var templateColumns = new List<int>();
+        var nonTemplateColumns = new List<int>();
 
-		// Process real columns
-		for (var i = 0; i < columns.Count; i++)
-		{
-			var colName = columns[i].Name;
-			if (!_mappingParser.Mappings.TryGetValue(colName, out var value))
-			{
-				continue;
-			}
+        // Process real columns
+        for (var i = 0; i < columns.Count; i++)
+        {
+            var colName = columns[i].Name;
+            if (!_mappingParser.Mappings.TryGetValue(colName, out var value))
+            {
+                continue;
+            }
 
-			if (DtPipe.Transformers.Arrow.Fake.FakeMappingParser.IsTemplate(value))
-			{
-				var refCols = DtPipe.Transformers.Arrow.Fake.FakeMappingParser.ExtractReferencedColumns(value);
-				processors[i] = new DtPipe.Transformers.Arrow.Fake.FakeColumnProcessor(i, value, refCols);
-				templateColumns.Add(i);
-			}
-			else
-			{
-				var generator = BuildGenerator(value, colName);
-				processors[i] = new DtPipe.Transformers.Arrow.Fake.FakeColumnProcessor(i, generator, value);
-				nonTemplateColumns.Add(i);
-			}
-		}
+            if (DtPipe.Transformers.Arrow.Fake.FakeMappingParser.IsTemplate(value))
+            {
+                var refCols = DtPipe.Transformers.Arrow.Fake.FakeMappingParser.ExtractReferencedColumns(value);
+                processors[i] = new DtPipe.Transformers.Arrow.Fake.FakeColumnProcessor(i, value, refCols);
+                templateColumns.Add(i);
+            }
+            else
+            {
+                var generator = BuildGenerator(value, colName);
+                processors[i] = new DtPipe.Transformers.Arrow.Fake.FakeColumnProcessor(i, generator, value);
+                nonTemplateColumns.Add(i);
+            }
+        }
 
-		// Process virtual columns
-		foreach (var virtualCol in _virtualColumns)
-		{
-			var virtualIndex = _columnNameToIndex[virtualCol];
-			var value = _mappingParser.Mappings[virtualCol];
+        // Process virtual columns
+        foreach (var virtualCol in _virtualColumns)
+        {
+            var virtualIndex = _columnNameToIndex[virtualCol];
+            var value = _mappingParser.Mappings[virtualCol];
 
-			if (DtPipe.Transformers.Arrow.Fake.FakeMappingParser.IsTemplate(value))
-			{
-				var refCols = DtPipe.Transformers.Arrow.Fake.FakeMappingParser.ExtractReferencedColumns(value);
-				processors[virtualIndex] = new DtPipe.Transformers.Arrow.Fake.FakeColumnProcessor(virtualIndex, value, refCols);
-				templateColumns.Add(virtualIndex);
-			}
-			else
-			{
-				var generator = BuildGenerator(value, virtualCol);
-				processors[virtualIndex] = new DtPipe.Transformers.Arrow.Fake.FakeColumnProcessor(virtualIndex, generator, value);
-				nonTemplateColumns.Add(virtualIndex);
-			}
-		}
+            if (DtPipe.Transformers.Arrow.Fake.FakeMappingParser.IsTemplate(value))
+            {
+                var refCols = DtPipe.Transformers.Arrow.Fake.FakeMappingParser.ExtractReferencedColumns(value);
+                processors[virtualIndex] = new DtPipe.Transformers.Arrow.Fake.FakeColumnProcessor(virtualIndex, value, refCols);
+                templateColumns.Add(virtualIndex);
+            }
+            else
+            {
+                var generator = BuildGenerator(value, virtualCol);
+                processors[virtualIndex] = new DtPipe.Transformers.Arrow.Fake.FakeColumnProcessor(virtualIndex, generator, value);
+                nonTemplateColumns.Add(virtualIndex);
+            }
+        }
 
-		_processors = processors.ToList();
-		_generationOrder = [.. nonTemplateColumns, .. templateColumns];
+        _processors = processors.ToList();
+        _generationOrder = [.. nonTemplateColumns, .. templateColumns];
 
-		// Resolve seed column indices
-		if (_seedColumns.Count > 0)
-		{
-			var indices = new List<int>();
-			foreach (var col in _seedColumns)
-			{
-				if (!_columnNameToIndex.TryGetValue(col, out var idx))
-				{
-					throw new InvalidOperationException($"Seed column '{col}' not found in result set.");
-				}
-				indices.Add(idx);
-			}
-			_seedColumnIndices = indices.ToArray();
-		}
+        // Resolve seed column indices
+        if (_seedColumns.Count > 0)
+        {
+            var indices = new List<int>();
+            foreach (var col in _seedColumns)
+            {
+                if (!_columnNameToIndex.TryGetValue(col, out var idx))
+                {
+                    throw new InvalidOperationException($"Seed column '{col}' not found in result set.");
+                }
+                indices.Add(idx);
+            }
+            _seedColumnIndices = indices.ToArray();
+        }
 
-		// Initialize deterministic caches
-		if (_seedRow || _seedColumnIndices is not null)
-		{
-			_pagedCaches = [];
-			foreach (var idx in _generationOrder)
-			{
-				var proc = _processors[idx];
-				if (proc.Generator is not null)
-				{
-					// Pass the global seed from options to align the page cache seeds
-					_pagedCaches[idx] = new DtPipe.Transformers.Arrow.Fake.PagedFakeValueCache(_locale, proc.Generator, proc.FakerHash, _options.Seed);
-				}
-			}
-		}
+        // Initialize deterministic caches
+        if (_seedRow || _seedColumnIndices is not null)
+        {
+            _pagedCaches = [];
+            foreach (var idx in _generationOrder)
+            {
+                var proc = _processors[idx];
+                if (proc.Generator is not null)
+                {
+                    // Pass the global seed from options to align the page cache seeds
+                    _pagedCaches[idx] = new DtPipe.Transformers.Arrow.Fake.PagedFakeValueCache(_locale, proc.Generator, proc.FakerHash, _options.Seed);
+                }
+            }
+        }
 
-		// Prepare output columns schema
-		var outputColumns = new List<PipeColumnInfo>(columns);
-		foreach (var virtualColName in _virtualColumns)
-		{
-			var fakerPath = _mappingParser.Mappings[virtualColName];
-			Type colType = typeof(string);
+        // Prepare output columns schema
+        var outputColumns = new List<PipeColumnInfo>(columns);
+        foreach (var virtualColName in _virtualColumns)
+        {
+            var fakerPath = _mappingParser.Mappings[virtualColName];
+            Type colType = typeof(string);
 
-			// Try to infer type from registry
-			if (!DtPipe.Transformers.Arrow.Fake.FakeMappingParser.IsTemplate(fakerPath))
-			{
-				var hashIndex = fakerPath.IndexOf('#');
-				var basePath = hashIndex >= 0 ? fakerPath[..hashIndex] : fakerPath;
-				colType = _fakerRegistry.GetReturnType(basePath) ?? typeof(string);
-			}
+            // Try to infer type from registry
+            if (!DtPipe.Transformers.Arrow.Fake.FakeMappingParser.IsTemplate(fakerPath))
+            {
+                var hashIndex = fakerPath.IndexOf('#');
+                var basePath = hashIndex >= 0 ? fakerPath[..hashIndex] : fakerPath;
+                colType = _fakerRegistry.GetReturnType(basePath) ?? typeof(string);
+            }
 
 
 
-			outputColumns.Add(new PipeColumnInfo(virtualColName, colType, true));
-		}
+            outputColumns.Add(new PipeColumnInfo(virtualColName, colType, true));
+        }
 
-		_outputSchema = ArrowSchemaFactory.Create(outputColumns);
-		return outputColumns;
-	}
+        _outputSchema = ArrowSchemaFactory.Create(outputColumns);
+        return outputColumns;
+    }
 
-	private Func<Faker, object?> BuildGenerator(string fakerPath, string colName)
-	{
-		var hashIndex = fakerPath.IndexOf('#');
-		var basePath = hashIndex >= 0 ? fakerPath[..hashIndex] : fakerPath;
+    private Func<Faker, object?> BuildGenerator(string fakerPath, string colName)
+    {
+        var hashIndex = fakerPath.IndexOf('#');
+        var basePath = hashIndex >= 0 ? fakerPath[..hashIndex] : fakerPath;
 
-		var generator = _fakerRegistry.GetGenerator(basePath);
-		if (generator is not null) return generator;
+        var generator = _fakerRegistry.GetGenerator(basePath);
+        if (generator is not null) return generator;
 
-		// If the dataset prefix is a known Bogus dataset (e.g. "name", "address") but the full path
-		// wasn't found, it's a genuine configuration error (typo in method name).
-		// Otherwise, treat as a hardcoded literal string.
-		var dotIndex = basePath.IndexOf('.');
-		if (dotIndex > 0)
-		{
-			var datasetName = basePath[..dotIndex];
-			if (_fakerRegistry.HasDataset(datasetName))
-			{
-				throw new ArgumentException($"Unknown fake provider: '{basePath}' for column '{colName}'. " +
-					$"Dataset '{datasetName}' exists but method '{basePath[(dotIndex + 1)..]}' was not found.");
-			}
-		}
+        // If the dataset prefix is a known Bogus dataset (e.g. "name", "address") but the full path
+        // wasn't found, it's a genuine configuration error (typo in method name).
+        // Otherwise, treat as a hardcoded literal string.
+        var dotIndex = basePath.IndexOf('.');
+        if (dotIndex > 0)
+        {
+            var datasetName = basePath[..dotIndex];
+            if (_fakerRegistry.HasDataset(datasetName))
+            {
+                throw new ArgumentException($"Unknown fake provider: '{basePath}' for column '{colName}'. " +
+                    $"Dataset '{datasetName}' exists but method '{basePath[(dotIndex + 1)..]}' was not found.");
+            }
+        }
 
-		// Fallback: treat as hardcoded literal string
-		return _ => fakerPath;
-	}
+        // Fallback: treat as hardcoded literal string
+        return _ => fakerPath;
+    }
 
-	private object? ProcessTemplate(object?[] row, string template, HashSet<string> refCols)
-	{
-		return TemplatePattern().Replace(template, match =>
-		{
-			var colName = match.Groups[1].Value;
-			if (_columnNameToIndex!.TryGetValue(colName, out var idx))
-			{
-				return row[idx]?.ToString() ?? "";
-			}
-			return match.Value;
-		});
-	}
+    private object? ProcessTemplate(object?[] row, string template, HashSet<string> refCols)
+    {
+        return TemplatePattern().Replace(template, match =>
+        {
+            var colName = match.Groups[1].Value;
+            if (_columnNameToIndex!.TryGetValue(colName, out var idx))
+            {
+                return row[idx]?.ToString() ?? "";
+            }
+            return match.Value;
+        });
+    }
 
-	protected override ValueTask<RecordBatch?> TransformBatchSafeAsync(RecordBatch batch, CancellationToken ct = default)
-	{
-		if (_processors is null || _generationOrder is null || _outputSchema is null)
-			return new ValueTask<RecordBatch?>(batch);
+    protected override ValueTask<RecordBatch?> TransformBatchSafeAsync(RecordBatch batch, CancellationToken ct = default)
+    {
+        if (_processors is null || _generationOrder is null || _outputSchema is null)
+            return new ValueTask<RecordBatch?>(batch);
 
-		int rowCount = batch.Length;
-		int totalColumns = _processors.Count;
+        int rowCount = batch.Length;
+        int totalColumns = _processors.Count;
 
-		// Non-fake real columns are passed through directly (preserving their original Arrow type,
-		// including complex types like StructType or ListType that PipeColumnInfo.ClrType cannot round-trip).
-		// Only fake columns and virtual columns go through the row-value-builder path.
-		// A column is "fake" if it has a generator or template (FakeColumnProcessor is a struct; default = no-op).
-		var hasFakeForCol = new bool[totalColumns];
-		for (int i = 0; i < totalColumns; i++)
-			hasFakeForCol[i] = _processors[i].Generator is not null || _processors[i].IsTemplate;
+        // Non-fake real columns are passed through directly (preserving their original Arrow type,
+        // including complex types like StructType or ListType that PipeColumnInfo.ClrType cannot round-trip).
+        // Only fake columns and virtual columns go through the row-value-builder path.
+        // A column is "fake" if it has a generator or template (FakeColumnProcessor is a struct; default = no-op).
+        var hasFakeForCol = new bool[totalColumns];
+        for (int i = 0; i < totalColumns; i++)
+            hasFakeForCol[i] = _processors[i].Generator is not null || _processors[i].IsTemplate;
 
-		// Build schema: preserve input field types for non-fake real columns.
-		var outputFields = new List<Field>(totalColumns);
-		for (int i = 0; i < _realColumnCount; i++)
-			outputFields.Add(hasFakeForCol[i] ? _outputSchema.GetFieldByIndex(i) : batch.Schema.GetFieldByIndex(i));
-		for (int i = _realColumnCount; i < totalColumns; i++)
-			outputFields.Add(_outputSchema.GetFieldByIndex(i));
-		var batchSchema = new Schema(outputFields, null);
+        // Build schema: preserve input field types for non-fake real columns.
+        var outputFields = new List<Field>(totalColumns);
+        for (int i = 0; i < _realColumnCount; i++)
+            outputFields.Add(hasFakeForCol[i] ? _outputSchema.GetFieldByIndex(i) : batch.Schema.GetFieldByIndex(i));
+        for (int i = _realColumnCount; i < totalColumns; i++)
+            outputFields.Add(_outputSchema.GetFieldByIndex(i));
+        var batchSchema = new Schema(outputFields, null);
 
-		// Pre-fill output arrays: non-fake real columns aliased into the output. Retain so the
-		// segment runner can dispose the input without freeing buffers this output points at.
-		var resultArrays = new Apache.Arrow.IArrowArray[totalColumns];
-		for (int i = 0; i < _realColumnCount; i++)
-		{
-			if (!hasFakeForCol[i])
-				resultArrays[i] = ArrowOwnership.RetainArray(batch.Column(i));
-		}
+        // Pre-fill output arrays: non-fake real columns aliased into the output. Retain so the
+        // segment runner can dispose the input without freeing buffers this output points at.
+        var resultArrays = new Apache.Arrow.IArrowArray[totalColumns];
+        for (int i = 0; i < _realColumnCount; i++)
+        {
+            if (!hasFakeForCol[i])
+                resultArrays[i] = ArrowOwnership.RetainArray(batch.Column(i));
+        }
 
-		// Builders for fake columns and virtual columns only.
-		IArrowArrayBuilder?[] builders = new IArrowArrayBuilder?[totalColumns];
-		Action<object?>?[] appenders = new Action<object?>?[totalColumns];
-		for (int i = 0; i < totalColumns; i++)
-		{
-			if (hasFakeForCol[i])
-			{
-				builders[i] = ArrowTypeMapper.CreateBuilder(outputFields[i].DataType);
-				appenders[i] = ArrowTypeMapper.ResolveAppender(builders[i]!);
-			}
-		}
+        // Builders for fake columns and virtual columns only.
+        IArrowArrayBuilder?[] builders = new IArrowArrayBuilder?[totalColumns];
+        Action<object?>?[] appenders = new Action<object?>?[totalColumns];
+        for (int i = 0; i < totalColumns; i++)
+        {
+            if (hasFakeForCol[i])
+            {
+                builders[i] = ArrowTypeMapper.CreateBuilder(outputFields[i].DataType);
+                appenders[i] = ArrowTypeMapper.ResolveAppender(builders[i]!);
+            }
+        }
 
-		// Row buffer for template substitution (needs real column values even for non-fake cols).
-		var rowBuffer = new object?[totalColumns];
+        // Row buffer for template substitution (needs real column values even for non-fake cols).
+        var rowBuffer = new object?[totalColumns];
 
-		for (int i = 0; i < rowCount; i++)
-		{
-			_rowCounter++;
+        for (int i = 0; i < rowCount; i++)
+        {
+            _rowCounter++;
 
-			// 1. Extract values for template interpolation (all real columns).
-			for (int colIdx = 0; colIdx < _realColumnCount; colIdx++)
-			{
-				rowBuffer[colIdx] = ArrowTypeMapper.GetValueForField(batch.Column(colIdx), batch.Schema.GetFieldByIndex(colIdx), i);
-			}
-			for (int colIdx = _realColumnCount; colIdx < totalColumns; colIdx++)
-				rowBuffer[colIdx] = null;
+            // 1. Extract values for template interpolation (all real columns).
+            for (int colIdx = 0; colIdx < _realColumnCount; colIdx++)
+            {
+                rowBuffer[colIdx] = ArrowTypeMapper.GetValueForField(batch.Column(colIdx), batch.Schema.GetFieldByIndex(colIdx), i);
+            }
+            for (int colIdx = _realColumnCount; colIdx < totalColumns; colIdx++)
+                rowBuffer[colIdx] = null;
 
-			// 2. Deterministic Row Seed
-			int? rowSeed = null;
-			if (_seedRow)
-			{
-				rowSeed = (int)(_rowCounter & 0x7FFFFFFF);
-			}
-			else if (_seedColumnIndices is not null)
-			{
-				// Combine hashes of all seed columns using a stable polynomial rolling hash.
-				// This ensures consistent data masking (same key values result in the same fake values).
-				int combinedHash = 17;
-				bool hasAnyValue = false;
-				foreach (var idx in _seedColumnIndices)
-				{
-					var seedVal = rowBuffer[idx];
-					if (seedVal is not null)
-					{
-						var valHash = DtPipe.Transformers.Arrow.Fake.StableHash.Compute(seedVal);
-						combinedHash = unchecked(combinedHash * 31 + (int)valHash);
-						hasAnyValue = true;
-					}
-				}
-				if (hasAnyValue)
-				{
-					rowSeed = (int)(combinedHash & 0x7FFFFFFF);
-				}
-			}
+            // 2. Deterministic Row Seed
+            int? rowSeed = null;
+            if (_seedRow)
+            {
+                rowSeed = (int)(_rowCounter & 0x7FFFFFFF);
+            }
+            else if (_seedColumnIndices is not null)
+            {
+                // Combine hashes of all seed columns using a stable polynomial rolling hash.
+                // This ensures consistent data masking (same key values result in the same fake values).
+                int combinedHash = 17;
+                bool hasAnyValue = false;
+                foreach (var idx in _seedColumnIndices)
+                {
+                    var seedVal = rowBuffer[idx];
+                    if (seedVal is not null)
+                    {
+                        var valHash = DtPipe.Transformers.Arrow.Fake.StableHash.Compute(seedVal);
+                        combinedHash = unchecked(combinedHash * 31 + (int)valHash);
+                        hasAnyValue = true;
+                    }
+                }
+                if (hasAnyValue)
+                {
+                    rowSeed = (int)(combinedHash & 0x7FFFFFFF);
+                }
+            }
 
-			// 3. Process Generation Order (fake columns only)
-			foreach (var idx in _generationOrder)
-			{
-				if (_skipNull && idx < _realColumnCount && rowBuffer[idx] is null)
-					continue;
+            // 3. Process Generation Order (fake columns only)
+            foreach (var idx in _generationOrder)
+            {
+                if (_skipNull && idx < _realColumnCount && rowBuffer[idx] is null)
+                    continue;
 
-				var proc = _processors[idx];
-				if (proc.IsTemplate)
-				{
-					rowBuffer[idx] = ProcessTemplate(rowBuffer, proc.Template!, proc.ReferencedColumns!);
-				}
-				else if (proc.Generator is not null)
-				{
-					if (rowSeed.HasValue && _pagedCaches!.TryGetValue(idx, out var cache))
-						rowBuffer[idx] = cache.GetValue(rowSeed.Value);
-					else
-						rowBuffer[idx] = proc.Generator(_faker);
-				}
-			}
+                var proc = _processors[idx];
+                if (proc.IsTemplate)
+                {
+                    rowBuffer[idx] = ProcessTemplate(rowBuffer, proc.Template!, proc.ReferencedColumns!);
+                }
+                else if (proc.Generator is not null)
+                {
+                    if (rowSeed.HasValue && _pagedCaches!.TryGetValue(idx, out var cache))
+                        rowBuffer[idx] = cache.GetValue(rowSeed.Value);
+                    else
+                        rowBuffer[idx] = proc.Generator(_faker);
+                }
+            }
 
-			// 4. Append to fake column builders only
-			for (int colIdx = 0; colIdx < totalColumns; colIdx++)
-			{
-				appenders[colIdx]?.Invoke(rowBuffer[colIdx]);
-			}
-		}
+            // 4. Append to fake column builders only
+            for (int colIdx = 0; colIdx < totalColumns; colIdx++)
+            {
+                appenders[colIdx]?.Invoke(rowBuffer[colIdx]);
+            }
+        }
 
-		// 5. Build fake column arrays
-		for (int i = 0; i < totalColumns; i++)
-		{
-			if (builders[i] is not null)
-				resultArrays[i] = ArrowTypeMapper.BuildArray(builders[i]!);
-		}
+        // 5. Build fake column arrays
+        for (int i = 0; i < totalColumns; i++)
+        {
+            if (builders[i] is not null)
+                resultArrays[i] = ArrowTypeMapper.BuildArray(builders[i]!);
+        }
 
-		return new ValueTask<RecordBatch?>(new RecordBatch(batchSchema, resultArrays, rowCount));
-	}
+        return new ValueTask<RecordBatch?>(new RecordBatch(batchSchema, resultArrays, rowCount));
+    }
 
-	private static IArrowArrayBuilder[] CreateBuilders(Schema schema, int capacity)
-	{
-		return schema.FieldsList.Select(f => ArrowTypeMapper.CreateBuilder(f.DataType)).ToArray();
-	}
+    private static IArrowArrayBuilder[] CreateBuilders(Schema schema, int capacity)
+    {
+        return schema.FieldsList.Select(f => ArrowTypeMapper.CreateBuilder(f.DataType)).ToArray();
+    }
 }

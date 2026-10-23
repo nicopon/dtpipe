@@ -9,98 +9,98 @@ namespace DtPipe.Tests.Unit.Configuration;
 
 public class JobFileParserTests
 {
-	[Fact]
-	public void Parse_ShouldSucceed_WhenQueryIsMissing()
-	{
-		// Arrange
-		var yaml = @"main:
+    [Fact]
+    public void Parse_ShouldSucceed_WhenQueryIsMissing()
+    {
+        // Arrange
+        var yaml = @"main:
   input: dummy.csv
   output: dummy.parquet
 ";
-		var tempFile = Path.GetTempFileName();
-		File.WriteAllText(tempFile, yaml);
+        var tempFile = Path.GetTempFileName();
+        File.WriteAllText(tempFile, yaml);
 
-		try
-		{
-			// Act
-			var jobs = JobFileParser.Parse(tempFile);
-			var job = jobs["main"];
+        try
+        {
+            // Act
+            var jobs = JobFileParser.Parse(tempFile);
+            var job = jobs["main"];
 
-			// Assert
-			job.Input.Should().Be("dummy.csv");
-		}
-		finally
-		{
-			if (File.Exists(tempFile)) File.Delete(tempFile);
-		}
-	}
+            // Assert
+            job.Input.Should().Be("dummy.csv");
+        }
+        finally
+        {
+            if (File.Exists(tempFile)) File.Delete(tempFile);
+        }
+    }
 
-	[Fact]
-	public void Parse_ShouldSucceed_EvenWhenInputIsMissing()
-	{
-		// Arrange: Partial job (template)
-		var yaml = @"main:
+    [Fact]
+    public void Parse_ShouldSucceed_EvenWhenInputIsMissing()
+    {
+        // Arrange: Partial job (template)
+        var yaml = @"main:
   output: dummy.parquet
 ";
-		var tempFile = Path.GetTempFileName();
-		File.WriteAllText(tempFile, yaml);
+        var tempFile = Path.GetTempFileName();
+        File.WriteAllText(tempFile, yaml);
 
-		try
-		{
-			// Act
-			var jobs = JobFileParser.Parse(tempFile);
-			var job = jobs["main"];
+        try
+        {
+            // Act
+            var jobs = JobFileParser.Parse(tempFile);
+            var job = jobs["main"];
 
-			// Assert
-			job.Input.Should().BeNull();
-			job.Output.Should().Be("dummy.parquet");
-		}
-		finally
-		{
-			if (File.Exists(tempFile)) File.Delete(tempFile);
-		}
-	}
+            // Assert
+            job.Input.Should().BeNull();
+            job.Output.Should().Be("dummy.parquet");
+        }
+        finally
+        {
+            if (File.Exists(tempFile)) File.Delete(tempFile);
+        }
+    }
 
-	/// <summary>
-	/// A key this loader does not know is refused. This fixture itself carried one for a cycle —
-	/// 'sql:' at branch level, where the query belongs under 'provider-options' — and the dropped
-	/// key went unnoticed because the assertions only looked at 'from' and 'ref'.
-	/// </summary>
-	[Fact]
-	public void Parse_ShouldRefuse_AKeyItDoesNotKnow()
-	{
-		var act = () => JobFileParser.ParseContent(@"
+    /// <summary>
+    /// A key this loader does not know is refused. This fixture itself carried one for a cycle —
+    /// 'sql:' at branch level, where the query belongs under 'provider-options' — and the dropped
+    /// key went unnoticed because the assertions only looked at 'from' and 'ref'.
+    /// </summary>
+    [Fact]
+    public void Parse_ShouldRefuse_AKeyItDoesNotKnow()
+    {
+        var act = () => JobFileParser.ParseContent(@"
 joined:
   sql: SELECT 1
   from: p
 ");
-		act.Should().Throw<InvalidOperationException>().WithMessage("*sql*");
-	}
+        act.Should().Throw<InvalidOperationException>().WithMessage("*sql*");
+    }
 
-	/// <summary>
-	/// The described refusal belongs to <see cref="JobFileParser.ParseContent"/>, not to the file
-	/// entry point above it: 'dry-run' and 'get-dag-topology' reach the parser through the string
-	/// path, and while the unwrap sat on the file path they answered an unknown key with the bare
-	/// property name. Asserting it here is what keeps the two entry points from drifting apart.
-	/// </summary>
-	[Fact]
-	public void Unknown_Key_Is_Named_With_Its_Line_On_The_String_Path()
-	{
-		var yaml = "main:\n  input: in.csv\n  providers:\n    csv:\n      separator: ';'\n  output: out.csv\n";
+    /// <summary>
+    /// The described refusal belongs to <see cref="JobFileParser.ParseContent"/>, not to the file
+    /// entry point above it: 'dry-run' and 'get-dag-topology' reach the parser through the string
+    /// path, and while the unwrap sat on the file path they answered an unknown key with the bare
+    /// property name. Asserting it here is what keeps the two entry points from drifting apart.
+    /// </summary>
+    [Fact]
+    public void Unknown_Key_Is_Named_With_Its_Line_On_The_String_Path()
+    {
+        var yaml = "main:\n  input: in.csv\n  providers:\n    csv:\n      separator: ';'\n  output: out.csv\n";
 
-		var ex = Assert.Throws<InvalidOperationException>(() => JobFileParser.ParseContent(yaml));
+        var ex = Assert.Throws<InvalidOperationException>(() => JobFileParser.ParseContent(yaml));
 
-		ex.Message.Should().Contain("providers");
-		ex.Message.Should().Contain("line 3");
-		ex.Message.Should().Contain("provider-options");   // the legal key it was mistaken for
-		ex.Message.Should().Contain("^");                  // the caret under the offending column
-	}
+        ex.Message.Should().Contain("providers");
+        ex.Message.Should().Contain("line 3");
+        ex.Message.Should().Contain("provider-options");   // the legal key it was mistaken for
+        ex.Message.Should().Contain("^");                  // the caret under the offending column
+    }
 
-	[Fact]
-	public void Parse_ShouldHandleMultiBranchDag()
-	{
-		// Arrange
-		var yaml = @"
+    [Fact]
+    public void Parse_ShouldHandleMultiBranchDag()
+    {
+        // Arrange
+        var yaml = @"
 p:
   input: data.parquet
 c:
@@ -112,155 +112,155 @@ joined:
   from: p
   ref: [c]
 ";
-		var tempFile = Path.GetTempFileName();
-		File.WriteAllText(tempFile, yaml);
+        var tempFile = Path.GetTempFileName();
+        File.WriteAllText(tempFile, yaml);
 
-		try
-		{
-			// Act
-			var jobs = JobFileParser.Parse(tempFile);
+        try
+        {
+            // Act
+            var jobs = JobFileParser.Parse(tempFile);
 
-			// Assert
-			jobs.Should().HaveCount(3);
-			jobs["p"].Input.Should().Be("data.parquet");
-			jobs["joined"].From.Should().Be("p");
-			jobs["joined"].Ref.Should().Contain("c");
-		}
-		finally
-		{
-			if (File.Exists(tempFile)) File.Delete(tempFile);
-		}
-	}
+            // Assert
+            jobs.Should().HaveCount(3);
+            jobs["p"].Input.Should().Be("data.parquet");
+            jobs["joined"].From.Should().Be("p");
+            jobs["joined"].Ref.Should().Contain("c");
+        }
+        finally
+        {
+            if (File.Exists(tempFile)) File.Delete(tempFile);
+        }
+    }
 
-	[Fact]
-	public void Parse_ShouldInterpolateEnvironmentVariables()
-	{
-		// Arrange
-		Environment.SetEnvironmentVariable("DTPIPE_TEST_ENV_VAR", "my-env-value");
-		var yaml = @"main:
+    [Fact]
+    public void Parse_ShouldInterpolateEnvironmentVariables()
+    {
+        // Arrange
+        Environment.SetEnvironmentVariable("DTPIPE_TEST_ENV_VAR", "my-env-value");
+        var yaml = @"main:
   input: ${{DTPIPE_TEST_ENV_VAR}}
   output: dummy.parquet
 ";
-		var tempFile = Path.GetTempFileName();
-		File.WriteAllText(tempFile, yaml);
+        var tempFile = Path.GetTempFileName();
+        File.WriteAllText(tempFile, yaml);
 
-		try
-		{
-			// Act
-			var jobs = JobFileParser.Parse(tempFile);
-			var job = jobs["main"];
+        try
+        {
+            // Act
+            var jobs = JobFileParser.Parse(tempFile);
+            var job = jobs["main"];
 
-			// Assert
-			job.Input.Should().Be("my-env-value");
-		}
-		finally
-		{
-			Environment.SetEnvironmentVariable("DTPIPE_TEST_ENV_VAR", null);
-			if (File.Exists(tempFile)) File.Delete(tempFile);
-		}
-	}
+            // Assert
+            job.Input.Should().Be("my-env-value");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("DTPIPE_TEST_ENV_VAR", null);
+            if (File.Exists(tempFile)) File.Delete(tempFile);
+        }
+    }
 
-	[Fact]
-	public void Parse_ShouldInterpolateKeyringSecrets()
-	{
-		// Arrange
-		var secretsManager = new DtPipe.Cli.Security.InMemorySecretsManager();
-		secretsManager.SetSecret("test-secret", "my-secret-value");
+    [Fact]
+    public void Parse_ShouldInterpolateKeyringSecrets()
+    {
+        // Arrange
+        var secretsManager = new DtPipe.Cli.Security.InMemorySecretsManager();
+        secretsManager.SetSecret("test-secret", "my-secret-value");
 
-		var yaml = @"main:
+        var yaml = @"main:
   input: ${{keyring://test-secret}}
   output: dummy.parquet
 ";
-		var tempFile = Path.GetTempFileName();
-		File.WriteAllText(tempFile, yaml);
+        var tempFile = Path.GetTempFileName();
+        File.WriteAllText(tempFile, yaml);
 
-		try
-		{
-			// Act
-			var jobs = JobFileParser.Parse(tempFile, secretsManager);
-			var job = jobs["main"];
+        try
+        {
+            // Act
+            var jobs = JobFileParser.Parse(tempFile, secretsManager);
+            var job = jobs["main"];
 
-			// Assert
-			job.Input.Should().Be("my-secret-value");
-		}
-		finally
-		{
-			if (File.Exists(tempFile)) File.Delete(tempFile);
-		}
-	}
+            // Assert
+            job.Input.Should().Be("my-secret-value");
+        }
+        finally
+        {
+            if (File.Exists(tempFile)) File.Delete(tempFile);
+        }
+    }
 
-	[Fact]
-	public void Parse_ShouldInterpolateCursorExpression()
-	{
-		// Arrange
-		var path = Path.Combine(Path.GetTempPath(), "test_yaml_cursor_" + Guid.NewGuid().ToString("N") + ".sync").Replace("\\", "/");
-		var cursor = new DtPipe.Core.Cursor.CursorValue("updated_at", "2026-06-16T12:00:00Z", DtPipe.Core.Cursor.CursorType.DateTime);
-		var meta = new DtPipe.Core.Cursor.CursorRunMetadata(DateTime.UtcNow, DateTime.UtcNow, 100, "success");
-		DtPipe.Core.Cursor.CursorStateStore.Save(path, cursor, meta);
+    [Fact]
+    public void Parse_ShouldInterpolateCursorExpression()
+    {
+        // Arrange
+        var path = Path.Combine(Path.GetTempPath(), "test_yaml_cursor_" + Guid.NewGuid().ToString("N") + ".sync").Replace("\\", "/");
+        var cursor = new DtPipe.Core.Cursor.CursorValue("updated_at", "2026-06-16T12:00:00Z", DtPipe.Core.Cursor.CursorType.DateTime);
+        var meta = new DtPipe.Core.Cursor.CursorRunMetadata(DateTime.UtcNow, DateTime.UtcNow, 100, "success");
+        DtPipe.Core.Cursor.CursorStateStore.Save(path, cursor, meta);
 
-		var yaml = $@"main:
+        var yaml = $@"main:
   input: select * from t where updated_at >= '${{{{cursor://{path}|1970-01-01}}}}'
   output: dummy.parquet
 ";
-		var tempFile = Path.GetTempFileName();
-		File.WriteAllText(tempFile, yaml);
+        var tempFile = Path.GetTempFileName();
+        File.WriteAllText(tempFile, yaml);
 
-		try
-		{
-			// Act
-			var jobs = JobFileParser.Parse(tempFile, null);
-			var job = jobs["main"];
+        try
+        {
+            // Act
+            var jobs = JobFileParser.Parse(tempFile, null);
+            var job = jobs["main"];
 
-			// Assert
-			job.Input.Should().Be("select * from t where updated_at >= '2026-06-16T12:00:00Z'");
-		}
-		finally
-		{
-			if (File.Exists(tempFile)) File.Delete(tempFile);
-			if (File.Exists(path)) File.Delete(path);
-		}
-	}
+            // Assert
+            job.Input.Should().Be("select * from t where updated_at >= '2026-06-16T12:00:00Z'");
+        }
+        finally
+        {
+            if (File.Exists(tempFile)) File.Delete(tempFile);
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
 
-	[Fact]
-	public void Parse_ShouldNotBreakYaml_WhenInterpolatedValueContainsYamlSpecialCharacters()
-	{
-		// Arrange
-		var secretsManager = new DtPipe.Cli.Security.InMemorySecretsManager();
-		// A secret containing quotes, colons, and newlines that would normally break raw YAML parsing
-		var complexSecret = "my:complex:string\nwith \"quotes\" and 'single' quotes and trailing: colon";
-		secretsManager.SetSecret("complex-secret", complexSecret);
+    [Fact]
+    public void Parse_ShouldNotBreakYaml_WhenInterpolatedValueContainsYamlSpecialCharacters()
+    {
+        // Arrange
+        var secretsManager = new DtPipe.Cli.Security.InMemorySecretsManager();
+        // A secret containing quotes, colons, and newlines that would normally break raw YAML parsing
+        var complexSecret = "my:complex:string\nwith \"quotes\" and 'single' quotes and trailing: colon";
+        secretsManager.SetSecret("complex-secret", complexSecret);
 
-		var yaml = @"main:
+        var yaml = @"main:
   input: ${{keyring://complex-secret}}
   output: dummy.parquet
 ";
-		var tempFile = Path.GetTempFileName();
-		File.WriteAllText(tempFile, yaml);
+        var tempFile = Path.GetTempFileName();
+        File.WriteAllText(tempFile, yaml);
 
-		try
-		{
-			// Act
-			var jobs = JobFileParser.Parse(tempFile, secretsManager);
-			var job = jobs["main"];
+        try
+        {
+            // Act
+            var jobs = JobFileParser.Parse(tempFile, secretsManager);
+            var job = jobs["main"];
 
-			// Assert
-			job.Input.Should().Be(complexSecret);
-		}
-		finally
-		{
-			if (File.Exists(tempFile)) File.Delete(tempFile);
-		}
-	}
+            // Assert
+            job.Input.Should().Be(complexSecret);
+        }
+        finally
+        {
+            if (File.Exists(tempFile)) File.Delete(tempFile);
+        }
+    }
 
-	[Fact]
-	public void Parse_ShouldInterpolateInsideTransformers()
-	{
-		// Arrange
-		var secretsManager = new DtPipe.Cli.Security.InMemorySecretsManager();
-		secretsManager.SetSecret("trans-secret", "secret-trans-val");
-		Environment.SetEnvironmentVariable("DTPIPE_TEST_TRANS_ENV", "env-trans-val");
+    [Fact]
+    public void Parse_ShouldInterpolateInsideTransformers()
+    {
+        // Arrange
+        var secretsManager = new DtPipe.Cli.Security.InMemorySecretsManager();
+        secretsManager.SetSecret("trans-secret", "secret-trans-val");
+        Environment.SetEnvironmentVariable("DTPIPE_TEST_TRANS_ENV", "env-trans-val");
 
-		var yaml = @"main:
+        var yaml = @"main:
   input: dummy.csv
   transformers:
     - type: compute
@@ -269,155 +269,155 @@ joined:
       options:
         some_opt: ${{keyring://trans-secret}}
 ";
-		var tempFile = Path.GetTempFileName();
-		File.WriteAllText(tempFile, yaml);
+        var tempFile = Path.GetTempFileName();
+        File.WriteAllText(tempFile, yaml);
 
-		try
-		{
-			// Act
-			var jobs = JobFileParser.Parse(tempFile, secretsManager);
-			var job = jobs["main"];
-			var config = job.Transformers.Should().ContainSingle().Subject;
+        try
+        {
+            // Act
+            var jobs = JobFileParser.Parse(tempFile, secretsManager);
+            var job = jobs["main"];
+            var config = job.Transformers.Should().ContainSingle().Subject;
 
-			// Assert
-			config.Mappings.Should().ContainKey("Val");
-			config.Mappings["Val"].Should().Be("env-trans-val");
+            // Assert
+            config.Mappings.Should().ContainKey("Val");
+            config.Mappings["Val"].Should().Be("env-trans-val");
 
-			config.Options.Should().ContainKey("some_opt");
-			config.Options["some_opt"].Should().Be("secret-trans-val");
-		}
-		finally
-		{
-			Environment.SetEnvironmentVariable("DTPIPE_TEST_TRANS_ENV", null);
-			if (File.Exists(tempFile)) File.Delete(tempFile);
-		}
-	}
+            config.Options.Should().ContainKey("some_opt");
+            config.Options["some_opt"].Should().Be("secret-trans-val");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("DTPIPE_TEST_TRANS_ENV", null);
+            if (File.Exists(tempFile)) File.Delete(tempFile);
+        }
+    }
 
-	[Fact]
-	public void Parse_ShouldSucceed_WhenUsingMemoryMappedFile()
-	{
-		// Arrange
-		var yaml = @"main:
+    [Fact]
+    public void Parse_ShouldSucceed_WhenUsingMemoryMappedFile()
+    {
+        // Arrange
+        var yaml = @"main:
   input: memory-dummy.csv
   output: memory-dummy.parquet
 ";
-		var jobName = "test-job-" + Guid.NewGuid().ToString("N");
-		var tempPath = Path.Combine(Path.GetTempPath(), "dtpipe-job-" + jobName + ".yaml");
-		File.WriteAllText(tempPath, yaml);
+        var jobName = "test-job-" + Guid.NewGuid().ToString("N");
+        var tempPath = Path.Combine(Path.GetTempPath(), "dtpipe-job-" + jobName + ".yaml");
+        File.WriteAllText(tempPath, yaml);
 
-		try
-		{
-			// Act
-			var jobs = JobFileParser.Parse($"memory://{jobName}");
-			var job = jobs["main"];
+        try
+        {
+            // Act
+            var jobs = JobFileParser.Parse($"memory://{jobName}");
+            var job = jobs["main"];
 
-			// Assert
-			job.Input.Should().Be("memory-dummy.csv");
-			job.Output.Should().Be("memory-dummy.parquet");
-		}
-		finally
-		{
-			if (File.Exists(tempPath)) File.Delete(tempPath);
-		}
-	}
+            // Assert
+            job.Input.Should().Be("memory-dummy.csv");
+            job.Output.Should().Be("memory-dummy.parquet");
+        }
+        finally
+        {
+            if (File.Exists(tempPath)) File.Delete(tempPath);
+        }
+    }
 }
 
 
 [Collection("console-serial")]
 public class YamlCliParityTests
 {
-	/// <summary>
-	/// F8 — the YAML path and the CLI path must produce identical options objects.
-	/// Drives ProviderConfigurationService both ways with stub csv contributors and
-	/// compares the registered CsvReaderOptions / CsvWriterOptions.
-	/// </summary>
-	[Fact]
-	public async Task Yaml_And_Cli_Produce_Identical_Options()
-	{
-		var registry = new DtPipe.Core.Options.OptionsRegistry();
-		var contributors = YamlParityStubs.Build();
+    /// <summary>
+    /// F8 — the YAML path and the CLI path must produce identical options objects.
+    /// Drives ProviderConfigurationService both ways with stub csv contributors and
+    /// compares the registered CsvReaderOptions / CsvWriterOptions.
+    /// </summary>
+    [Fact]
+    public async Task Yaml_And_Cli_Produce_Identical_Options()
+    {
+        var registry = new DtPipe.Core.Options.OptionsRegistry();
+        var contributors = YamlParityStubs.Build();
 
-		// ── YAML path: provider-options dictionaries ──
-		var yamlJob = new DtPipe.Core.Models.JobDefinition
-		{
-			Input = "in.csv",
-			Output = "out.csv",
-			ProviderOptions = new()
-			{
-				["csv"] = new() { ["separator"] = ";", ["column-types"] = "Id:int32" },
-				["csv-writer"] = new() { ["separator"] = "|" }
-			}
-		};
-		registry.BeginScope();
-		var yamlStderr = CaptureStderr(() => new DtPipe.Cli.Services.ProviderConfigurationService(contributors, registry)
-			.BindOptions(yamlJob, context: null));
-		var yamlReader = registry.Get<DtPipe.Adapters.Csv.CsvReaderOptions>();
-		var yamlWriter = registry.Get<DtPipe.Adapters.Csv.CsvWriterOptions>();
-		yamlStderr.Should().NotContain("[dtpipe] Warning",
-			"the shared 'csv:' key feeds both sides — reader-only keys must be skipped silently on the writer");
+        // ── YAML path: provider-options dictionaries ──
+        var yamlJob = new DtPipe.Core.Models.JobDefinition
+        {
+            Input = "in.csv",
+            Output = "out.csv",
+            ProviderOptions = new()
+            {
+                ["csv"] = new() { ["separator"] = ";", ["column-types"] = "Id:int32" },
+                ["csv-writer"] = new() { ["separator"] = "|" }
+            }
+        };
+        registry.BeginScope();
+        var yamlStderr = CaptureStderr(() => new DtPipe.Cli.Services.ProviderConfigurationService(contributors, registry)
+            .BindOptions(yamlJob, context: null));
+        var yamlReader = registry.Get<DtPipe.Adapters.Csv.CsvReaderOptions>();
+        var yamlWriter = registry.Get<DtPipe.Adapters.Csv.CsvWriterOptions>();
+        yamlStderr.Should().NotContain("[dtpipe] Warning",
+            "the shared 'csv:' key feeds both sides — reader-only keys must be skipped silently on the writer");
 
-		// ── CLI path: stage-scoped args ──
-		var cliJob = new DtPipe.Core.Models.JobDefinition { Input = "in.csv", Output = "out.csv" };
-		var cliContext = new DtPipe.Cli.Pipeline.CliJobContext(
-			ReaderArguments: new[] { "--csv-separator", ";", "--column-types", "Id:int32" },
-			PipelineArguments: System.Array.Empty<string>(),
-			WriterArguments: new[] { "-o", "out.csv", "--csv-separator", "|" },
-			Arguments: System.Array.Empty<string>());
-		registry.BeginScope();
-		new DtPipe.Cli.Services.ProviderConfigurationService(contributors, registry)
-			.BindOptions(cliJob, cliContext);
-		var cliReader = registry.Get<DtPipe.Adapters.Csv.CsvReaderOptions>();
-		var cliWriter = registry.Get<DtPipe.Adapters.Csv.CsvWriterOptions>();
+        // ── CLI path: stage-scoped args ──
+        var cliJob = new DtPipe.Core.Models.JobDefinition { Input = "in.csv", Output = "out.csv" };
+        var cliContext = new DtPipe.Cli.Pipeline.CliJobContext(
+            ReaderArguments: new[] { "--csv-separator", ";", "--column-types", "Id:int32" },
+            PipelineArguments: System.Array.Empty<string>(),
+            WriterArguments: new[] { "-o", "out.csv", "--csv-separator", "|" },
+            Arguments: System.Array.Empty<string>());
+        registry.BeginScope();
+        new DtPipe.Cli.Services.ProviderConfigurationService(contributors, registry)
+            .BindOptions(cliJob, cliContext);
+        var cliReader = registry.Get<DtPipe.Adapters.Csv.CsvReaderOptions>();
+        var cliWriter = registry.Get<DtPipe.Adapters.Csv.CsvWriterOptions>();
 
-		// ── Compare ──
-		cliReader.Separator.Should().Be(yamlReader.Separator).And.Be(";");
-		cliReader.ColumnTypes.Should().Be(yamlReader.ColumnTypes).And.Be("Id:int32");
-		cliWriter.Separator.Should().Be(yamlWriter.Separator).And.Be("|");
-		// Note: CsvWriterOptions has no ColumnTypes property at all — before the
-		// shared-key silence rule, binding the block onto the writer warned on it.
-	}
+        // ── Compare ──
+        cliReader.Separator.Should().Be(yamlReader.Separator).And.Be(";");
+        cliReader.ColumnTypes.Should().Be(yamlReader.ColumnTypes).And.Be("Id:int32");
+        cliWriter.Separator.Should().Be(yamlWriter.Separator).And.Be("|");
+        // Note: CsvWriterOptions has no ColumnTypes property at all — before the
+        // shared-key silence rule, binding the block onto the writer warned on it.
+    }
 
-	private static string CaptureStderr(Action action)
-	{
-		var original = Console.Error;
-		var captured = new StringWriter();
-		Console.SetError(captured);
-		try { action(); }
-		finally { Console.SetError(original); }
-		return captured.ToString();
-	}
+    private static string CaptureStderr(Action action)
+    {
+        var original = Console.Error;
+        var captured = new StringWriter();
+        Console.SetError(captured);
+        try { action(); }
+        finally { Console.SetError(original); }
+        return captured.ToString();
+    }
 
-	private static class YamlParityStubs
-	{
-		public sealed class ReaderStubFactory : IStreamReaderFactory, ICliContributor
-		{
-			public string ComponentName => "csv";
-			public string Category => "Readers";
-			public Type OptionsType => typeof(DtPipe.Adapters.Csv.CsvReaderOptions);
-			public bool CanHandle(string connectionString) => connectionString.EndsWith(".csv", StringComparison.OrdinalIgnoreCase);
-			public IEnumerable<FlagDef> GetFlagDefs() => CliOptionBuilder.GenerateFlagDefsForType(OptionsType);
-			public DtPipe.Core.Abstractions.IStreamReader Create(DtPipe.Core.Options.OptionsRegistry registry) => throw new NotSupportedException();
-			public IEnumerable<Type> GetSupportedOptionTypes() => new[] { OptionsType };
-			public bool RequiresQuery => false;
-		}
+    private static class YamlParityStubs
+    {
+        public sealed class ReaderStubFactory : IStreamReaderFactory, ICliContributor
+        {
+            public string ComponentName => "csv";
+            public string Category => "Readers";
+            public Type OptionsType => typeof(DtPipe.Adapters.Csv.CsvReaderOptions);
+            public bool CanHandle(string connectionString) => connectionString.EndsWith(".csv", StringComparison.OrdinalIgnoreCase);
+            public IEnumerable<FlagDef> GetFlagDefs() => CliOptionBuilder.GenerateFlagDefsForType(OptionsType);
+            public DtPipe.Core.Abstractions.IStreamReader Create(DtPipe.Core.Options.OptionsRegistry registry) => throw new NotSupportedException();
+            public IEnumerable<Type> GetSupportedOptionTypes() => new[] { OptionsType };
+            public bool RequiresQuery => false;
+        }
 
-		public sealed class WriterStubFactory : IDataWriterFactory, ICliContributor
-		{
-			public string ComponentName => "csv";
-			public string Category => "Writers";
-			public Type OptionsType => typeof(DtPipe.Adapters.Csv.CsvWriterOptions);
-			public bool CanHandle(string connectionString) => connectionString.EndsWith(".csv", StringComparison.OrdinalIgnoreCase);
-			public IEnumerable<FlagDef> GetFlagDefs() => CliOptionBuilder.GenerateFlagDefsForType(OptionsType);
-			public DtPipe.Core.Abstractions.IDataWriter Create(DtPipe.Core.Options.OptionsRegistry registry) => throw new NotSupportedException();
-			public IEnumerable<Type> GetSupportedOptionTypes() => new[] { OptionsType };
-		}
+        public sealed class WriterStubFactory : IDataWriterFactory, ICliContributor
+        {
+            public string ComponentName => "csv";
+            public string Category => "Writers";
+            public Type OptionsType => typeof(DtPipe.Adapters.Csv.CsvWriterOptions);
+            public bool CanHandle(string connectionString) => connectionString.EndsWith(".csv", StringComparison.OrdinalIgnoreCase);
+            public IEnumerable<FlagDef> GetFlagDefs() => CliOptionBuilder.GenerateFlagDefsForType(OptionsType);
+            public DtPipe.Core.Abstractions.IDataWriter Create(DtPipe.Core.Options.OptionsRegistry registry) => throw new NotSupportedException();
+            public IEnumerable<Type> GetSupportedOptionTypes() => new[] { OptionsType };
+        }
 
-		public static IEnumerable<ICliContributor> Build() => new ICliContributor[]
-		{
-			new ReaderStubFactory(),
-			new WriterStubFactory(),
-		};
-	}
+        public static IEnumerable<ICliContributor> Build() => new ICliContributor[]
+        {
+            new ReaderStubFactory(),
+            new WriterStubFactory(),
+        };
+    }
 }
 
 public class InterpolationUnificationTests

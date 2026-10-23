@@ -162,12 +162,13 @@ public class InspectCommand : Command
         {
             // Output JSON array of column descriptors
             var json = System.Text.Json.JsonSerializer.Serialize(
-                reader.Columns.Select(c => new {
+                reader.Columns.Select(c => new
+                {
                     c.Name, Type = c.ClrType?.Name ?? "unknown",
                     c.IsNullable
                 }),
                 new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
-            
+
             // Note: JSON output from 'inspect' is considered Primary Data for THIS command,
             // so we keep it on STDOUT. But for technical consistency, one might argue it should go to console.Error
             // if we want to pipe STDOUT to another dtpipe. However, 'inspect' isn't usually piped to 'dtpipe'.

@@ -52,7 +52,7 @@ public abstract class BaseColumnarTransformer : IColumnarTransformer
 
         // Use standard converter to create a 1-row batch
         using var batch = ArrowRowConverter.ToRecordBatch(InputSchema, new[] { row }, 1);
-        
+
         // Execute transformation (synchronous wait is acceptable for row-mode fallback/dry-run)
         using var resultBatch = TransformBatchAsync(batch).GetAwaiter().GetResult();
 

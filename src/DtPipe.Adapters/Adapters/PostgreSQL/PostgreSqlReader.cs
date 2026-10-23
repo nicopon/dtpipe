@@ -261,7 +261,7 @@ public sealed partial class PostgreSqlReader : IColumnarStreamReader, IBatchSize
                 (e, b) => { if (e.IsNull) { e.Skip(); b.AppendNull(); } else b.Append(ArrowTypeMapper.ToArrowUuidBytes(e.Read<Guid>())); },
                 b => b.Build()),
 
-            NpgsqlTypes.NpgsqlDbType.Date => arrowType is Date64Type 
+            NpgsqlTypes.NpgsqlDbType.Date => arrowType is Date64Type
                 ? BuildTyped(new Date64Array.Builder(), (e, b) => { if (e.IsNull) { e.Skip(); b.AppendNull(); } else b.Append(e.Read<DateOnly>().ToDateTime(TimeOnly.MinValue)); }, b => b.Build())
                 : BuildTyped(new Date32Array.Builder(), (e, b) => { if (e.IsNull) { e.Skip(); b.AppendNull(); } else b.Append(e.Read<DateOnly>().ToDateTime(TimeOnly.MinValue)); }, b => b.Build()),
 

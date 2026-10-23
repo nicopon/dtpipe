@@ -10,5 +10,5 @@ namespace DtPipe.Tests;
 [CollectionDefinition(Name, DisableParallelization = true)]
 public sealed class MemoryMeasurementCollection
 {
-	public const string Name = "memory-measurement";
+    public const string Name = "memory-measurement";
 }

@@ -29,11 +29,11 @@ public partial class DtPipeMcpTools
         var current = new System.Text.StringBuilder();
         bool inDoubleQuotes = false;
         bool inSingleQuotes = false;
-        
+
         for (int i = 0; i < commandLine.Length; i++)
         {
             char c = commandLine[i];
-            
+
             if (c == '\\' && i + 1 < commandLine.Length && commandLine[i + 1] == '"')
             {
                 current.Append('"');
@@ -60,12 +60,12 @@ public partial class DtPipeMcpTools
                 current.Append(c);
             }
         }
-        
+
         if (current.Length > 0)
         {
             args.Add(current.ToString());
         }
-        
+
         return args.ToArray();
     }
 

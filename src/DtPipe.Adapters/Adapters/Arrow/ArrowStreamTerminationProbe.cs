@@ -23,34 +23,34 @@ namespace DtPipe.Adapters.Arrow;
 /// </remarks>
 internal sealed class ArrowStreamTerminationProbe(Stream inner) : Stream
 {
-	/// <summary>True once the source reported end-of-file to a read that asked for bytes.</summary>
-	public bool SourceRanDry { get; private set; }
+    /// <summary>True once the source reported end-of-file to a read that asked for bytes.</summary>
+    public bool SourceRanDry { get; private set; }
 
-	private int Observe(int requested, int received)
-	{
-		if (requested > 0 && received == 0) SourceRanDry = true;
-		return received;
-	}
+    private int Observe(int requested, int received)
+    {
+        if (requested > 0 && received == 0) SourceRanDry = true;
+        return received;
+    }
 
-	public override int Read(byte[] buffer, int offset, int count)
-		=> Observe(count, inner.Read(buffer, offset, count));
+    public override int Read(byte[] buffer, int offset, int count)
+        => Observe(count, inner.Read(buffer, offset, count));
 
-	public override int Read(Span<byte> buffer)
-		=> Observe(buffer.Length, inner.Read(buffer));
+    public override int Read(Span<byte> buffer)
+        => Observe(buffer.Length, inner.Read(buffer));
 
-	public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken ct)
-		=> Observe(count, await inner.ReadAsync(buffer.AsMemory(offset, count), ct));
+    public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken ct)
+        => Observe(count, await inner.ReadAsync(buffer.AsMemory(offset, count), ct));
 
-	public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
-		=> Observe(buffer.Length, await inner.ReadAsync(buffer, ct));
+    public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
+        => Observe(buffer.Length, await inner.ReadAsync(buffer, ct));
 
-	public override bool CanRead => inner.CanRead;
-	public override bool CanSeek => inner.CanSeek;
-	public override bool CanWrite => false;
-	public override long Length => inner.Length;
-	public override long Position { get => inner.Position; set => inner.Position = value; }
-	public override void Flush() => inner.Flush();
-	public override long Seek(long offset, SeekOrigin origin) => inner.Seek(offset, origin);
-	public override void SetLength(long value) => throw new NotSupportedException();
-	public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    public override bool CanRead => inner.CanRead;
+    public override bool CanSeek => inner.CanSeek;
+    public override bool CanWrite => false;
+    public override long Length => inner.Length;
+    public override long Position { get => inner.Position; set => inner.Position = value; }
+    public override void Flush() => inner.Flush();
+    public override long Seek(long offset, SeekOrigin origin) => inner.Seek(offset, origin);
+    public override void SetLength(long value) => throw new NotSupportedException();
+    public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
 }

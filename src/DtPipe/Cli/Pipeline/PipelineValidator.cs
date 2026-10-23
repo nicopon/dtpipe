@@ -158,7 +158,7 @@ public static class PipelineValidator
     private static bool HasCycle(JobDagDefinition dag)
     {
         var adj = dag.Branches.ToDictionary(
-            b => b.Alias, 
+            b => b.Alias,
             b => b.StreamingAliases.Concat(b.RefAliases).ToList(),
             StringComparer.OrdinalIgnoreCase);
 

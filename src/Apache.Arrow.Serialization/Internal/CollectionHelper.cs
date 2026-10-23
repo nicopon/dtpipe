@@ -14,7 +14,7 @@ public static class CollectionHelper
         int start = listArray.ValueOffsets[index];
         int count = listArray.ValueOffsets[index + 1] - start;
         var values = listArray.Values;
-        
+
         var list = new List<T>(count);
         for (int i = 0; i < count; i++)
         {
@@ -30,7 +30,7 @@ public static class CollectionHelper
         int start = listArray.ValueOffsets[index];
         int count = listArray.ValueOffsets[index + 1] - start;
         var values = listArray.Values;
-        
+
         var res = new T[count];
         for (int i = 0; i < count; i++)
         {
@@ -46,7 +46,7 @@ public static class CollectionHelper
         int start = listArray.ValueOffsets[index];
         int count = listArray.ValueOffsets[index + 1] - start;
         var values = listArray.Values;
-        
+
         var set = new HashSet<T>(count);
         for (int i = 0; i < count; i++)
         {
@@ -61,11 +61,11 @@ public static class CollectionHelper
         var mapArray = (MapArray)array;
         int start = mapArray.ValueOffsets[index];
         int count = mapArray.ValueOffsets[index + 1] - start;
-        
+
         var dict = new Dictionary<K, V>(count);
         var keys = mapArray.Keys;
         var values = mapArray.Values;
-        
+
         for (int i = 0; i < count; i++)
         {
             var k = keyGetter(keys, start + i);

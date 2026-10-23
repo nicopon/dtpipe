@@ -43,10 +43,10 @@ public class XmlInferenceTests : IAsyncLifetime
             """;
         await File.WriteAllTextAsync(_testXmlPath, content);
 
-        var options = new XmlReaderOptions 
-        { 
-            Path = "//Item", 
-            ColumnTypes = "Id:int32,Meta.Price:double,Meta.IsActive:bool" 
+        var options = new XmlReaderOptions
+        {
+            Path = "//Item",
+            ColumnTypes = "Id:int32,Meta.Price:double,Meta.IsActive:bool"
         };
         var reader = new XmlStreamReader(_testXmlPath, options);
 
@@ -63,7 +63,7 @@ public class XmlInferenceTests : IAsyncLifetime
         var cols = reader.Columns!.ToList();
         cols.Should().Contain(c => c.Name == "Id");
         cols.Should().Contain(c => c.Name == "Meta");
-        
+
         var idCol = cols.First(c => c.Name == "Id");
         idCol.ClrType.Should().Be(typeof(int));
 
@@ -72,9 +72,9 @@ public class XmlInferenceTests : IAsyncLifetime
 
         batches.Should().HaveCount(1);
         var row = batches[0];
-        
+
         row[cols.FindIndex(c => c.Name == "Id")].Should().Be(101);
-        
+
         var metaDict = row[cols.FindIndex(c => c.Name == "Meta")] as Dictionary<string, object?>;
         metaDict.Should().NotBeNull();
         metaDict!["Price"].Should().Be(19.99);
@@ -99,10 +99,10 @@ public class XmlInferenceTests : IAsyncLifetime
             """;
         await File.WriteAllTextAsync(_testXmlPath, content);
 
-        var options = new XmlReaderOptions 
-        { 
-            Path = "//Item", 
-            AutoColumnTypes = true 
+        var options = new XmlReaderOptions
+        {
+            Path = "//Item",
+            AutoColumnTypes = true
         };
         var reader = new XmlStreamReader(_testXmlPath, options);
 
@@ -117,10 +117,10 @@ public class XmlInferenceTests : IAsyncLifetime
 
         // Assert
         var colNames = reader.Columns!.Select(c => c.Name).ToList();
-        
+
         // Both records contribute to the schema
         colNames.Should().Contain(new[] { "Id", "Tag", "OptionalCol" });
-        
+
         // "Id" should be inferred as int32 because "101" and "102" were seen
         reader.Columns!.First(c => c.Name == "Id").ClrType.Should().Be(typeof(int));
     }

@@ -41,7 +41,7 @@ public static class ArrowReflectionEngine
     public static ArrowTypeResult GetLogicalTypeFromValue(object? value)
     {
         if (value == null) return new ArrowTypeResult(StringType.Default);
-        
+
         if (value is IDictionary dict)
         {
             return new ArrowTypeResult(new StructType(GetFields(dict)));
@@ -52,7 +52,7 @@ public static class ArrowReflectionEngine
             object? first = null;
             var it = enumerable.GetEnumerator();
             if (it.MoveNext()) first = it.Current;
-            
+
             var elementLogicalType = GetLogicalTypeFromValue(first);
             return new ArrowTypeResult(new ListType(ArrowTypeMap.GetField("item", elementLogicalType, true)));
         }
@@ -92,7 +92,7 @@ public static class ArrowReflectionEngine
             var keyType = typeof(string);
             var valueType = typeof(object);
             var dictInterface = type.GetInterfaces().FirstOrDefault(i => i.IsGenericType && i.GetGenericTypeDefinition().Name.StartsWith("IDictionary"));
-            
+
             if (dictInterface != null)
             {
                 var args = dictInterface.GetGenericArguments();

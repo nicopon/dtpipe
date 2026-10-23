@@ -38,7 +38,7 @@ public class SerializationTests
         // Assert
         recordBatch.Length.Should().Be(data.Count);
         recordBatch.ColumnCount.Should().Be(4);
-        
+
         var idColumn = (Int32Array)recordBatch.Column(0);
         idColumn.GetValue(0).Should().Be(1);
         idColumn.GetValue(1).Should().Be(2);
@@ -105,14 +105,14 @@ public class SerializationTests
         // Arrange
         var data = new List<NestedPoco>
         {
-            new NestedPoco 
-            { 
-                Title = "Outer 1", 
-                Inner = new SimplePoco { Id = 1, Name = "Inner 1", IsActive = true } 
+            new NestedPoco
+            {
+                Title = "Outer 1",
+                Inner = new SimplePoco { Id = 1, Name = "Inner 1", IsActive = true }
             },
-            new NestedPoco 
-            { 
-                Title = "Outer 2", 
+            new NestedPoco
+            {
+                Title = "Outer 2",
                 Inner = null // Test null struct
             }
         };
@@ -145,17 +145,17 @@ public class SerializationTests
         // Arrange
         var data = new List<ListPoco>
         {
-            new ListPoco 
-            { 
-                Name = "John", 
-                Scores = new List<int> { 10, 20, 30 }, 
-                Tags = new[] { "tag1", "tag2" } 
+            new ListPoco
+            {
+                Name = "John",
+                Scores = new List<int> { 10, 20, 30 },
+                Tags = new[] { "tag1", "tag2" }
             },
-            new ListPoco 
-            { 
-                Name = "Jane", 
-                Scores = new List<int>(), 
-                Tags = null 
+            new ListPoco
+            {
+                Name = "Jane",
+                Scores = new List<int>(),
+                Tags = null
             }
         };
 
@@ -165,7 +165,7 @@ public class SerializationTests
 
         // Assert
         result.Should().HaveCount(2);
-        
+
         result[0].Name.Should().Be("John");
         result[0].Scores.Should().Equal(10, 20, 30);
         result[0].Tags.Should().Equal("tag1", "tag2");

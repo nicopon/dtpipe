@@ -12,147 +12,147 @@ namespace DtPipe.Transformers.Arrow.Mask;
 /// </summary>
 public class MaskDataTransformer : BaseColumnarTransformer, IRequiresOptions<DtPipe.Transformers.Arrow.Mask.MaskOptions>
 {
-	private const char KeepChar = '#';
+    private const char KeepChar = '#';
 
-	private readonly Dictionary<string, string> _columnPatterns;
-	private readonly bool _skipNull;
-	private Dictionary<int, string>? _indexPatterns;
+    private readonly Dictionary<string, string> _columnPatterns;
+    private readonly bool _skipNull;
+    private Dictionary<int, string>? _indexPatterns;
 
-	public override bool CanProcessColumnar => true;
+    public override bool CanProcessColumnar => true;
 
-	public MaskDataTransformer(DtPipe.Transformers.Arrow.Mask.MaskOptions options)
-	{
-		_columnPatterns = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-		_skipNull = options.SkipNull;
+    public MaskDataTransformer(DtPipe.Transformers.Arrow.Mask.MaskOptions options)
+    {
+        _columnPatterns = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        _skipNull = options.SkipNull;
 
-		foreach (var mapping in options.Mask)
-		{
-			var delimiterChars = new[] { ':', '=' };
-			var delimiterIndex = mapping.IndexOfAny(delimiterChars);
+        foreach (var mapping in options.Mask)
+        {
+            var delimiterChars = new[] { ':', '=' };
+            var delimiterIndex = mapping.IndexOfAny(delimiterChars);
 
-			if (delimiterIndex > 0)
-			{
-				var column = mapping[..delimiterIndex].Trim();
-				var pattern = mapping[(delimiterIndex + 1)..];
-				_columnPatterns[column] = pattern;
-			}
-			else
-			{
-				// No delimiter? Assume entire string is column name and use default mask
-				var column = mapping.Trim();
-				// Default pattern: Mask with 15 asterisks (safe default)
-				_columnPatterns[column] = "***************";
-			}
-		}
-	}
+            if (delimiterIndex > 0)
+            {
+                var column = mapping[..delimiterIndex].Trim();
+                var pattern = mapping[(delimiterIndex + 1)..];
+                _columnPatterns[column] = pattern;
+            }
+            else
+            {
+                // No delimiter? Assume entire string is column name and use default mask
+                var column = mapping.Trim();
+                // Default pattern: Mask with 15 asterisks (safe default)
+                _columnPatterns[column] = "***************";
+            }
+        }
+    }
 
-	public override async ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
-	{
-		await base.InitializeAsync(columns, ct);
-		if (_columnPatterns.Count == 0)
-		{
-			_indexPatterns = null;
-			return columns;
-		}
+    public override async ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
+    {
+        await base.InitializeAsync(columns, ct);
+        if (_columnPatterns.Count == 0)
+        {
+            _indexPatterns = null;
+            return columns;
+        }
 
-		_indexPatterns = new Dictionary<int, string>();
+        _indexPatterns = new Dictionary<int, string>();
 
-		var outputColumns = new PipeColumnInfo[columns.Count];
-		bool anyMasked = false;
+        var outputColumns = new PipeColumnInfo[columns.Count];
+        bool anyMasked = false;
 
-		for (var i = 0; i < columns.Count; i++)
-		{
-			if (_columnPatterns.TryGetValue(columns[i].Name, out var pattern))
-			{
-				_indexPatterns[i] = pattern;
-				// MaskArray always produces StringArray regardless of the original column type.
-				outputColumns[i] = columns[i] with { ClrType = typeof(string) };
-				anyMasked = true;
-			}
-			else
-			{
-				outputColumns[i] = columns[i];
-			}
-		}
+        for (var i = 0; i < columns.Count; i++)
+        {
+            if (_columnPatterns.TryGetValue(columns[i].Name, out var pattern))
+            {
+                _indexPatterns[i] = pattern;
+                // MaskArray always produces StringArray regardless of the original column type.
+                outputColumns[i] = columns[i] with { ClrType = typeof(string) };
+                anyMasked = true;
+            }
+            else
+            {
+                outputColumns[i] = columns[i];
+            }
+        }
 
-		if (!anyMasked)
-		{
-			_indexPatterns = null;
-			return columns;
-		}
+        if (!anyMasked)
+        {
+            _indexPatterns = null;
+            return columns;
+        }
 
-		return outputColumns;
-	}
+        return outputColumns;
+    }
 
-	protected override ValueTask<RecordBatch?> TransformBatchSafeAsync(RecordBatch batch, CancellationToken ct = default)
-	{
-		if (_indexPatterns == null) return new ValueTask<RecordBatch?>(batch);
+    protected override ValueTask<RecordBatch?> TransformBatchSafeAsync(RecordBatch batch, CancellationToken ct = default)
+    {
+        if (_indexPatterns == null) return new ValueTask<RecordBatch?>(batch);
 
-		var arrays = new IArrowArray[batch.Schema.FieldsList.Count];
-		var outputFields = new List<Field>(batch.Schema.FieldsList.Count);
+        var arrays = new IArrowArray[batch.Schema.FieldsList.Count];
+        var outputFields = new List<Field>(batch.Schema.FieldsList.Count);
 
-		for (int i = 0; i < arrays.Length; i++)
-		{
-			var field = batch.Schema.FieldsList[i];
-			if (_indexPatterns.TryGetValue(i, out var pattern))
-			{
-				arrays[i] = MaskArray(batch.Column(i), field, pattern, batch.Length);
-				outputFields.Add(new Field(field.Name, Apache.Arrow.Types.StringType.Default, field.IsNullable));
-			}
-			else
-			{
-				// Aliased column reused in the output batch — retain so the segment runner can
-				// dispose the input without freeing buffers this output still points at.
-				arrays[i] = ArrowOwnership.RetainArray(batch.Column(i));
-				outputFields.Add(field);
-			}
-		}
+        for (int i = 0; i < arrays.Length; i++)
+        {
+            var field = batch.Schema.FieldsList[i];
+            if (_indexPatterns.TryGetValue(i, out var pattern))
+            {
+                arrays[i] = MaskArray(batch.Column(i), field, pattern, batch.Length);
+                outputFields.Add(new Field(field.Name, Apache.Arrow.Types.StringType.Default, field.IsNullable));
+            }
+            else
+            {
+                // Aliased column reused in the output batch — retain so the segment runner can
+                // dispose the input without freeing buffers this output still points at.
+                arrays[i] = ArrowOwnership.RetainArray(batch.Column(i));
+                outputFields.Add(field);
+            }
+        }
 
-		var newSchema = new Schema(outputFields, batch.Schema.Metadata);
-		return new ValueTask<RecordBatch?>(new RecordBatch(newSchema, arrays, batch.Length));
-	}
+        var newSchema = new Schema(outputFields, batch.Schema.Metadata);
+        return new ValueTask<RecordBatch?>(new RecordBatch(newSchema, arrays, batch.Length));
+    }
 
-	private IArrowArray MaskArray(IArrowArray original, Field field, string pattern, int length)
-	{
-		var builder = new StringArray.Builder();
+    private IArrowArray MaskArray(IArrowArray original, Field field, string pattern, int length)
+    {
+        var builder = new StringArray.Builder();
 
-		for (int i = 0; i < length; i++)
-		{
-			if (original.IsNull(i))
-			{
-				builder.AppendNull();
-			}
-			else
-			{
-				var val = ArrowTypeMapper.GetValueForField(original, field, i)?.ToString() ?? "";
-				builder.Append(ApplyMask(val, pattern));
-			}
-		}
+        for (int i = 0; i < length; i++)
+        {
+            if (original.IsNull(i))
+            {
+                builder.AppendNull();
+            }
+            else
+            {
+                var val = ArrowTypeMapper.GetValueForField(original, field, i)?.ToString() ?? "";
+                builder.Append(ApplyMask(val, pattern));
+            }
+        }
 
-		return builder.Build();
-	}
+        return builder.Build();
+    }
 
-	private static string ApplyMask(string input, string pattern)
-	{
-		if (string.IsNullOrEmpty(input) || string.IsNullOrEmpty(pattern))
-		{
-			return input;
-		}
+    private static string ApplyMask(string input, string pattern)
+    {
+        if (string.IsNullOrEmpty(input) || string.IsNullOrEmpty(pattern))
+        {
+            return input;
+        }
 
-		return string.Create(input.Length, (input, pattern), (span, state) =>
-		{
-			var (inp, pat) = state;
-			for (var i = 0; i < span.Length; i++)
-			{
-				if (i < pat.Length)
-				{
-					span[i] = pat[i] == KeepChar ? inp[i] : pat[i];
-				}
-				else
-				{
-					span[i] = inp[i];
-				}
-			}
-		});
-	}
+        return string.Create(input.Length, (input, pattern), (span, state) =>
+        {
+            var (inp, pat) = state;
+            for (var i = 0; i < span.Length; i++)
+            {
+                if (i < pat.Length)
+                {
+                    span[i] = pat[i] == KeepChar ? inp[i] : pat[i];
+                }
+                else
+                {
+                    span[i] = inp[i];
+                }
+            }
+        });
+    }
 }

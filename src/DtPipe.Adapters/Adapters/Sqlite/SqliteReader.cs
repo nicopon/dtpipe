@@ -26,11 +26,11 @@ public sealed class SqliteReader : AdoColumnarReader
     public SqliteReader(string connectionString, string query, int queryTimeout = 0)
     {
         ValidateQueryIsSafeSelect(query, "VALUES", "PRAGMA");
-        
+
         // Enforce ReadOnly mode
         var csb = new SqliteConnectionStringBuilder(connectionString) { Mode = SqliteOpenMode.ReadOnly };
         _connectionString = csb.ConnectionString;
-        
+
         _query = query;
         _queryTimeout = queryTimeout;
     }

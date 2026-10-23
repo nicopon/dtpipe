@@ -29,12 +29,12 @@ public partial class DtPipeMcpTools
     private readonly IServiceProvider _serviceProvider;
     private readonly JobAnalysis _analysis;
 
-       /// <summary>
-        /// Optional agent-scoped options (F1/F2). When set by the agent command, governs the
-        /// guardrails: <see cref="DtPipe.Cli.Agent.AgentOptions.Apply"/> enables a real write (subject
-        /// to the approval gate), and the allow-* flags configure the SQL safety policy.
-        /// </summary>
-     public DtPipe.Cli.Agent.AgentOptions? AgentOptions { get; set; }
+    /// <summary>
+    /// Optional agent-scoped options (F1/F2). When set by the agent command, governs the
+    /// guardrails: <see cref="DtPipe.Cli.Agent.AgentOptions.Apply"/> enables a real write (subject
+    /// to the approval gate), and the allow-* flags configure the SQL safety policy.
+    /// </summary>
+    public DtPipe.Cli.Agent.AgentOptions? AgentOptions { get; set; }
 
     /// <summary>
     /// Overrides the working directory session resolution starts from (checkpoint tools). Null in

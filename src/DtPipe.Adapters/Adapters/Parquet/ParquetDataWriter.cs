@@ -17,73 +17,73 @@ namespace DtPipe.Adapters.Parquet;
 /// </summary>
 public sealed class ParquetDataWriter(string outputPath) : IColumnarDataWriter, IRequiresOptions<ParquetWriterOptions>, ISchemaInspector
 {
-	private string _outputPath = outputPath;
-	private Stream? _outputStream;
+    private string _outputPath = outputPath;
+    private Stream? _outputStream;
 
-	private ParquetSchema? _schema;
-	private ParquetWriter? _writer;
-	private IReadOnlyList<PipeColumnInfo>? _columns;
-	private ParquetField[]? _dataFields;
+    private ParquetSchema? _schema;
+    private ParquetWriter? _writer;
+    private IReadOnlyList<PipeColumnInfo>? _columns;
+    private ParquetField[]? _dataFields;
 
-	public bool RequiresTargetInspection => false;
+    public bool RequiresTargetInspection => false;
 
-	public async Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default)
-	{
-		if (_outputPath == "-")
-		{
-			return new TargetSchemaInfo([], false, null, null, null);
-		}
+    public async Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default)
+    {
+        if (_outputPath == "-")
+        {
+            return new TargetSchemaInfo([], false, null, null, null);
+        }
 
         if (string.IsNullOrEmpty(_outputPath))
         {
-             throw new InvalidOperationException("Output path is required. Use '-' for standard output.");
+            throw new InvalidOperationException("Output path is required. Use '-' for standard output.");
         }
 
-		if (!File.Exists(_outputPath))
-		{
-			return new TargetSchemaInfo([], false, null, null, null);
-		}
+        if (!File.Exists(_outputPath))
+        {
+            return new TargetSchemaInfo([], false, null, null, null);
+        }
 
-		try
-		{
-			using var fileStream = new FileStream(_outputPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-			await using var reader = await ParquetReader.CreateAsync(fileStream, cancellationToken: ct);
+        try
+        {
+            using var fileStream = new FileStream(_outputPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            await using var reader = await ParquetReader.CreateAsync(fileStream, cancellationToken: ct);
 
-			var schema = reader.Schema;
-			var columns = new List<TargetColumnInfo>();
+            var schema = reader.Schema;
+            var columns = new List<TargetColumnInfo>();
 
- 			foreach (var field in schema.DataFields)
- 				{
- 				Type clrType = ParquetStreamReader.NormalizeClrType(field.ClrNullableIfHasNullsType);
+            foreach (var field in schema.DataFields)
+            {
+                Type clrType = ParquetStreamReader.NormalizeClrType(field.ClrNullableIfHasNullsType);
 
-				columns.Add(new TargetColumnInfo(
-					field.Name,
-					clrType.Name,
-					clrType,
-					field.IsNullable,
-					IsPrimaryKey: false,
-					IsUnique: false,
-					MaxLength: null,
-					Precision: null,
-					Scale: null
-				));
-			}
+                columns.Add(new TargetColumnInfo(
+                    field.Name,
+                    clrType.Name,
+                    clrType,
+                    field.IsNullable,
+                    IsPrimaryKey: false,
+                    IsUnique: false,
+                    MaxLength: null,
+                    Precision: null,
+                    Scale: null
+                ));
+            }
 
-			long rowCount = 0;
-			for (int i = 0; i < reader.RowGroupCount; i++)
-			{
-				using var groupReader = reader.OpenRowGroupReader(i);
-				rowCount += groupReader.RowCount;
-			}
+            long rowCount = 0;
+            for (int i = 0; i < reader.RowGroupCount; i++)
+            {
+                using var groupReader = reader.OpenRowGroupReader(i);
+                rowCount += groupReader.RowCount;
+            }
 
-			return new TargetSchemaInfo(columns, true, rowCount, fileStream.Length, null);
-		}
-		catch
-		{
-			// If file is corrupted or unreadable
-			return null;
-		}
-	}
+            return new TargetSchemaInfo(columns, true, rowCount, fileStream.Length, null);
+        }
+        catch
+        {
+            // If file is corrupted or unreadable
+            return null;
+        }
+    }
 
     public async ValueTask InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
     {
@@ -95,150 +95,150 @@ public sealed class ParquetDataWriter(string outputPath) : IColumnarDataWriter, 
             }
             _outputStream = Console.OpenStandardOutput();
         }
-		else
-		{
-			// T64/T66: If it's a directory, append export.parquet
-			if (Directory.Exists(_outputPath) || _outputPath.EndsWith("/") || _outputPath.EndsWith("\\"))
-			{
-				_outputPath = Path.Combine(_outputPath, "export.parquet");
-			}
-			else if (!Path.HasExtension(_outputPath))
-			{
-				// File without extension
-				_outputPath += ".parquet";
-			}
+        else
+        {
+            // T64/T66: If it's a directory, append export.parquet
+            if (Directory.Exists(_outputPath) || _outputPath.EndsWith("/") || _outputPath.EndsWith("\\"))
+            {
+                _outputPath = Path.Combine(_outputPath, "export.parquet");
+            }
+            else if (!Path.HasExtension(_outputPath))
+            {
+                // File without extension
+                _outputPath += ".parquet";
+            }
 
-			var directory = Path.GetDirectoryName(_outputPath);
-			if (!string.IsNullOrEmpty(directory))
-				Directory.CreateDirectory(directory); // no-op if already exists
+            var directory = Path.GetDirectoryName(_outputPath);
+            if (!string.IsNullOrEmpty(directory))
+                Directory.CreateDirectory(directory); // no-op if already exists
 
-			_outputStream = new FileStream(_outputPath, FileMode.Create, FileAccess.Write, FileShare.None);
-		}
+            _outputStream = new FileStream(_outputPath, FileMode.Create, FileAccess.Write, FileShare.None);
+        }
 
-		_columns = columns;
-		_dataFields = BuildDataFields(columns);
-		_schema = new ParquetSchema(_dataFields);
-		_writer = await ParquetWriter.CreateAsync(_schema, _outputStream, cancellationToken: ct);
-		// _writer.CompressionMethod = CompressionMethod.Snappy;
-	}
+        _columns = columns;
+        _dataFields = BuildDataFields(columns);
+        _schema = new ParquetSchema(_dataFields);
+        _writer = await ParquetWriter.CreateAsync(_schema, _outputStream, cancellationToken: ct);
+        // _writer.CompressionMethod = CompressionMethod.Snappy;
+    }
 
-	public async ValueTask WriteRecordBatchAsync(RecordBatch batch, CancellationToken ct = default)
-	{
-		if (_writer is null || _dataFields is null)
-			throw new InvalidOperationException("Call InitializeAsync first.");
+    public async ValueTask WriteRecordBatchAsync(RecordBatch batch, CancellationToken ct = default)
+    {
+        if (_writer is null || _dataFields is null)
+            throw new InvalidOperationException("Call InitializeAsync first.");
 
-		using (batch)
-		{
-			// Parquet carries a LIST natively, so a column declared as one keeps its shape. A
-			// composite the schema declared as text — a struct, or a list whose source gave no
-			// element type — becomes JSON rather than failing the write: the declared field is
-			// what decides, and it was fixed at InitializeAsync.
-			using var payload = CompositeCellJson.RenderComposites(
-				batch, (index, _) => _dataFields[index] is ListField);
+        using (batch)
+        {
+            // Parquet carries a LIST natively, so a column declared as one keeps its shape. A
+            // composite the schema declared as text — a struct, or a list whose source gave no
+            // element type — becomes JSON rather than failing the write: the declared field is
+            // what decides, and it was fixed at InitializeAsync.
+            using var payload = CompositeCellJson.RenderComposites(
+                batch, (index, _) => _dataFields[index] is ListField);
 
-			using var rowGroup = _writer.CreateRowGroup();
+            using var rowGroup = _writer.CreateRowGroup();
 
-			for (int i = 0; i < payload.Batch.ColumnCount; i++)
-			{
-				var arrowArray = payload.Batch.Column(i);
-				await ArrowToParquetConverter.WriteColumnAsync(rowGroup, arrowArray, _dataFields[i], ct);
-			}
-		}
-	}
+            for (int i = 0; i < payload.Batch.ColumnCount; i++)
+            {
+                var arrowArray = payload.Batch.Column(i);
+                await ArrowToParquetConverter.WriteColumnAsync(rowGroup, arrowArray, _dataFields[i], ct);
+            }
+        }
+    }
 
-	private static ParquetField[] BuildDataFields(IReadOnlyList<PipeColumnInfo> columns)
-	{
-		var fields = new ParquetField[columns.Count];
+    private static ParquetField[] BuildDataFields(IReadOnlyList<PipeColumnInfo> columns)
+    {
+        var fields = new ParquetField[columns.Count];
 
-		for (var i = 0; i < columns.Count; i++)
-		{
-			fields[i] = MapToField(columns[i]);
-		}
+        for (var i = 0; i < columns.Count; i++)
+        {
+            fields[i] = MapToField(columns[i]);
+        }
 
-		return fields;
-	}
+        return fields;
+    }
 
-	/// <summary>
-	/// Parquet field for a column. A collection becomes a real Parquet LIST rather than text:
-	/// the format carries lists natively, and writing them as strings would misreport the schema
-	/// to every reader. "list"/"element" are the names the Parquet spec uses for the container and
-	/// its items — the same ones DuckDB emits.
-	/// </summary>
-	private static ParquetField MapToField(PipeColumnInfo col)
-	{
-		var baseType = Nullable.GetUnderlyingType(col.ClrType) ?? col.ClrType;
+    /// <summary>
+    /// Parquet field for a column. A collection becomes a real Parquet LIST rather than text:
+    /// the format carries lists natively, and writing them as strings would misreport the schema
+    /// to every reader. "list"/"element" are the names the Parquet spec uses for the container and
+    /// its items — the same ones DuckDB emits.
+    /// </summary>
+    private static ParquetField MapToField(PipeColumnInfo col)
+    {
+        var baseType = Nullable.GetUnderlyingType(col.ClrType) ?? col.ClrType;
 
-		if (baseType != typeof(byte[]) && baseType != typeof(string) &&
-		    TryGetElementType(baseType, out var elementType))
-		{
-			var item = MapToDataField(new PipeColumnInfo("element", elementType, true));
-			return new ListField(col.Name, item, "list");
-		}
+        if (baseType != typeof(byte[]) && baseType != typeof(string) &&
+            TryGetElementType(baseType, out var elementType))
+        {
+            var item = MapToDataField(new PipeColumnInfo("element", elementType, true));
+            return new ListField(col.Name, item, "list");
+        }
 
-		return MapToDataField(col);
-	}
+        return MapToDataField(col);
+    }
 
-	private static bool TryGetElementType(Type type, out Type elementType)
-	{
-		elementType = typeof(object);
-		if (type.IsArray) { elementType = type.GetElementType()!; return true; }
-		var enumerable = type.GetInterfaces().FirstOrDefault(
-			i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEnumerable<>));
-		if (enumerable is null) return false;
-		elementType = enumerable.GetGenericArguments()[0];
-		return true;
-	}
+    private static bool TryGetElementType(Type type, out Type elementType)
+    {
+        elementType = typeof(object);
+        if (type.IsArray) { elementType = type.GetElementType()!; return true; }
+        var enumerable = type.GetInterfaces().FirstOrDefault(
+            i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEnumerable<>));
+        if (enumerable is null) return false;
+        elementType = enumerable.GetGenericArguments()[0];
+        return true;
+    }
 
-	private static DataField MapToDataField(PipeColumnInfo col)
-	{
-		var baseType = Nullable.GetUnderlyingType(col.ClrType) ?? col.ClrType;
+    private static DataField MapToDataField(PipeColumnInfo col)
+    {
+        var baseType = Nullable.GetUnderlyingType(col.ClrType) ?? col.ClrType;
 
-		return baseType switch
-		{
-			Type t when t == typeof(bool) => new DataField<bool?>(col.Name),
-			Type t when t == typeof(byte) => new DataField<byte?>(col.Name),
-			Type t when t == typeof(sbyte) => new DataField<sbyte?>(col.Name),
-			Type t when t == typeof(short) => new DataField<short?>(col.Name),
-			Type t when t == typeof(int) => new DataField<int?>(col.Name),
-			Type t when t == typeof(long) => new DataField<long?>(col.Name),
-			Type t when t == typeof(float) => new DataField<float?>(col.Name),
-			Type t when t == typeof(double) => new DataField<double?>(col.Name),
-			// A decimal the source declared a width for keeps it: DataField<decimal?> would write
-			// Parquet.Net's default (38, 18), turning a DECIMAL(10,2) column into one the target
-			// no longer describes.
-			Type t when t == typeof(decimal) => col is { Precision: int p, Scale: int s } && p >= 1 && p <= 38 && s >= 0 && s <= p
-				? new DecimalDataField(col.Name, p, s, isNullable: true)
-				: new DataField<decimal?>(col.Name),
-			Type t when t == typeof(DateTime) => new DataField<DateTime?>(col.Name),
-			Type t when t == typeof(DateTimeOffset) => new DataField<DateTimeOffset?>(col.Name),
-			Type t when t == typeof(TimeSpan) => new DataField<TimeSpan?>(col.Name),
-			Type t when t == typeof(Guid) => new DataField<Guid?>(col.Name),
-			Type t when t == typeof(byte[]) => new DataField<byte[]>(col.Name),
-			_ => new DataField<string?>(col.Name)
-		};
-	}
+        return baseType switch
+        {
+            Type t when t == typeof(bool) => new DataField<bool?>(col.Name),
+            Type t when t == typeof(byte) => new DataField<byte?>(col.Name),
+            Type t when t == typeof(sbyte) => new DataField<sbyte?>(col.Name),
+            Type t when t == typeof(short) => new DataField<short?>(col.Name),
+            Type t when t == typeof(int) => new DataField<int?>(col.Name),
+            Type t when t == typeof(long) => new DataField<long?>(col.Name),
+            Type t when t == typeof(float) => new DataField<float?>(col.Name),
+            Type t when t == typeof(double) => new DataField<double?>(col.Name),
+            // A decimal the source declared a width for keeps it: DataField<decimal?> would write
+            // Parquet.Net's default (38, 18), turning a DECIMAL(10,2) column into one the target
+            // no longer describes.
+            Type t when t == typeof(decimal) => col is { Precision: int p, Scale: int s } && p >= 1 && p <= 38 && s >= 0 && s <= p
+                ? new DecimalDataField(col.Name, p, s, isNullable: true)
+                : new DataField<decimal?>(col.Name),
+            Type t when t == typeof(DateTime) => new DataField<DateTime?>(col.Name),
+            Type t when t == typeof(DateTimeOffset) => new DataField<DateTimeOffset?>(col.Name),
+            Type t when t == typeof(TimeSpan) => new DataField<TimeSpan?>(col.Name),
+            Type t when t == typeof(Guid) => new DataField<Guid?>(col.Name),
+            Type t when t == typeof(byte[]) => new DataField<byte[]>(col.Name),
+            _ => new DataField<string?>(col.Name)
+        };
+    }
 
-	public ValueTask CompleteAsync(CancellationToken ct = default)
-	{
-		// Parquet.Net handles flushing on dispose
-		return ValueTask.CompletedTask;
-	}
+    public ValueTask CompleteAsync(CancellationToken ct = default)
+    {
+        // Parquet.Net handles flushing on dispose
+        return ValueTask.CompletedTask;
+    }
 
-	public ValueTask ExecuteCommandAsync(string command, CancellationToken ct = default)
-	{
-		throw new NotSupportedException("Executing raw commands is not supported for Parquet targets.");
-	}
+    public ValueTask ExecuteCommandAsync(string command, CancellationToken ct = default)
+    {
+        throw new NotSupportedException("Executing raw commands is not supported for Parquet targets.");
+    }
 
-	public async ValueTask DisposeAsync()
-	{
-		if (_writer != null)
-		{
-			await _writer.DisposeAsync();
-		}
+    public async ValueTask DisposeAsync()
+    {
+        if (_writer != null)
+        {
+            await _writer.DisposeAsync();
+        }
 
-		if (_outputStream != null)
-		{
-			await _outputStream.DisposeAsync();
-		}
-	}
+        if (_outputStream != null)
+        {
+            await _outputStream.DisposeAsync();
+        }
+    }
 }

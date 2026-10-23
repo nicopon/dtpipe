@@ -11,7 +11,7 @@ public class CompletionCommand : Command
 {
     // Markers used by --install / --uninstall to locate the block in shell profiles
     internal const string BlockBeginMarker = "# >>> dtpipe completion >>>";
-    internal const string BlockEndMarker   = "# <<< dtpipe completion <<<";
+    internal const string BlockEndMarker = "# <<< dtpipe completion <<<";
 
     public CompletionCommand() : base("completion", "Generate or manage shell completion")
     {
@@ -63,7 +63,7 @@ public class CompletionCommand : Command
         var unixShell = Environment.GetEnvironmentVariable("SHELL");
         if (!string.IsNullOrEmpty(unixShell))
         {
-            if (unixShell.Contains("zsh",  StringComparison.OrdinalIgnoreCase)) return "zsh";
+            if (unixShell.Contains("zsh", StringComparison.OrdinalIgnoreCase)) return "zsh";
             if (unixShell.Contains("bash", StringComparison.OrdinalIgnoreCase)) return "bash";
         }
 
@@ -75,10 +75,10 @@ public class CompletionCommand : Command
     internal static string? GenerateScript(string? shell) =>
         shell?.ToLowerInvariant() switch
         {
-            "zsh"        => GenerateZshScript(),
-            "bash"       => GenerateBashScript(),
+            "zsh" => GenerateZshScript(),
+            "bash" => GenerateBashScript(),
             "powershell" => GeneratePowerShellScript(),
-            _            => null
+            _ => null
         };
 
     /// <summary>
@@ -192,9 +192,9 @@ public class CompletionCommand : Command
 
         cmd.SetAction((parseResult, ct) =>
         {
-            var shell   = parseResult.GetValue(shellOpt) ?? DetectShell();
+            var shell = parseResult.GetValue(shellOpt) ?? DetectShell();
             var profile = GetProfilePath(shell);
-            var block   = GenerateInstallBlock(shell);
+            var block = GenerateInstallBlock(shell);
 
             if (shell == null || profile == null || block == null)
             {
@@ -278,12 +278,12 @@ public class CompletionCommand : Command
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         return shell?.ToLowerInvariant() switch
         {
-            "zsh"        => Path.Combine(home, ".zshrc"),
-            "bash"       => File.Exists(Path.Combine(home, ".bashrc"))
+            "zsh" => Path.Combine(home, ".zshrc"),
+            "bash" => File.Exists(Path.Combine(home, ".bashrc"))
                                 ? Path.Combine(home, ".bashrc")
                                 : Path.Combine(home, ".bash_profile"),
             "powershell" => GetPowerShellProfilePath(),
-            _            => null
+            _ => null
         };
     }
 
@@ -311,7 +311,7 @@ public class CompletionCommand : Command
     private static string RemoveBlock(string content)
     {
         var begin = content.IndexOf(BlockBeginMarker, StringComparison.Ordinal);
-        var end   = content.IndexOf(BlockEndMarker,   StringComparison.Ordinal);
+        var end = content.IndexOf(BlockEndMarker, StringComparison.Ordinal);
         if (begin < 0 || end < 0 || end < begin) return content;
 
         end += BlockEndMarker.Length;

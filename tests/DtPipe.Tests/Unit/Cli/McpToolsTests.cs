@@ -50,7 +50,7 @@ public class McpToolsTests
 
     private void InvokeValidatePathSafety(string path)
     {
-        var method = typeof(DtPipeMcpTools).GetMethod("ValidatePathSafety", 
+        var method = typeof(DtPipeMcpTools).GetMethod("ValidatePathSafety",
             BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Static);
         Assert.NotNull(method);
         try
@@ -65,7 +65,7 @@ public class McpToolsTests
 
     private string[] InvokeSplitArguments(string commandLine)
     {
-        var method = typeof(DtPipeMcpTools).GetMethod("SplitArguments", 
+        var method = typeof(DtPipeMcpTools).GetMethod("SplitArguments",
             BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Static);
         Assert.NotNull(method);
         return (string[])method.Invoke(null, new object[] { commandLine })!;
@@ -136,10 +136,10 @@ public class McpToolsTests
     {
         IMcpSecurityContext context = new McpSecurityContext();
         Assert.False(context.IsMcpSession);
-        
+
         context.IsMcpSession = true;
         Assert.True(context.IsMcpSession);
-        
+
         context.IsMcpSession = false;
         Assert.False(context.IsMcpSession);
     }

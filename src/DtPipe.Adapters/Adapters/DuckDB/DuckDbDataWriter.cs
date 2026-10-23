@@ -332,7 +332,7 @@ public sealed class DuckDbDataWriter : IColumnarDataWriter, ISchemaInspector, IK
         {
             cmd.CommandText = $"SELECT COUNT(*) FROM information_schema.tables WHERE LOWER(table_schema) = LOWER('{schema}') AND LOWER(table_name) = LOWER('{table}')";
         }
-        
+
         if (cmd is System.Data.Common.DbCommand dbCmd)
         {
             var res = await dbCmd.ExecuteScalarAsync(ct);

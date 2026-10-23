@@ -12,43 +12,43 @@ namespace DtPipe.Cli.Security;
 /// remote read_parquet over http/https/s3/ftp) are denied unless explicitly overridden.
 /// </summary>
 public interface ISqlSafetyPolicy
- {
-      /// <summary>Analyze a SQL-ish string and return a classification result.</summary>
+{
+    /// <summary>Analyze a SQL-ish string and return a classification result.</summary>
     SqlSafetyResult Analyze(string sql, SqlSafetyOptions options);
 }
 
 /// <summary>Options controlling which classes of SQL are permitted.</summary>
 public sealed class SqlSafetyOptions
- {
-      /// <summary>Allow destructive SQL verbs (DROP/DELETE/TRUNCATE/UPDATE/ALTER/INSERT/ATTACH).</summary>
+{
+    /// <summary>Allow destructive SQL verbs (DROP/DELETE/TRUNCATE/UPDATE/ALTER/INSERT/ATTACH).</summary>
     public bool AllowDestructive { get; init; } = false;
 
-          /// <summary>Allow network access (LOAD httpfs/azure, remote read_parquet/read_csv over a URL).</summary>
+    /// <summary>Allow network access (LOAD httpfs/azure, remote read_parquet/read_csv over a URL).</summary>
     public bool AllowNetwork { get; init; } = false;
 }
 
 /// <summary>The outcome of a <see cref="ISqlSafetyPolicy.Analyze"/> call.</summary>
 public sealed class SqlSafetyResult
- {
-      /// <summary>True when the SQL is permitted under the given options.</summary>
+{
+    /// <summary>True when the SQL is permitted under the given options.</summary>
     public bool Allowed { get; init; } = true;
 
-          /// <summary>Human-readable violation messages (empty when allowed).</summary>
+    /// <summary>Human-readable violation messages (empty when allowed).</summary>
     public IReadOnlyList<string> Violations { get; init; } = Array.Empty<string>();
 
-          /// <summary>The destructive verbs that were detected.</summary>
+    /// <summary>The destructive verbs that were detected.</summary>
     public IReadOnlyList<string> DetectedDestructive { get; init; } = Array.Empty<string>();
 
-          /// <summary>Whether a network-access pattern was detected.</summary>
+    /// <summary>Whether a network-access pattern was detected.</summary>
     public bool NetworkDetected { get; init; }
 
     public static SqlSafetyResult Ok() => new() { Allowed = true };
 
     public static SqlSafetyResult Blocked(params string[] violations) => new()
-        {
-          Allowed = false,
-          Violations = violations
-        };
+    {
+        Allowed = false,
+        Violations = violations
+    };
 }
 
 /// <summary>
@@ -57,15 +57,15 @@ public sealed class SqlSafetyResult
 /// token boundaries and is intentionally conservative to fail closed.
 /// </summary>
 public sealed class DefaultSqlSafetyPolicy : ISqlSafetyPolicy
- {
+{
     private static readonly string[] DestructiveVerbs =
         {
          "TRUNCATE", "DROP", "DELETE", "UPDATE", "ALTER", "ATTACH", "INSERT"
         };
 
-     private static readonly Regex DestructiveRegex = new(
-          @"(^|[\s'""(,;=:])(" + string.Join("|", DestructiveVerbs.Select(Regex.Escape)) + @")\b",
-         RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex DestructiveRegex = new(
+         @"(^|[\s'""(,;=:])(" + string.Join("|", DestructiveVerbs.Select(Regex.Escape)) + @")\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex NetworkRegex = new(
         @"(?i)" +
@@ -84,55 +84,55 @@ public sealed class DefaultSqlSafetyPolicy : ISqlSafetyPolicy
         @"(?i)(^|[\s'""=:,\[(])(s3a?|azure|az)://",
         RegexOptions.Compiled);
 
-        public SqlSafetyResult Analyze(string sql, SqlSafetyOptions options)
-           {
-            if (string.IsNullOrWhiteSpace(sql))
-                 {
-                return SqlSafetyResult.Ok();
-                 }
+    public SqlSafetyResult Analyze(string sql, SqlSafetyOptions options)
+    {
+        if (string.IsNullOrWhiteSpace(sql))
+        {
+            return SqlSafetyResult.Ok();
+        }
 
-            var violations = new List<string>();
+        var violations = new List<string>();
 
-            var destructiveMatches = DestructiveRegex.Matches(sql)
-                 .Select(m => m.Groups[2].Value.ToUpperInvariant())
-                 .Distinct()
-                 .OrderBy(v => v)
-                 .ToList();
+        var destructiveMatches = DestructiveRegex.Matches(sql)
+             .Select(m => m.Groups[2].Value.ToUpperInvariant())
+             .Distinct()
+             .OrderBy(v => v)
+             .ToList();
 
-            bool networkDetected = NetworkRegex.IsMatch(sql) || ObjectStorageUriRegex.IsMatch(sql);
+        bool networkDetected = NetworkRegex.IsMatch(sql) || ObjectStorageUriRegex.IsMatch(sql);
 
-            if (destructiveMatches.Count > 0 && !options.AllowDestructive)
-                 {
-                violations.Add(
-                     "Destructive SQL verb(s) detected: " +
-                     string.Join(", ", destructiveMatches) +
-                     ". Set --allow-destructive to permit (default: deny).");
-                 }
+        if (destructiveMatches.Count > 0 && !options.AllowDestructive)
+        {
+            violations.Add(
+                 "Destructive SQL verb(s) detected: " +
+                 string.Join(", ", destructiveMatches) +
+                 ". Set --allow-destructive to permit (default: deny).");
+        }
 
-            if (networkDetected && !options.AllowNetwork)
-                 {
-                violations.Add(
-                     "Network access detected (LOAD httpfs/azure, remote read_parquet/read_csv, " +
-                     "or an s3://, azure:// connection string). " +
-                     "Set --allow-network to permit (default: deny).");
-                 }
+        if (networkDetected && !options.AllowNetwork)
+        {
+            violations.Add(
+                 "Network access detected (LOAD httpfs/azure, remote read_parquet/read_csv, " +
+                 "or an s3://, azure:// connection string). " +
+                 "Set --allow-network to permit (default: deny).");
+        }
 
-            if (violations.Count == 0)
-                 {
-                return new SqlSafetyResult
-                     {
-                      Allowed = true,
-                      NetworkDetected = networkDetected,
-                      DetectedDestructive = destructiveMatches
-                     };
-                 }
-
+        if (violations.Count == 0)
+        {
             return new SqlSafetyResult
-                 {
-                  Allowed = false,
-                  Violations = violations,
-                  NetworkDetected = networkDetected,
-                  DetectedDestructive = destructiveMatches
-                 };
-            }
+            {
+                Allowed = true,
+                NetworkDetected = networkDetected,
+                DetectedDestructive = destructiveMatches
+            };
+        }
+
+        return new SqlSafetyResult
+        {
+            Allowed = false,
+            Violations = violations,
+            NetworkDetected = networkDetected,
+            DetectedDestructive = destructiveMatches
+        };
+    }
 }

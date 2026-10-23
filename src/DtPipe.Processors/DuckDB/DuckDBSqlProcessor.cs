@@ -208,7 +208,8 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
 
         if (needsView)
         {
-            var columns = schema.FieldsList.Select(f => {
+            var columns = schema.FieldsList.Select(f =>
+            {
                 if (f.HasMetadata && f.Metadata.TryGetValue("ARROW:extension:name", out var ext))
                 {
                     var castType = GetDuckDBCastForExtension(ext);

@@ -14,57 +14,57 @@ namespace DtPipe.Tests;
 /// </summary>
 public class SqliteSchemaInspectorTests : IDisposable
 {
-	private readonly string _dbPath;
-	private readonly string _connectionString;
-	private readonly OptionsRegistry _registry;
+    private readonly string _dbPath;
+    private readonly string _connectionString;
+    private readonly OptionsRegistry _registry;
 
-	public SqliteSchemaInspectorTests()
-	{
-		_dbPath = Path.Combine(Path.GetTempPath(), $"dtpipe_test_{Guid.NewGuid()}.db");
-		_connectionString = $"Data Source={_dbPath}";
-		_registry = new OptionsRegistry();
-	}
+    public SqliteSchemaInspectorTests()
+    {
+        _dbPath = Path.Combine(Path.GetTempPath(), $"dtpipe_test_{Guid.NewGuid()}.db");
+        _connectionString = $"Data Source={_dbPath}";
+        _registry = new OptionsRegistry();
+    }
 
-	public void Dispose()
-	{
-		if (File.Exists(_dbPath))
-		{
-			File.Delete(_dbPath);
-		}
-	}
+    public void Dispose()
+    {
+        if (File.Exists(_dbPath))
+        {
+            File.Delete(_dbPath);
+        }
+    }
 
-	private async Task ExecuteSql(string sql)
-	{
-		await using var connection = new SqliteConnection(_connectionString);
-		await connection.OpenAsync();
-		await using var cmd = connection.CreateCommand();
-		cmd.CommandText = sql;
-		await cmd.ExecuteNonQueryAsync();
-	}
+    private async Task ExecuteSql(string sql)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = sql;
+        await cmd.ExecuteNonQueryAsync();
+    }
 
-	#region Schema Inspection Tests
+    #region Schema Inspection Tests
 
-	[Fact]
-	public async Task Sqlite_InspectTargetAsync_WhenTableDoesNotExist_ReturnsNotExists()
-	{
-		var options = new SqliteWriterOptions { Table = "non_existent" };
+    [Fact]
+    public async Task Sqlite_InspectTargetAsync_WhenTableDoesNotExist_ReturnsNotExists()
+    {
+        var options = new SqliteWriterOptions { Table = "non_existent" };
 
-		await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance);
-		var inspector = writer as ISchemaInspector;
+        await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance);
+        var inspector = writer as ISchemaInspector;
 
-		Assert.NotNull(inspector);
+        Assert.NotNull(inspector);
 
-		var result = await inspector.InspectTargetAsync();
+        var result = await inspector.InspectTargetAsync();
 
-		Assert.NotNull(result);
-		Assert.False(result.Exists);
-		Assert.Empty(result.Columns);
-	}
+        Assert.NotNull(result);
+        Assert.False(result.Exists);
+        Assert.Empty(result.Columns);
+    }
 
-	[Fact]
-	public async Task Sqlite_InspectTargetAsync_DetectsColumnsAndTypes()
-	{
-		await ExecuteSql(@"
+    [Fact]
+    public async Task Sqlite_InspectTargetAsync_DetectsColumnsAndTypes()
+    {
+        await ExecuteSql(@"
             CREATE TABLE type_test (
                 id INTEGER PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -73,261 +73,261 @@ public class SqliteSchemaInspectorTests : IDisposable
                 data BLOB
             )");
 
-		var options = new SqliteWriterOptions { Table = "type_test" };
+        var options = new SqliteWriterOptions { Table = "type_test" };
 
-		await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance);
-		var inspector = (ISchemaInspector)writer;
+        await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance);
+        var inspector = (ISchemaInspector)writer;
 
-		var result = await inspector.InspectTargetAsync();
+        var result = await inspector.InspectTargetAsync();
 
-		Assert.NotNull(result);
-		Assert.True(result.Exists);
-		Assert.Equal(5, result.Columns.Count);
+        Assert.NotNull(result);
+        Assert.True(result.Exists);
+        Assert.Equal(5, result.Columns.Count);
 
-		var idCol = result.Columns.First(c => c.Name == "id");
-		Assert.True(idCol.IsPrimaryKey);
-		Assert.Contains("INTEGER", idCol.NativeType);
+        var idCol = result.Columns.First(c => c.Name == "id");
+        Assert.True(idCol.IsPrimaryKey);
+        Assert.Contains("INTEGER", idCol.NativeType);
 
-		var nameCol = result.Columns.First(c => c.Name == "name");
-		Assert.False(nameCol.IsNullable);
-		Assert.Equal(typeof(string), nameCol.InferredClrType);
+        var nameCol = result.Columns.First(c => c.Name == "name");
+        Assert.False(nameCol.IsNullable);
+        Assert.Equal(typeof(string), nameCol.InferredClrType);
 
-		var ageCol = result.Columns.First(c => c.Name == "age");
-		Assert.True(ageCol.IsNullable);
+        var ageCol = result.Columns.First(c => c.Name == "age");
+        Assert.True(ageCol.IsNullable);
 
-		var salaryCol = result.Columns.First(c => c.Name == "salary");
-		Assert.Equal(typeof(double), salaryCol.InferredClrType);
+        var salaryCol = result.Columns.First(c => c.Name == "salary");
+        Assert.Equal(typeof(double), salaryCol.InferredClrType);
 
-		var dataCol = result.Columns.First(c => c.Name == "data");
-		Assert.Equal(typeof(byte[]), dataCol.InferredClrType);
-	}
+        var dataCol = result.Columns.First(c => c.Name == "data");
+        Assert.Equal(typeof(byte[]), dataCol.InferredClrType);
+    }
 
-	[Fact]
-	public async Task Sqlite_InspectTargetAsync_DetectsPrimaryKey()
-	{
-		await ExecuteSql(@"
+    [Fact]
+    public async Task Sqlite_InspectTargetAsync_DetectsPrimaryKey()
+    {
+        await ExecuteSql(@"
             CREATE TABLE pk_test (
                 user_id INTEGER PRIMARY KEY,
                 username TEXT NOT NULL
             )");
 
-		var options = new SqliteWriterOptions { Table = "pk_test" };
+        var options = new SqliteWriterOptions { Table = "pk_test" };
 
-		await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance);
-		var inspector = (ISchemaInspector)writer;
+        await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance);
+        var inspector = (ISchemaInspector)writer;
 
-		var result = await inspector.InspectTargetAsync();
+        var result = await inspector.InspectTargetAsync();
 
-		Assert.NotNull(result);
-		Assert.NotNull(result.PrimaryKeyColumns);
-		Assert.Contains("user_id", result.PrimaryKeyColumns);
+        Assert.NotNull(result);
+        Assert.NotNull(result.PrimaryKeyColumns);
+        Assert.Contains("user_id", result.PrimaryKeyColumns);
 
-		var pkCol = result.Columns.First(c => c.Name == "user_id");
-		Assert.True(pkCol.IsPrimaryKey);
-	}
+        var pkCol = result.Columns.First(c => c.Name == "user_id");
+        Assert.True(pkCol.IsPrimaryKey);
+    }
 
-	[Fact]
-	public async Task Sqlite_InspectTargetAsync_ReturnsRowCount()
-	{
-		await ExecuteSql(@"
+    [Fact]
+    public async Task Sqlite_InspectTargetAsync_ReturnsRowCount()
+    {
+        await ExecuteSql(@"
             CREATE TABLE count_test (id INTEGER PRIMARY KEY, value TEXT);
             INSERT INTO count_test VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd'), (5, 'e');");
 
-		var options = new SqliteWriterOptions { Table = "count_test" };
+        var options = new SqliteWriterOptions { Table = "count_test" };
 
-		await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance);
-		var inspector = (ISchemaInspector)writer;
+        await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance);
+        var inspector = (ISchemaInspector)writer;
 
-		var result = await inspector.InspectTargetAsync();
+        var result = await inspector.InspectTargetAsync();
 
-		Assert.NotNull(result);
-		Assert.True(result.Exists);
-		Assert.NotNull(result.RowCount);
-		Assert.Equal(5, result.RowCount);
-	}
+        Assert.NotNull(result);
+        Assert.True(result.Exists);
+        Assert.NotNull(result.RowCount);
+        Assert.Equal(5, result.RowCount);
+    }
 
-	[Fact]
-	public async Task Sqlite_InspectTargetAsync_ReturnsFileSize()
-	{
-		await ExecuteSql(@"
+    [Fact]
+    public async Task Sqlite_InspectTargetAsync_ReturnsFileSize()
+    {
+        await ExecuteSql(@"
             CREATE TABLE size_test (id INTEGER PRIMARY KEY, data TEXT);
             INSERT INTO size_test VALUES (1, 'some data here');");
 
-		var options = new SqliteWriterOptions { Table = "size_test" };
+        var options = new SqliteWriterOptions { Table = "size_test" };
 
-		await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance);
-		var inspector = (ISchemaInspector)writer;
+        await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance);
+        var inspector = (ISchemaInspector)writer;
 
-		var result = await inspector.InspectTargetAsync();
+        var result = await inspector.InspectTargetAsync();
 
-		Assert.NotNull(result);
-		Assert.NotNull(result.SizeBytes);
-		Assert.True(result.SizeBytes > 0);
-	}
+        Assert.NotNull(result);
+        Assert.NotNull(result.SizeBytes);
+        Assert.True(result.SizeBytes > 0);
+    }
 
-	[Fact]
-	public async Task Sqlite_InspectTargetAsync_DetectsVarcharLength()
-	{
-		await ExecuteSql("CREATE TABLE length_test (id INTEGER PRIMARY KEY, code VARCHAR(10), description VARCHAR(500))");
+    [Fact]
+    public async Task Sqlite_InspectTargetAsync_DetectsVarcharLength()
+    {
+        await ExecuteSql("CREATE TABLE length_test (id INTEGER PRIMARY KEY, code VARCHAR(10), description VARCHAR(500))");
 
-		var options = new SqliteWriterOptions { Table = "length_test" };
+        var options = new SqliteWriterOptions { Table = "length_test" };
 
-		await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance);
-		var inspector = (ISchemaInspector)writer;
+        await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance);
+        var inspector = (ISchemaInspector)writer;
 
-		var result = await inspector.InspectTargetAsync();
+        var result = await inspector.InspectTargetAsync();
 
-		var codeCol = result!.Columns.First(c => c.Name == "code");
-		Assert.Equal(10, codeCol.MaxLength);
+        var codeCol = result!.Columns.First(c => c.Name == "code");
+        Assert.Equal(10, codeCol.MaxLength);
 
-		var descCol = result.Columns.First(c => c.Name == "description");
-		Assert.Equal(500, descCol.MaxLength);
-	}
+        var descCol = result.Columns.First(c => c.Name == "description");
+        Assert.Equal(500, descCol.MaxLength);
+    }
 
-	#endregion
+    #endregion
 
-	#region Schema Compatibility Tests
+    #region Schema Compatibility Tests
 
-	[Fact]
-	public async Task Sqlite_SchemaCompatibility_CompatibleSchema()
-	{
-		await ExecuteSql("CREATE TABLE compat_test (id INTEGER PRIMARY KEY, name TEXT, value REAL)");
+    [Fact]
+    public async Task Sqlite_SchemaCompatibility_CompatibleSchema()
+    {
+        await ExecuteSql("CREATE TABLE compat_test (id INTEGER PRIMARY KEY, name TEXT, value REAL)");
 
-		var sourceSchema = new List<PipeColumnInfo>
-		{
-			new("id", typeof(int), false),
-			new("name", typeof(string), true),
-			new("value", typeof(double), true)
-		};
-
-		var options = new SqliteWriterOptions { Table = "compat_test" };
-
-		await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance);
-		var inspector = (ISchemaInspector)writer;
-
-		var targetSchema = await inspector.InspectTargetAsync();
-		var report = SchemaCompatibilityAnalyzer.Analyze(sourceSchema, targetSchema);
-
-		Assert.True(report.IsCompatible);
-		Assert.Empty(report.Errors);
-	}
-
-	[Fact]
-	public async Task Sqlite_SchemaCompatibility_MissingColumn()
-	{
-		await ExecuteSql("CREATE TABLE missing_test (id INTEGER PRIMARY KEY)");
-
-		var sourceSchema = new List<PipeColumnInfo>
-		{
-			new("id", typeof(int), false),
-			new("extra_column", typeof(string), true) // Not in target
+        var sourceSchema = new List<PipeColumnInfo>
+        {
+            new("id", typeof(int), false),
+            new("name", typeof(string), true),
+            new("value", typeof(double), true)
         };
 
-		var options = new SqliteWriterOptions { Table = "missing_test" };
+        var options = new SqliteWriterOptions { Table = "compat_test" };
 
-		await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance);
-		var inspector = (ISchemaInspector)writer;
+        await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance);
+        var inspector = (ISchemaInspector)writer;
 
-		var targetSchema = await inspector.InspectTargetAsync();
-		var report = SchemaCompatibilityAnalyzer.Analyze(sourceSchema, targetSchema);
+        var targetSchema = await inspector.InspectTargetAsync();
+        var report = SchemaCompatibilityAnalyzer.Analyze(sourceSchema, targetSchema);
 
-		Assert.False(report.IsCompatible);
-		Assert.Contains(report.Columns, c =>
-			c.ColumnName == "extra_column" && c.Status == CompatibilityStatus.MissingInTarget);
-	}
+        Assert.True(report.IsCompatible);
+        Assert.Empty(report.Errors);
+    }
 
-	[Fact]
-	public async Task Sqlite_SchemaCompatibility_ExtraNotNullColumn()
-	{
-		await ExecuteSql("CREATE TABLE extra_nn_test (id INTEGER PRIMARY KEY, required TEXT NOT NULL)");
+    [Fact]
+    public async Task Sqlite_SchemaCompatibility_MissingColumn()
+    {
+        await ExecuteSql("CREATE TABLE missing_test (id INTEGER PRIMARY KEY)");
 
-		var sourceSchema = new List<PipeColumnInfo>
-		{
-			new("id", typeof(int), false)
+        var sourceSchema = new List<PipeColumnInfo>
+        {
+            new("id", typeof(int), false),
+            new("extra_column", typeof(string), true) // Not in target
+        };
+
+        var options = new SqliteWriterOptions { Table = "missing_test" };
+
+        await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance);
+        var inspector = (ISchemaInspector)writer;
+
+        var targetSchema = await inspector.InspectTargetAsync();
+        var report = SchemaCompatibilityAnalyzer.Analyze(sourceSchema, targetSchema);
+
+        Assert.False(report.IsCompatible);
+        Assert.Contains(report.Columns, c =>
+            c.ColumnName == "extra_column" && c.Status == CompatibilityStatus.MissingInTarget);
+    }
+
+    [Fact]
+    public async Task Sqlite_SchemaCompatibility_ExtraNotNullColumn()
+    {
+        await ExecuteSql("CREATE TABLE extra_nn_test (id INTEGER PRIMARY KEY, required TEXT NOT NULL)");
+
+        var sourceSchema = new List<PipeColumnInfo>
+        {
+            new("id", typeof(int), false)
             // Missing 'required' which is NOT NULL in target
         };
 
-		var options = new SqliteWriterOptions { Table = "extra_nn_test" };
+        var options = new SqliteWriterOptions { Table = "extra_nn_test" };
 
-		await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance);
-		var inspector = (ISchemaInspector)writer;
+        await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance);
+        var inspector = (ISchemaInspector)writer;
 
-		var targetSchema = await inspector.InspectTargetAsync();
-		var report = SchemaCompatibilityAnalyzer.Analyze(sourceSchema, targetSchema);
+        var targetSchema = await inspector.InspectTargetAsync();
+        var report = SchemaCompatibilityAnalyzer.Analyze(sourceSchema, targetSchema);
 
-		Assert.False(report.IsCompatible);
-		Assert.Contains(report.Columns, c =>
-			c.ColumnName == "required" && c.Status == CompatibilityStatus.ExtraInTargetNotNull);
-	}
+        Assert.False(report.IsCompatible);
+        Assert.Contains(report.Columns, c =>
+            c.ColumnName == "required" && c.Status == CompatibilityStatus.ExtraInTargetNotNull);
+    }
 
-	[Fact]
-	public async Task Sqlite_SchemaCompatibility_NullabilityConflict()
-	{
-		await ExecuteSql("CREATE TABLE null_test (id INTEGER PRIMARY KEY, status TEXT NOT NULL)");
+    [Fact]
+    public async Task Sqlite_SchemaCompatibility_NullabilityConflict()
+    {
+        await ExecuteSql("CREATE TABLE null_test (id INTEGER PRIMARY KEY, status TEXT NOT NULL)");
 
-		var sourceSchema = new List<PipeColumnInfo>
-		{
-			new("id", typeof(int), false),
-			new("status", typeof(string), true) // Nullable in source, NOT NULL in target
+        var sourceSchema = new List<PipeColumnInfo>
+        {
+            new("id", typeof(int), false),
+            new("status", typeof(string), true) // Nullable in source, NOT NULL in target
         };
 
-		var options = new SqliteWriterOptions { Table = "null_test" };
+        var options = new SqliteWriterOptions { Table = "null_test" };
 
-		await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance);
-		var inspector = (ISchemaInspector)writer;
+        await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance);
+        var inspector = (ISchemaInspector)writer;
 
-		var targetSchema = await inspector.InspectTargetAsync();
-		var report = SchemaCompatibilityAnalyzer.Analyze(sourceSchema, targetSchema);
+        var targetSchema = await inspector.InspectTargetAsync();
+        var report = SchemaCompatibilityAnalyzer.Analyze(sourceSchema, targetSchema);
 
-		var statusCol = report.Columns.First(c => c.ColumnName == "status");
-		Assert.Equal(CompatibilityStatus.NullabilityConflict, statusCol.Status);
-	}
+        var statusCol = report.Columns.First(c => c.ColumnName == "status");
+        Assert.Equal(CompatibilityStatus.NullabilityConflict, statusCol.Status);
+    }
 
-	[Fact]
-	public async Task Sqlite_SchemaCompatibility_ExistingDataWarning()
-	{
-		await ExecuteSql(@"
+    [Fact]
+    public async Task Sqlite_SchemaCompatibility_ExistingDataWarning()
+    {
+        await ExecuteSql(@"
             CREATE TABLE data_warn_test (id INTEGER PRIMARY KEY, name TEXT);
             INSERT INTO data_warn_test VALUES (1, 'Alice'), (2, 'Bob');");
 
-		var sourceSchema = new List<PipeColumnInfo>
-		{
-			new("id", typeof(int), false),
-			new("name", typeof(string), true)
-		};
+        var sourceSchema = new List<PipeColumnInfo>
+        {
+            new("id", typeof(int), false),
+            new("name", typeof(string), true)
+        };
 
-		var options = new SqliteWriterOptions { Table = "data_warn_test" };
+        var options = new SqliteWriterOptions { Table = "data_warn_test" };
 
-		await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance);
-		var inspector = (ISchemaInspector)writer;
+        await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance);
+        var inspector = (ISchemaInspector)writer;
 
-		var targetSchema = await inspector.InspectTargetAsync();
-		var report = SchemaCompatibilityAnalyzer.Analyze(sourceSchema, targetSchema);
+        var targetSchema = await inspector.InspectTargetAsync();
+        var report = SchemaCompatibilityAnalyzer.Analyze(sourceSchema, targetSchema);
 
-		Assert.Contains(report.Warnings, w => w.Contains("2") && w.Contains("rows"));
-	}
+        Assert.Contains(report.Warnings, w => w.Contains("2") && w.Contains("rows"));
+    }
 
-	[Fact]
-	public async Task Sqlite_SchemaCompatibility_WhenTableNotExists_AllColumnsWillBeCreated()
-	{
-		var sourceSchema = new List<PipeColumnInfo>
-		{
-			new("id", typeof(int), false),
-			new("name", typeof(string), true),
-			new("value", typeof(decimal), true)
-		};
+    [Fact]
+    public async Task Sqlite_SchemaCompatibility_WhenTableNotExists_AllColumnsWillBeCreated()
+    {
+        var sourceSchema = new List<PipeColumnInfo>
+        {
+            new("id", typeof(int), false),
+            new("name", typeof(string), true),
+            new("value", typeof(decimal), true)
+        };
 
-		var options = new SqliteWriterOptions { Table = "will_be_created" };
+        var options = new SqliteWriterOptions { Table = "will_be_created" };
 
-		await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance);
-		var inspector = (ISchemaInspector)writer;
+        await using var writer = new SqliteDataWriter(_connectionString, options, NullLogger<SqliteDataWriter>.Instance, SqliteTypeConverter.Instance);
+        var inspector = (ISchemaInspector)writer;
 
-		var targetSchema = await inspector.InspectTargetAsync();
-		var report = SchemaCompatibilityAnalyzer.Analyze(sourceSchema, targetSchema);
+        var targetSchema = await inspector.InspectTargetAsync();
+        var report = SchemaCompatibilityAnalyzer.Analyze(sourceSchema, targetSchema);
 
-		Assert.True(report.IsCompatible);
-		Assert.All(report.Columns, c => Assert.Equal(CompatibilityStatus.WillBeCreated, c.Status));
-	}
+        Assert.True(report.IsCompatible);
+        Assert.All(report.Columns, c => Assert.Equal(CompatibilityStatus.WillBeCreated, c.Status));
+    }
 
-	#endregion
+    #endregion
 }

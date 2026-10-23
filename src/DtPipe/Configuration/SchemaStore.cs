@@ -39,8 +39,8 @@ public static class SchemaStore
         // We write the envelope manually so the schema is pretty-printed inline.
         var envelope = new SchemaEntry
         {
-            Version    = CurrentVersion,
-            BuiltAt    = DateTime.UtcNow.ToString("O"),
+            Version = CurrentVersion,
+            BuiltAt = DateTime.UtcNow.ToString("O"),
             ReaderType = readerType
         };
         var envelopeJson = JsonSerializer.Serialize(envelope, _serializerOptions);
@@ -95,8 +95,8 @@ public static class SchemaStore
     // Used only for serializing the envelope without the schema field.
     private sealed class SchemaEntry
     {
-        public int    Version    { get; set; }
-        public string? BuiltAt   { get; set; }
+        public int Version { get; set; }
+        public string? BuiltAt { get; set; }
         public string? ReaderType { get; set; }
     }
 }

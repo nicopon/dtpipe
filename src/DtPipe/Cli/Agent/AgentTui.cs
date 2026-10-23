@@ -389,14 +389,14 @@ public class AgentTui
         }
     }
 
-     /// <summary>
-      /// Renders a single tool result (F5 parallel tool execution). Kept lightweight so that many
-      /// independent calls produced in one turn can be rendered without heavy panels per call.
-      /// </summary>
-     public void RenderToolResult(string toolName, string result, bool isError)
-        => _console.MarkupLine(StepDigest.ToolResultLine(toolName, result, isError));
+    /// <summary>
+    /// Renders a single tool result (F5 parallel tool execution). Kept lightweight so that many
+    /// independent calls produced in one turn can be rendered without heavy panels per call.
+    /// </summary>
+    public void RenderToolResult(string toolName, string result, bool isError)
+       => _console.MarkupLine(StepDigest.ToolResultLine(toolName, result, isError));
 
-     public void RenderPipelineDag(string yamlContent, IServiceProvider serviceProvider)
+    public void RenderPipelineDag(string yamlContent, IServiceProvider serviceProvider)
     {
         try
         {

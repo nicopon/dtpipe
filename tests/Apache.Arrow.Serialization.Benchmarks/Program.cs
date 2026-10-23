@@ -105,8 +105,9 @@ public class Program
 
         // --- Dynamic Benchmarks ---
         Console.WriteLine($"\n--- Benchmark Dynamic with {N} items ---");
-        
-        var dynamicData = Enumerable.Range(0, N).Select(i => {
+
+        var dynamicData = Enumerable.Range(0, N).Select(i =>
+        {
             dynamic obj = new System.Dynamic.ExpandoObject();
             obj.Id = i;
             obj.Name = "Item-" + i;

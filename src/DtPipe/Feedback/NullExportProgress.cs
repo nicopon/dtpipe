@@ -10,24 +10,24 @@ namespace DtPipe.Feedback;
 /// </summary>
 internal sealed class NullExportProgress : IExportProgress
 {
-	private readonly DateTime _startTime = DateTime.UtcNow;
-	private long _readCount;
-	private long _writeCount;
+    private readonly DateTime _startTime = DateTime.UtcNow;
+    private long _readCount;
+    private long _writeCount;
 
-	public void ReportRead(int count) => Interlocked.Add(ref _readCount, count);
-	public void ReportTransform(string transformerName, int count) { }
-	public void ReportWrite(int count) => Interlocked.Add(ref _writeCount, count);
-	public void Complete() { }
+    public void ReportRead(int count) => Interlocked.Add(ref _readCount, count);
+    public void ReportTransform(string transformerName, int count) { }
+    public void ReportWrite(int count) => Interlocked.Add(ref _writeCount, count);
+    public void Complete() { }
 
-	public ExportMetrics GetMetrics()
-	{
-		var now = DateTime.UtcNow;
-		var written = Volatile.Read(ref _writeCount);
-		var elapsed = (now - _startTime).TotalSeconds;
-		return new ExportMetrics(
-			_startTime, now, Volatile.Read(ref _readCount), written,
-			elapsed > 0 ? written / elapsed : 0, 0, new Dictionary<string, long>());
-	}
+    public ExportMetrics GetMetrics()
+    {
+        var now = DateTime.UtcNow;
+        var written = Volatile.Read(ref _writeCount);
+        var elapsed = (now - _startTime).TotalSeconds;
+        return new ExportMetrics(
+            _startTime, now, Volatile.Read(ref _readCount), written,
+            elapsed > 0 ? written / elapsed : 0, 0, new Dictionary<string, long>());
+    }
 
-	public void Dispose() { }
+    public void Dispose() { }
 }

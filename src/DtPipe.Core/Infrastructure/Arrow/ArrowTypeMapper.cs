@@ -165,7 +165,7 @@ public static class ArrowTypeMapper
         return true;
     }
 
-    public static Apache.Arrow.Field GetField(string name, Type clrType, bool isNullable = true) => 
+    public static Apache.Arrow.Field GetField(string name, Type clrType, bool isNullable = true) =>
         Apache.Arrow.Serialization.Mapping.ArrowTypeMap.GetField(name, GetLogicalType(clrType), isNullable);
 
     /// <summary>

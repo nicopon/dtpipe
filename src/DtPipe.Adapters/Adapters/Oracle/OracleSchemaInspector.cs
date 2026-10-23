@@ -8,240 +8,240 @@ namespace DtPipe.Adapters.Oracle;
 
 public sealed class OracleSchemaInspector : ISchemaInspector
 {
-	private readonly string _connectionString;
-	private readonly string _tableName;
-	private readonly ILogger _logger;
+    private readonly string _connectionString;
+    private readonly string _tableName;
+    private readonly ILogger _logger;
 
-	public OracleSchemaInspector(string connectionString, string tableName, ILogger logger)
-	{
-		_connectionString = connectionString;
-		_tableName = tableName;
-		_logger = logger;
-	}
+    public OracleSchemaInspector(string connectionString, string tableName, ILogger logger)
+    {
+        _connectionString = connectionString;
+        _tableName = tableName;
+        _logger = logger;
+    }
 
-	public bool RequiresTargetInspection => true;
+    public bool RequiresTargetInspection => true;
 
-	public async Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default)
-	{
-		if (_logger.IsEnabled(LogLevel.Debug)) _logger.LogDebug("Starting target schema inspection for table {Table}", _tableName);
-		await using var connection = new OracleConnection(_connectionString);
-		await connection.OpenAsync(ct);
+    public async Task<TargetSchemaInfo?> InspectTargetAsync(CancellationToken ct = default)
+    {
+        if (_logger.IsEnabled(LogLevel.Debug)) _logger.LogDebug("Starting target schema inspection for table {Table}", _tableName);
+        await using var connection = new OracleConnection(_connectionString);
+        await connection.OpenAsync(ct);
 
-		// Parse optional schema prefix (e.g., "MYSCHEMA.MyTable" → owner=MYSCHEMA, table=MyTable)
-		string? inputOwner = null;
-		string inputTable = _tableName;
+        // Parse optional schema prefix (e.g., "MYSCHEMA.MyTable" → owner=MYSCHEMA, table=MyTable)
+        string? inputOwner = null;
+        string inputTable = _tableName;
 
-		// Strip quotes if present for catalog lookup
-		static string Unquote(string s) => s.StartsWith('"') && s.EndsWith('"') ? s[1..^1] : s;
+        // Strip quotes if present for catalog lookup
+        static string Unquote(string s) => s.StartsWith('"') && s.EndsWith('"') ? s[1..^1] : s;
 
-		var dotIndex = _tableName.IndexOf('.');
-		if (dotIndex > 0)
-		{
-			inputOwner = Unquote(_tableName[..dotIndex]);
-			inputTable = Unquote(_tableName[(dotIndex + 1)..]);
-		}
-		else
-		{
-			inputTable = Unquote(_tableName);
-		}
+        var dotIndex = _tableName.IndexOf('.');
+        if (dotIndex > 0)
+        {
+            inputOwner = Unquote(_tableName[..dotIndex]);
+            inputTable = Unquote(_tableName[(dotIndex + 1)..]);
+        }
+        else
+        {
+            inputTable = Unquote(_tableName);
+        }
 
-		bool hasOwner = !string.IsNullOrEmpty(inputOwner);
-		string GetView(string viewSuffix) => hasOwner ? $"ALL_{viewSuffix}" : $"USER_{viewSuffix}";
+        bool hasOwner = !string.IsNullOrEmpty(inputOwner);
+        string GetView(string viewSuffix) => hasOwner ? $"ALL_{viewSuffix}" : $"USER_{viewSuffix}";
 
-		// Case-insensitive catalog lookup to find the actual table name AND its size
-		var tablesView = GetView("TABLES");
-		var segView = GetView("SEGMENTS");
-		var findSql = hasOwner
-			? $@"SELECT t.table_name, t.num_rows, s.bytes
+        // Case-insensitive catalog lookup to find the actual table name AND its size
+        var tablesView = GetView("TABLES");
+        var segView = GetView("SEGMENTS");
+        var findSql = hasOwner
+            ? $@"SELECT t.table_name, t.num_rows, s.bytes
                  FROM {tablesView} t
                  LEFT JOIN {segView} s ON t.table_name = s.segment_name AND t.owner = s.owner AND s.segment_type = 'TABLE'
                  WHERE UPPER(t.owner) = UPPER(:p_owner) AND UPPER(t.table_name) = UPPER(:p_table)"
-			: $@"SELECT t.table_name, t.num_rows, s.bytes
+            : $@"SELECT t.table_name, t.num_rows, s.bytes
                  FROM {tablesView} t
                  LEFT JOIN {segView} s ON t.table_name = s.segment_name AND s.segment_type = 'TABLE'
                  WHERE UPPER(t.table_name) = UPPER(:p_table)";
 
-		using var findCmd = connection.CreateCommand();
-		findCmd.BindByName = true;
-		findCmd.CommandText = findSql;
-		if (hasOwner) findCmd.Parameters.Add(new OracleParameter("p_owner", inputOwner));
-		findCmd.Parameters.Add(new OracleParameter("p_table", inputTable));
+        using var findCmd = connection.CreateCommand();
+        findCmd.BindByName = true;
+        findCmd.CommandText = findSql;
+        if (hasOwner) findCmd.Parameters.Add(new OracleParameter("p_owner", inputOwner));
+        findCmd.Parameters.Add(new OracleParameter("p_table", inputTable));
 
-		if (_logger.IsEnabled(LogLevel.Debug))
-			_logger.LogDebug("Case-insensitive table lookup with size: {Sql} with table={Table}", findSql, inputTable);
+        if (_logger.IsEnabled(LogLevel.Debug))
+            _logger.LogDebug("Case-insensitive table lookup with size: {Sql} with table={Table}", findSql, inputTable);
 
-		var matches = new List<(string TableName, long? RowCount, long? SizeBytes)>();
-		using (var findReader = await findCmd.ExecuteReaderAsync(ct))
-		{
-			while (await findReader.ReadAsync(ct))
-			{
-				var catName = findReader.GetString(0);
-				var rows = findReader.IsDBNull(1) ? (long?)null : Convert.ToInt64(findReader.GetValue(1));
-				var bytes = findReader.IsDBNull(2) ? (long?)null : Convert.ToInt64(findReader.GetValue(2));
-				matches.Add((catName, rows, bytes));
-			}
-		}
+        var matches = new List<(string TableName, long? RowCount, long? SizeBytes)>();
+        using (var findReader = await findCmd.ExecuteReaderAsync(ct))
+        {
+            while (await findReader.ReadAsync(ct))
+            {
+                var catName = findReader.GetString(0);
+                var rows = findReader.IsDBNull(1) ? (long?)null : Convert.ToInt64(findReader.GetValue(1));
+                var bytes = findReader.IsDBNull(2) ? (long?)null : Convert.ToInt64(findReader.GetValue(2));
+                matches.Add((catName, rows, bytes));
+            }
+        }
 
-		if (matches.Count == 0)
-		{
-			if (_logger.IsEnabled(LogLevel.Debug))
-				_logger.LogDebug("Table {Table} not found in catalog", inputTable);
-			return new TargetSchemaInfo([], false, null, null, null);
-		}
+        if (matches.Count == 0)
+        {
+            if (_logger.IsEnabled(LogLevel.Debug))
+                _logger.LogDebug("Table {Table} not found in catalog", inputTable);
+            return new TargetSchemaInfo([], false, null, null, null);
+        }
 
-		// Resolve ambiguity: if multiple tables match case-insensitively, prefer exact match
-		string tableName;
-		long? rowCount;
-		long? sizeBytes;
+        // Resolve ambiguity: if multiple tables match case-insensitively, prefer exact match
+        string tableName;
+        long? rowCount;
+        long? sizeBytes;
 
-		if (matches.Count == 1)
-		{
-			tableName = matches[0].TableName;
-			rowCount = matches[0].RowCount;
-			sizeBytes = matches[0].SizeBytes;
-		}
-		else
-		{
-			// Multiple matches (e.g., "MaTable" and "MATABLE" both exist)
-			var exactMatch = matches.FirstOrDefault(m => m.TableName == inputTable);
-			if (exactMatch.TableName != null)
-			{
-				tableName = exactMatch.TableName;
-				rowCount = exactMatch.RowCount;
-				sizeBytes = exactMatch.SizeBytes;
-			}
-			else
-			{
-				// No exact match — use uppercase version (Oracle default)
-				var upperMatch = matches.FirstOrDefault(m => m.TableName == inputTable.ToUpperInvariant());
-				if (upperMatch.TableName != null)
-				{
-					tableName = upperMatch.TableName;
-					rowCount = upperMatch.RowCount;
-					sizeBytes = upperMatch.SizeBytes;
-				}
-				else
-				{
-					tableName = matches[0].TableName;
-					rowCount = matches[0].RowCount;
-					sizeBytes = matches[0].SizeBytes;
-				}
+        if (matches.Count == 1)
+        {
+            tableName = matches[0].TableName;
+            rowCount = matches[0].RowCount;
+            sizeBytes = matches[0].SizeBytes;
+        }
+        else
+        {
+            // Multiple matches (e.g., "MaTable" and "MATABLE" both exist)
+            var exactMatch = matches.FirstOrDefault(m => m.TableName == inputTable);
+            if (exactMatch.TableName != null)
+            {
+                tableName = exactMatch.TableName;
+                rowCount = exactMatch.RowCount;
+                sizeBytes = exactMatch.SizeBytes;
+            }
+            else
+            {
+                // No exact match — use uppercase version (Oracle default)
+                var upperMatch = matches.FirstOrDefault(m => m.TableName == inputTable.ToUpperInvariant());
+                if (upperMatch.TableName != null)
+                {
+                    tableName = upperMatch.TableName;
+                    rowCount = upperMatch.RowCount;
+                    sizeBytes = upperMatch.SizeBytes;
+                }
+                else
+                {
+                    tableName = matches[0].TableName;
+                    rowCount = matches[0].RowCount;
+                    sizeBytes = matches[0].SizeBytes;
+                }
 
-				if (_logger.IsEnabled(LogLevel.Warning))
-					_logger.LogWarning("Ambiguous table name '{Input}': found {Count} matches ({Names}). Using '{Resolved}'.",
-						inputTable, matches.Count, string.Join(", ", matches.Select(m => m.TableName)), tableName);
-			}
-		}
+                if (_logger.IsEnabled(LogLevel.Warning))
+                    _logger.LogWarning("Ambiguous table name '{Input}': found {Count} matches ({Names}). Using '{Resolved}'.",
+                        inputTable, matches.Count, string.Join(", ", matches.Select(m => m.TableName)), tableName);
+            }
+        }
 
-		string owner = inputOwner ?? "";
+        string owner = inputOwner ?? "";
 
-		void AddOwnerParam(OracleCommand cmd)
-		{
-			if (hasOwner) cmd.Parameters.Add(new OracleParameter("p_owner", owner));
-		}
+        void AddOwnerParam(OracleCommand cmd)
+        {
+            if (hasOwner) cmd.Parameters.Add(new OracleParameter("p_owner", owner));
+        }
 
 
-		var colView = GetView("TAB_COLUMNS");
-		var columnsSql = hasOwner
-			? $@"SELECT
+        var colView = GetView("TAB_COLUMNS");
+        var columnsSql = hasOwner
+            ? $@"SELECT
                 column_name, data_type, nullable, data_length, data_precision, data_scale, char_length
             FROM {colView}
             WHERE owner = :p_owner AND table_name = :p_table
             ORDER BY column_id"
-			: $@"SELECT
+            : $@"SELECT
                 column_name, data_type, nullable, data_length, data_precision, data_scale, char_length
             FROM {colView}
             WHERE table_name = :p_table
             ORDER BY column_id";
 
-		using var columnsCmd = connection.CreateCommand();
-		columnsCmd.BindByName = true;
-		columnsCmd.CommandText = columnsSql;
-		AddOwnerParam(columnsCmd);
-		columnsCmd.Parameters.Add(new OracleParameter("p_table", tableName));
+        using var columnsCmd = connection.CreateCommand();
+        columnsCmd.BindByName = true;
+        columnsCmd.CommandText = columnsSql;
+        AddOwnerParam(columnsCmd);
+        columnsCmd.Parameters.Add(new OracleParameter("p_table", tableName));
 
-		var allConstraints = await GetAllConstraintColumnsAsync(connection, GetView("CONSTRAINTS"), GetView("CONS_COLUMNS"), hasOwner, owner, tableName, ct);
-		var pkColumns = allConstraints.Where(c => c.Type == "P").Select(c => c.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
-		var uniqueColumns = allConstraints.Where(c => c.Type == "U").Select(c => c.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var allConstraints = await GetAllConstraintColumnsAsync(connection, GetView("CONSTRAINTS"), GetView("CONS_COLUMNS"), hasOwner, owner, tableName, ct);
+        var pkColumns = allConstraints.Where(c => c.Type == "P").Select(c => c.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var uniqueColumns = allConstraints.Where(c => c.Type == "U").Select(c => c.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-		var columns = new List<TargetColumnInfo>();
-		if (_logger.IsEnabled(LogLevel.Debug))
-			_logger.LogDebug("Retrieving columns with SQL: {Sql}", columnsSql);
-		using var reader = await columnsCmd.ExecuteReaderAsync(ct);
-		while (await reader.ReadAsync(ct))
-		{
-			var colName = reader.GetString(0);
-			var dataType = reader.GetString(1);
-			var isNullable = reader.GetString(2) == "Y";
-			var dataLength = reader.IsDBNull(3) ? (int?)null : reader.GetInt32(3);
-			var precision = reader.IsDBNull(4) ? (int?)null : reader.GetInt32(4);
-			var scale = reader.IsDBNull(5) ? (int?)null : reader.GetInt32(5);
-			var charLength = reader.IsDBNull(6) ? (int?)null : reader.GetInt32(6);
+        var columns = new List<TargetColumnInfo>();
+        if (_logger.IsEnabled(LogLevel.Debug))
+            _logger.LogDebug("Retrieving columns with SQL: {Sql}", columnsSql);
+        using var reader = await columnsCmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var colName = reader.GetString(0);
+            var dataType = reader.GetString(1);
+            var isNullable = reader.GetString(2) == "Y";
+            var dataLength = reader.IsDBNull(3) ? (int?)null : reader.GetInt32(3);
+            var precision = reader.IsDBNull(4) ? (int?)null : reader.GetInt32(4);
+            var scale = reader.IsDBNull(5) ? (int?)null : reader.GetInt32(5);
+            var charLength = reader.IsDBNull(6) ? (int?)null : reader.GetInt32(6);
 
-			var nativeType = OracleTypeConverter.Instance.BuildNativeType(dataType, dataLength, precision, scale, charLength);
-			var maxLength = charLength ?? dataLength;
+            var nativeType = OracleTypeConverter.Instance.BuildNativeType(dataType, dataLength, precision, scale, charLength);
+            var maxLength = charLength ?? dataLength;
 
-			columns.Add(new TargetColumnInfo(
-				colName,
-				nativeType,
-				OracleTypeConverter.Instance.MapFromProviderType(dataType),
-				isNullable,
-				pkColumns.Contains(colName),
-				uniqueColumns.Contains(colName),
-				maxLength,
-				precision,
-				scale,
-				IsCaseSensitive: colName != colName.ToUpperInvariant()
-			));
-		}
+            columns.Add(new TargetColumnInfo(
+                colName,
+                nativeType,
+                OracleTypeConverter.Instance.MapFromProviderType(dataType),
+                isNullable,
+                pkColumns.Contains(colName),
+                uniqueColumns.Contains(colName),
+                maxLength,
+                precision,
+                scale,
+                IsCaseSensitive: colName != colName.ToUpperInvariant()
+            ));
+        }
 
-		return new TargetSchemaInfo(
-			columns,
-			true,
-			rowCount,
-			sizeBytes,
-			pkColumns.Count > 0 ? pkColumns.ToList() : null,
-			uniqueColumns.Count > 0 ? uniqueColumns.ToList() : null,
-			IsRowCountEstimate: true
-		);
-	}
+        return new TargetSchemaInfo(
+            columns,
+            true,
+            rowCount,
+            sizeBytes,
+            pkColumns.Count > 0 ? pkColumns.ToList() : null,
+            uniqueColumns.Count > 0 ? uniqueColumns.ToList() : null,
+            IsRowCountEstimate: true
+        );
+    }
 
-	private async Task<List<(string Name, string Type)>> GetAllConstraintColumnsAsync(OracleConnection connection, string consView, string consColView, bool hasOwner, string owner, string tableName, CancellationToken ct)
-	{
-		string sql = hasOwner
-			? $@"SELECT cols.column_name, cons.constraint_type
+    private async Task<List<(string Name, string Type)>> GetAllConstraintColumnsAsync(OracleConnection connection, string consView, string consColView, bool hasOwner, string owner, string tableName, CancellationToken ct)
+    {
+        string sql = hasOwner
+            ? $@"SELECT cols.column_name, cons.constraint_type
                  FROM {consView} cons
                  JOIN {consColView} cols ON cons.constraint_name = cols.constraint_name AND cons.owner = cols.owner
                  WHERE cons.owner = :p_owner AND cons.table_name = :p_table AND cons.constraint_type IN ('P', 'U')"
-			: $@"SELECT cols.column_name, cons.constraint_type
+            : $@"SELECT cols.column_name, cons.constraint_type
                  FROM {consView} cons
                  JOIN {consColView} cols ON cons.constraint_name = cols.constraint_name
                  WHERE cons.table_name = :p_table AND cons.constraint_type IN ('P', 'U')";
 
-		using var cmd = connection.CreateCommand();
-		cmd.BindByName = true;
-		cmd.CommandText = sql;
-		if (hasOwner) cmd.Parameters.Add(new OracleParameter("p_owner", owner));
-		cmd.Parameters.Add(new OracleParameter("p_table", tableName));
+        using var cmd = connection.CreateCommand();
+        cmd.BindByName = true;
+        cmd.CommandText = sql;
+        if (hasOwner) cmd.Parameters.Add(new OracleParameter("p_owner", owner));
+        cmd.Parameters.Add(new OracleParameter("p_table", tableName));
 
-		var results = new List<(string Name, string Type)>();
-		using var reader = await cmd.ExecuteReaderAsync(ct);
-		while (await reader.ReadAsync(ct))
-		{
-			results.Add((reader.GetString(0), reader.GetString(1)));
-		}
-		return results;
-	}
+        var results = new List<(string Name, string Type)>();
+        using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            results.Add((reader.GetString(0), reader.GetString(1)));
+        }
+        return results;
+    }
 
 
-	/// <summary>
-	/// Resolves a table name using DBMS_UTILITY.NAME_RESOLVE.
-	/// This handles synonyms, public synonyms, and schema-qualified names, returning the actual owner and table name.
-	/// </summary>
-	public static async Task<(string Schema, string Table)> ResolveTargetTableAsync(OracleConnection connection, string inputName, CancellationToken ct)
-	{
-		using var cmd = connection.CreateCommand();
-		cmd.CommandText = @"
+    /// <summary>
+    /// Resolves a table name using DBMS_UTILITY.NAME_RESOLVE.
+    /// This handles synonyms, public synonyms, and schema-qualified names, returning the actual owner and table name.
+    /// </summary>
+    public static async Task<(string Schema, string Table)> ResolveTargetTableAsync(OracleConnection connection, string inputName, CancellationToken ct)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = @"
             DECLARE
               v_schema VARCHAR2(30);
               v_part1  VARCHAR2(30);
@@ -264,43 +264,43 @@ public sealed class OracleSchemaInspector : ISchemaInspector
               :out_table := v_part1;
             END;";
 
-		cmd.Parameters.Add(new OracleParameter("name", inputName));
+        cmd.Parameters.Add(new OracleParameter("name", inputName));
 
-		var pSchema = new OracleParameter("out_schema", OracleDbType.Varchar2, 100) { Direction = ParameterDirection.Output };
-		var pTable = new OracleParameter("out_table", OracleDbType.Varchar2, 100) { Direction = ParameterDirection.Output };
+        var pSchema = new OracleParameter("out_schema", OracleDbType.Varchar2, 100) { Direction = ParameterDirection.Output };
+        var pTable = new OracleParameter("out_table", OracleDbType.Varchar2, 100) { Direction = ParameterDirection.Output };
 
-		cmd.Parameters.Add(pSchema);
-		cmd.Parameters.Add(pTable);
+        cmd.Parameters.Add(pSchema);
+        cmd.Parameters.Add(pTable);
 
-		await cmd.ExecuteNonQueryAsync(ct);
+        await cmd.ExecuteNonQueryAsync(ct);
 
-		string schema = pSchema.Value.ToString() ?? "";
-		string table = pTable.Value.ToString() ?? "";
+        string schema = pSchema.Value.ToString() ?? "";
+        string table = pTable.Value.ToString() ?? "";
 
-		return (schema, table);
-	}
+        return (schema, table);
+    }
 
-	/// <summary>
-	/// Quotes an identifier only if necessary (i.e. contains lowercase, spaces, or special characters).
-	/// Oracle defaults to UPPERCASE for unquoted identifiers.
-	/// </summary>
-	public static string GetSmartQuotedIdentifier(string identifier)
-	{
-		if (string.IsNullOrEmpty(identifier)) return "";
+    /// <summary>
+    /// Quotes an identifier only if necessary (i.e. contains lowercase, spaces, or special characters).
+    /// Oracle defaults to UPPERCASE for unquoted identifiers.
+    /// </summary>
+    public static string GetSmartQuotedIdentifier(string identifier)
+    {
+        if (string.IsNullOrEmpty(identifier)) return "";
 
-		bool isAllUpper = true;
-		bool isValidChars = true;
+        bool isAllUpper = true;
+        bool isValidChars = true;
 
-		if (!char.IsLetter(identifier[0])) isValidChars = false;
+        if (!char.IsLetter(identifier[0])) isValidChars = false;
 
-		foreach (var c in identifier)
-		{
-			if (char.IsLower(c)) isAllUpper = false;
-			if (!char.IsLetterOrDigit(c) && c != '_' && c != '$' && c != '#') isValidChars = false;
-		}
+        foreach (var c in identifier)
+        {
+            if (char.IsLower(c)) isAllUpper = false;
+            if (!char.IsLetterOrDigit(c) && c != '_' && c != '$' && c != '#') isValidChars = false;
+        }
 
-		if (isAllUpper && isValidChars) return identifier;
+        if (isAllUpper && isValidChars) return identifier;
 
-		return $"\"{identifier}\"";
-	}
+        return $"\"{identifier}\"";
+    }
 }

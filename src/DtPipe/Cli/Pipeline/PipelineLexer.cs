@@ -91,7 +91,7 @@ public class PipelineLexer
                 {
                     branches.Add(BuildBranch(currentBranchFlags, currentBranchArgs));
                     currentBranchFlags = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
-                    currentBranchArgs  = new List<string>();
+                    currentBranchArgs = new List<string>();
                     seenPerStage.Clear();
                     currentStage = LexStage.Reader;
                 }
@@ -186,7 +186,7 @@ public class PipelineLexer
                     {
                         branches.Add(BuildBranch(currentBranchFlags, currentBranchArgs));
                         currentBranchFlags = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
-                        currentBranchArgs  = new List<string>();
+                        currentBranchArgs = new List<string>();
                         seenPerStage.Clear();
                         currentStage = LexStage.Reader;
                     }
@@ -271,18 +271,18 @@ public class PipelineLexer
     {
         return new GlobalOptions
         {
-            DryRunCount   = GetDryRun(dict),
-            NoStats       = dict.ContainsKey("--no-stats"),
-            StrictBindings= dict.ContainsKey("--strict-bindings"),
-            LogPath       = dict.TryGetValue("--log", out var logVal) ? logVal?.ToString() : null,
-            JobFile       = dict.TryGetValue("--job", out var jobVal) ? jobVal?.ToString()
+            DryRunCount = GetDryRun(dict),
+            NoStats = dict.ContainsKey("--no-stats"),
+            StrictBindings = dict.ContainsKey("--strict-bindings"),
+            LogPath = dict.TryGetValue("--log", out var logVal) ? logVal?.ToString() : null,
+            JobFile = dict.TryGetValue("--job", out var jobVal) ? jobVal?.ToString()
                           : dict.TryGetValue("-j", out var jVal) ? jVal?.ToString() : null,
             ExportJobFile = dict.TryGetValue("--export-job", out var ejVal) ? ejVal?.ToString() : null,
-            Session       = dict.TryGetValue("--session", out var sessVal) ? sessVal?.ToString() : null,
-            BindInput     = dict.TryGetValue("--bind-input", out var biVal) ? biVal?.ToString() : null,
-            BindOutput    = dict.TryGetValue("--bind-output", out var boVal) ? boVal?.ToString() : null,
-            IgnoreNulls   = dict.ContainsKey("--ignore-nulls"),
-            AllFlags      = dict
+            Session = dict.TryGetValue("--session", out var sessVal) ? sessVal?.ToString() : null,
+            BindInput = dict.TryGetValue("--bind-input", out var biVal) ? biVal?.ToString() : null,
+            BindOutput = dict.TryGetValue("--bind-output", out var boVal) ? boVal?.ToString() : null,
+            IgnoreNulls = dict.ContainsKey("--ignore-nulls"),
+            AllFlags = dict
         };
     }
 
@@ -333,34 +333,34 @@ public class PipelineLexer
             if (def?.Stage == FlagStage.Pipeline) { pipelineStart = idx; break; }
         }
 
-        int readerEnd   = pipelineStart >= 0 ? pipelineStart : (writerStart >= 0 ? writerStart : rawArgs.Count);
+        int readerEnd = pipelineStart >= 0 ? pipelineStart : (writerStart >= 0 ? writerStart : rawArgs.Count);
         int pipelineEnd = writerStart >= 0 ? writerStart : rawArgs.Count;
 
-        var readerArgs   = rawArgs.Take(readerEnd).ToArray();
+        var readerArgs = rawArgs.Take(readerEnd).ToArray();
         var pipelineArgs = pipelineStart >= 0
             ? rawArgs.Skip(pipelineStart).Take(pipelineEnd - pipelineStart).ToArray()
             : Array.Empty<string>();
-        var writerArgs   = writerStart >= 0 ? rawArgs.Skip(writerStart).ToArray() : Array.Empty<string>();
+        var writerArgs = writerStart >= 0 ? rawArgs.Skip(writerStart).ToArray() : Array.Empty<string>();
 
         // ── Stage validation ────────────────────────────────────────────────────────
-        ValidateStageConstraints(readerArgs,   FlagStage.Reader,   "before the first transformer or -o");
-        ValidateStageConstraints(writerArgs,   FlagStage.Writer,   "after -o");
+        ValidateStageConstraints(readerArgs, FlagStage.Reader, "before the first transformer or -o");
+        ValidateStageConstraints(writerArgs, FlagStage.Writer, "after -o");
         ValidateStageConstraints(pipelineArgs, FlagStage.Pipeline, "in transformer scope (between transformers and -o)");
 
         return new BranchSpec
         {
-            Input  = GetSingle("--input", "-i"),
+            Input = GetSingle("--input", "-i"),
             Output = GetSingle("--output", "-o"),
-            Alias  = GetSingle("--alias"),
-            From   = GetList("--from").SelectMany(s => s.Split(',')).Select(s => s.Trim()).ToList(),
-            Ref    = GetList("--ref").SelectMany(s => s.Split(',')).Select(s => s.Trim()).ToList(),
+            Alias = GetSingle("--alias"),
+            From = GetList("--from").SelectMany(s => s.Split(',')).Select(s => s.Trim()).ToList(),
+            Ref = GetList("--ref").SelectMany(s => s.Split(',')).Select(s => s.Trim()).ToList(),
 
-            ReaderArgs   = readerArgs,
+            ReaderArgs = readerArgs,
             PipelineArgs = pipelineArgs,
-            WriterArgs   = writerArgs,
+            WriterArgs = writerArgs,
 
             RawArgs = rawArgs.ToArray(),
-            Flags   = flags
+            Flags = flags
         };
     }
 

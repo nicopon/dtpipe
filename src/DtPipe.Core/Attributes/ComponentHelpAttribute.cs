@@ -8,12 +8,12 @@ namespace DtPipe.Core.Attributes;
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct)]
 public class ComponentHelpAttribute : Attribute
 {
-	public string UsageNotes { get; }
-	public string[] Examples { get; }
+    public string UsageNotes { get; }
+    public string[] Examples { get; }
 
-	public ComponentHelpAttribute(string usageNotes = "", string[]? examples = null)
-	{
-		UsageNotes = usageNotes;
-		Examples = examples ?? Array.Empty<string>();
-	}
+    public ComponentHelpAttribute(string usageNotes = "", string[]? examples = null)
+    {
+        UsageNotes = usageNotes;
+        Examples = examples ?? Array.Empty<string>();
+    }
 }

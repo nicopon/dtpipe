@@ -372,6 +372,7 @@ internal sealed class RunSession
             .ToDictionary(f => f, f => Exited[f].Task.Result, StringComparer.Ordinal);
 
         return RunOrchestrator.DetermineOutcome(reports, Spec.Edges, _fragmentNames, _cancelledFragments, ct.IsCancellationRequested, _wiringFailure, _unresponsive)
-            with { Replicas = _chosen.ToDictionary(c => c.Key, c => new RunReplica(c.Value.Key.Short, c.Value.Announcement.Origin), StringComparer.Ordinal) };
+            with
+        { Replicas = _chosen.ToDictionary(c => c.Key, c => new RunReplica(c.Value.Key.Short, c.Value.Announcement.Origin), StringComparer.Ordinal) };
     }
 }

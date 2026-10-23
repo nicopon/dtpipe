@@ -11,138 +11,138 @@ namespace DtPipe.Tests;
 
 public class DuckDBIntegrationTests : IAsyncLifetime
 {
-	private readonly string _dbPath;
-	private readonly string _connectionString;
+    private readonly string _dbPath;
+    private readonly string _connectionString;
 
-	public DuckDBIntegrationTests()
-	{
-		_dbPath = Path.Combine(Path.GetTempPath(), $"test_{Guid.NewGuid()}.duckdb");
-		_connectionString = $"Data Source={_dbPath}";
-	}
+    public DuckDBIntegrationTests()
+    {
+        _dbPath = Path.Combine(Path.GetTempPath(), $"test_{Guid.NewGuid()}.duckdb");
+        _connectionString = $"Data Source={_dbPath}";
+    }
 
-	public ValueTask InitializeAsync() => ValueTask.CompletedTask;
+    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
 
-	public ValueTask DisposeAsync()
-	{
-		try { File.Delete(_dbPath); } catch { /* best effort */ }
-		GC.SuppressFinalize(this);
-		return ValueTask.CompletedTask;
-	}
+    public ValueTask DisposeAsync()
+    {
+        try { File.Delete(_dbPath); } catch { /* best effort */ }
+        GC.SuppressFinalize(this);
+        return ValueTask.CompletedTask;
+    }
 
-	[Fact]
-	public async Task CanReadFromDuckDB()
-	{
-		// setup
-		using (var connection = new DuckDBConnection(_connectionString))
-		{
-			await connection.OpenAsync(TestContext.Current.CancellationToken);
+    [Fact]
+    public async Task CanReadFromDuckDB()
+    {
+        // setup
+        using (var connection = new DuckDBConnection(_connectionString))
+        {
+            await connection.OpenAsync(TestContext.Current.CancellationToken);
 
-			using var command = connection.CreateCommand();
-			command.CommandText = TestDataSeeder.GenerateTableDDL(connection, "users");
-			await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+            using var command = connection.CreateCommand();
+            command.CommandText = TestDataSeeder.GenerateTableDDL(connection, "users");
+            await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
 
-			await TestDataSeeder.SeedAsync(connection, "users");
-		}
+            await TestDataSeeder.SeedAsync(connection, "users");
+        }
 
-		// 2. Read with Reader
-		await using var reader = new DuckDataSourceReader(
-			_connectionString,
-			"SELECT * FROM users ORDER BY id",
-			new DuckDbReaderOptions());
-		await reader.OpenAsync(TestContext.Current.CancellationToken);
+        // 2. Read with Reader
+        await using var reader = new DuckDataSourceReader(
+            _connectionString,
+            "SELECT * FROM users ORDER BY id",
+            new DuckDbReaderOptions());
+        await reader.OpenAsync(TestContext.Current.CancellationToken);
 
-		// 3. Verify Columns
-		reader.Columns.Should().HaveCount(7);
-		reader.Columns![0].Name.Should().Be("Id");
-		reader.Columns![1].Name.Should().Be("Name");
+        // 3. Verify Columns
+        reader.Columns.Should().HaveCount(7);
+        reader.Columns![0].Name.Should().Be("Id");
+        reader.Columns![1].Name.Should().Be("Name");
 
-		// 4. Verify Data retrieval
-		var batches = new List<object?[]>();
-		await foreach (var batch in reader.ReadBatchesAsync(10, TestContext.Current.CancellationToken))
-		{
-			for (int i = 0; i < batch.Length; i++)
-				batches.Add(batch.Span[i]);
-		}
+        // 4. Verify Data retrieval
+        var batches = new List<object?[]>();
+        await foreach (var batch in reader.ReadBatchesAsync(10, TestContext.Current.CancellationToken))
+        {
+            for (int i = 0; i < batch.Length; i++)
+                batches.Add(batch.Span[i]);
+        }
 
-		batches.Should().HaveCount(4);
-		batches[0][0].Should().Be(1);
-		batches[0][1].Should().Be("Alice");
+        batches.Should().HaveCount(4);
+        batches[0][0].Should().Be(1);
+        batches[0][1].Should().Be("Alice");
 
-		batches[1][0].Should().Be(2);
-		batches[1][1].Should().Be("Bob");
-	}
+        batches[1][0].Should().Be(2);
+        batches[1][1].Should().Be("Bob");
+    }
 
-	[Fact]
-	public async Task CanReadRecordBatchesFromDuckDB()
-	{
-		// 1. setup
-		using (var connection = new DuckDBConnection(_connectionString))
-		{
-			await connection.OpenAsync(TestContext.Current.CancellationToken);
-			using var command = connection.CreateCommand();
-			command.CommandText = "CREATE TABLE records (id INTEGER, val DOUBLE)";
-			await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
-			command.CommandText = "INSERT INTO records VALUES (100, 1.23), (200, 4.56)";
-			await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
-		}
+    [Fact]
+    public async Task CanReadRecordBatchesFromDuckDB()
+    {
+        // 1. setup
+        using (var connection = new DuckDBConnection(_connectionString))
+        {
+            await connection.OpenAsync(TestContext.Current.CancellationToken);
+            using var command = connection.CreateCommand();
+            command.CommandText = "CREATE TABLE records (id INTEGER, val DOUBLE)";
+            await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+            command.CommandText = "INSERT INTO records VALUES (100, 1.23), (200, 4.56)";
+            await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+        }
 
-		// 2. Read with Reader
-		await using var reader = new DuckDataSourceReader(
-			_connectionString,
-			"SELECT * FROM records ORDER BY id",
-			new DuckDbReaderOptions());
-		await reader.OpenAsync(TestContext.Current.CancellationToken);
+        // 2. Read with Reader
+        await using var reader = new DuckDataSourceReader(
+            _connectionString,
+            "SELECT * FROM records ORDER BY id",
+            new DuckDbReaderOptions());
+        await reader.OpenAsync(TestContext.Current.CancellationToken);
 
-		// 3. Verify Data retrieval via RecordBatches
-		var batches = new List<Apache.Arrow.RecordBatch>();
-		await foreach (var batch in reader.ReadRecordBatchesAsync(TestContext.Current.CancellationToken))
-		{
-			batches.Add(batch);
-		}
+        // 3. Verify Data retrieval via RecordBatches
+        var batches = new List<Apache.Arrow.RecordBatch>();
+        await foreach (var batch in reader.ReadRecordBatchesAsync(TestContext.Current.CancellationToken))
+        {
+            batches.Add(batch);
+        }
 
-		batches.Should().HaveCount(1);
-		batches[0].Length.Should().Be(2);
+        batches.Should().HaveCount(1);
+        batches[0].Length.Should().Be(2);
 
-		var idCol = batches[0].Column(0) as Apache.Arrow.Int32Array;
-		idCol!.GetValue(0).Should().Be(100);
-		idCol.GetValue(1).Should().Be(200);
+        var idCol = batches[0].Column(0) as Apache.Arrow.Int32Array;
+        idCol!.GetValue(0).Should().Be(100);
+        idCol.GetValue(1).Should().Be(200);
 
-		var valCol = batches[0].Column(1) as Apache.Arrow.DoubleArray;
-		valCol!.GetValue(0).Should().Be(1.23);
-		valCol.GetValue(1).Should().Be(4.56);
-	}
+        var valCol = batches[0].Column(1) as Apache.Arrow.DoubleArray;
+        valCol!.GetValue(0).Should().Be(1.23);
+        valCol.GetValue(1).Should().Be(4.56);
+    }
 
-	[Fact]
-	public void ThrowsOnDDL()
-	{
-		// DtPipe throws InvalidOperationException or ArgumentException depending on where it catches it
-		// The regex check throws InvalidOperationException for forbidden keywords at the start
-		var act = () => new DuckDataSourceReader(
-			_connectionString,
-			"DROP TABLE users",
-			new DuckDbReaderOptions());
-		act.Should().Throw<Exception>(); // Relaxed check to catch either ArgumentException or InvalidOperationException
-	}
+    [Fact]
+    public void ThrowsOnDDL()
+    {
+        // DtPipe throws InvalidOperationException or ArgumentException depending on where it catches it
+        // The regex check throws InvalidOperationException for forbidden keywords at the start
+        var act = () => new DuckDataSourceReader(
+            _connectionString,
+            "DROP TABLE users",
+            new DuckDbReaderOptions());
+        act.Should().Throw<Exception>(); // Relaxed check to catch either ArgumentException or InvalidOperationException
+    }
 
-	[Fact]
-	public async Task DuckDbDataWriter_Recreate_RebuildsFromTheSourceSchema()
-	{
-		var duckDbPath = Path.Combine(Path.GetTempPath(), $"test_recreate_p_{Guid.NewGuid():N}.duckdb");
-		var connectionString = $"Data Source={duckDbPath}";
-		var tableNameRaw = "TestRecreateEnh";
+    [Fact]
+    public async Task DuckDbDataWriter_Recreate_RebuildsFromTheSourceSchema()
+    {
+        var duckDbPath = Path.Combine(Path.GetTempPath(), $"test_recreate_p_{Guid.NewGuid():N}.duckdb");
+        var connectionString = $"Data Source={duckDbPath}";
+        var tableNameRaw = "TestRecreateEnh";
 
-		try
-		{
-			// 1. Manually create table with specific structure:
-			// - Code: VARCHAR (DuckDB uses string, but let's see if we can use explicit types)
-			// - PreciseNum: DECIMAL(10,5)
-			// - "My Blob": BLOB (Quoted)
-			// - Tiny: TINYINT
-			await using (var connection = new DuckDBConnection(connectionString))
-			{
-				await connection.OpenAsync();
-				using var cmd = connection.CreateCommand();
-				cmd.CommandText = $@"
+        try
+        {
+            // 1. Manually create table with specific structure:
+            // - Code: VARCHAR (DuckDB uses string, but let's see if we can use explicit types)
+            // - PreciseNum: DECIMAL(10,5)
+            // - "My Blob": BLOB (Quoted)
+            // - Tiny: TINYINT
+            await using (var connection = new DuckDBConnection(connectionString))
+            {
+                await connection.OpenAsync();
+                using var cmd = connection.CreateCommand();
+                cmd.CommandText = $@"
                     CREATE TABLE {tableNameRaw} (
                         Code VARCHAR NOT NULL,
                         PreciseNum DECIMAL(10,5),
@@ -151,167 +151,167 @@ public class DuckDBIntegrationTests : IAsyncLifetime
                         Extra INTEGER,
                         PRIMARY KEY (Code)
                     )";
-				await cmd.ExecuteNonQueryAsync();
+                await cmd.ExecuteNonQueryAsync();
 
-				cmd.CommandText = $"INSERT INTO {tableNameRaw} VALUES ('OLD', 10.5, '0xAA', 1, 5)";
-				await cmd.ExecuteNonQueryAsync();
-			}
+                cmd.CommandText = $"INSERT INTO {tableNameRaw} VALUES ('OLD', 10.5, '0xAA', 1, 5)";
+                await cmd.ExecuteNonQueryAsync();
+            }
 
-			var writerOptions = new DuckDbWriterOptions
-			{
-				Table = tableNameRaw,
-				Strategy = DuckDbWriteStrategy.Recreate
-			};
+            var writerOptions = new DuckDbWriterOptions
+            {
+                Table = tableNameRaw,
+                Strategy = DuckDbWriteStrategy.Recreate
+            };
 
-			var columns = new List<Core.Models.PipeColumnInfo>
-			{
-				new("Code", typeof(string), true),
-				new("PreciseNum", typeof(decimal), false),
-				new("My Blob", typeof(byte[]), true),
-				new("Tiny", typeof(int), false)
-			};
+            var columns = new List<Core.Models.PipeColumnInfo>
+            {
+                new("Code", typeof(string), true),
+                new("PreciseNum", typeof(decimal), false),
+                new("My Blob", typeof(byte[]), true),
+                new("Tiny", typeof(int), false)
+            };
 
-			var batch = new List<object?[]> { new object?[] { "NEW", 99.123m, new byte[] { 0xBB }, 120 } };
+            var batch = new List<object?[]> { new object?[] { "NEW", 99.123m, new byte[] { 0xBB }, 120 } };
 
-			// Act
-			await using var writer = new DuckDbDataWriter(connectionString, writerOptions, NullLogger<DuckDbDataWriter>.Instance, DuckDbTypeConverter.Instance);
-			await writer.InitializeAsync(columns);
-			await writer.WriteRecordBatchAsync(batch.ToRecordBatch(columns));
-			await writer.CompleteAsync();
+            // Act
+            await using var writer = new DuckDbDataWriter(connectionString, writerOptions, NullLogger<DuckDbDataWriter>.Instance, DuckDbTypeConverter.Instance);
+            await writer.InitializeAsync(columns);
+            await writer.WriteRecordBatchAsync(batch.ToRecordBatch(columns));
+            await writer.CompleteAsync();
 
-			// Assert
-			await using (var connection = new DuckDBConnection(connectionString))
-			{
-				await connection.OpenAsync();
+            // Assert
+            await using (var connection = new DuckDBConnection(connectionString))
+            {
+                await connection.OpenAsync();
 
-				// Check Data
-				using var cmd = connection.CreateCommand();
-				cmd.CommandText = $"SELECT Code, PreciseNum, \"My Blob\", Tiny FROM {tableNameRaw}";
-				using (var reader = await cmd.ExecuteReaderAsync())
-				{
-					Assert.True(await reader.ReadAsync());
-					Assert.Equal("NEW", reader.GetString(0));
-					Assert.Equal(99.123m, reader.GetDecimal(1));
+                // Check Data
+                using var cmd = connection.CreateCommand();
+                cmd.CommandText = $"SELECT Code, PreciseNum, \"My Blob\", Tiny FROM {tableNameRaw}";
+                using (var reader = await cmd.ExecuteReaderAsync())
+                {
+                    Assert.True(await reader.ReadAsync());
+                    Assert.Equal("NEW", reader.GetString(0));
+                    Assert.Equal(99.123m, reader.GetDecimal(1));
 
-					Assert.IsAssignableFrom<Stream>(reader.GetValue(2));
-					var stream = (Stream)reader.GetValue(2);
-					var buffer = new byte[stream.Length];
-					int bytesRead = 0;
-					while (bytesRead < buffer.Length)
-					{
-						int read = stream.Read(buffer, bytesRead, buffer.Length - bytesRead);
-						if (read == 0) break;
-						bytesRead += read;
-					}
-					Assert.Equal(0xBB, buffer[0]);
-					Assert.Equal(120, reader.GetInt32(3));
-				}
+                    Assert.IsAssignableFrom<Stream>(reader.GetValue(2));
+                    var stream = (Stream)reader.GetValue(2);
+                    var buffer = new byte[stream.Length];
+                    int bytesRead = 0;
+                    while (bytesRead < buffer.Length)
+                    {
+                        int read = stream.Read(buffer, bytesRead, buffer.Length - bytesRead);
+                        if (read == 0) break;
+                        bytesRead += read;
+                    }
+                    Assert.Equal(0xBB, buffer[0]);
+                    Assert.Equal(120, reader.GetInt32(3));
+                }
 
-				// Check Metadata (using PRAGMA table_info)
-				using var metaCmd = connection.CreateCommand();
-				metaCmd.CommandText = $"PRAGMA table_info('{tableNameRaw}')";
+                // Check Metadata (using PRAGMA table_info)
+                using var metaCmd = connection.CreateCommand();
+                metaCmd.CommandText = $"PRAGMA table_info('{tableNameRaw}')";
 
-				var types = new Dictionary<string, string>();
-				using (var metaReader = await metaCmd.ExecuteReaderAsync())
-				{
-					while (await metaReader.ReadAsync())
-					{
-						types[metaReader.GetString(1)] = metaReader.GetString(2);
-					}
-				}
+                var types = new Dictionary<string, string>();
+                using (var metaReader = await metaCmd.ExecuteReaderAsync())
+                {
+                    while (await metaReader.ReadAsync())
+                    {
+                        types[metaReader.GetString(1)] = metaReader.GetString(2);
+                    }
+                }
 
-				// Rebuilt from the source: the column the source lacks is gone and no native width survives.
-				Assert.Equal(new[] { "Code", "My Blob", "PreciseNum", "Tiny" }, types.Keys.OrderBy(k => k, StringComparer.Ordinal).ToArray());
-				Assert.DoesNotContain("DECIMAL(10,5)", types["PreciseNum"]);
-				Assert.DoesNotContain("TINYINT", types["Tiny"]);
-			}
-		}
-		finally
-		{
-			if (File.Exists(duckDbPath)) File.Delete(duckDbPath);
-		}
-	}
+                // Rebuilt from the source: the column the source lacks is gone and no native width survives.
+                Assert.Equal(new[] { "Code", "My Blob", "PreciseNum", "Tiny" }, types.Keys.OrderBy(k => k, StringComparer.Ordinal).ToArray());
+                Assert.DoesNotContain("DECIMAL(10,5)", types["PreciseNum"]);
+                Assert.DoesNotContain("TINYINT", types["Tiny"]);
+            }
+        }
+        finally
+        {
+            if (File.Exists(duckDbPath)) File.Delete(duckDbPath);
+        }
+    }
 
-	[Fact]
-	public async Task DuckDbDataWriter_Inspect_ReadsThePrimaryKeyAndUniqueColumnsOfTheTarget()
-	{
-		var duckDbPath = Path.Combine(Path.GetTempPath(), $"test_inspect_keys_{Guid.NewGuid():N}.duckdb");
-		var connectionString = $"Data Source={duckDbPath}";
+    [Fact]
+    public async Task DuckDbDataWriter_Inspect_ReadsThePrimaryKeyAndUniqueColumnsOfTheTarget()
+    {
+        var duckDbPath = Path.Combine(Path.GetTempPath(), $"test_inspect_keys_{Guid.NewGuid():N}.duckdb");
+        var connectionString = $"Data Source={duckDbPath}";
 
-		try
-		{
-			await using (var connection = new DuckDBConnection(connectionString))
-			{
-				await connection.OpenAsync();
-				using var cmd = connection.CreateCommand();
-				cmd.CommandText = "CREATE TABLE keyed (region VARCHAR, id INTEGER, email VARCHAR UNIQUE, note VARCHAR, PRIMARY KEY (region, id))";
-				await cmd.ExecuteNonQueryAsync();
-				cmd.CommandText = "CREATE TABLE other_keyed (note VARCHAR)";
-				await cmd.ExecuteNonQueryAsync();
-			}
+        try
+        {
+            await using (var connection = new DuckDBConnection(connectionString))
+            {
+                await connection.OpenAsync();
+                using var cmd = connection.CreateCommand();
+                cmd.CommandText = "CREATE TABLE keyed (region VARCHAR, id INTEGER, email VARCHAR UNIQUE, note VARCHAR, PRIMARY KEY (region, id))";
+                await cmd.ExecuteNonQueryAsync();
+                cmd.CommandText = "CREATE TABLE other_keyed (note VARCHAR)";
+                await cmd.ExecuteNonQueryAsync();
+            }
 
-			var columns = new List<Core.Models.PipeColumnInfo> { new("region", typeof(string), true), new("id", typeof(int), false) };
-			await using var writer = new DuckDbDataWriter(connectionString,
-				new DuckDbWriterOptions { Table = "keyed", Strategy = DuckDbWriteStrategy.Append },
-				NullLogger<DuckDbDataWriter>.Instance, DuckDbTypeConverter.Instance);
-			await writer.InitializeAsync(columns);
+            var columns = new List<Core.Models.PipeColumnInfo> { new("region", typeof(string), true), new("id", typeof(int), false) };
+            await using var writer = new DuckDbDataWriter(connectionString,
+                new DuckDbWriterOptions { Table = "keyed", Strategy = DuckDbWriteStrategy.Append },
+                NullLogger<DuckDbDataWriter>.Instance, DuckDbTypeConverter.Instance);
+            await writer.InitializeAsync(columns);
 
-			var schema = await writer.InspectTargetAsync();
+            var schema = await writer.InspectTargetAsync();
 
-			schema!.PrimaryKeyColumns.Should().Equal("region", "id");
-			schema.UniqueColumns.Should().Equal("email");
-			schema.Columns.Where(c => c.IsPrimaryKey).Select(c => c.Name).Should().BeEquivalentTo("region", "id");
-			schema.Columns.Single(c => c.Name == "email").IsUnique.Should().BeTrue();
-			schema.Columns.Single(c => c.Name == "note").IsPrimaryKey.Should().BeFalse();
-		}
-		finally
-		{
-			if (File.Exists(duckDbPath)) File.Delete(duckDbPath);
-		}
-	}
+            schema!.PrimaryKeyColumns.Should().Equal("region", "id");
+            schema.UniqueColumns.Should().Equal("email");
+            schema.Columns.Where(c => c.IsPrimaryKey).Select(c => c.Name).Should().BeEquivalentTo("region", "id");
+            schema.Columns.Single(c => c.Name == "email").IsUnique.Should().BeTrue();
+            schema.Columns.Single(c => c.Name == "note").IsPrimaryKey.Should().BeFalse();
+        }
+        finally
+        {
+            if (File.Exists(duckDbPath)) File.Delete(duckDbPath);
+        }
+    }
 
-	[Fact]
-	public async Task DuckDbDataWriter_Upsert_UsesTheTargetPrimaryKeyWhenNoKeyIsGiven()
-	{
-		var duckDbPath = Path.Combine(Path.GetTempPath(), $"test_upsert_pk_{Guid.NewGuid():N}.duckdb");
-		var connectionString = $"Data Source={duckDbPath}";
+    [Fact]
+    public async Task DuckDbDataWriter_Upsert_UsesTheTargetPrimaryKeyWhenNoKeyIsGiven()
+    {
+        var duckDbPath = Path.Combine(Path.GetTempPath(), $"test_upsert_pk_{Guid.NewGuid():N}.duckdb");
+        var connectionString = $"Data Source={duckDbPath}";
 
-		try
-		{
-			await using (var connection = new DuckDBConnection(connectionString))
-			{
-				await connection.OpenAsync();
-				using var cmd = connection.CreateCommand();
-				cmd.CommandText = "CREATE TABLE people (id INTEGER PRIMARY KEY, name VARCHAR)";
-				await cmd.ExecuteNonQueryAsync();
-				cmd.CommandText = "INSERT INTO people VALUES (1, 'old'), (2, 'kept')";
-				await cmd.ExecuteNonQueryAsync();
-			}
+        try
+        {
+            await using (var connection = new DuckDBConnection(connectionString))
+            {
+                await connection.OpenAsync();
+                using var cmd = connection.CreateCommand();
+                cmd.CommandText = "CREATE TABLE people (id INTEGER PRIMARY KEY, name VARCHAR)";
+                await cmd.ExecuteNonQueryAsync();
+                cmd.CommandText = "INSERT INTO people VALUES (1, 'old'), (2, 'kept')";
+                await cmd.ExecuteNonQueryAsync();
+            }
 
-			var columns = new List<Core.Models.PipeColumnInfo> { new("id", typeof(int), false), new("name", typeof(string), true) };
-			var batch = new List<object?[]> { new object?[] { 1, "new" }, new object?[] { 3, "added" } };
+            var columns = new List<Core.Models.PipeColumnInfo> { new("id", typeof(int), false), new("name", typeof(string), true) };
+            var batch = new List<object?[]> { new object?[] { 1, "new" }, new object?[] { 3, "added" } };
 
-			await using (var writer = new DuckDbDataWriter(connectionString,
-				new DuckDbWriterOptions { Table = "people", Strategy = DuckDbWriteStrategy.Upsert },
-				NullLogger<DuckDbDataWriter>.Instance, DuckDbTypeConverter.Instance))
-			{
-				await writer.InitializeAsync(columns);
-				await writer.WriteRecordBatchAsync(batch.ToRecordBatch(columns));
-				await writer.CompleteAsync();
-			}
+            await using (var writer = new DuckDbDataWriter(connectionString,
+                new DuckDbWriterOptions { Table = "people", Strategy = DuckDbWriteStrategy.Upsert },
+                NullLogger<DuckDbDataWriter>.Instance, DuckDbTypeConverter.Instance))
+            {
+                await writer.InitializeAsync(columns);
+                await writer.WriteRecordBatchAsync(batch.ToRecordBatch(columns));
+                await writer.CompleteAsync();
+            }
 
-			await using var check = new DuckDBConnection(connectionString);
-			await check.OpenAsync();
-			using var read = check.CreateCommand();
-			read.CommandText = "SELECT id, name FROM people ORDER BY id";
-			var rows = new List<(int, string)>();
-			using (var reader = await read.ExecuteReaderAsync())
-				while (await reader.ReadAsync()) rows.Add((reader.GetInt32(0), reader.GetString(1)));
-			rows.Should().Equal((1, "new"), (2, "kept"), (3, "added"));
-		}
-		finally
-		{
-			if (File.Exists(duckDbPath)) File.Delete(duckDbPath);
-		}
-	}
+            await using var check = new DuckDBConnection(connectionString);
+            await check.OpenAsync();
+            using var read = check.CreateCommand();
+            read.CommandText = "SELECT id, name FROM people ORDER BY id";
+            var rows = new List<(int, string)>();
+            using (var reader = await read.ExecuteReaderAsync())
+                while (await reader.ReadAsync()) rows.Add((reader.GetInt32(0), reader.GetString(1)));
+            rows.Should().Equal((1, "new"), (2, "kept"), (3, "added"));
+        }
+        finally
+        {
+            if (File.Exists(duckDbPath)) File.Delete(duckDbPath);
+        }
+    }
 }

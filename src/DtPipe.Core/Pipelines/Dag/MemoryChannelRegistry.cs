@@ -68,7 +68,7 @@ public class MemoryChannelRegistry : IMemoryChannelRegistry
             // Protection: if existing schema is richer than the new one, preserve it.
             bool existingIsRicher = ArrowSchemaFactory.IsRichSchema(arrowData.Schema);
             bool newIsRicher = ArrowSchemaFactory.IsRichSchema(schema);
-            
+
             if (newIsRicher || !existingIsRicher || arrowData.Schema.FieldsList.Count == 0)
             {
                 _arrowChannels[branchAlias] = (arrowData.Channel, schema);
@@ -79,7 +79,7 @@ public class MemoryChannelRegistry : IMemoryChannelRegistry
             }
             found = true;
         }
-        
+
         // Propagate to fan-out sub-channels
         PropagateArrowSchemaToFanOut(branchAlias + IChannelNaming.FanPrefix, schema);
 

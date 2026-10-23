@@ -114,7 +114,7 @@ public class ArrowOwnershipTests
         // Arrange
         var pool = new TrackingMemoryPool();
         var rowCount = 100;
-        
+
         // 1. Create source batch using tracking pool
         var schema = new Schema.Builder()
             .Field(f => f.Name("id").DataType(Int32Type.Default))
@@ -131,7 +131,7 @@ public class ArrowOwnershipTests
 
         // Pass pool to Build
         var batch = new RecordBatch(schema, new IArrowArray[] { idBuilder.Build(pool), valBuilder.Build(pool) }, rowCount);
-        
+
         // Initial state: memory is rented
         pool.ActiveAllocations.Should().BeGreaterThan(0);
 
@@ -140,15 +140,15 @@ public class ArrowOwnershipTests
         mockJs.Setup(j => j.GetEngine()).Returns(new Jint.Engine());
 
         // Transformer 1: Filter (Columnar) -> Will return NEW batch (clone) and dispose INPUT
-        var filter = new FilterDataTransformer(new FilterOptions 
-        { 
+        var filter = new FilterDataTransformer(new FilterOptions
+        {
             Filters = new[] { "row.id > 50" },
         }, mockJs.Object);
 
         // Transformer 2: Project (Columnar) -> Will return NEW batch and dispose INPUT
-        var project = new ProjectDataTransformer(new ProjectOptions 
-        { 
-            Project = new[] { "id", "val" } 
+        var project = new ProjectDataTransformer(new ProjectOptions
+        {
+            Project = new[] { "id", "val" }
         });
 
         // Transformer 3: Spy -> Verifies intermediate disposal
@@ -160,13 +160,13 @@ public class ArrowOwnershipTests
         await project.InitializeAsync(columns);
 
         // Run the chain
-        var batch1 = await filter.TransformBatchAsync(batch); 
+        var batch1 = await filter.TransformBatchAsync(batch);
         batch.Dispose(); // Manual disposal required in direct unit test calls
-        
-        var batch2 = await project.TransformBatchAsync(batch1!); 
+
+        var batch2 = await project.TransformBatchAsync(batch1!);
         batch1?.Dispose(); // Manual disposal required in direct unit test calls
-        
-        var batch3 = await spy.TransformBatchAsync(batch2!); 
+
+        var batch3 = await spy.TransformBatchAsync(batch2!);
         batch2?.Dispose(); // Manual disposal required in direct unit test calls
 
         // Final Dispose (Simulating Writer)
