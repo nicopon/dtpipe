@@ -2,7 +2,6 @@ using System.Text.Json.Serialization;
 using DtPipe.Coordinator;
 using DtPipe.Coordinator.Contracts;
 using DtPipe.Coordinator.Server;
-using DtPipe.Coordinator.TrialIdp;
 using DtPipe.Jobs.Coordinator;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.DataProtection.Repositories;
@@ -18,8 +17,6 @@ using TransportR.Interfaces;
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = args, ContentRootPath = AppContext.BaseDirectory });
 builder.Logging.AddFilter("TransportR", LogLevel.Warning);
 builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
-builder.Logging.AddFilter("OpenIddict", LogLevel.Warning);
-builder.Logging.AddFilter("Microsoft.EntityFrameworkCore", LogLevel.Warning);
 
 var server = CoordinatorServerOptions.FromConfiguration(builder.Configuration);
 builder.Services.AddSingleton(server);
@@ -39,7 +36,6 @@ builder.Services.Configure<HubOptions<NodeChannelHub>>(o => o.MaximumReceiveMess
 builder.Services.Replace(ServiceDescriptor.Singleton<IFlowControlService, RightsFlowControl>());
 builder.Services.Replace(ServiceDescriptor.Singleton<IClientIdentityProvider, RightsIdentityProvider>());
 builder.Services.AddTrustedIdp(server);
-if (server.IsTrialIdp) builder.Services.AddTrialIdpMode(server);
 if (server.KeyIssuer is not null) builder.Services.AddKeyIssuer();
 // The sign-in form of a person verified by a key carries an antiforgery token, checked by its handler.
 if (server.SignsPeopleInByKey) builder.Services.AddAntiforgery();
@@ -89,17 +85,6 @@ if (server.PublicUrl is { } publicUrl)
         context.Request.Host = new HostString(publicUrl.Authority);
         return next(context);
     });
-// The trial provider's clients follow the rights; made right before a token is issued, so a service added in Access gets one at once.
-if (server.IsTrialIdp)
-{
-    var trialClients = app.Services.GetRequiredService<TrialIdpClients>();
-    await trialClients.EnsureCurrentAsync(CancellationToken.None);
-    app.Use(async (context, next) =>
-    {
-        if (context.Request.Path == "/connect/token") await trialClients.EnsureCurrentAsync(context.RequestAborted);
-        await next(context);
-    });
-}
 // The session keys are read before anything is served: Redis down stops the start instead of the first sign-in.
 TrustedIdp.EnsureSessionKeys(app.Services);
 // The issuer's signing keys are opened with the session keys, so they are read after them, and a store that cannot give them stops the start.
@@ -184,7 +169,6 @@ app.UseDefaultFiles();
 app.UseStaticFiles();
 app.UseRouting();
 app.UseAuthorization();
-if (server.IsTrialIdp) app.UseAntiforgery();
 app.MapDataHub(requireAuth: true);
 app.MapHub<NodeChannelHub>(NodeChannel.Path).RequireAuthorization();
 
@@ -221,7 +205,7 @@ app.MapGet("/account/denied", () => AccountPages.Access(server, StatusCodes.Stat
 var account = app.MapGroup("/api").RequireAuthorization(TrustedIdp.SignedIn).AddEndpointFilter(RequireCsrfHeader);
 account.MapGet(CoordinatorApi.MeRoute, (HttpContext context) => new CoordinatorMe(
     context.User.Identity?.Name, context.User.FindFirst("email")?.Value, [.. CoordinatorRoles.All.Where(context.User.IsInRole)]));
-account.MapGet("/info", (CoordinatorServerOptions options) => new { labMode = options.LabMode, trialIdp = options.IsTrialIdp, httpKeys = options.ExchangesKeysOverHttp });
+account.MapGet("/info", (CoordinatorServerOptions options) => new { labMode = options.LabMode, httpKeys = options.ExchangesKeysOverHttp });
 
 var api = app.MapGroup("/api").RequireAuthorization(CoordinatorRoles.Reader).AddEndpointFilter(RequireCsrfHeader);
 var designer = api.MapGroup("").RequireAuthorization(CoordinatorRoles.Designer);
@@ -234,7 +218,6 @@ api.MapRuns(designer);
 app.MapHealth(api);
 app.MapService();
 
-if (server.IsTrialIdp) app.MapTrialIdp();
 if (server.KeyIssuer is not null) app.MapKeyIssuer(server);
 if (server.LabMode) admin.MapLabMode();
 

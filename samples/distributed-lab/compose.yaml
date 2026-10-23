@@ -150,6 +150,9 @@ services:
       Coordinator__LabMode: "true"
       # The address browsers reach the coordinator at, through the proxy.
       Coordinator__PublicUrl: http://coordinator.localtest.me${LAB_STACK_HTTP_PORT:+:}${LAB_STACK_HTTP_PORT:-}
+      # The key issuer beside the IdP, over the stack's own HTTP, for smoke.py keys: the sign-in form then comes first and the
+      # IdP is the link beside it (tools/lab_session.py follows it).
+      Coordinator__Auth__AllowHttpKeys: "true"
       Coordinator__Scenarios: /lab/pipelines
       Coordinator__LibrarySeed: /lab/library-seed
       Coordinator__RightsSeed: /lab/rights-seed.json

@@ -25,9 +25,6 @@ public static class PersonAuth
     /// <summary>Through the external identity provider, the first of the authorization servers.</summary>
     public const string Idp = "idp";
 
-    /// <summary>Through the identity provider the coordinator runs itself for a trial, never for production.</summary>
-    public const string Trial = "trial";
-
     /// <summary>With a key the coordinator made for the person, exchanged at the authorization server that is the coordinator's own address.</summary>
     public const string Key = "key";
 }

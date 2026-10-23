@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
 using Microsoft.IdentityModel.Tokens;
 
-namespace DtPipe.Coordinator.TrialIdp;
+namespace DtPipe.Lab.Idp;
 
 /// <summary>
 /// The RSA key the IdP signs tokens with: generated the first time the IdP starts and read back

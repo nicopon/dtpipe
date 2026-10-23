@@ -186,6 +186,10 @@ def waiting_card(browser):
 
 def sign_in(browser):
     browser.goto(URL + "/", 2)
+    # Where people may also hold a key, the coordinator's own form comes first: the IdP is the link beside it.
+    browser.wait_for("!!document.querySelector('form input[name=password], form input[name=key]')", 20)
+    if browser.js("!!document.querySelector('form input[name=key]')"):
+        browser.goto(URL + "/account/login/idp?returnUrl=%2F", 2)
     on_form = browser.wait_for("!!document.querySelector('form input[name=password]')", 20)
     if on_form:
         browser.js(f"(() => {{ const f = document.querySelector('form'); f.user.value = {json.dumps(ADMIN)};"

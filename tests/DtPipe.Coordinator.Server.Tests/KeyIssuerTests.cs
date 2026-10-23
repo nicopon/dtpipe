@@ -311,13 +311,12 @@ public sealed class KeyIssuerTests : IDisposable
     }
 
     [Fact]
-    public void Public_Url_Turns_The_Issuer_On_And_The_Trial_Provider_Keeps_It_Off()
+    public void Public_Url_Turns_The_Issuer_On()
     {
         (string, string)[] external = [("Authority", "https://idp.example"), ("Ui:ClientSecret", "s")];
 
         Assert.Equal("https://c.example", Options([.. external, ("PublicUrl", "https://c.example/")]).KeyIssuer);
         Assert.Null(Options(external).KeyIssuer);
-        Assert.Null(Options(("InsecureTrialIdp:Password", "0123456789abcdef"), ("PublicUrl", "https://c.example")).KeyIssuer);
         Assert.Equal(TimeSpan.FromMinutes(15), Options([.. external, ("Auth:ServiceTokenLifetime", "00:15:00")]).ServiceTokenLifetime);
     }
 
@@ -345,13 +344,10 @@ public sealed class KeyIssuerTests : IDisposable
         rights.AddIdentity(new Identity("edge", "edge", "", ["crm"]) { Auth = new IdentityAuth(AuthModes.Key, []) });
         KeyIssuer.CheckIdentities(rights, issuing);
 
-        var trial = Assert.Throws<InvalidOperationException>(() => KeyIssuer.CheckIdentities(rights,
-            Options(("InsecureTrialIdp:Password", "0123456789abcdef"), ("PublicUrl", "https://c.example"))));
         var noAddress = Assert.Throws<InvalidOperationException>(() => KeyIssuer.CheckIdentities(rights,
             Options(("Authority", "https://idp.example"), ("Ui:ClientSecret", "s"))));
 
-        Assert.Contains("edge", trial.Message);
-        Assert.Contains("trial identity provider", trial.Message);
+        Assert.Contains("edge", noAddress.Message);
         Assert.Contains("Coordinator:PublicUrl", noAddress.Message);
     }
 }

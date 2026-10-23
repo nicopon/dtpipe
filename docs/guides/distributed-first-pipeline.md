@@ -23,14 +23,23 @@ Everything listens on the loopback of your machine, in plain HTTP. The addresses
 `localtest.me`, a public name that resolves to `127.0.0.1`; without a network that resolves it, add
 `coordinator.localtest.me` to `/etc/hosts`.
 
-Open <http://coordinator.localtest.me:8080> and sign in as `admin` with the password
-`dtpipe-trial-password`. The coordinator is its own trial identity provider: it accepts any user
-name with that one password, which is also every service's secret, and a red banner says it is not
-for production. Only `admin` may change anything.
+Every identity here is verified by a **key** the coordinator issues tokens for. On the first `up`, a
+one-off service wrote two random keys into the coordinator's volume: the first administrator's and
+the runner's. The coordinator added both identities from them, and the runner read its own. Print
+yours:
 
-The coordinator starts with **no rights**: **Access** lists no identity and no group, and nobody may
-send anything to anybody. Its library holds one pipeline, `shop-orders-by-country`, which reads a
-brick named `orders` on a node named `shop` and writes a brick named `report` on the same node. No
+```bash
+docker compose -f deploy/compose.yaml exec coordinator cat /secrets/admin.key
+```
+
+Open <http://coordinator.localtest.me:8080> and paste the key into the sign-in form. A red banner
+says that keys cross the network in clear: the recipe has no TLS, so it lets the coordinator take a
+key over HTTP, which a real deployment does not. The key is the only way in as `admin`, and
+`down -v` drops it with the volumes.
+
+**Access** lists `admin` and `runner-1`, in the group `runner`, and the flow matrix is empty: nobody
+may send anything to anybody. Its library holds one pipeline, `shop-orders-by-country`, which reads
+a brick named `orders` on a node named `shop` and writes a brick named `report` on the same node. No
 such node exists yet.
 
 ## Seed a database
@@ -57,24 +66,22 @@ Stay in this folder for the rest of the page.
 
 ## Say who may do what
 
-The trial identity provider knows only the services the rights name, so you declare a host in
-**Access** before you start it. With an external identity provider an unknown host would wait in
-**Waiting for approval** and you would accept it there; the rights are the same.
+A host verified by a key is declared before it starts: its key is what opens it. In **Access**,
+press **Add an identity**, type `shop` as the client id, leave the kind `node` and the key, type
+`data` as its group, keep **exchange with the runners both ways** ticked, and press **Create**.
 
-In **Access**, press **Add an identity** twice:
+A **group** is a label; the **flow matrix** says which group may send rows to which. The case you
+kept ticked added `data` → `runner` and `runner` → `data` to the matrix, in the same change as the
+identity: the node sends orders to the runner, and the runner sends the counts back. A change
+applies to the next run with no restart.
 
-| Client id | Groups |
-|:---|:---|
-| `runner-1` | `runner` |
-| `shop` | `data` |
+A window shows the node's key, once, with **Copy** and the way to use it; closing it forgets the
+key. Read it into the variable the window names, in the terminal where the node will run (paste,
+then Enter):
 
-A **group** is a label; the **flow matrix** says which group may send rows to which. In the matrix
-below the identities, tick `runner` → `data` and `data` → `runner`, and press **Apply**. The
-pipeline needs both: the node sends orders to the runner, and the runner sends the counts back. A
-change applies to the next run with no restart.
-
-The runner started with the coordinator and was refused until now. It retries, and **runner-1**
-shows as connected within seconds.
+```bash
+read -rs DTPIPE_NODE_KEY && export DTPIPE_NODE_KEY
+```
 
 ## Declare a node on the database
 
@@ -95,13 +102,12 @@ report:
 EOF
 ```
 
-Start the node. It names itself `shop`, finds the coordinator at its public address and reads its
-secret from the environment, since a secret is never an argument:
+Start the node. It names itself `shop`, finds the coordinator at its public address, and reads its
+key from the environment, since a secret is never an argument:
 
 ```bash
-export DTPIPE_TRIAL_PASSWORD=dtpipe-trial-password
 dtpipe node --name shop --coordinator http://coordinator.localtest.me:8080 \
-  --client-secret '${{DTPIPE_TRIAL_PASSWORD}}' --job bricks.yaml
+  --client-secret '${{DTPIPE_NODE_KEY}}' --job bricks.yaml
 ```
 
 The node stays in the foreground and logs that it connected, with two bricks. **Access** shows
@@ -109,15 +115,17 @@ The node stays in the foreground and logs that it connected, with two bricks. **
 
 ## Open the studio
 
-In a second terminal, in the same folder:
+In a second terminal, in the same folder, read the administrator's key the same way, and start
+the studio with a reference to it:
 
 ```bash
+read -rs DTPIPE_KEY && export DTPIPE_KEY
 mkdir jobs
-dtpipe studio ./jobs --coordinator http://coordinator.localtest.me:8080
+dtpipe studio ./jobs --coordinator http://coordinator.localtest.me:8080 --key '${{DTPIPE_KEY}}'
 ```
 
-**Sign in** opens the identity provider in a new tab: sign in as `admin`. The studio now offers the
-bricks of the nodes. **Open from library** writes `shop-orders-by-country` into `./jobs`, where you
+**Sign in with the key** signs the studio in as `admin`. The studio now offers the bricks of the
+nodes. **Open from library** writes `shop-orders-by-country` into `./jobs`, where you
 can edit it; **Publish** saves it back to the library. The full behaviour is in
 [REFERENCE.md](../../REFERENCE.md#studio-dtpipe-studio).
 
@@ -164,7 +172,10 @@ BO,9
   file on the node; [Incremental loading](incremental.md#in-a-distributed-pipeline) says what is
   served and what is not.
 - **The rights you declared are the coordinator's.** They are kept in its volume and survive a
-  restart; `down -v` removes them.
+  restart; `down -v` removes them, and the keys with them.
+- **A key is shown once.** Lost, it is not read back: in **Access**, **Keys**, then **Rotate: make
+  a second key** gives the identity another, and revoking the first ends what it opened at its
+  next request.
 
 ## Stop it
 

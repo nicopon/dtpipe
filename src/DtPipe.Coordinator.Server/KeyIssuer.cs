@@ -36,10 +36,7 @@ public static class KeyIssuer
 
     /// <summary>Why this server cannot verify an identity by a key, or null when it can.</summary>
     public static string? Unavailable(CoordinatorServerOptions server) =>
-        server.KeyIssuer is not null ? null
-        : server.IsTrialIdp
-            ? "the trial identity provider issues no token for a key, and it serves the paths and the issuer of the coordinator's key issuer, so the two never run together"
-            : "this coordinator issues the tokens of a key at Coordinator:PublicUrl, which is not set";
+        server.KeyIssuer is not null ? null : "this coordinator issues the tokens of a key at Coordinator:PublicUrl, which is not set";
 
     /// <summary>Why this server signs no person in by a key, or null when it does.</summary>
     public static string? PersonUnavailable(CoordinatorServerOptions server) =>

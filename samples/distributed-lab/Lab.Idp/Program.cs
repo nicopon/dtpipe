@@ -1,9 +1,8 @@
-namespace DtPipe.Coordinator.TrialIdp;
+namespace DtPipe.Lab.Idp;
 
 /// <summary>
-/// The trial identity provider as a host of its own, for a lab or a test bench that wants the provider apart from the coordinator
-/// (the coordinator's trial mode runs the same provider inside itself). Never for production. An entry point of a named class, not top-level
-/// statements: the coordinator references this assembly and has a <c>Program</c> of its own.
+/// The lab's identity provider as a host of its own, an external provider on an origin apart from the coordinator's. Never for
+/// production.
 /// </summary>
 public static class TrialIdpHost
 {

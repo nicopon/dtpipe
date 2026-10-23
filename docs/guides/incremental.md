@@ -103,15 +103,16 @@ starts, and keeps the new one only when the whole run has succeeded.
 
 Two bricks make it: a source that filters with a token that names no file, and a sink that names the
 column to follow. Declare each from a command line or a `--job` file, on the node that owns its
-database, with absolute paths since a fragment runs in a directory of the node's own:
+database, with absolute paths since a fragment runs in a directory of the node's own. Each node
+reads its own key from the environment (`SHOP_KEY`, `WAREHOUSE_KEY`), as Access shows it once:
 
 ```bash
 dtpipe node --name shop --coordinator http://coordinator.localtest.me:8080 \
-  --client-secret '${{DTPIPE_TRIAL_PASSWORD}}' --alias orders-new \
+  --client-secret '${{SHOP_KEY}}' --alias orders-new \
   -i sqlite:/srv/shop/shop.db \
   --query 'SELECT * FROM orders WHERE OrderId > ${{cursor://|-1}} ORDER BY OrderId'
 dtpipe node --name warehouse --coordinator http://coordinator.localtest.me:8080 \
-  --client-secret '${{DTPIPE_TRIAL_PASSWORD}}' --alias orders-copy \
+  --client-secret '${{WAREHOUSE_KEY}}' --alias orders-copy \
   -o sqlite:/srv/warehouse/warehouse.db --table orders_copy --cursor OrderId
 ```
 

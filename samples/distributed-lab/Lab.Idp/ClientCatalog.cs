@@ -4,7 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using OpenIddict.Abstractions;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
-namespace DtPipe.Coordinator.TrialIdp;
+namespace DtPipe.Lab.Idp;
 
 public sealed class IdpDbContext(DbContextOptions<IdpDbContext> options) : DbContext(options);
 

@@ -16,33 +16,33 @@ settings a node host takes are `DtPipeNode__*` (the runner) or the host team's o
 docker compose -f deploy/compose.yaml up --wait
 ```
 
-**Not for production.** The recipe starts a coordinator on Redis and a runner. The coordinator is
-its own identity provider (`Coordinator__InsecureTrialIdp__Password`, below), with a password that
-is written in the file. It listens in plain HTTP on the loopback of the host only. Every file it
-mounts is under `deploy/`; the images of the coordinator and the runner come from GHCR. It seeds no
-rights, as a deployment seeds none: a person declares the runner and the nodes in Access, as
+**Not for production.** The recipe starts a coordinator on Redis and a runner, with no identity
+provider: every identity is verified by a key (below). It listens in plain HTTP on the loopback of
+the host only, so a key crosses the network in clear. Every file it mounts is under `deploy/`; the
+images of the coordinator and the runner come from GHCR. It gives the rights two identities, the
+first administrator and the runner, and no flow: a person adds the nodes in Access, as
 [Your first distributed pipeline](../docs/guides/distributed-first-pipeline.md) shows.
 
 To run everything in Docker, add `deploy/compose.trial.yaml`: it builds a data node from the
-checkout (the first start takes a few minutes), seeds the rights that name it and the pipeline that
-runs on it.
+checkout (the first start takes a few minutes), gives it and a scheduler a key, and seeds the flow
+matrix and the pipeline that run on it.
 
 ```bash
 docker compose -f deploy/compose.yaml -f deploy/compose.trial.yaml up --build --wait
 ```
 
-- **People.** The pages are at <http://coordinator.localtest.me:8080>. Any user name made of
-  letters, digits, `.`, `_` or `-` signs in with the trial password (`dtpipe-trial-password`);
-  `admin` is the coordinator's administrator, and nobody else may do anything. The address needs
-  `localtest.me`, a public name that resolves to `127.0.0.1`; without a network that resolves it,
-  add `coordinator.localtest.me` to `/etc/hosts`.
+- **People.** The pages are at <http://coordinator.localtest.me:8080>, and the first
+  administrator signs in with the key `docker compose -f deploy/compose.yaml exec coordinator cat
+  /secrets/admin.key` prints; nobody else may do anything until they are added in Access. The
+  address needs `localtest.me`, a public name that resolves to `127.0.0.1`; without a network that
+  resolves it, add `coordinator.localtest.me` to `/etc/hosts`.
 - **A run.** With the second file, the library holds `trial-totals`: a generated source on the data
-  node, summed by the runner, written back to the data node. It runs from the pages, or as a scheduler
-  would: a `launcher-1` token (client `launcher-1`, secret the trial password, from
-  `http://coordinator.localtest.me:8080/connect/token`) posted to
-  `/service/runs` with `{"pipelineId": "trial-totals"}`. The result is in the data node's
-  `/state/totals.csv`. The pipeline is armed first, from its page: launched unarmed, the
-  coordinator answers 409.
+  node, summed by the runner, written back to the data node. It runs from the pages, or as a
+  scheduler would: a `launcher-1` token (client `launcher-1`, secret its key,
+  `/secrets/launcher-1.key` in the coordinator's container, from
+  `http://coordinator.localtest.me:8080/connect/token`) posted to `/service/runs` with
+  `{"pipelineId": "trial-totals"}`. The result is in the data node's `/state/totals.csv`. The
+  pipeline is armed first, from its page: launched unarmed, the coordinator answers 409.
 - **Version.** The data node of the second file is built from the checkout you run the recipe in,
   so run it from the checkout of a tag, with `DTPIPE_VERSION` set to that version without the `v`
   (`DTPIPE_VERSION=1.11.0`). The first file alone builds nothing.
@@ -52,22 +52,23 @@ docker compose -f deploy/compose.yaml -f deploy/compose.trial.yaml up --build --
 - **`Coordinator__Initialize` stays on.** The recipe is meant to start again after
   `docker compose down -v`; a deployment sets it for the first start only, as
   [below](#the-smallest-coordinator).
-- **The trial identity provider** is the coordinator's own, switched on by
-  `Coordinator__InsecureTrialIdp__Password`: a secret of 16 characters at least, which is every
-  client's secret and every person's password. It needs `Coordinator__PublicUrl`, the one address
-  of its issuer, and the coordinator must reach itself there (the recipe gives its service that
-  name as a network alias); it refuses to start beside `Coordinator__Authority`. The clients are
-  the identities of the rights, so a service added in Access can ask for a token at once; any
-  user name signs in; no token carries a role or a group. The pages, the login form and the
-  studio say so on screen. It signs with a key kept in the state directory. A real deployment
-  sets `Coordinator__Authority` instead, and none of this exists in it. The data node
-  (`src/DtPipe.PipelineNode.TrialNode`) is what a team's own service looks like to the
-  coordinator: it adds a node to itself and declares two bricks in a file. It is not published.
+- **The keys.** On the first `up`, the one-off `keys` service (the runner's image, run once as
+  root to hand the files to `1654`) writes a random key, `dtp_<id>_<43 characters>`, for each id
+  of `DTPIPE_KEYS` that has none, mode `0600`, into the coordinator's volume, and copies each
+  node's into a volume of that node's alone: a runner runs whatever branch a pipeline holds, so it
+  never sees another identity's key. The coordinator reads them as `@/secrets/<id>.key`
+  (`Coordinator__Bootstrap__AdminKey`, `Coordinator__Bootstrap__Identities__<n>__*`), and each node
+  as `DtPipeNode__Oidc__ClientSecret`; it finds the coordinator's issuer in the coordinator's
+  metadata. `up` again keeps the keys, and `down -v` makes new ones. The coordinator makes no key
+  itself. `Coordinator__Auth__AllowHttpKeys` lets it take a key over HTTP, which the log and
+  every page then say; a real deployment is reached over HTTPS and sets none of it.
+- **The data node** (`src/DtPipe.PipelineNode.TrialNode`) is what a team's own service looks like to
+  the coordinator: it adds a node to itself and declares two bricks in a file. It is not published.
   A team that writes no .NET declares its bricks with `dtpipe node` instead
   ([REFERENCE.md](../REFERENCE.md#a-node-from-the-cli-dtpipe-node)): the recipe keeps the .NET host
   because it gives its bricks a title and a description, which a command line has no place for. The
-  library of the first file holds `shop-orders-by-country`, which runs on a node named `shop` that
-  a person declares with `dtpipe node`.
+  library of the first file holds `shop-orders-by-country`, which runs on a node named `shop` that a
+  person declares with `dtpipe node`.
 
 ## The images
 
@@ -97,18 +98,27 @@ docker build -f deploy/Dockerfile --target runner \
 
 ## The smallest coordinator
 
-One coordinator, one volume, no other service. The coordinator keeps its state in a SQLite file,
-`coordinator.db`, and its library as a git repository, both under `/state`:
+One coordinator, one volume, no other service and no identity provider. The coordinator keeps its
+state in a SQLite file, `coordinator.db`, and its library as a git repository, both under
+`/state`. It makes no key: the first administrator's is yours to make, 32 random bytes in
+base64url after `dtp_<id>_`, in a file only the coordinator's user reads:
 
 ```bash
+mkdir -p secrets
+printf 'dtp_admin_%s' "$(head -c 32 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=\n')" \
+    > secrets/admin.key
+chmod 600 secrets/admin.key && sudo chown 1654:1654 secrets/admin.key
 docker run -d --init --name coordinator -p 8080:8080 -v coordinator-state:/state \
+    -v "$PWD/secrets":/secrets:ro \
     -e Coordinator__Initialize=true \
-    -e Coordinator__Authority=https://idp.example \
-    -e Coordinator__Ui__ClientSecret=... \
     -e Coordinator__PublicUrl=https://coordinator.example \
+    -e Coordinator__Bootstrap__AdminKey=@/secrets/admin.key \
     dtpipe-coordinator
 ```
 
+- The key signs `admin` in through the form at the public address. The rights get that person
+  once, while they hold no administrator with a live key; from then on Access makes every key, and
+  shows each once.
 - `Coordinator__Initialize=true` is for the first start only. A store that holds nothing stops the
   start unless it is set, because rights begun again could grant what was revoked and run ids
   would be given twice. Remove it afterwards, so that a volume that was not mounted stops the
@@ -171,19 +181,27 @@ both.
   `__Timeout`), every save is pushed to that git remote before it is accepted. Without it,
   `/state/library` holds the **only copy**: it is in the volume, so back the volume up, or accept
   losing the library with it. A deployment chooses one of the two.
-- **An identity provider** (`Coordinator__Authority`, https in production). The pages sign
-  people in with `Coordinator__Ui__ClientId` and `Coordinator__Ui__ClientSecret` (a secret): a
-  confidential client whose redirect URI is `https://<public address>/signin-oidc`.
-  `Coordinator__Studio__ClientId` names the public client `dtpipe studio` signs in with.
-- **People**: `Coordinator__Roles__Admin`, `__Designer`, `__Reader`. Nobody unlisted may do
-  anything.
+- **The first keys.** `Coordinator__Bootstrap__AdminKey` (required without a provider) and
+  `Coordinator__Bootstrap__Identities__<n>__*`, each `@path` to a file or a value of the
+  environment, never of the command line. The coordinator issues the tokens a key is exchanged
+  for, under `Coordinator__PublicUrl`, and refuses to take a key over HTTP.
+  `Coordinator__Studio__ClientId` names the client of a person's token, which `dtpipe studio`
+  presents.
+- **An identity provider**, if people or services are verified by one (`Coordinator__Authority`,
+  https in production, on an origin of its own). The pages sign people in with
+  `Coordinator__Ui__ClientId` and `Coordinator__Ui__ClientSecret` (a secret): a confidential
+  client whose redirect URI is `https://<public address>/signin-oidc`.
+  `Coordinator__Auth__PersonKeys=false` then admits people through it only.
+- **People**: an identity of kind `person` in Access, with its role; with a provider,
+  `Coordinator__Roles__Admin`, `__Designer`, `__Reader` too. Nobody else may do anything.
 - **TLS**, by a proxy in front, and `Coordinator__PublicUrl`: see below.
 
-A node host (the runner, or a team's own) takes its coordinator's address and its secret at the
-provider (`DtPipeNode__CoordinatorUrl`, `DtPipeNode__Oidc__ClientSecret`); its client is its
-name unless `DtPipeNode__Oidc__ClientId` says otherwise, and its provider is the one the
-coordinator names unless `DtPipeNode__Oidc__Authority` does. Its rights are the coordinator's,
-never its own.
+A node host (the runner, or a team's own) takes its coordinator's address and its secret, a key or
+the provider's (`DtPipeNode__CoordinatorUrl`, `DtPipeNode__Oidc__ClientSecret`, `@path` to read it
+from a file); its client is its name unless `DtPipeNode__Oidc__ClientId` says otherwise, and its
+issuer is the first one the coordinator names unless `DtPipeNode__Oidc__Authority` does: beside a
+provider, a node verified by a key sets it to the coordinator's address. Its rights are the
+coordinator's, never its own.
 
 ## HTTPS in front
 
@@ -202,15 +220,19 @@ long requests open. A node may also reach the coordinator directly, inside the n
 ## Secrets
 
 The Redis connection string, the remote's token and the pages' client secret are given to the
-container as environment variables by the orchestrator's secret mechanism. They are in no
-`ARG`, no `ENV` of the image and no command line, and the server writes none of them to a log or
-a response. The token reaches git in the environment of the one process that talks to the remote.
-A person who may inspect the container (`docker inspect`, the pod's spec) can read its
-environment: give that right with the same care as the secrets.
+container as environment variables by the orchestrator's secret mechanism, and a key the deployment
+gives as a file it mounts (`@path`). The coordinator keeps a key as its hash only. They are in no
+`ARG`, no `ENV` of the image and no command line, and the server writes none of them to a log or a
+response. The token reaches git in the environment of the one process that talks to the remote. A
+person who may inspect the container (`docker inspect`, the pod's spec) can read its environment:
+give that right with the same care as the secrets.
 
 Checked: the public address, in `PublicUrlTests`, and the SQLite store, in `SqliteStoreTests`, of
 [tests/DtPipe.Coordinator.Server.Tests](../tests/DtPipe.Coordinator.Server.Tests). Checked on the
 real containers, on SQLite: the coordinator ended and started again, and a copy of its state
 directory put back, read back the rights, the library, the armed pipelines, the run journal and a
-session cookie. Not checked: a real TLS proxy, a Linux Docker host, a volume owned by another uid,
-a SQLite file on a network volume, an https remote with a token.
+session cookie. Checked outside Docker: the recipe's coordinator settings, with keys made by the
+`keys` service's script, take the runner's key and the administrator's and bootstrap the four
+identities of the second file. Not checked: the recipe's containers since the keys (the `keys`
+service under `up --wait`, the volumes it hands over), a real TLS proxy, a Linux Docker host, a
+volume owned by another uid, a SQLite file on a network volume, an https remote with a token.

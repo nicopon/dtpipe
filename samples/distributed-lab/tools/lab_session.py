@@ -55,6 +55,10 @@ class Session:
         # Back on /api/me, which any person signed in may read, whatever their roles.
         with self._opener.open(self.base + "/account/login?returnUrl=/api/me", timeout=30) as page:
             login_url, text = page.geturl(), page.read().decode()
+        # Where people may also hold a key, the coordinator shows its own form first: the IdP is the link beside it.
+        if login_url.startswith(self.base) and urllib.parse.urlparse(login_url).path == "/account/login":
+            with self._opener.open(self.base + "/account/login/idp?returnUrl=/api/me", timeout=30) as page:
+                login_url, text = page.geturl(), page.read().decode()
         if login_url.startswith(self.base):
             self._signed_in = True  # the IdP still had a session for this jar
             return self

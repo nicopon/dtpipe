@@ -1275,17 +1275,21 @@ dtpipe studio ./jobs --coordinator https://coordinator.example  # signed in to a
 |---|---|
 | `--port` | Port on 127.0.0.1. Default: any free port |
 | `--coordinator` | A distributed pipeline's coordinator, by its address: its bricks and its library. Default: none |
+| `--key` | Sign in to the coordinator with a key it made for you, as a reference (`${{NAME}}`, `keyring://alias`, `@file`), never the key itself. Default: through the browser |
 
 ### With a coordinator
 
 `--coordinator` names the one coordinator the studio talks to; the page never chooses another.
 **Sign in** opens your identity provider in a new tab, so the cards you have not saved stay where
-they are, and comes back to the studio on its own address. The studio learns everything from the
-coordinator's address: the identity provider it trusts, the client to sign in with, and the
-version of the API it speaks, which this dtpipe must speak too, or it says so and stops there.
-Your tokens stay in the studio's memory, never on disk or in the page; quitting the studio, or
-**Sign out**, forgets them. A coordinator lets you in only if its administrator listed you
-(`Coordinator:Studio:ClientId` names the studio's client, and your roles are the coordinator's).
+they are, and comes back to the studio on its own address. With `--key`, **Sign in with the key**
+exchanges the key the coordinator made for you instead, and the studio presents it again for each
+next token; a coordinator with no identity provider signs people in this way only. The studio
+learns everything from the coordinator's address: how people sign in there, the client to sign in
+with, and the version of the API it speaks, which this dtpipe must speak too, or it says so and
+stops there. Your tokens stay in the studio's memory, never on disk or in the page; quitting the
+studio, or **Sign out**, forgets them. A coordinator lets you in only if its administrator listed
+you (`Coordinator:Studio:ClientId` names the studio's client, and your roles are the
+coordinator's).
 
 Once signed in, the palette offers the bricks of the coordinator's nodes, grouped by node, a node
 offline greyed out, and lists this studio's dtpipe version beside each node's: a difference is
@@ -1387,19 +1391,25 @@ data; a **runner** is a node with no data that runs every step between the brick
 and the runner are published as container images, `ghcr.io/nicopon/dtpipe-coordinator` and
 `ghcr.io/nicopon/dtpipe-runner`, by each release. A node that serves real data is `dtpipe node`, or
 your own .NET host that calls `AddDtPipeNode`, and declares its **bricks**. Every setting below is
-read from the environment first (`Coordinator__Authority`), then from command-line arguments
-(`--Coordinator:Authority`); a secret belongs in the environment only.
+read from the environment first (`Coordinator__PublicUrl`), then from command-line arguments
+(`--Coordinator:PublicUrl`); a secret belongs in the environment only, or in a file named by
+`@path` where a setting says so.
 
 ### Coordinator settings (`Coordinator__*`)
 
 | Setting | Description |
 |---|---|
-| `Authority` | The OpenID Connect provider the coordinator trusts (required). `https` in production |
+| `Authority` | An OpenID Connect provider the coordinator trusts, on an origin of its own; `https` in production. Unset: every identity is verified by a key |
 | `Audience` | The audience a service's token must name. Default: `dtpipe-coordinator` |
-| `Ui__ClientId` / `Ui__ClientSecret` | The confidential client the pages sign people in with (the secret is required). Default id: `coordinator-ui` |
-| `Studio__ClientId` | The public client `dtpipe studio` signs in with. Unset: no person's token reaches `/api` |
-| `Roles__Admin` / `__Designer` / `__Reader` | Lists of people, matched on the claim `Roles__Claim` (default `email`). Nobody unlisted may do anything |
-| `PublicUrl` | The address people reach the coordinator at, behind a TLS proxy: scheme, host, port, no path |
+| `Ui__ClientId` / `Ui__ClientSecret` | The provider's confidential client the pages sign people in with (the secret is required with `Authority`, refused without). Default id: `coordinator-ui` |
+| `Studio__ClientId` | The public client `dtpipe studio` signs in with, and the client a person's key token names. Unset: no person's token reaches `/api` |
+| `Roles__Admin` / `__Designer` / `__Reader` | With `Authority`: lists of people, matched on the claim `Roles__Claim` (default `email`), beside the roles the rights give. Nobody unlisted and absent from the rights may do anything |
+| `PublicUrl` | The address people reach the coordinator at, behind a TLS proxy: scheme, host, port, no path. The issuer of the tokens a key is exchanged for; required without `Authority` |
+| `Auth__AllowHttpKeys` | `true` lets a key be exchanged while `PublicUrl` is `http` (the key then crosses the network in clear, which the log and every page say). Default: refused |
+| `Auth__PersonKeys` | `false` lets people sign in through the provider only. Default: `true`; refused without `Authority` |
+| `Auth__ServiceTokenLifetime` / `__PersonTokenLifetime` | How long a token exchanged for a service's or a person's key lasts, five minutes at least. Default: 10 minutes / 1 hour |
+| `Bootstrap__AdminKey` | The first administrator's key, `dtp_<id>_<secret>`, as `@path` to a file or a value of the environment. Required without `Authority`; added while the rights hold no administrator with a live key |
+| `Bootstrap__Identities__<n>__Id` / `__Key` / `__Kind` / `__Name` / `__Groups__<n>` / `__Pipelines__<n>` / `__Role` | An identity the deployment gives with its key (`@path` or the environment), added at start when its id is absent, never changed after. Default kind: `node` |
 | `Store` | `sqlite` (default; one coordinator, a file in the state directory) or `redis` |
 | `Sqlite__Directory` | Where the SQLite file lives, if not the state directory |
 | `Redis__ConnectionString` / `Redis__KeyPrefix` | The Redis to use with `Store=redis` (a secret), and the prefix of its keys |
@@ -1416,13 +1426,20 @@ The state directory is the coordinator's whole state when the store is SQLite: b
 as described in [deploy/README.md](./deploy/README.md#backing-up-a-sqlite-coordinator).
 `GET /healthz` answers 200, anonymously, once the server serves.
 
+An identity in **Access** is verified by the provider or by a key the coordinator makes,
+`dtp_<id>_<43 characters>`: shown once when it is made, then kept only as its hash. A node presents
+its key as its client secret at the coordinator's `/connect/token`; a person types it into the
+sign-in form, or hands it to `dtpipe studio --key`. Two keys may be live at once, for a rotation,
+and revoking one ends what it opened at the next request. The server never makes a key on its
+own: a deployment gives the first ones through `Bootstrap__*`.
+
 ### Node host settings (`DtPipeNode__*`)
 
 | Setting | Description |
 |---|---|
 | `Name` / `Description` | The name the host proposes. The coordinator names a node from its rights, not from this |
 | `CoordinatorUrl` | The coordinator's base address |
-| `Oidc__Authority` / `__ClientId` / `__ClientSecret` / `__Scope` | The client-credentials client the host authenticates as: `ClientId` is the node's `Name` and `Authority` the provider the coordinator names, unless given; the client id is the node's identity |
+| `Oidc__Authority` / `__ClientId` / `__ClientSecret` / `__Scope` | The client-credentials client the host authenticates as: `ClientId` is the node's `Name` and `Authority` the first issuer the coordinator names (its own, without a provider), unless given; a node verified by a key beside a provider sets it to the coordinator's address. `ClientSecret` is the key or the provider's secret, `@path` to read it from a file. The client id is the node's identity |
 | `DtPipe` | The `dtpipe` binary every fragment runs as a child process. Default: `dtpipe` on the path; the binary itself under `dtpipe node` |
 | `StateDirectory` | Where fragment jobs are written and run from. Default: a directory under the temp directory |
 | `Policy` | `Bricks` (default: a data node runs only its own bricks) or `AnyFragment` (a runner) |

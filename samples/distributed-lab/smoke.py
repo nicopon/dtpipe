@@ -33,7 +33,7 @@ it ran on; a replica that stops says so, is gone at once and removes its directo
 then lost once its grace has run out, and the next run goes to the other; a replica announcing another declaration of a brick is passed over for a plan made from
 the first one, and when none is left the run is refused, until the pipeline is deployed again. Local lab only.
 The keys': played only when named, on a coordinator that exchanges keys (its metadata's dtpipe_auth names `key`: Coordinator:PublicUrl,
-over HTTPS or with Coordinator:Auth:AllowHttpKeys, which neither lab target sets yet): a node verified by a key gets its token from the
+over HTTPS or with Coordinator:Auth:AllowHttpKeys, which the stack sets: `lab.sh stack smoke keys`): a node verified by a key gets its token from the
 coordinator and its announcement is taken; a person verified by a key reads /api/me with hers; revoking each key refuses the next
 exchange, cuts the node's connection and turns the person's token away at the next request; both identities are removed.
 The restart's: the stack's coordinator ended and started again (`lab.sh stack restart-check [restore]`, which gives the command in
@@ -709,6 +709,8 @@ def rights_pass():
             url, code, _ = navigate(nobody, "/")
             _, me, _ = navigate(nobody, "/api/me")
             again, _, _ = navigate(nobody, "/")
+            if again.startswith(URL + "/account/login"):  # the coordinator's key form: the IdP is the link beside it
+                again, _, _ = navigate(nobody, "/account/login/idp?returnUrl=/")
             return urllib.parse.urlparse(url).path, code, me, "/account/login" in again and not again.startswith(URL)
         policy = call("/api/rights")["matrix"]
         expected = {

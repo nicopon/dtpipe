@@ -3,6 +3,7 @@
 !Directory.Build.props
 !src/
 !samples/distributed-lab/Lab.NodeHost/
+!samples/distributed-lab/Lab.Idp/
 !samples/distributed-lab/pipelines/
 !samples/distributed-lab/library-seed/
 !samples/distributed-lab/nodes/

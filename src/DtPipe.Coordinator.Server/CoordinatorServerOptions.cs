@@ -31,30 +31,14 @@ public sealed class CoordinatorServerOptions
     public required string StateDir { get; init; }
 
     /// <summary>
-    /// The OpenID Connect provider the server trusts for people and for the identities it verifies. In trial mode it is the server's own
-    /// <see cref="PublicUrl"/>. The tokens of the identities verified by a key are <see cref="KeyIssuer"/>'s. None when
-    /// <c>Coordinator:Authority</c> is unset outside trial mode: then every identity is verified by a key, the key issuer is the only
-    /// authorization server, and <see cref="Bootstrap"/> must name the first administrator.
+    /// The OpenID Connect provider the server trusts for people and for the identities it verifies. The tokens of the identities
+    /// verified by a key are <see cref="KeyIssuer"/>'s. None when <c>Coordinator:Authority</c> is unset: then every identity is verified
+    /// by a key, the key issuer is the only authorization server, and <see cref="Bootstrap"/> must name the first administrator.
     /// </summary>
     public string? Authority { get; init; }
 
-    /// <summary>The server trusts an identity provider, external or the trial one: an identity may be verified by it.</summary>
+    /// <summary>The server trusts an identity provider: an identity may be verified by it.</summary>
     public bool HasProvider => Authority is not null;
-
-    /// <summary>
-    /// The password of the trial identity provider the server runs in itself (<c>Coordinator:InsecureTrialIdp:Password</c>, a secret, at
-    /// least <see cref="TrialPasswordMinLength"/> characters): every client's secret and every person's password. None when unset, and then
-    /// the server trusts the external provider <see cref="Authority"/> names. Setting both is refused, as is a trial mode with no
-    /// <see cref="PublicUrl"/>, since the issuer would not be one address.
-    /// </summary>
-    public string? TrialIdpPassword { get; init; }
-
-    public bool IsTrialIdp => TrialIdpPassword is not null;
-
-    public const int TrialPasswordMinLength = 16;
-
-    /// <summary>The studio's client of the trial identity provider, when <c>Coordinator:Studio:ClientId</c> names none.</summary>
-    public const string TrialStudioClientId = "dtpipe-studio";
 
     /// <summary>The audience a service's token must name to be accepted here.</summary>
     public required string Audience { get; init; }
@@ -131,8 +115,8 @@ public sealed class CoordinatorServerOptions
     public Uri? PublicUrl { get; init; }
 
     /// <summary>
-    /// The issuer of the tokens this server makes for identities verified by a key: <see cref="PublicUrl"/>, without the trial identity
-    /// provider, which serves the same paths under the same issuer. None otherwise, and then no identity may be verified by a key.
+    /// The issuer of the tokens this server makes for identities verified by a key: <see cref="PublicUrl"/>. None without it, and then no
+    /// identity may be verified by a key.
     /// </summary>
     public string? KeyIssuer { get; init; }
 
@@ -179,13 +163,13 @@ public sealed class CoordinatorServerOptions
     /// </summary>
     public TimeSpan PersonTokenLifetime { get; init; } = TimeSpan.FromHours(1);
 
-    /// <summary>The ways a person signs in here, as the metadata lists them: the provider (or the trial one) when there is one, and a key when <see cref="SignsPeopleInByKey"/>.</summary>
+    /// <summary>The ways a person signs in here, as the metadata lists them: the provider when there is one, and a key when <see cref="SignsPeopleInByKey"/>.</summary>
     public IReadOnlyList<string> PersonAuth
     {
         get
         {
             var ways = new List<string>();
-            if (HasProvider) ways.Add(IsTrialIdp ? DtPipe.Jobs.Coordinator.PersonAuth.Trial : DtPipe.Jobs.Coordinator.PersonAuth.Idp);
+            if (HasProvider) ways.Add(DtPipe.Jobs.Coordinator.PersonAuth.Idp);
             if (SignsPeopleInByKey) ways.Add(DtPipe.Jobs.Coordinator.PersonAuth.Key);
             return ways;
         }
@@ -215,19 +199,7 @@ public sealed class CoordinatorServerOptions
     public static CoordinatorServerOptions FromConfiguration(IConfiguration configuration)
     {
         var section = configuration.GetSection("Coordinator");
-        var trial = section["InsecureTrialIdp:Password"] is { Length: > 0 } password ? password : null;
         var publicUrl = PublicUrlOf(section["PublicUrl"]);
-        if (trial is not null)
-        {
-            if (trial.Length < TrialPasswordMinLength)
-                throw new InvalidOperationException($"Coordinator:InsecureTrialIdp:Password must be at least {TrialPasswordMinLength} characters.");
-            if (section["Authority"] is { Length: > 0 })
-                throw new InvalidOperationException("Coordinator:InsecureTrialIdp:Password and Coordinator:Authority are both set: the trial identity provider replaces an external one, never joins it.");
-            if (publicUrl is null)
-                throw new InvalidOperationException("Coordinator:InsecureTrialIdp:Password needs Coordinator:PublicUrl: the trial identity provider's issuer is the address people reach this server at.");
-            if (section["Ui:ClientSecret"] is { Length: > 0 })
-                throw new InvalidOperationException("Coordinator:Ui:ClientSecret is set in trial mode: the pages' client is made by the trial identity provider, with a secret of its own.");
-        }
         string? PathOf(string key) => section[key] is { Length: > 0 } value ? Path.GetFullPath(value) : null;
         var store = section["Store"] is { Length: > 0 } kind
             ? Enum.TryParse<StoreKind>(kind, ignoreCase: true, out var parsed) ? parsed
@@ -236,10 +208,8 @@ public sealed class CoordinatorServerOptions
         // Redis settings under the SQLite store would be ignored in silence, and a coordinator meant to share its state would keep it alone.
         if (store == StoreKind.Sqlite && (section["Redis:ConnectionString"] is { Length: > 0 } || section["Redis:KeyPrefix"] is { Length: > 0 }))
             throw new InvalidOperationException("Coordinator:Redis settings are given but Coordinator:Store is 'sqlite': set Coordinator:Store to 'redis', or remove them.");
-        var authority = trial is not null
-            ? publicUrl!.GetLeftPart(UriPartial.Authority)
-            : section["Authority"] is { Length: > 0 } external ? external.TrimEnd('/') : null;
-        var keyIssuer = trial is null && publicUrl is not null ? publicUrl.GetLeftPart(UriPartial.Authority) : null;
+        var authority = section["Authority"] is { Length: > 0 } external ? external.TrimEnd('/') : null;
+        var keyIssuer = publicUrl?.GetLeftPart(UriPartial.Authority);
         // The issuer is what tells the two providers' tokens apart: one address for both would let either sign for the other.
         if (keyIssuer is not null && string.Equals(authority, keyIssuer, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Coordinator:Authority is Coordinator:PublicUrl, where this server issues the tokens of the identities verified by a key: an external identity provider has an issuer of its own.");
@@ -272,15 +242,12 @@ public sealed class CoordinatorServerOptions
             ServiceTokenLifetime = lifetime,
             PersonTokenLifetime = personLifetime,
             PersonKeys = personKeys,
-            TrialIdpPassword = trial,
             Audience = section["Audience"] ?? "dtpipe-coordinator",
             UiClientId = section["Ui:ClientId"] ?? "coordinator-ui",
-            UiClientSecret = trial is not null
-                ? Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32))
-                : authority is null ? null
+            UiClientSecret = authority is null ? null
                 : section["Ui:ClientSecret"] ?? throw new InvalidOperationException("Coordinator:Ui:ClientSecret is required: the secret of the pages' client at the provider."),
             Bootstrap = RightsBootstrap.FromConfiguration(configuration),
-            StudioClientId = section["Studio:ClientId"] is { Length: > 0 } studio ? studio : trial is not null ? TrialStudioClientId : null,
+            StudioClientId = section["Studio:ClientId"] is { Length: > 0 } studio ? studio : null,
             LibrarySeed = PathOf("LibrarySeed"),
             LibraryDirectory = PathOf("Library:Directory"),
             RightsSeed = PathOf("RightsSeed"),

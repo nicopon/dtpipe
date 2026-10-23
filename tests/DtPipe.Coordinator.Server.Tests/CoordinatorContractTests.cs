@@ -36,7 +36,7 @@ public sealed class CoordinatorContractTests
             Write(new ResourceMetadata("http://c.test", ["http://idp.test/", "http://c.test"], ["header"], CoordinatorApi.Contract, "studio",
                 [PersonAuth.Idp, PersonAuth.Key])));
         Assert.DoesNotContain("dtpipe_studio_client_id", Write(new ResourceMetadata("http://c.test", ["http://idp.test/"], ["header"], 1)));
-        Assert.Equal(("idp", "trial", "key"), (PersonAuth.Idp, PersonAuth.Trial, PersonAuth.Key));
+        Assert.Equal(("idp", "key"), (PersonAuth.Idp, PersonAuth.Key));
     }
 
     /// <summary>The coordinator makes a key and the studio presents it: both read the client id it names by this one rule.</summary>

@@ -21,7 +21,8 @@ everything in Docker. To run one over a database of your own, with a node you de
 
 Who may do what is the coordinator's own configuration: **rights** list the nodes, the groups
 they belong to and which group may send rows to which. The identity provider only says who a
-caller is. In this recipe the coordinator is its own trial identity provider.
+caller is. In this recipe there is no identity provider: every identity is verified by a key the
+coordinator issues tokens for.
 
 ## Start the recipe
 
@@ -38,22 +39,29 @@ Wait until every service is `healthy`. Everything listens on the loopback of you
 plain HTTP. The addresses use `localtest.me`, a public name that resolves to `127.0.0.1`; without
 a network that resolves it, add `coordinator.localtest.me` to `/etc/hosts`.
 
-Open <http://coordinator.localtest.me:8080> and sign in as `admin` with the password
-`dtpipe-trial-password`: the coordinator's trial identity provider accepts any name made of
-letters, digits, `.`, `_` or `-`, with that one password, which is also every service's secret.
-Nobody but `admin` may do anything on this coordinator. A red banner on every page says so: the
-trial identity provider is for trying the product, never for production. It starts only when
-`Coordinator__InsecureTrialIdp__Password` is set (16 characters at least), and the coordinator
-refuses to start with an external `Coordinator__Authority` beside it.
+On the first start, a one-off service wrote a random key for each identity of the recipe into the
+coordinator's volume, and gave each node its own; the coordinator added the identities from them.
+Print the first administrator's:
+
+```bash
+docker compose -f deploy/compose.yaml -f deploy/compose.trial.yaml exec coordinator \
+  cat /secrets/admin.key
+```
+
+Open <http://coordinator.localtest.me:8080> and paste it into the sign-in form. A red banner on
+every page says that keys cross the network in clear: the recipe has no TLS, so it sets
+`Coordinator__Auth__AllowHttpKeys`, without which the coordinator takes no key over HTTP. Nobody
+but `admin` may change anything on this coordinator.
 
 - **Library** holds one pipeline, `trial-totals`: a source brick on the trial node
   (`brick:trial-node/numbers`), summed by the runner, written to a file by a sink brick on the trial
   node (`brick:trial-node/totals`). A job names a brick by reference; the node holds what it reads
   and writes.
 - **Runs** shows the queue and the journal of every run.
-- **Access** shows the rights that `deploy/compose.trial.yaml` seeds: the two nodes, `trial-node`
-  and `runner-1`, and the groups that may send rows to each other. Without that file the coordinator
-  starts with none, as in [Your first distributed pipeline](distributed-first-pipeline.md).
+- **Access** shows the identities the keys opened: `admin`, the two nodes `trial-node` and
+  `runner-1`, the scheduler `launcher-1`, and the groups that may send rows to each other, which
+  `deploy/compose.trial.yaml` seeds. Without that file the coordinator starts with `admin` and
+  `runner-1` alone, as in [Your first distributed pipeline](distributed-first-pipeline.md).
 
 ## Run the pipeline
 
@@ -77,13 +85,16 @@ each edge.
 ### From a scheduler
 
 A **launcher** is a service identity that may start the runs of the pipelines it lists, and
-nothing else. The recipe declares one, `launcher-1`. It asks the identity provider for a token and
-posts the run to `/service/runs`; the pipeline must be armed first. This needs `curl` and `jq`:
+nothing else. The recipe declares one, `launcher-1`. It exchanges its key for a token at the
+coordinator and posts the run to `/service/runs`; the pipeline must be armed first. This needs
+`curl` and `jq`:
 
 ```bash
+KEY=$(docker compose -f deploy/compose.yaml -f deploy/compose.trial.yaml exec coordinator \
+  cat /secrets/launcher-1.key)
 TOKEN=$(curl -s http://coordinator.localtest.me:8080/connect/token \
   -d grant_type=client_credentials -d client_id=launcher-1 \
-  -d client_secret=dtpipe-trial-password | jq -r .access_token)
+  -d "client_secret=$KEY" | jq -r .access_token)
 curl -s -X POST http://coordinator.localtest.me:8080/service/runs \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"pipelineId": "trial-totals"}'
@@ -100,15 +111,16 @@ The studio is part of the CLI. Over a folder of YAML jobs it needs no coordinato
 dtpipe studio ./jobs
 ```
 
-Pointed at the recipe's coordinator, it also offers the bricks of the nodes:
+Pointed at the recipe's coordinator, with a reference to the administrator's key, it also offers
+the bricks of the nodes. Read the key into a variable (paste, then Enter), never onto the command
+line:
 
 ```bash
-dtpipe studio ./jobs --coordinator http://coordinator.localtest.me:8080
+read -rs DTPIPE_KEY && export DTPIPE_KEY
+dtpipe studio ./jobs --coordinator http://coordinator.localtest.me:8080 --key '${{DTPIPE_KEY}}'
 ```
 
-**Sign in** opens the identity provider in a new tab (the studio shows a warning beside the
-coordinator while it is the trial one). The studio's client is registered and the recipe
-lists `admin` as the coordinator's administrator, so sign in as `admin`. **Open from library**
+**Sign in with the key** signs the studio in as `admin`. **Open from library**
 writes `trial-totals` into the folder as a job file you can edit; **Publish** sends the saved job
 back, and the pipeline keeps running the version it was armed with until it is armed again. The
 coordinator's own pages design nothing: what a person writes reaches the library from the studio.
@@ -120,7 +132,8 @@ The full behaviour is in [REFERENCE.md](../../REFERENCE.md#studio-dtpipe-studio)
 docker compose -f deploy/compose.yaml -f deploy/compose.trial.yaml down -v
 ```
 
-`-v` removes the volumes: the next start begins from the recipe's rights and library again. After
+`-v` removes the volumes: the next start begins from the recipe's rights and library again, with
+new keys. After
 you pull a newer checkout, run `docker compose -f deploy/compose.yaml -f deploy/compose.trial.yaml
 build` before starting, or the trial node keeps the old build.
 

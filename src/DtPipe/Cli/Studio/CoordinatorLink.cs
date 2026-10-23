@@ -15,11 +15,10 @@ public sealed class CoordinatorLinkException(string message) : Exception(message
 
 /// <summary>
 /// What the page is told of the link: the coordinator's address, whether a person is signed in, why
-/// not, and who; <c>TrialIdp</c> when the coordinator's metadata says its provider is its own trial one, never for production;
-/// <c>ByKey</c> when the studio signs in with a key rather than through the browser. Never a token, never the key.
+/// not, and who; <c>ByKey</c> when the studio signs in with a key rather than through the browser. Never a token, never the key.
 /// </summary>
 public sealed record CoordinatorStatus(
-    string Url, string State, string? Reason, CoordinatorMe? Me, string StudioVersion, int Contract, bool TrialIdp = false, bool ByKey = false);
+    string Url, string State, string? Reason, CoordinatorMe? Me, string StudioVersion, int Contract, bool ByKey = false);
 
 /// <summary>
 /// The studio's link to one coordinator, named on the command line: the page never chooses where a
@@ -51,7 +50,7 @@ public sealed class CoordinatorLink : IDisposable
 
     private const string Scopes = "openid email profile offline_access";
 
-    private sealed record Discovery(string Issuer, string AuthorizationEndpoint, string TokenEndpoint, string ClientId, bool TrialIdp);
+    private sealed record Discovery(string Issuer, string AuthorizationEndpoint, string TokenEndpoint, string ClientId);
 
     private sealed record Pending(string State, string Verifier, string RedirectUri, DateTimeOffset Expires);
 
@@ -115,7 +114,7 @@ public sealed class CoordinatorLink : IDisposable
         lock (_lock)
         {
             var state = _tokens is not null ? SignedIn : _pending is not null && _time.GetUtcNow() < _pending.Expires ? SigningIn : SignedOut;
-            return new CoordinatorStatus(Url, state, _reason, _tokens is null ? null : _me, StudioVersion, CoordinatorApi.Contract, _discovery?.TrialIdp ?? false, ByKey);
+            return new CoordinatorStatus(Url, state, _reason, _tokens is null ? null : _me, StudioVersion, CoordinatorApi.Contract, ByKey);
         }
     }
 
@@ -478,14 +477,13 @@ public sealed class CoordinatorLink : IDisposable
             throw new CoordinatorLinkException($"{Url} names itself {metadata.Resource}: open the studio with that address.");
         if (string.IsNullOrEmpty(metadata.StudioClientId))
             throw new CoordinatorLinkException($"{Url} accepts no studio: its administrator sets Coordinator:Studio:ClientId.");
-        var trial = metadata.Auth?.Contains(PersonAuth.Trial) == true;
         if (ByKey)
         {
             var keyDiscovery = await DiscoverKeyIssuerAsync(metadata, ct);
             lock (_lock) _discovery = keyDiscovery;
             return keyDiscovery;
         }
-        if (metadata.Auth is { } ways && !ways.Contains(PersonAuth.Idp) && !ways.Contains(PersonAuth.Trial))
+        if (metadata.Auth is { } ways && !ways.Contains(PersonAuth.Idp))
             throw new CoordinatorLinkException($"{Url} signs people in with a key only: start the studio with --key.");
         var issuer = metadata.AuthorizationServers?.FirstOrDefault()
             ?? throw new CoordinatorLinkException($"{Url} names no identity provider.");
@@ -504,7 +502,7 @@ public sealed class CoordinatorLink : IDisposable
             if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var uri) || (issuerUri.Scheme == "https" && uri.Scheme != "https"))
                 throw new CoordinatorLinkException($"The identity provider at {issuer} gives an endpoint that is no address over {issuerUri.Scheme}: '{endpoint}'.");
         }
-        var discovery = new Discovery(configuration.Issuer, configuration.AuthorizationEndpoint!, configuration.TokenEndpoint!, metadata.StudioClientId, trial);
+        var discovery = new Discovery(configuration.Issuer, configuration.AuthorizationEndpoint!, configuration.TokenEndpoint!, metadata.StudioClientId);
         lock (_lock) _discovery = discovery;
         return discovery;
     }
@@ -526,7 +524,7 @@ public sealed class CoordinatorLink : IDisposable
         if (!Uri.TryCreate(configuration.TokenEndpoint, UriKind.Absolute, out var endpoint)
             || endpoint.GetLeftPart(UriPartial.Authority) != _origin.GetLeftPart(UriPartial.Authority))
             throw new CoordinatorLinkException($"The issuer at {issuer} gives a token endpoint off the coordinator's origin: '{configuration.TokenEndpoint}'. The key is not sent there.");
-        return new Discovery(configuration.Issuer, "", configuration.TokenEndpoint!, metadata.StudioClientId!, false);
+        return new Discovery(configuration.Issuer, "", configuration.TokenEndpoint!, metadata.StudioClientId!);
     }
 
     private async Task<T> GetJsonAsync<T>(string url, string who, CancellationToken ct)

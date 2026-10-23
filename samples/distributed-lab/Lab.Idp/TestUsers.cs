@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 using OpenIddict.Abstractions;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
-namespace DtPipe.Coordinator.TrialIdp;
+namespace DtPipe.Lab.Idp;
 
 /// <summary>
 /// The users of a test IdP: any name made of letters, digits, <c>.</c>, <c>_</c> or <c>-</c> is a

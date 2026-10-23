@@ -31,7 +31,8 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   `.state/`. A lab scenario, brick or pipeline is named under `samples/` only.
   `[CI: validate_distributed_boundary.sh]`
 - **Lab tools sign in as people, through the IdP.** `tools/lab_session.py` follows the real flow
-  (login form, code back to `/signin-oidc`) and sends the CSRF header; every tool reaches `/api`
+  (login form, code back to `/signin-oidc`) and sends the CSRF header; where the coordinator shows its key form first (the
+  stack), it and `ui_check.py` take the IdP's link beside it (`/account/login/idp`); every tool reaches `/api`
   through it (`smoke.call`, `ui_check.py`, `nodes_report.py`, `lab.sh`). `ui_check.py` also signs its
   browser in through the IdP's form, so the flow a person follows runs on every pass. `lab.sh exec-coordinator` lists `labadmin`, `labdesigner` and
   `labreader` (`@dtpipe.test`) in the three roles; any other `{user}` / `{user}pwd` signs in with
@@ -83,10 +84,10 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   version of a brick. That pass is named only, refuses the compose stack (it starts hosts), and leaves the hosts
   started as the lab starts them. `[local: smoke.py replicas, tools/campaign.py F13]`
 - **The IdP's signing key survives an IdP restart.** A node host reuses its cached token until
-  shortly before it expires, so `DtPipe.Coordinator.TrialIdp` reads its key from `.state/idp/signing-key.pem` (generated
+  shortly before it expires, so `Lab.Idp` reads its key from `.state/idp/signing-key.pem` (generated
   once, readable by its owner only, outside git). `lab.sh idp --Idp:AccessTokenLifetimeSeconds=N`
   restarts it with shorter tokens for trials. `[local: tools/campaign.py S3, S5]`
-- **`DtPipe.Coordinator.TrialIdp` says who, never what.** Its tokens carry a subject, a name and an email; no group,
+- **`Lab.Idp` says who, never what.** Its tokens carry a subject, a name and an email; no group,
   role or permission enters a token or the clients file, because what a caller may do belongs to
   the coordinator. A client's `audience` and `refreshTokens` are protocol, not a right. It stands
   alone: no reference to dtpipe, TransportR or the coordinator. `[local: tools/idp_check.py]`
@@ -98,7 +99,7 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   off the redirect to the loopback. Its refresh tokens live in the IdP's memory: an IdP restart
   signs every studio out. `[local: tools/idp_check.py, smoke.py rights — studio bearer]`
 - A node's tokens come from the IdP its `Oidc:Authority` names, through the discovery document:
-  `lab.sh` starts `DtPipe.Coordinator.TrialIdp` first and points the coordinator (`--authority`) and every node at it.
+  `lab.sh` starts `Lab.Idp` first and points the coordinator (`--authority`) and every node at it.
   The secrets live in `idp-clients.json` (the IdP) and the node files (the clients), never in the
   rights document. `[local: smoke.py rights]`
 - `tools/campaign.py` plays a fixed matrix of faults (a killed child or host, a cancellation, a
@@ -159,9 +160,10 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   coordinator's log, the enrollment host, the revision each node's own binary and image must carry). A new check that
   starts a process or reads a path of the local lab takes its stack form there too.
   `[local: lab.sh stack smoke, ui, studio]`
-- **`smoke.py keys` is played only when named, on a coordinator that exchanges keys** (its metadata's `dtpipe_auth` names `key`),
-  which neither target sets: it refuses any other by name. It makes a node and a person verified by a key, uses and revokes their
-  keys, and removes both identities; the key stays in its process. `[unchecked: no lab target exchanges keys]`
+- **`smoke.py keys` is played only when named, on a coordinator that exchanges keys** (its metadata's `dtpipe_auth` names `key`):
+  the stack, whose coordinator sets `Coordinator:Auth:AllowHttpKeys` beside the IdP; the local lab has no `PublicUrl`, so no key
+  issuer, and the pass refuses it by name. It makes a node and a person verified by a key, uses and revokes their keys, and removes
+  both identities; the key stays in its process. `[local: lab.sh stack smoke keys]`
 - **The coordinator's restart is checked on the stack, named only.** `lab.sh stack restart-check [restore|restore-alone]` runs `smoke.py restart`:
   a rights edit, a library save, an armed pipeline, a run and a session cookie are recorded, the container is stopped and started (`restore`: on
   a copy of its state directory put back, as `deploy/README.md` describes a backup; `restore-alone`: with the library's remote emptied too), and

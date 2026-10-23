@@ -297,8 +297,8 @@ public sealed partial class KeyOnlyCoordinatorTests : IDisposable
             (_adminKey, [.. keyOnly, ("Bootstrap:AdminKey", _adminKey), ("Bootstrap:Identities:0:Id", "edge")], "Identities:0:Key is required"),
             (_adminKey, [.. keyOnly, ("Bootstrap:AdminKey", _adminKey), ("Bootstrap:Identities:0:Id", "boss"), ("Bootstrap:Identities:0:Key", _adminKey)],
                 "names 'boss' more than once"),
-            // A key needs the issuer: with the trial provider there is none, and without people's keys there is no administrator's.
-            (_adminKey, [("PublicUrl", PublicUrl), ("InsecureTrialIdp:Password", "0123456789abcdef"), ("Bootstrap:AdminKey", _adminKey)], "the trial identity provider"),
+            // A key needs the issuer, which needs the public address; without people's keys there is no administrator's.
+            (_adminKey, [("Authority", "https://idp.example"), ("Ui:ClientSecret", "s"), ("Bootstrap:AdminKey", _adminKey)], "Coordinator:PublicUrl"),
             (_adminKey, [.. keyOnly, ("Authority", "https://idp.example"), ("Ui:ClientSecret", "s"), ("Auth:PersonKeys", "false"), ("Bootstrap:AdminKey", _adminKey)],
                 "names people (boss)"),
         };

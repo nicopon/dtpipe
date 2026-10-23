@@ -65,7 +65,7 @@ fi
 pass "no core project references the distributed family or the lab (the CLI reaches the Launcher alone)"
 
 # 3. The distributed family and the lab stay out of the solution.
-if grep -qE 'DtPipe\.(Coordinator|PipelineNode)|distributed-lab|Lab\.(Coordinator|NodeHost|Contracts)' DtPipe.sln; then
+if grep -qE 'DtPipe\.(Coordinator|PipelineNode)|distributed-lab|Lab\.(Coordinator|NodeHost|Contracts|Idp)' DtPipe.sln; then
     fail "DtPipe.sln names a distributed-family project or a lab project"
 fi
 pass "DtPipe.sln names neither the distributed family nor the lab"
@@ -82,7 +82,7 @@ for f in $(
     [ -f "$f" ] || continue
     # This guard names the lab on purpose.
     [ "$f" = "tests/scripts/validate_distributed_boundary.sh" ] && continue
-    if grep -qE 'distributed-lab|DtPipe\.Lab\b|Lab\.(Coordinator|NodeHost|Contracts)|sensor-stream|order-history|customers-anonymized' "$f"; then
+    if grep -qE 'distributed-lab|DtPipe\.Lab\b|Lab\.(Coordinator|NodeHost|Contracts|Idp)|sensor-stream|order-history|customers-anonymized' "$f"; then
         HITS="$HITS\n  $f"
     fi
 done

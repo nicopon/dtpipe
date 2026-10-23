@@ -56,18 +56,6 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   its next request and an hour's token with it. A person of a key signs out here only. `Coordinator:Auth:PersonKeys=false`
   refuses a person by name when it is added and at start (`KeyIssuer.CheckIdentities`), maps no form, gives a person no token and
   takes `key` out of the metadata's `dtpipe_auth`. `[local: PersonKeyTests, RouteTableTests]`
-- **The trial identity provider is opt-in and the server trusts it like any other.** `Coordinator:InsecureTrialIdp:Password` (16
-  characters at least) runs `DtPipe.Coordinator.TrialIdp` inside the server (`TrialIdpMode`), and the metadata's `dtpipe_auth`
-  then names `trial`, which the studio reads for its banner; unset, the trial provider maps nothing and `dtpipe_auth` names `idp`. It is refused beside `Coordinator:Authority`, without
-  `Coordinator:PublicUrl` (the issuer is that one address, and the server reaches itself there) and beside `Coordinator:Ui:ClientSecret`.
-  `Authority` is then the public address and `TrustedIdp` validates its tokens through discovery, with no exception for them. It
-  serves the key issuer's paths under the key issuer's address, so with it the server issues no key's token: an identity verified by
-  a key is refused when it is added, and a start whose rights hold one stops naming it. The
-  clients are the rights' identities the IdP verifies other than people, who sign in as its users (secret: the password), the pages' client and the studio's; `TrialIdpClients` makes them right
-  before a token is issued after the rights change, and a client the rights drop loses every permission (the in-memory store cannot
-  cascade a delete). The login form and cookie (`/trial-idp/login`, scheme `TrialIdp`) are apart from the server's own.
-  `[local: TrialIdpModeTests, KeyIssuerTests; the trial recipe, deploy/compose.yaml]` `[unchecked: the refusals without `PublicUrl` and beside
-  `Ui:ClientSecret`; a client withdrawn from the rights]`
 - **A person and a service are told apart by the claims of a token the issuer made from the identity's kind, whichever
   issuer.** A service's token comes from
   client credentials, so its subject is its client (`sub == client_id`, RFC 9068): the default
@@ -135,7 +123,7 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   id it names only finds the identity, a disabled one or one the IdP verifies opens nothing, and every live key is compared in constant
   time. `[local: IdentityKeyRoutesTests, IdentityKeyTests (its Redis case needs DTPIPE_TEST_REDIS or DTPIPE_TEST_REUSE_INFRA)]`
 - **The server issues the tokens of a key, and trusts them as it trusts the provider's.** `KeyIssuer`'s issuer is
-  `Coordinator:PublicUrl`; there is none without it or beside the trial provider, and then an identity verified by a key is refused
+  `Coordinator:PublicUrl`; there is none without it, and then an identity verified by a key is refused
   when it is added and a start whose rights hold one stops naming it. An `Authority` equal to the issuer stops the start: the issuer
   is what tells the two apart. It maps `GET /.well-known/openid-configuration`, `GET /.well-known/jwks.json` and `POST
   /connect/token`, client credentials only, the key as the form's `client_secret`; the client id must be the one the key names, and
@@ -149,7 +137,7 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   `Coordinator:Auth:PersonKeys=false`, a person's key is refused as any other client is. While `PublicUrl` is plain HTTP the exchange is refused unless
   `Coordinator:Auth:AllowHttpKeys`, and while that setting is in effect the start logs a warning and every page shows a banner
   (`/api/info` `httpKeys`, `AccessPage`). The metadata lists the issuer after `Authority`, which the studio and a node with no
-  `Oidc:Authority` read first: a node verified by a key sets `Oidc:Authority` to the coordinator's address. **Without `Coordinator:Authority` (and no trial) the issuer is
+  `Oidc:Authority` read first: a node verified by a key sets `Oidc:Authority` to the coordinator's address. **Without `Coordinator:Authority` the issuer is
   the only one: `AddTrustedIdp` registers neither `IdpBearer`, `IdpPerson` nor OpenID Connect, every token goes to the key issuer's
   schemes, the challenge is the cookie's (the form), the metadata lists the issuer alone and `dtpipe_auth` is `key`, the form links to
   no provider and `/account/login/idp` is not mapped, `/api/rights` names no `idp`, and an identity of the IdP is refused when it is
@@ -565,5 +553,5 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   + `js/` (the coordinator's views, ES modules, no build) and `lab/` (the Lab view, lab mode only).
   `window.lab.store` exists for the lab's `tools/ui_check.py`. `/healthz`, the protected resource
   metadata (`CoordinatorApi.Metadata`, RFC 9728: the provider, the contract, the studio's client) and
-  the routes of an issuer (the key issuer's, the trial provider's) are the only anonymous routes; `/health` is a monitor's and `/service` a launcher's. Verify a change with the lab's `./lab.sh smoke`, and a page change with
+  the key issuer's routes are the only anonymous routes; `/health` is a monitor's and `/service` a launcher's. Verify a change with the lab's `./lab.sh smoke`, and a page change with
   `./lab.sh ui` too.

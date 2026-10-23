@@ -1,10 +1,9 @@
-namespace DtPipe.Coordinator.TrialIdp;
+namespace DtPipe.Lab.Idp;
 
 /// <summary>
-/// What the trial identity provider needs to run inside any ASP.NET Core host: the stand-alone host
-/// (<see cref="IdpOptions"/>) and the coordinator's trial mode build one each. Every name the provider
-/// registers in its host (the session cookie, the login route) is a setting, so it never meets the
-/// host's own.
+/// What the identity provider needs to run inside an ASP.NET Core host, built from the host's configuration
+/// (<see cref="IdpOptions"/>). Every name the provider registers in its host (the session cookie, the login
+/// route) is a setting, so it never meets the host's own.
 /// </summary>
 public sealed class TrialIdpSettings
 {

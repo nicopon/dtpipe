@@ -6,8 +6,8 @@ namespace DtPipe.Coordinator.Server;
 
 /// <summary>
 /// The pages of <c>/account</c> a browser opens without the coordinator's scripts: a refusal and its ways out, and the form a person
-/// verified by a key signs in with. <c>Program.cs</c> maps them. A value a page shows is HTML-encoded first, and every page names the
-/// trial identity provider and an exchange of keys over HTTP while they are in effect.
+/// verified by a key signs in with. <c>Program.cs</c> maps them. A value a page shows is HTML-encoded first, and every page names an
+/// exchange of keys over HTTP while it is in effect.
 /// </summary>
 internal static class AccountPages
 {
@@ -95,7 +95,6 @@ internal static class AccountPages
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
         + "<title>dtpipe coordinator</title><link rel=\"stylesheet\" href=\"/styles.css\"></head>"
         + "<body style=\"max-width:40rem;margin:4rem auto;padding:0 1rem;font-family:system-ui,sans-serif;line-height:1.5\">"
-        + (server.IsTrialIdp ? "<p style=\"background:#b00020;color:#fff;padding:.4rem .8rem;font-weight:600\">Trial identity provider: not for production.</p>" : "")
         + (server.ExchangesKeysOverHttp ? "<p style=\"background:#b00020;color:#fff;padding:.4rem .8rem;font-weight:600\">Identity keys cross the network in clear: this coordinator is reached over HTTP.</p>" : "")
         + "<h1 style=\"font-size:1.3rem\">dtpipe coordinator</h1>"
         + body

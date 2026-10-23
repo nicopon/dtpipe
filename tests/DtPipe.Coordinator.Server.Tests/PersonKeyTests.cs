@@ -506,7 +506,6 @@ public sealed partial class PersonKeyTests : IDisposable
         Assert.Equal([PersonAuth.Idp], Options([.. external, ("PublicUrl", "http://c.example")]).PersonAuth);
         Assert.Equal([PersonAuth.Idp, PersonAuth.Key], Options([.. external, ("PublicUrl", "http://c.example"), ("Auth:AllowHttpKeys", "true")]).PersonAuth);
         Assert.Equal([PersonAuth.Idp], Options(external).PersonAuth);
-        Assert.Equal([PersonAuth.Trial], Options(("InsecureTrialIdp:Password", "0123456789abcdef"), ("PublicUrl", "https://c.example")).PersonAuth);
         Assert.Equal(TimeSpan.FromMinutes(30), Options([.. external, ("Auth:PersonTokenLifetime", "00:30:00")]).PersonTokenLifetime);
         var tooShort = Assert.Throws<InvalidOperationException>(() => Options([.. external, ("Auth:PersonTokenLifetime", "00:04:00")]));
         Assert.Contains("Coordinator:Auth:PersonTokenLifetime", tooShort.Message);

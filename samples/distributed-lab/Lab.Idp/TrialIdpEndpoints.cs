@@ -11,13 +11,12 @@ using OpenIddict.Abstractions;
 using OpenIddict.Server.AspNetCore;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
-namespace DtPipe.Coordinator.TrialIdp;
+namespace DtPipe.Lab.Idp;
 
 /// <summary>
-/// A trial identity provider for the coordinator and its nodes, never for production: OpenIddict, client credentials for services and
+/// The lab's identity provider for the coordinator and its nodes, never for production: OpenIddict, client credentials for services and
 /// authorization code with PKCE for front ends, with refresh tokens for a client that asks for them. It says who a caller is; what a
-/// caller may do belongs to the services that trust it. It runs in any ASP.NET Core host: the stand-alone one, or the coordinator's trial
-/// mode. A host that maps it also calls <c>UseAuthentication</c> (OpenIddict answers its discovery and key routes there) and
+/// caller may do belongs to the services that trust it. A host that maps it also calls <c>UseAuthentication</c> (OpenIddict answers its discovery and key routes there) and
 /// <c>UseAntiforgery</c> after its routing, for the login form; it hands the clients it wants to <see cref="ClientRegistrar"/>.
 /// </summary>
 public static class TrialIdpEndpoints
