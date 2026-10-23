@@ -12,7 +12,7 @@ import { sequence, state } from "./state.js";
 import { adoptDraft, cardBadge, cardTool, cardTools, debugComposed, forgetPins, forgetPreview, previewView, restoreRows, runPreview, setDebugRows } from "./preview.js";
 import { forgetRun, prepareRun, restoreReview, runView } from "./run.js";
 import { forgetPublication, publicationView, publish } from "./publish.js";
-import { loadVariables, unreadyCount, variablesView } from "./variables.js";
+import { loadVariables, onLaunchChanged, unreadyCount, variablesView } from "./variables.js";
 
 const MAX_DEBUG_ROWS = 100000;
 const opening = sequence();
@@ -246,6 +246,7 @@ async function start() {
   state.components = await api("/api/components");
   onZone("bar", renderBar);
   onZone("jobs", renderJobs);
+  onLaunchChanged(debugComposed);
   afterFlush(rememberView);
   mountDesigner($("designer"), {
     toolbar: barButtons,

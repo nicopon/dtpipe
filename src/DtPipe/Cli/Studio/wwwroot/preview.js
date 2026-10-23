@@ -141,7 +141,7 @@ async function planNow() {
   const forJob = state.job;
   const ticket = planning.begin();
   try {
-    const answer = await api("/api/debug/plan", { yaml, rows: dbg.rows });
+    const answer = await api("/api/debug/plan", { yaml, rows: dbg.rows, path: forJob.hash ? forJob.path : undefined });
     if (planning.stale(ticket) || forJob !== state.job || dbg.running) return;
     dbg.branches = answer.view.branches;
     takePlaces(answer.view.places);

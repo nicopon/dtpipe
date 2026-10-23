@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using DtPipe.Cli.Split;
@@ -76,6 +78,27 @@ public sealed partial class StudioServer
         {
             throw new StudioRefusal(422, ex.Message);
         }
+    }
+
+    private byte[]? _levelKey;
+
+    /// <summary>
+    /// The key a level's salt is hashed under, derived from the debug session's own key in user state: it survives a
+    /// restart of the studio, which keeps the levels held, and goes with the session when that key is destroyed.
+    /// </summary>
+    private byte[] LevelKey() => _levelKey ??= HKDF.DeriveKey(
+        HashAlgorithmName.SHA256, SessionKeyStore.GetOrCreateKey(DebugCutter.SessionName), 32, info: "dtpipe studio level salt"u8.ToArray());
+
+    /// <summary>
+    /// What a sample's levels were read with besides the text: the launch values by name, hashed under <see cref="LevelKey"/>
+    /// so a digest kept on disk gives none back. Null for a job with no variable, which keeps the digest of the text alone.
+    /// </summary>
+    private string? SampleSalt(string? path, string? yaml)
+    {
+        if (string.IsNullOrWhiteSpace(yaml)) return null;
+        var material = _variables.Fingerprint(JobPath(path), yaml);
+        return material.Length == 0 ? null
+            : Convert.ToHexStringLower(HMACSHA256.HashData(LevelKey(), Encoding.UTF8.GetBytes("sample\0" + material)));
     }
 
     private CheckpointStore DebugStore() => new(SessionStore.Resolve(DebugCutter.SessionName, _folder.Root));
@@ -245,7 +268,7 @@ public sealed partial class StudioServer
         var key = DebugKey(asked.Path, asked.Draft);
         _local.CheckDebug(key);
         var upTo = asked.UpTo is null ? null : WatchOf(asked.UpTo);
-        var plan = PlanOf(cutter, asked.Yaml, rows);
+        var plan = PlanOf(cutter, asked.Yaml, rows, SampleSalt(asked.Path, asked.Yaml));
 
         DebugCut? cut = null;
         DebugState? state = null;
@@ -325,7 +348,7 @@ public sealed partial class StudioServer
         var rows = Math.Clamp(asked.Rows ?? 1000, 1, DebugMaxRows);
         var key = DebugKey(asked.Path, asked.Draft);
         _local.CheckDebug(key);
-        var plan = PlanOf(cutter, asked.Yaml, rows);
+        var plan = PlanOf(cutter, asked.Yaml, rows, SampleSalt(asked.Path, asked.Yaml));
         var wanted = asked.Watch?.Select(WatchOf).ToList();
         var reset = (asked.Reset ?? []).Select(WatchOf).ToList();
         string? adopted = asked.Adopt is null || asked.Path is null ? null : DebugKey(null, asked.Adopt);
@@ -367,7 +390,7 @@ public sealed partial class StudioServer
         finally { _sampling.Release(); }
     }
 
-    private sealed record DebugPlanRequest(string? Yaml, int? Rows);
+    private sealed record DebugPlanRequest(string? Yaml, int? Rows, string? Path);
 
     /// <summary>
     /// The places of a job's cards and the digest of what each depends on. Pure: it reads nothing held, changes nothing and
@@ -377,7 +400,7 @@ public sealed partial class StudioServer
     {
         var cutter = _tools.Engine.Cutter;
         var asked = await BodyAsync<DebugPlanRequest>(context);
-        var plan = PlanOf(cutter, asked.Yaml, Math.Clamp(asked.Rows ?? 1000, 1, DebugMaxRows));
+        var plan = PlanOf(cutter, asked.Yaml, Math.Clamp(asked.Rows ?? 1000, 1, DebugMaxRows), SampleSalt(asked.Path, asked.Yaml));
         await JsonAsync(context, new { view = DebugView(plan, new DebugState(), null) });
     }
 

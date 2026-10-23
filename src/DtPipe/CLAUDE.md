@@ -253,7 +253,8 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   resolves its values; the Variables tab reads the real environment only.
   `[CI: StudioServerTests, StudioSampleTests — the values reach every branch of a DAG]` The
   launch file holds an alias or a typed text, never a keyring value; the page sees names and
-  aliases only. The keyring is opened only for a job that needs it: opening it can ask the person.
+  aliases only. The keyring is opened only for a job that needs it, and its alias list is kept for the session
+  (read again once when a name is missing): opening it can ask the person and wait.
 - **The command line names the coordinator, never the page.** `--coordinator <url>` gives the studio
   a `CoordinatorLink` to that origin: the coordinator's metadata (RFC 9728) and contract number, its
   provider's discovery (issuer equal, no HTTPS downgrade), then authorization code with PKCE through
@@ -337,7 +338,7 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   the piece of the report that holds it (first stage for a read, last for an end) or null when the run did not
   produce it (read back from a level held, upstream of a stop). A null place keeps the rows it showed, while
   its digest is unchanged. `POST /api/debug/plan` answers the places of a text and nothing else: pure, no engine
-  slot, no file. After an edit the page compares digests as strings and clears the rows they no longer
+  slot, no file of the job's. After an edit the page compares digests as strings and clears the rows they no longer
   support. `[CI: StudioDebugTests]`
 - **A staged run is the job's own run, and nothing leaves the process before its last stage.**
   `POST /api/run/prepare` and `POST /api/run` take `debug` and `review`; the saved file only, and the
@@ -365,7 +366,12 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   a place and the card it sits on, nothing else.
 - **A level's digest comes from the job as written, never from the cut.** It hashes the branches the
   level reads, the reader side, the transformers up to it and the rows asked, so pinning another card
-  invalidates nothing. A launch value is not in a sample's, but is in a real run's (the salt).
+  invalidates nothing. The launch values are in both, as a salt: a real run's under the session's token (it
+  does not survive the studio), a sample's by name under a key derived from the debug session's own
+  (`StudioVariables.Fingerprint`: a typed text and a process variable by value, a keyring alias by its name, never
+  its value, so the keyring stays closed and a value changed under the same alias is not seen). A job with no
+  variable has no salt. `/api/debug/plan` takes the job's `path` for the same reason, and the page asks it again once
+  a launch value changed. A salt creates the session's key file, so that route is pure of the engine and the job, not of user state.
 - **A checkpoint is valid or does not exist.** `POST /api/debug` and `POST /api/debug/state` settle the
   watchers and held levels against the text under the engine slot, delete from the session what the
   text, the rows or a reset no longer supports (a reset takes everything downstream with it), and

@@ -26,6 +26,12 @@ export const unreadyCount = () => state.vars.variables.filter((v) => !v.ready).l
 
 const launchOf = () => Object.fromEntries(state.vars.variables.filter((v) => v.kind === "env" && v.override).map((v) => [v.name, v.override]));
 
+/** What follows a change of launch values: the rows held depend on them, so the places are asked again. @type {() => void} */
+let afterLaunch = () => {};
+
+/** @param {() => void} fn */
+export function onLaunchChanged(fn) { afterLaunch = fn; }
+
 /** @param {string} name @param {any} chosen */
 async function launch(name, chosen) {
   const overrides = launchOf();
@@ -33,6 +39,7 @@ async function launch(name, chosen) {
   try {
     await api("/api/launch", { path: state.job?.path, overrides }, "PUT");
     await loadVariables(await compose());
+    afterLaunch();
   } catch (e) { status(e.message, "bad"); }
 }
 

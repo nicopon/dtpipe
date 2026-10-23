@@ -313,6 +313,70 @@ public sealed class StudioDebugTests : IAsyncLifetime
         Assert.False(Directory.Exists(KeyDirectory(read)));
     }
 
+    private const string Modulo = "% 2 == 0";
+
+    private async Task LaunchWithAsync(object overrides)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Put, $"http://127.0.0.1:{_server.Port}/api/launch")
+        {
+            Content = new StringContent(JsonSerializer.Serialize(overrides), Encoding.UTF8, "application/json"),
+        };
+        request.Headers.Add(StudioServer.TokenHeader, _server.Token);
+        using var response = await _http.SendAsync(request, Ct);
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync(Ct));
+    }
+
+    [Fact]
+    public async Task A_launch_value_is_part_of_what_a_level_depends_on_and_the_job_s_text_is_not_enough()
+    {
+        var job = Chain.Replace(Modulo, "% ${{MOD}} == 0");
+        File.WriteAllText(Path.Combine(_dir, "job.yaml"), job);
+        await LaunchWithAsync(new { path = "job.yaml", overrides = new { MOD = new { value = "2" } } });
+        await StateAsync(new { yaml = job, rows = 20, path = "job.yaml", watch = new[] { At("b", "read"), At("b", "end") } });
+        var (_, held) = await DebugAsync(new { yaml = job, rows = 20, path = "job.yaml", upTo = At("b", "end") });
+        var end = KeyOf(held, "b", "end")!;
+
+        // Same text, same values: ▶ on a card starts from what is held.
+        var (_, same) = await StateAsync(new { yaml = job, rows = 20, path = "job.yaml" });
+        Assert.Equal(end, KeyOf(same, "b", "end"));
+
+        // Same text, another value: the rows held were read with the first, so none of them is served.
+        await LaunchWithAsync(new { path = "job.yaml", overrides = new { MOD = new { value = "3" } } });
+        var (_, other) = await StateAsync(new { yaml = job, rows = 20, path = "job.yaml" });
+        Assert.Null(KeyOf(other, "b", "end"));
+        Assert.False(Directory.Exists(KeyDirectory(end)));
+    }
+
+    [Fact]
+    public async Task What_a_level_depends_on_is_the_same_after_the_studio_restarts_and_never_a_value_in_the_clear()
+    {
+        const string Witness = "48210137";
+        var job = Chain.Replace(Modulo, "% ${{MOD}} == 0");
+        File.WriteAllText(Path.Combine(_dir, "job.yaml"), job);
+        await LaunchWithAsync(new { path = "job.yaml", overrides = new { MOD = new { value = "2" } } });
+        await StateAsync(new { yaml = job, rows = 20, path = "job.yaml", watch = new[] { At("b", "end") } });
+        var (_, held) = await DebugAsync(new { yaml = job, rows = 20, path = "job.yaml", upTo = At("b", "end") });
+        var end = KeyOf(held, "b", "end")!;
+
+        // The level held is the first studio's; a second, on the same folder, still holds it.
+        await using var second = await StudioServer.StartAsync(new StudioFolder(_dir), 0, new StudioTools(
+            StudioEngines.Real(_services), new DesignService(IBrickLookup.None), [], [], new InMemorySecretsManager()), CancellationToken.None);
+        var first = _server;
+        _server = second;
+        try
+        {
+            var (_, again) = await StateAsync(new { yaml = job, rows = 20, path = "job.yaml" });
+            Assert.Equal(end, KeyOf(again, "b", "end"));
+        }
+        finally { _server = first; }
+
+        // The state a job keeps holds digests: a launch value is in the launch file alone.
+        await LaunchWithAsync(new { path = "job.yaml", overrides = new { MOD = new { value = $"2 + 0 * {Witness}" } } });
+        await StateAsync(new { yaml = job, rows = 20, path = "job.yaml", watch = new[] { At("b", "end") } });
+        await DebugAsync(new { yaml = job, rows = 20, path = "job.yaml", upTo = At("b", "end") });
+        Assert.DoesNotContain(Witness, File.ReadAllText(Directory.EnumerateFiles(Path.Combine(_dir, ".dtpipe", "studio"), "*-debug.json").Single()));
+    }
+
     [Fact]
     public async Task A_reset_forgets_the_card_and_every_checkpoint_downstream_of_it()
     {
