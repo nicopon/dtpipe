@@ -1,4 +1,4 @@
-# DtPipe (CLI) — parsing, options, sample mode, checkpoints, MCP, agent and studio
+# DtPipe (CLI) — parsing, engine and host, options, sample mode, checkpoints, MCP, agent, studio
 
 Mechanics for editing the CLI project. The rules themselves are in the root `CLAUDE.md`.
 
@@ -22,6 +22,22 @@ Neither `--sql` nor boolean processor flags (`--merge`) split. Each processor de
 flags via `IStreamTransformerFactory.CliTriggerFlags`. `--job` loads a YAML job and applies extra CLI
 flags as overrides; `--export-job <file>` serialises the CLI pipeline through `JobFileWriter` and
 exits without running.
+
+## The engine and its host
+
+`Engine/` (namespace `DtPipe.Engine`) runs a parsed job; `Cli/` hosts it.
+`JobService.ExecutePipelineAsync` hands the run to `JobExecutor.ExecuteAsync`, which takes the
+one-run gate, applies alias binding, validates, fingerprints the DAG and drives `DagOrchestrator`.
+Each branch is a `BranchRun` that `LinearPipelineService` resolves once, binds and hands to
+`ExportService`. What a run needs of its process (the interrupt, logging, a choice, a display) it
+asks through `IRunHost`, which `JobService` implements: read the interface for its members.
+
+A message is plain text: the orchestrator raises a `DagLogEvent`, the engine calls
+`IExportObserver.LogMessage` with a `MessageTone` (Core, `Abstractions/`), and the host picks glyph
+and colour and escapes. Never write markup into a message's text, and never render one as markup in
+a host: a `[` in a path, a value or an exception message is then read as a tag and throws inside
+the branch. `validate_engine_boundary.sh` greps `Engine/` for the three libraries; it does not see
+one of their types reached through another assembly's signature.
 
 ## Options
 
@@ -135,7 +151,7 @@ passes what the resolved run knows (component, sanitised connection, query, `Eff
 sampling) and `PipelineOptions.DefinitionFingerprint`, computed by `BranchFingerprint` from the job as
 written: transformer configuration, a processor's options and, recursively, the fingerprint of
 each branch it reads. A plain `from:` takes its upstream's fingerprint alone, a processor takes
-(alias, fingerprint) pairs because its query names them. `JobService` computes the whole DAG
+(alias, fingerprint) pairs because its query names them. `JobExecutor` computes the whole DAG
 before it starts, since branches run concurrently and an upstream without `--checkpoint` computes
 no key. A non-source reader (`IStreamReaderFactory.IsSource`) contributes no connection: its route
 is a channel alias. Pass a new part of a branch's definition through the fingerprint, never through
@@ -197,7 +213,7 @@ Mandatory MCP directives:
 ### One run, one report collection
 
 A process runs one pipeline at a time (root `CLAUDE.md`), so a run started beside another waits for
-it at `JobService.ExecutePipelineAsync`. The agent orders its own runs before they reach that gate
+it at `JobExecutor.ExecuteAsync`, behind `JobService.ExecutePipelineAsync`. The agent orders its own runs before they reach that gate
 (F5); `dtpipe mcp` relies on the gate alone, since the SDK handles a client's requests concurrently. `JobRunner` is the only caller-facing way to run a resolved job
 (MCP's sample and real write, `split`, `contract`, the studio): it arms a `RunReports` for the run
 through `SampleReportCollector.Begin`, around the whole `ExecutePipelineAsync`, and returns a

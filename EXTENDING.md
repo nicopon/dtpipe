@@ -54,7 +54,7 @@ public class MyProviderWriterOptions : IProviderOptions, IKeyAwareOptions
     public static string Prefix => "myprovider";
     public static string DisplayName => "MyProvider Writer";
 
-    public string? Key { get; set; }  // propagated by JobService
+    public string? Key { get; set; }  // propagated by ProviderConfigurationService
 
     [ComponentOption(Description = "Target table name", Hidden = true)]
     public string Table { get; set; } = "export";

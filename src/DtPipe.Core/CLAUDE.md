@@ -1,11 +1,13 @@
-# DtPipe.Core — engine, Arrow ownership, redaction
+# DtPipe.Core — DAG orchestrator, Arrow ownership, redaction
 
 Mechanics for editing Core. The rules themselves are in the root `CLAUDE.md`.
 
 ## DAG engine
 
 `DagOrchestrator` spawns one concurrent `Task` per branch; a linear run goes through it once too.
-The kernel is `PipelineExecutor.ExecuteSegmentedPipelineAsync`. Branches communicate through
+Each branch runs in the engine, which lives in the CLI's assembly (`src/DtPipe/CLAUDE.md`, "The
+engine and its host"); its kernel is `PipelineExecutor.ExecuteSegmentedPipelineAsync`. What the
+orchestrator reports is a `DagLogEvent` of plain text, never markup. Branches communicate through
 `IMemoryChannelRegistry` (Arrow `Channel<RecordBatch>`).
 Fan-out (broadcast/tee) resolves through `BranchChannelContext.AliasMap` — logical alias → physical
 channel, including `s__fan_0` sub-channels — which `DagOrchestrator` populates and factories consume

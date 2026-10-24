@@ -134,7 +134,7 @@ example to make it checked]`
 
 | Project | Role |
 |---|---|
-| `src/DtPipe` | CLI entry, DI wiring, `JobService`, `ExportService`, MCP server, AI agent, studio |
+| `src/DtPipe` | CLI entry, DI wiring, the engine (`Engine/`, namespace `DtPipe.Engine`), `JobService` (its CLI host), MCP server, AI agent, studio |
 | `src/DtPipe.Core` | Abstractions, DAG engine, pipeline models, helpers |
 | `src/DtPipe.Adapters` | Readers and writers (`Adapters/<Name>/`) |
 | `src/DtPipe.Adapters.Shared` | Infrastructure shared by adapters and processors (DuckDB read path) |
@@ -154,7 +154,8 @@ example to make it checked]`
 | `deploy` | The Dockerfile of the coordinator's and the runner's images, and `deploy/README.md`: what a deployment provides |
 | `tests/DtPipe.Tests` | xunit.v3 unit and integration tests |
 
-`DtPipe.Core` holds abstractions, models and the engine only. The **distributed family** is every
+`DtPipe.Core` holds abstractions, models and the DAG orchestrator only; the engine that runs a
+branch lives in the CLI's assembly, under `src/DtPipe/Engine/`. The **distributed family** is every
 project named `DtPipe.Coordinator*` or `DtPipe.PipelineNode*`: it references TransportR as NuGet
 packages and stays outside `DtPipe.sln`, so `build.yml` builds only what `src/DtPipe` reaches through
 `DtPipe.PipelineNode.Launcher` and tests none of it; `build.sh` discovers its test projects, so
@@ -260,16 +261,25 @@ it. Ownership moves downstream when a batch is yielded, returned or written.**
 `[CI: ArrowOwnershipTests, CDataOwnershipTests]` `[unchecked: a transformer that aliases a column
 without retaining it]` Detail: `src/DtPipe.Core/CLAUDE.md`.
 
+### The engine formats nothing
+
+**The engine names neither Spectre.Console, System.CommandLine nor Serilog: what it and
+`DagOrchestrator` tell a person is plain text, which the host formats.**
+`[CI: validate_engine_boundary.sh — a grep of src/DtPipe/Engine/]`
+`[unchecked: markup written into a message's text; a host that renders a message as markup]`
+Detail: `src/DtPipe/CLAUDE.md`.
+
 ### One run at a time per process
 
-**A process runs one pipeline at a time.** `JobService.ExecutePipelineAsync`, which every run enters
-(the command line, `JobRunner`), holds a static gate for the whole run: a run that finds it held
+**A process runs one pipeline at a time.** `JobExecutor.ExecuteAsync` holds a static gate for the
+whole run, and every run reaches it through `JobService.ExecutePipelineAsync` (the command line,
+`JobRunner`): a run that finds it held
 waits, and one cancelled while it waits returns 130. A run owns state the process holds once (the
 channel registry `DagOrchestrator` clears at its start, the console's Ctrl-C); two runs over it
 trade rows, and one can still exit 0. **Never start a run from inside a run**: it would wait on
 itself. Callers that overlap wait: MCP requests, which the SDK handles concurrently; the agent
 issues a turn's runs one after the other (F5).
-`[CI: ConcurrentRunCollectionTests]` `[unchecked: an entry that runs the engine without JobService;
+`[CI: ConcurrentRunCollectionTests]` `[unchecked: an entry that runs the engine without JobExecutor;
 the branches a failed DAG leaves running once it has returned]` Detail: `src/DtPipe/CLAUDE.md`.
 
 **A value of one run is armed for its call chain, never written to the process environment**
