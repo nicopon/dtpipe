@@ -193,22 +193,10 @@ public sealed class JobAnalysis(IServiceProvider services, IEnumerable<IStreamRe
         var outcome = await runner.RunAsync(jobs, parsed.Dag, contexts,
             new GlobalOptions { NoStats = true, Quiet = true }, ct);
         var exitCode = outcome.ExitCode;
-        string? failure = null;
-        // A failed sample is still a sample that wrote nothing. Reporting it as a bare
-        // error would drop `applied: false`, and a model could no longer tell "nothing was
-        // written" from "something was written and then it failed" — which is exactly the
-        // distinction F2 exists to keep visible.
-        if (outcome.Fault is not null)
-            failure = DtPipe.Core.Security.ConnectionStringSanitizer.Sanitize(outcome.Fault.Message);
-
-        // A branch that fails does not throw here: the orchestrator turns it into an exit code and
-        // the reason goes to the console, which this run has silenced. Reported without them, a
-        // failed sample was `success: false` with `error: null` — and validate-yaml-job now sends
-        // every caller straight to this tool.
-        if (failure is null && outcome.Failures.Count > 0)
-            failure = string.Join(" ", outcome.Failures
-                .OrderBy(kv => kv.Key, StringComparer.Ordinal)
-                .Select(kv => $"Branch '{kv.Key}': {DtPipe.Core.Security.ConnectionStringSanitizer.Sanitize(kv.Value)}"));
+        // A failed sample is still a sample that wrote nothing: it keeps `applied: false`, so a model can
+        // tell "nothing was written" from "something was written and then it failed" (F2). The reason
+        // goes in `error`, since the console that would show it is silenced.
+        var failure = outcome.FailureText();
 
         return new
         {

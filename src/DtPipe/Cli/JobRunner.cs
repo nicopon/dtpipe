@@ -21,6 +21,23 @@ public sealed record RunOutcome(
     {
         if (Fault is not null) ExceptionDispatchInfo.Capture(Fault).Throw();
     }
+
+    /// <summary>
+    /// Why the run failed, for a caller that answers a model: the engine's exception, else each failed
+    /// branch's reason in alias order. Sanitised; null when the run gave neither. A failed branch does not
+    /// throw (the orchestrator turns it into an exit code), so this is the only place its reason surfaces
+    /// when the console is silenced.
+    /// </summary>
+    public string? FailureText()
+    {
+        if (Fault is not null)
+            return DtPipe.Core.Security.ConnectionStringSanitizer.Sanitize(Fault.Message);
+        if (Failures.Count == 0)
+            return null;
+        return string.Join(" ", Failures
+            .OrderBy(kv => kv.Key, StringComparer.Ordinal)
+            .Select(kv => $"Branch '{kv.Key}': {DtPipe.Core.Security.ConnectionStringSanitizer.Sanitize(kv.Value)}"));
+    }
 }
 
 /// <summary>

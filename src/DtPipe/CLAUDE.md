@@ -217,7 +217,9 @@ it at `JobExecutor.ExecuteAsync`, behind `JobService.ExecutePipelineAsync`. The 
 (F5); `dtpipe mcp` relies on the gate alone, since the SDK handles a client's requests concurrently. `JobRunner` is the only caller-facing way to run a resolved job
 (MCP's sample and real write, `split`, `contract`, the studio): it arms a `RunReports` for the run
 through `SampleReportCollector.Begin`, around the whole `ExecutePipelineAsync`, and returns a
-`RunOutcome` (exit code, branch failures, reports, checkpoint keys). `SampleReportCollector` is the
+`RunOutcome` (exit code, branch failures, reports, checkpoint keys). A caller that answers a model words
+a failed run through `RunOutcome.FailureText` alone (the sample and the real write of `execute-yaml-job`
+share it), since a failed branch throws nothing and the console that would show its reason is silenced. `SampleReportCollector` is the
 singleton the engine and the observer publish to; it forwards to the collection the calling async flow
 armed, branches included, and drops everything when none is armed. Never read it from a caller, and
 never arm it from an `async` method that returns before the run ends: the value is gone with the frame.
@@ -227,7 +229,8 @@ never arm it from an `async` method that returns before the run ends: the value 
 (`JobSqlSafety`), sample, resolve for a run. MCP and the studio call it; `DtPipeMcpTools` keeps only the tool
 surface and the wording written for a model. A refusal that names a tool of this server goes through `JobHints`, so
 a caller that has none gets the refusal without the pointer. Never copy a validator into a caller.
-`[CI: ConcurrentRunCollectionTests, SampleReportCollectorTests, SampleModeDagTests, McpCommandTests]`
+`[CI: ConcurrentRunCollectionTests, SampleReportCollectorTests, SampleModeDagTests, McpCommandTests,
+ExecuteYamlJobRealRunTests]`
 
 ### The session trace
 

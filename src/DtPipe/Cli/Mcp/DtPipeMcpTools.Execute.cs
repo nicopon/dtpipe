@@ -251,6 +251,8 @@ public partial class DtPipeMcpTools
                 mode = "write",
                 durationMs = sw.ElapsedMilliseconds,
                 safety = "ok",
+                // The reason of each branch that failed without throwing, as the sample path reports it.
+                error = outcome.FailureText(),
                 branches = parsed.Dag.Branches.Select(b => new
                 {
                     b.Alias,
