@@ -9,6 +9,7 @@ using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Pipelines;
 using DtPipe.Services;
+using DtPipe.Tests.Helpers;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -263,6 +264,53 @@ public class PipelineExecutorTests
         Assert.Equal(1, values.GetValue(0));
         Assert.Equal(2, values.GetValue(1));
         Assert.Equal(3, values.GetValue(2));
+    }
+
+    /// <summary>
+    /// --limit cuts a batch whatever the type of its columns. A dictionary column (what DuckDB hands
+    /// over for a repeated string) has no builder, so a cut that rebuilds the batch cannot carry it;
+    /// the cut is a view, and it keeps the dictionary alive after the batch it came from is disposed.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteSegmentedPipelineAsync_ColumnarPath_LimitCutsADictionaryColumn()
+    {
+        var pool = new TrackingMemoryPool();
+        var dictionaryType = new DictionaryType(Int32Type.Default, StringType.Default, false);
+        var dictionary = new StringArray.Builder().Append("a").Append("b").Build(pool);
+        var indices = new Int32Array.Builder().AppendRange(Enumerable.Range(0, 10).Select(i => i % 2)).Build(pool);
+        var schema = new Schema.Builder().Field(f => f.Name("Tag").DataType(dictionaryType)).Build();
+        var batch = new RecordBatch(schema, new IArrowArray[] { new DictionaryArray(dictionaryType, indices, dictionary) }, 10);
+
+        var mockReader = new Mock<IColumnarStreamReader>();
+        mockReader.As<IStreamReader>();
+        mockReader.Setup(r => r.ReadRecordBatchesAsync(It.IsAny<CancellationToken>()))
+                  .Returns(new[] { batch }.ToAsyncEnumerable());
+        mockReader.SetupGet(r => r.Schema).Returns(schema);
+
+        var mockWriter = new Mock<IColumnarDataWriter>();
+        mockWriter.As<IDataWriter>();
+        var tags = new List<string?>();
+        mockWriter.Setup(w => w.WriteRecordBatchAsync(It.IsAny<RecordBatch>(), It.IsAny<CancellationToken>()))
+                  .Callback<RecordBatch, CancellationToken>((b, _) =>
+                  {
+                      var column = (DictionaryArray)b.Column(0);
+                      var words = (StringArray)column.Dictionary;
+                      var codes = (Int32Array)column.Indices;
+                      for (int i = 0; i < b.Length; i++) tags.Add(words.GetString(codes.GetValue(i)!.Value));
+                      b.Dispose(); // the writer is the owner
+                  })
+                  .Returns(new ValueTask());
+
+        var segments = new List<PipelineSegment> { new PipelineSegment(true, new List<IDataTransformer>()) };
+        var columns = new List<PipeColumnInfo> { new PipeColumnInfo("Tag", typeof(string), true, false) };
+        using var linkedCts = new CancellationTokenSource();
+
+        await _executor.ExecuteSegmentedPipelineAsync(
+            mockReader.Object, (IDataWriter)mockWriter.Object, segments, columns,
+            new PipelineOptions { Limit = 3 }, new Mock<IExportProgress>().Object, linkedCts, default);
+
+        Assert.Equal(new[] { "a", "b", "a" }, tags);
+        Assert.Equal(0, pool.ActiveAllocations);
     }
 
     /// <summary>

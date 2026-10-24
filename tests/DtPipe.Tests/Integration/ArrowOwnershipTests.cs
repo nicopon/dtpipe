@@ -4,6 +4,7 @@ using Apache.Arrow.Types;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Core.Models;
+using DtPipe.Core.Pipelines;
 using DtPipe.Services;
 using DtPipe.Tests.Helpers;
 using DtPipe.Transformers.Arrow.Filter;
@@ -19,12 +20,14 @@ namespace DtPipe.Tests.Integration;
 
 public class ArrowOwnershipTests
 {
+    private static Schema IdValSchema() => new Schema.Builder()
+        .Field(f => f.Name("id").DataType(Int32Type.Default))
+        .Field(f => f.Name("val").DataType(DoubleType.Default))
+        .Build();
+
     private static RecordBatch MakeBatch(MemoryAllocator pool, int rowCount, int start = 0)
     {
-        var schema = new Schema.Builder()
-            .Field(f => f.Name("id").DataType(Int32Type.Default))
-            .Field(f => f.Name("val").DataType(DoubleType.Default))
-            .Build();
+        var schema = IdValSchema();
 
         var idBuilder = new Int32Array.Builder();
         var valBuilder = new DoubleArray.Builder();
@@ -79,6 +82,58 @@ public class ArrowOwnershipTests
 
         lastId.Should().Be(127);
         pool.ActiveAllocations.Should().Be(0, "the segment runner disposes every input and the consumer disposes every output");
+    }
+
+    /// <summary>
+    /// The batch a <c>--limit</c> cuts is a view over the reader's buffers, not a copy of them: the
+    /// pool stays held while the writer owns the cut, and returns to zero when the writer disposes
+    /// it. A copy would let the pool fall to zero before the writer had the batch, and would leave
+    /// the writer owning memory the pool never saw.
+    /// </summary>
+    [Fact]
+    public async Task Limit_CutsTheBatchAsAView_ThePoolIsHeldUntilTheWriterDisposesIt()
+    {
+        var pool = new TrackingMemoryPool();
+        var executor = new PipelineExecutor(
+            System.Linq.Enumerable.Empty<IRowToColumnarBridgeFactory>(),
+            System.Linq.Enumerable.Empty<IColumnarToRowBridgeFactory>(),
+            NullLogger<PipelineExecutor>.Instance);
+
+        async IAsyncEnumerable<RecordBatch> Source()
+        {
+            for (int b = 0; b < 3; b++)
+            {
+                yield return MakeBatch(pool, 32, b * 32);
+                await Task.Yield();
+            }
+        }
+
+        var schema = IdValSchema();
+        var reader = new Mock<IColumnarStreamReader>();
+        reader.As<IStreamReader>();
+        reader.Setup(r => r.ReadRecordBatchesAsync(It.IsAny<CancellationToken>())).Returns(Source());
+        reader.SetupGet(r => r.Schema).Returns(schema);
+
+        var heldWhileWriting = new List<(int Rows, long Active)>();
+        var writer = new Mock<IColumnarDataWriter>();
+        writer.As<IDataWriter>();
+        writer.Setup(w => w.WriteRecordBatchAsync(It.IsAny<RecordBatch>(), It.IsAny<CancellationToken>()))
+            .Callback<RecordBatch, CancellationToken>((batch, _) =>
+            {
+                heldWhileWriting.Add((batch.Length, pool.ActiveAllocations));
+                batch.Dispose(); // the writer is the owner
+            })
+            .Returns(new ValueTask());
+
+        var columns = new List<PipeColumnInfo> { new("id", typeof(int), true), new("val", typeof(double), true) };
+        using var linkedCts = new CancellationTokenSource();
+        await executor.ExecuteSegmentedPipelineAsync(
+            reader.Object, (IDataWriter)writer.Object, new List<PipelineSegment> { new(true, new List<IDataTransformer>()) },
+            columns, new PipelineOptions { Limit = 40 }, Mock.Of<IExportProgress>(), linkedCts, default);
+
+        heldWhileWriting.Select(h => h.Rows).Should().Equal(32, 8);
+        heldWhileWriting[1].Active.Should().BeGreaterThan(0, "the cut shares the reader's buffers, so the pool is held until the writer disposes it");
+        pool.ActiveAllocations.Should().Be(0, "the writer disposed the cut and the executor disposed the batch it was cut from");
     }
 
     [Fact]

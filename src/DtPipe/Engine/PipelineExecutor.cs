@@ -80,21 +80,13 @@ public sealed class PipelineExecutor
         long rowCount = 0;
         await foreach (var batch in source.WithCancellation(ct))
         {
-            var batchToWriter = batch;
-            bool sliced = false;
-            if (limit > 0 && rowCount + batch.Length > limit)
-            {
-                int remaining = (int)(limit - rowCount);
-                // SliceShared (not Slice): the slice reference-counts the buffers so it outlives
-                // the original batch, which we dispose right after handing the slice to the writer.
-                batchToWriter = batch.SliceShared(0, remaining);
-                sliced = true;
-            }
+            var batchToWriter = limit > 0 && rowCount + batch.Length > limit
+                ? CutHead(batch, (int)(limit - rowCount))
+                : batch;
 
             if (reportReads) progress.ReportRead(batchToWriter.Length);
             // The writer takes ownership of batchToWriter and disposes it.
             await writer.WriteRecordBatchAsync(batchToWriter, ct);
-            if (sliced) batch.Dispose();
             progress.ReportWrite(batchToWriter.Length);
             rowCount += batchToWriter.Length;
 
@@ -684,27 +676,22 @@ public sealed class PipelineExecutor
                 continue;
             }
 
-            // TruncateBatch builds its own arrays, so the input is ours to dispose.
-            var truncated = TruncateBatch(batch, (int)remaining);
-            batch.Dispose();
-            yield return truncated;
+            yield return CutHead(batch, (int)remaining);
             yield break;
         }
     }
 
-    /// <summary>First <paramref name="count"/> rows as a new batch owning its buffers.</summary>
-    private static RecordBatch TruncateBatch(RecordBatch batch, int count)
+    /// <summary>
+    /// The first <paramref name="count"/> rows of <paramref name="batch"/>, which the caller owned and
+    /// no longer does: the cut is a view over the same buffers, so it works for every column type, and
+    /// it goes to whoever receives it. SliceShared (not Slice) reference-counts the buffers, which is
+    /// what lets the cut outlive the batch disposed here.
+    /// </summary>
+    private static RecordBatch CutHead(RecordBatch batch, int count)
     {
-        var arrays = new IArrowArray[batch.Schema.FieldsList.Count];
-        for (int colIdx = 0; colIdx < arrays.Length; colIdx++)
-        {
-            var original = batch.Column(colIdx);
-            var builder = ArrowTypeMapper.CreateBuilder(original.Data.DataType);
-            for (int i = 0; i < count; i++)
-                ArrowTypeMapper.AppendArrayValue(builder, original, i);
-            arrays[colIdx] = ArrowTypeMapper.BuildArray(builder);
-        }
-        return new RecordBatch(batch.Schema, arrays, count);
+        var head = batch.SliceShared(0, count);
+        batch.Dispose();
+        return head;
     }
 
     private async IAsyncEnumerable<RecordBatch> ApplySamplingAsync(
