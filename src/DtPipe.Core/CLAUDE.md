@@ -13,6 +13,10 @@ Fan-out (broadcast/tee) resolves through `BranchChannelContext.AliasMap` — log
 channel, including `s__fan_0` sub-channels — which `DagOrchestrator` populates and factories consume
 directly (e.g. `DuckDBSqlTransformerFactory`).
 
+`DagOrchestrator.ExecuteAsync` waits at its single exit (`finally`) for every task it started,
+branches and broadcast multiplexers: it cancels what still runs, awaits each task, and logs an
+exception that arrives after the verdict without changing the verdict.
+
 ### Cancellation (F16)
 
 - `LinearPipelineService` tells the dedicated user token apart from internal cancellation sources:

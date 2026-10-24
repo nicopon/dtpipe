@@ -109,6 +109,8 @@ public class DagOrchestrator : IDagOrchestrator
         // ──────────────────────────────────────────────────────────────────
 
         var tasks = new List<Task<int>>();
+        // Every task the run started, waited for at the exit whatever the verdict.
+        var started = new List<Task>();
         var broadcastAssignmentCursor = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         foreach (var alias in broadcastSubAliases.Keys)
             broadcastAssignmentCursor[alias] = 0;
@@ -187,6 +189,7 @@ public class DagOrchestrator : IDagOrchestrator
                 var task = ExecuteBranchAsync(dag, updatedBranch, actualFromAlias, broadcastSubAliases, branchExecutor, bCts.Token, branchCtx);
                 taskToMetadata[task] = metadata;
                 tasks.Add(task);
+                started.Add(task);
             }
 
             // Start Broadcast Tasks
@@ -211,6 +214,9 @@ public class DagOrchestrator : IDagOrchestrator
 
                 taskToMetadata[wrappedTask] = metadata;
                 tasks.Add(wrappedTask);
+                // The wrapper is canceled with the run while the multiplexer may still be reading.
+                started.Add(broadcastTask);
+                started.Add(wrappedTask);
 
                 foreach (var sub in subs)
                     activeConsumerCounts[sub] = 1;
@@ -302,8 +308,38 @@ public class DagOrchestrator : IDagOrchestrator
             OnLogEvent?.Invoke(new DagLogEvent(DagLogSeverity.Error, $"Unexpected error during DAG orchestration: {ex.Message}"));
             return 1;
         }
+        finally
+        {
+            // A verdict reached while a branch still runs would let the next run clear the registry under that
+            // branch, which completes its channel by alias: it returns only once every task has ended.
+            if (started.Exists(t => !t.IsCompleted))
+                await linkedCts.CancelAsync();
+            await WaitForEndAsync(started);
+        }
     }
 
+    /// <summary>
+    /// Waits for every task to end, however it ends. The verdict is already given, so a task that fails or is
+    /// canceled now does not change it; its exception is observed here instead of surfacing at finalization.
+    /// </summary>
+    private async Task WaitForEndAsync(IReadOnlyList<Task> started)
+    {
+        foreach (var task in started)
+        {
+            try
+            {
+                await task;
+            }
+            catch (OperationCanceledException)
+            {
+                // Cancellation is how the verdict stops the remaining tasks.
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "A task ended with an error after the DAG gave its verdict.");
+            }
+        }
+    }
 
     private async Task<int> ExecuteBranchAsync(
         JobDagDefinition dag,

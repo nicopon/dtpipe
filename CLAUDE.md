@@ -278,9 +278,11 @@ waits, and one cancelled while it waits returns 130. A run owns state the proces
 channel registry `DagOrchestrator` clears at its start, the console's Ctrl-C); two runs over it
 trade rows, and one can still exit 0. **Never start a run from inside a run**: it would wait on
 itself. Callers that overlap wait: MCP requests, which the SDK handles concurrently; the agent
-issues a turn's runs one after the other (F5).
-`[CI: ConcurrentRunCollectionTests]` `[unchecked: an entry that runs the engine without JobExecutor;
-the branches a failed DAG leaves running once it has returned]` Detail: `src/DtPipe/CLAUDE.md`.
+issues a turn's runs one after the other (F5). **A DAG returns its verdict only once every branch has
+ended**, a failed one included: the gate is never released under a branch that still completes its
+channel by alias.
+`[CI: ConcurrentRunCollectionTests, DagOrchestratorTests — a failing branch's verdict waits for a slow
+sibling]` `[unchecked: an entry that runs the engine without JobExecutor]` Detail: `src/DtPipe/CLAUDE.md`.
 
 **A value of one run is armed for its call chain, never written to the process environment**
 (`LaunchValues`, `CursorOverride`): the environment reaches every branch, every run beside it and

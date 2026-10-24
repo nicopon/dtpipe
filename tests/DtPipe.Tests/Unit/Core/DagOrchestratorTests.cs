@@ -212,6 +212,64 @@ public class DagOrchestratorTests
         Assert.Equal(42, result);
     }
 
+    // A run that returns while a branch still runs lets the next run's registry clear race that branch's
+    // channel completion, so the orchestrator returns only once every branch has ended.
+    private const int SlowBranchMs = 300;
+
+    [Fact]
+    public async Task Execute_BranchFailsWithCode_ReturnsOnlyAfterTheSlowSiblingEnds()
+    {
+        var dag = GoldenDagDefinitions.Dag_TwoInputs_OneOutput;
+        var orchestrator = BuildOrchestrator();
+        var siblingEnded = false;
+
+        var result = await orchestrator.ExecuteAsync(dag, async (b, _, _) =>
+        {
+            if (b.Alias == "source1") return 42;
+            await Task.Delay(SlowBranchMs); // does not honour the cancellation the failure raises
+            siblingEnded = true;
+            return 0;
+        });
+
+        Assert.Equal(42, result);
+        Assert.True(siblingEnded, "ExecuteAsync returned while a sibling branch was still running.");
+    }
+
+    [Fact]
+    public async Task Execute_BranchThrows_ReturnsOnlyAfterTheSlowSiblingEnds()
+    {
+        var dag = GoldenDagDefinitions.Dag_TwoInputs_OneOutput;
+        var orchestrator = BuildOrchestrator();
+        var siblingEnded = false;
+
+        var result = await orchestrator.ExecuteAsync(dag, async (b, _, _) =>
+        {
+            if (b.Alias == "source1") throw new InvalidOperationException("boom");
+            await Task.Delay(SlowBranchMs);
+            siblingEnded = true;
+            return 0;
+        });
+
+        Assert.Equal(1, result);
+        Assert.True(siblingEnded, "ExecuteAsync returned while a sibling branch was still running.");
+    }
+
+    [Fact]
+    public async Task Execute_SlowSiblingThrowsAfterTheFailure_KeepsTheFirstExitCode()
+    {
+        var dag = GoldenDagDefinitions.Dag_TwoInputs_OneOutput;
+        var orchestrator = BuildOrchestrator();
+
+        var result = await orchestrator.ExecuteAsync(dag, async (b, _, _) =>
+        {
+            if (b.Alias == "source1") return 42;
+            await Task.Delay(SlowBranchMs);
+            throw new InvalidOperationException("late");
+        });
+
+        Assert.Equal(42, result);
+    }
+
     [Fact]
     public async Task Execute_EmptyDag_ReturnsOne()
     {
