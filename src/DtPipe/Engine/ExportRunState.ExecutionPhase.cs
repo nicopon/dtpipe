@@ -60,19 +60,19 @@ internal sealed partial class ExportRunState
 
             var currentCursor = DtPipe.Adapters.Shared.Cursor.CursorStateStore.Read(Options.State);
             if (currentCursor != null && !SilenceInternal)
-                Observer.LogMessage($"[grey]   Cursor loaded: {currentCursor.Column} = {currentCursor.Value} (from {Options.State})[/]");
+                Observer.LogMessage($"   Cursor loaded: {currentCursor.Column} = {currentCursor.Value} (from {Options.State})", MessageTone.Detail);
             else if (!SilenceInternal)
-                Observer.LogMessage($"[grey]   No active cursor state found at {Options.State}[/]");
+                Observer.LogMessage($"   No active cursor state found at {Options.State}", MessageTone.Detail);
         }
 
         // Read hook settings from writer options
         WriterHooks = Registry.Get(WriterFactory.OptionsType) as IHookAware;
 
         // Schema Validation
-        await _svc._schemaValidator.ValidateAndMigrateAsync(Writer, exportableSchema, writerSchemaSettings, ct);
+        await _svc.SchemaValidator.ValidateAndMigrateAsync(Writer, exportableSchema, writerSchemaSettings, ct);
 
         // Execute Pre-Hook (from writer options)
-        await _svc._hookExecutor.ExecuteAsync(Writer, "Pre-Hook", WriterHooks?.PreExec, ct);
+        await _svc.Hooks.ExecuteAsync(Writer, "Pre-Hook", WriterHooks?.PreExec, ct);
 
         await EffectiveWriter.InitializeAsync(exportableSchema, ct);
 
@@ -283,11 +283,11 @@ internal sealed partial class ExportRunState
                     : src => teeRef.TeeAsync(upstream(src), effectiveCt);
             }
 
-            await _svc._pipelineExecutor.ExecuteSegmentedPipelineAsync(
+            await _svc.PipelineExecutor.ExecuteSegmentedPipelineAsync(
                 Reader, EffectiveWriter, Segments, exportableSchema, effectiveOptions, Progress, LinkedCts, effectiveCt, SampleTap, materialise);
 
             // The tee has committed: the stream was consumed to its end.
-            if (CheckpointKey is not null) _svc._reports?.RecordCheckpoint(Alias, CheckpointKey);
+            if (CheckpointKey is not null) _svc.Reports?.RecordCheckpoint(Alias, CheckpointKey);
 
             if (contractTee is not null)
                 WriteContract(contractTee, exportableSchema);
@@ -320,7 +320,7 @@ internal sealed partial class ExportRunState
                     Status: "success");
                 DtPipe.Adapters.Shared.Cursor.CursorStateStore.Save(Options.State, CursorTracker.TrackedMaxValue, runMeta);
                 if (!SilenceInternal)
-                    Observer.LogMessage($"[grey]   Cursor saved: {Options.Cursor} = {CursorTracker.TrackedMaxValue.Value} → {Options.State}[/]");
+                    Observer.LogMessage($"   Cursor saved: {Options.Cursor} = {CursorTracker.TrackedMaxValue.Value} → {Options.State}", MessageTone.Detail);
             }
 
             Progress.Complete();
@@ -337,9 +337,9 @@ internal sealed partial class ExportRunState
                 Logger.LogInformation("Export completed in {Elapsed}. Written {Rows} rows ({Speed:F1} rows/s).", elapsed, Progress.GetMetrics().WriteCount, rowsPerSecond);
 
             // ── POST-EXEC HOOK + METRICS ──
-            await _svc._hookExecutor.ExecuteAsync(Writer, "Post-Hook", WriterHooks?.PostExec, ct);
+            await _svc.Hooks.ExecuteAsync(Writer, "Post-Hook", WriterHooks?.PostExec, ct);
             Logger.LogDebug("[Metrics] saving run metrics");
-            await _svc._metricsService.SaveMetricsAsync(Progress, Options.MetricsPath, ct);
+            await _svc.Metrics.SaveMetricsAsync(Progress, Options.MetricsPath, ct);
         }
         catch (OperationCanceledException)
         {
@@ -361,7 +361,7 @@ internal sealed partial class ExportRunState
             try
             {
                 if (!IsSampleMode)
-                    await _svc._hookExecutor.ExecuteAsync(Writer, "On-Error Hook", WriterHooks?.OnErrorExec, CancellationToken.None, TimeSpan.FromSeconds(ExportService.HookTimeoutSeconds));
+                    await _svc.Hooks.ExecuteAsync(Writer, "On-Error Hook", WriterHooks?.OnErrorExec, CancellationToken.None, TimeSpan.FromSeconds(ExportService.HookTimeoutSeconds));
             }
             catch (Exception hookEx)
             {
@@ -376,7 +376,7 @@ internal sealed partial class ExportRunState
             try
             {
                 if (!IsSampleMode)
-                    await _svc._hookExecutor.ExecuteAsync(Writer, "Finally Hook", WriterHooks?.FinallyExec, CancellationToken.None, TimeSpan.FromSeconds(ExportService.HookTimeoutSeconds));
+                    await _svc.Hooks.ExecuteAsync(Writer, "Finally Hook", WriterHooks?.FinallyExec, CancellationToken.None, TimeSpan.FromSeconds(ExportService.HookTimeoutSeconds));
             }
             catch (Exception hookEx)
             {
@@ -430,7 +430,7 @@ internal sealed partial class ExportRunState
         // the interactive and non-interactive sample renderings do not share a footer.
         if (!SilenceInternal)
             Observer.LogMessage(
-                $"[grey]   Contract saved: {contract.Hash[..12]} → {Spectre.Console.Markup.Escape(Options.ContractSave!)}[/]");
+                $"   Contract saved: {contract.Hash[..12]} → {Options.ContractSave}", MessageTone.Detail);
     }
 
     private List<(string Name, bool IsColumnar)> GetTransformerModes()

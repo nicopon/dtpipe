@@ -30,7 +30,7 @@ public class DagOrchestrator : IDagOrchestrator
     // Constants for DAG execution
     private const int DefaultArrowChannelCapacity = 8;
 
-    public Action<string>? OnLogEvent { get; set; }
+    public Action<DagLogEvent>? OnLogEvent { get; set; }
 
     public DagOrchestrator(
         ILogger<DagOrchestrator> logger,
@@ -233,7 +233,7 @@ public class DagOrchestrator : IDagOrchestrator
                     _logger.LogError(fault, "A task failed. Cancelling the entire DAG.\n{Chain}",
                         Infrastructure.Diagnostics.ExceptionChainFlattener.Format(fault));
                     var innerMsg = fault.GetBaseException().Message;
-                    OnLogEvent?.Invoke($"✖ {innerMsg}");
+                    OnLogEvent?.Invoke(new DagLogEvent(DagLogSeverity.Error, innerMsg));
                     await linkedCts.CancelAsync();
                     return 1;
                 }
@@ -293,13 +293,13 @@ public class DagOrchestrator : IDagOrchestrator
         catch (OperationCanceledException)
         {
             _logger.LogWarning("DAG execution was canceled.");
-            OnLogEvent?.Invoke("⚠ DAG execution was canceled.");
+            OnLogEvent?.Invoke(new DagLogEvent(DagLogSeverity.Warning, "DAG execution was canceled."));
             return 1;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Unexpected error during DAG orchestration.");
-            OnLogEvent?.Invoke($"✖ Unexpected error during DAG orchestration: {ex.Message}");
+            OnLogEvent?.Invoke(new DagLogEvent(DagLogSeverity.Error, $"Unexpected error during DAG orchestration: {ex.Message}"));
             return 1;
         }
     }
@@ -348,7 +348,7 @@ public class DagOrchestrator : IDagOrchestrator
                 if (exitCode != 0)
                 {
                     _logger.LogError("Branch '{Alias}' failed with exit code {ExitCode}.", branch.Alias, exitCode);
-                    OnLogEvent?.Invoke($"  ✖ Branch '{branch.Alias}' failed with exit code {exitCode}.");
+                    OnLogEvent?.Invoke(new DagLogEvent(DagLogSeverity.Error, $"Branch '{branch.Alias}' failed with exit code {exitCode}.", branch.Alias));
                     return exitCode;
                 }
 

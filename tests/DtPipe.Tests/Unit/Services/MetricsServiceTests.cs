@@ -31,7 +31,7 @@ public class MetricsServiceTests
         await _service.SaveMetricsAsync(mockProgress.Object, null, CancellationToken.None);
 
         // Assert
-        _mockObserver.Verify(o => o.LogMessage(It.IsAny<string>()), Times.Never);
+        _mockObserver.Verify(o => o.LogMessage(It.IsAny<string>(), It.IsAny<MessageTone>()), Times.Never);
     }
 
     [Fact]
@@ -52,7 +52,7 @@ public class MetricsServiceTests
             Assert.True(File.Exists(tempFile));
             var content = await File.ReadAllTextAsync(tempFile);
             Assert.Contains("\"ReadCount\": 100", content);
-            _mockObserver.Verify(o => o.LogMessage(It.Is<string>(s => s.Contains("Metrics saved to"))), Times.Once);
+            _mockObserver.Verify(o => o.LogMessage(It.Is<string>(s => s.Contains("Metrics saved to")), It.IsAny<MessageTone>()), Times.Once);
         }
         finally
         {

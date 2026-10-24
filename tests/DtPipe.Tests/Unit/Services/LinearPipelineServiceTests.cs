@@ -9,7 +9,6 @@ using DtPipe.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
-using Spectre.Console;
 using Xunit;
 using DtPipe.Engine;
 
@@ -173,7 +172,7 @@ public class LinearPipelineServiceTests
     // Harness
     // ─────────────────────────────────────────────────────────────────────────
 
-    private static (LinearPipelineService Service, Mock<IAnsiConsole> Console, OptionsRegistry OptionsRegistry) BuildService(
+    private static (LinearPipelineService Service, Mock<IRunHost> Host, OptionsRegistry OptionsRegistry) BuildService(
         IStreamReaderFactory readerFactory,
         IDataWriterFactory? writerFactoryOverride = null,
         IStreamTransformerFactory? streamTransformerFactory = null)
@@ -205,15 +204,15 @@ public class LinearPipelineServiceTests
                 : new List<IStreamTransformerFactory>());
         var serviceProvider = services.BuildServiceProvider();
 
-        var consoleMock = new Mock<IAnsiConsole>();
+        var hostMock = new Mock<IRunHost>();
         var serviceRegistry = new OptionsRegistry();
         var service = new LinearPipelineService(
             contributors: Array.Empty<DtPipe.Cli.Infrastructure.ICliContributor>(),
             serviceProvider: serviceProvider,
             channelRegistry: new MemoryChannelRegistry(),
             optionsRegistry: serviceRegistry,
-            console: consoleMock.Object);
-        return (service, consoleMock, serviceRegistry);
+            host: hostMock.Object);
+        return (service, hostMock, serviceRegistry);
     }
 
     private static JobDefinition BlockingJob() => new() { Input = "stub:block", Output = "null:", Limit = 0 };
@@ -228,7 +227,7 @@ public class LinearPipelineServiceTests
         var (service, _, _) = BuildService(new StubReaderFactory(() => new BlockingReader()));
         using var userCts = new CancellationTokenSource();
 
-        var task = service.ExecuteAsync(BlockingJob(), context: null, token: CancellationToken.None, userCancellationToken: userCts.Token);
+        var task = service.ExecuteAsync(new BranchRun(BlockingJob()) { UserCancellation = userCts.Token }, CancellationToken.None);
 
         // Give the pipeline time to reach the blocking OpenAsync, then simulate Ctrl-C.
         await Task.Delay(200);
@@ -244,7 +243,7 @@ public class LinearPipelineServiceTests
         var (service, _, _) = BuildService(new StubReaderFactory(() => new BlockingReader()));
         using var internalCts = new CancellationTokenSource();
 
-        var task = service.ExecuteAsync(BlockingJob(), context: null, token: internalCts.Token, userCancellationToken: CancellationToken.None);
+        var task = service.ExecuteAsync(new BranchRun(BlockingJob()), internalCts.Token);
 
         await Task.Delay(200);
         await internalCts.CancelAsync();
@@ -256,12 +255,12 @@ public class LinearPipelineServiceTests
     [Fact]
     public async Task Exception_Chain_Is_Preserved_In_Error_Output()
     {
-        var (service, consoleMock, _) = BuildService(new StubReaderFactory(() => new FaultedReader()));
+        var (service, hostMock, _) = BuildService(new StubReaderFactory(() => new FaultedReader()));
 
-        var exitCode = await service.ExecuteAsync(new JobDefinition { Input = "stub:fault", Output = "null:-" }, context: null, token: CancellationToken.None, userCancellationToken: CancellationToken.None);
+        var exitCode = await service.ExecuteAsync(new BranchRun(new JobDefinition { Input = "stub:fault", Output = "null:-" }), CancellationToken.None);
 
         Assert.Equal(1, exitCode);
-        consoleMock.Verify(c => c.Write(It.IsAny<Markup>()), Times.AtLeastOnce);
+        hostMock.Verify(h => h.ShowBranchFault(It.IsAny<string>(), It.IsAny<Exception>()), Times.Once);
     }
 
     [Fact]
@@ -300,9 +299,7 @@ public class LinearPipelineServiceTests
         var (service, _, registry) = BuildService(factory);
         registry.Register(readerOptions);
 
-        var exitCode = await service.ExecuteAsync(
-            new JobDefinition { Input = "qstub:x" }, context: null,
-            token: CancellationToken.None, userCancellationToken: CancellationToken.None);
+        var exitCode = await service.ExecuteAsync(new BranchRun(new JobDefinition { Input = "qstub:x" }), CancellationToken.None);
 
         // The marker reader fails after creation — we only care about pre-flight binding.
         Assert.Equal(1, exitCode);
@@ -319,9 +316,7 @@ public class LinearPipelineServiceTests
         registry.Register(readerOptions);
         registry.Register(writerOptions);
 
-        var exitCode = await service.ExecuteAsync(
-            new JobDefinition { Input = "qstub:x", Output = "twstub:same_named" }, context: null,
-            token: CancellationToken.None, userCancellationToken: CancellationToken.None);
+        var exitCode = await service.ExecuteAsync(new BranchRun(new JobDefinition { Input = "qstub:x", Output = "twstub:same_named" }), CancellationToken.None);
 
         Assert.Equal(1, exitCode);
         Assert.Equal("SELECT * FROM \"same_named\"", readerOptions.Query);
@@ -342,10 +337,7 @@ public class LinearPipelineServiceTests
             streamTransformerFactory: new ProbeTransformerFactory(transformer));
         transformer.Probe = () => registry.Has<DtPipe.Core.Models.PipelineOptions>();
 
-        await service.ExecuteAsync(
-            new JobDefinition { Input = "stub:x", Output = "null:" },
-            context: new CliJobContext(null, null, null, new[] { "--stubproc" }),
-            token: CancellationToken.None, userCancellationToken: CancellationToken.None);
+        await service.ExecuteAsync(new BranchRun(new JobDefinition { Input = "stub:x", Output = "null:" }) { Context = new CliJobContext(null, null, null, new[] { "--stubproc" }) }, CancellationToken.None);
 
         // The flag being evaluated at all proves execution reached OpenAsync;
         // it must hold by then (writerless branch may still end with a non-zero exit).
@@ -366,9 +358,7 @@ public class LinearPipelineServiceTests
 
         // Reader resolution throws ahead of the fault handler, so this one surfaces as the
         // exception itself rather than through Failure — unlike the writer site below.
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => service.ExecuteAsync(
-            new JobDefinition { Input = "Server=srvA;Database=A;User Id=u;Password=hunter2" },
-            context: null, token: CancellationToken.None, userCancellationToken: CancellationToken.None));
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => service.ExecuteAsync(new BranchRun(new JobDefinition { Input = "Server=srvA;Database=A;User Id=u;Password=hunter2" }), CancellationToken.None));
 
         Assert.DoesNotContain("hunter2", ex.Message, StringComparison.Ordinal);
         Assert.Contains("Server=srvA", ex.Message, StringComparison.Ordinal);
@@ -379,9 +369,7 @@ public class LinearPipelineServiceTests
     {
         var (service, _, _) = BuildService(new StubReaderFactory(() => new BlockingReader()));
 
-        var exitCode = await service.ExecuteAsync(
-            new JobDefinition { Input = "stub:x", Output = "Server=srvB;Database=B;Password=hunter2" },
-            context: null, token: CancellationToken.None, userCancellationToken: CancellationToken.None);
+        var exitCode = await service.ExecuteAsync(new BranchRun(new JobDefinition { Input = "stub:x", Output = "Server=srvB;Database=B;Password=hunter2" }), CancellationToken.None);
 
         Assert.Equal(1, exitCode);
         Assert.DoesNotContain("hunter2", service.Failure, StringComparison.Ordinal);
@@ -395,9 +383,8 @@ public class LinearPipelineServiceTests
         var services = new ServiceCollection();
         Program.ConfigureServices(services);
         var sp = services.BuildServiceProvider();
-        var console = AnsiConsole.Create(new AnsiConsoleSettings { Out = new AnsiConsoleOutput(new StringWriter()) });
         return new LinearPipelineService(
-            sp.GetServices<DtPipe.Cli.Infrastructure.ICliContributor>(), sp, new MemoryChannelRegistry(), new OptionsRegistry(), console);
+            sp.GetServices<DtPipe.Cli.Infrastructure.ICliContributor>(), sp, new MemoryChannelRegistry(), new OptionsRegistry(), Mock.Of<IRunHost>());
     }
 
     [Theory]
@@ -405,9 +392,7 @@ public class LinearPipelineServiceTests
     [InlineData("mem:x")]
     public async Task An_Internal_Channel_Prefix_Is_No_Input(string input)
     {
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => RealService().ExecuteAsync(
-            new JobDefinition { Input = input, Output = "null:" },
-            context: null, token: CancellationToken.None, userCancellationToken: CancellationToken.None));
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => RealService().ExecuteAsync(new BranchRun(new JobDefinition { Input = input, Output = "null:" }), CancellationToken.None));
 
         Assert.Contains($"No reader factory resolved for input '{input}'", ex.Message, StringComparison.Ordinal);
     }
@@ -417,9 +402,7 @@ public class LinearPipelineServiceTests
     {
         var service = RealService();
 
-        var exitCode = await service.ExecuteAsync(
-            new JobDefinition { Input = "generate:1", Output = "arrow-memory:x" },
-            context: null, token: CancellationToken.None, userCancellationToken: CancellationToken.None);
+        var exitCode = await service.ExecuteAsync(new BranchRun(new JobDefinition { Input = "generate:1", Output = "arrow-memory:x" }), CancellationToken.None);
 
         Assert.Equal(1, exitCode);
         Assert.Contains("No writer factory resolved for output 'arrow-memory:x'", service.Failure!, StringComparison.Ordinal);

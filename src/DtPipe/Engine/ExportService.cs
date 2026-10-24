@@ -5,7 +5,6 @@ using DtPipe.Core.Options;
 using DtPipe.Core.Security;
 using DtPipe.Core.Validation;
 using Microsoft.Extensions.Logging;
-using Spectre.Console;
 using Apache.Arrow;
 using System.Runtime.CompilerServices;
 using DtPipe.Core.Abstractions.Dag;
@@ -19,18 +18,9 @@ namespace DtPipe.Engine;
 
 public class ExportService
 {
-    internal readonly IEnumerable<IStreamReaderFactory> _readerFactories;
-    internal readonly IEnumerable<IDataWriterFactory> _writerFactories;
-    internal readonly IEnumerable<IDataTransformerFactory> _transformerFactories;
-    internal readonly OptionsRegistry _optionsRegistry;
-    internal readonly IExportObserver _observer;
-    internal readonly IMemoryChannelRegistry? _channelRegistry;
-    internal readonly DtPipe.DryRun.SampleReportCollector? _reports;
-    internal readonly ILogger<ExportService> _logger;
-    internal readonly HookExecutor _hookExecutor;
-    internal readonly MetricsService _metricsService;
-    internal readonly SchemaValidationService _schemaValidator;
-    internal readonly PipelineExecutor _pipelineExecutor;
+    private readonly ILogger<ExportService> _logger;
+    private readonly IExportObserver _observer;
+    private readonly ExportRunServices _runServices;
     internal const int HookTimeoutSeconds = 30;
 
     public ExportService(
@@ -47,18 +37,10 @@ public class ExportService
         IMemoryChannelRegistry? channelRegistry = null,
         DtPipe.DryRun.SampleReportCollector? reports = null)
     {
-        _reports = reports;
-        _readerFactories = readerFactories;
-        _writerFactories = writerFactories;
-        _transformerFactories = transformerFactories;
-        _optionsRegistry = optionsRegistry;
-        _observer = observer;
         _logger = logger;
-        _channelRegistry = channelRegistry;
-        _hookExecutor = hookExecutor;
-        _metricsService = metricsService;
-        _schemaValidator = schemaValidator;
-        _pipelineExecutor = pipelineExecutor;
+        _observer = observer;
+        _runServices = new ExportRunServices(observer, logger, hookExecutor, metricsService, schemaValidator,
+            pipelineExecutor, channelRegistry, reports);
     }
 
     public async Task RunExportAsync(
@@ -91,7 +73,7 @@ public class ExportService
             _observer.ShowConnectionStatus(false, null);
         }
 
-        var state = new ExportRunState(this, options, providerName, outputPath, pipeline, readerFactory, writerFactory,
+        var state = new ExportRunState(_runServices, options, providerName, outputPath, pipeline, readerFactory, writerFactory,
             registry, alias, resultsCollector, showStatusMessages, silenceInternal, outputIsStdio);
         await state.RunAsync(ct);
     }

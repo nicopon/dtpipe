@@ -453,7 +453,7 @@ public class E2EIntegrationTests : IAsyncLifetime
             serviceProvider,
             serviceProvider.GetRequiredService<DtPipe.Core.Abstractions.Dag.IMemoryChannelRegistry>(),
             registry,
-            Spectre.Console.AnsiConsole.Console
+            Moq.Mock.Of<DtPipe.Engine.IRunHost>()
         );
 
         // 4. Create JobDefinition pointing to keyring://
@@ -472,7 +472,7 @@ public class E2EIntegrationTests : IAsyncLifetime
         );
 
         // 5. Execute - should not throw any resolver or reader factory errors
-        var exitCode = await pipelineService.ExecuteAsync(job, context, TestContext.Current.CancellationToken);
+        var exitCode = await pipelineService.ExecuteAsync(new DtPipe.Engine.BranchRun(job) { Context = context }, TestContext.Current.CancellationToken);
 
         exitCode.Should().Be(0);
     }

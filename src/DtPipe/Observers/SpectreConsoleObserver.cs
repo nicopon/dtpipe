@@ -65,9 +65,16 @@ public class SpectreConsoleObserver : IExportObserver
         }
     }
 
-    public void LogMessage(string message)
+    public void LogMessage(string message, MessageTone tone)
     {
-        _console.MarkupLine(message);
+        var text = Markup.Escape(message);
+        _console.MarkupLine(tone switch
+        {
+            MessageTone.Detail => $"[grey]{text}[/]",
+            MessageTone.Notice => $"[yellow]{text}[/]",
+            MessageTone.Success => $"[green]{text}[/]",
+            _ => text
+        });
     }
 
     public void LogWarning(string message)

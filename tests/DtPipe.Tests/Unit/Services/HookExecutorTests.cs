@@ -30,7 +30,7 @@ public class HookExecutorTests
 
         // Assert
         mockWriter.Verify(w => w.ExecuteCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
-        _mockObserver.Verify(o => o.LogMessage(It.IsAny<string>()), Times.Never);
+        _mockObserver.Verify(o => o.LogMessage(It.IsAny<string>(), It.IsAny<MessageTone>()), Times.Never);
     }
 
     [Fact]

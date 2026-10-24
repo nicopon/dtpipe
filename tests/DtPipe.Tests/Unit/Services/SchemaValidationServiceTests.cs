@@ -61,7 +61,7 @@ public class SchemaValidationServiceTests
         await _service.ValidateAndMigrateAsync(mockWriter.Object, schema, options, CancellationToken.None);
 
         // Assert
-        _mockObserver.Verify(o => o.LogMessage(It.IsAny<string>()), Times.Never);
+        _mockObserver.Verify(o => o.LogMessage(It.IsAny<string>(), It.IsAny<MessageTone>()), Times.Never);
     }
 
     [Fact]
@@ -82,7 +82,7 @@ public class SchemaValidationServiceTests
         await _service.ValidateAndMigrateAsync(mockWriter.Object, schema, options, CancellationToken.None);
 
         // Assert
-        _mockObserver.Verify(o => o.LogMessage(It.Is<string>(s => s.Contains("Target schema compatible"))), Times.Once);
+        _mockObserver.Verify(o => o.LogMessage(It.Is<string>(s => s.Contains("Target schema compatible")), It.IsAny<MessageTone>()), Times.Once);
     }
 
     [Fact]
@@ -154,7 +154,7 @@ public class SchemaValidationServiceTests
         mockWriter.As<ISchemaMigrator>();
 
         var messages = new List<string>();
-        _mockObserver.Setup(o => o.LogMessage(It.IsAny<string>())).Callback<string>(messages.Add);
+        _mockObserver.Setup(o => o.LogMessage(It.IsAny<string>(), It.IsAny<MessageTone>())).Callback<string, MessageTone>((m, _) => messages.Add(m));
 
         // Act
         await _service.ValidateAndMigrateAsync(mockWriter.Object, schema, options, CancellationToken.None);
@@ -174,11 +174,11 @@ public class SchemaValidationServiceTests
         var column = new TargetColumnInfo("ID", "INTEGER", typeof(int), false, true, false);
 
         var discard = new List<string>();
-        _mockObserver.Setup(o => o.LogMessage(It.IsAny<string>())).Callback<string>(discard.Add);
+        _mockObserver.Setup(o => o.LogMessage(It.IsAny<string>(), It.IsAny<MessageTone>())).Callback<string, MessageTone>((m, _) => discard.Add(m));
         await _service.ValidateAndMigrateAsync(InspectableWriter(true, column).Object, schema, new SchemaSettings(), CancellationToken.None);
 
         var freeze = new List<string>();
-        _mockObserver.Setup(o => o.LogMessage(It.IsAny<string>())).Callback<string>(freeze.Add);
+        _mockObserver.Setup(o => o.LogMessage(It.IsAny<string>(), It.IsAny<MessageTone>())).Callback<string, MessageTone>((m, _) => freeze.Add(m));
         await _service.ValidateAndMigrateAsync(
             InspectableWriter(true, column).Object, schema, new SchemaSettings { StrictSchema = true }, CancellationToken.None);
 
@@ -199,7 +199,7 @@ public class SchemaValidationServiceTests
         await _service.ValidateAndMigrateAsync(mockWriter.Object, new List<PipeColumnInfo>(), options, CancellationToken.None);
 
         // Assert
-        _mockObserver.Verify(o => o.LogMessage(It.IsAny<string>()), Times.Never);
+        _mockObserver.Verify(o => o.LogMessage(It.IsAny<string>(), It.IsAny<MessageTone>()), Times.Never);
     }
 
     [Theory]

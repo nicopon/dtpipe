@@ -6,7 +6,6 @@ using DtPipe.Core.Options;
 using DtPipe.Core.Security;
 using DtPipe.Core.Validation;
 using Microsoft.Extensions.Logging;
-using Spectre.Console;
 using Apache.Arrow;
 using System.Runtime.CompilerServices;
 using DtPipe.Core.Abstractions.Dag;
@@ -25,7 +24,7 @@ namespace DtPipe.Engine;
 /// </summary>
 internal sealed partial class ExportRunState
 {
-    private readonly ExportService _svc;
+    private readonly ExportRunServices _svc;
     internal readonly PipelineOptions Options;
     internal readonly string ProviderName;
     internal readonly string OutputPath;
@@ -91,7 +90,7 @@ internal sealed partial class ExportRunState
         : Options.Limit;
 
     internal ExportRunState(
-        ExportService svc,
+        ExportRunServices svc,
         PipelineOptions options,
         string providerName,
         string outputPath,
@@ -120,8 +119,8 @@ internal sealed partial class ExportRunState
         OutputIsStdio = outputIsStdio;
     }
 
-    private ILogger Logger => _svc._logger;
-    private IExportObserver Observer => _svc._observer;
+    private ILogger Logger => _svc.Logger;
+    private IExportObserver Observer => _svc.Observer;
 
     internal async Task RunAsync(CancellationToken ct)
     {

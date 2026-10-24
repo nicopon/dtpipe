@@ -12,7 +12,6 @@ using DtPipe.Core.Options;
 using DtPipe.Core.Pipelines;
 using DtPipe.Core.Pipelines.Dag;
 using Microsoft.Extensions.DependencyInjection;
-using Spectre.Console;
 
 namespace DtPipe.Engine;
 
@@ -24,17 +23,14 @@ public class JobExecutor
 {
     private readonly IEnumerable<ICliContributor> _contributors;
     private readonly IServiceProvider _serviceProvider;
-    private readonly IAnsiConsole _console;
 
     public JobExecutor(
         IServiceProvider serviceProvider,
-        IAnsiConsole console,
         IEnumerable<IStreamReaderFactory> readerFactories,
         IEnumerable<IDataTransformerFactory> transformerFactories,
         IEnumerable<IDataWriterFactory> writerFactories)
     {
         _serviceProvider = serviceProvider;
-        _console = console;
 
         var list = new List<ICliContributor>();
         list.AddRange(readerFactories.OfType<ICliContributor>());
@@ -80,8 +76,7 @@ public class JobExecutor
         if (bindingErrors.Count > 0)
         {
             if (!globals.Quiet)
-                foreach (var err in bindingErrors)
-                    _console.MarkupLine($"[red]Binding Error:[/] {err}");
+                host.ShowRefusal(RunRefusal.Binding, bindingErrors);
             return 1;
         }
 
@@ -91,8 +86,7 @@ public class JobExecutor
         if (validationErrors.Any())
         {
             if (!globals.Quiet)
-                foreach (var err in validationErrors)
-                    _console.MarkupLine($"[red]Validation Error:[/] {err}");
+                host.ShowRefusal(RunRefusal.Validation, validationErrors);
             return 1;
         }
 
@@ -107,7 +101,7 @@ public class JobExecutor
 
             var orchestrator = _serviceProvider.GetRequiredService<IDagOrchestrator>();
             if (!globals.Quiet)
-                orchestrator.OnLogEvent = msg => _console.MarkupLine(msg);
+                orchestrator.OnLogEvent = host.ShowDagEvent;
 
             var fingerprints = DtPipe.Cli.Services.BranchFingerprint.ForDag(dag, jobs, contexts);
             Func<BranchDefinition, BranchChannelContext, CancellationToken, Task<int>> branchExecutor = async (branch, ctx, token) =>
@@ -115,7 +109,12 @@ public class JobExecutor
                 var job = jobs[branch.Alias];
                 contexts.TryGetValue(branch.Alias, out var branchCtx);
                 var fingerprinted = ctx with { DefinitionFingerprint = fingerprints.GetValueOrDefault(branch.Alias) };
-                return await RunSingleJobAsync(job, branchCtx, branch.Alias, true, fingerprinted, resultsCollector, token, globals, userCts.Token, branchFailures);
+                var run = new BranchRun(job)
+                {
+                    Context = branchCtx, Alias = branch.Alias, IsDag = true, Channels = fingerprinted,
+                    Results = resultsCollector, Globals = globals, UserCancellation = userCts.Token
+                };
+                return await RunSingleJobAsync(run, host, token, branchFailures);
             };
 
             var exitCode = await host.RunDagAsync(dag, globals, () => orchestrator.ExecuteAsync(dag, branchExecutor, ct), ct);
@@ -145,57 +144,34 @@ public class JobExecutor
                 var orchestrator = _serviceProvider.GetRequiredService<IDagOrchestrator>();
 
                 Func<BranchDefinition, BranchChannelContext, CancellationToken, Task<int>> linearExecutor =
-                    (_, branchCtx, token) => RunSingleJobAsync(mainJob, mainContext, "main", isDag: false, branchCtx, null, token, globals, userCts.Token, branchFailures);
+                    (_, branchCtx, token) => RunSingleJobAsync(
+                        new BranchRun(mainJob)
+                        {
+                            Context = mainContext, Alias = "main", Channels = branchCtx,
+                            Globals = globals, UserCancellation = userCts.Token
+                        },
+                        host, token, branchFailures);
 
                 return await orchestrator.ExecuteAsync(linearDag, linearExecutor, ct);
             }
 
-            return await RunSingleJobAsync(mainJob, mainContext, null, false, null, null, ct, globals, userCts.Token, branchFailures);
+            return await RunSingleJobAsync(
+                new BranchRun(mainJob) { Context = mainContext, Globals = globals, UserCancellation = userCts.Token },
+                host, ct, branchFailures);
         }
     }
 
-    private async Task<int> RunSingleJobAsync(
-        JobDefinition job,
-        CliJobContext? context,
-        string? alias,
-        bool isDag,
-        BranchChannelContext? ctx,
-        System.Collections.Concurrent.ConcurrentQueue<DtPipe.Feedback.BranchSummary>? resultsCollector,
-        CancellationToken ct,
-        GlobalOptions? globals = null,
-        CancellationToken userCancellationToken = default,
-        System.Collections.Concurrent.ConcurrentDictionary<string, string>? branchFailures = null)
+    private async Task<int> RunSingleJobAsync(BranchRun run, IRunHost host, CancellationToken ct,
+        System.Collections.Concurrent.ConcurrentDictionary<string, string>? branchFailures)
     {
         var registry = _serviceProvider.GetRequiredService<OptionsRegistry>();
         registry.BeginScope();
 
-        // BindOptions() below gates flag binding (--query, --table, ...) on factory.CanHandle(job.Input/Output).
-        // An unresolved indirection (e.g. "keyring://alias") fails CanHandle for every provider, silently
-        // skipping the bind — so resolve a throwaway copy just for that check. LinearPipelineService still
-        // does its own resolution later for the actual connection open; that pass is separate, keep it.
-        var resolver = _serviceProvider.GetService<DtPipe.Core.Expressions.IStringContentResolver>();
-        var jobForBinding = job;
-        if (resolver != null)
-        {
-            var resolvedInput = job.Input != null ? await resolver.ResolveAsync(job.Input, ct) : job.Input;
-            var resolvedOutput = job.Output != null ? await resolver.ResolveAsync(job.Output, ct) : job.Output;
-            jobForBinding = job with
-            {
-                Input = resolvedInput ?? job.Input,
-                Output = resolvedOutput ?? job.Output
-            };
-        }
-
-        // Bind options from JobDefinition to the registry (for providers/transformers)
-        var providerConfigService = new DtPipe.Cli.Services.ProviderConfigurationService(
-            _contributors, registry, _serviceProvider.GetService<FlagRegistry>());
-        providerConfigService.BindOptions(jobForBinding, context, globals);
-
         var channelRegistry = _serviceProvider.GetRequiredService<IMemoryChannelRegistry>();
-        var linearPipelineService = new LinearPipelineService(_contributors, _serviceProvider, channelRegistry, registry, _console);
-        var exitCode = await linearPipelineService.ExecuteAsync(job, context, ct, userCancellationToken, resultsCollector, isDag, alias, ctx, showStatusMessages: false, dryRunInteractiveBranch: globals?.DryRunInteractiveBranch, quiet: globals?.Quiet ?? false);
+        var linearPipelineService = new LinearPipelineService(_contributors, _serviceProvider, channelRegistry, registry, host);
+        var exitCode = await linearPipelineService.ExecuteAsync(run, ct);
         if (branchFailures is not null && linearPipelineService.Failure is { } why)
-            branchFailures[alias ?? "main"] = why;
+            branchFailures[run.Alias ?? "main"] = why;
         return exitCode;
     }
 }

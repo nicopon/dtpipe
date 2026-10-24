@@ -16,7 +16,6 @@ using DtPipe.Cli.Pipeline;
 using DtPipe.Cli.Infrastructure;
 using DtPipe.Cli.Services;
 using Microsoft.Extensions.DependencyInjection;
-using Spectre.Console;
 
 namespace DtPipe.Engine;
 
@@ -26,7 +25,7 @@ public class LinearPipelineService
     private readonly IServiceProvider _serviceProvider;
     private readonly IMemoryChannelRegistry _channelRegistry;
     private readonly OptionsRegistry _optionsRegistry;
-    private readonly IAnsiConsole _console;
+    private readonly IRunHost _host;
     private readonly IEnumerable<IDataWriterFactory> _writerFactories;
     private readonly IEnumerable<IStreamReaderFactory> _readerFactories;
 
@@ -40,13 +39,13 @@ public class LinearPipelineService
         IServiceProvider serviceProvider,
         IMemoryChannelRegistry channelRegistry,
         OptionsRegistry optionsRegistry,
-        IAnsiConsole console)
+        IRunHost host)
     {
         _contributors = contributors;
         _serviceProvider = serviceProvider;
         _channelRegistry = channelRegistry;
         _optionsRegistry = optionsRegistry;
-        _console = console;
+        _host = host;
         _writerFactories = _serviceProvider.GetRequiredService<IEnumerable<IDataWriterFactory>>();
         _readerFactories = _serviceProvider.GetRequiredService<IEnumerable<IStreamReaderFactory>>();
     }
@@ -64,69 +63,27 @@ public class LinearPipelineService
     /// </summary>
     public string? Failure { get; private set; }
 
-    public Task<int> ExecuteAsync(
-        JobDefinition job,
-        CliJobContext? context,
-        CancellationToken token,
-        System.Collections.Concurrent.ConcurrentQueue<DtPipe.Feedback.BranchSummary>? resultsCollector = null,
-        bool isDag = false,
-        string? localAlias = null,
-        BranchChannelContext? ctx = null,
-        bool showStatusMessages = false,
-        string? dryRunInteractiveBranch = null,
-        bool quiet = false)
-        => ExecuteAsync(job, context, token, CancellationToken.None, resultsCollector, isDag, localAlias, ctx, showStatusMessages, dryRunInteractiveBranch, quiet);
-
-    public async Task<int> ExecuteAsync(
-        JobDefinition job,
-        CliJobContext? context,
-        CancellationToken token,
-        CancellationToken userCancellationToken,
-        System.Collections.Concurrent.ConcurrentQueue<DtPipe.Feedback.BranchSummary>? resultsCollector = null,
-        bool isDag = false,
-        string? localAlias = null,
-        BranchChannelContext? ctx = null,
-        bool showStatusMessages = false,
-        string? dryRunInteractiveBranch = null,
-        bool quiet = false)
+    public async Task<int> ExecuteAsync(BranchRun run, CancellationToken token)
     {
         // Internal cancellation models non-user sources (DAG branch faults, host teardown);
         // the working token honors both so a Ctrl-C still stops the pipeline cooperatively.
-        _userCancellationToken = userCancellationToken;
+        _userCancellationToken = run.UserCancellation;
         using var internalCts = CancellationTokenSource.CreateLinkedTokenSource(token);
         _internalCts = internalCts;
-        using var workCts = CancellationTokenSource.CreateLinkedTokenSource(internalCts.Token, userCancellationToken);
-        var workCt = workCts.Token;
-        return await ExecuteCoreAsync(job, context, workCt, resultsCollector, isDag, localAlias, ctx, showStatusMessages, dryRunInteractiveBranch, quiet);
+        using var workCts = CancellationTokenSource.CreateLinkedTokenSource(internalCts.Token, run.UserCancellation);
+        return await ExecuteCoreAsync(run, workCts.Token);
     }
 
-    private async Task<int> ExecuteCoreAsync(
-        JobDefinition job,
-        CliJobContext? context,
-        CancellationToken token,
-        System.Collections.Concurrent.ConcurrentQueue<DtPipe.Feedback.BranchSummary>? resultsCollector,
-        bool isDag,
-        string? localAlias,
-        BranchChannelContext? ctx,
-        bool showStatusMessages,
-        string? dryRunInteractiveBranch,
-        bool quiet)
+    private async Task<int> ExecuteCoreAsync(BranchRun run, CancellationToken token)
     {
-        var exportService = _serviceProvider.GetRequiredService<ExportService>();
-        var currentRawArgs = context?.Arguments ?? System.Array.Empty<string>();
+        var context = run.Context;
+        var ctx = run.Channels;
 
-        if (job.Limit < 0)
-            throw new ArgumentException($"--limit value must be >= 0 (got {job.Limit}).");
-
-        // F5: consume the orchestrator's typed channel endpoints directly — no CLI flag
-        // syntax is synthesized; reader/writer factories are selected by capability.
-        InternalChannelEndpoint? inputEndpoint = ctx?.InputEndpoint;
-        InternalChannelEndpoint? outputEndpoint = ctx?.OutputEndpoint;
-        if (ctx?.SuppressStats == true && !job.NoStats)
-            job = job with { NoStats = true };
-
-        // Resolve keyring connection string secrets
+        // Resolve the input and the output once (keyring://, ${{NAME}}), before binding: binding
+        // gates each flag on factory.CanHandle, which an unresolved indirection fails for every
+        // provider, so the bind would be skipped in silence.
         var resolver = _serviceProvider.GetService<DtPipe.Core.Expressions.IStringContentResolver>();
+        var job = run.Job;
         if (resolver != null)
         {
             if (job.Input != null)
@@ -140,6 +97,23 @@ public class LinearPipelineService
                 if (resolvedOutput != null) job = job with { Output = resolvedOutput };
             }
         }
+
+        // Bind options from JobDefinition to the registry (for providers/transformers)
+        new DtPipe.Cli.Services.ProviderConfigurationService(_contributors, _optionsRegistry, _serviceProvider.GetService<FlagRegistry>())
+            .BindOptions(job, context, run.Globals);
+
+        var exportService = _serviceProvider.GetRequiredService<ExportService>();
+        var currentRawArgs = context?.Arguments ?? System.Array.Empty<string>();
+
+        if (job.Limit < 0)
+            throw new ArgumentException($"--limit value must be >= 0 (got {job.Limit}).");
+
+        // F5: consume the orchestrator's typed channel endpoints directly — no CLI flag
+        // syntax is synthesized; reader/writer factories are selected by capability.
+        InternalChannelEndpoint? inputEndpoint = ctx?.InputEndpoint;
+        InternalChannelEndpoint? outputEndpoint = ctx?.OutputEndpoint;
+        if (ctx?.SuppressStats == true && !job.NoStats)
+            job = job with { NoStats = true };
 
         // 1. Resolve Reader. A typed input endpoint bypasses connection-string resolution
         // entirely: the factory is picked by capability and the channel alias handed over.
@@ -221,7 +195,7 @@ public class LinearPipelineService
             MaxBatchBytes = job.MaxBatchBytes,
             DryRunCount = job.DryRunCount,
             NoStats = job.NoStats,
-            DryRunInteractiveBranch = dryRunInteractiveBranch,
+            DryRunInteractiveBranch = run.Globals?.DryRunInteractiveBranch,
             Cursor = job.Cursor,
             State = job.State,
             Checkpoint = job.Checkpoint,
@@ -325,7 +299,7 @@ public class LinearPipelineService
         }
         else if (job.Transformers != null && job.Transformers.Count > 0)
         {
-            pipeline = BuildPipelineFromYaml(job, tFactories, _console);
+            pipeline = BuildPipelineFromYaml(job, tFactories);
         }
         else
         {
@@ -339,7 +313,7 @@ public class LinearPipelineService
             {
                 if (string.IsNullOrEmpty(job.Output))
                 {
-                    if (isDag)
+                    if (run.IsDag)
                     {
                         if (pipelineOptions.DryRunCount <= 0)
                             return 0; // Upstream branch to memory channel handled elsewhere
@@ -365,7 +339,7 @@ public class LinearPipelineService
                 }
             }
 
-            await exportService.RunExportAsync(pipelineOptions, readerFactory.ComponentName, cleanedOutput, token, pipeline, readerFactory, writerFactory, _optionsRegistry, isDag ? localAlias : null, resultsCollector, showStatusMessages, quiet);
+            await exportService.RunExportAsync(pipelineOptions, readerFactory.ComponentName, cleanedOutput, token, pipeline, readerFactory, writerFactory, _optionsRegistry, run.IsDag ? run.Alias : null, run.Results, quiet: run.Globals?.Quiet ?? false);
             return 0;
         }
         catch (OperationCanceledException)
@@ -376,7 +350,7 @@ public class LinearPipelineService
             if (_userCancellationToken.IsCancellationRequested
                 && _internalCts is { Token.IsCancellationRequested: false })
             {
-                _console.Write(new Spectre.Console.Markup($"{Environment.NewLine}[yellow]Warning: Pipeline canceled by user (Ctrl-C).[/]{Environment.NewLine}"));
+                _host.ShowUserCancellation();
                 return 130;
             }
             throw;
@@ -385,9 +359,7 @@ public class LinearPipelineService
         {
             var chain = DtPipe.Core.Infrastructure.Diagnostics.ExceptionChainFlattener.Format(ex);
             Failure = chain;
-            _console.Write(new Spectre.Console.Markup($"{Environment.NewLine}[red]Error: {Markup.Escape(chain)}[/]{Environment.NewLine}"));
-            if (Environment.GetEnvironmentVariable("DEBUG") == "1")
-                _console.WriteLine(ex.StackTrace ?? "");
+            _host.ShowBranchFault(chain, ex);
             return 1;
         }
     }
@@ -419,7 +391,7 @@ public class LinearPipelineService
         => _serviceProvider.GetRequiredService<InternalChannelTransports>().Writer(kind);
 
 
-    private List<IDataTransformer> BuildPipelineFromYaml(JobDefinition job, List<IDataTransformerFactory> factories, IAnsiConsole console)
+    private List<IDataTransformer> BuildPipelineFromYaml(JobDefinition job, List<IDataTransformerFactory> factories)
     {
         var pipeline = new List<IDataTransformer>();
         var configs = job.Transformers ?? new List<TransformerConfig>();

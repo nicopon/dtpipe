@@ -398,13 +398,13 @@ public class OrderedPipelineTests
             serviceProvider,
             serviceProvider.GetRequiredService<DtPipe.Core.Abstractions.Dag.IMemoryChannelRegistry>(),
             registry,
-            Spectre.Console.AnsiConsole.Console);
+            Mock.Of<IRunHost>());
 
         var job = new JobDefinition { Output = "null:", ProviderOptions = new() { ["merge"] = new() } };
 
         // The stream-transformer dispatch runs before ExecuteAsync's try/catch, so the sentinel propagates.
         var thrown = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            pipelineService.ExecuteAsync(job, context: null, token: default));
+            pipelineService.ExecuteAsync(new BranchRun(job), default));
 
         thrown.Should().BeSameAs(sentinel);
         fakeFactory.CreateFromJobCalls.Should().Be(1, "a YAML branch must use the CreateFromJob surface");
@@ -454,7 +454,7 @@ public class OrderedPipelineTests
             serviceProvider,
             serviceProvider.GetRequiredService<DtPipe.Core.Abstractions.Dag.IMemoryChannelRegistry>(),
             registry,
-            Spectre.Console.AnsiConsole.Console);
+            Mock.Of<IRunHost>());
 
         // The real shape a recorded session delivered: a projection naming a column the source has not.
         var job = new JobDefinition
@@ -467,7 +467,7 @@ public class OrderedPipelineTests
             }
         };
 
-        var exitCode = await pipelineService.ExecuteAsync(job, context: null, token: default);
+        var exitCode = await pipelineService.ExecuteAsync(new BranchRun(job), default);
 
         exitCode.Should().Be(1);
         pipelineService.Failure.Should().NotBeNull().And.Subject.Should().Contain("Projected column");

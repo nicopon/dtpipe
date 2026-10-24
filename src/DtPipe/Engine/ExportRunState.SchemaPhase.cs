@@ -2,7 +2,6 @@ using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using Microsoft.Extensions.Logging;
-using Spectre.Console;
 using Apache.Arrow;
 using Apache.Arrow.Types;
 using DtPipe.Core.Abstractions.Dag;
@@ -27,7 +26,7 @@ internal sealed partial class ExportRunState
         if (loadedSchema != null)
             ExportService.InjectSchema(ReaderFactory, Registry, ArrowSchemaSerializer.SerializeCompact(loadedSchema));
         else
-            _svc._logger.LogWarning("Schema file '{Name}' not found — falling back to inference.", schemaLoadName);
+            Logger.LogWarning("Schema file '{Name}' not found — falling back to inference.", schemaLoadName);
     }
 
     internal async Task InitializeTransformersAsync(CancellationToken ct)
@@ -65,18 +64,18 @@ internal sealed partial class ExportRunState
 
     internal void PublishBranchSchema()
     {
-        if (string.IsNullOrEmpty(Alias) || _svc._channelRegistry == null || !_svc._channelRegistry.ContainsChannel(Alias))
+        if (string.IsNullOrEmpty(Alias) || _svc.ChannelRegistry == null || !_svc.ChannelRegistry.ContainsChannel(Alias))
             return;
 
         Schema? sourceSchema = (Reader as IStreamTransformer)?.Schema ?? (Reader as IColumnarStreamReader)?.Schema;
         if (!string.IsNullOrEmpty(Alias) && sourceSchema != null)
         {
             var evolvedSchema = ExportService.EvolveSchema(sourceSchema, CurrentSchema);
-            _svc._channelRegistry.UpdateArrowChannelSchema(Alias, evolvedSchema);
+            _svc.ChannelRegistry.UpdateArrowChannelSchema(Alias, evolvedSchema);
         }
         // The only publication for a reader with no Arrow schema of its own; the registry keeps
         // a richer schema published above over this flat one.
-        _svc._channelRegistry.UpdateArrowChannelSchema(Alias, ArrowSchemaFactory.Create(CurrentSchema ?? System.Array.Empty<PipeColumnInfo>()));
+        _svc.ChannelRegistry.UpdateArrowChannelSchema(Alias, ArrowSchemaFactory.Create(CurrentSchema ?? System.Array.Empty<PipeColumnInfo>()));
     }
 
     internal async Task InferAdvisoryAsync(CancellationToken ct)

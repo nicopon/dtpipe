@@ -21,5 +21,5 @@ public interface IDagOrchestrator
     /// <summary>
     /// Optional delegate to receive real-time execution logs (e.g., for console output).
     /// </summary>
-    Action<string>? OnLogEvent { get; set; }
+    Action<DagLogEvent>? OnLogEvent { get; set; }
 }

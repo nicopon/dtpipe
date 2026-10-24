@@ -10,8 +10,8 @@ public interface IExportObserver
     void ShowPipeline(IEnumerable<string> transformerNames);
     void ShowTarget(string provider, string output);
 
-    // Logging
-    void LogMessage(string message);
+    // Logging. Every message is plain text: the observer formats and escapes it.
+    void LogMessage(string message, MessageTone tone);
     void LogWarning(string message);
     void LogError(Exception ex);
 

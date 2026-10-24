@@ -324,8 +324,8 @@ public static class PipelineToJobConverter
     /// An unresolved indirection matches no <see cref="ComponentSelector"/> prefix and no
     /// <c>CanHandle</c>, so <see cref="ResolveFactory"/> returned null and every reader option —
     /// the query included — was dropped from the exported job file, which then died on
-    /// "A query is required for provider 'mssql'". <c>JobExecutor.RunSingleJobAsync</c> resolves a
-    /// throwaway copy against the same gate before binding; this is the export side of it.
+    /// "A query is required for provider 'mssql'". <c>LinearPipelineService</c> resolves the run's
+    /// input and output against the same gate before it binds; this is the export side of it.
     /// The expansion stays inside factory lookup: the job keeps the keyring reference.
     /// </summary>
     /// <summary>

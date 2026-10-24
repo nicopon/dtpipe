@@ -41,7 +41,7 @@ public class OptInNoticeTests : IDisposable
     {
         OptInNotice.ShowOnce(_session, _observer, silenced: false);
 
-        var text = string.Join("\n", _observer.Messages);
+        var text = string.Join("\n", _observer.Messages.Select(m => m.Text));
         text.Should().Contain(_session.SessionPath, "the user must be able to go and look");
         text.Should().Contain("AES-GCM").And.Contain(UserStatePaths.KeysDirectory());
         text.Should().Contain("days");
@@ -55,7 +55,7 @@ public class OptInNoticeTests : IDisposable
         OptInNotice.ShowOnce(_session, _observer, silenced: false);
         OptInNotice.ShowOnce(_session, _observer, silenced: false);
 
-        _observer.Messages.Should().HaveCount(1);
+        _observer.Notices.Should().Be(1);
     }
 
     [Fact]
@@ -65,13 +65,14 @@ public class OptInNoticeTests : IDisposable
 
         _observer.Messages.Should().BeEmpty();
         OptInNotice.ShowOnce(_session, _observer, silenced: false);
-        _observer.Messages.Should().HaveCount(1, "being silenced must not consume the one showing");
+        _observer.Notices.Should().Be(1, "being silenced must not consume the one showing");
     }
 
     private sealed class RecordingObserver : IExportObserver
     {
-        public List<string> Messages { get; } = new();
-        public void LogMessage(string message) => Messages.Add(message);
+        public List<(string Text, MessageTone Tone)> Messages { get; } = new();
+        public int Notices => Messages.Count(m => m.Tone == MessageTone.Notice);
+        public void LogMessage(string message, MessageTone tone) => Messages.Add((message, tone));
         public void ShowIntro(string provider, string output) { }
         public void ShowConnectionStatus(bool connected, int? columnCount) { }
         public void ShowPipeline(IEnumerable<string> transformerNames) { }

@@ -163,4 +163,28 @@ public class JobService : IRunHost
         _console.WriteLine();
         DagRenderer.PrintUnifiedResultsTable(results.ToList(), dag, isDag: true, _console);
     }
+
+    void IRunHost.ShowRefusal(RunRefusal refusal, IEnumerable<string> errors)
+    {
+        var label = refusal == RunRefusal.Binding ? "Binding Error:" : "Validation Error:";
+        foreach (var err in errors)
+            _console.MarkupLine($"[red]{label}[/] {Markup.Escape(err)}");
+    }
+
+    void IRunHost.ShowDagEvent(DtPipe.Core.Abstractions.Dag.DagLogEvent dagEvent)
+    {
+        var glyph = dagEvent.Severity == DtPipe.Core.Abstractions.Dag.DagLogSeverity.Error ? "✖" : "⚠";
+        var indent = dagEvent.Branch is null ? "" : "  ";
+        _console.MarkupLine(Markup.Escape($"{indent}{glyph} {dagEvent.Message}"));
+    }
+
+    void IRunHost.ShowBranchFault(string reason, Exception fault)
+    {
+        _console.Write(new Markup($"{Environment.NewLine}[red]Error: {Markup.Escape(reason)}[/]{Environment.NewLine}"));
+        if (Environment.GetEnvironmentVariable("DEBUG") == "1")
+            _console.WriteLine(fault.StackTrace ?? "");
+    }
+
+    void IRunHost.ShowUserCancellation()
+        => _console.Write(new Markup($"{Environment.NewLine}[yellow]Warning: Pipeline canceled by user (Ctrl-C).[/]{Environment.NewLine}"));
 }

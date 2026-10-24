@@ -83,11 +83,11 @@ public sealed class SchemaValidationService
         }
 
         // Named before the outcome, so the line stands whether the run then warns, migrates or aborts.
-        _observer.LogMessage($"[grey]Schema mode: {DescribeMode(settings)}.[/]");
+        _observer.LogMessage($"Schema mode: {DescribeMode(settings)}.", MessageTone.Detail);
 
         if (settings?.NoSchemaValidation == true) return;
 
-        _observer.LogMessage("Verifying target schema compatibility...");
+        _observer.LogMessage("Verifying target schema compatibility...", MessageTone.Plain);
         var targetSchema = await inspector.InspectTargetAsync(ct);
         var dialect = (writer as IHasSqlDialect)?.Dialect;
         var report = SchemaCompatibilityAnalyzer.Analyze(exportableSchema, targetSchema, dialect);
@@ -108,12 +108,12 @@ public sealed class SchemaValidationService
 
         if (report.IsCompatible)
         {
-            _observer.LogMessage("Target schema compatible.");
+            _observer.LogMessage("Target schema compatible.", MessageTone.Plain);
         }
 
         if (willMigrate && writer is ISchemaMigrator migrator)
         {
-            _observer.LogMessage($"[yellow]Auto-migrating schema: Adding {missingCount} missing columns...[/]");
+            _observer.LogMessage($"Auto-migrating schema: Adding {missingCount} missing columns...", MessageTone.Notice);
             await migrator.MigrateSchemaAsync(report, ct);
 
             targetSchema = await inspector.InspectTargetAsync(ct);
@@ -122,7 +122,7 @@ public sealed class SchemaValidationService
             if (!report.IsCompatible && settings?.StrictSchema == true)
                 throw new InvalidOperationException("Export aborted: Schema migration failed to resolve all incompatibilities in Strict Mode.");
 
-            _observer.LogMessage("[green]Schema migration successful. Continuing export.[/]");
+            _observer.LogMessage("Schema migration successful. Continuing export.", MessageTone.Success);
         }
         else if (!report.IsCompatible && settings?.StrictSchema == true)
         {

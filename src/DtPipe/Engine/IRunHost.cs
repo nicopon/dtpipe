@@ -1,4 +1,5 @@
 using DtPipe.Cli.Pipeline;
+using DtPipe.Core.Abstractions.Dag;
 using DtPipe.Core.Models;
 using DtPipe.Core.Pipelines.Dag;
 using DtPipe.Feedback;
@@ -28,4 +29,22 @@ public interface IRunHost
     Task<int> RunDagAsync(JobDagDefinition dag, GlobalOptions globals, Func<Task<int>> run, CancellationToken ct);
 
     void ShowResults(IReadOnlyList<BranchSummary> results, JobDagDefinition dag);
+
+    /// <summary>The run was refused before any branch started, one plain-text reason per error.</summary>
+    void ShowRefusal(RunRefusal refusal, IEnumerable<string> errors);
+
+    /// <summary>What the orchestrator reported while the DAG ran.</summary>
+    void ShowDagEvent(DagLogEvent dagEvent);
+
+    /// <summary>A branch stopped on <paramref name="fault"/>; <paramref name="reason"/> is its flattened chain.</summary>
+    void ShowBranchFault(string reason, Exception fault);
+
+    /// <summary>A branch stopped because the user interrupted the run.</summary>
+    void ShowUserCancellation();
+}
+
+public enum RunRefusal
+{
+    Binding,
+    Validation
 }

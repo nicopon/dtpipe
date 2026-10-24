@@ -19,13 +19,13 @@ public static class OptInNotice
         var meta = session.EnsureCreated();
         if (meta.NoticeShown) return;
 
+        observer.LogMessage("dtpipe is materialising pipeline data on disk.", MessageTone.Notice);
         observer.LogMessage(
-            $"[yellow]dtpipe is materialising pipeline data on disk.[/]{Environment.NewLine}" +
-            $"[grey]   session   : {session.Identity.Name} ({session.Identity.Origin})[/]{Environment.NewLine}" +
-            $"[grey]   location  : {session.SessionPath}[/]{Environment.NewLine}" +
-            $"[grey]   encryption: AES-GCM; the key is held apart, in {UserStatePaths.KeysDirectory()}[/]{Environment.NewLine}" +
-            $"[grey]   retention : {meta.TtlDays} days, then purged automatically[/]{Environment.NewLine}" +
-            $"[grey]   remove now: dtpipe session purge {session.Identity.Name}[/]");
+            $"   session   : {session.Identity.Name} ({session.Identity.Origin}){Environment.NewLine}" +
+            $"   location  : {session.SessionPath}{Environment.NewLine}" +
+            $"   encryption: AES-GCM; the key is held apart, in {UserStatePaths.KeysDirectory()}{Environment.NewLine}" +
+            $"   retention : {meta.TtlDays} days, then purged automatically{Environment.NewLine}" +
+            $"   remove now: dtpipe session purge {session.Identity.Name}", MessageTone.Detail);
 
         meta.NoticeShown = true;
         session.WriteMetadata(meta);

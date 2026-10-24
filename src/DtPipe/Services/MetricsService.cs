@@ -28,7 +28,7 @@ public sealed class MetricsService
             var json = System.Text.Json.JsonSerializer.Serialize(metrics,
                 new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
             await File.WriteAllTextAsync(metricsPath, json, ct);
-            _observer.LogMessage($"   [grey]Metrics saved to: {metricsPath}[/]");
+            _observer.LogMessage($"   Metrics saved to: {metricsPath}", MessageTone.Detail);
         }
         catch (Exception ex)
         {
