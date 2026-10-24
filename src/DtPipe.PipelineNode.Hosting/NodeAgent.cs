@@ -13,7 +13,7 @@ namespace DtPipe.PipelineNode.Hosting;
 /// channel, with the TransportR client its runs move their bytes with, and runs the fragments the coordinator launches
 /// on it (<see cref="ReplicaRuns"/>). Whatever the coordinator asks, a fragment runs only under the node's own
 /// <see cref="FragmentPolicy"/>, read from its configuration and never from a message. Messages are answered as they
-/// arrive and never queued behind a run; a brick preview and a lab request answer on the same footing.
+/// arrive and never queued behind a run; a brick preview and a check answer on the same footing.
 /// </summary>
 internal sealed class NodeAgent : BackgroundService
 {

@@ -7,7 +7,9 @@
 #   product-with-dtpipe   the runtime plus the dtpipe binary
 #   product-runtime       the runtime alone
 #
-#   coordinator-lab  the coordinator, plus the lab's scenarios, library seed and rights seed under /lab
+#   coordinator-lab  the lab's coordinator (Lab.Coordinator: the product's server and the Lab view) in
+#                    place of the product's in /app, plus the lab's scenarios, library seed and rights
+#                    seed under /lab
 #   node             the lab's data node host, its node files and seed script under /lab; it
 #                    seeds its own database on first start (node-entrypoint.sh)
 #   idp              the lab's test identity provider, its clients file under /lab
@@ -19,20 +21,24 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS source
 WORKDIR /src
 COPY Directory.Build.props ./
 COPY src/ src/
+COPY samples/distributed-lab/Lab.Coordinator/ samples/distributed-lab/Lab.Coordinator/
 COPY samples/distributed-lab/Lab.NodeHost/ samples/distributed-lab/Lab.NodeHost/
 COPY samples/distributed-lab/Lab.Idp/ samples/distributed-lab/Lab.Idp/
 
 # Framework-dependent: the runtime image carries ASP.NET Core.
 FROM source AS hosts-build
 RUN --mount=type=cache,id=dtpipe-lab-nuget,target=/root/.nuget/packages,sharing=locked \
-    dotnet publish samples/distributed-lab/Lab.NodeHost/Lab.NodeHost.csproj -c Release -o /out/node \
+    dotnet publish samples/distributed-lab/Lab.Coordinator/Lab.Coordinator.csproj -c Release -o /out/coordinator \
+    && dotnet publish samples/distributed-lab/Lab.NodeHost/Lab.NodeHost.csproj -c Release -o /out/node \
     && dotnet publish samples/distributed-lab/Lab.Idp/Lab.Idp.csproj -c Release -o /out/idp
 
 FROM product-coordinator AS coordinator-lab
 USER root
-# The library's remote is a directory the stack mounts, owned by whoever runs the stack.
-RUN git config --system --add safe.directory /lab/library.git
+# The library's remote is a directory the stack mounts, owned by whoever runs the stack. The product's
+# coordinator leaves /app to the lab's, which carries the same server.
+RUN git config --system --add safe.directory /lab/library.git && rm -rf /app/*
 USER 1654:1654
+COPY --from=hosts-build /out/coordinator /app
 COPY samples/distributed-lab/pipelines/ /lab/pipelines/
 COPY samples/distributed-lab/library-seed/ /lab/library-seed/
 COPY samples/distributed-lab/rights-seed.json /lab/rights-seed.json

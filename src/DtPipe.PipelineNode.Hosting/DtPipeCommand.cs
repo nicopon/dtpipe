@@ -18,8 +18,9 @@ internal sealed record DtPipeCommandResult(int ExitCode, byte[] Output, string S
 
 /// <summary>
 /// Runs the dtpipe binary for what the node reads itself rather than as a fragment (a brick's schema
-/// and preview, the coordinator's lab requests), with the environment its fragments inherit, so a
-/// command names a database through <c>${{VARIABLE}}</c> and its value never enters an argument.
+/// and preview, the coordinator's checks of a brick or a job), with the environment its fragments
+/// inherit, so a command names a database through <c>${{VARIABLE}}</c> and its value never enters
+/// an argument.
 /// </summary>
 internal sealed class DtPipeCommand(string dtpipe, string workingDirectory, IReadOnlyDictionary<string, string> environment)
 {

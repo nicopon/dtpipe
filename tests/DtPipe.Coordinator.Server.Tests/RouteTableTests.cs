@@ -106,6 +106,19 @@ public sealed class RouteTableTests
         Assert.Equal(Expected, TableOf(host));
     }
 
+    private static readonly string[] BenchRoutes = ["/api/pipelines", "/api/plan", "/api/deploy", "/api/fragments/{name}/kill"];
+
+    /// <summary>
+    /// The bench's routes (the scenario catalog, planning by hand, fault injection) are the lab's own host's, never the product's:
+    /// no setting of the product maps them, <c>Coordinator:LabMode</c> included.
+    /// </summary>
+    [Fact]
+    public void The_Product_Maps_None_Of_The_Benchs_Routes_Whatever_Its_Settings()
+    {
+        using var host = new CoordinatorHost(settings: new Dictionary<string, string> { ["LabMode"] = "true", ["Scenarios"] = "." });
+        Assert.Empty(TableOf(host).Select(line => line.Split(' ')[1]).Intersect(BenchRoutes));
+    }
+
     private static readonly string[] KeyIssuerOnly = [
         "GET /.well-known/jwks.json [none]",
         "GET /.well-known/openid-configuration [none]",

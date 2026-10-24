@@ -73,7 +73,7 @@
     <tr><th>Service</th><th>What it does</th></tr>
     <tr><td><code>proxy</code></td><td>This page, and the only published port: routes each host name to its service.</td></tr>
     <tr><td><code>idp</code></td><td>Test OpenID Connect provider: client credentials for the nodes, a sign-in form for people.</td></tr>
-    <tr><td><code>coordinator</code></td><td>The control plane, in lab mode: plans, deploys and runs pipelines, holds the library (a git repository) and the rights.</td></tr>
+    <tr><td><code>coordinator</code></td><td>The control plane, with the Lab view: plans, deploys and runs pipelines, holds the library (a git repository) and the rights.</td></tr>
     <tr><td><code>node-1</code> … <code>node-4</code></td><td>Data nodes, each with its own database, seeded on first start. They serve no HTTP: their state is in the coordinator's Nodes view.</td></tr>
     <tr><td><code>runner-1</code></td><td>The official runner: holds no data, carries every step between the bricks.</td></tr>
   </table>

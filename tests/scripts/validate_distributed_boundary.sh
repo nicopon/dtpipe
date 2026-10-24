@@ -5,7 +5,8 @@ set -e
 # Source-level guard on the distributed-pipeline split: TransportR is named only by the distributed
 # family (every project named DtPipe.Coordinator* or DtPipe.PipelineNode*), its tests and the lab; no
 # core project reaches it; the two base libraries stay libraries; the lab and its sample data stay
-# under samples/, outside the solution and the build, and the product's images (deploy/) name none of them; the family reaches the solution only through
+# under samples/, outside the solution and the build, and the product's images (deploy/) name none of them; src/ holds nothing of the
+# lab's bench (lab mode, the Lab view); the family reaches the solution only through
 # DtPipe.Jobs; the CLI reaches the family through one project, DtPipe.PipelineNode.Launcher (`dtpipe node`), named in one source
 # file, so no other command loads TransportR; the CLI maps no SignalR hub.
 #
@@ -91,6 +92,22 @@ if [ -n "$HITS" ]; then
     fail "the lab or its sample pipelines are named outside samples/distributed-lab"
 fi
 pass "the lab and its sample data are named only under samples/distributed-lab"
+
+# 4b. The product holds nothing of the bench: no source or page under src/, the family's included, names lab mode, the Lab view,
+#     its catalog's directives or the lab's script. The lab's coordinator (samples/distributed-lab/Lab.Coordinator) adds them
+#     to the server through its seams, so a name here puts the bench in the product's image.
+HITS=""
+for f in $(echo "$FILES" | grep -E '^src/' | grep -E '\.(cs|csproj|props|targets|js|html|css|json)$' || true); do
+    [ -f "$f" ] || continue
+    if grep -qE 'LabMode|labMode|LabFaults|Lab view|lab-(place|check)|lab\.sh|"/lab|[^A-Za-z]lab/|[Ll]ab (mode|host|request)' "$f"; then
+        HITS="$HITS\n  $f"
+    fi
+done
+if [ -n "$HITS" ]; then
+    echo -e "$HITS"
+    fail "src/ names the lab's bench: it belongs to samples/distributed-lab/Lab.Coordinator"
+fi
+pass "src/ names nothing of the lab's bench"
 
 # 5. The two base libraries stay libraries: a host owns Program, authentication and the address. An
 #    executable of the family (DtPipe.Coordinator.Host, a runner) is such a host and is not checked.

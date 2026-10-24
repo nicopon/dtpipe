@@ -7,4 +7,4 @@ set -euo pipefail
 remote=/lab/library.git
 [[ -f "$remote/HEAD" ]] || git init -q --bare -b main "$remote"
 
-exec dotnet /app/DtPipe.Coordinator.Host.dll "$@"
+exec dotnet /app/Lab.Coordinator.dll "$@"
