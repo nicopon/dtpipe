@@ -79,6 +79,25 @@ public class JobService
     public async Task<int> ExecutePipelineAsync(Dictionary<string, JobDefinition> jobs, JobDagDefinition dag, Dictionary<string, Pipeline.CliJobContext> contexts, Pipeline.GlobalOptions globals, CancellationToken ct,
         System.Collections.Concurrent.ConcurrentDictionary<string, string>? branchFailures = null)
     {
+        // A run waits here while another holds the process; cancelled while it waits, it never started.
+        try { await OneRunAtATime.WaitAsync(ct); }
+        catch (OperationCanceledException) { return 130; }
+
+        try { return await RunHeldAsync(jobs, dag, contexts, globals, ct, branchFailures); }
+        finally { OneRunAtATime.Release(); }
+    }
+
+    /// <summary>
+    /// One run at a time in the process. A run owns state it shares with any other: the channel registry
+    /// <c>DagOrchestrator</c> clears at its start, the <c>DTPIPE_CURSOR_OVERRIDE</c> variable, the
+    /// console's Ctrl-C. Two runs over them trade rows, and one can still exit 0. Static, so a second
+    /// container in the process waits too. A run started from inside a run would wait on itself.
+    /// </summary>
+    private static readonly SemaphoreSlim OneRunAtATime = new(1, 1);
+
+    private async Task<int> RunHeldAsync(Dictionary<string, JobDefinition> jobs, JobDagDefinition dag, Dictionary<string, Pipeline.CliJobContext> contexts, Pipeline.GlobalOptions globals, CancellationToken ct,
+        System.Collections.Concurrent.ConcurrentDictionary<string, string>? branchFailures)
+    {
         if (globals.AllFlags.TryGetValue("--cursor-from", out var cursorFromObj) && cursorFromObj is string cursorFromVal && !string.IsNullOrEmpty(cursorFromVal))
         {
             Environment.SetEnvironmentVariable("DTPIPE_CURSOR_OVERRIDE", cursorFromVal);

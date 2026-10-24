@@ -230,15 +230,17 @@ public partial class DtPipeMcpTools
                  kv => new CliJobContext(null, null, null, Array.Empty<string>())
                );
 
-            var jobService = _serviceProvider.GetRequiredService<DtPipe.Cli.JobService>();
+            var runner = _serviceProvider.GetRequiredService<DtPipe.Cli.JobRunner>();
             var sw = System.Diagnostics.Stopwatch.StartNew();
 
             // Quiet: this result goes back as JSON. The topology panel and the live progress
             // display are for a person watching a CLI run, and under the agent's full-screen
             // surface they would land on a screen the toolkit owns.
             var globalOptions = new GlobalOptions { Quiet = true };
-            var exitCode = await jobService.ExecutePipelineAsync(parsed.Jobs, parsed.Dag, contexts, globalOptions, ct);
+            var outcome = await runner.RunAsync(parsed.Jobs, parsed.Dag, contexts, globalOptions, ct);
             sw.Stop();
+            outcome.ThrowIfFaulted();
+            var exitCode = outcome.ExitCode;
 
             return JsonSerializer.Serialize(new
             {

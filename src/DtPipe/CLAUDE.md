@@ -185,16 +185,18 @@ Hardening invariants — fail-closed, non-negotiable:
 Mandatory MCP directives:
 1. Reflect help from `[Description]` / `[ComponentHelp]`; never hardcode it. `[unchecked — nothing
    tests GetGeneralHelp]`
-2. Execute in memory via `JobFileParser` + `JobService.ExecutePipelineAsync()`; no temp files or
-   shell proxies. `[unchecked]`
+2. Execute in memory via `JobFileParser` + `JobRunner`; no temp files or shell proxies.
+   `[unchecked]`
 3. Discover tables on `inspect` without a query; give actionable hints on validation errors.
    `[unchecked]`
 4. Fail closed: default `apply=false`, reject on ambiguity. `[CI: ExecuteYamlJobGuardrailTests]`
 
 ### One run, one report collection
 
-The agent runs the tools of a turn in parallel (F5), so two runs overlap. `JobRunner` is the only
-caller-facing way to run a resolved job (MCP, `split`, `contract`, the studio): it arms a `RunReports` for the run
+The agent runs the tools of a turn in parallel (F5), and the runs they start follow each other: a
+process runs one at a time (root `CLAUDE.md`), so a run started beside another waits for it at
+`JobService.ExecutePipelineAsync`. `JobRunner` is the only caller-facing way to run a resolved job
+(MCP's sample and real write, `split`, `contract`, the studio): it arms a `RunReports` for the run
 through `SampleReportCollector.Begin`, around the whole `ExecutePipelineAsync`, and returns a
 `RunOutcome` (exit code, branch failures, reports, checkpoint keys). `SampleReportCollector` is the
 singleton the engine and the observer publish to; it forwards to the collection the calling async flow

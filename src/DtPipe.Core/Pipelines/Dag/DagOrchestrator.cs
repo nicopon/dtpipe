@@ -61,7 +61,8 @@ public class DagOrchestrator : IDagOrchestrator
             return 1;
         }
 
-        // Systematically clear channels to prevent any state leakage between runs (e.g. in MCP or embedded library modes)
+        // A run starts on an empty registry. Clearing it is safe only because a process runs one run at a
+        // time (JobService): a second run beside this one would clear its channels and trade its rows.
         _channelRegistry.Clear();
 
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);

@@ -256,6 +256,17 @@ it. Ownership moves downstream when a batch is yielded, returned or written.**
 `[CI: ArrowOwnershipTests, CDataOwnershipTests]` `[unchecked: a transformer that aliases a column
 without retaining it]` Detail: `src/DtPipe.Core/CLAUDE.md`.
 
+### One run at a time per process
+
+**A process runs one pipeline at a time.** `JobService.ExecutePipelineAsync`, which every run enters
+(the command line, `JobRunner`), holds a static gate for the whole run: a run that finds it held
+waits, and one cancelled while it waits returns 130. A run owns state the process holds once (the
+channel registry `DagOrchestrator` clears at its start, `DTPIPE_CURSOR_OVERRIDE`, the console's
+Ctrl-C); two runs over it trade rows, and one can still exit 0. **Never start a run from inside a
+run**: it would wait on itself. Callers that overlap (the agent's tool calls, MCP requests) wait.
+`[CI: ConcurrentRunCollectionTests]` `[unchecked: an entry that runs the engine without JobService;
+the branches a failed DAG leaves running once it has returned]` Detail: `src/DtPipe/CLAUDE.md`.
+
 ### Adding an adapter
 
 Full patterns: `EXTENDING.md`.
@@ -431,6 +442,6 @@ Detail: `src/DtPipe.Core/CLAUDE.md`.
 **F7** `analyze-traces.sh --gate`; never record a placeholder variance.
 
 MCP directives: reflect help from `[Description]` / `[ComponentHelp]`, never hardcode it; execute
-in memory via `JobFileParser` + `JobService.ExecutePipelineAsync()`, no temp files; discover tables
+in memory via `JobFileParser` + `JobRunner`, no temp files; discover tables
 on `inspect`; default `apply=false`. `[CI: ExecuteYamlJobGuardrailTests — the last one]`
 `[unchecked: the rest]` Detail: `src/DtPipe/CLAUDE.md`.
