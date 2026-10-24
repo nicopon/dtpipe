@@ -19,5 +19,5 @@ public static class BranchSides
     /// Keys that describe one whole run: a path cannot describe two, so no side takes them.
     /// </summary>
     public static readonly IReadOnlySet<string> Diagnostics = new HashSet<string>(
-        ["metrics-path", "log-path"], StringComparer.Ordinal);
+        ["metrics-path"], StringComparer.Ordinal);
 }

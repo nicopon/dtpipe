@@ -539,7 +539,7 @@ DuckDB extensions (`excel`, `httpfs`, `azure`, `ducklake`…) are reached throug
 | `--max-batch-bytes` | `268435456` | Soft byte cap per read batch: a batch flushes when either `--batch-size` rows **or** this many bytes accumulate, whichever comes first. `0` (default) disables the byte cap. Bounds memory when rows carry large text/blob columns. Estimate is approximate — the row that crosses the bound is kept. Applies to the wire-decode readers (PostgreSQL `COPY`, and the ADO readers: MySQL, Oracle, SQL Server, SQLite) and the row→columnar bridge. |
 | `--no-stats` | | Suppress progress bars and transfer statistics |
 | `--metrics-path` | `metrics.json` | Write structured execution results to a JSON file |
-| `--log` | `pipeline.log` | Write log output to a file |
+| `--log` | `pipeline.log` | Write log output to a file. The log belongs to the process, so a job file has no key for it |
 | `--strict-bindings` | | Non-zero exit on the two binding faults that are otherwise tolerated: a flag nothing declares that consumes no value (one followed by a value is refused by the parser either way), and a job file's unrecognized `provider-options` key (a warning otherwise). A flag that exists but is not an option of the branch's component is refused with or without it |
 | `--dry-run` | `10` | Run the pipeline over N source rows with the writer neutralised — see [Sample Mode](#sample-mode--materialisation) |
 | `--session` | `mission-7` | Name the session materialised artefacts belong to |
@@ -702,7 +702,6 @@ branch-name:
   sampling-seed: null
   dry-run-count: 0
   metrics-path: null
-  log-path: null
   prefix: null
 
   # DAG routing (optional)
@@ -1136,8 +1135,8 @@ dtpipe split producer.yaml --at 1 --out orders --acknowledge
 Each value of the job goes to the half that governs it — the source, cursor, `--limit` and sampling
 to the producer; the target, `--prefix` and `--checkpoint` to the consumer. A `provider-options`
 block follows **the component that owns it**, so a block neither end answers to stops the cut by
-name rather than being placed on a guess. `--metrics-path` and `--log-path` reach neither half: one
-path cannot hold two runs' reports, and the table says so instead of letting them vanish.
+name rather than being placed on a guess. `--metrics-path` reaches neither half: one
+path cannot hold two runs' reports, and the table says so instead of letting it vanish.
 
 Without `--acknowledge` it prints the placement and exits `1`. The gate is not a clean bill of
 health — it reports a scan of the keys this build knows, and **a cut does not remove a secret, it

@@ -30,7 +30,7 @@ public static class JobFileWriter
         nameof(JobDefinition.SamplingRate), nameof(JobDefinition.SamplingSeed),
         nameof(JobDefinition.DryRunCount), nameof(JobDefinition.Prefix),
         nameof(JobDefinition.Cursor), nameof(JobDefinition.State), nameof(JobDefinition.Session),
-        nameof(JobDefinition.MetricsPath), nameof(JobDefinition.LogPath),
+        nameof(JobDefinition.MetricsPath),
         nameof(JobDefinition.ProviderOptions),
     ];
 

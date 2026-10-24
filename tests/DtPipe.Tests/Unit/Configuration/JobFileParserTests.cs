@@ -97,6 +97,18 @@ joined:
     }
 
     [Fact]
+    public void Log_Path_Is_Refused_With_Where_The_Log_Lives()
+    {
+        var yaml = "main:\n  input: in.csv\n  output: out.csv\n  log-path: run.log\n";
+
+        var ex = Assert.Throws<InvalidOperationException>(() => JobFileParser.ParseContent(yaml));
+
+        ex.Message.Should().Contain("log-path");
+        ex.Message.Should().Contain("line 4");
+        ex.Message.Should().Contain("--log");
+    }
+
+    [Fact]
     public void Parse_ShouldHandleMultiBranchDag()
     {
         // Arrange

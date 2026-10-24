@@ -4,7 +4,7 @@ namespace DtPipe.Core.Models;
 
 /// <summary>
 /// F7 — canonical per-branch engine-control settings (limit/batch/sampling/dry-run/
-/// metrics/log/prefix/cursor/state). The CLI converter derives the bundle once, from global
+/// metrics/prefix/cursor/state). The CLI converter derives the bundle once, from global
 /// defaults overlaid by branch-local flags, and immediately folds it into the branch's job
 /// through <see cref="ApplyTo"/>. Downstream the settings are read off the
 /// <see cref="JobDefinition"/>; the bundle itself is the derivation step, not a second place
@@ -19,7 +19,6 @@ public sealed record BranchEngineSettings(
     int DryRunCount,
     bool NoStats,
     string? MetricsPath,
-    string? LogPath,
     string? Prefix,
     string? Cursor,
     string? State,
@@ -34,7 +33,7 @@ public sealed record BranchEngineSettings(
 {
     public static BranchEngineSettings Default { get; }
         = new(Limit: 0, BatchSize: PipelineOptions.DefaultBatchSize, MaxBatchBytes: 0, SamplingRate: 1.0, SamplingSeed: null,
-              DryRunCount: 0, NoStats: false, MetricsPath: null, LogPath: null, Prefix: null,
+              DryRunCount: 0, NoStats: false, MetricsPath: null, Prefix: null,
               Cursor: null, State: null);
 
     /// <summary>Applies these settings onto a job definition (single derivation point).</summary>
@@ -48,7 +47,6 @@ public sealed record BranchEngineSettings(
         DryRunCount = DryRunCount,
         NoStats = NoStats || job.NoStats,
         MetricsPath = MetricsPath ?? job.MetricsPath,
-        LogPath = LogPath ?? job.LogPath,
         Prefix = Prefix ?? job.Prefix,
         Cursor = Cursor ?? job.Cursor,
         State = State ?? job.State,

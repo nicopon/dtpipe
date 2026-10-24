@@ -9,7 +9,7 @@ public static class EngineOverrideFlags
 {
     public static readonly IReadOnlyList<string> All =
     [
-        "--limit", "--batch-size", "-b", "--max-batch-bytes", "--log", "--metrics-path",
+        "--limit", "--batch-size", "-b", "--max-batch-bytes", "--metrics-path",
         "--cursor", "--state", "--sampling-rate", "--sampling-seed",
         "--prefix", "--dry-run", "--session", "--checkpoint", "--from-checkpoint", "--contract-save", "--from-contract",
     ];

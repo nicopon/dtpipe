@@ -34,7 +34,6 @@ public record JobDefinition
     /// <summary>Session the checkpoints belong to (--session); null lets the precedence chain decide.</summary>
     public string? Session { get; init; }
     public string? MetricsPath { get; init; }
-    public string? LogPath { get; init; }
 
     public double SamplingRate { get; init; } = 1.0;
     public int? SamplingSeed { get; init; }

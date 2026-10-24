@@ -177,7 +177,6 @@ public static class JobCutter
         // second process would overwrite the first. Naming them here is the difference between a
         // decision and a loss.
         Add(CutSide.Dropped, "metrics-path", job.MetricsPath);
-        Add(CutSide.Dropped, "log-path", job.LogPath);
 
         return rows;
     }

@@ -95,7 +95,7 @@ public class EngineOverrideFlagsParityTests
     {
         var expected = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "--limit", "--batch-size", "-b", "--log", "--metrics-path",
+            "--limit", "--batch-size", "-b", "--metrics-path",
             "--cursor", "--state", "--sampling-rate", "--sampling-seed",
             "--prefix", "--dry-run",
         };

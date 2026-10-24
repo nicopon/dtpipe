@@ -101,11 +101,23 @@ internal static class ToolError
         // the caller got the top level right and named one thing wrong inside a branch, so the
         // answer is the list of keys a branch takes — read off the type, never written twice.
         if (reason.Contains("not found", StringComparison.Ordinal))
-            return $". A branch takes: {BranchKeys}. Call 'help' for the full shape.";
+            return $". A branch takes: {BranchKeys}. Call 'help' for the full shape."
+                 + string.Concat(ProcessSettings
+                       .Where(s => reason.Contains($"Property '{s.Key}' not found", StringComparison.Ordinal))
+                       .Select(s => $" {s.Where}"));
 
         return ". The top level of a job is a map of branch aliases (e.g. 'main:'), each with its own "
              + "'input:', 'output:', 'transformers:' and 'provider-options:'. Call 'help' for the full shape.";
     }
+
+    /// <summary>
+    /// Keys that name a setting of the process, not of a branch: refused like any unknown key, with
+    /// where the setting lives, since the key alone reads as a misspelt branch key.
+    /// </summary>
+    private static readonly (string Key, string Where)[] ProcessSettings =
+    [
+        ("log-path", "A job file names no log: the log belongs to the process that runs the job, set by --log."),
+    ];
 
     private static readonly string BranchKeys = string.Join(", ",
         typeof(DtPipe.Core.Models.JobDefinition)

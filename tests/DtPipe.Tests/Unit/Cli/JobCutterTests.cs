@@ -176,19 +176,15 @@ public class JobCutterTests
             Input = "csv:in.csv",
             Output = "csv:out.csv",
             MetricsPath = "run.json",
-            LogPath = "run.log",
         };
 
         var result = Cut(Job(job), at: 0);
 
         Assert.Null(result.Producer["main"].MetricsPath);
         Assert.Null(result.Consumer["main"].MetricsPath);
-        Assert.Null(result.Producer["main"].LogPath);
-        Assert.Null(result.Consumer["main"].LogPath);
 
         var dropped = result.Placements.Where(p => p.Side == CutSide.Dropped).Select(p => p.Key).ToList();
         Assert.Contains("metrics-path", dropped);
-        Assert.Contains("log-path", dropped);
     }
 
     // ── Provider options follow the component that owns them ─────────────────

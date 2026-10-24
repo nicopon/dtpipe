@@ -130,7 +130,6 @@ public static class PipelineToJobConverter
         int? limitOverride = GetInt(flags, "--limit");
         int? batchOverride = GetInt(flags, "--batch-size", "-b");
         long? maxBatchBytesOverride = GetLong(flags, "--max-batch-bytes");
-        string? logOverride = GetString(flags, "--log");
         string? metricsOverride = GetString(flags, "--metrics-path");
         string? prefixOverride = GetString(flags, "--prefix", "-p");
         string? cursorOverride = GetString(flags, "--cursor");
@@ -145,7 +144,6 @@ public static class PipelineToJobConverter
             if (limitOverride is > 0) job = job with { Limit = limitOverride.Value };
             if (batchOverride is > 0) job = job with { BatchSize = batchOverride.Value };
             if (maxBatchBytesOverride is > 0) job = job with { MaxBatchBytes = maxBatchBytesOverride.Value };
-            if (!string.IsNullOrEmpty(logOverride)) job = job with { LogPath = logOverride };
             if (!string.IsNullOrEmpty(metricsOverride)) job = job with { MetricsPath = metricsOverride };
             if (!string.IsNullOrEmpty(prefixOverride)) job = job with { Prefix = prefixOverride };
             if (!string.IsNullOrEmpty(cursorOverride)) job = job with { Cursor = cursorOverride };
@@ -204,7 +202,6 @@ public static class PipelineToJobConverter
                            ?? 1.0;
         int? samplingSeed = GetNullableInt(branchFlags, "--sampling-seed", "--sample-seed")
                          ?? GetNullableInt(globals.AllFlags, "--sampling-seed", "--sample-seed");
-        string? logPath = GetString(branchFlags, "--log") ?? globals.LogPath;
         string? metricsPath = GetString(branchFlags, "--metrics-path")
                            ?? GetString(globals.AllFlags, "--metrics-path");
         string? prefix = GetString(branchFlags, "--prefix", "-p")
@@ -231,7 +228,6 @@ public static class PipelineToJobConverter
             DryRunCount: globals.DryRunCount,
             NoStats: globals.NoStats,
             MetricsPath: metricsPath,
-            LogPath: logPath,
             Prefix: prefix,
             Cursor: cursor,
             State: state,

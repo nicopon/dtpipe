@@ -58,7 +58,7 @@ stream1:
 | `transformers` | The chain, in order, each with `mappings` and `options` |
 | `provider-options` | Per-component options, keyed by component name (`pg`, `csv-reader`, `sql`) |
 | `cursor`, `state` | Incremental loading |
-| `batch-size`, `limit`, `sampling-rate`, `metrics-path`, `log-path`, `prefix` | Engine controls |
+| `batch-size`, `limit`, `sampling-rate`, `metrics-path`, `prefix` | Engine controls |
 
 An `options:` key is the **property name**, which is not always the flag name: `--compute-types`
 is `compute-types`, but `--duck-init` is `init-sql`. A key matching no property is refused **by
