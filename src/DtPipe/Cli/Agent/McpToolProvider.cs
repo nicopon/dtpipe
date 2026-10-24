@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -15,6 +14,7 @@ public class McpToolProvider : IAgentToolProvider
     private readonly Type _toolsType;
     private readonly List<ToolDefinition> _definitions;
     private readonly IReadOnlySet<string> _writingTools;
+    private readonly IReadOnlySet<string> _runningTools;
 
     /// <summary>
     /// A tool the model can call to stop and ask the user a question. It is defined here, not on
@@ -57,11 +57,15 @@ public class McpToolProvider : IAgentToolProvider
         _definitions = McpToolReflector.BuildToolDefinitions(_toolsType);
         _definitions.Add(AskUserTool);
         _writingTools = ToolModePolicy.WritingTools(_toolsType);
+        _runningTools = ToolModePolicy.RunningTools(_toolsType);
     }
 
     /// <inheritdoc />
     /// <remarks>Stated rather than inherited: these tools are dtpipe's own engine.</remarks>
     public bool CanRunDtPipePlans => true;
+
+    /// <inheritdoc />
+    public bool RunsPipeline(string toolName) => _runningTools.Contains(toolName);
 
     public List<ToolDefinition> GetToolDefinitions() => _definitions;
 
@@ -109,21 +113,16 @@ public class McpToolProvider : IAgentToolProvider
 /// </summary>
 public static class ToolModePolicy
 {
+    /// <summary>The tools on <paramref name="toolsType"/> that declare they write to a target.</summary>
+    public static IReadOnlySet<string> WritingTools(Type toolsType) =>
+        McpToolReflector.ToolsMarked<WritesToTargetAttribute>(toolsType);
+
     /// <summary>
-    /// The tools on <paramref name="toolsType"/> that declare they write to a target, by the name
-    /// they are exposed under — <see cref="McpToolReflector.ToolNameOf"/> owns that spelling, so a
-    /// tool renamed through its attribute cannot fall out of this set.
+    /// The tools on <paramref name="toolsType"/> that declare they execute a run, read off
+    /// <see cref="RunsPipelineAttribute"/> like the writing set.
     /// </summary>
-    public static IReadOnlySet<string> WritingTools(Type toolsType)
-    {
-        return toolsType
-              .GetMethods(BindingFlags.Public | BindingFlags.Instance)
-              .Where(m => m.GetCustomAttribute<WritesToTargetAttribute>() is not null)
-              .Select(McpToolReflector.ToolNameOf)
-              .Where(n => n is not null)
-              .Select(n => n!)
-              .ToHashSet(StringComparer.OrdinalIgnoreCase);
-    }
+    public static IReadOnlySet<string> RunningTools(Type toolsType) =>
+        McpToolReflector.ToolsMarked<RunsPipelineAttribute>(toolsType);
 
     private static readonly IReadOnlySet<string> DtPipeWritingTools = WritingTools(typeof(DtPipeMcpTools));
 

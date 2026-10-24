@@ -430,8 +430,8 @@ public class AgentExecutor
                 break;
             }
 
-            // Execute every tool call in this turn (F5). Independent calls run in parallel by
-            // default; --sequential forces one-at-a-time execution. Results are appended in the
+            // Execute every tool call in this turn (F5). Calls that run no pipeline run in parallel
+            // by default; --sequential forces one-at-a-time execution. Results are appended in the
             // same order as the calls so each "tool" message stays correlated with its call id.
             var allCalls = lastMsg.ToolCalls!;
 
@@ -462,28 +462,35 @@ public class AgentExecutor
                 && !string.Equals(argYaml, yamlBeforeThisIteration, StringComparison.Ordinal))
                 view!.PlanUpdated(argYaml!);
 
-            var outcomes = new List<ToolInvocationOutcome>(calls.Count);
+            var outcomes = new ToolInvocationOutcome[calls.Count];
             if (opts.Sequential)
             {
-                foreach (var call in calls)
-                {
-                    outcomes.Add(await InvokeToolInto(call.Name, call.Arguments, ct));
-                    toolCounts[call.Name] = toolCounts.GetValueOrDefault(call.Name, 0) + 1;
-                }
+                for (int i = 0; i < calls.Count; i++)
+                    outcomes[i] = await InvokeToolInto(calls[i].Name, calls[i].Arguments, ct);
             }
             else
             {
-                var tasks = calls
-                      .Select(c => InvokeToolInto(c.Name, c.Arguments, ct))
+                // A call that runs a pipeline waits on the process's one-run gate. Started
+                // together, such calls would reach it in whatever order the scheduler gives: they
+                // run after the others, one at a time, in the order the model emitted them.
+                var runs = Enumerable.Range(0, calls.Count)
+                      .Where(i => _toolProvider.RunsPipeline(calls[i].Name))
+                      .ToList();
+                var others = Enumerable.Range(0, calls.Count).Except(runs).ToList();
+
+                var tasks = others
+                      .Select(i => InvokeToolInto(calls[i].Name, calls[i].Arguments, ct))
                       .ToArray();
                 await Task.WhenAll(tasks);
-                foreach (var (c, t) in calls.Zip(tasks))
-                {
-                    var outcome = await t;
-                    outcomes.Add(outcome);
-                    toolCounts[c.Name] = toolCounts.GetValueOrDefault(c.Name, 0) + 1;
-                }
+                for (int k = 0; k < others.Count; k++)
+                    outcomes[others[k]] = await tasks[k];
+
+                foreach (var i in runs)
+                    outcomes[i] = await InvokeToolInto(calls[i].Name, calls[i].Arguments, ct);
             }
+
+            foreach (var call in calls)
+                toolCounts[call.Name] = toolCounts.GetValueOrDefault(call.Name, 0) + 1;
 
             for (int i = 0; i < calls.Count; i++)
             {

@@ -173,8 +173,11 @@ Hardening invariants — fail-closed, non-negotiable:
   `DeterminismReport` variance = distinct YAML − 1. Default temperature stays `1`: greedy decoding
   degenerates weak quantised models. `--seed` keeps a run replayable at any temperature.
 - **F4 Non-destructive context** — fact cache + `ConversationWindowManager.Compact`.
-- **F5 Parallel tools** — every `ToolCall` of a turn runs (`Task.WhenAll`; `--sequential` forces
-  serial).
+- **F5 Every call of a turn runs** — the calls that run no pipeline in parallel (`Task.WhenAll`), then
+  the tools marked `[RunsPipeline]` one at a time, in the order the model emitted them; results keep
+  the turn's order, and `--sequential` forces everything serial. The set is reflected off the
+  attribute, never listed; a tool that only parses, validates or reads a source stays unmarked.
+  `[CI: AgentParallelToolsTests, AgentModeTests — whole catalogue]`
 - **F6 Single YAML path** — the `yamlContent` tool argument is the sole plan source.
 - **F7 CI gate** — `tests/agentic/analyze-traces.sh --gate` fails on unhandled MCP errors or a failed
   mission. Its variance criterion applies only when `variance_results.jsonl` holds real replication
@@ -193,9 +196,9 @@ Mandatory MCP directives:
 
 ### One run, one report collection
 
-The agent runs the tools of a turn in parallel (F5), and the runs they start follow each other: a
-process runs one at a time (root `CLAUDE.md`), so a run started beside another waits for it at
-`JobService.ExecutePipelineAsync`. `JobRunner` is the only caller-facing way to run a resolved job
+A process runs one pipeline at a time (root `CLAUDE.md`), so a run started beside another waits for
+it at `JobService.ExecutePipelineAsync`. The agent orders its own runs before they reach that gate
+(F5); `dtpipe mcp` relies on the gate alone, since the SDK handles a client's requests concurrently. `JobRunner` is the only caller-facing way to run a resolved job
 (MCP's sample and real write, `split`, `contract`, the studio): it arms a `RunReports` for the run
 through `SampleReportCollector.Begin`, around the whole `ExecutePipelineAsync`, and returns a
 `RunOutcome` (exit code, branch failures, reports, checkpoint keys). `SampleReportCollector` is the

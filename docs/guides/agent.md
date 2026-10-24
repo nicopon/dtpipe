@@ -76,7 +76,7 @@ stable**; anything else means the wording, the model or the source is leaving ro
 interpretation. `--seed` makes a run replayable at any temperature.
 
 `--sequential` forces one tool call at a time; by default the independent calls of a turn run
-together.
+together, and the calls that run a pipeline follow, one at a time, in the order the model made them.
 
 ## One mission, one session
 

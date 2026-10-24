@@ -22,32 +22,52 @@ public class AgentParallelToolsTests
     private sealed class RecordingToolProvider : IAgentToolProvider
     {
         public readonly List<string> InvokedNames = new();
+        public readonly List<string> FinishedRuns = new();
         public int MaxConcurrentObserved;
+        public int MaxConcurrentRuns;
 
         private readonly object _lock = new();
+        private readonly IReadOnlyDictionary<string, int> _runDelays;
         private int _inflight;
+        private int _runsInflight;
+
+        /// <param name="runDelays">The tools that run a pipeline, each with how long it takes.</param>
+        public RecordingToolProvider(IReadOnlyDictionary<string, int>? runDelays = null)
+        {
+            _runDelays = runDelays ?? new Dictionary<string, int>();
+        }
 
         public int CallCount => InvokedNames.Count;
 
         public List<ToolDefinition> GetToolDefinitions() => new();
         public List<ToolDefinition> GetToolDefinitions(AgentMode mode) => new();
 
+        public bool RunsPipeline(string toolName) => _runDelays.ContainsKey(toolName);
+
         public async Task<ToolResult> InvokeToolAsync(string toolName, JsonElement args, CancellationToken ct)
         {
+            var isRun = _runDelays.TryGetValue(toolName, out var runDelay);
             lock (_lock)
             {
                 _inflight++;
                 MaxConcurrentObserved = System.Math.Max(MaxConcurrentObserved, _inflight);
                 InvokedNames.Add(toolName);
+                if (isRun)
+                    MaxConcurrentRuns = System.Math.Max(MaxConcurrentRuns, ++_runsInflight);
             }
 
             // Small yield so that, under parallel execution, multiple calls overlap; under
             // sequential execution only one call is ever in flight at a time.
-            await Task.Delay(80, ct);
+            await Task.Delay(isRun ? runDelay : 80, ct);
 
             lock (_lock)
             {
                 _inflight--;
+                if (isRun)
+                {
+                    _runsInflight--;
+                    FinishedRuns.Add(toolName);
+                }
             }
 
             return ToolResult.Success("{}");
@@ -151,6 +171,56 @@ public class AgentParallelToolsTests
 
         Assert.Equal(3, provider.CallCount);
         Assert.Equal(1, provider.MaxConcurrentObserved);
+    }
+
+    /// <summary>
+    /// The first run is the slower one: started together, the second would finish first.
+    /// </summary>
+    [Fact]
+    public async Task Calls_That_Run_A_Pipeline_Follow_Each_Other_In_The_Order_Emitted()
+    {
+        var provider = new RecordingToolProvider(new Dictionary<string, int>
+        {
+            ["dry-run"] = 150,
+            ["execute-yaml-job"] = 10
+        });
+        var llm = new QueuedLlmClient(new[]
+          {
+            WithToolCalls("reasoning", ("1", "dry-run"), ("2", "execute-yaml-job")),
+            new LlmResponse(new ChatMessage("assistant", "done"), true, null)
+          });
+
+        var executor = BuildExecutor(provider, llm, out _);
+        await executor.RunTurnAsync("mission", "model", "http://localhost:11434", new AgentOptions { Sequential = false }, maxIterations: 5);
+
+        Assert.Equal(1, provider.MaxConcurrentRuns);
+        Assert.Equal(new[] { "dry-run", "execute-yaml-job" }, provider.FinishedRuns);
+    }
+
+    [Fact]
+    public async Task A_Mixed_Turn_Keeps_The_Other_Calls_Parallel_And_The_Results_In_Turn_Order()
+    {
+        var provider = new RecordingToolProvider(new Dictionary<string, int>
+        {
+            ["dry-run"] = 40,
+            ["execute-yaml-job"] = 40
+        });
+        var llm = new QueuedLlmClient(new[]
+          {
+            WithToolCalls("reasoning",
+                ("1", "execute-yaml-job"), ("2", "inspect"), ("3", "dry-run"), ("4", "inspect"), ("5", "preview-data")),
+            new LlmResponse(new ChatMessage("assistant", "done"), true, null)
+          });
+
+        var executor = BuildExecutor(provider, llm, out _);
+        await executor.RunTurnAsync("mission", "model", "http://localhost:11434", new AgentOptions { Sequential = false }, maxIterations: 5);
+
+        Assert.Equal(5, provider.CallCount);
+        Assert.Equal(1, provider.MaxConcurrentRuns);
+        Assert.True(provider.MaxConcurrentObserved >= 2, $"expected overlap, observed {provider.MaxConcurrentObserved}");
+        Assert.Equal(
+            new[] { "1", "2", "3", "4", "5" },
+            executor.Messages.Where(m => m.Role == "tool").Select(m => m.ToolCallId));
     }
 
     [Fact]

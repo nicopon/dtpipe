@@ -91,6 +91,20 @@ public static class McpToolReflector
         return !string.IsNullOrEmpty(attr.Name) ? attr.Name : method.Name;
     }
 
+    /// <summary>
+    /// The tools on <paramref name="toolsType"/> whose method carries <typeparamref name="TMark"/>,
+    /// by the name they are exposed under (<see cref="ToolNameOf"/>), so a tool renamed through its
+    /// attribute cannot fall out of the set.
+    /// </summary>
+    internal static IReadOnlySet<string> ToolsMarked<TMark>(Type toolsType) where TMark : Attribute =>
+        toolsType
+           .GetMethods(BindingFlags.Public | BindingFlags.Instance)
+           .Where(m => m.GetCustomAttribute<TMark>() is not null)
+           .Select(ToolNameOf)
+           .Where(n => n is not null)
+           .Select(n => n!)
+           .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>A tool name reduced to what carries meaning: its letters, in one case.</summary>
     private static string Normalise(string name) =>
         name.Replace("-", string.Empty).Replace("_", string.Empty).ToLowerInvariant();

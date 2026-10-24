@@ -30,4 +30,11 @@ public interface IAgentToolProvider
     /// default is true so a provider says nothing unless it is not dtpipe.
     /// </summary>
     bool CanRunDtPipePlans => true;
+
+    /// <summary>
+    /// True when <paramref name="toolName"/> executes a run in this process. The agent runs such
+    /// calls one at a time, in the order of the turn (F5). The default is false: a foreign server
+    /// runs its tools in its own process, and a fake has no engine behind it.
+    /// </summary>
+    bool RunsPipeline(string toolName) => false;
 }

@@ -142,6 +142,7 @@ public partial class DtPipeMcpTools
 
 
     [McpServerTool(Name = "dry-run")]
+    [RunsPipeline]
     [System.ComponentModel.Description("Run a pipeline over a small sample of its source, through the real execution path, with the writer neutralised so nothing is written to the target. Returns the rows as they leave each stage, the target compatibility report, and what could actually be guaranteed about the source not being modified.")]
     public Task<string> DryRun(
         [System.ComponentModel.Description("The complete YAML configuration string representing the pipeline")] string yamlContent,

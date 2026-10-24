@@ -125,6 +125,25 @@ public class AgentModeTests
     }
 
     /// <summary>
+    /// F5 over the whole catalogue: the agent serialises exactly the tools marked as running a
+    /// pipeline, read off the mark. A write is a run, so every writing tool is among them.
+    /// </summary>
+    [Fact]
+    public void The_Agent_Serialises_Exactly_The_Tools_That_Run_A_Pipeline()
+    {
+        var provider = new McpToolProvider(McpCatalogue.Tools());
+        var running = ToolModePolicy.RunningTools(typeof(DtPipeMcpTools));
+
+        Assert.Contains("dry-run", running);
+        Assert.Subset(running.ToHashSet(), ToolModePolicy.WritingTools(typeof(DtPipeMcpTools)).ToHashSet());
+
+        foreach (var tool in provider.GetToolDefinitions(AgentMode.Execute))
+            Assert.Equal(running.Contains(tool.Name), provider.RunsPipeline(tool.Name));
+        foreach (var tool in running)
+            Assert.Contains(provider.GetToolDefinitions(AgentMode.Execute), t => t.Name == tool);
+    }
+
+    /// <summary>
     /// 'dry-run' executes the real pipeline with the writer neutralised. Marking it would hide it
     /// from the planner, which its own role prompt tells it to call.
     /// </summary>

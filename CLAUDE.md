@@ -263,7 +263,8 @@ without retaining it]` Detail: `src/DtPipe.Core/CLAUDE.md`.
 waits, and one cancelled while it waits returns 130. A run owns state the process holds once (the
 channel registry `DagOrchestrator` clears at its start, `DTPIPE_CURSOR_OVERRIDE`, the console's
 Ctrl-C); two runs over it trade rows, and one can still exit 0. **Never start a run from inside a
-run**: it would wait on itself. Callers that overlap (the agent's tool calls, MCP requests) wait.
+run**: it would wait on itself. Callers that overlap wait: MCP requests, which the SDK handles
+concurrently; the agent issues a turn's runs one after the other (F5).
 `[CI: ConcurrentRunCollectionTests]` `[unchecked: an entry that runs the engine without JobService;
 the branches a failed DAG leaves running once it has returned]` Detail: `src/DtPipe/CLAUDE.md`.
 
@@ -437,7 +438,8 @@ Detail: `src/DtPipe.Core/CLAUDE.md`.
 **F2** `ISqlSafetyPolicy` + `IApprovalGate`; a write needs `apply` + approval ·
 **F3** determinism available, not default (`--temperature 0 --seed N --repeat N`) ·
 **F4** fact cache + `ConversationWindowManager.Compact` ·
-**F5** all tool calls of a turn run in parallel ·
+**F5** every tool call of a turn runs; those that run a pipeline (`[RunsPipeline]`, reflected) one
+after the other ·
 **F6** `yamlContent` is the sole plan source ·
 **F7** `analyze-traces.sh --gate`; never record a placeholder variance.
 
