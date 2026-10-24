@@ -106,5 +106,6 @@ services:
 volumes:
   redis-data:
   coordinator-state:
+  runner-state:
   coordinator-keys:
   runner-key:

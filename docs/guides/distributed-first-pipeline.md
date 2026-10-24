@@ -124,9 +124,9 @@ mkdir jobs
 dtpipe studio ./jobs --coordinator http://coordinator.localtest.me:8080 --key '${{DTPIPE_KEY}}'
 ```
 
-**Sign in with the key** signs the studio in as `admin`. The studio now offers the bricks of the
-nodes. **Open from library** writes `shop-orders-by-country` into `./jobs`, where you
-can edit it; **Publish** saves it back to the library. The full behaviour is in
+The studio signs in as `admin` with the key as it starts, and says so in the terminal. It now offers
+the bricks of the nodes. **Open from library** writes `shop-orders-by-country` into `./jobs`, where
+you can edit it; **Publish** saves it back to the library. The full behaviour is in
 [REFERENCE.md](../../REFERENCE.md#studio-dtpipe-studio).
 
 ## Arm it, run it, read the result

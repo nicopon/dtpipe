@@ -1279,15 +1279,15 @@ dtpipe studio ./jobs --coordinator https://coordinator.example  # signed in to a
 
 `--coordinator` names the one coordinator the studio talks to; the page never chooses another.
 **Sign in** opens your identity provider in a new tab, so the cards you have not saved stay where
-they are, and comes back to the studio on its own address. With `--key`, **Sign in with the key**
-exchanges the key the coordinator made for you instead, and the studio presents it again for each
-next token; a coordinator with no identity provider signs people in this way only. The studio
-learns everything from the coordinator's address: how people sign in there, the client to sign in
-with, and the version of the API it speaks, which this dtpipe must speak too, or it says so and
-stops there. Your tokens stay in the studio's memory, never on disk or in the page; quitting the
-studio, or **Sign out**, forgets them. A coordinator lets you in only if its administrator listed
-you (`Coordinator:Studio:ClientId` names the studio's client, and your roles are the
-coordinator's).
+they are, and comes back to the studio on its own address. With `--key`, the studio exchanges the
+key the coordinator made for you instead, as it starts, and presents it again for each next token;
+**Sign in with the key** exchanges it again after **Sign out** or a refusal. A coordinator with no
+identity provider signs people in this way only. The studio learns everything from the coordinator's
+address: how people sign in there, the client to sign in with, and the version of the API it speaks,
+which this dtpipe must speak too, or it says so and stops there. Your tokens stay in the studio's
+memory, never on disk or in the page; quitting the studio, or **Sign out**, forgets them. A
+coordinator lets you in only if its administrator listed you (`Coordinator:Studio:ClientId` names
+the studio's client, and your roles are the coordinator's).
 
 Once signed in, the palette offers the bricks of the coordinator's nodes, grouped by node, a node
 offline greyed out, and lists this studio's dtpipe version beside each node's: a difference is

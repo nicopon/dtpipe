@@ -31,11 +31,11 @@ data node, built from the checkout, so the first start takes a few minutes, and 
 library that name it. The coordinator and the runner are the images each release publishes on GHCR.
 
 ```bash
-docker compose -f deploy/compose.yaml -f deploy/compose.trial.yaml up -d
-docker compose -f deploy/compose.yaml -f deploy/compose.trial.yaml ps
+docker compose -f deploy/compose.yaml -f deploy/compose.trial.yaml up -d --wait
 ```
 
-Wait until every service is `healthy`. Everything listens on the loopback of your machine, in
+The command returns once the coordinator is healthy and the one-off `keys` service, below, has
+exited with its work done. Everything listens on the loopback of your machine, in
 plain HTTP. The addresses use `localtest.me`, a public name that resolves to `127.0.0.1`; without
 a network that resolves it, add `coordinator.localtest.me` to `/etc/hosts`.
 
@@ -120,7 +120,7 @@ read -rs DTPIPE_KEY && export DTPIPE_KEY
 dtpipe studio ./jobs --coordinator http://coordinator.localtest.me:8080 --key '${{DTPIPE_KEY}}'
 ```
 
-**Sign in with the key** signs the studio in as `admin`. **Open from library**
+The studio signs in as `admin` with the key as it starts. **Open from library**
 writes `trial-totals` into the folder as a job file you can edit; **Publish** sends the saved job
 back, and the pipeline keeps running the version it was armed with until it is armed again. The
 coordinator's own pages design nothing: what a person writes reaches the library from the studio.
