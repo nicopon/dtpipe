@@ -227,7 +227,7 @@ response. The token reaches git in the environment of the one process that talks
 person who may inspect the container (`docker inspect`, the pod's spec) can read its environment:
 give that right with the same care as the secrets.
 
-Checked: the public address, in `PublicUrlTests`, and the SQLite store, in `SqliteStoreTests`, of
+Checked: the public address, in `PublicUrlTests`, and the SQLite store, in `SqlStoreTests`, of
 [tests/DtPipe.Coordinator.Server.Tests](../tests/DtPipe.Coordinator.Server.Tests). Checked on the
 real containers, on SQLite: the coordinator ended and started again, and a copy of its state
 directory put back, read back the rights, the library, the armed pipelines, the run journal and a

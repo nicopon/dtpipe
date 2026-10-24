@@ -5,7 +5,7 @@ internal static class StoreRegistration
 {
     /// <summary>
     /// The rights, the run journal, the armed deployments, the cursors, the hosts set aside, the session keys and the key issuer's signing
-    /// keys, all on one store: a Redis connection or a SQLite file, opened when the first of them is asked for, which the server does before
+    /// keys, all on one store: a Redis connection or a database (<see cref="SqlDatabase"/>, a SQLite file), opened when the first of them is asked for, which the server does before
     /// it serves. The signing keys' shelf is keyed (<see cref="IssuerKeys.Shelf"/>): DataProtection reads the one unkeyed repository, and
     /// would read any other element there as a key of its own.
     /// </summary>
@@ -25,16 +25,16 @@ internal static class StoreRegistration
         }
         else
         {
-            services.AddSingleton(provider => SqliteDatabase.Open(
-                server.SqliteDirectory ?? server.StateDir, server.Initialize, provider.GetRequiredService<ILoggerFactory>().CreateLogger<SqliteDatabase>()));
-            services.AddSingleton<IRightsStore, SqliteRightsStore>();
-            services.AddSingleton<IRunStore, SqliteRunStore>();
-            services.AddSingleton<IDeploymentStore, SqliteDeploymentStore>();
-            services.AddSingleton<ICursorStore, SqliteCursorStore>();
-            services.AddSingleton<IIgnoredHostStore, SqliteIgnoredHostStore>();
-            services.AddSingleton<Microsoft.AspNetCore.DataProtection.Repositories.IXmlRepository, SqliteXmlRepository>();
+            services.AddSingleton(provider => SqlDatabase.Open(
+                new SqliteDialect(server.SqliteDirectory ?? server.StateDir), server.Initialize, provider.GetRequiredService<ILoggerFactory>().CreateLogger<SqlDatabase>()));
+            services.AddSingleton<IRightsStore, SqlRightsStore>();
+            services.AddSingleton<IRunStore, SqlRunStore>();
+            services.AddSingleton<IDeploymentStore, SqlDeploymentStore>();
+            services.AddSingleton<ICursorStore, SqlCursorStore>();
+            services.AddSingleton<IIgnoredHostStore, SqlIgnoredHostStore>();
+            services.AddSingleton<Microsoft.AspNetCore.DataProtection.Repositories.IXmlRepository, SqlXmlRepository>();
             services.AddKeyedSingleton<Microsoft.AspNetCore.DataProtection.Repositories.IXmlRepository>(IssuerKeys.Shelf, (provider, _) =>
-                new SqliteXmlRepository(provider.GetRequiredService<SqliteDatabase>(), "issuer_keys", "signing key"));
+                new SqlXmlRepository(provider.GetRequiredService<SqlDatabase>(), "issuer_keys", "signing key"));
         }
         return services;
     }

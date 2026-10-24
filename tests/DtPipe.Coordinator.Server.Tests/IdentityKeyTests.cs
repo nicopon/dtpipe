@@ -12,7 +12,7 @@ public sealed class IdentityKeyTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "identity-keys-" + Guid.NewGuid().ToString("N"));
     private readonly RedisTestBed _redis = new();
-    private SqliteDatabase? _sqlite;
+    private SqlDatabase? _sqlite;
 
     public IdentityKeyTests() => Directory.CreateDirectory(_dir);
 
@@ -151,8 +151,8 @@ public sealed class IdentityKeyTests : IDisposable
                 return MemoryRightsStore.At(_dir);
             case "sqlite":
                 _sqlite?.Dispose();
-                _sqlite = SqliteDatabase.Open(_dir, true, NullLogger.Instance);
-                return new SqliteRightsStore(_sqlite);
+                _sqlite = SqlDatabase.Open(new SqliteDialect(_dir), true, NullLogger.Instance);
+                return new SqlRightsStore(_sqlite);
             default:
                 RedisTestBed.Need();
                 return new RedisRightsStore(_redis.Open());
