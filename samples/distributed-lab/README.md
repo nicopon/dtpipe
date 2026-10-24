@@ -12,9 +12,9 @@ it in a git-backed **library**, places every brick on its node and every other s
 runner, deploys the fragments and runs them, live. A second page, the **Lab view**, places a
 job by hand and injects faults.
 
-The lab **uses** dtpipe and changes nothing in it. Its coordinator is the product's server,
-`src/DtPipe.Coordinator.Server`, run in **lab mode** (the Lab view, fault injection and the query
-panel exist only then); its runner is the official `DtPipe.PipelineNode.Runner`; its data nodes are
+The lab **uses** dtpipe and changes nothing in it. Its coordinator, `Lab.Coordinator`, is a host of
+the product's server, `src/DtPipe.Coordinator.Server`, that adds the bench (the Lab view, planning by
+hand and fault injection), which the product's coordinator does not have; its runner is the official `DtPipe.PipelineNode.Runner`; its data nodes are
 disposable hosts of `DtPipe.PipelineNode.Hosting`. They drive the `dtpipe` binary like a user
 (`--export-job`, `--job`). None of it is in `DtPipe.sln`: `build.yml` never builds it.
 
@@ -301,7 +301,7 @@ warehouse.
 ## How it works
 
 ```
- browser ──HTTP / SSE──▶ DtPipe.Coordinator.Server :5180 (lab mode)
+ browser ──HTTP / SSE──▶ Lab.Coordinator :5180 (DtPipe.Coordinator.Server and the bench)
                           ├─ AddCoordinatorHub()  TransportR hub (bytes), replica registry, admission, runs
                           ├─ /node-channel        the control channel to the node hosts
                           ├─ /api                 bricks, design, library, plan, deploy, runs, events
@@ -374,7 +374,7 @@ sign a person in and out. `/health` is not under `/api` and takes a service's to
 | `POST /service/runs` | a launcher's token (no CSRF header; optional `Idempotency-Key`): `{pipelineId}`; 202 `{runId, pipelineId, state, …}`, or 200 with the first run for a retry of a key; 400 no pipeline or a key out of bounds; 403 a pipeline off the identity's list; 409 not armed, or the key started another pipeline |
 | `POST /service/runs/{id}/cancel` | the same token: cancels a run this identity started (a waiting run is cancelled when the call answers; a running one ends through its token); 202 with the run, 200 when it is over already, 404 for a run it did not start |
 | `GET /service/runs/{id}` | the same token: `{runId, pipelineId, state, queuedAt, startedAt, finishedAt, description, refusal, launchedBy}`; 404 for a run off the identity's list or none |
-| `GET /api/me`, `/api/info` | who is signed in and with which roles; whether the server runs in lab mode |
+| `GET /api/me`, `/api/info` | who is signed in and with which roles; whether keys cross plain HTTP (`httpKeys`) |
 | `GET /api/nodes`, `/api/bricks`, `/api/flow-matrix`, `/api/pipelines`, `/api/state` | what the pages draw |
 | `POST /api/bricks/{node}/{id}/preview` | a few rows, read by the node that owns the brick |
 | `GET /api/library` · `GET`/`PUT`/`DELETE /api/library/{id}` | pipelines; `PUT {yaml, message}` commits what a check accepted: `dtpipe --dry-run 1` over one row per source brick sent by its node, then each sink brick's node checks its target (422 and nothing written otherwise) |

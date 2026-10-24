@@ -1,8 +1,9 @@
 # samples/distributed-lab
 
 Mechanics for editing the lab. What it is and how to run it: `README.md`. The coordinator it runs
-is the product's, `src/DtPipe.Coordinator.Server` (its rules: that project's `CLAUDE.md`); the
-nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Hosting/CLAUDE.md`).
+is `Lab.Coordinator`, a host of the product's server, `src/DtPipe.Coordinator.Server` (its rules: that
+project's `CLAUDE.md`); the nodes are `src/DtPipe.PipelineNode.Hosting` hosts
+(`src/DtPipe.PipelineNode.Hosting/CLAUDE.md`).
 
 - **The lab uses dtpipe, it never changes it.** Nothing in `DtPipe.sln` moves for the lab. It
   reaches the engine through the binary (`--export-job`, `--job`, `inspect`, `--dry-run`)
@@ -25,8 +26,14 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   entrypoint (`docker/coordinator-entrypoint.sh`) creates the repository on first start, as a node seeds its own database. The remote is the one
   directory the stack adds beside a service's own: it stands for a git server a deployment would run, and only the coordinator mounts it. `[local: lab.sh up, lab.sh stack up, smoke.py library]`
   `[local: lab.sh stack restart-check restore-alone — the local copy is the only one]`
-- **The lab runs the server in lab mode, on its own seeds.** `lab.sh exec-coordinator` is the one
-  way the server starts, for `lab.sh` and `tools/campaign.py`: `Coordinator:LabMode`, the scenarios
+- **The bench is the lab's coordinator's, never the server's.** `Lab.Coordinator` adds the product's server, declares the
+  Lab view (`wwwroot/lab/`, served beside the server's pages) as an admin view, and maps on the server's admin group
+  (`LabModeEndpoints`) the scenario catalog (`PipelineCatalog`, from `Lab:Scenarios`), planning by hand (`/api/plan`,
+  `/api/deploy`, in `PlanMode.Manual`) and fault injection (`/api/fragments/{name}/kill`, over `DeploymentManager.KillAsync`).
+  A route or a page only the bench needs goes there, never under `src/`. `[CI: validate_distributed_boundary.sh]`
+  `[local: smoke.py lab, sandbox, rights; ui_check.py]`
+- **The lab runs its own coordinator, on its own seeds.** `lab.sh exec-coordinator` is the one
+  way the coordinator starts, for `lab.sh` and `tools/campaign.py`: `Lab.Coordinator`, the scenarios
   in `pipelines/`, the library from `library-seed/`, the rights from `rights-seed.json`, the state in
   `.state/`. A lab scenario, brick or pipeline is named under `samples/` only.
   `[CI: validate_distributed_boundary.sh]`
@@ -66,7 +73,7 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   `seed.sh` wrote, located from the node files, never from the coordinator. Every lab node also enables
   fault injection (`FaultInjection` in `Lab.NodeHost`'s options, `DtPipeNode__FaultInjection` in the
   environment of the runner `lab.sh exec-node` starts and of `runner-1` in `compose.yaml`), so the kill
-  route of lab mode reaches the hosts of a plan. Node mechanics: `src/DtPipe.PipelineNode.Hosting/CLAUDE.md`.
+  route of the lab's coordinator reaches the hosts of a plan. Node mechanics: `src/DtPipe.PipelineNode.Hosting/CLAUDE.md`.
   `[local: smoke.py, for the two requests; tools/campaign.py F1 (the data hosts) and F12 (the runner `lab.sh` starts), named]`
   `[unchecked: runner-1 of compose.yaml enabling it]`
 - **The lab is stopped only when nothing of it runs.** A process of the lab is one whose command line names
@@ -140,7 +147,8 @@ nodes are `src/DtPipe.PipelineNode.Hosting` hosts (`src/DtPipe.PipelineNode.Host
   studio]`
 - **The lab's images extend the product's, never the other way.** `deploy/Dockerfile` builds the coordinator, the runtime and the
   runtime with `dtpipe`; `compose.yaml` builds each as a service of `scale: 0` and hands it to `docker/Dockerfile` as a named build
-  context (`additional_contexts`), where `coordinator-lab`, `node` and `idp` add lab content. `runner-1` is the product's `runner`
+  context (`additional_contexts`), where `coordinator-lab` puts `Lab.Coordinator` in place of the product's coordinator and,
+  with `node` and `idp`, adds lab content. `runner-1` is the product's `runner`
   target as built. Lab content enters through those three targets or `compose.yaml`'s environment, never `deploy/`. Every .NET
   service runs under `init: true`: dotnet as PID 1 hangs on its own crash, and the nodes start dtpipe children. `[unchecked]`
 - **The stack's images are built from the commit HEAD names, and its services run unprivileged.** `compose()` in `lab.sh` sets

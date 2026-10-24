@@ -6,7 +6,9 @@ the hub, the barrier and admission are `DtPipe.Coordinator`'s (`src/DtPipe.Coord
 The server hosts `DtPipe.Coordinator` (`AddCoordinatorHub`) and adds what a person needs around it:
 the node channel (`NodeChannel`, `NodeChannelHub`), bricks, the git-backed library,
 the plan a launch makes, deployments and the run queue, rights, and the pages. Its settings are the
-`Coordinator` configuration section (`CoordinatorServerOptions`), from the environment first.
+`Coordinator` configuration section (`CoordinatorServerOptions`), from the environment first. It is a
+library: a host owns `Program` and calls `AddCoordinatorServer` and `MapCoordinatorServerAsync`
+(`CoordinatorServer.cs`); the product's host is `DtPipe.Coordinator.Host`, whose `Program` adds nothing.
 
 - **The server trusts an IdP for who, and decides what.** `TrustedIdp` validates the tokens of
   `Coordinator:Authority` for `Coordinator:Audience`, and those of its own key issuer (see "An identity is verified by the IdP
@@ -81,7 +83,7 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   `[local: DtPipe.Coordinator.Server.Tests TrustedIdpTests, ServiceRoutesTests, NodeChannelHubTests, the lab's smoke.py rights, bricks - health, a service launches a run]`
 - **The public address is a setting, never a header.** The server listens in plain HTTP and a proxy in front terminates TLS.
   `Coordinator:PublicUrl` (a scheme, a host, a port; no path, user, query or fragment: it stops the start without echoing the value)
-  makes `Program.cs` read every request as made to that address, first in the pipeline, whatever `Host` or `X-Forwarded-*` it
+  makes `MapCoordinatorServerAsync` read every request as made to that address, first in the pipeline, whatever `Host` or `X-Forwarded-*` it
   carries; no forwarded header is ever applied. `OriginOf` (the metadata document, the `WWW-Authenticate` challenge), the OpenID
   Connect return address and the `SameAsRequest` cookies (session, correlation, nonce) all read the request's scheme and host, so
   they follow. Unset, the request stands as it came, which is right for a server reached directly. A deployment behind a TLS proxy
@@ -97,12 +99,12 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   never answers. The pages' `api()` helpers send it. Never add a cookie-authenticated route outside
   those groups.
   `[local: RouteTableTests, the lab's smoke.py rights]`
-- **A route's authorization is the group it is mapped on, and `Program.cs` declares the groups.** The reader, designer and
-  admin groups of `/api` (their roles, and the CSRF filter they inherit) are built once there. `NodeEndpoints`,
+- **A route's authorization is the group it is mapped on, and `MapCoordinatorServerAsync` declares the groups.** The reader,
+  designer and admin groups of `/api` (their roles, and the CSRF filter they inherit) are built once there. `NodeEndpoints`,
   `LibraryEndpoints`, `RightsEndpoints` and `RunEndpoints` each map their domain on the reader group they extend and on
-  the designer or admin group they receive, as `LabModeEndpoints` maps the bench on the admin group; `HealthEndpoints`
+  the designer or admin group they receive, as a host maps its own routes on the groups returned (`CoordinatorApiGroups`); `HealthEndpoints`
   maps `/health` on its own group, outside `/api`, for a monitor, and `/api/health` on the reader group; `ServiceEndpoints` maps `/service`
-  on its own group, outside `/api`, for a launcher, with no CSRF filter since a service's token is bearer only; `Program.cs` keeps
+  on its own group, outside `/api`, for a launcher, with no CSRF filter since a service's token is bearer only; `CoordinatorServer` keeps
   the `account` group, `/healthz`, the metadata document, `/account/*` and the hubs. `[local: RouteTableTests]`
 - **Every rights change names its author** (`AuditEntry.By`, by `TrustedIdp.CallerOf`: the signed-in email, or the identity's
   id when it has none, a person verified by a key; a person of the provider with no email by its name and ` (idp)`, which no id
@@ -186,15 +188,16 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   the race reads the winner's document) or empty, and refuses unless `Coordinator:Initialize` is true, since rights begun
   again could grant what was revoked. `[local: RightsStoreTests, RightsRoutesTests; RedisRightsStoreTests (needs DTPIPE_TEST_REDIS
   or DTPIPE_TEST_REUSE_INFRA)]` `[unchecked: a Redis that loses a write it acknowledged]`
-- **Lab mode is off by default, and everything only a bench needs sits behind it.**
-  `LabModeEndpoints` maps the Lab view's scenario catalog and manual planning (`/api/plan`,
-  `/api/deploy`), and fault injection, for admins; the pages under `wwwroot/lab/`
-  answer 404 without it (and 403 to anyone but an admin), and `GET /api/info` tells the pages
-  which mode they run in. Never add a bench-only
-  route outside `MapLabMode`. `[local: RouteTableTests]` `[unchecked: whether a new route belongs to the bench]`
+- **A host adds to the server through two seams, never through a setting.** `MapCoordinatorServerAsync` returns the groups
+  of `/api` behind every guard (`CoordinatorApiGroups`), and `AddCoordinatorServer` takes the host's own pages as `AdminView`s:
+  under the view's path a page navigation signs in as any page does, and anyone but an admin gets the 403 page that names the
+  view. The product's host adds neither. The lab's bench (the Lab view, its scenario catalog, planning by hand and fault
+  injection) is its own coordinator's, `samples/distributed-lab/Lab.Coordinator`: nothing of it enters this project or its
+  pages. `[CI: validate_distributed_boundary.sh — names under src/]` `[local: RouteTableTests — the bench's routes; the lab's
+  smoke.py rights — a reader opens the Lab view]` `[unchecked: whether a new route belongs to the bench]`
 - **Fault injection ends a fragment's child only on a replica whose host enabled it.** A replica that did
-  not answers that it ended none, and the kill route answers 200 with `killed`, the count of children ended over
-  every replica of the node: `0` says none was. `[local: PipelineNode.Tests FaultInjectionTests, RunQueueTests]`
+  not answers that it ended none, and `DeploymentManager.KillAsync` (`FaultInjection`) returns the count of children ended
+  over every replica of the node: `0` says none was. The product's host maps no route to it. `[local: PipelineNode.Tests FaultInjectionTests, RunQueueTests]`
 - **The server never opens a node's data.** What reads it asks the node that hosts it, through
   `NodeRequests`: a brick preview and a
   library save's check (`DesignValidator`): each source brick's node sends its first row as Arrow IPC
@@ -318,7 +321,7 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   `Coordinator:Library:Directory` puts it elsewhere, driven by the `git` command line with a fixed identity and with
   its own directory trusted (`safe.directory`, whoever owns a mounted volume; the image needs `git`), and starts with a commit of its own (empty without seeds)
   so that a write always has a commit to go back to; armed deployments and run history are in Redis
-  (see "A deployment is the coordinator's" and "A run is journaled as it goes"); the Lab view's fixed plan is in memory.
+  (see "A deployment is the coordinator's" and "A run is journaled as it goes"); a plan fixed by hand is in memory.
   `Coordinator:Initialize` lets every one of these begin where nothing is kept, the library's remote included.
 - **The library is pushed to a git remote when one is configured, and the remote is the authority.** `Coordinator:Library:Remote:Url`
   (an `https://` URL, a `file://` URL or an absolute path; SSH is not supported), `Token`, `User` and `Timeout` are read by
@@ -345,8 +348,8 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   reads an immutable commit without the lock once the library is open, so no launch waits for a save or for the remote; every other read waits for a
   push in flight, `Timeout` at most. `[local: LibraryRemoteTests]` `[unchecked: a git server that goes down in the middle of a push and
   applies it; an https remote with a token; Windows; the health read after an alignment, which publishes no event and so may stay stale up to Coordinator:Health:MaxAge]`
-- **Only a plan in `PlanMode.Manual` sends a data node a fragment written as a job.** The two planning routes of
-  lab mode, `/api/plan` and `/api/deploy`, plan that way, and only to a host that announces `raw-fragments`; every other
+- **Only a plan in `PlanMode.Manual` sends a data node a fragment written as a job.** No route of the product plans that
+  way; the lab's coordinator's `/api/plan` and `/api/deploy` do, and only to a host that announces `raw-fragments`; every other
   caller plans in `Library`. `[local: PlanModeTests; the lab's smoke.py lab and sandbox (through /api/deploy), ui_check.py
   (the Lab view plans through /api/plan)]` `[unchecked: a new route that plans in Manual]`
 - **A job names a brick by reference, a node holds its text, and the reference decides the placement.** A source is read
@@ -383,7 +386,7 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   of the job, the bindings at that commit, when, by whom}` (`ArmedDeployment`), kept in Redis once its deployment is ready and read
   back at start as ready, with no check, since no replica is connected yet. A run reads the job at the armed
   commit (`IJobSource`, the library) and the armed bindings, never the library as it is now. A node whose identity is gone stays
-  armed, and a run is refused naming it. `DeployAsync` is the Lab view's fixed plan, in memory only. Deploying plans as a launch
+  armed, and a run is refused naming it. `DeployAsync` deploys a plan fixed by hand, in memory only. Deploying plans as a launch
   would, then asks every connected replica of each node whether it would run the fragments (`Check`, answered, spawning nothing)
   and is ready when each fragment has a replica that said yes and that admission could place a run on. One
   replica that refuses does not fail it while another can run the fragment (a rolling update leaves some at
@@ -403,7 +406,7 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   forgets it in the store before memory does. A store that refuses (`StoreUnavailableException`, 503) therefore leaves the earlier
   deployment as it was, or, when it refuses the record of a deployment whose check passed, removes that deployment from memory and
   answers 503 (the clean-up that follows only logs when it fails, so the error the caller reads is the one that ended the arming). An id that is no library id
-  (the Lab view's fixed plan) has no record and never reaches the store. Redis that comes back empty is no failure to open: a pipeline with
+  (a plan fixed by hand) has no record and never reaches the store. Redis that comes back empty is no failure to open: a pipeline with
   no record is not armed and nothing runs, which `/health` reports. **Limit**: a write that timed out may have been applied. An arming whose
   record was kept while memory refused it is read back ready at the next start, with no check; an undeploy or a replacement whose
   forgetting was kept while the call timed out leaves the deployment in memory until the next start, when it is gone. Arm the pipeline
@@ -422,7 +425,7 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   `[local: EnrollmentQueueTests, RightsRoutesTests; RedisIgnoredHostStoreTests (needs DTPIPE_TEST_REDIS or DTPIPE_TEST_REUSE_INFRA)]`
 - **Deployments and runs are decided under one lock.** `DeploymentManager` is what the routes call, over three
   parts and the one `DeploymentLedger` they share: `DeploymentService` (the deployments), `RunQueue` (the queue
-  and the dispatch) and `LabFaults`. A decision that reads both sides, such as a deployment refused while a run of
+  and the dispatch) and `FaultInjection`. A decision that reads both sides, such as a deployment refused while a run of
   its pipeline is queued or in flight, is taken under the ledger's lock; give a part no lock of its own.
   `[local: RunQueueTests]` `[unchecked: the lock itself]`
 - **One run at a time per data node, first come first served.** `RunDispatch` decides, at each
@@ -439,7 +442,7 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   online while any replica is connected, and shows the announcement of the connected replica that
   arrived last (a reconnection of the same host does not change which); `NodeView.Replicas` lists each
   with the runs placed on it and a hash of its bricks, and `ReplicasDisagree` says two connected replicas
-  offer different bricks. A read (a preview, a sample, a sink check, a lab request) goes to one connected
+  offer different bricks. A read (a preview, a sample, a sink check) goes to one connected
   replica, the one with the fewest runs, and is not tried on a second when it fails. `Disconnect` interrupts
   the connections of every replica of an identity, and `PUT /api/rights/identities/{id}` does it when the
   name or the **groups** change, or when the identity goes from enabled to disabled: a replica's data plane
@@ -473,7 +476,7 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   the ticket is visible), when it starts and when it ends. History (`List`, `Find`, `PipelineHealth`) holds the runs that are over and
   is read from memory, loaded at start: one coordinator writes the store, so the window in memory is the store's, and a key's
   lookup `(LaunchedBy, key)` costs no call to Redis under the ledger's lock. **A run not yet over that the store cannot keep
-  throws `StoreUnavailableException`** (503 from the middleware of `Program.cs`), so none is queued or started
+  throws `StoreUnavailableException`** (503 from the middleware of `CoordinatorServer`), so none is queued or started
   without its record; a run that is over is kept in memory whatever the store says and only logged, and a store that missed it
   leaves it in flight for the next start to end. A command that finds Redis disconnected fails at once instead of waiting in a
   backlog. At start `RunJournal` gives each run it finds queued or running the state `error` and `RestartedRefusal`, and owes
@@ -543,15 +546,14 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
   `PlanBuilder` gives a data node's fragment as `FragmentUnit`s and composes the job with
   `FragmentJob` (`DtPipe.Coordinator.Contracts`), the function the node calls again on its own
   declarations, so both hash the same bytes; a branch that is none of the node's bricks is a planner
-  error naming why (`BrickRules`), never a job sent to run. Only the Lab view's manual planning
-  (`allowRaw`) sends a job as written, and only to a host that announces `raw-fragments`; the library
+  error naming why (`BrickRules`), never a job sent to run. Only planning by hand
+  (`PlanMode.Manual`) sends a job as written, and only to a host that announces `raw-fragments`; the library
   and `AutoPlacer` never do. `BrickRules.Processors` is the one list of processors, shared with `JobGraph`;
   it must equal the `stream-processor` entries of `dtpipe providers --format json`. The replica decides again at
   `Launch`, with the same function. `[local: PipelineNode.Tests BrickRulesProcessorsTests, the lab's smoke.py
   bricks, sandbox]`
-- The pages are served from the `wwwroot` published beside the binary (`dotnet publish`): `index.html`
-  + `js/` (the coordinator's views, ES modules, no build) and `lab/` (the Lab view, lab mode only).
-  `window.lab.store` exists for the lab's `tools/ui_check.py`. `/healthz`, the protected resource
+- The pages are this library's `wwwroot`, which `dotnet publish` puts at the root of the `wwwroot` beside any host that
+  references it, beside the host's own pages: `index.html` + `js/` (the coordinator's views, ES modules, no build). `/healthz`, the protected resource
   metadata (`CoordinatorApi.Metadata`, RFC 9728: the provider, the contract, the studio's client) and
   the key issuer's routes are the only anonymous routes; `/health` is a monitor's and `/service` a launcher's. Verify a change with the lab's `./lab.sh smoke`, and a page change with
   `./lab.sh ui` too.

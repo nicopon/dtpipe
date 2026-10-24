@@ -145,7 +145,8 @@ example to make it checked]`
 | `src/DtPipe.Jobs` | A job file as a YAML tree (`JobYaml`), the designer's cards (`DesignService`, used by `dtpipe studio`), the coordinator's API the studio calls (`Coordinator/`) |
 | `src/DtPipe.Coordinator` | Central hub of a distributed pipeline: the control plane over TransportR |
 | `src/DtPipe.PipelineNode` | Runs one distributed-pipeline fragment under the coordinator's control |
-| `src/DtPipe.Coordinator.Server` | The coordinator's server: API, pages, planner, library, rights; lab mode for benches |
+| `src/DtPipe.Coordinator.Server` | The coordinator's server, a library a host adds (`AddCoordinatorServer`): API, pages, planner, library, rights |
+| `src/DtPipe.Coordinator.Host` | The product's coordinator: a `Program` that adds the server and nothing else, the image's entry point |
 | `src/DtPipe.Coordinator.Contracts` | Node channel messages, `BrickRules`: what coordinator and nodes share |
 | `src/DtPipe.PipelineNode.Hosting` | `AddDtPipeNode`: makes any .NET host a node (bricks, fragments, tokens) |
 | `src/DtPipe.PipelineNode.Launcher` | The assembly of `dtpipe node`: the CLI's only reach into the family, loaded when a node starts and by no other command |
@@ -164,7 +165,8 @@ packages and stays outside `DtPipe.sln`, so `build.yml` builds only what `src/Dt
 and the address, and an executable of the family is such a host. Nothing else in `src/` names
 TransportR; only the family, its tests and the lab do. The family references `DtPipe.Jobs` and no
 other project of the solution, so none of its hosts runs the engine in its own process: every fragment runs as a `dtpipe` child. The lab under
-`samples/distributed-lab` is a host, and it and its sample data are named nowhere else.
+`samples/distributed-lab` is a host, and it and its sample data are named nowhere else; its bench (the Lab view, planning
+by hand, fault injection) is its own coordinator's, `Lab.Coordinator`, and nothing of it is under `src/`.
 `[CI: validate_distributed_boundary.sh — names, references and project shape, not behaviour]`
 
 Data flow: `args` → `PipelineLexer.Parse` → `PipelineToJobConverter` → `DagOrchestrator` →
