@@ -141,7 +141,7 @@ public class EngineInvariantsTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Harness — a minimal branch executor mirroring JobService's wiring
+    // Harness — a minimal branch executor mirroring JobExecutor's wiring
     // ─────────────────────────────────────────────────────────────────────────
 
     private static readonly PipelineExecutor Executor = new(

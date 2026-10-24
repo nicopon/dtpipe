@@ -67,7 +67,7 @@ public interface IQueryAwareOptions
 
 /// <summary>
 /// Implemented by writer options that accept a keyring alias.
-/// Allows JobService to propagate the global --key without reflection.
+/// Allows ProviderConfigurationService to propagate the global --key without reflection.
 /// </summary>
 public interface IKeyAwareOptions
 {

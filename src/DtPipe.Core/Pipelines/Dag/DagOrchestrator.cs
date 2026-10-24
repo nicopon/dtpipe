@@ -57,7 +57,7 @@ public class DagOrchestrator : IDagOrchestrator
         }
 
         // A run starts on an empty registry. Clearing it is safe only because a process runs one run at a
-        // time (JobService): a second run beside this one would clear its channels and trade its rows.
+        // time (JobExecutor): a second run beside this one would clear its channels and trade its rows.
         _channelRegistry.Clear();
 
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);

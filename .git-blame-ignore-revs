@@ -5,3 +5,5 @@
 58c1a42be3b6bc54f7c483d4d627465ae5794007
 # refactor(adapters-shared): move the DtPipe.Core namespaces to DtPipe.Adapters.Shared
 b6f2723fabdb203c83b556655da1cd479e848aec
+# refactor(cli): move the engine into the DtPipe.Engine namespace
+aa37501af03d1106a7ff5356d29f3229cd6ce213

@@ -314,6 +314,7 @@ class Program
         services.AddSingleton<DtPipe.Cli.Pipeline.FlagRegistry>(sp => DtPipe.Cli.Pipeline.FlagRegistryFactory.Build(sp));
         services.AddSingleton<DtPipe.Core.Security.IMcpSecurityContext, DtPipe.Core.Security.McpSecurityContext>();
         services.AddSingleton<Spectre.Console.IAnsiConsole>(sp => DtPipe.Cli.Infrastructure.SharedConsole.Create());
+        services.AddSingleton<DtPipe.Engine.JobExecutor>();
         services.AddSingleton<JobService>();
         services.AddSingleton<JobRunner>();
         services.AddSingleton<JobAnalysis>();
