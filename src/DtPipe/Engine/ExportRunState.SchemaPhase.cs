@@ -36,9 +36,6 @@ internal sealed partial class ExportRunState
 
         if (Pipeline.Count == 0) return;
 
-        var transformerNames = Pipeline.Select(t => t.GetType().Name.Replace("DataTransformer", ""));
-        if (ShowStatusMessages && !SilenceInternal) Observer.ShowPipeline(transformerNames);
-
         foreach (var t in Pipeline)
         {
             var inputSchema = CurrentSchema;

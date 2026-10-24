@@ -16,9 +16,6 @@ internal sealed partial class ExportRunState
 {
     internal async Task PrepareWriterAsync(CancellationToken ct)
     {
-        if (ShowStatusMessages && !SilenceInternal)
-            Observer.ShowTarget(WriterFactory.ComponentName, OutputPath);
-
         var exportableSchema = CurrentSchema ?? throw new InvalidOperationException("Exportable schema is null.");
         // Constructing a writer does not touch its target — DryRunSafeWriterTests holds that
         // invariant for the catalogue — so a sample run can build the real writer and inspect it.

@@ -34,7 +34,6 @@ internal sealed partial class ExportRunState
     internal readonly OptionsRegistry Registry;
     internal readonly string? Alias;
     internal readonly System.Collections.Concurrent.ConcurrentQueue<DtPipe.Feedback.BranchSummary>? ResultsCollector;
-    internal readonly bool ShowStatusMessages;
     internal readonly bool SilenceInternal;
     internal readonly bool OutputIsStdio;
 
@@ -100,7 +99,6 @@ internal sealed partial class ExportRunState
         OptionsRegistry registry,
         string? alias,
         System.Collections.Concurrent.ConcurrentQueue<DtPipe.Feedback.BranchSummary>? resultsCollector,
-        bool showStatusMessages,
         bool silenceInternal,
         bool outputIsStdio)
     {
@@ -114,7 +112,6 @@ internal sealed partial class ExportRunState
         Registry = registry;
         Alias = alias;
         ResultsCollector = resultsCollector;
-        ShowStatusMessages = showStatusMessages;
         SilenceInternal = silenceInternal;
         OutputIsStdio = outputIsStdio;
     }
@@ -179,9 +176,6 @@ internal sealed partial class ExportRunState
         if (!SilenceInternal && Reader is IColumnTypeInferenceCapable autoCapable
             && autoCapable.AutoAppliedTypes?.Count > 0)
             Observer.ShowColumnTypeInferenceSuggestion(autoCapable.AutoAppliedTypes, 100, applied: true);
-
-        if (ShowStatusMessages && !SilenceInternal)
-            Observer.ShowConnectionStatus(true, Reader.Columns?.Count);
 
         // ── Schema ─────────────────────────────────────────────────────────
         Logger.LogDebug("[Schema] initializing transformers and segmenting pipeline");

@@ -95,13 +95,9 @@ public class ExportServiceTests
         _mockWriterFactory.Setup(f => f.Create(It.IsAny<OptionsRegistry>())).Returns(mockWriter.Object);
 
         // Act
-        await _service.RunExportAsync(new PipelineOptions { NoStats = options.NoStats }, "test-source", "target-path", cts.Token, pipeline, _mockReaderFactory.Object, _mockWriterFactory.Object, new OptionsRegistry(), showStatusMessages: true);
+        await _service.RunExportAsync(new PipelineOptions { NoStats = options.NoStats }, "test-source", "target-path", cts.Token, pipeline, _mockReaderFactory.Object, _mockWriterFactory.Object, new OptionsRegistry());
 
         // Assert
-        _mockObserver.Verify(o => o.ShowIntro("test-source", "target-path"), Times.Once);
-        _mockObserver.Verify(o => o.ShowConnectionStatus(false, null), Times.Once); // Connecting...
-        _mockObserver.Verify(o => o.ShowConnectionStatus(true, 1), Times.Once); // Connected
-        _mockObserver.Verify(o => o.ShowTarget("test-target", "target-path"), Times.Once);
         _mockObserver.Verify(o => o.CreateProgressReporter(false, It.IsAny<IReadOnlyList<(string Name, bool IsColumnar)>>(), It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<bool>()), Times.Once);
 
         _mockProgress.Verify(p => p.ReportRead(1), Times.AtLeastOnce);

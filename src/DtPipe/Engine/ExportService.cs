@@ -54,7 +54,6 @@ public class ExportService
         OptionsRegistry registry,
         string? alias = null,
         System.Collections.Concurrent.ConcurrentQueue<DtPipe.Feedback.BranchSummary>? resultsCollector = null,
-        bool showStatusMessages = false,
         bool quiet = false)
     {
         // Ensure the registry has the correct pipeline options for this run
@@ -67,14 +66,8 @@ public class ExportService
         bool silenceInternal = quiet;
         bool outputIsStdio = string.Equals(outputPath, "-", StringComparison.Ordinal);
 
-        if (showStatusMessages && !silenceInternal)
-        {
-            _observer.ShowIntro(providerName, outputPath);
-            _observer.ShowConnectionStatus(false, null);
-        }
-
         var state = new ExportRunState(_runServices, options, providerName, outputPath, pipeline, readerFactory, writerFactory,
-            registry, alias, resultsCollector, showStatusMessages, silenceInternal, outputIsStdio);
+            registry, alias, resultsCollector, silenceInternal, outputIsStdio);
         await state.RunAsync(ct);
     }
 
