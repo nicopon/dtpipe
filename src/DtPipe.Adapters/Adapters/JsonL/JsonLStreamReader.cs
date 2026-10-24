@@ -160,7 +160,7 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
             columns.Add(new PipeColumnInfo(kvp.Key, type, true));
             fields.Add(new Field(kvp.Key, arrowType, true));
 
-            var hint = ClrTypeToHint(type);
+            var hint = DtPipe.Core.Helpers.TypeHelper.HintFor(type);
             if (hint != null) autoApplied[kvp.Key] = hint;
         }
 
@@ -267,7 +267,7 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
         foreach (var kvp in merged)
         {
             var (clrType, _) = InferTypes(kvp.Key, kvp.Value);
-            var hint = ClrTypeToHint(clrType);
+            var hint = DtPipe.Core.Helpers.TypeHelper.HintFor(clrType);
             if (hint != null) result[kvp.Key] = hint;
         }
         return result;
@@ -521,21 +521,6 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
     }
 
     private static Type? ResolveHintToClrType(string hint) => DtPipe.Core.Helpers.TypeHelper.ParseTypeHint(hint);
-
-    /// <summary>Maps a CLR type back to the type hint string used in --json-column-types.</summary>
-    private static string? ClrTypeToHint(Type t)
-    {
-        if (t == typeof(string)) return "string";
-        if (t == typeof(long)) return "int64";
-        if (t == typeof(double)) return "double";
-        if (t == typeof(bool)) return "bool";
-        if (t == typeof(Guid)) return "uuid";
-        if (t == typeof(int)) return "int32";
-        if (t == typeof(decimal)) return "decimal";
-        if (t == typeof(DateTime)) return "datetime";
-        if (t == typeof(DateTimeOffset)) return "datetimeoffset";
-        return null; // object, List, etc. → omit (no portable scalar hint)
-    }
 
     public async ValueTask DisposeAsync()
     {

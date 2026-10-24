@@ -110,6 +110,24 @@ public class ExportServiceTests
         yield return new ReadOnlyMemory<object?[]>(System.Linq.Enumerable.ToArray(data));
         await Task.CompletedTask;
     }
+
+    [Fact]
+    public void InjectSchema_GivesAReaderThatTakesColumnTypeHints_TheHintsOfTheSchemaScalars()
+    {
+        var schema = new Apache.Arrow.Schema.Builder()
+            .Field(f => f.Name("Id").DataType(Apache.Arrow.Types.Int32Type.Default))
+            .Field(f => f.Name("Born").DataType(Apache.Arrow.Types.Date32Type.Default))
+            .Field(f => f.Name("Tags").DataType(new Apache.Arrow.Types.ListType(Apache.Arrow.Types.StringType.Default)))
+            .Build();
+        _mockReaderFactory.Setup(f => f.GetSupportedOptionTypes()).Returns(new[] { typeof(DtPipe.Adapters.Csv.CsvReaderOptions) });
+        var registry = new OptionsRegistry();
+        registry.Register(new DtPipe.Adapters.Csv.CsvReaderOptions());
+
+        ExportService.InjectSchema(_mockReaderFactory.Object, registry,
+            DtPipe.Core.Infrastructure.Arrow.ArrowSchemaSerializer.SerializeCompact(schema));
+
+        registry.Get<DtPipe.Adapters.Csv.CsvReaderOptions>().ColumnTypes.Should().Be("Id:int32,Born:datetime");
+    }
 }
 
 public class PipelinePhaseOrderTests

@@ -11,7 +11,7 @@ namespace DtPipe.Adapters.Csv;
     examples: new[] {
         "main:\n  input: \"data.csv\"\n  provider-options:\n    csv:\n      separator: \";\"\n      has-header: true\n  output: \"<adapter-prefix>:<target>\""
     })]
-public class CsvReaderOptions : TextSourceOptions, IOptionSet
+public class CsvReaderOptions : TextSourceOptions, IOptionSet, IHasColumnTypeHints
 {
     public static string Prefix => "csv";
     public static string DisplayName => "CSV Reader";

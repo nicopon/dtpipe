@@ -72,8 +72,8 @@ public class ExportService
     }
 
     /// <summary>
-    /// Injects a compact Arrow schema JSON string into the reader's registered options
-    /// via <c>Schema</c> (preferred) or falls back to <c>ColumnTypes</c> for CSV readers.
+    /// Injects a compact Arrow schema JSON string into the reader's registered options via
+    /// <c>Schema</c> (preferred) or, for options that take column-type hints, as those hints.
     /// </summary>
     internal static void InjectSchema(IStreamReaderFactory readerFactory, OptionsRegistry registry, string schemaJson)
     {
@@ -88,49 +88,25 @@ public class ExportService
             return;
         }
 
-        // Fallback for CSV (flat, row-based): extract scalar ColumnTypes from the schema.
-        var columnTypesProp = optType.GetProperty("ColumnTypes");
-        if (columnTypesProp != null && columnTypesProp.CanWrite
-            && string.IsNullOrEmpty(columnTypesProp.GetValue(opts) as string))
+        // Flat, row-based readers (CSV): the scalar columns of the schema, as hints.
+        if (opts is IHasColumnTypeHints typed && string.IsNullOrEmpty(typed.ColumnTypes))
         {
             try
             {
                 var schema = ArrowSchemaSerializer.Deserialize(schemaJson);
                 var hints = schema.FieldsList
-                    .Select(f => (f.Name, Hint: ArrowTypeToColumnTypeHint(f)))
+                    .Select(f => (f.Name, Hint: DtPipe.Core.Helpers.TypeHelper.HintFor(f)))
                     .Where(x => !string.IsNullOrEmpty(x.Hint))
                     .Select(x => $"{x.Name}:{x.Hint}");
                 var columnTypes = string.Join(",", hints);
                 if (!string.IsNullOrEmpty(columnTypes))
                 {
-                    columnTypesProp.SetValue(opts, columnTypes);
+                    typed.ColumnTypes = columnTypes;
                     registry.RegisterByType(optType, opts);
                 }
             }
             catch { /* best-effort */ }
         }
-    }
-
-    /// <summary>Extracts a --column-types hint string for a field (scalars only; null for complex types).</summary>
-    private static string? ArrowTypeToColumnTypeHint(Field field)
-    {
-        // Check arrow.uuid metadata first
-        if (field.Metadata?.TryGetValue("ARROW:extension:name", out var ext) == true && ext == "arrow.uuid")
-            return "uuid";
-        return field.DataType switch
-        {
-            StringType => "string",
-            Int32Type => "int32",
-            Int64Type => "int64",
-            FloatType => "float32",
-            DoubleType => "float64",
-            Decimal128Type => "decimal",
-            BooleanType => "bool",
-            Date32Type => "date32",
-            Date64Type => "datetime",
-            TimestampType => "datetimeoffset",
-            _ => null
-        };
     }
 
     internal static Schema EvolveSchema(Schema original, IReadOnlyList<PipeColumnInfo> transformed)

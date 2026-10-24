@@ -1,3 +1,6 @@
+using Apache.Arrow;
+using DtPipe.Core.Infrastructure.Arrow;
+
 namespace DtPipe.Core.Helpers;
 
 /// <summary>
@@ -13,35 +16,27 @@ namespace DtPipe.Core.Helpers;
 /// </remarks>
 public static class TypeHelper
 {
-    private static readonly Dictionary<string, Type> Hints = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["uuid"] = typeof(Guid),
-        ["guid"] = typeof(Guid),
-        ["string"] = typeof(string),
-        ["str"] = typeof(string),
-        ["text"] = typeof(string),
-        ["int"] = typeof(int),
-        ["int32"] = typeof(int),
-        ["integer"] = typeof(int),
-        ["long"] = typeof(long),
-        ["int64"] = typeof(long),
-        ["double"] = typeof(double),
-        ["float64"] = typeof(double),
-        ["number"] = typeof(double),
-        ["float"] = typeof(float),
-        ["float32"] = typeof(float),
-        ["single"] = typeof(float),
-        ["decimal"] = typeof(decimal),
-        ["numeric"] = typeof(decimal),
-        ["money"] = typeof(decimal),
-        ["bool"] = typeof(bool),
-        ["boolean"] = typeof(bool),
-        ["datetime"] = typeof(DateTime),
-        ["date"] = typeof(DateTime),
-        ["datetimeoffset"] = typeof(DateTimeOffset),
-        ["timestamp"] = typeof(DateTimeOffset),
-        ["datetimetz"] = typeof(DateTimeOffset),
-    };
+    // One row per type. The first spelling is the one written when a hint is produced from a type;
+    // the others are accepted when a hint is read.
+    private static readonly (Type Type, string[] Names)[] Table =
+    [
+        (typeof(Guid), ["uuid", "guid"]),
+        (typeof(string), ["string", "str", "text"]),
+        (typeof(int), ["int32", "int", "integer"]),
+        (typeof(long), ["int64", "long"]),
+        (typeof(double), ["double", "float64", "number"]),
+        (typeof(float), ["float32", "float", "single"]),
+        (typeof(decimal), ["decimal", "numeric", "money"]),
+        (typeof(bool), ["bool", "boolean"]),
+        (typeof(DateTime), ["datetime", "date"]),
+        (typeof(DateTimeOffset), ["datetimeoffset", "timestamp", "datetimetz"]),
+    ];
+
+    private static readonly Dictionary<string, Type> Hints = Table
+        .SelectMany(row => row.Names.Select(name => (name, row.Type)))
+        .ToDictionary(x => x.name, x => x.Type, StringComparer.OrdinalIgnoreCase);
+
+    private static readonly Dictionary<Type, string> Spellings = Table.ToDictionary(row => row.Type, row => row.Names[0]);
 
     /// <summary>
     /// The CLR type a hint names, or <c>null</c> when it names none.
@@ -69,6 +64,30 @@ public static class TypeHelper
             : ParseTypeHint(hint)
               ?? throw new InvalidOperationException(
                   $"{flag} declares '{column}' as '{hint}', which names no type. {Accepted}");
+
+    /// <summary>
+    /// The hint that names <paramref name="type"/>, or <c>null</c> when none does. The reverse of
+    /// <see cref="ParseTypeHint"/>: what it returns always parses back to the same type.
+    /// </summary>
+    public static string? HintFor(Type type) => Spellings.GetValueOrDefault(type);
+
+    /// <summary>
+    /// The hint that names the scalar a field carries, or <c>null</c> for a field no hint can name
+    /// (a nested type, bytes, an integer width the table lacks). It reads the CLR type through the
+    /// metadata-aware map, so an <c>arrow.uuid</c> field answers <c>uuid</c> and a zone-less timestamp
+    /// <c>datetime</c>, never a guess from the storage type.
+    /// </summary>
+    public static string? HintFor(Field field)
+    {
+        try
+        {
+            return HintFor(ArrowTypeMapper.GetClrTypeFromField(field));
+        }
+        catch (NotSupportedException)
+        {
+            return null;
+        }
+    }
 
     /// <summary>The accepted spellings, grouped by the type each one names.</summary>
     public static string Accepted { get; } =
