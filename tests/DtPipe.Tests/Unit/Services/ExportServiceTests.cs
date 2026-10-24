@@ -257,7 +257,7 @@ internal sealed class MarkerWriter(string outputPath) : IRowDataWriter
 internal sealed class StubExportProgress : IExportProgress
 {
     public void ReportRead(int count) { }
-    public void ReportTransform(string transformerName, int count) { }
+    public void ReportTransform(int stage, int count) { }
     public void ReportWrite(int count) { }
     public void Complete() { }
     public ExportMetrics GetMetrics() => new ExportMetrics(DateTime.UtcNow, DateTime.UtcNow, 0, 0, 0, 0,

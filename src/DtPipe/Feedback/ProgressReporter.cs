@@ -30,14 +30,25 @@ public sealed class ProgressReporter : IExportProgress
     public DateTime StartTime => _startTime;
     public IReadOnlyList<(string Name, bool IsColumnar)> TransformerModes => _transformerModes;
     public long[] TransformerCountsByIndex => _transformerCountsByIndex;
-    public Dictionary<string, long> TransformerStats => _transformerStats;
 
-    // Transformers stats
-    private readonly Dictionary<string, long> _transformerStats = new();
+    /// <summary>The counts summed by transformer name, built when asked for: a stage owns its count, a name is a label.</summary>
+    public Dictionary<string, long> TransformerStats
+    {
+        get
+        {
+            var stats = new Dictionary<string, long>();
+            for (int i = 0; i < _transformerModes.Count; i++)
+            {
+                var name = _transformerModes[i].Name;
+                stats[name] = stats.GetValueOrDefault(name) + Volatile.Read(ref _transformerCountsByIndex[i]);
+            }
+            return stats;
+        }
+    }
+
+    // Transformers stats: one counter per stage, fixed at construction.
     private readonly List<(string Name, bool IsColumnar)> _transformerModes = new();
-    private long[] _transformerCountsByIndex = System.Array.Empty<long>();
-    private readonly Dictionary<string, List<int>> _transformerNameIndices = new();
-    private readonly Dictionary<string, int> _transformerCursors = new();
+    private readonly long[] _transformerCountsByIndex = System.Array.Empty<long>();
 
     // UI Task
     private Task? _uiTask;
@@ -54,22 +65,8 @@ public sealed class ProgressReporter : IExportProgress
 
         if (transformerModes != null)
         {
-            foreach (var mode in transformerModes)
-            {
-                _transformerModes.Add(mode);
-                _transformerStats[mode.Name] = 0;
-            }
+            _transformerModes.AddRange(transformerModes);
             _transformerCountsByIndex = new long[_transformerModes.Count];
-            for (int i = 0; i < _transformerModes.Count; i++)
-            {
-                var name = _transformerModes[i].Name;
-                if (!_transformerNameIndices.ContainsKey(name))
-                {
-                    _transformerNameIndices[name] = new List<int>();
-                    _transformerCursors[name] = 0;
-                }
-                _transformerNameIndices[name].Add(i);
-            }
         }
 
         // Compute whether a live TUI should be started. Disable when output is
@@ -117,23 +114,11 @@ public sealed class ProgressReporter : IExportProgress
         // Refresh is handled by background loop
     }
 
-    public void ReportTransform(string transformerName, int count)
+    public void ReportTransform(int stage, int count)
     {
-        var key = transformerName.Replace("DataTransformer", "");
-        lock (_transformerStats)
-        {
-            if (_transformerStats.ContainsKey(key))
-                _transformerStats[key] += count;
-
-            // Per-index tracking: use a round-robin cursor so duplicate-named transformers
-            // accumulate into separate slots rather than the same aggregated counter.
-            if (_transformerNameIndices.TryGetValue(key, out var indices) && indices.Count > 0)
-            {
-                var cursor = _transformerCursors[key];
-                Interlocked.Add(ref _transformerCountsByIndex[indices[cursor]], count);
-                _transformerCursors[key] = (cursor + 1) % indices.Count;
-            }
-        }
+        var index = stage - 1;
+        if ((uint)index < (uint)_transformerCountsByIndex.Length)
+            Interlocked.Add(ref _transformerCountsByIndex[index], count);
     }
 
     public void ReportWrite(int count)
@@ -164,16 +149,13 @@ public sealed class ProgressReporter : IExportProgress
             table.AddRow("[grey]▸ Reading[/]", $"[white]{_readCount:N0}[/]", $"[grey]{FormatSpeed(readSpeed)}[/]");
 
         // Transformers
-        lock (_transformerStats)
+        for (int i = 0; i < _transformerModes.Count; i++)
         {
-            for (int i = 0; i < _transformerModes.Count; i++)
-            {
-                var (name, isColumnar) = _transformerModes[i];
-                var count = _transformerCountsByIndex.Length > i ? _transformerCountsByIndex[i] : _transformerStats.GetValueOrDefault(name);
-                var speed = elapsed > 0 ? count / elapsed : 0;
-                var modeLabel = isColumnar ? "[cyan]◈ columnar[/]" : "[yellow]● row[/]";
-                table.AddRow($"[grey]▸ → {Markup.Escape(name)}[/]", $"[white]{count:N0}[/]", $"[grey]{FormatSpeed(speed)}[/]", modeLabel);
-            }
+            var (name, isColumnar) = _transformerModes[i];
+            var count = Volatile.Read(ref _transformerCountsByIndex[i]);
+            var speed = elapsed > 0 ? count / elapsed : 0;
+            var modeLabel = isColumnar ? "[cyan]◈ columnar[/]" : "[yellow]● row[/]";
+            table.AddRow($"[grey]▸ → {Markup.Escape(name)}[/]", $"[white]{count:N0}[/]", $"[grey]{FormatSpeed(speed)}[/]", modeLabel);
         }
 
         // Writing
@@ -250,13 +232,6 @@ public sealed class ProgressReporter : IExportProgress
     {
         UpdatePeakMemory();
 
-        var transformerStats = new Dictionary<string, long>();
-        lock (_transformerStats)
-        {
-            foreach (var kvp in _transformerStats)
-                transformerStats[kvp.Key] = kvp.Value;
-        }
-
         var elapsed = _stopwatch.Elapsed.TotalSeconds;
         var overallThroughput = elapsed > 0 ? _writeCount / elapsed : 0;
 
@@ -267,7 +242,7 @@ public sealed class ProgressReporter : IExportProgress
             _writeCount,
             overallThroughput,
             _peakMemoryMb,
-            transformerStats,
+            TransformerStats,
             _transformerCountsByIndex.Length > 0 ? (IReadOnlyList<long>)_transformerCountsByIndex.ToList() : null
         );
     }

@@ -68,7 +68,9 @@ outside — tell them apart first:
 
 - **`ISampleTap`** — an observation point offered each stage's output where `ReportTransform` is
   already called. Read-only; never disposes or retains a `RecordBatch`. Stage 0 is the reader, 1..n
-  the transformers in pipeline order.
+  the transformers in pipeline order. `ReportTransform` takes the same stage number and counts per
+  stage, never per transformer name, so two transformers of one type keep their own count.
+  `[CI: ProgressReporterTests]`
 - **`SampleModeSink`** — two decorators selected by the real writer's **capability**, the shape
   `CursorTracking{Row,Columnar}Decorator` uses. The engine reads row-vs-columnar mode off
   `writer is IColumnarDataWriter`, so a sink of the wrong kind changes segmentation and the bridge

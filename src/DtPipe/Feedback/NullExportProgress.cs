@@ -15,7 +15,7 @@ internal sealed class NullExportProgress : IExportProgress
     private long _writeCount;
 
     public void ReportRead(int count) => Interlocked.Add(ref _readCount, count);
-    public void ReportTransform(string transformerName, int count) { }
+    public void ReportTransform(int stage, int count) { }
     public void ReportWrite(int count) => Interlocked.Add(ref _writeCount, count);
     public void Complete() { }
 

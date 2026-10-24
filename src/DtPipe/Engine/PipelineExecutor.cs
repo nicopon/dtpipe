@@ -420,7 +420,7 @@ public sealed class PipelineExecutor
                     currentBatch!.Dispose();
                 currentBatch = res;
                 if (currentBatch == null) break;
-                progress.ReportTransform(t.GetType().Name.Replace("DataTransformer", ""), currentBatch.Length);
+                progress.ReportTransform(stageBase + i + 1, currentBatch.Length);
                 if (tap?.WantsMore == true) tap.OnBatch(stageBase + i + 1, currentBatch);
             }
             if (currentBatch != null)
@@ -450,7 +450,7 @@ public sealed class PipelineExecutor
                     current = res;
                     if (current != null)
                     {
-                        progress.ReportTransform(nextT.GetType().Name, current.Length);
+                        progress.ReportTransform(stageBase + j + 1, current.Length);
                         if (tap?.WantsMore == true) tap.OnBatch(stageBase + j + 1, current);
                     }
                 }
@@ -504,6 +504,7 @@ public sealed class PipelineExecutor
         for (int i = 0; i < p.Count; i++)
         {
             var transformer = p[i];
+            var stage = stageBase + i + 1;
             var nextRows = new List<IReadOnlyList<object?>>();
             foreach (var r in currentRows)
             {
@@ -511,19 +512,18 @@ public sealed class PipelineExecutor
                 {
                     foreach (var res in multi.TransformMany(r))
                     {
-                        if (res != null) { nextRows.Add(res); progress.ReportTransform(transformer.GetType().Name, 1); }
+                        if (res != null) { nextRows.Add(res); progress.ReportTransform(stage, 1); }
                     }
                 }
                 else
                 {
                     var res = transformer.Transform(r);
-                    if (res != null) { nextRows.Add(res); progress.ReportTransform(transformer.GetType().Name, 1); }
+                    if (res != null) { nextRows.Add(res); progress.ReportTransform(stage, 1); }
                 }
             }
             currentRows = nextRows;
             if (tap?.WantsMore == true)
             {
-                var stage = stageBase + i + 1;
                 foreach (var r in currentRows) tap.OnRow(stage, r);
             }
             if (currentRows.Count == 0) break;
