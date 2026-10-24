@@ -1,6 +1,7 @@
 # DtPipe.PipelineNode
 
-Mechanics for editing the pipeline node. The rules themselves are in the root `CLAUDE.md`.
+Mechanics for editing the pipeline node. The rules themselves are in the root `CLAUDE.md` and
+`.claude/rules/distributed-pipelines.md`.
 
 A pipeline node is a replica's side of the data plane. Under the control of the coordinator
 (`src/DtPipe.Coordinator/`, through the host in `src/DtPipe.PipelineNode.Hosting/`) it launches each run of a

@@ -5,7 +5,7 @@ set -e
 # 1. A code comment may only cite what a clone of this repository can open. Planning documents live
 #    in .notes/, which .gitignore excludes, so "voie 4 §6 lot E2b" points at nothing. Names the
 #    repository carries stay legal: F1-F7, F16, REFERENCE.md anchors.
-# 2. Guidance files (CLAUDE.md at any depth, .claude/skills/) state rules, not history: no ISO
+# 2. Guidance files (CLAUDE.md at any depth, .claude/rules/, .claude/skills/) state rules, not history: no ISO
 #    date, no cycle name, no commit hash. History lives in git.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -38,7 +38,7 @@ pass "no comment cites a document absent from the repository"
 
 # Untracked files are included: a new CLAUDE.md must be checked before its first commit.
 guidance="$(cd "$PROJECT_ROOT" && git ls-files -co --exclude-standard \
-    | grep -E '(^|/)CLAUDE\.md$|^\.claude/skills/' || true)"
+    | grep -E '(^|/)CLAUDE\.md$|^\.claude/(rules|skills)/' || true)"
 
 if [ -z "$guidance" ]; then
     fail "no guidance file found — the discovery rule no longer matches the tree"

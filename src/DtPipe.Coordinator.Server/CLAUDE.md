@@ -1,6 +1,7 @@
 # DtPipe.Coordinator.Server
 
-Mechanics for editing the coordinator's server. The rules themselves are in the root `CLAUDE.md`;
+Mechanics for editing the coordinator's server. The rules themselves are in the root `CLAUDE.md` and
+`.claude/rules/distributed-pipelines.md`;
 the hub, the barrier and admission are `DtPipe.Coordinator`'s (`src/DtPipe.Coordinator/CLAUDE.md`).
 
 The server hosts `DtPipe.Coordinator` (`AddCoordinatorHub`) and adds what a person needs around it:

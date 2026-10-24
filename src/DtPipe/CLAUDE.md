@@ -1,6 +1,7 @@
 # DtPipe (CLI) — parsing, engine and host, options, sample mode, checkpoints, MCP, agent, studio
 
-Mechanics for editing the CLI project. The rules themselves are in the root `CLAUDE.md`.
+Mechanics for editing the CLI project. The rules themselves are in the root `CLAUDE.md`; those of MCP
+and the agent are in `.claude/rules/mcp-and-agent.md`.
 
 ## From args to a DAG
 

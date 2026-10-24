@@ -1,6 +1,7 @@
 # DtPipe.Coordinator
 
-Mechanics for editing the coordinator. The rules themselves are in the root `CLAUDE.md`.
+Mechanics for editing the coordinator. The rules themselves are in the root `CLAUDE.md` and
+`.claude/rules/distributed-pipelines.md`.
 
 The coordinator is the central hub of a distributed pipeline. A node is an identity; it is carried by one or
 more hosts, its **replicas**, each running fragments for a run on a remote machine
