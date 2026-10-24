@@ -50,10 +50,10 @@ RUN --mount=type=cache,id=dtpipe-nuget,target=/root/.nuget/packages,sharing=lock
 FROM source AS hosts-build
 ARG SOURCE_REVISION=""
 RUN --mount=type=cache,id=dtpipe-nuget,target=/root/.nuget/packages,sharing=locked \
-    dotnet publish src/DtPipe.Coordinator.Server/DtPipe.Coordinator.Server.csproj -c Release -p:SourceRevisionId="$SOURCE_REVISION" -o /out/coordinator \
+    dotnet publish src/DtPipe.Coordinator.Host/DtPipe.Coordinator.Host.csproj -c Release -p:SourceRevisionId="$SOURCE_REVISION" -o /out/coordinator \
     && dotnet publish src/DtPipe.PipelineNode.Runner/DtPipe.PipelineNode.Runner.csproj -c Release -p:SourceRevisionId="$SOURCE_REVISION" -o /out/runner \
     && { [ -z "$SOURCE_REVISION" ] \
-        || { grep -qaF "+$SOURCE_REVISION" /out/coordinator/DtPipe.Coordinator.Server.dll \
+        || { grep -qaF "+$SOURCE_REVISION" /out/coordinator/DtPipe.Coordinator.Host.dll \
              && grep -qaF "+$SOURCE_REVISION" /out/runner/DtPipe.PipelineNode.Runner.dll; }; } \
     || { echo "A host does not carry the revision $SOURCE_REVISION." >&2; exit 1; }
 
@@ -92,7 +92,7 @@ EXPOSE 8080
 # /healthz is anonymous and answers 200 once the server serves, which is after its store is open, and its library
 # too when it has a remote. An orchestrator that probes on its own (a compose file, a pod spec) replaces this check.
 HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=3 CMD curl -fs http://localhost:8080/healthz || exit 1
-ENTRYPOINT ["dotnet", "/app/DtPipe.Coordinator.Server.dll"]
+ENTRYPOINT ["dotnet", "/app/DtPipe.Coordinator.Host.dll"]
 
 FROM with-dtpipe AS runner
 COPY --from=hosts-build /out/runner /app

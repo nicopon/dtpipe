@@ -93,7 +93,7 @@ fi
 pass "the lab and its sample data are named only under samples/distributed-lab"
 
 # 5. The two base libraries stay libraries: a host owns Program, authentication and the address. An
-#    executable of the family (DtPipe.Coordinator.Server, a runner) is such a host and is not checked.
+#    executable of the family (DtPipe.Coordinator.Host, a runner) is such a host and is not checked.
 HITS=""
 for f in src/DtPipe.Coordinator/DtPipe.Coordinator.csproj src/DtPipe.PipelineNode/DtPipe.PipelineNode.csproj; do
     if grep -qE 'Sdk="Microsoft\.NET\.Sdk\.Web"|<OutputType>[[:space:]]*(Exe|WinExe)' "$f"; then HITS="$HITS\n  $f"; fi

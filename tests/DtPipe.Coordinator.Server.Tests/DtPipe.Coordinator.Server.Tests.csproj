@@ -14,6 +14,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\DtPipe.Coordinator.Server\DtPipe.Coordinator.Server.csproj" />
+    <!-- The product's host, whose Program the tests start: the server as it ships. -->
+    <ProjectReference Include="..\..\src\DtPipe.Coordinator.Host\DtPipe.Coordinator.Host.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The coordinator as the product ships it: a host that only adds DtPipe.Coordinator.Server. -->
+    <ProjectReference Include="..\DtPipe.Coordinator.Server\DtPipe.Coordinator.Server.csproj" />
+  </ItemGroup>
+
+</Project>

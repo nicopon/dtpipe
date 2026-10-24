@@ -16,6 +16,7 @@
     <ProjectReference Include="..\..\src\DtPipe.PipelineNode.Hosting\DtPipe.PipelineNode.Hosting.csproj" />
     <!-- A real coordinator on a port, whose key issuer a node's token client reaches as it reaches any provider. -->
     <ProjectReference Include="..\..\src\DtPipe.Coordinator.Server\DtPipe.Coordinator.Server.csproj" />
+    <ProjectReference Include="..\..\src\DtPipe.Coordinator.Host\DtPipe.Coordinator.Host.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -2,8 +2,10 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
+    <!-- A library a host adds the server to (AddCoordinatorServer, MapCoordinatorServerAsync); its wwwroot reaches every host
+         that references it, at the root of the site. -->
+    <OutputType>Library</OutputType>
     <IsPackable>false</IsPackable>
-    <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
 
   <ItemGroup>
