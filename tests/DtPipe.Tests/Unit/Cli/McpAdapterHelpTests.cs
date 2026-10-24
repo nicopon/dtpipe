@@ -270,8 +270,7 @@ public partial class McpAdapterHelpTests
     public void SingleRoleAdapter_Keeps_Unlabelled_Sections()
     {
         var adapter = _roles.GroupBy(x => x.Adapter)
-            .First(g => g.Select(x => x.Role).Distinct().Count() == 1
-                     && g.Key != "mem" && g.Key != "arrow-memory").Key;
+            .First(g => g.Select(x => x.Role).Distinct().Count() == 1).Key;
 
         var help = _help.GetAdapterHelp(adapter);
 

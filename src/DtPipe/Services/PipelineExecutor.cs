@@ -9,6 +9,7 @@ using DtPipe.Core.Abstractions;
 using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
+using DtPipe.Core.Pipelines;
 using Microsoft.Extensions.Logging;
 
 namespace DtPipe.Services;

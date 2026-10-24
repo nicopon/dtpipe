@@ -43,7 +43,7 @@ DtPipe.Adapters/
     ├── Generate/        GenerateStreamReader (synthetic data)
     ├── Null/            NullDataWriter
     ├── Checksum/        ChecksumDataWriter
-    └── MemoryChannel/   In-process channels for DAG branch wiring (row and Arrow modes)
+    └── MemoryChannel/   In-process Arrow channels for DAG branch wiring
 ```
 
 ---

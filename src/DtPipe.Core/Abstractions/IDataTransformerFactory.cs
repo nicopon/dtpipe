@@ -6,9 +6,6 @@ namespace DtPipe.Core.Abstractions;
 
 public interface IDataTransformerFactory : IDataFactory
 {
-
-    // Create(DumpOptions) removed as legacy
-
     /// <summary>
     /// Creates a transformer instance from specific configuration values.
     /// Example: config=[("--fake", "NAME:name.firstName"), ("--fake-locale", "fr")]

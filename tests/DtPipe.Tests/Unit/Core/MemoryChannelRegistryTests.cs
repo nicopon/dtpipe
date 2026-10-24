@@ -1,5 +1,6 @@
 using Apache.Arrow;
 using Apache.Arrow.Types;
+using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Core.Models;
 using DtPipe.Core.Pipelines.Dag;
 using Xunit;
@@ -9,7 +10,7 @@ namespace DtPipe.Tests.Unit.Core;
 public class MemoryChannelRegistryTests
 {
     [Fact]
-    public void UpdateChannelColumns_ShouldNotDowngradeRichArrowSchema()
+    public void FlatSchema_ShouldNotDowngradeRichArrowSchema()
     {
         // Arrange
         var registry = new MemoryChannelRegistry();
@@ -33,7 +34,7 @@ public class MemoryChannelRegistryTests
         };
 
         // Act
-        registry.UpdateChannelColumns(alias, rowColumns);
+        registry.UpdateArrowChannelSchema(alias, ArrowSchemaFactory.Create(rowColumns));
 
         // Assert
         var schema = registry.GetArrowChannel(alias)!.Value.Schema;
@@ -45,7 +46,7 @@ public class MemoryChannelRegistryTests
     }
 
     [Fact]
-    public void UpdateChannelColumns_ShouldOverwriteSimpleArrowSchema()
+    public void FlatSchema_ShouldOverwriteSimpleArrowSchema()
     {
         // Arrange
         var registry = new MemoryChannelRegistry();
@@ -66,7 +67,7 @@ public class MemoryChannelRegistryTests
         };
 
         // Act
-        registry.UpdateChannelColumns(alias, rowColumns);
+        registry.UpdateArrowChannelSchema(alias, ArrowSchemaFactory.Create(rowColumns));
 
         // Assert
         var schema = registry.GetArrowChannel(alias)!.Value.Schema;

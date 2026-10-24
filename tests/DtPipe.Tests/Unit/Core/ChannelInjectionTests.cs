@@ -6,7 +6,7 @@ namespace DtPipe.Tests.Unit.Core;
 
 /// <summary>
 /// F5 — typed channel endpoints. The orchestrator hands branches structured routing;
-/// these tests pin the endpoint contracts that the legacy string path used to encode.
+/// these tests pin the endpoints each golden shape hands its branches.
 /// </summary>
 public class ChannelInjectionTests
 {
@@ -20,9 +20,9 @@ public class ChannelInjectionTests
     }
 
     [Fact]
-    public async Task Typed_Endpoints_Equivalent_To_Legacy_String_Path_Source_To_Sql()
+    public async Task Typed_Endpoints_Source_To_Sql()
     {
-        // Legacy encoding: source branch output → "arrow-memory:src"; SQL branch keeps args.
+        // The source writes the channel of its own alias; the SQL branch keeps its args.
         var dag = GoldenDagDefinitions.Dag_SourcePlusSqlProcessor;
         var orchestrator = BuildOrchestrator();
         BranchChannelContext? srcCtx = null;
@@ -34,16 +34,16 @@ public class ChannelInjectionTests
         });
 
         Assert.NotNull(srcCtx?.OutputEndpoint);
-        Assert.Equal("src", srcCtx!.OutputEndpoint!.Alias);   // legacy: arrow-memory:src
+        Assert.Equal("src", srcCtx!.OutputEndpoint!.Alias);
         Assert.Equal(InternalChannelKind.Arrow, srcCtx.OutputEndpoint.Kind);
         Assert.Null(srcCtx.InputEndpoint);
         Assert.True(srcCtx.SuppressStats);
     }
 
     [Fact]
-    public async Task Typed_Endpoints_Equivalent_To_Legacy_String_Path_FanOut()
+    public async Task Typed_Endpoints_FanOut()
     {
-        // Legacy encoding: each consumer input ← "arrow-memory:{alias}__fan_{n}".
+        // Each consumer reads a fan-out sub-channel of its own: "{alias}__fan_{n}".
         var dag = GoldenDagDefinitions.Dag_FanOut_OneSourceTwoConsumers;
         var orchestrator = BuildOrchestrator();
         var inputs = new System.Collections.Concurrent.ConcurrentDictionary<string, string>();
@@ -61,9 +61,9 @@ public class ChannelInjectionTests
     }
 
     [Fact]
-    public async Task Typed_Endpoints_Equivalent_To_Legacy_String_Path_Merge()
+    public async Task Typed_Endpoints_Merge()
     {
-        // Legacy encoding: both merge sources wrote to "arrow-memory:{alias}" channels.
+        // Each merge source writes the channel of its own alias.
         var dag = GoldenDagDefinitions.Dag_Merge_TwoSources;
         var orchestrator = BuildOrchestrator();
         var outputs = new System.Collections.Concurrent.ConcurrentDictionary<string, string>();
@@ -80,6 +80,5 @@ public class ChannelInjectionTests
 
     private static DagOrchestrator BuildOrchestrator() => new(
         Microsoft.Extensions.Logging.Abstractions.NullLogger<DagOrchestrator>.Instance,
-        new MemoryChannelRegistry(),
-        readerFactories: []);
+        new MemoryChannelRegistry());
 }

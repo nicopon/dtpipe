@@ -68,7 +68,7 @@ public class ComponentHelpCoverageTests
             }
 
             var optionsType = ((IComponentDescriptor)instance).OptionsType;
-            if (!seenOptionsTypes.Add(optionsType)) continue; // shared Options type across reader+writer (e.g. MemoryChannelOptions)
+            if (!seenOptionsTypes.Add(optionsType)) continue; // shared Options type across reader+writer (e.g. ArrowMemoryChannelOptions)
 
             var descriptionAttr = optionsType.GetCustomAttribute<DescriptionAttribute>();
             if (descriptionAttr == null || string.IsNullOrWhiteSpace(descriptionAttr.Description))

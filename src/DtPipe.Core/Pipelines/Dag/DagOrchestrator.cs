@@ -25,24 +25,19 @@ public class DagOrchestrator : IDagOrchestrator
 {
     private readonly ILogger<DagOrchestrator> _logger;
     private readonly IMemoryChannelRegistry _channelRegistry;
-    private readonly List<IStreamReaderFactory> _readerFactories;
-    private readonly object _schemaLock = new();
     private static readonly Schema _emptySchema = new Schema(System.Array.Empty<Field>(), null);
 
     // Constants for DAG execution
-    private const int DefaultNativeChannelCapacity = 100;
     private const int DefaultArrowChannelCapacity = 8;
 
     public Action<string>? OnLogEvent { get; set; }
 
     public DagOrchestrator(
         ILogger<DagOrchestrator> logger,
-        IMemoryChannelRegistry channelRegistry,
-        IEnumerable<IStreamReaderFactory> readerFactories)
+        IMemoryChannelRegistry channelRegistry)
     {
         _logger = logger;
         _channelRegistry = channelRegistry;
-        _readerFactories = readerFactories.ToList();
     }
 
     private sealed record BranchTaskMetadata(
@@ -320,10 +315,6 @@ public class DagOrchestrator : IDagOrchestrator
         BranchChannelContext ctx)
     {
         await Task.Yield();
-
-        string role = branch.HasStreamTransformer ? "[magenta]Stream Transformer[/]"
-                    : branch.StreamingAliases.Count > 0 ? "[cyan]Fan-out (tee)[/]"
-                    : "[blue]Linear Branch[/]";
 
         _logger.LogInformation("Starting branch '{Alias}' [HasStreamTransformer={HasST}, From={From}]",
             branch.Alias, branch.HasStreamTransformer, branch.StreamingAliases.FirstOrDefault() ?? "(none)");

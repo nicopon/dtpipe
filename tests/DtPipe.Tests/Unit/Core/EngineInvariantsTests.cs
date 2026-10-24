@@ -178,7 +178,7 @@ public class EngineInvariantsTests
     private static (DagOrchestrator Orchestrator, MemoryChannelRegistry Registry) BuildOrchestrator()
     {
         var registry = new MemoryChannelRegistry();
-        var orchestrator = new DagOrchestrator(NullLogger<DagOrchestrator>.Instance, registry, readerFactories: []);
+        var orchestrator = new DagOrchestrator(NullLogger<DagOrchestrator>.Instance, registry);
         return (orchestrator, registry);
     }
 

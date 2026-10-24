@@ -223,11 +223,12 @@ public sealed class SampleModeDagTests : IDisposable
 
         var services = new ServiceCollection();
         Program.ConfigureServices(services);
-        var readers = services.BuildServiceProvider().GetServices<DtPipe.Core.Abstractions.IStreamReaderFactory>().ToList();
+        var sp = services.BuildServiceProvider();
 
-        readers.Where(r => r.CapabilityKind is not null).Should().NotBeEmpty();
-        readers.Where(r => r.CapabilityKind is not null).Should().OnlyContain(r => !r.IsSource,
+        var channelReaders = sp.GetRequiredService<DtPipe.Cli.Infrastructure.InternalChannelTransports>().Readers;
+        channelReaders.Should().NotBeEmpty();
+        channelReaders.Should().OnlyContain(r => !r.IsSource,
             "a channel reader reads what the branch upstream produced");
-        readers.Where(r => r.CapabilityKind is null).Should().OnlyContain(r => r.IsSource);
+        sp.GetServices<DtPipe.Core.Abstractions.IStreamReaderFactory>().Should().OnlyContain(r => r.IsSource);
     }
 }

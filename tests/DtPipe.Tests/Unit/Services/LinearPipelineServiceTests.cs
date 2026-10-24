@@ -386,4 +386,41 @@ public class LinearPipelineServiceTests
         Assert.DoesNotContain("hunter2", service.Failure, StringComparison.Ordinal);
         Assert.Contains("Server=srvB", service.Failure!, StringComparison.Ordinal);
     }
+
+    // An internal channel is picked by capability for a typed endpoint, never by name: over the
+    // real registrations, its component name is no prefix a connection string can carry.
+    private static LinearPipelineService RealService()
+    {
+        var services = new ServiceCollection();
+        Program.ConfigureServices(services);
+        var sp = services.BuildServiceProvider();
+        var console = AnsiConsole.Create(new AnsiConsoleSettings { Out = new AnsiConsoleOutput(new StringWriter()) });
+        return new LinearPipelineService(
+            sp.GetServices<DtPipe.Cli.Infrastructure.ICliContributor>(), sp, new MemoryChannelRegistry(), new OptionsRegistry(), console);
+    }
+
+    [Theory]
+    [InlineData("arrow-memory:x")]
+    [InlineData("mem:x")]
+    public async Task An_Internal_Channel_Prefix_Is_No_Input(string input)
+    {
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => RealService().ExecuteAsync(
+            new JobDefinition { Input = input, Output = "null:" },
+            context: null, token: CancellationToken.None, userCancellationToken: CancellationToken.None));
+
+        Assert.Contains($"No reader factory resolved for input '{input}'", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task An_Internal_Channel_Prefix_Is_No_Output()
+    {
+        var service = RealService();
+
+        var exitCode = await service.ExecuteAsync(
+            new JobDefinition { Input = "generate:1", Output = "arrow-memory:x" },
+            context: null, token: CancellationToken.None, userCancellationToken: CancellationToken.None);
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("No writer factory resolved for output 'arrow-memory:x'", service.Failure!, StringComparison.Ordinal);
+    }
 }

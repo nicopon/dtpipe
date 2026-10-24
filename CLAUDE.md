@@ -199,9 +199,13 @@ many aliases `--from` accepts is the processor's business, not the grammar's. Se
   its own prefix.
 - Route every site through `ComponentSelector`; never hand-roll `StartsWith(name + ":")`.
 - A remote URI (`s3://…`) is never a selector.
+- An internal channel is never a selector: a transport (`IInternalChannelCapable`) is registered
+  apart from the reader and writer factories (`InternalChannelTransports`) and picked by capability
+  for a typed endpoint, so no routing site sees its name.
 - Variants reach providers as data (`IVariantAwareOptions`), never as text to re-parse.
 
-`[CI: ComponentSelectorTests, RemoteUriClaimTests]` `[unchecked: a site that bypasses the
+`[CI: ComponentSelectorTests, RemoteUriClaimTests, LinearPipelineServiceTests — an internal channel
+prefix]` `[unchecked: a site that bypasses the
 selector]` Detail: `src/DtPipe.Adapters/CLAUDE.md`.
 
 ### One way to read DuckDB

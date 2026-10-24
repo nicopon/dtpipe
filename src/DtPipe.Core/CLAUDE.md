@@ -6,7 +6,7 @@ Mechanics for editing Core. The rules themselves are in the root `CLAUDE.md`.
 
 `DagOrchestrator` spawns one concurrent `Task` per branch; a linear run goes through it once too.
 The kernel is `PipelineExecutor.ExecuteSegmentedPipelineAsync`. Branches communicate through
-`IMemoryChannelRegistry` (`Channel<IReadOnlyList<object?[]>>` or Arrow `Channel<RecordBatch>`).
+`IMemoryChannelRegistry` (Arrow `Channel<RecordBatch>`).
 Fan-out (broadcast/tee) resolves through `BranchChannelContext.AliasMap` — logical alias → physical
 channel, including `s__fan_0` sub-channels — which `DagOrchestrator` populates and factories consume
 directly (e.g. `DuckDBSqlTransformerFactory`).

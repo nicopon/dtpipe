@@ -19,7 +19,6 @@ public class ArrowMemoryChannelWriterDescriptor : IProviderDescriptor<IDataWrite
 
     public IDataWriter Create(string connectionString, object options, IServiceProvider serviceProvider)
     {
-        var opts = (ArrowMemoryChannelOptions)options;
         var registry = serviceProvider.GetRequiredService<IMemoryChannelRegistry>();
         var logger = serviceProvider.GetRequiredService<ILoggerFactory>().CreateLogger<ArrowMemoryChannelDataWriter>();
 
@@ -32,7 +31,6 @@ public class ArrowMemoryChannelWriterDescriptor : IProviderDescriptor<IDataWrite
             channelData.Channel.Writer,
             registry,
             alias,
-            opts.BatchSize,
             logger);
     }
 }

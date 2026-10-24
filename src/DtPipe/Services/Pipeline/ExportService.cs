@@ -81,12 +81,9 @@ public class ExportService
         if (_logger.IsEnabled(LogLevel.Information))
             _logger.LogInformation("Starting export from {Provider} to {OutputPath}", providerName, ConnectionStringSanitizer.Redact(outputPath));
 
-        // Silence internal DAG plumbing branches unless DEBUG=1 — capability check, not
-        // an adapter-identity string comparison (F5). `quiet` folds in here: a run started for
-        // a program (the MCP tools) suppresses the same chatter, and does so even under DEBUG,
+        // A run started for a program (the MCP tools) suppresses the chatter, even under DEBUG,
         // because its console feeds a JSON reply or a screen the agent's toolkit owns.
-        bool isInternalChannel = writerFactory is IInternalChannelCapable;
-        bool silenceInternal = quiet || (isInternalChannel && Environment.GetEnvironmentVariable("DEBUG") != "1");
+        bool silenceInternal = quiet;
         bool outputIsStdio = string.Equals(outputPath, "-", StringComparison.Ordinal);
 
         if (showStatusMessages && !silenceInternal)

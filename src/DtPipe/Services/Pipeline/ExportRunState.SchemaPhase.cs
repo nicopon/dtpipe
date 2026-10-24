@@ -74,7 +74,9 @@ internal sealed partial class ExportRunState
             var evolvedSchema = ExportService.EvolveSchema(sourceSchema, CurrentSchema);
             _svc._channelRegistry.UpdateArrowChannelSchema(Alias, evolvedSchema);
         }
-        _svc._channelRegistry.UpdateChannelColumns(Alias, CurrentSchema ?? System.Array.Empty<PipeColumnInfo>());
+        // The only publication for a reader with no Arrow schema of its own; the registry keeps
+        // a richer schema published above over this flat one.
+        _svc._channelRegistry.UpdateArrowChannelSchema(Alias, ArrowSchemaFactory.Create(CurrentSchema ?? System.Array.Empty<PipeColumnInfo>()));
     }
 
     internal async Task InferAdvisoryAsync(CancellationToken ct)

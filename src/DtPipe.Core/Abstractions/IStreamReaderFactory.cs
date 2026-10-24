@@ -24,7 +24,7 @@ public interface IStreamReaderFactory : IDataFactory
     /// <summary>
     /// If true, the reader created by this factory implements IColumnarStreamReader
     /// and can produce Apache Arrow RecordBatches natively.
-    /// When true, the DagOrchestrator will use 'arrow-memory' for this branch's output alias.
+    /// The topology view (<c>DagRenderer</c>) draws such a branch as columnar.
     /// Default is false.
     /// </summary>
     bool YieldsColumnarOutput => false;

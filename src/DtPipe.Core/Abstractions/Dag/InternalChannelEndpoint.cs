@@ -3,8 +3,6 @@ namespace DtPipe.Core.Abstractions.Dag;
 /// <summary>Transport kind of an internal memory channel.</summary>
 public enum InternalChannelKind
 {
-    /// <summary>Row batches (<c>object?[]</c>) over a native channel.</summary>
-    Row,
     /// <summary>Arrow <c>RecordBatch</c>es over a native channel.</summary>
     Arrow
 }
@@ -17,7 +15,8 @@ public sealed record InternalChannelEndpoint(string Alias, InternalChannelKind K
 
 /// <summary>
 /// Capability marker for reader/writer factories that transport data over internal
-/// memory channels. Replaces adapter-identity string checks ("arrow-memory"/"memory-channel").
+/// memory channels. Such a transport is picked by this capability for a typed endpoint,
+/// never by name: the host keeps it out of the factories a connection string is routed to.
 /// </summary>
 public interface IInternalChannelCapable
 {

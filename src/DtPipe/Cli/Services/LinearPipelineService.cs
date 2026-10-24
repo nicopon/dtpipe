@@ -409,13 +409,13 @@ public class LinearPipelineService
         return (match, raw, null);
     }
 
-    // F5 — capability-based selection of internal channel transports. DI wraps
-    // descriptors in CliProviderFactory, which forwards the descriptor's capability.
+    // F5 — capability-based selection of internal channel transports, which are absent from
+    // the factories ResolveFactory routes by name.
     private IStreamReaderFactory? PickChannelReader(InternalChannelKind kind)
-        => _readerFactories.FirstOrDefault(f => f.CapabilityKind == kind);
+        => _serviceProvider.GetRequiredService<InternalChannelTransports>().Reader(kind);
 
     private IDataWriterFactory? PickChannelWriter(InternalChannelKind kind)
-        => _writerFactories.FirstOrDefault(f => f.CapabilityKind == kind);
+        => _serviceProvider.GetRequiredService<InternalChannelTransports>().Writer(kind);
 
 
     private List<IDataTransformer> BuildPipelineFromYaml(JobDefinition job, List<IDataTransformerFactory> factories, IAnsiConsole console)

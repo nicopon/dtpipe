@@ -33,7 +33,7 @@ if [ ! -f "$DTPIPE" ]; then
     "$PROJECT_ROOT/build.sh" > /dev/null
 fi
 
-EXPECTED="arrow arrow-memory checksum csv duck generate jsonl mem merge mssql mysql null ora parquet pg sql sqlite xml"
+EXPECTED="arrow checksum csv duck generate jsonl merge mssql mysql null ora parquet pg sql sqlite xml"
 
 # The inventory is read from the command's own machine form, never from the table meant for a
 # person: a table's colours and borders change with the terminal the runner believes it has.
@@ -46,13 +46,7 @@ pass "all expected providers registered"
 # Docs drift, help -> docs. The loop must iterate the DISCOVERED set: walking a literal list here
 # would only ever check the providers someone remembered to add to it, so a new one could never
 # fail this gate.
-#
-# "mem" and "arrow-memory" are excluded on purpose: they are the DAG's inter-branch channels,
-# addressed through --alias / --from rather than typed as a connection prefix. They are registered
-# as components because the engine routes them like providers, not because a user ever writes one.
-INTERNAL="mem arrow-memory"
 for p in $ACTUAL; do
-    case " $INTERNAL " in *" $p "*) continue ;; esac
     grep -q "$p" "$PROJECT_ROOT/REFERENCE.md" || fail "provider '$p' missing from REFERENCE.md"
 done
 pass "REFERENCE.md covers all user-facing registered providers"

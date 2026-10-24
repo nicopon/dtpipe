@@ -15,8 +15,7 @@ public class DagOrchestratorTests
 {
     private static DagOrchestrator BuildOrchestrator() => new(
         NullLogger<DagOrchestrator>.Instance,
-        new MemoryChannelRegistry(),
-        readerFactories: []);
+        new MemoryChannelRegistry());
 
     // ─────────────────────────────────────────────────────────────────────────
     // Case 1: Linear pipeline — single branch, no memory channel
@@ -286,8 +285,8 @@ public class DagOrchestratorTests
     [Fact]
     public async Task Execute_SourceFeedingStreamTransformer_ChannelInjectionUsesArrowMode()
     {
-        // A source consumed by a SQL/merge processor must use arrow-memory
-        // for the Arrow IPC transport required by the processor.
+        // A source consumed by a SQL/merge processor writes an Arrow channel, the
+        // transport the processor reads.
         var dag = GoldenDagDefinitions.Dag_SourcePlusSqlProcessor;
         var orchestrator = BuildOrchestrator();
         BranchChannelContext? sourceCtx = null;

@@ -346,7 +346,7 @@ class Program
             Console.Error.WriteLine($"[catalog] readers={catalog.Readers.Count} writers={catalog.Writers.Count} stream={catalog.StreamTransformers.Count} transformers={catalog.Transformers.Count}");
         }
 
-        foreach (var entry in catalog.Readers)
+        foreach (var entry in catalog.Readers.Where(e => !InternalChannelTransports.Carries(e.ImplementationType)))
         {
             var type = entry.ImplementationType;
             services.AddSingleton<IStreamReaderFactory>(sp => new CliStreamReaderFactory(
@@ -356,7 +356,7 @@ class Program
                 (ICliContributor)sp.GetServices<IStreamReaderFactory>().First(f => f.ComponentName == entry.ComponentName));
         }
 
-        foreach (var entry in catalog.Writers)
+        foreach (var entry in catalog.Writers.Where(e => !InternalChannelTransports.Carries(e.ImplementationType)))
         {
             var type = entry.ImplementationType;
             services.AddSingleton<IDataWriterFactory>(sp => new CliDataWriterFactory(
@@ -365,6 +365,20 @@ class Program
             services.AddSingleton<ICliContributor>(sp =>
                 (ICliContributor)sp.GetServices<IDataWriterFactory>().First(f => f.ComponentName == entry.ComponentName));
         }
+
+        // A transport is chosen by capability, never routed by name: it stays out of the
+        // collections above, which every connection string is matched against.
+        services.AddSingleton(sp => new InternalChannelTransports(
+            catalog.Readers.Where(e => InternalChannelTransports.Carries(e.ImplementationType))
+                .Select(e => (IStreamReaderFactory)new CliStreamReaderFactory(
+                    (IProviderDescriptor<IStreamReader>)Activator.CreateInstance(e.ImplementationType)!,
+                    sp.GetRequiredService<OptionsRegistry>(), sp))
+                .ToList(),
+            catalog.Writers.Where(e => InternalChannelTransports.Carries(e.ImplementationType))
+                .Select(e => (IDataWriterFactory)new CliDataWriterFactory(
+                    (IProviderDescriptor<IDataWriter>)Activator.CreateInstance(e.ImplementationType)!,
+                    sp.GetRequiredService<OptionsRegistry>(), sp))
+                .ToList()));
 
         foreach (var entry in catalog.StreamTransformers)
         {

@@ -12,7 +12,6 @@ namespace DtPipe.Adapters.MemoryChannel;
 /// <summary>
 /// An IDataWriter that pushes RecordBatches into a Channel&lt;RecordBatch&gt;
 /// for downstream Arrow consumers.
-/// This writer is now purely columnar.
 /// </summary>
 public sealed class ArrowMemoryChannelDataWriter : IColumnarDataWriter
 {
@@ -26,7 +25,6 @@ public sealed class ArrowMemoryChannelDataWriter : IColumnarDataWriter
         ChannelWriter<RecordBatch> writer,
         IMemoryChannelRegistry registry,
         string alias,
-        int batchSize, // Kept for signature compatibility but unused
         ILogger<ArrowMemoryChannelDataWriter> logger)
     {
         _writer = writer;

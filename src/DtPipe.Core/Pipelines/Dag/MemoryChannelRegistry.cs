@@ -1,9 +1,7 @@
 using DtPipe.Core.Abstractions.Dag;
-using DtPipe.Core.Models;
 using System.Collections.Concurrent;
 using System.Threading.Channels;
 using Apache.Arrow;
-using Apache.Arrow.Types;
 using DtPipe.Core.Infrastructure.Arrow;
 
 namespace DtPipe.Core.Pipelines.Dag;
@@ -14,19 +12,11 @@ namespace DtPipe.Core.Pipelines.Dag;
 /// </summary>
 public class MemoryChannelRegistry : IMemoryChannelRegistry
 {
-    private static readonly object _schemaLock = new();
-
     private readonly ConcurrentDictionary<string, (Channel<RecordBatch> Channel, Schema Schema)> _arrowChannels
         = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly ConcurrentDictionary<string, TaskCompletionSource<Schema>> _arrowSchemaTcs
         = new(StringComparer.OrdinalIgnoreCase);
-
-    public void UpdateChannelColumns(string branchAlias, IReadOnlyList<PipeColumnInfo> columns)
-    {
-        // Forward row-based column updates to the Arrow schema storage
-        UpdateArrowChannelSchema(branchAlias, ArrowSchemaFactory.Create(columns));
-    }
 
     private void PropagateArrowSchemaToFanOut(string fanPrefix, Schema schema)
     {
@@ -37,13 +27,6 @@ public class MemoryChannelRegistry : IMemoryChannelRegistry
             _arrowChannels[key] = (fanData.Channel, schema);
             if (_arrowSchemaTcs.TryGetValue(key, out var tcs)) tcs.TrySetResult(schema);
         }
-    }
-
-    public async Task<IReadOnlyList<PipeColumnInfo>> WaitForChannelColumnsAsync(string branchAlias, CancellationToken ct = default)
-    {
-        // Map the Arrow schema back to row-based PipeColumnInfo for legacy components
-        var schema = await WaitForArrowChannelSchemaAsync(branchAlias, ct);
-        return ArrowSchemaFactory.ToPipeColumns(schema);
     }
 
     public bool ContainsChannel(string branchAlias)
