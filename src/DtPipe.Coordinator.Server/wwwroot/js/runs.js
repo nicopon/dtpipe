@@ -50,7 +50,7 @@ function renderDeployments() {
     <tr><th>pipeline</th><th>from</th><th>state</th><th>fragments</th><th>edges</th><th>queued</th><th></th></tr>
     ${store.deployments.map((d) => `<tr>
       <td>${d.origin === "library" ? `<a href="#/library/${encodeURIComponent(d.pipelineId)}">${esc(d.pipelineId)}</a>` : esc(d.pipelineId)}</td>
-      <td>${esc(d.origin === "lab" ? "Lab view" : "library")}</td>
+      <td>${esc(d.origin)}</td>
       <td><span class="chip ${d.state === "ready" ? "ok" : d.state === "failed" ? "bad" : "warn"}" title="${esc(d.message || "")}">${esc(d.state)}</span>${d.commit ? ` <span class="hint mono" title="The commit it is armed at">${esc(d.commit.slice(0, 8))}</span>` : ""}</td>
       <td class="wrap">${d.fragments.length ? "" : (d.nodes || []).map((n) => `<span class="chip" style="color:${nodeColor(n)}" title="Bound by this deployment; planned at each launch">${esc(n)}</span>`).join(" ")}${d.fragments.map((f) => `<span class="chip" style="color:${nodeColor(f.node)}" title="${esc(f.name)} · ${esc(f.version.slice(0, 12))} · ${f.replicas ?? 0} replica(s) could run it now">${esc(f.node)}${f.replicas != null ? ` · ${f.replicas}` : ""}</span>`).join(" ")}</td>
       <td class="num">${d.edges}</td><td class="num">${d.queued || ""}</td>

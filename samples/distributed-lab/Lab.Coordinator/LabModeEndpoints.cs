@@ -1,11 +1,10 @@
-using DtPipe.Coordinator.Contracts;
+using DtPipe.Coordinator.Server;
 
-namespace DtPipe.Coordinator.Server;
+namespace DtPipe.Lab.Coordinator;
 
 /// <summary>
-/// What only a test bench needs, mapped in <see cref="CoordinatorServerOptions.LabMode"/> alone: the
-/// Lab view's scenario catalog and manual planning (a placement chosen by hand, the routes that plan in
-/// <see cref="PlanMode.Manual"/>), and fault injection.
+/// What only the bench needs, on the server's admin group: the Lab view's scenario catalog and manual planning (a placement
+/// chosen by hand, the routes that plan in <see cref="PlanMode.Manual"/>), and fault injection.
 /// </summary>
 public static class LabModeEndpoints
 {

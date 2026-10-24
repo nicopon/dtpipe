@@ -30,7 +30,7 @@ internal sealed class DeploymentLedger
 }
 
 /// <summary>
-/// A deployment: a plan fixed by the Lab view (<see cref="Armed"/> null, in memory only) or a library pipeline armed at a commit
+/// A deployment: a plan fixed by hand (<see cref="Armed"/> null, in memory only) or a library pipeline armed at a commit
 /// (<see cref="Armed"/>, persisted), whose plan is computed at each launch. <see cref="Plan"/> is the fixed plan, or the last plan
 /// computed for an armed deployment (null until one is).
 /// </summary>

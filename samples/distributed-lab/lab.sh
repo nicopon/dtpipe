@@ -95,8 +95,8 @@ build() {
     echo "Building the lab"
     dotnet build "$LAB/Lab.Idp/Lab.Idp.csproj" -c Release -o "$STATE/bin/idp" -v q -nologo >"$STATE/logs/build.log" 2>&1 \
         || { cat "$STATE/logs/build.log" >&2; exit 1; }
-    # Published, not built: the server serves the wwwroot published beside it.
-    dotnet publish "$REPO/src/DtPipe.Coordinator.Host/DtPipe.Coordinator.Host.csproj" -c Release -o "$STATE/bin/coordinator" -v q -nologo >>"$STATE/logs/build.log" 2>&1 \
+    # Published, not built: the server serves the wwwroot published beside it, the Lab view's with the product's pages.
+    dotnet publish "$LAB/Lab.Coordinator/Lab.Coordinator.csproj" -c Release -o "$STATE/bin/coordinator" -v q -nologo >>"$STATE/logs/build.log" 2>&1 \
         || { cat "$STATE/logs/build.log" >&2; exit 1; }
     dotnet build "$LAB/Lab.NodeHost/Lab.NodeHost.csproj" -c Release -o "$STATE/bin/node" -v q -nologo >>"$STATE/logs/build.log" 2>&1 \
         || { cat "$STATE/logs/build.log" >&2; exit 1; }
@@ -244,14 +244,14 @@ library_remote() {
     [[ -f "$STATE/library.git/HEAD" ]] || git init -q --bare -b main "$STATE/library.git"
 }
 
-# Replaces this shell with the coordinator's server, in lab mode, on the lab's state and seeds. Extra
+# Replaces this shell with the lab's coordinator (the server and the Lab view), on the lab's state and seeds. Extra
 # arguments are passed on. The one way the server starts, for this script and for tools/campaign.py.
 exec_coordinator() {
     load_redis_settings
     library_remote
-    exec dotnet "$STATE/bin/coordinator/DtPipe.Coordinator.Host.dll" --urls "$URL" \
+    exec dotnet "$STATE/bin/coordinator/Lab.Coordinator.dll" --urls "$URL" \
         --Coordinator:StateDirectory="$STATE" --Coordinator:Authority="$IDP_URL" \
-        --Coordinator:LabMode=true --Coordinator:Scenarios="$LAB/pipelines" \
+        --Lab:Scenarios="$LAB/pipelines" \
         --Coordinator:LibrarySeed="$LAB/library-seed" --Coordinator:RightsSeed="$LAB/rights-seed.json" \
         --Coordinator:Library:Remote:Url="$STATE/library.git" \
         --Coordinator:Ui:ClientSecret=coordinator-ui-lab-secret --Coordinator:Studio:ClientId=dtpipe-studio \

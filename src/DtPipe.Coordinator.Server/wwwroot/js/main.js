@@ -7,8 +7,6 @@ import * as access from "./access.js";
 
 const views = { nodes, library, runs, access };
 
-// For scripted checks (tools/ui_check.py): the live store.
-window.lab = { store };
 let current = null;
 
 function route() {
@@ -52,9 +50,7 @@ window.addEventListener("error", (e) => addLog({ node: "coordinator", level: "Er
 window.addEventListener("unhandledrejection", (e) => addLog({ node: "coordinator", level: "Error", message: `page: ${e.reason?.stack || e.reason}` }));
 
 start().then(() => {
-  // The Lab view is an admin's, in lab mode only.
   $("http-keys-banner").hidden = !store.httpKeys;
-  $("lab-link").hidden = !(store.labMode && store.me.roles.includes("admin"));
   $("me").textContent = `${store.me.email || store.me.name} · ${store.me.roles[0] || "no role"}`;
   renderPills();
   route();

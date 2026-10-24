@@ -46,7 +46,7 @@ function render() {
       <section class="card node-card ${n.online ? "" : "offline"}" style="--node-color:${nodeColor(n.name)}">
         <div class="node-head">
           <span class="node-name"><span class="dot ${n.online ? "on" : ""}"></span>${esc(n.name)}</span>
-          <span><span class="chip">${esc(n.role === "Runner" ? "runner" : "data")}</span> <span class="chip">${n.groups.length > 1 ? "groups" : "group"} ${esc(n.groups.join(" + "))}</span>${n.capabilities.includes("raw-fragments") && n.role !== "Runner" ? ` <span class="chip" title="This host accepts a fragment that is no brick of its own: its owner configured it so (the lab's sandbox mode).">raw fragments</span>` : ""}</span>
+          <span><span class="chip">${esc(n.role === "Runner" ? "runner" : "data")}</span> <span class="chip">${n.groups.length > 1 ? "groups" : "group"} ${esc(n.groups.join(" + "))}</span>${n.capabilities.includes("raw-fragments") && n.role !== "Runner" ? ` <span class="chip" title="This host accepts a fragment that is no brick of its own: its owner configured it so.">raw fragments</span>` : ""}</span>
         </div>
         <p class="hint">${esc(n.description)}</p>
         ${n.datasets.map((d) => `<div class="dataset"><code>\${{${esc(d.variable)}}}</code> ${esc(d.description)}</div>`).join("")}
@@ -70,7 +70,7 @@ function render() {
 
   host.innerHTML = `
     <div class="view-head"><h1>Nodes</h1><p class="hint">What each node offers. A brick is a read or a write its owner preconfigured; dtpipe studio assembles pipelines from them.</p></div>
-    <div class="node-grid">${cards || `<p class="hint">No node connected yet. Start them with <code>./lab.sh up</code>.</p>`}</div>
+    <div class="node-grid">${cards || `<p class="hint">No node connected yet.</p>`}</div>
     <section class="card"><div class="card-head"><h2>Flow matrix</h2><a href="#/access">edit in Access →</a></div><p class="hint">Which node group may send to which: the hub checks it on every transfer, the planner on every plan. A node's group comes from its token.</p>${matrix}</section>`;
 }
 

@@ -18,21 +18,38 @@ namespace DtPipe.Coordinator.Server;
 public sealed record CoordinatorApiGroups(RouteGroupBuilder Reader, RouteGroupBuilder Designer, RouteGroupBuilder Admin);
 
 /// <summary>
+/// A view a host adds to the server's pages, under <paramref name="Path"/>: a person opens it signed in as any page, and only an admin
+/// sees it; anyone else is shown a refusal that names it (<paramref name="Name"/>, as a sentence's subject).
+/// </summary>
+public sealed record AdminView(PathString Path, string Name);
+
+/// <summary>The views the host added (<see cref="CoordinatorServer.AddCoordinatorServer"/>), which the page guard reads.</summary>
+internal sealed class AdminViews(IReadOnlyList<AdminView> views)
+{
+    /// <summary>The view whose path holds <paramref name="path"/>, or null.</summary>
+    public AdminView? Of(PathString path) => views.FirstOrDefault(v => path.StartsWithSegments(v.Path));
+}
+
+/// <summary>
 /// The coordinator's server, added to a host. <see cref="AddCoordinatorServer"/> registers its services and its authentication;
 /// <see cref="MapCoordinatorServerAsync"/> checks what a start needs, builds the request pipeline and maps the routes. The host owns
-/// <c>Program</c>, its content root (the pages are the <c>wwwroot</c> published beside it) and its address, and maps its own routes
-/// on the groups the map returns. The settings are the <c>Coordinator</c> configuration section.
+/// <c>Program</c>, its content root (the pages are the <c>wwwroot</c> published beside it) and its address; it maps its own routes
+/// on the groups the map returns, and declares its own pages as admin views. The settings are the <c>Coordinator</c> configuration section.
 /// </summary>
 public static class CoordinatorServer
 {
-    /// <summary>Registers the server's services, from the <c>Coordinator</c> section of the builder's configuration, which it returns read.</summary>
-    public static CoordinatorServerOptions AddCoordinatorServer(this WebApplicationBuilder builder)
+    /// <summary>
+    /// Registers the server's services, from the <c>Coordinator</c> section of the builder's configuration, which it returns read, and the
+    /// pages the host adds as <paramref name="adminViews"/>.
+    /// </summary>
+    public static CoordinatorServerOptions AddCoordinatorServer(this WebApplicationBuilder builder, params AdminView[] adminViews)
     {
         builder.Logging.AddFilter("TransportR", LogLevel.Warning);
         builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
 
         var server = CoordinatorServerOptions.FromConfiguration(builder.Configuration);
         builder.Services.AddSingleton(server);
+        builder.Services.AddSingleton(new AdminViews(adminViews));
         builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
         // The coordinator as DtPipe.Coordinator ships it, in TransportR's production mode: every client
@@ -62,7 +79,6 @@ public static class CoordinatorServer
         builder.Services.AddSingleton<NodeRequests>();
         builder.Services.AddSingleton<BrickCatalog>();
         builder.Services.AddSingleton<CursorKeeper>();
-        builder.Services.AddSingleton<PipelineCatalog>();
         builder.Services.AddSingleton<PlanBuilder>();
         builder.Services.AddSingleton<AutoPlacer>();
         builder.Services.AddSingleton<DesignValidator>();
@@ -88,6 +104,7 @@ public static class CoordinatorServer
     public static async Task<CoordinatorApiGroups> MapCoordinatorServerAsync(this WebApplication app)
     {
         var server = app.Services.GetRequiredService<CoordinatorServerOptions>();
+        var adminViews = app.Services.GetRequiredService<AdminViews>();
         // The server's own category, whatever the host's name.
         var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger(typeof(CoordinatorServer).Namespace!);
 
@@ -153,10 +170,7 @@ public static class CoordinatorServer
             return next(context);
         });
         app.UseAuthentication();
-        // The Lab view's pages exist only in lab mode, like the endpoints they call.
-        if (!server.LabMode)
-            app.Use((context, next) => context.Request.Path.StartsWithSegments("/lab") ? Results.NotFound().ExecuteAsync(context) : next(context));
-        // A page is opened by a person signed in, with a role: the Lab view an admin's. Where a person may sign in with a key, the sign-in
+        // A page is opened by a person signed in, with a role: an admin view an admin's. Where a person may sign in with a key, the sign-in
         // form offers both ways; otherwise the provider's sign-in begins at once.
         app.Use(async (context, next) =>
         {
@@ -180,10 +194,11 @@ public static class CoordinatorServer
                 await Results.SignOut(new AuthenticationProperties { RedirectUri = "/account/denied" }, SignedInWith(context.User)).ExecuteAsync(context);
                 return;
             }
-            if (context.Request.Path.StartsWithSegments("/lab") && !context.User.IsInRole(CoordinatorRoles.Admin))
+            if (adminViews.Of(context.Request.Path) is { } view && !context.User.IsInRole(CoordinatorRoles.Admin))
             {
                 var who = System.Net.WebUtility.HtmlEncode(TrustedIdp.CallerOf(context));
-                await AccountPages.Access(server, StatusCodes.Status403Forbidden, $"{who} is not an admin of this coordinator: the Lab view is for administrators.",
+                var what = System.Net.WebUtility.HtmlEncode(view.Name);
+                await AccountPages.Access(server, StatusCodes.Status403Forbidden, $"{who} is not an admin of this coordinator: {what} is for administrators.",
                     ("/", "Back to the coordinator"), ("/account/logout", "Sign out")).ExecuteAsync(context);
                 return;
             }
@@ -224,12 +239,12 @@ public static class CoordinatorServer
 
         // /api serves the pages by the session cookie, and dtpipe studio by a person's bearer token, with
         // three cumulative roles: a reader sees everything, a designer also changes pipelines, deploys and
-        // runs them, an admin also changes the rights and, in lab mode, uses the bench's tools. A request that changes something carries the CSRF
-        // header. TransportR's own routes under /api (client, stream) are mapped by MapDataHub, not here.
+        // runs them, an admin also changes the rights and uses what a host maps on the admin group. A request that changes something carries
+        // the CSRF header. TransportR's own routes under /api (client, stream) are mapped by MapDataHub, not here.
         var account = app.MapGroup("/api").RequireAuthorization(TrustedIdp.SignedIn).AddEndpointFilter(RequireCsrfHeader);
         account.MapGet(CoordinatorApi.MeRoute, (HttpContext context) => new CoordinatorMe(
             context.User.Identity?.Name, context.User.FindFirst("email")?.Value, [.. CoordinatorRoles.All.Where(context.User.IsInRole)]));
-        account.MapGet("/info", (CoordinatorServerOptions options) => new { labMode = options.LabMode, httpKeys = options.ExchangesKeysOverHttp });
+        account.MapGet("/info", (CoordinatorServerOptions options) => new { httpKeys = options.ExchangesKeysOverHttp });
 
         var api = app.MapGroup("/api").RequireAuthorization(CoordinatorRoles.Reader).AddEndpointFilter(RequireCsrfHeader);
         var designer = api.MapGroup("").RequireAuthorization(CoordinatorRoles.Designer);
@@ -243,7 +258,6 @@ public static class CoordinatorServer
         app.MapService();
 
         if (server.KeyIssuer is not null) app.MapKeyIssuer(server);
-        if (server.LabMode) admin.MapLabMode();
 
         return new CoordinatorApiGroups(api, designer, admin);
 

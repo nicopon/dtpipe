@@ -2,8 +2,11 @@ using DtPipe.Coordinator.Contracts;
 
 namespace DtPipe.Coordinator.Server;
 
-/// <summary>What only a test bench asks of a deployment: fault injection on the fragments it deployed. Called by the routes of lab mode.</summary>
-internal sealed class LabFaults(DeploymentLedger ledger, NodeInventory inventory, INodeLink link)
+/// <summary>
+/// Fault injection on a deployed fragment, which a host that tests the coordinator may offer through a route of its own: the
+/// product's host maps none. A replica ends a child only when its own host enabled it.
+/// </summary>
+internal sealed class FaultInjection(DeploymentLedger ledger, NodeInventory inventory, INodeLink link)
 {
     /// <summary>
     /// Fault injection: asks every replica of the fragment's node to end the child of its run; a replica whose host did not enable it

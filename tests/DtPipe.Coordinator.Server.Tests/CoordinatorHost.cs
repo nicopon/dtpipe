@@ -16,12 +16,12 @@ namespace DtPipe.Coordinator.Server.Tests;
 /// <summary>
 /// The coordinator's server in memory, trusting a test provider: its configuration is handed over
 /// directly, with a key generated here, so nothing is discovered over the network. The state
-/// directory is a fresh temporary one, and lab mode is off unless asked. <c>check</c> stands for the designer's check, which needs a runner and
+/// directory is a fresh temporary one. <c>check</c> stands for the designer's check, which needs a runner and
 /// the bricks' nodes; without it the real one runs. <c>publicUrl</c> is the address the server is told people reach it at, and the issuer of the
 /// tokens of a key. <c>state</c> names a state directory, and the stores in memory behind it, that another host used: a restart.
 /// <c>settings</c> are further <c>Coordinator</c> settings, by their key under that section.
 /// </summary>
-public sealed class CoordinatorHost(string? studioClientId = CoordinatorHost.StudioClient, Func<string, DesignCheck>? check = null, bool labMode = false,
+public sealed class CoordinatorHost(string? studioClientId = CoordinatorHost.StudioClient, Func<string, DesignCheck>? check = null,
     string? publicUrl = null, string? state = null, IReadOnlyDictionary<string, string>? settings = null)
     : WebApplicationFactory<Program>
 {
@@ -68,7 +68,6 @@ public sealed class CoordinatorHost(string? studioClientId = CoordinatorHost.Stu
         builder.UseSetting("Coordinator:Roles:Designer", Designer);
         builder.UseSetting("Coordinator:Roles:Reader", Reader);
         builder.UseSetting("Coordinator:Studio:ClientId", studioClientId ?? "");
-        builder.UseSetting("Coordinator:LabMode", labMode ? "true" : "false");
         if (publicUrl is not null) builder.UseSetting("Coordinator:PublicUrl", publicUrl);
         foreach (var (key, value) in settings ?? new Dictionary<string, string>()) builder.UseSetting("Coordinator:" + key, value);
         builder.ConfigureTestServices(services =>

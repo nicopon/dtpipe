@@ -1,4 +1,4 @@
-namespace DtPipe.Coordinator.Server;
+namespace DtPipe.Lab.Coordinator;
 
 /// <summary>
 /// A scenario of the Lab view, with the layout it proposes: <see cref="Placement"/>
@@ -9,22 +9,21 @@ public sealed record CatalogEntry(
     IReadOnlyDictionary<string, string> Placement);
 
 /// <summary>
-/// The Lab view's scenarios: the monolithic jobs in <see cref="CoordinatorServerOptions.Scenarios"/>,
-/// read in lab mode only. A file's leading <c>#</c> comment lines give its title (the first) and
+/// The Lab view's scenarios: the monolithic jobs in the <c>Lab:Scenarios</c> directory, none when it is unset or
+/// absent. A file's leading <c>#</c> comment lines give its title (the first) and
 /// description (the rest); dtpipe reads past them. Directives among them preload the page
 /// (<c># lab-place: unit=node, ...</c>), and
 /// <c># lab-check: &lt;SQL&gt;</c> names the query a test compares between a run and its witness.
 /// </summary>
-public sealed class PipelineCatalog(CoordinatorServerOptions options)
+public sealed class PipelineCatalog(string? scenarios)
 {
     private const string PlaceDirective = "lab-place:";
     private const string CheckDirective = "lab-check:";
 
     public IReadOnlyList<CatalogEntry> List()
     {
-        var dir = options.Scenarios;
-        if (!options.LabMode || dir is null || !Directory.Exists(dir)) return [];
-        return Directory.GetFiles(dir, "*.yaml").Order(StringComparer.Ordinal).Select(Load).ToList();
+        if (scenarios is null || !Directory.Exists(scenarios)) return [];
+        return Directory.GetFiles(scenarios, "*.yaml").Order(StringComparer.Ordinal).Select(Load).ToList();
     }
 
     private static CatalogEntry Load(string path)

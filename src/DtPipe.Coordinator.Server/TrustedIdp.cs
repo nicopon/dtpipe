@@ -308,11 +308,14 @@ public static class TrustedIdp
         server.PersonKeys
         && context.RequestServices.GetRequiredService<RightsStore>().SignedInPerson(person.Id, person.KeyId, DateTimeOffset.UtcNow) is not null;
 
-    /// <summary>A page a browser opens: the only requests a missing session sends to sign in, at the form or the provider.</summary>
+    /// <summary>
+    /// A page a browser opens, the server's or an admin view the host added: the only requests a missing session sends to sign in, at the
+    /// form or the provider.
+    /// </summary>
     public static bool IsPageNavigation(HttpRequest request) =>
         HttpMethods.IsGet(request.Method)
-        && (request.Path == "/" || request.Path == "/index.html" || request.Path.StartsWithSegments("/lab")
-            || request.Path.StartsWithSegments("/account"));
+        && (request.Path == "/" || request.Path == "/index.html" || request.Path.StartsWithSegments("/account")
+            || request.HttpContext.RequestServices.GetRequiredService<AdminViews>().Of(request.Path) is not null);
 
     /// <summary>
     /// A client-credentials token: no resource owner, so its subject is its client (RFC 9068). A

@@ -19,16 +19,16 @@ public sealed record DeploymentView(
 
 /// <summary>
 /// What the routes see of deployments and runs. A deployment is the coordinator's: a library pipeline armed at a commit, or a
-/// plan the Lab view fixed, where it came from, and a state (<see cref="DeploymentService"/>); nothing of it is left on a node. A run is queued, sent to the orchestrator and
+/// plan fixed by hand (<see cref="DeployAsync"/>), where it came from, and a state (<see cref="DeploymentService"/>); nothing of it is left on a node. A run is queued, sent to the orchestrator and
 /// journaled (<see cref="RunQueue"/>); several pipelines may be deployed at once, their fragments told apart by name
-/// (<c>&lt;pipeline&gt;@&lt;node&gt;</c>). Fault injection on a deployed fragment is the bench's (<see cref="LabFaults"/>).
+/// (<c>&lt;pipeline&gt;@&lt;node&gt;</c>). Fault injection on a deployed fragment is <see cref="FaultInjection"/>'s.
 /// The three share one <see cref="DeploymentLedger"/> and its lock; this class composes them and decides nothing.
 /// </summary>
 public sealed class DeploymentManager
 {
     private readonly DeploymentService _deployments;
     private readonly RunQueue _runs;
-    private readonly LabFaults _lab;
+    private readonly FaultInjection _faults;
     private readonly LaunchPlanner _planner;
 
     /// <summary>The kept cursors of the library's pipelines.</summary>
@@ -47,10 +47,10 @@ public sealed class DeploymentManager
             ledger, inventory, link, admission, new PlanRegistry(flowControl), planner, verifier, new DeploymentStore(store, logger), jobs, bus, logger);
         Cursors = cursors ?? new CursorKeeper(new MemoryCursorStore(), bricks, Microsoft.Extensions.Logging.Abstractions.NullLogger<CursorKeeper>.Instance);
         _runs = new RunQueue(ledger, _deployments, planner, inventory, orchestrator, bus, journal, Cursors, logger);
-        _lab = new LabFaults(ledger, inventory, link);
+        _faults = new FaultInjection(ledger, inventory, link);
     }
 
-    /// <summary>The plan deployed last: what the Lab view shows and what a run naming no pipeline runs.</summary>
+    /// <summary>The plan fixed by hand and deployed last: what a run naming no pipeline runs.</summary>
     public DistributionPlan? ActivePlan => _deployments.ActivePlan;
 
     /// <summary>Forgets a kept cursor; false when there was none. Refused while a run of the pipeline is queued or in flight.</summary>
@@ -86,7 +86,7 @@ public sealed class DeploymentManager
     /// <summary>What a library pipeline is armed with, or null when it is not armed.</summary>
     public ArmedDeployment? ArmedOf(string pipelineId) => _deployments.ArmedOf(pipelineId);
 
-    /// <summary>Deploys a plan the Lab view fixed.</summary>
+    /// <summary>Deploys a plan fixed by hand, which no route of the product's host makes.</summary>
     public Task DeployAsync(DistributionPlan plan, string origin, CancellationToken ct) => _deployments.DeployAsync(plan, origin, ct);
 
     /// <summary>Arms a library pipeline at a commit (see <see cref="DeploymentService.ArmAsync"/>).</summary>
@@ -107,6 +107,9 @@ public sealed class DeploymentManager
     /// </summary>
     public void Cancel(string? runId = null) => _runs.Cancel(runId);
 
-    /// <summary>Fault injection: ends the child of the fragment's run on every replica of its node. How many it ended.</summary>
-    public Task<int> KillAsync(string fragmentName, CancellationToken ct) => _lab.KillAsync(fragmentName, ct);
+    /// <summary>
+    /// Fault injection: ends the child of the fragment's run on every replica of its node. How many it ended. The product's host maps
+    /// no route to it.
+    /// </summary>
+    public Task<int> KillAsync(string fragmentName, CancellationToken ct) => _faults.KillAsync(fragmentName, ct);
 }

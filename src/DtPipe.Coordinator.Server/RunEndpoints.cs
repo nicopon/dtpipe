@@ -15,7 +15,7 @@ internal static partial class RunEndpoints
 
     public static void MapRuns(this RouteGroupBuilder api, RouteGroupBuilder designer)
     {
-        // The Lab view's snapshot: the plan deployed last and its own run, whatever else is in flight.
+        // The snapshot of a plan fixed by hand: the plan deployed last and its own run, whatever else is in flight.
         api.MapGet("/state", (DeploymentManager deployments, RunJournal journal) =>
         {
             var plan = deployments.ActivePlan;

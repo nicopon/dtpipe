@@ -11,9 +11,8 @@ namespace DtPipe.Coordinator.Server.Tests;
 /// <summary>
 /// The server's route table as the framework holds it: each endpoint with its methods, its pattern and what authorizes it, in
 /// literals, so a route that moves, loses a policy or leaves its group changes a line here. The hubs and the routes
-/// TransportR maps are in it: moving to another TransportR can change those lines, which is not a defect of the server. Lab
-/// mode adds the bench's routes and nothing else. Every route that changes something answers 403, naming the CSRF header,
-/// to a request without it.
+/// TransportR maps are in it: moving to another TransportR can change those lines, which is not a defect of the server. Every
+/// route that changes something answers 403, naming the CSRF header, to a request without it.
 /// </summary>
 public sealed class RouteTableTests
 {
@@ -100,13 +99,6 @@ public sealed class RouteTableTests
         "PUT api/client/{clientId:guid}/token [default]",
     ];
 
-    private static readonly string[] LabOnly = [
-        "GET /api/pipelines [reader > admin]",
-        "POST /api/deploy [reader > admin]",
-        "POST /api/fragments/{name}/kill [reader > admin]",
-        "POST /api/plan [reader > admin]",
-    ];
-
     [Fact]
     public void The_Routes_Are_The_Ones_Listed_With_The_Authorization_Of_Each()
     {
@@ -129,23 +121,14 @@ public sealed class RouteTableTests
         Assert.Equal(Expected.Concat(KeyIssuerOnly).Order(StringComparer.Ordinal), TableOf(host));
     }
 
-    [Fact]
-    public void Lab_Mode_Adds_The_Benchs_Routes_And_Nothing_Else()
-    {
-        using var host = new CoordinatorHost(labMode: true);
-        Assert.Equal(Expected.Concat(LabOnly).Order(StringComparer.Ordinal), TableOf(host));
-    }
-
     /// <summary>
     /// A request that changes something carries the CSRF header, whoever sends it: an admin's bearer with a body that binds
     /// is still refused without it, on every such route of <c>/api</c> (TransportR's own client and stream routes are not ours).
     /// </summary>
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task Every_Route_That_Changes_Something_Refuses_A_Request_Without_The_Csrf_Header(bool labMode)
+    [Fact]
+    public async Task Every_Route_That_Changes_Something_Refuses_A_Request_Without_The_Csrf_Header()
     {
-        using var host = new CoordinatorHost(labMode: labMode);
+        using var host = new CoordinatorHost();
         var routes = TableOf(host)
             .Select(line => Regex.Match(line, @"^(?<methods>\S+) (?<pattern>/api/\S*) "))
             .Where(m => m.Success && !m.Groups["methods"].Value.Split('+').All(x => x is "GET" or "HEAD"))

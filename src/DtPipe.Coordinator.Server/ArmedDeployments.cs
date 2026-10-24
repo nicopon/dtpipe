@@ -54,7 +54,7 @@ internal sealed class DeploymentStore(IDeploymentStore store, ILogger logger)
 
     public void Save(ArmedDeployment armed) => store.Save(armed.PipelineId, JsonSerializer.Serialize(armed, Json));
 
-    /// <summary>Forgets the pipeline's armed deployment, if it has one; a lab plan's id may be no library id and has no document.</summary>
+    /// <summary>Forgets the pipeline's armed deployment, if it has one; a plan fixed by hand may have an id that is no library id and has no document.</summary>
     public void Delete(string pipelineId)
     {
         if (PipelineLibrary.IsValidId(pipelineId)) store.Delete(pipelineId);

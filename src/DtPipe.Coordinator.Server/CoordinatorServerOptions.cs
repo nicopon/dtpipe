@@ -67,12 +67,6 @@ public sealed class CoordinatorServerOptions
     public IReadOnlyList<string> IdentityLabelClaims { get; init; } = [];
 
     /// <summary>
-    /// Turns on what only a test bench needs: the Lab view and its manual planning (<c>/api/plan</c>,
-    /// <c>/api/deploy</c>, the scenario catalog), and fault injection. Off by default.
-    /// </summary>
-    public bool LabMode { get; init; }
-
-    /// <summary>
     /// How long a health read is kept while nothing the server publishes moves (<c>Coordinator:Health:MaxAge</c>, a time span). The state of
     /// TransportR's registrations changes without an event, so a read is never kept longer than this.
     /// </summary>
@@ -184,9 +178,6 @@ public sealed class CoordinatorServerOptions
     /// <summary>The identities a deployment gives the rights to start with (<c>Coordinator:Bootstrap</c>); none unless set.</summary>
     public RightsBootstrap Bootstrap { get; init; } = RightsBootstrap.None;
 
-    /// <summary>The Lab view's scenarios, one job file each; read only in <see cref="LabMode"/>.</summary>
-    public string? Scenarios { get; init; }
-
     private static Uri? PublicUrlOf(string? value)
     {
         if (string.IsNullOrWhiteSpace(value)) return null;
@@ -252,9 +243,7 @@ public sealed class CoordinatorServerOptions
             LibraryDirectory = PathOf("Library:Directory"),
             RightsSeed = PathOf("RightsSeed"),
             IdentityLabelClaims = section.GetSection("Identity:LabelClaims").Get<string[]>() ?? [],
-            LabMode = section.GetValue<bool>("LabMode"),
             PublicUrl = publicUrl,
-            Scenarios = PathOf("Scenarios"),
             Store = store,
             Initialize = section.GetValue<bool>("Initialize"),
             SqliteDirectory = PathOf("Sqlite:Directory"),

@@ -28,7 +28,7 @@ public enum FragmentForm
     /// <summary>A data node's fragment, made of its bricks by id (<see cref="PlannedFragment.Composition"/>).</summary>
     Bricks,
 
-    /// <summary>A runner's fragment, or one a lab host that accepts raw fragments runs as written.</summary>
+    /// <summary>A runner's fragment, or one a host that accepts raw fragments runs as written.</summary>
     Job,
 }
 
@@ -59,7 +59,7 @@ public enum PlanMode
     /// <summary>A plan the coordinator places itself, for a pipeline of the library: a data node's fragment is made of its bricks.</summary>
     Library,
 
-    /// <summary>The Lab view's planning by hand: the only plan that sends a data node a fragment written as a job.</summary>
+    /// <summary>Planning by hand: the only plan that sends a data node a fragment written as a job.</summary>
     Manual,
 }
 

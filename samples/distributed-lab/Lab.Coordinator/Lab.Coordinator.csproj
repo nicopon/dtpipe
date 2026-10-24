@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>DtPipe.Lab.Coordinator</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The lab's coordinator: a host that adds the product's server and the bench on its admin group, as any host may. Its
+         wwwroot (the Lab view) is served beside the server's. -->
+    <ProjectReference Include="..\..\..\src\DtPipe.Coordinator.Server\DtPipe.Coordinator.Server.csproj" />
+  </ItemGroup>
+
+</Project>

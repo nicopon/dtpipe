@@ -6,7 +6,7 @@ namespace DtPipe.Coordinator.Server;
 /// <summary>
 /// The deployments: what is deployed, where it came from, and its state. A library pipeline is <em>armed</em> at a commit with
 /// its bindings (<see cref="ArmedDeployment"/>), kept in <see cref="DeploymentStore"/> and read back at start; its plan is
-/// computed at each launch, so a deployment holds none. The Lab view's plan is fixed and lives in memory. Deploying asks every
+/// computed at each launch, so a deployment holds none. A plan fixed by hand lives in memory. Deploying asks every
 /// connected replica of each node whether it would run its fragments (<c>Check</c>), for an early answer; it is ready when every
 /// fragment has a replica that says so and that admission could place a run on. Nothing is left on a node, so a replica that
 /// arrives later is as good as one that was asked, and one that goes away takes nothing with it. What decides a run is
@@ -47,7 +47,7 @@ internal sealed class DeploymentService
         }
     }
 
-    /// <summary>The plan the Lab view deployed last: what it shows and what a run naming no pipeline runs. Null when that is an armed pipeline.</summary>
+    /// <summary>The plan fixed by hand and deployed last: what a run naming no pipeline runs. Null when that is an armed pipeline.</summary>
     public DistributionPlan? ActivePlan
     {
         get
@@ -98,7 +98,7 @@ internal sealed class DeploymentService
         lock (_ledger.Lock) return _ledger.Deployments.GetValueOrDefault(pipelineId)?.Armed;
     }
 
-    /// <summary>Deploys a plan fixed by the Lab view: in memory only, and it replaces whatever the pipeline was deployed with.</summary>
+    /// <summary>Deploys a plan fixed by hand: in memory only, and it replaces whatever the pipeline was deployed with.</summary>
     public async Task DeployAsync(DistributionPlan plan, string origin, CancellationToken ct)
     {
         if (!plan.Deployable)

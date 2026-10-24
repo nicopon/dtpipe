@@ -1,4 +1,4 @@
-/* The coordinator's views. Tokens and base controls come from styles.css, shared with the Lab view. */
+/* The coordinator's views. Tokens and base controls come from styles.css, which a host's own pages may share. */
 
 body.app { min-height: 100vh; }
 .nav { display: flex; gap: 4px; flex-wrap: wrap; }
