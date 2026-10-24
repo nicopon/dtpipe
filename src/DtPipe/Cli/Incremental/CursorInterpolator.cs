@@ -18,10 +18,9 @@ public sealed class CursorInterpolator : IStringInterpolator
 
     private string ResolveCursorExpression(string expressionBody)
     {
-        // 1. Check if an environment override is active
-        var envOverride = Environment.GetEnvironmentVariable("DTPIPE_CURSOR_OVERRIDE");
-        if (!string.IsNullOrWhiteSpace(envOverride))
-            return envOverride;
+        // 1. A value given for the run
+        if (CursorOverride.Value is { } given)
+            return given;
 
         // 2. Parse path|default
         string path = expressionBody;

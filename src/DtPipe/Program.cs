@@ -113,6 +113,8 @@ class Program
 
             var lexer = new PipelineLexer(registry);
             var parsedPipeline = lexer.Parse(args);
+            // Armed before the conversion, which reads and resolves a --job file, and held to the end of the run.
+            using var cursorFrom = DtPipe.Cli.Incremental.CursorOverride.Arm(parsedPipeline.Globals.CursorFrom);
             var secretsManager = serviceProvider.GetRequiredService<DtPipe.Cli.Security.ISecretsManager>();
             var (jobs, dag, contexts) = PipelineToJobConverter.Convert(
                 parsedPipeline,

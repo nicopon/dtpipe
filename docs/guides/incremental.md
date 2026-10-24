@@ -170,8 +170,8 @@ Rows
 ```
 
 The coordinator keeps that value, `4`, once the run is over. Two orders arrive. The next run starts
-from `4`: the node hands the value to the child as `DTPIPE_CURSOR_OVERRIDE`, the variable that
-`--cursor-from` sets for a command line, and the token resolves to it. Only the new orders are read:
+from `4`: the node hands the value to the child as `DTPIPE_CURSOR_OVERRIDE`, which `dtpipe` reads
+as it would a `--cursor-from`, and the token resolves to it. Only the new orders are read:
 
 ```bash
 dtpipe -i generate:2 --rename "GenerateIndex:OrderId" --compute "OrderId:row.OrderId+5" \

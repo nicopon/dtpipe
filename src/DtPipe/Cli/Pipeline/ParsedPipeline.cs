@@ -27,6 +27,9 @@ public record GlobalOptions
     /// <summary>F17: when true, binding failures (unrecognized flags, unparsable values) exit non-zero instead of being skipped.</summary>
     public bool StrictBindings { get; init; }
 
+    /// <summary>--cursor-from &lt;value&gt;. Armed as the run's <c>CursorOverride</c> before the job is read.</summary>
+    public string? CursorFrom { get; init; }
+
     /// <summary>
     /// Suppress every human-facing console rendering the run would otherwise emit — the DAG
     /// topology panel, the live progress display, the results table, orchestrator log events.

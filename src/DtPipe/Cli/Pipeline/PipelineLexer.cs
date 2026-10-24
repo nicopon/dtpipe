@@ -297,6 +297,7 @@ public class PipelineLexer
             BindInput = dict.TryGetValue("--bind-input", out var biVal) ? biVal?.ToString() : null,
             BindOutput = dict.TryGetValue("--bind-output", out var boVal) ? boVal?.ToString() : null,
             IgnoreNulls = dict.ContainsKey("--ignore-nulls"),
+            CursorFrom = dict.TryGetValue("--cursor-from", out var cfVal) ? cfVal?.ToString() : null,
             AllFlags = dict
         };
     }

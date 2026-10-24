@@ -261,12 +261,18 @@ without retaining it]` Detail: `src/DtPipe.Core/CLAUDE.md`.
 **A process runs one pipeline at a time.** `JobService.ExecutePipelineAsync`, which every run enters
 (the command line, `JobRunner`), holds a static gate for the whole run: a run that finds it held
 waits, and one cancelled while it waits returns 130. A run owns state the process holds once (the
-channel registry `DagOrchestrator` clears at its start, `DTPIPE_CURSOR_OVERRIDE`, the console's
-Ctrl-C); two runs over it trade rows, and one can still exit 0. **Never start a run from inside a
-run**: it would wait on itself. Callers that overlap wait: MCP requests, which the SDK handles
-concurrently; the agent issues a turn's runs one after the other (F5).
+channel registry `DagOrchestrator` clears at its start, the console's Ctrl-C); two runs over it
+trade rows, and one can still exit 0. **Never start a run from inside a run**: it would wait on
+itself. Callers that overlap wait: MCP requests, which the SDK handles concurrently; the agent
+issues a turn's runs one after the other (F5).
 `[CI: ConcurrentRunCollectionTests]` `[unchecked: an entry that runs the engine without JobService;
 the branches a failed DAG leaves running once it has returned]` Detail: `src/DtPipe/CLAUDE.md`.
+
+**A value of one run is armed for its call chain, never written to the process environment**
+(`LaunchValues`, `CursorOverride`): the environment reaches every branch, every run beside it and
+every child. `--cursor-from` is armed before the job is read, so a `--job` file resolves it too;
+`DTPIPE_CURSOR_OVERRIDE`, which a node gives its child, is read once for the process, under the flag.
+`[CI: validate_process_environment.sh, CursorFromTests]`
 
 ### Adding an adapter
 

@@ -9,8 +9,8 @@ namespace DtPipe.PipelineNode.Hosting;
 /// How a fragment's child keeps a cursor without touching the coordinator or a file the brick names. A sink branch that sets
 /// <c>cursor</c> is given a state file of the node's own, per run, fragment and alias; the child writes the file it always writes, and
 /// the node reads it once the child has exited with 0 and sends the value with <c>Exited</c>. Whether it is kept is the coordinator's,
-/// at the verdict of the whole run. The value a run starts from reaches the child as the one environment variable that
-/// <c>--cursor-from</c> sets.
+/// at the verdict of the whole run. The value a run starts from reaches the child as one variable of its environment, which
+/// <c>dtpipe</c> reads once at start and resolves as it would a <c>--cursor-from</c>.
 /// </summary>
 internal static class FragmentCursors
 {

@@ -89,8 +89,7 @@ public class JobService
 
     /// <summary>
     /// One run at a time in the process. A run owns state it shares with any other: the channel registry
-    /// <c>DagOrchestrator</c> clears at its start, the <c>DTPIPE_CURSOR_OVERRIDE</c> variable, the
-    /// console's Ctrl-C. Two runs over them trade rows, and one can still exit 0. Static, so a second
+    /// <c>DagOrchestrator</c> clears at its start, the console's Ctrl-C. Two runs over them trade rows, and one can still exit 0. Static, so a second
     /// container in the process waits too. A run started from inside a run would wait on itself.
     /// </summary>
     private static readonly SemaphoreSlim OneRunAtATime = new(1, 1);
@@ -98,11 +97,6 @@ public class JobService
     private async Task<int> RunHeldAsync(Dictionary<string, JobDefinition> jobs, JobDagDefinition dag, Dictionary<string, Pipeline.CliJobContext> contexts, Pipeline.GlobalOptions globals, CancellationToken ct,
         System.Collections.Concurrent.ConcurrentDictionary<string, string>? branchFailures)
     {
-        if (globals.AllFlags.TryGetValue("--cursor-from", out var cursorFromObj) && cursorFromObj is string cursorFromVal && !string.IsNullOrEmpty(cursorFromVal))
-        {
-            Environment.SetEnvironmentVariable("DTPIPE_CURSOR_OVERRIDE", cursorFromVal);
-        }
-
         // Translate Ctrl-C into cooperative cancellation (F16): the dedicated user token
         // discriminates user shutdown from internal cancellation so the process can report
         // exit code 130 instead of masking cancellation as success.
@@ -252,7 +246,6 @@ public class JobService
         finally
         {
             Console.CancelKeyPress -= cancelHandler;
-            Environment.SetEnvironmentVariable("DTPIPE_CURSOR_OVERRIDE", null);
         }
     }
 
