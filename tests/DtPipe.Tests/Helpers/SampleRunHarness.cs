@@ -2,7 +2,7 @@ using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.DryRun;
 using DtPipe.Services;
-using DtPipe.Services.Pipeline;
+using DtPipe.Engine;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 

@@ -10,9 +10,10 @@ using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using DtPipe.Core.Pipelines;
+using DtPipe.Services;
 using Microsoft.Extensions.Logging;
 
-namespace DtPipe.Services;
+namespace DtPipe.Engine;
 
 public sealed class PipelineExecutor
 {

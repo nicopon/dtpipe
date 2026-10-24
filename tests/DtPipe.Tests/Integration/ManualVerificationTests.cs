@@ -12,6 +12,7 @@ using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Xunit;
+using DtPipe.Engine;
 
 namespace DtPipe.Tests;
 

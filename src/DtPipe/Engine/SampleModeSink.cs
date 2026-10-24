@@ -2,7 +2,7 @@ using Apache.Arrow;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 
-namespace DtPipe.Services.Pipeline;
+namespace DtPipe.Engine;
 
 /// <summary>Common surface of the two sample-mode sinks, so callers need not know which one they got.</summary>
 internal interface ISampleModeSink

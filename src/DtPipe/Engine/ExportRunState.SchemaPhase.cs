@@ -11,7 +11,7 @@ using DtPipe.Core.Pipelines;
 using DtPipe.Configuration;
 using DtPipe.DryRun;
 
-namespace DtPipe.Services.Pipeline;
+namespace DtPipe.Engine;
 
 // ── Schema phase (P1-8): transformer initialization, segmentation support,
 //    branch schema publication and dry-run inference advisory. ──────────────

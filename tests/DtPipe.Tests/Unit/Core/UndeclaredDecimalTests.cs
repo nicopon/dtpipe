@@ -92,7 +92,7 @@ public class UndeclaredDecimalTests
     public void A_Column_Added_After_The_Source_Keeps_Its_Declared_Or_Undeclared_Width()
     {
         var source = new Schema(new[] { new Field("id", Int32Type.Default, true) }, null);
-        var evolved = DtPipe.ExportService.EvolveSchema(source, new[]
+        var evolved = DtPipe.Engine.ExportService.EvolveSchema(source, new[]
         {
             new PipeColumnInfo("id", typeof(int), true),
             new PipeColumnInfo("none", typeof(decimal), true),

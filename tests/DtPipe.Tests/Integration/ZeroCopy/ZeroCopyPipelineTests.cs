@@ -14,6 +14,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using System.Runtime.CompilerServices;
 using Xunit;
+using DtPipe.Engine;
 
 namespace DtPipe.Tests.Integration.ZeroCopy;
 

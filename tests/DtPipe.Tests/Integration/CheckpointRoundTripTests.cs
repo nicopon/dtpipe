@@ -10,6 +10,7 @@ using AwesomeAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
+using DtPipe.Engine;
 
 namespace DtPipe.Tests.Integration;
 

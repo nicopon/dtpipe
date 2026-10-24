@@ -11,6 +11,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Spectre.Console;
 using Xunit;
+using DtPipe.Engine;
 
 namespace DtPipe.Tests.Unit.Services;
 

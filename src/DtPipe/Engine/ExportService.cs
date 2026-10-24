@@ -14,9 +14,8 @@ using DtPipe.Core.Pipelines;
 using DtPipe.Configuration;
 using Apache.Arrow.Types;
 using DtPipe.Services;
-using DtPipe.Services.Pipeline;
 
-namespace DtPipe;
+namespace DtPipe.Engine;
 
 public class ExportService
 {

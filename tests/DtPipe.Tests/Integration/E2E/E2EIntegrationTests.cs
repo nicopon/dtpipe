@@ -16,6 +16,7 @@ using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Xunit;
+using DtPipe.Engine;
 
 namespace DtPipe.Tests;
 
@@ -447,7 +448,7 @@ public class E2EIntegrationTests : IAsyncLifetime
         contributors.AddRange(serviceProvider.GetServices<IStreamReaderFactory>().OfType<ICliContributor>());
         contributors.AddRange(serviceProvider.GetServices<IDataWriterFactory>().OfType<ICliContributor>());
 
-        var pipelineService = new DtPipe.Cli.Services.LinearPipelineService(
+        var pipelineService = new DtPipe.Engine.LinearPipelineService(
             contributors,
             serviceProvider,
             serviceProvider.GetRequiredService<DtPipe.Core.Abstractions.Dag.IMemoryChannelRegistry>(),

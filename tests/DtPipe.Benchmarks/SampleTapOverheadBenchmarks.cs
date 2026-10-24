@@ -6,6 +6,7 @@ using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Services;
 using Microsoft.Extensions.Logging.Abstractions;
+using DtPipe.Engine;
 
 namespace DtPipe.Benchmarks;
 

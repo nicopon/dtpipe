@@ -400,8 +400,8 @@ class Program
         services.AddSingleton<DtPipe.Services.HookExecutor>();
         services.AddSingleton<DtPipe.Services.MetricsService>();
         services.AddSingleton<DtPipe.Services.SchemaValidationService>();
-        services.AddSingleton<DtPipe.Services.PipelineExecutor>();
-        services.AddSingleton<ExportService>();
+        services.AddSingleton<DtPipe.Engine.PipelineExecutor>();
+        services.AddSingleton<DtPipe.Engine.ExportService>();
         services.AddSingleton<IMemoryChannelRegistry, MemoryChannelRegistry>();
         services.AddTransient<IDagOrchestrator, DagOrchestrator>();
         services.AddSingleton<IRowToColumnarBridgeFactory, DtPipe.Adapters.Infrastructure.Arrow.ArrowRowToColumnarBridgeFactory>();

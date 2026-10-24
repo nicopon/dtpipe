@@ -49,7 +49,7 @@ TM_HITS=$(grep -rn "\.TransformMany(" "$PROJECT_ROOT/src/" --include="*.cs" 2>/d
     | grep -v "/obj/" \
     | grep -v "/bin/" \
     | grep -v "src/DtPipe.Transformers/" \
-    | grep -v "src/DtPipe/Services/PipelineExecutor.cs" || true)
+    | grep -v "src/DtPipe/Engine/PipelineExecutor.cs" || true)
 if [ -n "$TM_HITS" ]; then
     echo "$TM_HITS"
     fail "IMultiRowTransformer.TransformMany called outside PipelineExecutor — a second row engine"

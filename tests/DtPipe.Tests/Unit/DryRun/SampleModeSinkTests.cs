@@ -2,7 +2,7 @@ using Apache.Arrow;
 using Apache.Arrow.Types;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
-using DtPipe.Services.Pipeline;
+using DtPipe.Engine;
 using DtPipe.Tests.Helpers;
 using AwesomeAssertions;
 using Xunit;

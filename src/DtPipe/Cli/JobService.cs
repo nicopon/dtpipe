@@ -287,7 +287,7 @@ public class JobService
         providerConfigService.BindOptions(jobForBinding, context, globals);
 
         var channelRegistry = _serviceProvider.GetRequiredService<IMemoryChannelRegistry>();
-        var linearPipelineService = new DtPipe.Cli.Services.LinearPipelineService(_contributors, _serviceProvider, channelRegistry, registry, _console);
+        var linearPipelineService = new DtPipe.Engine.LinearPipelineService(_contributors, _serviceProvider, channelRegistry, registry, _console);
         var exitCode = await linearPipelineService.ExecuteAsync(job, context, ct, userCancellationToken, resultsCollector, isDag, alias, ctx, showStatusMessages: false, dryRunInteractiveBranch: globals?.DryRunInteractiveBranch, quiet: globals?.Quiet ?? false);
         if (branchFailures is not null && linearPipelineService.Failure is { } why)
             branchFailures[alias ?? "main"] = why;

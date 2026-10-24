@@ -16,7 +16,7 @@ using DtPipe.Configuration;
 using Apache.Arrow.Types;
 using DtPipe.Services;
 
-namespace DtPipe.Services.Pipeline;
+namespace DtPipe.Engine;
 
 /// <summary>
 /// Carries the per-run state of one export execution through its phases (P1-8):

@@ -7,6 +7,7 @@ using AwesomeAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
+using DtPipe.Engine;
 
 namespace DtPipe.Tests.Unit.Services;
 

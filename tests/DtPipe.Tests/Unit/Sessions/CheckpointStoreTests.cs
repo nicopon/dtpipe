@@ -11,6 +11,7 @@ using DtPipe.Sessions;
 using DtPipe.Tests.Helpers;
 using AwesomeAssertions;
 using Xunit;
+using DtPipe.Engine;
 
 namespace DtPipe.Tests.Unit.Sessions;
 

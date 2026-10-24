@@ -14,10 +14,11 @@ using DtPipe.Core.Pipelines.Dag;
 using DtPipe.Core.Pipelines;
 using DtPipe.Cli.Pipeline;
 using DtPipe.Cli.Infrastructure;
+using DtPipe.Cli.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Spectre.Console;
 
-namespace DtPipe.Cli.Services;
+namespace DtPipe.Engine;
 
 public class LinearPipelineService
 {
@@ -426,7 +427,7 @@ public class LinearPipelineService
         {
             var factory = factories.FirstOrDefault(f => f.ComponentName.Equals(config.Type, StringComparison.OrdinalIgnoreCase));
             if (factory == null) throw new InvalidOperationException($"Transformer factory '{config.Type}' not found.");
-            var transformer = Pipeline.YamlTransformerBuilder.Build(factory, config);
+            var transformer = YamlTransformerBuilder.Build(factory, config);
             if (transformer != null) pipeline.Add(transformer);
         }
 
