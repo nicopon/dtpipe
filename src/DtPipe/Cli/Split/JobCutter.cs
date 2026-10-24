@@ -156,22 +156,22 @@ public static class JobCutter
             if (!string.IsNullOrEmpty(value)) rows.Add(new CutPlacement(side, key, value));
         }
 
-        Add(CutSide.Producer, "input", ConnectionStringSanitizer.Redact(producer.Input));
+        Add(CutSide.Producer, JobKeys.Input, ConnectionStringSanitizer.Redact(producer.Input));
         Add(CutSide.Producer, "transformers", Names(upstream));
         Add(CutSide.Producer, "cursor", producer.Cursor);
         Add(CutSide.Producer, "state", producer.State);
         Add(CutSide.Producer, "from-checkpoint", producer.FromCheckpoint);
         Add(CutSide.Producer, "from-contract", producer.FromContract);
         foreach (var block in Blocks(producer.ProviderOptions))
-            rows.Add(new CutPlacement(CutSide.Producer, "provider-options", block));
+            rows.Add(new CutPlacement(CutSide.Producer, JobKeys.ProviderOptions, block));
 
-        Add(CutSide.Consumer, "output", ConnectionStringSanitizer.Redact(consumer.Output));
+        Add(CutSide.Consumer, JobKeys.Output, ConnectionStringSanitizer.Redact(consumer.Output));
         Add(CutSide.Consumer, "transformers", Names(downstream));
         Add(CutSide.Consumer, "prefix", consumer.Prefix);
         Add(CutSide.Consumer, "checkpoint", consumer.Checkpoint);
         Add(CutSide.Consumer, "contract-save", consumer.ContractSave);
         foreach (var block in Blocks(consumer.ProviderOptions))
-            rows.Add(new CutPlacement(CutSide.Consumer, "provider-options", block));
+            rows.Add(new CutPlacement(CutSide.Consumer, JobKeys.ProviderOptions, block));
 
         // A cut makes two runs out of one, and a single path cannot hold both their reports: the
         // second process would overwrite the first. Naming them here is the difference between a

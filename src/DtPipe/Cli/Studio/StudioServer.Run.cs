@@ -93,14 +93,14 @@ public sealed partial class StudioServer
         var writes = new List<RunWrite>();
         foreach (var (alias, branch) in JobYaml.Branches(JobYaml.Parse(sampling.Yaml)))
         {
-            if (JobYaml.Scalar(branch, "output") is not { } output) continue;
+            if (JobYaml.Scalar(branch, JobKeys.Output) is not { } output) continue;
             if (sampling.Sinks.Contains(alias)) { writes.Add(new RunWrite(alias, true, null, null)); continue; }
             // The writer's block as the file holds it, its options neither read nor judged, but for the
             // connection string, which is redacted as one before the block is text.
-            var block = new YamlMappingNode { { "output", ConnectionStringSanitizer.Redact(output) } };
+            var block = new YamlMappingNode { { JobKeys.Output, ConnectionStringSanitizer.Redact(output) } };
             foreach (var key in BranchSides.Write)
                 if (branch.Children.TryGetValue(new YamlScalarNode(key), out var value)) block.Add(key, value);
-            if (branch.Children.TryGetValue(new YamlScalarNode("provider-options"), out var options)) block.Add("provider-options", options);
+            if (branch.Children.TryGetValue(new YamlScalarNode(JobKeys.ProviderOptions), out var options)) block.Add(JobKeys.ProviderOptions, options);
             writes.Add(new RunWrite(alias, false, ConnectionStringSanitizer.Redact(output), ConnectionStringSanitizer.Sanitize(JobYaml.Serialize(block))));
         }
 

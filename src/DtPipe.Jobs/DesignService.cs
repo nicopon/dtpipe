@@ -126,7 +126,7 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
                     {
                         if (from.Count != 1) errors.Add($"'{step.Alias}' writes {brick.Key}: connect exactly one step to it.");
                         branch = new YamlMappingNode();
-                        if (from.Count > 0) branch.Add("from", string.Join(',', from));
+                        if (from.Count > 0) branch.Add(JobKeys.From, string.Join(',', from));
                         foreach (var (key, value) in bricks.BranchOf(brick).Children) branch.Add(key, value);
                     }
                     if (!brick.Online) warnings.Add($"'{step.Alias}': {brick.Node} is offline.");
@@ -136,7 +136,7 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
                     if (from.Count != 1) errors.Add($"'{step.Alias}' transforms one input: connect exactly one step to it.");
                     if (step.Transformers is not { Count: > 0 }) warnings.Add($"'{step.Alias}' has no transformer yet: it passes its rows through.");
                     branch = new YamlMappingNode();
-                    if (from.Count > 0) branch.Add("from", string.Join(',', from));
+                    if (from.Count > 0) branch.Add(JobKeys.From, string.Join(',', from));
                     if (step.Transformers is { Count: > 0 }) branch.Add("transformers", JobYaml.FromJson(step.Transformers));
                     joinable[step.Alias!] = StepKinds.Transform;
                     break;
@@ -145,16 +145,16 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
                     if (from.Count != 1) errors.Add($"'{step.Alias}': connect exactly one main input (from); join the others as ref.");
                     if (string.IsNullOrWhiteSpace(step.Query)) errors.Add($"'{step.Alias}' has no query.");
                     branch = new YamlMappingNode();
-                    if (from.Count > 0) branch.Add("from", string.Join(',', from));
-                    if (refs.Count > 0) branch.Add("ref", new YamlSequenceNode(refs.Select(r => new YamlScalarNode(r))));
-                    branch.Add("provider-options", new YamlMappingNode { { "sql", new YamlMappingNode { { "query", JobYaml.Text(step.Query?.Trim() ?? "") } } } });
+                    if (from.Count > 0) branch.Add(JobKeys.From, string.Join(',', from));
+                    if (refs.Count > 0) branch.Add(JobKeys.Ref, new YamlSequenceNode(refs.Select(r => new YamlScalarNode(r))));
+                    branch.Add(JobKeys.ProviderOptions, new YamlMappingNode { { "sql", new YamlMappingNode { { "query", JobYaml.Text(step.Query?.Trim() ?? "") } } } });
                     break;
 
                 case StepKinds.Merge:
                     if (from.Count < 2) errors.Add($"'{step.Alias}' merges several inputs: connect at least two steps to it.");
                     branch = new YamlMappingNode();
-                    if (from.Count > 0) branch.Add("from", string.Join(',', from));
-                    branch.Add("provider-options", new YamlMappingNode { { "merge", new YamlMappingNode() } });
+                    if (from.Count > 0) branch.Add(JobKeys.From, string.Join(',', from));
+                    branch.Add(JobKeys.ProviderOptions, new YamlMappingNode { { "merge", new YamlMappingNode() } });
                     break;
 
                 case StepKinds.Branch:
@@ -168,7 +168,7 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
 
             if (branch is null) continue;
             branches.Add((step.Alias!, branch));
-            var dependsOn = JobYaml.Aliases(branch, "from").Concat(JobYaml.Aliases(branch, "ref")).ToList();
+            var dependsOn = JobYaml.Aliases(branch, JobKeys.From).Concat(JobYaml.Aliases(branch, JobKeys.Ref)).ToList();
             infos.Add(new StepInfo(step.Alias!, brick?.Node, brick?.Version, brick?.Title, dependsOn));
         }
 
@@ -185,7 +185,7 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
         }
         foreach (var (alias, branch) in branches)
         {
-            if (!consumed.Contains(alias) && !JobYaml.Has(branch, "output"))
+            if (!consumed.Contains(alias) && !JobYaml.Has(branch, JobKeys.Output))
                 errors.Add($"'{alias}' leads nowhere: connect it to a sink, or remove it.");
         }
         var branchOf = infos.ToDictionary(i => i.Alias, i => i.Alias, StringComparer.Ordinal);
@@ -238,27 +238,27 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
         {
             yield return whole.Kind == StepKinds.Source
                 ? new DesignStep(alias, StepKinds.Source, whole.Key)
-                : new DesignStep(alias, StepKinds.Sink, whole.Key, JobYaml.Aliases(branch, "from"));
+                : new DesignStep(alias, StepKinds.Sink, whole.Key, JobYaml.Aliases(branch, JobKeys.From));
             yield break;
         }
 
         // A reference nothing recognised (signed out, a brick the catalog lacks, the wrong direction, a branch that says more) is no
         // endpoint of a reader or a writer: it stays as written, so two such branches are never joined into one that says too much.
-        if (new[] { "input", "output" }.Any(key => JobYaml.Scalar(branch, key)?.StartsWith(BrickRef.Scheme, StringComparison.Ordinal) == true))
+        if (new[] { JobKeys.Input, JobKeys.Output }.Any(key => JobYaml.Scalar(branch, key)?.StartsWith(BrickRef.Scheme, StringComparison.Ordinal) == true))
         {
             yield return RawStep(alias, branch);
             yield break;
         }
 
         var keys = branch.Children.Keys.OfType<YamlScalarNode>().Select(k => k.Value!).ToHashSet(StringComparer.Ordinal);
-        var options = JobYaml.Mapping(branch, "provider-options");
+        var options = JobYaml.Mapping(branch, JobKeys.ProviderOptions);
         var components = options?.Children.Keys.OfType<YamlScalarNode>().Select(k => k.Value!).ToHashSet(StringComparer.Ordinal) ?? [];
-        var owners = endpoints is not null && (keys.Contains("input") || keys.Contains("output"))
-            ? endpoints.Blocks(JobYaml.Scalar(branch, "input"), JobYaml.Scalar(branch, "output"), components.ToList())
+        var owners = endpoints is not null && (keys.Contains(JobKeys.Input) || keys.Contains(JobKeys.Output))
+            ? endpoints.Blocks(JobYaml.Scalar(branch, JobKeys.Input), JobYaml.Scalar(branch, JobKeys.Output), components.ToList())
             : null;
-        var source = keys.Contains("input") ? FindEndpoint(branch, StepKinds.Source, owners) : null;
-        var sink = keys.Contains("output") ? FindEndpoint(branch, StepKinds.Sink, owners) : null;
-        var middle = keys.Contains("input") && source is null || keys.Contains("output") && sink is null
+        var source = keys.Contains(JobKeys.Input) ? FindEndpoint(branch, StepKinds.Source, owners) : null;
+        var sink = keys.Contains(JobKeys.Output) ? FindEndpoint(branch, StepKinds.Sink, owners) : null;
+        var middle = keys.Contains(JobKeys.Input) && source is null || keys.Contains(JobKeys.Output) && sink is null
             ? NoCard(alias)
             : Middle(alias, branch, keys, components, source, sink);
 
@@ -279,7 +279,7 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
         foreach (var card in carriers) yield return card;
         if (sink is not null)
             yield return carriers.Count == 0
-                ? Card(sink, alias, JobYaml.Aliases(branch, "from"))
+                ? Card(sink, alias, JobYaml.Aliases(branch, JobKeys.From))
                 : Card(sink, fresh(alias, "sink"), [carriers[^1].Alias]);
     }
 
@@ -289,7 +289,7 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
     /// </summary>
     private static Endpoint? FindEndpoint(YamlMappingNode branch, string kind, EndpointBlocks? owners)
     {
-        var endpointKey = kind == StepKinds.Source ? "input" : "output";
+        var endpointKey = kind == StepKinds.Source ? JobKeys.Input : JobKeys.Output;
         if (owners is null) return null;
 
         var sideKeys = kind == StepKinds.Source ? BranchSides.Read : BranchSides.Write;
@@ -305,11 +305,11 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
                 local.Add(name, value);
                 keys.Add(name);
             }
-            else if (name == "provider-options" && value is YamlMappingNode blocks)
+            else if (name == JobKeys.ProviderOptions && value is YamlMappingNode blocks)
             {
                 var mine = blocks.Children.Where(kv => owned.Contains(((YamlScalarNode)kv.Key).Value!)).ToList();
                 if (mine.Count == 0) continue;
-                local.Add("provider-options", new YamlMappingNode(mine));
+                local.Add(JobKeys.ProviderOptions, new YamlMappingNode(mine));
                 components.UnionWith(mine.Select(kv => ((YamlScalarNode)kv.Key).Value!));
             }
         }
@@ -331,23 +331,23 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
         var rest = new HashSet<string>(components, StringComparer.Ordinal);
         if (source is not null) rest.ExceptWith(source.Components);
         if (sink is not null) rest.ExceptWith(sink.Components);
-        var middleKeys = keys.Except(["provider-options"]).ToHashSet(StringComparer.Ordinal);
+        var middleKeys = keys.Except([JobKeys.ProviderOptions]).ToHashSet(StringComparer.Ordinal);
         if (source is not null) middleKeys.ExceptWith(source.Keys);
         if (sink is not null) middleKeys.ExceptWith(sink.Keys);
-        var from = JobYaml.Aliases(branch, "from");
+        var from = JobYaml.Aliases(branch, JobKeys.From);
 
-        if (source is not null && (middleKeys.Contains("from") || middleKeys.Contains("ref"))) return NoCard(alias);
-        if (rest.Count == 0 && middleKeys.IsSubsetOf(["from", "transformers"]))
+        if (source is not null && (middleKeys.Contains(JobKeys.From) || middleKeys.Contains(JobKeys.Ref))) return NoCard(alias);
+        if (rest.Count == 0 && middleKeys.IsSubsetOf([JobKeys.From, "transformers"]))
         {
             if (!middleKeys.Contains("transformers"))
                 return source is not null || sink is not null ? null : NoCard(alias);
             return new DesignStep(alias, StepKinds.Transform, From: from, Transformers: JobYaml.ToJson(branch["transformers"]) as JsonArray);
         }
-        if (source is null && rest.SetEquals(["sql"]) && middleKeys.Contains("from") && middleKeys.IsSubsetOf(["from", "ref"])
-            && JobYaml.Mapping(JobYaml.Mapping(branch, "provider-options")!, "sql") is { } sql
+        if (source is null && rest.SetEquals(["sql"]) && middleKeys.Contains(JobKeys.From) && middleKeys.IsSubsetOf([JobKeys.From, JobKeys.Ref])
+            && JobYaml.Mapping(JobYaml.Mapping(branch, JobKeys.ProviderOptions)!, "sql") is { } sql
             && sql.Children.Count == 1 && JobYaml.Scalar(sql, "query") is { } query)
-            return new DesignStep(alias, StepKinds.Sql, From: from, Ref: JobYaml.Aliases(branch, "ref"), Query: query);
-        if (source is null && rest.SetEquals(["merge"]) && middleKeys.SetEquals(["from"]))
+            return new DesignStep(alias, StepKinds.Sql, From: from, Ref: JobYaml.Aliases(branch, JobKeys.Ref), Query: query);
+        if (source is null && rest.SetEquals(["merge"]) && middleKeys.SetEquals([JobKeys.From]))
             return new DesignStep(alias, StepKinds.Merge, From: from);
         return NoCard(alias);
     }
@@ -367,9 +367,9 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
         var local = Body(step, errors);
         if (local is null) return null;
 
-        var (endpointKey, other) = step.Kind == StepKinds.Source ? ("input", "output") : ("output", "input");
+        var (endpointKey, other) = step.Kind == StepKinds.Source ? (JobKeys.Input, JobKeys.Output) : (JobKeys.Output, JobKeys.Input);
         if (!JobYaml.Has(local, endpointKey)) errors.Add($"'{step.Alias}' is a {step.Kind}: its YAML names no {endpointKey}.");
-        var stray = new[] { "from", "ref", "transformers", other }.Where(k => JobYaml.Has(local, k)).ToList();
+        var stray = new[] { JobKeys.From, JobKeys.Ref, "transformers", other }.Where(k => JobYaml.Has(local, k)).ToList();
         if (stray.Count > 0) errors.Add($"'{step.Alias}' is a {step.Kind}: {string.Join(", ", stray)} belong to other cards.");
 
         if (step.Kind == StepKinds.Source)
@@ -377,9 +377,9 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
             if (from.Count > 0 || refs.Count > 0) warnings.Add($"'{step.Alias}' is a source: its inputs are ignored.");
             return local;
         }
-        if (from.Count != 1) errors.Add($"'{step.Alias}' writes {JobYaml.Scalar(local, "output")}: connect exactly one step to it.");
+        if (from.Count != 1) errors.Add($"'{step.Alias}' writes {JobYaml.Scalar(local, JobKeys.Output)}: connect exactly one step to it.");
         var branch = new YamlMappingNode();
-        if (from.Count > 0) branch.Add("from", string.Join(',', from));
+        if (from.Count > 0) branch.Add(JobKeys.From, string.Join(',', from));
         foreach (var (key, value) in local.Children) branch.Add(key, value);
         return branch;
     }
@@ -402,16 +402,16 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
             for (var i = 0; i < list.Count; i++)
             {
                 var (up, upBranch) = list[i];
-                if (kinds.GetValueOrDefault(up) != upstreamKind || JobYaml.Has(upBranch, "output")) continue;
+                if (kinds.GetValueOrDefault(up) != upstreamKind || JobYaml.Has(upBranch, JobKeys.Output)) continue;
 
-                var readers = list.Where(b => JobYaml.Aliases(b.Branch, "from").Concat(JobYaml.Aliases(b.Branch, "ref")).Contains(up)).ToList();
+                var readers = list.Where(b => JobYaml.Aliases(b.Branch, JobKeys.From).Concat(JobYaml.Aliases(b.Branch, JobKeys.Ref)).Contains(up)).ToList();
                 if (readers.Count != 1) continue;
                 var (down, downBranch) = readers[0];
                 var downKind = kinds.GetValueOrDefault(down);
                 var accepts = downKind == StepKinds.Sink || upstreamKind == StepKinds.Source && downKind == StepKinds.Transform;
-                if (!accepts || JobYaml.Has(downBranch, "input") || JobYaml.Has(downBranch, "ref")
-                    || !JobYaml.Aliases(downBranch, "from").SequenceEqual([up])) continue;
-                if (downKind == StepKinds.Sink && list.Any(b => JobYaml.Aliases(b.Branch, "from").Concat(JobYaml.Aliases(b.Branch, "ref")).Contains(down))) continue;
+                if (!accepts || JobYaml.Has(downBranch, JobKeys.Input) || JobYaml.Has(downBranch, JobKeys.Ref)
+                    || !JobYaml.Aliases(downBranch, JobKeys.From).SequenceEqual([up])) continue;
+                if (downKind == StepKinds.Sink && list.Any(b => JobYaml.Aliases(b.Branch, JobKeys.From).Concat(JobYaml.Aliases(b.Branch, JobKeys.Ref)).Contains(down))) continue;
 
                 var joined = JoinBranches(upBranch, downBranch);
                 if (joined is null) continue;
@@ -440,12 +440,12 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
     /// </summary>
     private static YamlMappingNode? JoinBranches(YamlMappingNode up, YamlMappingNode down)
     {
-        var upOptions = JobYaml.Mapping(up, "provider-options");
-        var downOptions = JobYaml.Mapping(down, "provider-options");
+        var upOptions = JobYaml.Mapping(up, JobKeys.ProviderOptions);
+        var downOptions = JobYaml.Mapping(down, JobKeys.ProviderOptions);
         var joined = new YamlMappingNode();
         foreach (var (key, value) in up.Children)
         {
-            if (key is YamlScalarNode { Value: "provider-options" } && downOptions is not null)
+            if (key is YamlScalarNode { Value: JobKeys.ProviderOptions } && downOptions is not null)
             {
                 if (upOptions!.Children.Keys.Any(downOptions.Children.ContainsKey)) return null;
                 joined.Add(key, new YamlMappingNode(upOptions.Children.Concat(downOptions.Children)));
@@ -454,8 +454,8 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
         }
         foreach (var (key, value) in down.Children)
         {
-            if (key is YamlScalarNode { Value: "from" }) continue;
-            if (key is YamlScalarNode { Value: "provider-options" } && upOptions is not null) continue;
+            if (key is YamlScalarNode { Value: JobKeys.From }) continue;
+            if (key is YamlScalarNode { Value: JobKeys.ProviderOptions } && upOptions is not null) continue;
             if (joined.Children.ContainsKey(key)) return null;
             joined.Add(key, value);
         }
@@ -483,7 +483,7 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
     }
 
     private static DesignStep RawStep(string alias, YamlMappingNode branch) =>
-        new(alias, StepKinds.Branch, From: JobYaml.Aliases(branch, "from"), Ref: JobYaml.Aliases(branch, "ref"), Yaml: BodyText(branch));
+        new(alias, StepKinds.Branch, From: JobYaml.Aliases(branch, JobKeys.From), Ref: JobYaml.Aliases(branch, JobKeys.Ref), Yaml: BodyText(branch));
 
     private static List<(string Alias, YamlMappingNode Branch)> TopologicalOrder(
         List<(string Alias, YamlMappingNode Branch)> branches, List<StepInfo> infos, List<string> errors)

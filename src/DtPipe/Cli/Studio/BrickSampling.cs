@@ -36,14 +36,14 @@ public sealed record BrickSampling(string Yaml, IReadOnlyList<(string Alias, Cat
             if (brick.Kind == StepKinds.Sink)
             {
                 var sink = new YamlMappingNode();
-                if (JobYaml.Scalar(branch, "from") is { } from) sink.Add("from", from);
-                sink.Add("output", ArrowLink);
+                if (JobYaml.Scalar(branch, JobKeys.From) is { } from) sink.Add(JobKeys.From, from);
+                sink.Add(JobKeys.Output, ArrowLink);
                 root.Children[new YamlScalarNode(alias)] = sink;
                 sinks.Add(alias);
             }
             else
             {
-                root.Children[new YamlScalarNode(alias)] = new YamlMappingNode { { "input", ArrowLink } };
+                root.Children[new YamlScalarNode(alias)] = new YamlMappingNode { { JobKeys.Input, ArrowLink } };
                 sources.Add((alias, brick));
             }
         }

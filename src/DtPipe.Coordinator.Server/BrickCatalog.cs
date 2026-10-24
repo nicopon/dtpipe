@@ -58,5 +58,5 @@ public sealed class BrickCatalog(NodeInventory inventory)
 
     // A source is read by an input reference and a sink written by an output one.
     private static YamlMappingNode ReferenceTo(string node, BrickInfo brick) =>
-        new() { { brick.Kind == BrickKind.Sink ? "output" : "input", BrickRef.Format(node, brick.Id) } };
+        new() { { brick.Kind == BrickKind.Sink ? JobKeys.Output : JobKeys.Input, BrickRef.Format(node, brick.Id) } };
 }

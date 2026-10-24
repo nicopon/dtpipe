@@ -51,14 +51,14 @@ public class DesignValidator(BrickCatalog bricks, NodeRequests nodes)
             switch (BrickOf(alias, branch))
             {
                 case { Kind: BrickKind.Source } source:
-                    rewritten.Add(alias, new YamlMappingNode { { "input", BrickRules.ArrowEndpoint } });
+                    rewritten.Add(alias, new YamlMappingNode { { JobKeys.Input, BrickRules.ArrowEndpoint } });
                     sources.Add(new Placed(alias, source));
                     break;
                 case { Kind: BrickKind.Sink } sink:
                     rewritten.Add(alias, new YamlMappingNode
                     {
-                        { "from", branch.Children[new YamlScalarNode("from")] },
-                        { "output", BrickRules.ArrowEndpoint },
+                        { JobKeys.From, branch.Children[new YamlScalarNode(JobKeys.From)] },
+                        { JobKeys.Output, BrickRules.ArrowEndpoint },
                         { "contract-save", JobCheck.ContractFile(alias) },
                     });
                     sinks.Add(new Placed(alias, sink));

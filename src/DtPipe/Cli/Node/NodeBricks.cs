@@ -23,7 +23,7 @@ internal static class NodeBricks
         {
             if (Shape(alias, branch) is { } shape) return ([], shape);
             if (SecretRefusal(alias, branch) is { } secret) return ([], secret);
-            var isSource = JobYaml.Has(branch, "input");
+            var isSource = JobYaml.Has(branch, JobKeys.Input);
             bricks.Add(new DeclaredBrick(alias, isSource, JobYaml.ToJson(branch)!.ToJsonString()));
         }
         return bricks.Count == 0 ? ([], "a node offers at least one brick: declare a branch (-i/-o with --alias) or give --job.") : (bricks, null);
@@ -33,9 +33,9 @@ internal static class NodeBricks
     // read and a write belongs on a runner. The alias is the brick's id, so a branch without one has none.
     private static string? Shape(string alias, YamlMappingNode branch)
     {
-        var reads = JobYaml.Has(branch, "input");
-        var writes = JobYaml.Has(branch, "output");
-        if (JobYaml.Has(branch, "from"))
+        var reads = JobYaml.Has(branch, JobKeys.Input);
+        var writes = JobYaml.Has(branch, JobKeys.Output);
+        if (JobYaml.Has(branch, JobKeys.From))
             return $"Branch '{alias}' reads another branch (from): a brick reads a source or writes a sink, and everything between belongs on a runner.";
         if (reads == writes)
             return $"Branch '{alias}' {(reads ? "reads and writes" : "neither reads nor writes")}: a brick is either a source (-i) or a sink (-o).";

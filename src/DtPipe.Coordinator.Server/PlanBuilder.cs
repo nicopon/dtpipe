@@ -195,7 +195,7 @@ public sealed class PlanBuilder(
             var producer = drafts[producerNode];
             var producerBranch = producer.Branch(alias);
             var readLocally = units.Any(u => placement[u.Id] == producerNode && u.DependsOn.Contains(alias));
-            var sendDirectly = !JobYaml.Has(producerBranch, "output") && consumerNodes.Count == 1 && !readLocally;
+            var sendDirectly = !JobYaml.Has(producerBranch, JobKeys.Output) && consumerNodes.Count == 1 && !readLocally;
 
             foreach (var consumerNode in consumerNodes)
             {
@@ -205,12 +205,12 @@ public sealed class PlanBuilder(
                     errors.Add($"{consumer.Name} would need two branches named '{alias}'. Move one of them.");
                     continue;
                 }
-                consumer.Inbound.Add((alias, new YamlMappingNode { { "input", ArrowEndpoint } }));
+                consumer.Inbound.Add((alias, new YamlMappingNode { { JobKeys.Input, ArrowEndpoint } }));
 
                 string producerAlias;
                 if (sendDirectly)
                 {
-                    JobYaml.Set(producerBranch, "output", ArrowEndpoint);
+                    JobYaml.Set(producerBranch, JobKeys.Output, ArrowEndpoint);
                     producerAlias = alias;
                 }
                 else
@@ -218,7 +218,7 @@ public sealed class PlanBuilder(
                     // The branch already writes somewhere, is read on its own node too, or feeds
                     // several nodes: each remote reader gets its own relay branch.
                     producerAlias = $"{alias}__to__{Sanitize(consumerNode)}";
-                    producer.Relays.Add((producerAlias, new YamlMappingNode { { "from", alias }, { "output", ArrowEndpoint } }));
+                    producer.Relays.Add((producerAlias, new YamlMappingNode { { JobKeys.From, alias }, { JobKeys.Output, ArrowEndpoint } }));
                 }
                 Connect(producer, producerAlias, consumer, alias);
             }
@@ -255,7 +255,7 @@ public sealed class PlanBuilder(
             var refused = false;
             foreach (var (key, branch) in draft.Owned)
             {
-                if (new[] { "input", "output" }.Select(k => JobYaml.Scalar(branch, k)).FirstOrDefault(v => v?.StartsWith(BrickRef.Scheme, StringComparison.Ordinal) == true) is not { } input) continue;
+                if (new[] { JobKeys.Input, JobKeys.Output }.Select(k => JobYaml.Scalar(branch, k)).FirstOrDefault(v => v?.StartsWith(BrickRef.Scheme, StringComparison.Ordinal) == true) is not { } input) continue;
                 if (!BrickRef.TryParse(input, out var refNode, out var refBrick))
                     errors.Add($"{draft.Name}: '{key}' has a malformed brick reference '{input}'.");
                 else if (refNode != draft.Node || form != FragmentForm.Bricks)
@@ -303,17 +303,17 @@ public sealed class PlanBuilder(
             if (brick is null) return null;
             if (brick.Kind == BrickKind.Source)
             {
-                var sends = JobYaml.Scalar(branch, "output") == ArrowEndpoint;
+                var sends = JobYaml.Scalar(branch, JobKeys.Output) == ArrowEndpoint;
                 units.Add(new FragmentUnit(key, sends ? FragmentUnitKind.SourceSend : FragmentUnitKind.Source, brick.Id));
             }
-            else if (JobYaml.Aliases(branch, "from") is [var feed])
+            else if (JobYaml.Aliases(branch, JobKeys.From) is [var feed])
             {
                 units.Add(new FragmentUnit(key, FragmentUnitKind.Sink, brick.Id, feed));
             }
             else return null;
         }
         foreach (var (key, branch) in draft.Relays)
-            units.Add(new FragmentUnit(key, FragmentUnitKind.Relay, From: JobYaml.Scalar(branch, "from")));
+            units.Add(new FragmentUnit(key, FragmentUnitKind.Relay, From: JobYaml.Scalar(branch, JobKeys.From)));
         return units;
     }
 
@@ -325,7 +325,7 @@ public sealed class PlanBuilder(
         var units = new List<Unit>();
         foreach (var (alias, branch) in JobYaml.Branches(job))
         {
-            var dependsOn = JobYaml.Aliases(branch, "from").Concat(JobYaml.Aliases(branch, "ref")).ToList();
+            var dependsOn = JobYaml.Aliases(branch, JobKeys.From).Concat(JobYaml.Aliases(branch, JobKeys.Ref)).ToList();
             units.Add(new Unit { Id = alias, Key = alias, Branch = branch, DependsOn = dependsOn });
         }
         return units;

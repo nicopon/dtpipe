@@ -38,13 +38,13 @@ public static class BrickRules
     // is not on the list, so a key dtpipe adds later is refused until someone decides. The one exception
     // is a sink's cursor column (CursorKey): the file that keeps it is the node's own, never the brick's.
     private static readonly HashSet<string> IoKeys = new(
-        ["input", "output", "from", "provider-options", "batch-size", "max-batch-bytes", "limit", "sampling-rate", "sampling-seed"],
+        [JobKeys.Input, JobKeys.Output, JobKeys.From, JobKeys.ProviderOptions, "batch-size", "max-batch-bytes", "limit", "sampling-rate", "sampling-seed"],
         StringComparer.Ordinal);
-    private static readonly YamlScalarNode FromKey = new("from");
+    private static readonly YamlScalarNode FromKey = new(JobKeys.From);
 
     /// <summary>The column a sink brick tracks the highest value of; the node adds the file that keeps it.</summary>
     public const string CursorKey = "cursor";
-    private static readonly YamlScalarNode OutputKey = new("output");
+    private static readonly YamlScalarNode OutputKey = new(JobKeys.Output);
 
     /// <summary>The form a brick has as its node declares it (its branch as JSON text).</summary>
     public static BrickForm Declared(BrickKind kind, string branchJson) =>
@@ -67,7 +67,7 @@ public static class BrickRules
     /// </summary>
     public static BrickForm FormOf(YamlMappingNode branch)
     {
-        var isSink = JobYaml.Has(branch, "from");
+        var isSink = JobYaml.Has(branch, JobKeys.From);
         var kept = branch.Children.Where(kv =>
             !kv.Key.Equals(FromKey)
             && !(!isSink && kv.Key.Equals(OutputKey) && kv.Value is YamlScalarNode { Value: ArrowEndpoint }));
@@ -87,25 +87,25 @@ public static class BrickRules
     {
         var keys = branch.Children.Keys.OfType<YamlScalarNode>().Select(k => k.Value ?? "").ToHashSet(StringComparer.Ordinal);
 
-        if (keys.Contains(CursorKey) && keys.Contains("input"))
+        if (keys.Contains(CursorKey) && keys.Contains(JobKeys.Input))
             return $"'{alias}' reads a source and sets a cursor: a cursor is the column a sink tracks, and a source is filtered by ${{{{cursor://|default}}}}.";
         if (CursorTokenRefusal(alias, branch) is { } token) return token;
 
         var extra = keys.Where(k => !IoKeys.Contains(k) && k != CursorKey).Order(StringComparer.Ordinal).ToList();
         if (extra.Count > 0) return $"'{alias}' does more than read or write ({string.Join(", ", extra)}): {RunnerHint}.";
 
-        var processor = JobYaml.Mapping(branch, "provider-options")?.Children.Keys.OfType<YamlScalarNode>()
+        var processor = JobYaml.Mapping(branch, JobKeys.ProviderOptions)?.Children.Keys.OfType<YamlScalarNode>()
             .Select(k => k.Value ?? "").FirstOrDefault(Processors.Contains);
         if (processor is not null) return $"'{alias}' runs the {processor} processor: {RunnerHint}.";
 
-        if (JobYaml.Aliases(branch, "from").Count > 1) return $"'{alias}' reads several branches at once: {RunnerHint}.";
+        if (JobYaml.Aliases(branch, JobKeys.From).Count > 1) return $"'{alias}' reads several branches at once: {RunnerHint}.";
 
         if (!requireBricks) return null;
 
-        if (keys.SetEquals(["input"]) && JobYaml.Scalar(branch, "input") == ArrowEndpoint) return null;
+        if (keys.SetEquals([JobKeys.Input]) && JobYaml.Scalar(branch, JobKeys.Input) == ArrowEndpoint) return null;
 
-        if (keys.SetEquals(["from", "output"]) && JobYaml.Scalar(branch, "output") == ArrowEndpoint
-            && JobYaml.Aliases(branch, "from") is [var source] && source != alias && fragmentAliases.Contains(source))
+        if (keys.SetEquals([JobKeys.From, JobKeys.Output]) && JobYaml.Scalar(branch, JobKeys.Output) == ArrowEndpoint
+            && JobYaml.Aliases(branch, JobKeys.From) is [var source] && source != alias && fragmentAliases.Contains(source))
             return null;
 
         var form = FormOf(branch);

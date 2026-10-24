@@ -73,7 +73,7 @@ internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> dec
         try
         {
             var branch = Branch(brick);
-            var input = Scalar(branch, "output") ?? throw new InvalidOperationException("The sink names no output.");
+            var input = Scalar(branch, JobKeys.Output) ?? throw new InvalidOperationException("The sink names no output.");
             var table = ProviderOption(branch, "-writer", "table") ?? throw new InvalidOperationException("The sink names no table.");
             var result = await dtpipe.RunAsync(
                 ["--input", input, "--query", $"SELECT * FROM {table}", "--limit", rows.ToString(), "--output", "csv:-", "--no-stats"],
@@ -131,7 +131,7 @@ internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> dec
         if (brick is null) return new BrickSample(null, $"{node} offers no source brick '{id}'.");
         try
         {
-            var (result, contract) = await RunBranchAsync(brick, "output", new Dictionary<string, string>(),
+            var (result, contract) = await RunBranchAsync(brick, JobKeys.Output, new Dictionary<string, string>(),
                 job => ["--job", job, "--limit", rows.ToString(), "--no-stats"], saveContract: true);
             if (!result.Succeeded) return new BrickSample(null, result.Diagnostic);
             return result.Output.Length > MaxSampleBytes
@@ -242,7 +242,7 @@ internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> dec
         if (brick is null) return new SinkCheck(false, $"{node} offers no sink brick '{id}'.");
         try
         {
-            var (result, _) = await RunBranchAsync(brick, "input", new Dictionary<string, string> { ["contract.json"] = contractJson },
+            var (result, _) = await RunBranchAsync(brick, JobKeys.Input, new Dictionary<string, string> { ["contract.json"] = contractJson },
                 job => ["contract", "check", "--job", job, "--contract", Path.Combine(Path.GetDirectoryName(job)!, "contract.json")]);
             return new SinkCheck(result.Succeeded, Findings(result.Stderr) ?? result.Tail(12));
         }
@@ -309,7 +309,7 @@ internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> dec
     /// <summary>A setting of the first provider-options component whose name ends with <paramref name="suffix"/>.</summary>
     private static string? ProviderOption(JsonElement branch, string suffix, string key)
     {
-        if (!branch.TryGetProperty("provider-options", out var components) || components.ValueKind != JsonValueKind.Object) return null;
+        if (!branch.TryGetProperty(JobKeys.ProviderOptions, out var components) || components.ValueKind != JsonValueKind.Object) return null;
         foreach (var component in components.EnumerateObject())
         {
             if (component.Name.EndsWith(suffix, StringComparison.Ordinal) && component.Value.ValueKind == JsonValueKind.Object

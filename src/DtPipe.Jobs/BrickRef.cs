@@ -41,10 +41,10 @@ public static class BrickRef
     /// </summary>
     public static BrickReference? Of(string alias, YamlMappingNode branch)
     {
-        if (branch.Children.Count == 1 && TryParse(JobYaml.Scalar(branch, "input"), out var node, out var brick))
+        if (branch.Children.Count == 1 && TryParse(JobYaml.Scalar(branch, JobKeys.Input), out var node, out var brick))
             return new BrickReference(alias, node, brick);
-        if (branch.Children.Count == 2 && JobYaml.Has(branch, "from") && JobYaml.Aliases(branch, "from").Count == 1
-            && TryParse(JobYaml.Scalar(branch, "output"), out node, out brick))
+        if (branch.Children.Count == 2 && JobYaml.Has(branch, JobKeys.From) && JobYaml.Aliases(branch, JobKeys.From).Count == 1
+            && TryParse(JobYaml.Scalar(branch, JobKeys.Output), out node, out brick))
             return new BrickReference(alias, node, brick, IsSink: true);
         return null;
     }
@@ -61,16 +61,16 @@ public static class BrickRef
     /// </summary>
     public static string? Misuse(string alias, YamlMappingNode branch)
     {
-        foreach (var key in new[] { "input", "output" })
+        foreach (var key in new[] { JobKeys.Input, JobKeys.Output })
         {
             if (JobYaml.Scalar(branch, key) is not { } value || !value.StartsWith(Scheme, StringComparison.Ordinal)) continue;
             if (!TryParse(value, out _, out _)) return $"'{alias}' has a malformed brick reference '{value}': write brick:<node>/<brick>.";
-            if (key == "input")
+            if (key == JobKeys.Input)
             {
                 if (branch.Children.Count != 1) return $"'{alias}' references a brick and says more: the node composes the rest of the branch.";
                 continue;
             }
-            if (!JobYaml.Has(branch, "from") || JobYaml.Aliases(branch, "from").Count != 1)
+            if (!JobYaml.Has(branch, JobKeys.From) || JobYaml.Aliases(branch, JobKeys.From).Count != 1)
                 return $"'{alias}' writes to a brick reference and must read one branch: write from: <branch>.";
             if (branch.Children.Count != 2) return $"'{alias}' references a brick and says more: the node composes the rest of the branch.";
         }

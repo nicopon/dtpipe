@@ -22,7 +22,7 @@ public static class JobGraph
 
     public static BranchView Describe(string alias, YamlMappingNode branch)
     {
-        var providerOptions = JobYaml.Mapping(branch, "provider-options");
+        var providerOptions = JobYaml.Mapping(branch, JobKeys.ProviderOptions);
         var processor = providerOptions?.Children.Keys.OfType<YamlScalarNode>()
             .Select(k => k.Value!).FirstOrDefault(k => BrickRules.Processors.Contains(k));
 
@@ -40,10 +40,10 @@ public static class JobGraph
 
         return new BranchView(
             alias,
-            JobYaml.Scalar(branch, "input"),
-            JobYaml.Scalar(branch, "output"),
-            JobYaml.Aliases(branch, "from"),
-            JobYaml.Aliases(branch, "ref"),
+            JobYaml.Scalar(branch, JobKeys.Input),
+            JobYaml.Scalar(branch, JobKeys.Output),
+            JobYaml.Aliases(branch, JobKeys.From),
+            JobYaml.Aliases(branch, JobKeys.Ref),
             processor,
             JobYaml.Transformers(branch).Select(DescribeStage).ToList(),
             options,

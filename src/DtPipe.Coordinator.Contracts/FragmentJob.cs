@@ -71,27 +71,27 @@ public static partial class FragmentJob
             switch (unit.Kind)
             {
                 case FragmentUnitKind.Inbound:
-                    branch = new YamlMappingNode { { "input", BrickRules.ArrowEndpoint } };
+                    branch = new YamlMappingNode { { JobKeys.Input, BrickRules.ArrowEndpoint } };
                     break;
                 case FragmentUnitKind.Source or FragmentUnitKind.SourceSend:
                     if (Declared(unit, BrickKind.Source, branchOf) is not { } source) return (null, NoBrick(unit, "source"));
                     branch = source;
                     if (unit.Kind == FragmentUnitKind.SourceSend)
                     {
-                        if (JobYaml.Has(branch, "output")) return (null, $"'{unit.Key}': the brick '{unit.Brick}' already writes somewhere.");
-                        JobYaml.Set(branch, "output", BrickRules.ArrowEndpoint);
+                        if (JobYaml.Has(branch, JobKeys.Output)) return (null, $"'{unit.Key}': the brick '{unit.Brick}' already writes somewhere.");
+                        JobYaml.Set(branch, JobKeys.Output, BrickRules.ArrowEndpoint);
                     }
                     break;
                 case FragmentUnitKind.Sink:
                     if (Declared(unit, BrickKind.Sink, branchOf) is not { } sink) return (null, NoBrick(unit, "sink"));
                     if (unit.From is not { } feed || !Alias().IsMatch(feed)) return (null, $"'{unit.Key}' is a sink that reads no piece of the fragment.");
                     branch = sink;
-                    if (JobYaml.Has(branch, "from")) return (null, $"'{unit.Key}': the brick '{unit.Brick}' already reads something.");
-                    JobYaml.Set(branch, "from", feed);
+                    if (JobYaml.Has(branch, JobKeys.From)) return (null, $"'{unit.Key}': the brick '{unit.Brick}' already reads something.");
+                    JobYaml.Set(branch, JobKeys.From, feed);
                     break;
                 case FragmentUnitKind.Relay:
                     if (unit.From is not { } relayed || !Alias().IsMatch(relayed)) return (null, $"'{unit.Key}' is a relay of no piece of the fragment.");
-                    branch = new YamlMappingNode { { "from", relayed }, { "output", BrickRules.ArrowEndpoint } };
+                    branch = new YamlMappingNode { { JobKeys.From, relayed }, { JobKeys.Output, BrickRules.ArrowEndpoint } };
                     break;
                 default:
                     return (null, $"'{unit.Key}' is a piece of an unknown kind.");
