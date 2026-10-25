@@ -3,7 +3,7 @@ using System.Collections.Concurrent;
 namespace DtPipe.Coordinator.Server.Tests;
 
 /// <summary>
-/// <see cref="IDeploymentStore"/> in memory, for tests that are not about Redis: a document per pipeline. A store lives as long as the
+/// <see cref="IDeploymentStore"/> in memory, for tests that are not about a database: a document per pipeline. A store lives as long as the
 /// test process, found again by the name of the state directory a test gives it: a second <see cref="DeploymentManager"/> over the
 /// same name is a restart.
 /// </summary>

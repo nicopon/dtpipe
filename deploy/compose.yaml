@@ -1,8 +1,8 @@
-# The distributed pipeline's trial recipe: a coordinator, its Redis and a runner, every identity verified by a key the
-# coordinator issues tokens for. On the first `up`, the one-off `keys` service writes a random key for the first administrator
-# and one for the runner; the coordinator adds both identities from them, and the runner reads its own. Nothing else is in the
-# rights: docs/guides/distributed-first-pipeline.md adds a node in Access. For a recipe that runs in Docker alone, add
-# deploy/compose.trial.yaml.
+# The distributed pipeline's trial recipe: a coordinator, which keeps its state in a SQLite file on its volume, and a runner,
+# every identity verified by a key the coordinator issues tokens for. On the first `up`, the one-off `keys` service writes a
+# random key for the first administrator and one for the runner; the coordinator adds both identities from them, and the
+# runner reads its own. Nothing else is in the rights: docs/guides/distributed-first-pipeline.md adds a node in Access. For a
+# recipe that runs in Docker alone, add deploy/compose.trial.yaml.
 # NOT FOR PRODUCTION: nothing here is behind TLS, so a key crosses the network in clear at every token request
 # (Coordinator__Auth__AllowHttpKeys, which every page names). See deploy/README.md for what a real deployment provides.
 #
@@ -47,16 +47,6 @@ services:
       - coordinator-keys:/keys/coordinator
       - runner-key:/keys/runner-1
 
-  redis:
-    image: redis:7.4-alpine
-    command: redis-server --appendonly yes --appendfsync always
-    volumes:
-      - redis-data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 2s
-      retries: 30
-
   coordinator:
     image: ${DTPIPE_COORDINATOR_IMAGE:-ghcr.io/nicopon/dtpipe-coordinator:${DTPIPE_VERSION:-latest}}
     init: true
@@ -74,8 +64,6 @@ services:
       Coordinator__Bootstrap__Identities__0__Name: runner-1
       Coordinator__Bootstrap__Identities__0__Groups__0: runner
       Coordinator__Bootstrap__Identities__0__Key: "@/secrets/runner-1.key"
-      Coordinator__Store: redis
-      Coordinator__Redis__ConnectionString: redis:6379
       Coordinator__LibrarySeed: /trial/library
     volumes:
       - coordinator-state:/state
@@ -86,7 +74,6 @@ services:
         aliases: [coordinator.localtest.me]
     depends_on:
       keys: { condition: service_completed_successfully }
-      redis: { condition: service_healthy }
 
   runner:
     image: ${DTPIPE_RUNNER_IMAGE:-ghcr.io/nicopon/dtpipe-runner:${DTPIPE_VERSION:-latest}}
@@ -104,7 +91,6 @@ services:
       coordinator: { condition: service_healthy }
 
 volumes:
-  redis-data:
   coordinator-state:
   runner-state:
   coordinator-keys:

@@ -11,8 +11,8 @@ using Xunit;
 namespace DtPipe.Coordinator.Server.Tests;
 
 /// <summary>
-/// The stores over a real database of each provider (<see cref="SqlTestBed"/>): what the coordinator keeps when its state is not in
-/// Redis. A "start" of the coordinator ends the earlier one, since the database is held by one coordinator at a time.
+/// The stores over a real database of each provider (<see cref="SqlTestBed"/>): what the coordinator keeps beyond the process. A "start"
+/// of the coordinator ends the earlier one, since the database is held by one coordinator at a time.
 /// </summary>
 public sealed class SqlStoreTests : IDisposable
 {
@@ -435,25 +435,5 @@ public sealed class SqlStoreTests : IDisposable
         configuration["Coordinator:ConnectionString"] = "Server=db.example";
         var options = CoordinatorServerOptions.FromConfiguration(configuration);
         Assert.Equal((StoreKind.SqlServer, "Server=db.example", TimeSpan.FromSeconds(5)), (options.Store, options.ConnectionString, options.StoreLockWait));
-    }
-
-    [Theory]
-    [InlineData("Coordinator:Redis:ConnectionString", "localhost")]
-    [InlineData("Coordinator:Redis:KeyPrefix", "x:")]
-    public void Redis_Settings_Under_The_Sqlite_Store_Stop_The_Start_Instead_Of_Being_Ignored(string key, string value)
-    {
-        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
-        {
-            ["Coordinator:Authority"] = "http://idp", ["Coordinator:Ui:ClientSecret"] = "x", [key] = value,
-        }).Build();
-
-        var failure = Assert.Throws<InvalidOperationException>(() => CoordinatorServerOptions.FromConfiguration(configuration));
-        Assert.Contains("Coordinator:Store", failure.Message);
-        Assert.DoesNotContain(value, failure.Message);
-
-        configuration["Coordinator:Store"] = "redis";
-        Assert.Equal(StoreKind.Redis, CoordinatorServerOptions.FromConfiguration(configuration).Store);
-        configuration["Coordinator:Store"] = "memory";
-        Assert.Throws<InvalidOperationException>(() => CoordinatorServerOptions.FromConfiguration(configuration));
     }
 }

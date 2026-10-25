@@ -11,20 +11,7 @@ public enum StoreKind
 
     /// <summary>A SQL Server database the deployment provides, named by <see cref="CoordinatorServerOptions.ConnectionString"/>.</summary>
     SqlServer,
-
-    /// <summary>A Redis the deployment provides.</summary>
-    Redis,
 }
-
-/// <summary>
-/// The Redis that keeps the coordinator's state when <see cref="StoreKind.Redis"/> is chosen: the run journal, the rights, the deployments and the session keys (<c>Coordinator:Redis</c>).
-/// <see cref="ConnectionString"/> is a secret when it holds a password: it is read from the environment
-/// (<c>Coordinator__Redis__ConnectionString</c>) and written in no log or message.
-/// <see cref="KeyPrefix"/> lets several coordinators share one Redis. <see cref="Initialize"/> allows the journal, the rights and the library
-/// to begin where the state holds none: the first start, or after Redis (or the library's remote) lost its data. The connection string is
-/// set through the environment only: a command-line argument can be listed by any process of the host.
-/// </summary>
-public sealed record RedisSettings(string? ConnectionString = null, string KeyPrefix = "dtpipe-coordinator:", bool Initialize = false);
 
 /// <summary>
 /// The server's settings, from the <c>Coordinator</c> configuration section: environment variables
@@ -79,8 +66,8 @@ public sealed class CoordinatorServerOptions
     public TimeSpan HealthMaxAge { get; init; } = TimeSpan.FromMinutes(5);
 
     /// <summary>
-    /// Where the state lives beyond the process (<c>Coordinator:Store</c>: <c>sqlite</c>, <c>postgresql</c>, <c>sqlserver</c> or
-    /// <c>redis</c>); SQLite when unset.
+    /// Where the state lives beyond the process (<c>Coordinator:Store</c>: <c>sqlite</c>, <c>postgresql</c> or <c>sqlserver</c>); SQLite
+    /// when unset.
     /// </summary>
     public StoreKind Store { get; init; } = StoreKind.Sqlite;
 
@@ -102,9 +89,6 @@ public sealed class CoordinatorServerOptions
     /// and run ids would be given twice.
     /// </summary>
     public bool Initialize { get; init; }
-
-    /// <summary>The Redis the state lives in when <see cref="Store"/> is Redis; the server does not start without a connection string.</summary>
-    public RedisSettings Redis { get; init; } = new();
 
     /// <summary>
     /// The directory of the SQLite database when <see cref="Store"/> is SQLite (<c>Coordinator:Sqlite:Directory</c>): the state directory
@@ -210,7 +194,7 @@ public sealed class CoordinatorServerOptions
 
     // A table, not Enum.TryParse, which takes "1" for a value.
     private static readonly (string Name, StoreKind Kind)[] StoreNames =
-        [("sqlite", StoreKind.Sqlite), ("postgresql", StoreKind.PostgreSql), ("sqlserver", StoreKind.SqlServer), ("redis", StoreKind.Redis)];
+        [("sqlite", StoreKind.Sqlite), ("postgresql", StoreKind.PostgreSql), ("sqlserver", StoreKind.SqlServer)];
 
     public static CoordinatorServerOptions FromConfiguration(IConfiguration configuration)
     {
@@ -219,12 +203,10 @@ public sealed class CoordinatorServerOptions
         string? PathOf(string key) => section[key] is { Length: > 0 } value ? Path.GetFullPath(value) : null;
         var store = section["Store"] is { Length: > 0 } kind
             ? StoreNames.FirstOrDefault(n => string.Equals(n.Name, kind, StringComparison.OrdinalIgnoreCase)) is { Name: not null } named ? named.Kind
-                : throw new InvalidOperationException("Coordinator:Store must be 'sqlite', 'postgresql', 'sqlserver' or 'redis'.")
+                : throw new InvalidOperationException("Coordinator:Store must be 'sqlite', 'postgresql' or 'sqlserver'.")
             : StoreKind.Sqlite;
         var storeName = StoreNames.First(n => n.Kind == store).Name;
         // A setting of another store would be ignored in silence, and a coordinator would keep its state elsewhere than meant.
-        if (store != StoreKind.Redis && (section["Redis:ConnectionString"] is { Length: > 0 } || section["Redis:KeyPrefix"] is { Length: > 0 }))
-            throw new InvalidOperationException($"Coordinator:Redis settings are given but Coordinator:Store is '{storeName}': set Coordinator:Store to 'redis', or remove them.");
         if (store != StoreKind.Sqlite && section["Sqlite:Directory"] is { Length: > 0 })
             throw new InvalidOperationException($"Coordinator:Sqlite:Directory is given but Coordinator:Store is '{storeName}': remove it, or set Coordinator:Store to 'sqlite'.");
         var connectionString = SecretReference.Read(configuration, "Coordinator:ConnectionString");
@@ -285,10 +267,6 @@ public sealed class CoordinatorServerOptions
             StoreLockWait = lockWait,
             Initialize = section.GetValue<bool>("Initialize"),
             SqliteDirectory = PathOf("Sqlite:Directory"),
-            Redis = new RedisSettings(
-                section["Redis:ConnectionString"] is { Length: > 0 } redis ? redis : null,
-                section["Redis:KeyPrefix"] is { Length: > 0 } prefix ? prefix : "dtpipe-coordinator:",
-                section.GetValue<bool>("Initialize")),
             LibraryRemote = LibraryRemoteSettings.FromConfiguration(section),
             HealthMaxAge = section.GetValue<TimeSpan?>("Health:MaxAge") is { } age && age > TimeSpan.Zero ? age : TimeSpan.FromMinutes(5),
         };

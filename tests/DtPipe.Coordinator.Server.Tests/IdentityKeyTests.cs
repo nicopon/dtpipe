@@ -1,5 +1,3 @@
-using Microsoft.Data.Sqlite;
-using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace DtPipe.Coordinator.Server.Tests;
@@ -11,16 +9,13 @@ namespace DtPipe.Coordinator.Server.Tests;
 public sealed class IdentityKeyTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "identity-keys-" + Guid.NewGuid().ToString("N"));
-    private readonly RedisTestBed _redis = new();
-    private SqlDatabase? _sqlite;
+    private SqlTestBed? _bed;
 
     public IdentityKeyTests() => Directory.CreateDirectory(_dir);
 
     public void Dispose()
     {
-        _sqlite?.Dispose();
-        _redis.Dispose();
-        SqliteConnection.ClearAllPools();
+        _bed?.Dispose();
         Directory.Delete(_dir, recursive: true);
     }
 
@@ -140,23 +135,14 @@ public sealed class IdentityKeyTests : IDisposable
     public void The_Client_Id_Reads_From_The_End_Since_The_Secret_Has_A_Fixed_Length(string presented, string? clientId) =>
         Assert.Equal(clientId, ClearKey.ClientIdOf(presented));
 
-    public static TheoryData<string> Stores => ["memory", "sqlite", "redis"];
+    public static TheoryData<string> Stores => ["memory", .. SqlTestBed.Names];
 
-    /// <summary>One start of the coordinator over the store named <paramref name="kind"/>; the earlier start over SQLite is over.</summary>
+    /// <summary>One start of the coordinator over the store named <paramref name="kind"/>; the earlier start over a database is over.</summary>
     private IRightsStore Start(string kind)
     {
-        switch (kind)
-        {
-            case "memory":
-                return MemoryRightsStore.At(_dir);
-            case "sqlite":
-                _sqlite?.Dispose();
-                _sqlite = SqlDatabase.Open(new SqliteDialect(_dir), true, TimeSpan.Zero, NullLogger.Instance);
-                return new SqlRightsStore(_sqlite);
-            default:
-                RedisTestBed.Need();
-                return new RedisRightsStore(_redis.Open());
-        }
+        if (kind == "memory") return MemoryRightsStore.At(_dir);
+        _bed ??= new SqlTestBed(kind, _dir);
+        return new SqlRightsStore(_bed.Start());
     }
 
     [Theory]

@@ -56,7 +56,7 @@ public static class CoordinatorServer
         // is identified by a token of the trusted IdP, its group read from the rights document by its
         // subject. The flow matrix is the rights document's too, read live by the hub on every transfer and
         // by the planner on every plan.
-        // The state the coordinator keeps beyond the process is on one store, a SQLite file or a Redis, which the stores borrow.
+        // The state the coordinator keeps beyond the process is in one database, a SQLite file, a PostgreSQL or a SQL Server database, which the stores borrow.
         builder.Services.AddCoordinatorStores(server);
         builder.Services.AddSingleton<RightsStore>();
         builder.Services.AddCoordinatorHub(_ => { }).Build();
@@ -126,13 +126,13 @@ public static class CoordinatorServer
                 context.Request.Host = new HostString(publicUrl.Authority);
                 return next(context);
             });
-        // The session keys are read before anything is served: Redis down stops the start instead of the first sign-in.
+        // The session keys are read before anything is served: a store that is down stops the start instead of the first sign-in.
         TrustedIdp.EnsureSessionKeys(app.Services);
         // The issuer's signing keys are opened with the session keys, so they are read after them, and a store that cannot give them stops the start.
         if (server.KeyIssuer is not null) app.Services.GetRequiredService<IssuerKeys>();
         if (server.ExchangesKeysOverHttp)
             logger.LogWarning("Coordinator:Auth:AllowHttpKeys is set and Coordinator:PublicUrl is http: identity keys cross the network in clear at every token request.");
-        // The armed deployments and the hosts set aside are read now too: a Redis that cannot be read stops the start.
+        // The armed deployments and the hosts set aside are read now too: a store that cannot be read stops the start.
         app.Services.GetRequiredService<DeploymentManager>();
         app.Services.GetRequiredService<EnrollmentQueue>();
         // With a remote, the library is read from it now: a remote that cannot be reached, or that holds nothing to begin from, stops the start.

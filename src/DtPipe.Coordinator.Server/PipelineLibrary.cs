@@ -535,7 +535,7 @@ public sealed partial class PipelineLibrary : IJobSource, ILibraryHeads
         psi.Environment.Remove("GIT_DIR");
         psi.Environment.Remove("GIT_WORK_TREE");
         psi.Environment["GIT_CEILING_DIRECTORIES"] = Path.GetDirectoryName(_root)!;
-        // The coordinator's own settings (the token, the Redis connection string, the pages' client secret) are in its environment, which a child
+        // The coordinator's own settings (the token, the store's connection string, the pages' client secret) are in its environment, which a child
         // inherits: git, and a remote's hooks when the remote is a local path, have no use for them.
         foreach (var name in psi.Environment.Keys.Where(k => k.StartsWith("Coordinator__", StringComparison.OrdinalIgnoreCase)).ToList())
             psi.Environment.Remove(name);

@@ -10,16 +10,14 @@ project's `CLAUDE.md`); the nodes are `src/DtPipe.PipelineNode.Hosting` hosts
   and hosts the distributed family (`src/DtPipe.Coordinator*`, `src/DtPipe.PipelineNode*`) as a
   consumer: product code a lab need may shape, never code written for the lab alone. A need of the
   engine is reported to the user, not patched in. `[unchecked]`
-- **The lab runs the coordinator on `Coordinator:Store=redis`**, whatever the product's default is: it is the store that shares state between coordinators.
-  The stack alone also runs on the product's default: `LAB_STACK_STORE=sqlite` empties the Redis connection string, leaves the `redis`
-  service (a Compose profile) out, and keeps the state in `.stack/coordinator`. A stack is made on one store; purge `.stack/` to change it.
-  `[local: lab.sh stack up|smoke|ui|studio with LAB_STACK_STORE=sqlite]`
-- **The lab's coordinator state, its library apart, is in a Redis whose settings are fixed once per state directory.** `lab.sh up` records the Redis
-  (`LAB_REDIS`, else a `redis-server` of its own on `LAB_REDIS_PORT` with its data under `.state/redis`, fsynced on every write,
-  and a message naming what is missing when there is none) and a random key prefix in `.state/redis.env`; `exec-coordinator`
-  reads it back, so `tools/campaign.py` restarts the coordinator on the same journal and a reset lab starts a new one even on a
-  Redis that outlives it. `Coordinator:Initialize` is true here only: a lab begins where Redis holds nothing. The stack's
-  `redis` service keeps its data in `.stack/redis`, its own directory like every service's. `[local: lab.sh up, tools/campaign.py F4]`
+- **The stack's coordinator keeps its state in PostgreSQL, the local lab's in SQLite.** The stack's `postgres` service (a Compose
+  profile) keeps its data in `.stack/postgres`, its own directory like every service's. `compose()` in `lab.sh` gives the coordinator
+  `Coordinator__Store` and `Coordinator__ConnectionString` through the environment (`LAB_STACK_CONNECTION`, the password
+  `LAB_POSTGRES_SECRET`), never as an argument. `LAB_STACK_STORE=sqlite` empties the connection string, leaves the service out and keeps
+  the state in `.stack/coordinator`. A stack is made on one store; purge `.stack/` to change it. The local lab's coordinator keeps its
+  database in `.state/`, which `lab.sh reset` takes with it, so `tools/campaign.py` restarts the coordinator on the same state and a
+  throw-away `LAB_STATE` has a state of its own. `Coordinator:Initialize` is true here only: a lab begins where its store holds nothing.
+  `[local: lab.sh up, lab.sh stack up|smoke|ui|studio on either store, tools/campaign.py F4]`
 - **The lab's library is pushed to a bare repository beside its state.** `exec-coordinator` creates `.state/library.git` when it is missing
   (`git init --bare`, nothing of the server) and passes it as `Coordinator:Library:Remote:Url`, so `tools/campaign.py` restarts the coordinator on the
   same remote and `lab.sh reset` takes it with the state. The stack's coordinator mounts `.stack/library.git` for the same purpose and its
@@ -55,7 +53,7 @@ project's `CLAUDE.md`); the nodes are `src/DtPipe.PipelineNode.Hosting` hosts
   reference cannot take, so it runs on sandbox nodes as written. A strict probe through `/api/deploy` names the bricks by id (`bricks`).
   `[local: smoke.py lab, library, bricks, sandbox]`
 - **`monitor-1` is the lab's supervisor**: a client of `idp-clients.json` and an identity of kind `monitor` in
-  `rights-seed.json`, which reads `/health` and nothing else. A stack keeps its rights (in Redis) across restarts, so
+  `rights-seed.json`, which reads `/health` and nothing else. A stack keeps its rights (in its store) across restarts, so
   `smoke.py bricks` adds the identity through `POST /api/rights/identities` when the rights predate the seed.
   It arms `customers-mirror` for the check and undeploys it. `[local: smoke.py bricks - health, ui_check.py]`
 - **`launcher-1` is the lab's scheduler**: a client of `idp-clients.json` and an identity of kind `launcher` in
@@ -154,7 +152,7 @@ project's `CLAUDE.md`); the nodes are `src/DtPipe.PipelineNode.Hosting` hosts
 - **The stack's images are built from the commit HEAD names, and its services run unprivileged.** `compose()` in `lab.sh` sets
   `SOURCE_REVISION` (`${SOURCE_REVISION:-}` in `compose.yaml`: a `:?` would fail `down` and `exec` too; an empty value
   builds images labelled `unknown`, which the `versions` guard refuses), `LAB_UID` and `LAB_GID`. The services that mount a `.stack/` directory (`node-N`, `idp`, `coordinator`,
-  `redis`) run as that user and with `HOME=/tmp`, so nothing in `.stack/` is owned by root; `lab.sh stack up` creates the directories
+  `postgres`) run as that user and with `HOME=/tmp`, so nothing in `.stack/` is owned by root; `lab.sh stack up` creates the directories
   first, as docker would create them as root. The runner mounts nothing and keeps the image's own user (1654). A throwaway container
   of the stack (the enrollment check) runs as the invoking user too. `smoke.py bricks - versions` requires every node's `dtpipe` and
   the revision label of the coordinator, runner and node images to be HEAD; a tree that is dirty at the same HEAD is not seen.
@@ -175,9 +173,10 @@ project's `CLAUDE.md`); the nodes are `src/DtPipe.PipelineNode.Hosting` hosts
 - **The coordinator's restart is checked on the stack, named only.** `lab.sh stack restart-check [restore|restore-alone]` runs `smoke.py restart`:
   a rights edit, a library save, an armed pipeline, a run and a session cookie are recorded, the container is stopped and started (`restore`: on
   a copy of its state directory put back, as `deploy/README.md` describes a backup; `restore-alone`: with the library's remote emptied too), and
-  each is read back with the cookie sent as it was, never signed in again. The stack keeps `Coordinator:Initialize` true, so a store that lost
+  each is read back with the cookie sent as it was, never signed in again. On PostgreSQL the database stays in its service, whose backup is the
+  database's own, so `restore` puts back the state directory alone. The stack keeps `Coordinator:Initialize` true, so a store that lost
   its state would begin again in silence: the guard compares values and fails then. A run asked in the gap between a host announcing and its data
-  plane client registering is refused by name and asked again. `[local: lab.sh stack restart-check]`
+  plane client registering is refused by name and asked again. `[local: lab.sh stack restart-check, on either store]`
 - Verify a change with `./lab.sh smoke`, a page change with `./lab.sh ui` too, and a change to what
   `dtpipe studio` calls with `./lab.sh studio` (`tools/studio_check.py`, outside CI); one that touches
   the images, `compose.yaml` or a check's stack form with `./lab.sh stack smoke|ui|studio` as well. The page checks

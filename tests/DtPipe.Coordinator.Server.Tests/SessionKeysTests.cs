@@ -7,7 +7,7 @@ using Xunit;
 
 namespace DtPipe.Coordinator.Server.Tests;
 
-/// <summary>An <see cref="IXmlRepository"/> in memory, for the hosts of tests that are not about Redis.</summary>
+/// <summary>An <see cref="IXmlRepository"/> in memory, for the hosts of tests that are not about a database.</summary>
 public sealed class MemoryXmlRepository : IXmlRepository
 {
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, MemoryXmlRepository> Shelves = new();

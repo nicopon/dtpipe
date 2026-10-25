@@ -4,7 +4,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace DtPipe.Coordinator.Server.Tests;
 
 /// <summary>
-/// <see cref="IRunStore"/> in memory, for tests that are not about Redis: the same contract (documents, a counter that never
+/// <see cref="IRunStore"/> in memory, for tests that are not about a database: the same contract (documents, a counter that never
 /// goes back, a history cut to the window), nothing from a file. A store lives as long as the test process, found again by the
 /// name of the state directory a test gives it: a second <see cref="RunJournal"/> over the same name is a restart.
 /// </summary>

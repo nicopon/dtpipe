@@ -3,7 +3,7 @@ using System.Collections.Concurrent;
 namespace DtPipe.Coordinator.Server.Tests;
 
 /// <summary>
-/// <see cref="IRightsStore"/> in memory, for tests that are not about Redis: the same contract (a document, a version a write must
+/// <see cref="IRightsStore"/> in memory, for tests that are not about a database: the same contract (a document, a version a write must
 /// name, a create that happens once). A store lives as long as the test process, found again by the name of the state directory a test
 /// gives it: a second <see cref="RightsStore"/> over the same name is a restart.
 /// </summary>

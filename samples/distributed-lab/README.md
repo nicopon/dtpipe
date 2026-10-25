@@ -21,9 +21,8 @@ disposable hosts of `DtPipe.PipelineNode.Hosting`. They drive the `dtpipe` binar
 ## Quick start
 
 Prerequisites: the .NET 10 SDK, `python3`, a bash shell, network access to nuget.org for the
-TransportR `0.5.1` packages (restored like any other dependency of `DtPipe.Coordinator`), a
-`redis-server` on the path (or `LAB_REDIS=host:port` naming a Redis; `tests/infra/start_infra.sh`
-starts one on `localhost:6390`) and a built binary:
+TransportR `0.5.1` packages (restored like any other dependency of `DtPipe.Coordinator`) and a
+built binary:
 
 ```bash
 ./build.sh                          # at the repository root: produces dist/release/dtpipe
@@ -77,8 +76,9 @@ the images are built from (without it the images say `unknown` and `stack smoke`
 the user who owns `.stack/`. The services that mount it run as that user, so `rm -rf .stack` needs no root; the
 runner mounts nothing and runs as the image's own unprivileged user. Run `docker compose` yourself with
 `SOURCE_REVISION=$(git rev-parse HEAD) LAB_UID=$(id -u) LAB_GID=$(id -g)` set, and with `.stack/*` created, and
-the store: `COMPOSE_PROFILES=redis` for the default (the `redis` service is a profile), or
-`LAB_STACK_STORE=sqlite LAB_STACK_REDIS=` for SQLite, where the empty value is the point.
+the store: `COMPOSE_PROFILES=postgresql` and `LAB_STACK_CONNECTION` (the database's connection string, from the
+environment) for the default (the `postgres` service is a profile, its password `LAB_POSTGRES_SECRET`), or
+`LAB_STACK_STORE=sqlite LAB_STACK_CONNECTION=` for SQLite, where the empty value is the point.
 The coordinator and the runner are the product's images, `coordinator-lab` adding the lab's seeds to the first.
 `*.localtest.me` resolves to `127.0.0.1`: the host needs a DNS that answers for it. A proxy (Caddy)
 publishes the stack's only port and routes by host name: `coordinator.localtest.me` to the
@@ -93,15 +93,16 @@ run side by side. Browse the coordinator at that name, never `127.0.0.1`.
 | `.stack/idp/` | `idp` | its signing key |
 | `.stack/coordinator/` | `coordinator` | its copy of the library, its fragments' scratch files, and with `LAB_STACK_STORE=sqlite` its state |
 | `.stack/library.git/` | `coordinator` | the bare repository the library is pushed to, created on first start |
-| `.stack/redis/` | `redis` | runs, rights, armed deployments, session keys (not with `LAB_STACK_STORE=sqlite`) |
+| `.stack/postgres/` | `postgres` | runs, rights, armed deployments, session keys (not with `LAB_STACK_STORE=sqlite`) |
 | `.stack/node-N/` | `node-N` | its database, seeded on first start, and its fragment jobs |
 
 The runner mounts nothing. `LAB_SCALE` (default `1`) multiplies the seeded rows for every node: a
 node's rows reference the others' counts, so a node seeded at another scale refuses to start; delete
 `.stack/` to seed again. `LAB_NODE_SANDBOX=1 ./lab.sh stack up` starts the data nodes in sandbox
-mode. `LAB_STACK_STORE=sqlite` runs the coordinator on the product's default store, a SQLite file in
-`.stack/coordinator/`, with no `redis` service: the same checks pass on both, and a stack is made on one
-store, so delete `.stack/` to change it. `./lab.sh stack restart-check [restore|restore-alone]` ends the
+mode. The stack's coordinator keeps its state in PostgreSQL; `LAB_STACK_STORE=sqlite` runs it on the product's
+default store, a SQLite file in `.stack/coordinator/`, with no `postgres` service: the same checks pass on both,
+and a stack is made on one store, so delete `.stack/` to change it. The local lab's coordinator keeps its state in
+a SQLite file in `.state/`. `./lab.sh stack restart-check [restore|restore-alone]` ends the
 coordinator and starts it again, on a copy of its state directory put back for `restore` (also with the
 library's remote emptied for `restore-alone`), and checks that a rights edit, a library save, an armed
 pipeline, a run and a session cookie come back. `LAB_STACK_HTTP_PORT` moves the proxy off port 80, outside and inside: tokens name the issuer
@@ -163,7 +164,7 @@ Tokens come from `Lab.Idp` (below), which the coordinator trusts for its audienc
 holds a client id and secret in its `nodes/<node>.json`, which `idp-clients.json` registers; the
 token it obtains names it (`sub`) and grants nothing. The coordinator gives that subject its groups,
 which TransportR's hub then enforces: a node sends to another only if every group of the sender may
-send to every group of the receiver. What is allowed lives in one document, kept in the coordinator's Redis,
+send to every group of the receiver. What is allowed lives in one document, kept in the coordinator's store,
 started from `rights-seed.json` and edited in the **Access** view:
 
 | | Enforced |
@@ -177,7 +178,7 @@ takes its client in `idp-clients.json` (then an IdP restart); its identity then 
 a host whose token no identity knows is not a node. It waits in the Access view's *Waiting for approval* card,
 with the name, description and bricks it proposes (and the token's claims listed by
 `Coordinator:Identity:LabelClaims`, none by default), and an administrator accepts it by giving it a node name and
-groups, or sets it aside for 24 hours. The list of hosts that wait lives in memory and holds 50, never evicting one that waits; the hosts set aside are kept in Redis, so a restart does not let them back in early.
+groups, or sets it aside for 24 hours. The list of hosts that wait lives in memory and holds 50, never evicting one that waits; the hosts set aside are kept in the store, so a restart does not let them back in early.
 
 ### The stand-alone test IdP (`Lab.Idp`)
 
@@ -275,10 +276,10 @@ planning ever sends a job as written.
 
 **The library** is a git repository under `.state/library`, started from `library-seed/`: each
 save and each save of bindings is a commit, pushed to the bare repository `.state/library.git` before the save is accepted
-(`lab.sh` creates it; a refused push undoes the save, and `rm -r .state/library` followed by a restart reads the library back from it). Armed deployments are kept in Redis, like the runs. A seed `<id>.yaml` brings its `<id>.bindings.json`, which gives the mode of each referenced branch (`strict`: the brick must stay at the version the last check pinned; `contract`, `compatible`, `tolerant`: the brick may change, judged against what the last check pinned), the job saying the node and the brick; a seed carries no pin, and arming writes it; the runner is never bound. Several pipelines may be deployed at once. Their runs are in
+(`lab.sh` creates it; a refused push undoes the save, and `rm -r .state/library` followed by a restart reads the library back from it). Armed deployments are kept in the store, like the runs. A seed `<id>.yaml` brings its `<id>.bindings.json`, which gives the mode of each referenced branch (`strict`: the brick must stay at the version the last check pinned; `contract`, `compatible`, `tolerant`: the brick may change, judged against what the last check pinned), the job saying the node and the brick; a seed carries no pin, and arming writes it; the runner is never bound. Several pipelines may be deployed at once. Their runs are in
 flight together when they share no data node; otherwise they wait their turn in the order they came
-(the runner never counts). Runs and armed deployments are kept in Redis, under a key prefix derived from the state directory,
-so a throw-away `LAB_STATE` sees no other lab's runs or deployments.
+(the runner never counts). Runs and armed deployments are kept in the store, which a throw-away `LAB_STATE` has of its own, so it sees no other
+lab's runs or deployments.
 
 
 ## Lab view scenarios (`/lab/`)
@@ -349,7 +350,7 @@ replica ran each fragment.
   fragment: the coordinator's log carries the refusal.
 - One run at a time per data node: the runner's fragments of two runs share its host with no bound
   on either. The coordinator is not highly available: a restart ends the runs in flight as errors (they keep their ids and the journal
-  holds them, in Redis), and asks the node hosts that carried them to abandon their fragments when they announce again; the library, the armed
+  holds them, in the store), and asks the node hosts that carried them to abandon their fragments when they announce again; the library, the armed
   deployments, the rights, the session keys and the finished runs survive, the library by being read back from its remote. A host that does not announce again keeps its fragments until it is restarted
   (`./lab.sh down`, then `./lab.sh up`). Nothing reconstructs a run from the nodes reconnecting: the journal is the authority.
 - A studio knows a source brick's columns, not those after a step: dtpipe offers no schema of

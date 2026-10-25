@@ -3,12 +3,12 @@
 # of a bind mount (Linux), which the macOS hosts the stack was built on do not. Played by hand, on the host itself;
 # it asks for no sudo, and the first step that fails ends it with a non-zero status.
 #
-#   ./tools/linux_replay.sh [stack|sqlite|uid]...    no argument plays all three, in this order
+#   ./tools/linux_replay.sh [postgresql|sqlite|uid]...    no argument plays all three, in this order
 #
-#   stack    the Redis stack: up, smoke, down, then .stack/ removed by the user who made it
-#   sqlite   the stack on the product's default store: up, smoke, restart-check restore, down, .stack/ removed
-#   uid      the product's coordinator image on a volume owned by another uid, which it refuses to start on,
-#            and on one owned by 1654, which it starts on
+#   postgresql  the stack on PostgreSQL, its default store: up, smoke, restart-check, down, then .stack/ removed by the user who made it
+#   sqlite      the stack on the product's default store: up, smoke, restart-check restore, down, .stack/ removed
+#   uid         the product's coordinator image on a volume owned by another uid, which it refuses to start on,
+#               and on one owned by 1654, which it starts on
 #
 # The stack steps build the images of the commit HEAD names and need ports 80 and 8080 free, and a purged .stack/.
 
@@ -36,7 +36,8 @@ cycle() {
     export LAB_STACK_STORE="$store"
     step_shown "$store: stack up" "$LAB/lab.sh" stack up
     step_shown "$store: stack smoke" "$LAB/lab.sh" stack smoke
-    [[ "$store" == sqlite ]] && step_shown "$store: restart-check restore" "$LAB/lab.sh" stack restart-check restore
+    local how=restart; [[ "$store" == sqlite ]] && how=restore
+    step_shown "$store: restart-check $how" "$LAB/lab.sh" stack restart-check "$how"
     step "$store: stack down" "$LAB/lab.sh" stack down
     step "$store: .stack removed without sudo" rm -rf "$LAB/.stack"
     [[ ! -e "$LAB/.stack" ]] || { echo "FAIL  $store: .stack still there"; exit 1; }
@@ -78,13 +79,13 @@ uid() {
         || { echo "FAIL  uid: $health on a volume of uid 1654"; docker logs "$NAME" 2>&1 | tail -5; exit 1; }
 }
 
-plays=("$@"); [[ ${#plays[@]} -gt 0 ]] || plays=(stack sqlite uid)
+plays=("$@"); [[ ${#plays[@]} -gt 0 ]] || plays=(postgresql sqlite uid)
 for play in "${plays[@]}"; do
     case "$play" in
-        stack) cycle redis ;;
+        postgresql) cycle postgresql ;;
         sqlite) cycle sqlite ;;
         uid) uid ;;
-        *) echo "usage: $0 [stack|sqlite|uid]..." >&2; exit 1 ;;
+        *) echo "usage: $0 [postgresql|sqlite|uid]..." >&2; exit 1 ;;
     esac
 done
 echo "All steps passed."

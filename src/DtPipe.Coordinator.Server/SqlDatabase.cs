@@ -3,12 +3,12 @@ using System.Data.Common;
 namespace DtPipe.Coordinator.Server;
 
 /// <summary>
-/// The coordinator's one database when its state is not in Redis, on the provider its <see cref="StoreDialect"/> speaks: one connection
+/// The coordinator's one database, on the provider its <see cref="StoreDialect"/> speaks: one connection
 /// for the life of the process, which holds the database for this coordinator, which the stores borrow and the container disposes, and
 /// on which every read and write runs, one at a time. It never opens a second one: a session opened again would hold no lock. A
 /// database that can be lost is probed; lost, it says so once, every call after fails, and it calls the action it was given, which
 /// stops the coordinator, since another may now take the database. A failure of the database, whatever form the driver gives it, is a
-/// <see cref="StoreUnavailableException"/>, as an unreachable Redis is.
+/// <see cref="StoreUnavailableException"/>.
 /// </summary>
 internal sealed class SqlDatabase : IDisposable
 {

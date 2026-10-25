@@ -14,14 +14,9 @@ jobs:
   gate-smoke:
     name: F7 gate smoke (no LLM)
     runs-on: ubuntu-latest
-    # The coordinator's stores are tested against a real Redis and a real PostgreSQL (DtPipe.Coordinator.Server.Tests);
+    # The coordinator's stores are tested against a real PostgreSQL (DtPipe.Coordinator.Server.Tests);
     # SQL Server is the manual job of coordinator-sqlserver.yml.
     services:
-      redis:
-        image: redis:7.4-alpine
-        ports: ["6379:6379"]
-        options: >-
-          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 5
       postgres:
         image: postgres:18-alpine
         env:
@@ -30,7 +25,6 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 5
     env:
-      DTPIPE_TEST_REDIS: localhost:6379
       DTPIPE_TEST_POSTGRES: Host=localhost;Port=5432;Username=postgres;Password=password;Database=postgres
     steps:
        - name: Checkout

@@ -3,7 +3,7 @@ using System.Collections.Concurrent;
 namespace DtPipe.Coordinator.Server.Tests;
 
 /// <summary>
-/// <see cref="IIgnoredHostStore"/> in memory, for tests that are not about Redis: the same contract (what expired is forgotten, the
+/// <see cref="IIgnoredHostStore"/> in memory, for tests that are not about a database: the same contract (what expired is forgotten, the
 /// soonest to be let back in goes first past the bound). A store lives as long as the test process, found again by a name: a second
 /// <see cref="EnrollmentQueue"/> over the same name is a restart.
 /// </summary>

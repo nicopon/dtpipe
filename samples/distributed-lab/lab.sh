@@ -1,18 +1,12 @@
 #!/usr/bin/env bash
 # Starts, stops and inspects the distributed lab: one coordinator, four data-node hosts and a
 # runner, as plain local processes. Everything the lab writes lives under .state/ (databases,
-# fragments, library, the bare repository the library is pushed to, logs); the rest of the
-# coordinator's state lives in Redis.
+# fragments, library, the bare repository the library is pushed to, the coordinator's SQLite database, logs).
 #
 #   ./lab.sh up        build, seed if needed, start everything, print the page URL
 #                      (LAB_NODE_SANDBOX=1 starts the nodes in sandbox mode: see "nodes";
 #                      LAB_REPLICAS="node-4=2,runner-1=2" starts that many hosts for those nodes,
 #                      all of one identity: the first is named for the node, the others <node>.r2, ...)
-#   LAB_REDIS=H:P      the Redis that keeps the coordinator's state. Unset, `up` starts the redis-server it finds on LAB_REDIS_PORT
-#                      (5191) with its data under .state/redis, and fails naming what is missing when there is none; any
-#                      Redis does (tests/infra/start_infra.sh starts one on localhost:6390). `up` records the Redis and a
-#                      random key prefix in .state/redis.env, which every later call reads back: a reset lab starts a
-#                      new journal and a throw-away LAB_STATE sees no other lab's runs
 #   LAB_STATE=DIR      moves the state directory (an absolute path), for a throw-away run: a relative one would not
 #                      match the absolute paths in the command lines of the hosts' children
 #   ./lab.sh down      stop every lab process: those the pid files name, and any other whose command line names the state
@@ -36,8 +30,9 @@
 #                        restart-check [restore|restore-alone]: ends the coordinator's process and starts it again and checks that its state came
 #                            back, a session included. restore does it on a copy of the state directory, as deploy/README.md's backup; restore-alone
 #                            also empties the library's remote. Named only
-#   LAB_STACK_STORE=sqlite  the stack's coordinator keeps its state in .stack/coordinator and the redis service stays out
-#                           (default redis); a stack is made on one store, so purge .stack/ to change it
+#   LAB_STACK_STORE=sqlite  the stack's coordinator keeps its state in .stack/coordinator and the postgres service stays out
+#                           (postgresql, the default, keeps it in that service, whose data is in .stack/postgres); a stack is made
+#                           on one store, so purge .stack/ to change it. LAB_POSTGRES_SECRET sets the database's password
 set -euo pipefail
 
 LAB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -54,7 +49,6 @@ STACK_PORT="${LAB_STACK_HTTP_PORT:-80}"
 STACK_SUFFIX="$([[ "$STACK_PORT" == 80 ]] || echo ":$STACK_PORT")"
 STACK_URL="http://coordinator.localtest.me$STACK_SUFFIX"
 NODES=(node-1 node-2 node-3 node-4 runner-1)
-REDIS_PORT="${LAB_REDIS_PORT:-5191}"
 
 # The processes that carry the nodes: one per node, and the extra replicas LAB_REPLICAS asks for ("node=count",
 # comma-separated), each named <node>.r<n>. A count that is not a number is an error, never one replica.
@@ -170,51 +164,13 @@ require_clean_start() {
         exit 1
     fi
     command -v lsof >/dev/null 2>&1 || return 0
-    local ports=("$PORT" "${LAB_IDP_PORT:-5190}")
-    [[ -f "$STATE/redis.env" ]] || [[ -n "${LAB_REDIS:-}" ]] || ports+=("$REDIS_PORT")
-    for port in "${ports[@]}"; do
+    for port in "$PORT" "${LAB_IDP_PORT:-5190}"; do
         for pid in $(lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null); do
             is_tracked "$pid" && continue
             echo "Port $port is held by pid $pid, which is not the lab's: $(ps -o args= -p "$pid" | cut -c1-110)" >&2
             exit 1
         done
     done
-}
-
-# Where the run journal lives, fixed once per state directory (.state/redis.env): the Redis (LAB_REDIS, else the lab's own) and a
-# prefix no other lab shares, so a reset lab starts a journal of its own even on a Redis that outlives it. REDIS_OWN is set when
-# the lab starts that Redis itself.
-load_redis_settings() {
-    if [[ ! -f "$STATE/redis.env" ]]; then
-        mkdir -p "$STATE"
-        {
-            echo "REDIS_URL=${LAB_REDIS:-127.0.0.1:$REDIS_PORT}"
-            echo "REDIS_PREFIX=lab-$(od -An -N6 -tx1 /dev/urandom | tr -d ' \n'):"
-            [[ -n "${LAB_REDIS:-}" ]] || echo "REDIS_OWN=1"
-        } >"$STATE/redis.env"
-    fi
-    REDIS_OWN=""
-    # shellcheck disable=SC1091
-    source "$STATE/redis.env"
-}
-
-# The run journal's Redis: the one LAB_REDIS names, else a redis-server of the lab's own, started here with its data in
-# .state/redis and every write fsynced (a journal that never reuses an id needs it).
-start_redis() {
-    load_redis_settings
-    [[ -n "$REDIS_OWN" ]] || return 0
-    if ! command -v redis-server >/dev/null 2>&1; then
-        echo "The lab keeps its run journal in Redis and there is no redis-server here: install one, or set LAB_REDIS=host:port" >&2
-        echo "(tests/infra/start_infra.sh starts one on localhost:6390)." >&2
-        exit 1
-    fi
-    mkdir -p "$STATE/redis"
-    start redis redis-server --bind 127.0.0.1 --port "$REDIS_PORT" --dir "$STATE/redis" --appendonly yes --appendfsync always --save ""
-    for _ in $(seq 1 40); do
-        python3 -c 'import socket,sys; socket.create_connection(("127.0.0.1", int(sys.argv[1])), 1).close()' "$REDIS_PORT" 2>/dev/null && return
-        sleep 0.25
-    done
-    echo "Redis did not come up; see $STATE/logs/redis.log" >&2; exit 1
 }
 
 start() {
@@ -247,7 +203,6 @@ library_remote() {
 # Replaces this shell with the lab's coordinator (the server and the Lab view), on the lab's state and seeds. Extra
 # arguments are passed on. The one way the server starts, for this script and for tools/campaign.py.
 exec_coordinator() {
-    load_redis_settings
     library_remote
     exec dotnet "$STATE/bin/coordinator/Lab.Coordinator.dll" --urls "$URL" \
         --Coordinator:StateDirectory="$STATE" --Coordinator:Authority="$IDP_URL" \
@@ -255,7 +210,7 @@ exec_coordinator() {
         --Coordinator:LibrarySeed="$LAB/library-seed" --Coordinator:RightsSeed="$LAB/rights-seed.json" \
         --Coordinator:Library:Remote:Url="$STATE/library.git" \
         --Coordinator:Ui:ClientSecret=coordinator-ui-lab-secret --Coordinator:Studio:ClientId=dtpipe-studio \
-        --Coordinator:Store=redis --Coordinator:Redis:ConnectionString="$REDIS_URL" --Coordinator:Redis:KeyPrefix="$REDIS_PREFIX" --Coordinator:Initialize=true \
+        --Coordinator:Initialize=true \
         --Coordinator:Roles:Admin="${LAB_ADMIN:-labadmin}@dtpipe.test" \
         --Coordinator:Roles:Designer=labdesigner@dtpipe.test --Coordinator:Roles:Reader=labreader@dtpipe.test "$@"
 }
@@ -328,7 +283,6 @@ up() {
 
     echo "Starting"
     start_idp
-    start_redis
     start coordinator "$LAB/lab.sh" exec-coordinator
 
     for _ in $(seq 1 60); do
@@ -392,9 +346,9 @@ smoke_passes() {
 }
 
 down() {
-    local names=(coordinator idp redis "${ALL_PROCS[@]}")
-    # Nodes first, so each can tear down its own dtpipe children while the coordinator still answers; Redis last, with the journal.
-    for name in "${ALL_PROCS[@]}" coordinator idp redis; do
+    local names=(coordinator idp "${ALL_PROCS[@]}")
+    # Nodes first, so each can tear down its own dtpipe children while the coordinator still answers.
+    for name in "${ALL_PROCS[@]}" coordinator idp; do
         if is_running "$name"; then
             kill -TERM "$(cat "$STATE/run/$name.pid")" 2>/dev/null || true
         fi
@@ -416,7 +370,7 @@ down() {
 }
 
 status() {
-    for name in idp redis coordinator "${ALL_PROCS[@]}"; do
+    for name in idp coordinator "${ALL_PROCS[@]}"; do
         if is_running "$name"; then echo "  $name  running (pid $(cat "$STATE/run/$name.pid"))"; else echo "  $name  stopped"; fi
     done
     local pid args
@@ -433,14 +387,16 @@ status() {
 # 127.0.0.1, which the local lab's cookies hold). smoke.py, ui_check.py and studio_check.py are the
 # ones the local lab runs, pointed at STACK_URL; LAB_TARGET=stack tells smoke.py where the stack differs.
 # The images are built from the commit HEAD names, and the services that mount .stack/ run as the user who owns it.
-# LAB_STACK_STORE=sqlite keeps the coordinator's state in its own directory and leaves the redis service (a profile) out; the
-# default is Redis. A stack is made on one store: purge .stack/ to change it.
+# LAB_STACK_STORE=sqlite keeps the coordinator's state in its own directory and leaves the postgres service (a profile) out; the
+# default is PostgreSQL. A stack is made on one store: purge .stack/ to change it. The connection string reaches the coordinator
+# through its environment, as a secret does.
 compose() {
-    local store="${LAB_STACK_STORE:-redis}"
-    [[ "$store" == redis || "$store" == sqlite ]] || { echo "LAB_STACK_STORE is redis or sqlite, not '$store'" >&2; return 1; }
+    local store="${LAB_STACK_STORE:-postgresql}" secret="${LAB_POSTGRES_SECRET:-coordinator-db-lab-secret}"
+    [[ "$store" == postgresql || "$store" == sqlite ]] || { echo "LAB_STACK_STORE is postgresql or sqlite, not '$store'" >&2; return 1; }
     (cd "$LAB" \
-        && SOURCE_REVISION="$(git rev-parse HEAD)" LAB_UID="$(id -u)" LAB_GID="$(id -g)" LAB_STACK_STORE="$store" \
-            LAB_STACK_REDIS="$([[ "$store" == redis ]] && echo redis:6379)" COMPOSE_PROFILES="$([[ "$store" == redis ]] && echo redis)" \
+        && SOURCE_REVISION="$(git rev-parse HEAD)" LAB_UID="$(id -u)" LAB_GID="$(id -g)" LAB_STACK_STORE="$store" LAB_POSTGRES_SECRET="$secret" \
+            LAB_STACK_CONNECTION="$([[ "$store" == postgresql ]] && echo "Host=postgres;Username=postgres;Password=$secret;Database=coordinator")" \
+            COMPOSE_PROFILES="$([[ "$store" == postgresql ]] && echo postgresql)" \
             docker compose "$@")
 }
 
@@ -487,7 +443,7 @@ stack() {
         up)
             # Created here, by the user, so that docker does not create them as root.
             mkdir -p "$STACK"/{idp,coordinator,library.git,node-1,node-2,node-3,node-4}
-            [[ "${LAB_STACK_STORE:-redis}" == sqlite ]] || mkdir -p "$STACK/redis"
+            [[ "${LAB_STACK_STORE:-postgresql}" == sqlite ]] || mkdir -p "$STACK/postgres"
             compose up -d --build --wait
             nodes_report "$STACK_URL" "$([[ "${LAB_NODE_SANDBOX:-}" == 1 ]] && echo sandbox || echo strict)" 90 \
                 || { echo "The stack's node hosts did not come online; see ./lab.sh stack logs" >&2; exit 1; }

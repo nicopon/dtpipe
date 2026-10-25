@@ -39,16 +39,16 @@ public sealed class CoordinatorHost(string? studioClientId = CoordinatorHost.Stu
 
     private readonly string _state = state ?? Path.Combine(Path.GetTempPath(), "coordinator-host-" + Guid.NewGuid().ToString("N"));
 
-    /// <summary>The run journal's store; <c>Down</c> makes every call fail as an unreachable Redis does.</summary>
+    /// <summary>The run journal's store; <c>Down</c> makes every call fail as an unreachable database does.</summary>
     internal FailingRunStore Runs => _runs ??= new FailingRunStore(MemoryRunStore.At(_state));
 
-    /// <summary>The rights' store; <c>Down</c> makes every call fail as an unreachable Redis does.</summary>
+    /// <summary>The rights' store; <c>Down</c> makes every call fail as an unreachable database does.</summary>
     internal FailingRightsStore Rights => _rights ??= new FailingRightsStore(MemoryRightsStore.At(_state));
 
-    /// <summary>The armed deployments' store; <c>Down</c> makes every call fail as an unreachable Redis does.</summary>
+    /// <summary>The armed deployments' store; <c>Down</c> makes every call fail as an unreachable database does.</summary>
     internal FailingDeploymentStore Deployments => _deployments ??= new FailingDeploymentStore(MemoryDeploymentStore.At(_state));
 
-    /// <summary>The store of the hosts set aside; <c>Down</c> makes every call fail as an unreachable Redis does.</summary>
+    /// <summary>The store of the hosts set aside; <c>Down</c> makes every call fail as an unreachable database does.</summary>
     internal FailingIgnoredHostStore IgnoredHosts => _ignoredHosts ??= new FailingIgnoredHostStore(MemoryIgnoredHostStore.At(_state));
 
     private FailingRunStore? _runs;
@@ -72,8 +72,8 @@ public sealed class CoordinatorHost(string? studioClientId = CoordinatorHost.Stu
         foreach (var (key, value) in settings ?? new Dictionary<string, string>()) builder.UseSetting("Coordinator:" + key, value);
         builder.ConfigureTestServices(services =>
         {
-            // What the coordinator keeps beyond the process is in memory: the real store is Redis, which these tests are not about.
-            // Each can be taken down, as Redis can.
+            // What the coordinator keeps beyond the process is in memory: the real store is a database, which these tests are not about.
+            // Each can be taken down, as a database can.
             services.AddSingleton<IRunStore>(Runs);
             services.AddSingleton<IRightsStore>(Rights);
             services.AddSingleton<IDeploymentStore>(Deployments);
