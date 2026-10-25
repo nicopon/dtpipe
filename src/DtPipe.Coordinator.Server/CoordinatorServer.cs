@@ -149,6 +149,9 @@ public static class CoordinatorServer
         TrustedIdp.EnsureSessionKeys(app.Services);
         // The issuer's signing keys are opened with the session keys, so they are read after them, and a store that cannot give them stops the start.
         if (server.KeyIssuer is not null) app.Services.GetRequiredService<IssuerKeys>();
+        // The listener's own line names the address it binds (a container's port, not the host's): this one is the address people and nodes give.
+        if (server.PublicUrl is not null)
+            logger.LogInformation("Reach this coordinator at {PublicUrl}: the address to give dtpipe studio (--coordinator) and dtpipe node (--coordinator)", server.PublicUrl.GetLeftPart(UriPartial.Authority));
         if (server.ExchangesKeysOverHttp)
             logger.LogWarning("Coordinator:Auth:AllowHttpKeys is set and Coordinator:PublicUrl is http: identity keys cross the network in clear at every token request.");
         // The armed deployments and the hosts set aside are read now too: a store that cannot be read stops the start.
