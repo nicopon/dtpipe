@@ -15,7 +15,9 @@ services:
       retries: 5
 
   mssql:
-    image: mcr.microsoft.com/azure-sql-edge:latest
+    # Pinned by digest (the multi-arch index): the image is retired, so its disappearance shows as a failed pull, never as another
+    # image under the same tag. Keep it equal to the coordinator's SQL Server job (.github/workflows/coordinator-sqlserver.yml).
+    image: mcr.microsoft.com/azure-sql-edge@sha256:902628a8be89e35dfb7895ca31d602974c7bafde4d583a0d0873844feb1c42cf
     container_name: dtpipe-integ-mssql
     environment:
       ACCEPT_EULA: "Y"

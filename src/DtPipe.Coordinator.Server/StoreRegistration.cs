@@ -5,7 +5,7 @@ internal static class StoreRegistration
 {
     /// <summary>
     /// The rights, the run journal, the armed deployments, the cursors, the hosts set aside, the session keys and the key issuer's signing
-    /// keys, all on one store: a Redis connection or a database (<see cref="SqlDatabase"/>, a SQLite file), opened when the first of them is asked for, which the server does before
+    /// keys, all on one store: a Redis connection or a database (<see cref="SqlDatabase"/>: a SQLite file, a PostgreSQL or a SQL Server database), opened when the first of them is asked for, which the server does before
     /// it serves. The signing keys' shelf is keyed (<see cref="IssuerKeys.Shelf"/>): DataProtection reads the one unkeyed repository, and
     /// would read any other element there as a key of its own.
     /// </summary>
@@ -25,8 +25,14 @@ internal static class StoreRegistration
         }
         else
         {
+            // A database lost stops the coordinator with an exit code that says it failed.
             services.AddSingleton(provider => SqlDatabase.Open(
-                new SqliteDialect(server.SqliteDirectory ?? server.StateDir), server.Initialize, provider.GetRequiredService<ILoggerFactory>().CreateLogger<SqlDatabase>()));
+                DialectOf(server), server.Initialize, server.StoreLockWait, provider.GetRequiredService<ILoggerFactory>().CreateLogger<SqlDatabase>(),
+                () =>
+                {
+                    Environment.ExitCode = 1;
+                    provider.GetRequiredService<IHostApplicationLifetime>().StopApplication();
+                }));
             services.AddSingleton<IRightsStore, SqlRightsStore>();
             services.AddSingleton<IRunStore, SqlRunStore>();
             services.AddSingleton<IDeploymentStore, SqlDeploymentStore>();
@@ -38,4 +44,11 @@ internal static class StoreRegistration
         }
         return services;
     }
+
+    private static StoreDialect DialectOf(CoordinatorServerOptions server) => server.Store switch
+    {
+        StoreKind.PostgreSql => new PostgreSqlDialect(server.ConnectionString!),
+        StoreKind.SqlServer => new SqlServerDialect(server.ConnectionString!),
+        _ => new SqliteDialect(server.SqliteDirectory ?? server.StateDir),
+    };
 }

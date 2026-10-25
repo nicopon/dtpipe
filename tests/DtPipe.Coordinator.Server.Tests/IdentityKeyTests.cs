@@ -151,7 +151,7 @@ public sealed class IdentityKeyTests : IDisposable
                 return MemoryRightsStore.At(_dir);
             case "sqlite":
                 _sqlite?.Dispose();
-                _sqlite = SqlDatabase.Open(new SqliteDialect(_dir), true, NullLogger.Instance);
+                _sqlite = SqlDatabase.Open(new SqliteDialect(_dir), true, TimeSpan.Zero, NullLogger.Instance);
                 return new SqlRightsStore(_sqlite);
             default:
                 RedisTestBed.Need();

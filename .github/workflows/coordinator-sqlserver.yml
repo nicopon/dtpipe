@@ -1,0 +1,40 @@
+name: Coordinator on SQL Server
+
+# The suite of the coordinator's stores against SQL Server, run by hand: the image is Azure SQL Edge, retired by Microsoft, so
+# it is pinned by digest (the same as tests/infra/docker-compose.yml) and kept off the checks of every change. The SQL the
+# coordinator writes stays the subset every SQL Server runs; if the image disappears, the fallback is mcr.microsoft.com/mssql/server.
+on:
+  workflow_dispatch:
+
+jobs:
+  stores:
+    name: Coordinator stores on SQL Server
+    runs-on: ubuntu-latest
+    services:
+      mssql:
+        image: mcr.microsoft.com/azure-sql-edge@sha256:902628a8be89e35dfb7895ca31d602974c7bafde4d583a0d0873844feb1c42cf
+        env:
+          ACCEPT_EULA: "Y"
+          MSSQL_SA_PASSWORD: "Password123!"
+        ports: ["1433:1433"]
+    env:
+      DTPIPE_TEST_SQLSERVER: Server=localhost,1433;User Id=sa;Password=Password123!;TrustServerCertificate=true;Encrypt=false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.300'
+
+      # The image has no client to probe itself with: wait for the port, then for the server to take logins.
+      - name: Wait for SQL Server
+        run: |
+          for i in $(seq 1 60); do (echo > /dev/tcp/localhost/1433) 2>/dev/null && break; sleep 2; done
+          sleep 15
+
+      - name: Stores on SQL Server
+        run: >-
+          dotnet test tests/DtPipe.Coordinator.Server.Tests/DtPipe.Coordinator.Server.Tests.csproj
+          --filter "FullyQualifiedName~SqlStoreTests"

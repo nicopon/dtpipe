@@ -157,20 +157,30 @@ library: a host owns `Program` and calls `AddCoordinatorServer` and `MapCoordina
   `RightsIdentityProvider`, `ServiceKindHandler` and the announcement sit behind it, TransportR's renewal included.
   `[local: KeyIssuerTests, IdentityKeyRoutesTests; Hosting.Tests KeyTokenTests — a node's token client, a real SQLite store]`
   `[unchecked: Redis's shelf; two instances that make a key at the same first start]`
-- **The state is kept in one store, SQLite unless the deployment chose Redis.** `Coordinator:Store` is `sqlite` (the default) or
-  `redis`; `StoreRegistration` registers the six stores of the chosen kind, opened when the first is asked for, which the server
-  does before it serves. Redis settings under the SQLite store stop the start rather than being ignored, so a coordinator meant to
-  share its state does not keep it alone in silence. **SQLite**: `SqlDatabase` over `SqliteDialect` is one file, `coordinator.db`, in
-  `Coordinator:Sqlite:Directory` (the state directory unless set), held exclusively by one connection for the life of the process, WAL
-  and `synchronous=FULL`: a second coordinator on the file is refused at its start, which is why this store is one coordinator; run
-  several on Redis. Nothing else can open the file while the process runs, so a backup is taken stopped and takes the whole state
-  directory (`deploy/README.md`). The exclusive lock needs no shared memory, so the file can sit on a network volume. A change of the schema takes
-  the `schema_version` table's number; a newer database is refused. What a provider writes differently is its `StoreDialect` (the
-  schema, an upsert, the first rows of an ordered query, the connection), every other statement being one text; a failure of the
-  driver, its expiry and its cancellation included, is a `StoreUnavailableException` that carries no message of the driver. `Coordinator:Initialize` has one meaning for both stores: a document or counter
-  that is absent begins only when it is true. A new store takes its contract from `IRunStore`, `IRightsStore`, `IDeploymentStore`,
-  `ICursorStore`, `IIgnoredHostStore` and `IXmlRepository`, and its own tests, as `SqlStoreTests` (per provider) and the Redis ones. `[local: SqlStoreTests; lab.sh stack restart-check with LAB_STACK_STORE=sqlite, restored from a copy as deploy/README.md's backup]`
-  `[unchecked: the file on a network volume; a power cut between a write and its sync]`
+- **The state is kept in one store, SQLite unless the deployment chose another.** `Coordinator:Store` is `sqlite` (the default),
+  `postgresql`, `sqlserver` or `redis`; `StoreRegistration` registers the seven stores of the chosen kind, opened when the first is
+  asked for, which the server does before it serves. A setting of another store (`Coordinator:Redis:*`, `Coordinator:Sqlite:Directory`,
+  `Coordinator:ConnectionString`) stops the start rather than being ignored. **One coordinator holds a database**: `SqlDatabase` is one
+  connection for the life of the process, out of the pool, on which every read and write runs, and which holds the database: SQLite's
+  file exclusively (`coordinator.db` in `Coordinator:Sqlite:Directory`, the state directory unless set; WAL, `synchronous=FULL`, no
+  shared memory, so the file can sit on a network volume), PostgreSQL's session advisory lock, SQL Server's session application lock.
+  A start that finds it held tries each second for `Coordinator:StoreLockWait` (30 s), then refuses naming the provider. Never a
+  second connection and never a reconnection (`ConnectRetryCount=0` for SqlClient): a session opened again would hold no lock. A server's
+  connection is probed every 5 seconds and PostgreSQL's asks the server for `tcp_keepalives_*`; lost, every call fails and the
+  coordinator stops with exit code 1, since another may take the database. Nothing else can open SQLite's file while the process runs,
+  so a backup is taken stopped and takes the whole state directory (`deploy/README.md`). The schema's number is the
+  `schema_version` table's; a newer database is refused. What a provider writes differently is its `StoreDialect` (the schema, an
+  upsert, the first rows of an ordered query, the connection), every other statement being one text, and keys compare as ordinal
+  text on every provider (binary collations). A failure of the driver, its expiry and its cancellation included, is a
+  `StoreUnavailableException` that carries no message of the driver. **`Coordinator:ConnectionString` is a secret** (`SecretReference`:
+  the environment or `@path`) and the family never references `ConnectionStringSanitizer`, so no message or log carries a part of it,
+  the host included: they name the provider, the setting and the driver's code. `Coordinator:Initialize` has one meaning for every
+  store: a document or counter that is absent begins only when it is true. A new store takes its contract from `IRunStore`,
+  `IRightsStore`, `IDeploymentStore`, `ICursorStore`, `IIgnoredHostStore` and `IXmlRepository`, and its own tests, as `SqlStoreTests`
+  (per provider) and the Redis ones. `[CI: SqlStoreTests on SQLite and PostgreSQL (agentic-ci.yml)]` `[local: SqlStoreTests on SQL
+  Server (DTPIPE_TEST_REUSE_INFRA, or coordinator-sqlserver.yml by hand); lab.sh stack restart-check with LAB_STACK_STORE=sqlite,
+  restored from a copy as deploy/README.md's backup]` `[unchecked: the file on a network volume; a power cut between a write and its
+  sync; a key longer than SQL Server's columns]`
 - **The session cookie's keys are in Redis, and a start that cannot read them stops.** `TrustedIdp.AddSessionKeys` points
   DataProtection at the `IXmlRepository` the host registers (`RedisXmlRepository`: a list at `{prefix}session-keys`, one element per
   entry), under a fixed application name so that two hosts of one coordinator read each other's cookies, and `EnsureSessionKeys` reads

@@ -26,7 +26,10 @@
          services present bearer tokens, people sign in through the provider into a session cookie. -->
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.12" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.12" />
+    <!-- The drivers of the stores the state can be kept in (Coordinator:Store), the same versions as the adapters'. -->
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.13" />
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.2" />
+    <PackageReference Include="Npgsql" Version="10.0.3" />
     <!-- The run journal's store. TransportR's own Redis store is a separate package this server does not use. -->
     <PackageReference Include="StackExchange.Redis" Version="3.3.1" />
   </ItemGroup>

@@ -19,7 +19,9 @@ internal sealed class SqliteDialect(string directory) : StoreDialect
 
     public override string Name => "SQLite";
 
-    public override string Where => Path;
+    public override string Where => $"SQLite, {Path}";
+
+    public override bool CanBeLost => false;
 
     public override string Schema => """
         CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
@@ -40,8 +42,8 @@ internal sealed class SqliteDialect(string directory) : StoreDialect
 
     public override string First(string count) => $"LIMIT {count}";
 
-    /// <summary>Refuses when another process holds the file, when the file is no database, and when the directory cannot be written.</summary>
-    public override DbConnection Connect()
+    /// <summary>Null when another process holds the file; refuses when the file is no database and when the directory cannot be written.</summary>
+    public override DbConnection? TryConnect()
     {
         SqliteConnection? connection = null;
         try
@@ -63,11 +65,10 @@ internal sealed class SqliteDialect(string directory) : StoreDialect
         catch (SqliteException ex)
         {
             connection?.Dispose();
-            throw new InvalidOperationException(ex.SqliteErrorCode is 5 or 6
-                ? $"The coordinator's database ({Path}) is held by another process: one coordinator runs on a SQLite file. Use Coordinator:Store=redis to run several."
-                : ex.SqliteErrorCode == 14
-                    ? $"The coordinator could not open its database ({Path}): the directory must exist or be creatable, and be writable by the user the server runs as."
-                    : $"The coordinator could not open its database ({Path}): {ex.Message}", ex);
+            if (ex.SqliteErrorCode is 5 or 6) return null;
+            throw new InvalidOperationException(ex.SqliteErrorCode == 14
+                ? $"The coordinator could not open its database ({Path}): the directory must exist or be creatable, and be writable by the user the server runs as."
+                : $"The coordinator could not open its database ({Path}): {ex.Message}", ex);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

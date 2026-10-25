@@ -4,7 +4,7 @@ namespace DtPipe.Coordinator.Server;
 
 /// <summary>
 /// What differs between the databases the coordinator's state can be kept in, and nothing else: the schema, an upsert, the clause
-/// that keeps the first rows of an ordered query, how the one connection is opened, and how a failure of the driver is told. Every
+/// that keeps the first rows of an ordered query, how the one connection is opened and the database taken, and how a failure of the driver is told. Every
 /// other statement the stores run is the same text on each, with <c>@name</c> parameters: a statement that needs a fourth point
 /// of variation is written in the portable form instead (the run counter has a single writer, so it needs no upsert).
 /// </summary>
@@ -32,10 +32,17 @@ internal abstract class StoreDialect
     public abstract string First(string count);
 
     /// <summary>
-    /// Opens the one connection of the process and takes the database for this coordinator, or refuses naming why. A refusal is an
-    /// <see cref="InvalidOperationException"/> that names the provider and <see cref="Where"/>, never a part of a connection string.
+    /// Opens the one connection of the process and takes the database for this coordinator, or answers null when another coordinator
+    /// holds it, having closed what it opened. Any other refusal is an <see cref="InvalidOperationException"/> that names the provider
+    /// and <see cref="Where"/>, never a part of a connection string, and has no exception of the driver inside.
     /// </summary>
-    public abstract DbConnection Connect();
+    public abstract DbConnection? TryConnect();
+
+    /// <summary>
+    /// Whether the database can be lost while the process lives, so that the connection is probed: a server's session can end, and with
+    /// it the lock; a file's lock is held as long as the process.
+    /// </summary>
+    public abstract bool CanBeLost { get; }
 
     /// <summary>A failure of the driver, in the words of a message: its code, never its message, which may name the host.</summary>
     public abstract string Describe(DbException exception);

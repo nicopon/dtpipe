@@ -6,6 +6,12 @@ public enum StoreKind
     /// <summary>A SQLite database file in a directory of the host: one coordinator, no other service. The default.</summary>
     Sqlite,
 
+    /// <summary>A PostgreSQL database the deployment provides, named by <see cref="CoordinatorServerOptions.ConnectionString"/>.</summary>
+    PostgreSql,
+
+    /// <summary>A SQL Server database the deployment provides, named by <see cref="CoordinatorServerOptions.ConnectionString"/>.</summary>
+    SqlServer,
+
     /// <summary>A Redis the deployment provides.</summary>
     Redis,
 }
@@ -72,8 +78,23 @@ public sealed class CoordinatorServerOptions
     /// </summary>
     public TimeSpan HealthMaxAge { get; init; } = TimeSpan.FromMinutes(5);
 
-    /// <summary>Where the state lives beyond the process (<c>Coordinator:Store</c>, <c>sqlite</c> or <c>redis</c>); SQLite when unset.</summary>
+    /// <summary>
+    /// Where the state lives beyond the process (<c>Coordinator:Store</c>: <c>sqlite</c>, <c>postgresql</c>, <c>sqlserver</c> or
+    /// <c>redis</c>); SQLite when unset.
+    /// </summary>
     public StoreKind Store { get; init; } = StoreKind.Sqlite;
+
+    /// <summary>
+    /// The database of a PostgreSQL or SQL Server store (<c>Coordinator:ConnectionString</c>), required by those two and refused by the
+    /// others. A secret, as <see cref="SecretReference"/> reads one: no log or message carries a part of it, the host it names included.
+    /// </summary>
+    public string? ConnectionString { get; init; }
+
+    /// <summary>
+    /// How long a start waits for another coordinator to leave the database before it refuses (<c>Coordinator:StoreLockWait</c>, a time
+    /// span, 30 seconds unless set): the earlier instance of a rolling update. Never without bound.
+    /// </summary>
+    public TimeSpan StoreLockWait { get; init; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
     /// Whether the state may begin where none is kept (<c>Coordinator:Initialize</c>): the first start, or after the store (or the library's
@@ -187,18 +208,33 @@ public sealed class CoordinatorServerOptions
         return uri;
     }
 
+    // A table, not Enum.TryParse, which takes "1" for a value.
+    private static readonly (string Name, StoreKind Kind)[] StoreNames =
+        [("sqlite", StoreKind.Sqlite), ("postgresql", StoreKind.PostgreSql), ("sqlserver", StoreKind.SqlServer), ("redis", StoreKind.Redis)];
+
     public static CoordinatorServerOptions FromConfiguration(IConfiguration configuration)
     {
         var section = configuration.GetSection("Coordinator");
         var publicUrl = PublicUrlOf(section["PublicUrl"]);
         string? PathOf(string key) => section[key] is { Length: > 0 } value ? Path.GetFullPath(value) : null;
         var store = section["Store"] is { Length: > 0 } kind
-            ? Enum.TryParse<StoreKind>(kind, ignoreCase: true, out var parsed) ? parsed
-                : throw new InvalidOperationException("Coordinator:Store must be 'sqlite' or 'redis'.")
+            ? StoreNames.FirstOrDefault(n => string.Equals(n.Name, kind, StringComparison.OrdinalIgnoreCase)) is { Name: not null } named ? named.Kind
+                : throw new InvalidOperationException("Coordinator:Store must be 'sqlite', 'postgresql', 'sqlserver' or 'redis'.")
             : StoreKind.Sqlite;
-        // Redis settings under the SQLite store would be ignored in silence, and a coordinator meant to share its state would keep it alone.
-        if (store == StoreKind.Sqlite && (section["Redis:ConnectionString"] is { Length: > 0 } || section["Redis:KeyPrefix"] is { Length: > 0 }))
-            throw new InvalidOperationException("Coordinator:Redis settings are given but Coordinator:Store is 'sqlite': set Coordinator:Store to 'redis', or remove them.");
+        var storeName = StoreNames.First(n => n.Kind == store).Name;
+        // A setting of another store would be ignored in silence, and a coordinator would keep its state elsewhere than meant.
+        if (store != StoreKind.Redis && (section["Redis:ConnectionString"] is { Length: > 0 } || section["Redis:KeyPrefix"] is { Length: > 0 }))
+            throw new InvalidOperationException($"Coordinator:Redis settings are given but Coordinator:Store is '{storeName}': set Coordinator:Store to 'redis', or remove them.");
+        if (store != StoreKind.Sqlite && section["Sqlite:Directory"] is { Length: > 0 })
+            throw new InvalidOperationException($"Coordinator:Sqlite:Directory is given but Coordinator:Store is '{storeName}': remove it, or set Coordinator:Store to 'sqlite'.");
+        var connectionString = SecretReference.Read(configuration, "Coordinator:ConnectionString");
+        if (store is StoreKind.PostgreSql or StoreKind.SqlServer && connectionString is null)
+            throw new InvalidOperationException($"Coordinator:ConnectionString is required when Coordinator:Store is '{storeName}': the database the state is kept in, given through the environment or as @path to a file.");
+        if (store is not (StoreKind.PostgreSql or StoreKind.SqlServer) && connectionString is not null)
+            throw new InvalidOperationException($"Coordinator:ConnectionString is given but Coordinator:Store is '{storeName}': it names the database of a 'postgresql' or 'sqlserver' store.");
+        var lockWait = section.GetValue<TimeSpan?>("StoreLockWait") ?? TimeSpan.FromSeconds(30);
+        if (lockWait < TimeSpan.Zero)
+            throw new InvalidOperationException("Coordinator:StoreLockWait must not be negative.");
         var authority = section["Authority"] is { Length: > 0 } external ? external.TrimEnd('/') : null;
         var keyIssuer = publicUrl?.GetLeftPart(UriPartial.Authority);
         // The issuer is what tells the two providers' tokens apart: one address for both would let either sign for the other.
@@ -245,6 +281,8 @@ public sealed class CoordinatorServerOptions
             IdentityLabelClaims = section.GetSection("Identity:LabelClaims").Get<string[]>() ?? [],
             PublicUrl = publicUrl,
             Store = store,
+            ConnectionString = connectionString,
+            StoreLockWait = lockWait,
             Initialize = section.GetValue<bool>("Initialize"),
             SqliteDirectory = PathOf("Sqlite:Directory"),
             Redis = new RedisSettings(

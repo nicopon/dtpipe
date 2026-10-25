@@ -4,19 +4,30 @@ namespace DtPipe.Coordinator.Server;
 
 /// <summary>
 /// The coordinator's one database when its state is not in Redis, on the provider its <see cref="StoreDialect"/> speaks: one connection
-/// for the life of the process, which the stores borrow and the container disposes, and on which every read and write runs, one at a
-/// time. A failure of the database, whatever form the driver gives it, is a <see cref="StoreUnavailableException"/>, as an unreachable
-/// Redis is.
+/// for the life of the process, which holds the database for this coordinator, which the stores borrow and the container disposes, and
+/// on which every read and write runs, one at a time. It never opens a second one: a session opened again would hold no lock. A
+/// database that can be lost is probed; lost, it says so once, every call after fails, and it calls the action it was given, which
+/// stops the coordinator, since another may now take the database. A failure of the database, whatever form the driver gives it, is a
+/// <see cref="StoreUnavailableException"/>, as an unreachable Redis is.
 /// </summary>
 internal sealed class SqlDatabase : IDisposable
 {
     private const int Version = 1;
 
+    private static readonly TimeSpan Retry = TimeSpan.FromSeconds(1);
+
     private readonly object _gate = new();
     private readonly DbConnection _connection;
+    private readonly ILogger _logger;
+    private readonly Action _lost;
+    private readonly Timer? _probe;
+    private bool _isLost;
 
-    private SqlDatabase(StoreDialect dialect, DbConnection connection, bool initialize) =>
-        (Dialect, _connection, Initialize) = (dialect, connection, initialize);
+    private SqlDatabase(StoreDialect dialect, DbConnection connection, bool initialize, ILogger logger, Action lost, TimeSpan probeEvery)
+    {
+        (Dialect, _connection, Initialize, _logger, _lost) = (dialect, connection, initialize, logger, lost);
+        if (dialect.CanBeLost) _probe = new Timer(_ => Probe(), null, probeEvery, probeEvery);
+    }
 
     /// <summary>What this provider writes differently.</summary>
     public StoreDialect Dialect { get; }
@@ -25,12 +36,25 @@ internal sealed class SqlDatabase : IDisposable
     public bool Initialize { get; }
 
     /// <summary>
-    /// Takes the database (<see cref="StoreDialect.Connect"/>) and creates what it lacks. Refuses a database that a newer version of
-    /// this server wrote.
+    /// Takes the database (<see cref="StoreDialect.TryConnect"/>), trying each second for <paramref name="wait"/> while another
+    /// coordinator holds it, then refusing naming the provider; and creates what it lacks. Refuses a database that a newer version of
+    /// this server wrote. <paramref name="lost"/> is called once, off the caller's thread, if the database is lost; the probe runs every
+    /// <paramref name="probeEvery"/>, 5 seconds unless given.
     /// </summary>
-    public static SqlDatabase Open(StoreDialect dialect, bool initialize, ILogger logger)
+    public static SqlDatabase Open(StoreDialect dialect, bool initialize, TimeSpan wait, ILogger logger, Action? lost = null, TimeSpan? probeEvery = null)
     {
-        var database = new SqlDatabase(dialect, dialect.Connect(), initialize);
+        var waited = System.Diagnostics.Stopwatch.StartNew();
+        DbConnection? connection;
+        while ((connection = dialect.TryConnect()) is null)
+        {
+            if (waited.Elapsed >= wait)
+                throw new InvalidOperationException(
+                    $"The coordinator's database ({dialect.Where}) is held by another coordinator, still after Coordinator:StoreLockWait ({wait.TotalSeconds:0.#} s): one coordinator runs on a database.");
+            if (waited.Elapsed < Retry)
+                logger.LogWarning("Another coordinator holds the database ({Where}): waiting up to {Wait} s for it to leave (Coordinator:StoreLockWait)", dialect.Where, wait.TotalSeconds);
+            Thread.Sleep(Retry);
+        }
+        var database = new SqlDatabase(dialect, connection, initialize, logger, lost ?? (() => { }), probeEvery ?? TimeSpan.FromSeconds(5));
         try
         {
             database.Call("the schema", (c, t) =>
@@ -47,7 +71,7 @@ internal sealed class SqlDatabase : IDisposable
             database.Dispose();
             throw;
         }
-        logger.LogInformation("Coordinator state in {Provider} at {Where}", dialect.Name, dialect.Where);
+        logger.LogInformation("Coordinator state in {Where}", dialect.Where);
         return database;
     }
 
@@ -60,6 +84,11 @@ internal sealed class SqlDatabase : IDisposable
     {
         lock (_gate)
         {
+            if (_isLost || _connection.State != System.Data.ConnectionState.Open)
+            {
+                Lose();
+                throw new StoreUnavailableException($"The coordinator's database ({Dialect.Where}) was lost, so {document} was not kept.");
+            }
             try
             {
                 using var transaction = _connection.BeginTransaction();
@@ -69,6 +98,7 @@ internal sealed class SqlDatabase : IDisposable
             }
             catch (Exception ex) when (ex is DbException or OperationCanceledException or TimeoutException)
             {
+                if (_connection.State != System.Data.ConnectionState.Open) Lose();
                 // No inner exception: a driver's message may name the host of a connection string, and a log would write it whole.
                 var failure = ex switch
                 {
@@ -105,7 +135,47 @@ internal sealed class SqlDatabase : IDisposable
         return rows;
     }
 
-    public void Dispose() => _connection.Dispose();
+    public void Dispose()
+    {
+        _probe?.Dispose();
+        lock (_gate) _connection.Dispose();
+    }
+
+    // A tick that finds a call under way skips: that call reads the connection as well.
+    private void Probe()
+    {
+        if (!Monitor.TryEnter(_gate)) return;
+        try
+        {
+            if (_isLost) return;
+            if (_connection.State == System.Data.ConnectionState.Open)
+            {
+                using var command = _connection.CreateCommand();
+                command.CommandText = "SELECT 1";
+                command.ExecuteScalar();
+                if (_connection.State == System.Data.ConnectionState.Open) return;
+            }
+            Lose();
+        }
+        // A probe that fails on a session still open (a slow server) holds the lock still.
+        catch (Exception ex) when (ex is DbException or InvalidOperationException or OperationCanceledException or TimeoutException)
+        {
+            if (_connection.State != System.Data.ConnectionState.Open) Lose();
+        }
+        finally
+        {
+            Monitor.Exit(_gate);
+        }
+    }
+
+    // Under the gate. Once: the coordinator stops, and every later call fails.
+    private void Lose()
+    {
+        if (_isLost) return;
+        _isLost = true;
+        _logger.LogCritical("The coordinator lost its database ({Where}) and the lock it held: another coordinator may take it, so this one stops", Dialect.Where);
+        ThreadPool.QueueUserWorkItem(_ => _lost());
+    }
 
     private static DbCommand Prepare(DbConnection connection, DbTransaction? transaction, string sql, (string Name, object? Value)[] parameters)
     {

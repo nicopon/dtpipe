@@ -3,6 +3,7 @@ using DtPipe.Coordinator.Contracts;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Xunit;
@@ -299,19 +300,92 @@ public sealed class SqlStoreTests : IDisposable
         Assert.Contains("newer version", refused.Message);
     }
 
-    [Fact]
-    public void A_Second_Coordinator_On_The_Same_File_Is_Refused_Naming_It()
+    [Theory]
+    [MemberData(nameof(Providers))]
+    public void A_Second_Coordinator_On_The_Same_Database_Waits_Then_Is_Refused_Naming_The_Store(string provider)
     {
-        var first = Bed("sqlite").Start();
+        var bed = Bed(provider);
+        var first = bed.Start();
         new SqlDeploymentStore(first).Save("p", "kept");
 
-        var refused = Assert.Throws<InvalidOperationException>(() => SqlDatabase.Open(new SqliteDialect(_dir), true, NullLogger.Instance));
+        var waited = System.Diagnostics.Stopwatch.StartNew();
+        var refused = Assert.Throws<InvalidOperationException>(() => SqlDatabase.Open(bed.Dialect(), true, TimeSpan.FromSeconds(2), NullLogger.Instance));
 
-        Assert.Contains(SqliteDialect.FileName, refused.Message);
-        Assert.Contains("another process", refused.Message);
-        // The first is untouched, and the log needs no shared memory file beside the database.
+        Assert.True(waited.Elapsed >= TimeSpan.FromSeconds(2), $"refused after {waited.Elapsed}");
+        Assert.Contains(bed.Dialect().Name, refused.Message);
+        Assert.Contains("Coordinator:StoreLockWait", refused.Message);
+        Assert.Null(refused.InnerException);
+        if (provider == "sqlite") Assert.Contains(SqliteDialect.FileName, refused.Message);
+        else Assert.DoesNotContain("assword", refused.Message);
+        // The first is untouched; on SQLite, the log needs no shared memory file beside the database.
         Assert.Equal([new StoredDeployment("p", "kept")], new SqlDeploymentStore(first).Load());
-        Assert.Empty(Directory.GetFiles(_dir, "*-shm"));
+        Assert.Empty(Directory.Exists(_dir) ? Directory.GetFiles(_dir, "*-shm") : []);
+    }
+
+    [Theory]
+    [MemberData(nameof(Providers))]
+    public async Task A_Second_Coordinator_Takes_The_Database_When_The_First_Leaves_Within_The_Wait(string provider)
+    {
+        var bed = Bed(provider);
+        var first = bed.Start();
+
+        var second = Task.Run(() => SqlDatabase.Open(bed.Dialect(), true, TimeSpan.FromSeconds(20), NullLogger.Instance));
+        await Task.Delay(TimeSpan.FromSeconds(1.5), TestContext.Current.CancellationToken);
+        Assert.False(second.IsCompleted);
+        first.Dispose();
+
+        using var taken = await second.WaitAsync(TimeSpan.FromSeconds(20), TestContext.Current.CancellationToken);
+        Assert.Equal([], new SqlDeploymentStore(taken).Load());
+    }
+
+    [Theory]
+    [InlineData("postgresql")]
+    [InlineData("sqlserver")]
+    public async Task A_Coordinator_Whose_Session_Is_Cut_Stops_And_Writes_Nothing_More(string provider)
+    {
+        var bed = Bed(provider);
+        var lifetime = new StoppedLifetime();
+        var server = new CoordinatorServerOptions
+        {
+            StateDir = _dir, Authority = "http://idp", Audience = "test", UiClientId = "ui", UiClientSecret = "secret",
+            Store = provider == "postgresql" ? StoreKind.PostgreSql : StoreKind.SqlServer, ConnectionString = bed.ConnectionString, Initialize = true,
+        };
+        using var services = new ServiceCollection().AddLogging().AddSingleton<IHostApplicationLifetime>(lifetime).AddCoordinatorStores(server).BuildServiceProvider();
+        var deployments = services.GetRequiredService<IDeploymentStore>();
+        deployments.Save("p", "kept");
+        var exitCode = Environment.ExitCode;
+        try
+        {
+            bed.CutSessions();
+
+            // The probe finds it with no call made.
+            await lifetime.Stopped.WaitAsync(TimeSpan.FromSeconds(20), TestContext.Current.CancellationToken);
+            Assert.Equal(1, Environment.ExitCode);
+            var refused = Assert.Throws<StoreUnavailableException>(() => deployments.Save("p", "late"));
+            Assert.Contains("lost", refused.Message);
+        }
+        finally
+        {
+            Environment.ExitCode = exitCode;
+        }
+        // Another coordinator takes the database, and finds what the first kept before it was cut.
+        using var next = SqlDatabase.Open(bed.Dialect(), true, TimeSpan.Zero, NullLogger.Instance);
+        Assert.Equal([new StoredDeployment("p", "kept")], new SqlDeploymentStore(next).Load());
+    }
+
+    private sealed class StoppedLifetime : IHostApplicationLifetime
+    {
+        private readonly TaskCompletionSource _stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task Stopped => _stopped.Task;
+
+        public CancellationToken ApplicationStarted => CancellationToken.None;
+
+        public CancellationToken ApplicationStopping => CancellationToken.None;
+
+        public CancellationToken ApplicationStopped => CancellationToken.None;
+
+        public void StopApplication() => _stopped.TrySetResult();
     }
 
     [Fact]
@@ -329,8 +403,38 @@ public sealed class SqlStoreTests : IDisposable
         configuration["Coordinator:Sqlite:Directory"] = volume;
         Assert.Equal(volume, CoordinatorServerOptions.FromConfiguration(configuration).SqliteDirectory);
 
-        using var database = SqlDatabase.Open(new SqliteDialect(volume), true, NullLogger.Instance);
+        using var database = SqlDatabase.Open(new SqliteDialect(volume), true, TimeSpan.Zero, NullLogger.Instance);
         Assert.True(File.Exists(Path.Combine(volume, SqliteDialect.FileName)));
+    }
+
+    [Theory]
+    [InlineData("postgresql", null, null, "Coordinator:ConnectionString is required")]
+    [InlineData("sqlite", "ConnectionString", "Host=db.example;Password=hunter2", "Coordinator:ConnectionString is given")]
+    [InlineData("postgresql", "Sqlite:Directory", "/state/db", "Coordinator:Sqlite:Directory is given")]
+    [InlineData("1", null, null, "Coordinator:Store must be")]
+    [InlineData("sqlite", "StoreLockWait", "-00:00:01", "Coordinator:StoreLockWait")]
+    public void A_Store_Setting_That_Does_Not_Fit_The_Store_Stops_The_Start_Without_Its_Value(string store, string? key, string? value, string expected)
+    {
+        var settings = new Dictionary<string, string?>
+        {
+            ["Coordinator:Authority"] = "http://idp", ["Coordinator:Ui:ClientSecret"] = "x", ["Coordinator:Store"] = store,
+        };
+        if (key is not null) settings["Coordinator:" + key] = value;
+        if (store == "postgresql" && key is not null) settings["Coordinator:ConnectionString"] = "Host=db.example;Password=hunter2";
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
+
+        var failure = Assert.Throws<InvalidOperationException>(() => CoordinatorServerOptions.FromConfiguration(configuration));
+
+        Assert.Contains(expected, failure.Message);
+        Assert.DoesNotContain("hunter2", failure.Message);
+        Assert.DoesNotContain("db.example", failure.Message);
+
+        configuration["Coordinator:Store"] = "SqlServer";
+        configuration["Coordinator:Sqlite:Directory"] = null;
+        configuration["Coordinator:StoreLockWait"] = "00:00:05";
+        configuration["Coordinator:ConnectionString"] = "Server=db.example";
+        var options = CoordinatorServerOptions.FromConfiguration(configuration);
+        Assert.Equal((StoreKind.SqlServer, "Server=db.example", TimeSpan.FromSeconds(5)), (options.Store, options.ConnectionString, options.StoreLockWait));
     }
 
     [Theory]
