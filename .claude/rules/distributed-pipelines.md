@@ -84,19 +84,19 @@ the control plane, over each replica's node channel; TransportR carries the data
   the version, its major.minor and `latest`; the trial recipe's data node is built by `deploy/compose.trial.yaml`, never pushed. The lab's images extend these and the product's names no lab; `deploy/`
   is scanned like `src/`. **The server listens in plain HTTP and reads no forwarded header**: a TLS proxy in front is
   told to it by `Coordinator:PublicUrl`, the address people reach it at, so it does not turn into `http://` return addresses.
-  `[CI: validate_distributed_boundary.sh — deploy/ names no lab]` `[local: PublicUrlTests; the lab's smoke.py bricks - versions; the lab's tools/linux_replay.sh uid, a named volume of another uid]`
+  `[CI: validate_distributed_boundary.sh — deploy/ names no lab]` `[CI: PublicUrlTests] [local: the lab's smoke.py bricks - versions; the lab's tools/linux_replay.sh uid, a named volume of another uid]`
   `[unchecked: the release's push to GHCR, until a tag runs it; a Linux Docker host, where tools/linux_replay.sh is the replay; a real TLS proxy; a bind mount of another uid; deploy/README.md is in no documentation check, so keep its lines to 100 columns]`
 - **A key is never stored, logged, returned or compared but as its hash, and the hash never leaves the store.** The call that
   makes a key is the only answer that carries it, and a key the deployment gives (`Coordinator:Bootstrap`) is read once and hashed;
   the rights keep its SHA-256, which no route answers, and no log carries the key, a part of it or its hash. A presented key is
   judged by that hash, in constant time, never by the client id it names; `/connect/token` and the sign-in form
-  (`POST /account/login`) are the only routes that take one in. `[local: Server.Tests IdentityKeyRoutesTests, IdentityKeyTests,
+  (`POST /account/login`) are the only routes that take one in. `[CI: Server.Tests IdentityKeyRoutesTests, IdentityKeyTests,
   KeyIssuerTests, PersonKeyTests, KeyOnlyCoordinatorTests — the logs of a bootstrapped start and of its keys at work]`
   Detail: `src/DtPipe.Coordinator.Server/CLAUDE.md`.
 - **No page offers to copy a command that holds a key.** The Access page is the only one that asks for a key: it shows it once, in
   the one element its Copy button copies, which closing the window empties; every command it shows names a variable or a reference
   the person fills (`--client-secret '${{VAR}}'`, `keyring://`, `--key '${{VAR}}'`), never the key, and nothing of a page keeps it in
-  storage or in the address. `[local: Server.Tests KeyWindowTests — the pages' text, not their behaviour]`
+  storage or in the address. `[CI: Server.Tests KeyWindowTests — the pages' text, not their behaviour]`
 - **A cursor is the coordinator's: read when a run starts, kept only at the verdict of the whole run.** One cursor per branch that
   writes, keyed by (library pipeline, alias), kept by `CursorKeeper` in the store that holds its state. The child never reaches the
   coordinator or a file a brick names: the node gives each sink branch that sets `cursor` a state file of its own, reads it once the
@@ -106,7 +106,7 @@ the control plane, over each replica's node channel; TransportR carries the data
   pipeline is refused, never queued, once a cursor exists. A value is substituted into the source's SQL, so `CursorValues` is the one
   rule the node, the coordinator and the route apply. `BrickRules` admits `cursor` on a sink, never `state`, never `cursor` on a source
   (the half of a `dtpipe split` cut that reads advances a cursor before the sink has written), and refuses a `cursor://` token that names a
-  file. `[local: Server.Tests CursorRunTests, CursorRoutesTests, CursorRulesTests; Hosting.Tests FragmentCursorsTests; validate_doc_examples.sh]`
+  file. `[CI: Server.Tests CursorRunTests, CursorRoutesTests, CursorRulesTests; Hosting.Tests FragmentCursorsTests] [local: validate_doc_examples.sh]`
   `[unchecked: an older node, which ignores the value it is handed]` Detail: `src/DtPipe.Coordinator.Server/CLAUDE.md`.
 - **The coordinator issues the tokens of the identities a key verifies, and trusts them by their issuer like any other.**
   Its issuer is `Coordinator:PublicUrl`, beside an external provider (another issuer) or alone. One grant, client credentials, the key as the client secret: every refusal of
@@ -124,7 +124,7 @@ the control plane, over each replica's node channel; TransportR carries the data
   `Coordinator:Bootstrap` names (the first administrator's key, identities with theirs, each `@path` or a value of the
   environment, never of the command line) is added at start where the rights lack it, in one change the audit names
   `Coordinator:Bootstrap`, and never replaces an identity. The product's recipe (`deploy/compose.yaml`) has a one-off service
-  write its keys into a volume that the coordinator and the runner read by `@path`. `[local: Server.Tests KeyIssuerTests,
+  write its keys into a volume that the coordinator and the runner read by `@path`. `[CI: Server.Tests KeyIssuerTests,
   PersonKeyTests, KeyOnlyCoordinatorTests; Hosting.Tests KeyTokenTests]` `[unchecked: a real
   TLS proxy; two instances that bootstrap at the same first start; deploy/compose.yaml, until a Docker host runs it]` Detail:
   `src/DtPipe.Coordinator.Server/CLAUDE.md`.
@@ -137,10 +137,10 @@ the control plane, over each replica's node channel; TransportR carries the data
   secret is a reference (`keyring://`, `${{NAME}}`) read once at start.
   `[CI: validate_distributed_boundary.sh — names and references, one file naming the Launcher, no SignalR hub under src/DtPipe;
   NodeCommandTests in DtPipe.Tests — no TransportR loaded after --version, --help or node --help]`
-  `[local: DtPipe.PipelineNode.Tests NodeCommandTests — a node started by the command announces its bricks and shows its secret nowhere]`
+  `[CI: DtPipe.PipelineNode.Tests NodeCommandTests — a node started by the command announces its bricks and shows its secret nowhere]`
   `[unchecked: a listener of the CLI that is no SignalR hub]`
 
-`[local: DtPipe.Coordinator.Tests, DtPipe.PipelineNode.Tests, DtPipe.Coordinator.Server.Tests, the lab's
+`[CI: DtPipe.Coordinator.Tests, DtPipe.PipelineNode.Tests, DtPipe.Coordinator.Server.Tests] [local: the lab's
 smoke.py]`
 `[unchecked: Windows]` Detail: `src/DtPipe.Coordinator/CLAUDE.md`, `src/DtPipe.PipelineNode/CLAUDE.md`,
 `src/DtPipe.PipelineNode.Hosting/CLAUDE.md`.

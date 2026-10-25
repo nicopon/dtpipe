@@ -16,7 +16,7 @@ stdin/stdout and TransportR. It speaks to no coordinator itself.
   the one client of the replica and the book of the handles it is given, launches runs (`Launch`, from a
   `FragmentLaunch`: the job, the edges, how the child starts - nothing of the replica) and hands a run its
   handles (`WireAsync`). The fault is one value, origin and reason together: a reader never sees a reason
-  without its origin. `[local: PipelineNode.Tests]`
+  without its origin. `[CI: PipelineNode.Tests]`
 - **The node is a byte relay.** It references no DtPipe project and never rewrites a batch; the
   child's `arrow:` reader and writer own the format. Put engine logic in dtpipe, never here.
   `ArrowIpcRowCounter` reads the IPC framing only to count rows.
@@ -28,7 +28,7 @@ stdin/stdout and TransportR. It speaks to no coordinator itself.
 - **A transfer handle is claimed once, and an unclaimed one is released.** The handshake delivers a handle on
   its own schedule, before or after the run's `Wire` asks for it. One no run wires within
   `NodeClientOptions.UnclaimedTransferTimeout` (its run was torn down first) is disposed, not kept, and a
-  `Wire` whose handle never comes faults its run `FaultOrigin.Remote`. `[local: PipelineNode.Tests]`
+  `Wire` whose handle never comes faults its run `FaultOrigin.Remote`. `[CI: PipelineNode.Tests]`
   `[unchecked: the release of an unclaimed handle]`
 - An edge is a branch alias plus a direction (`EdgeBinding`). The first edge of each direction rides
   the child's stdin/stdout; `LaunchChild` gives every further edge its own `NamedPipeServerStream`
@@ -44,13 +44,13 @@ stdin/stdout and TransportR. It speaks to no coordinator itself.
   that child's stdout. The host's `Cancel` (`ReplicaRuns`) reuses exactly this path, not
   a second teardown mechanism: `Fault(Local, ...)` then run to completion for a fragment not yet fully
   wired, `Fault(Remote, ...)` alone for a fully wired one, which is already completing on its own.
-  `[local: CoordinatorAbortTests]`
+  `[CI: CoordinatorAbortTests]`
 - **The child is watched independently of the relays.** `WatchChild` faults the fragment
   (`FaultOrigin.Local`) the moment the child exits non-zero: a relay only notices a dead child on its
   next read or write, which a fragment waiting on a silent peer never makes. `RunToCompletionAsync`
   then gives the relays `RelayDrainAfterChildFailureMs` to fail on their own and reports without a
   relay still waiting on its peer; the coordinator's teardown ends that transfer.
-  `[local: FaultVerdictTests]`
+  `[CI: FaultVerdictTests]`
 - **The child's exit is awaited by polling `HasExited` beside `WaitForExitAsync`.**
   `RunToCompletionAsync` uses `WaitForChildExitAsync`: `Process.WaitForExitAsync` alone can stay
   pending after the child has exited, which holds the `Exited` report, and so the run's verdict,
@@ -63,7 +63,7 @@ stdin/stdout and TransportR. It speaks to no coordinator itself.
   that holds no group, which leaves the groups the hub held until the client's next token renewal withdraws them.
   A client the hub does not know (`IsRegisteredAsync`, which asks the hub's `Heartbeat`, the only public sign of a
   registration) holds no groups to be stale, and the same call registers it again.
-  `[local: RefreshRegistrationTests, GroupRefreshTests, RegistrationTests]`
+  `[CI: RefreshRegistrationTests, GroupRefreshTests, RegistrationTests]`
   `[unchecked: the withdrawal at the next token renewal]`
 - **The node must run on Windows**: no POSIX-only API (FIFO, signals). `[unchecked: nothing runs
   the node on Windows]`
@@ -75,11 +75,11 @@ stdin/stdout and TransportR. It speaks to no coordinator itself.
   no token reaches `SendAsync`/`ReceiveAsync` - or an `ObjectDisposedException` thrown by the send
   handle itself, disposed under the call when its transfer was torn down). The coordinator's
   outcome rule tells a run's cause from its consequences by this, not by which fragment reports
-  first. `[local: PipelineNode.Tests, DtPipe.Coordinator.Tests.RunOrchestratorTests]`
+  first. `[CI: PipelineNode.Tests, DtPipe.Coordinator.Tests.RunOrchestratorTests]`
 - `ConnectAsync` connects the replica's client and launches nothing; `Launch` spawns a run's child and
   `WireAsync(run, alias, transferId)` hands it one edge's transfer, `true` when it was the last edge the run
   declares. An alias the run does not declare is refused (`ArgumentException`) before the handle is claimed, so the
-  handle stays for the edge that exists. `[local: WireEdgeAliasTests]`
+  handle stays for the edge that exists. `[CI: WireEdgeAliasTests]`
 - **A run is its launcher's to dispose.** Disposing the node closes its client and releases the handles no run
   claimed; it ends no run. `[unchecked]`
 - **A test whose verdict depends on how soon a child starts or how soon its end is seen joins

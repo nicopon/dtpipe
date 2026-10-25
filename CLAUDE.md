@@ -7,10 +7,11 @@ invariants). User-facing syntax lives in [README.md](./README.md) and [REFERENCE
 Every rule that must hold is stated here or in `.claude/rules/`: a rule of one area (the distributed
 family, the docs site, MCP and the agent) is in `.claude/rules/<area>.md`, which loads when you work
 on a file of that area. Each area also has a nested `CLAUDE.md` with the mechanics you need when
-editing it, loaded when you read a file under it: `src/DtPipe/`, `src/DtPipe.Core/`,
-`src/DtPipe.Transformers/`, `src/DtPipe.Adapters/`, `src/DtPipe.Adapters.Shared/`,
-`src/DtPipe.Processors/`, `src/Apache.Arrow.Serialization/`, `src/DtPipe.Coordinator/`,
-`src/DtPipe.PipelineNode/`, `src/DtPipe.PipelineNode.Hosting/`, `src/DtPipe.Coordinator.Server/`.
+editing it, loaded when you read a file under it: `src/DtPipe/`, `src/DtPipe/Cli/Studio/`,
+`src/DtPipe.Core/`, `src/DtPipe.Transformers/`, `src/DtPipe.Adapters/`,
+`src/DtPipe.Adapters.Shared/`, `src/DtPipe.Processors/`, `src/Apache.Arrow.Serialization/`,
+`src/DtPipe.Coordinator/`, `src/DtPipe.PipelineNode/`, `src/DtPipe.PipelineNode.Hosting/`,
+`src/DtPipe.Coordinator.Server/`.
 
 Each rule ends with its guard: `[CI: check]`, `[local: check]` (runs only when someone runs it), or
 `[unchecked]` (this file is the only defence).

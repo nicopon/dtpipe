@@ -47,7 +47,7 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   (`Identity.Pipelines`, `Launches`): empty means none, and no other kind keeps a list (a monitor reads every pipeline). The
   host of such a service is refused when it announces, as a known identity that is no node, never queued, and
   `RightsIdentityProvider` gives it no group, so the data plane never admits it. Every sort of service reads its permission from here: add a sort as a kind, never as a claim.
-  `[local: DtPipe.Coordinator.Server.Tests, the lab's smoke.py rights]`
+  `[CI: DtPipe.Coordinator.Server.Tests] [local: the lab's smoke.py rights]`
 - **A person's rights are the rights', and for a person of the IdP the configuration's too, never the token's.** People sign in through
   the provider (`Coordinator:Ui:ClientId`, a confidential authorization-code client, PKCE, the code
   in the query so the Lax correlation cookies ride the redirect) into the `dtpipe-coordinator`
@@ -60,7 +60,7 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   when it is added and at start. The pages accept the
   cookie only. Only a page navigation (`TrustedIdp.IsPageNavigation`) is sent to sign in: to the form where people may hold a key,
   to the provider otherwise; any other request is told 401, with `WWW-Authenticate: Bearer resource_metadata="…"` on `/api`.
-  `[local: PersonKeyTests; the lab's smoke.py rights — roles and sessions]`
+  `[CI: PersonKeyTests] [local: the lab's smoke.py rights — roles and sessions]`
 - **A person verified by a key is judged against the rights on every request.** Where a key can be taken
   (`CoordinatorServerOptions.SignsPeopleInByKey`: the issuer, over HTTPS or with `Coordinator:Auth:AllowHttpKeys`, and people
   allowed a key), `GET /account/login` shows a form (a password field, an antiforgery token, `no-store`) beside a link to the
@@ -72,7 +72,7 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   by a key, whose named key is live) and `Coordinator:Auth:PersonKeys`: a revocation, a disablement or a removal ends a session at
   its next request and an hour's token with it. A person of a key signs out here only. `Coordinator:Auth:PersonKeys=false`
   refuses a person by name when it is added and at start (`KeyIssuer.CheckIdentities`), maps no form, gives a person no token and
-  takes `key` out of the metadata's `dtpipe_auth`. `[local: PersonKeyTests, RouteTableTests]`
+  takes `key` out of the metadata's `dtpipe_auth`. `[CI: PersonKeyTests, RouteTableTests]`
 - **A person and a service are told apart by the claims of a token the issuer made from the identity's kind, whichever
   issuer.** A service's token comes from
   client credentials, so its subject is its client (`sub == client_id`, RFC 9068): the default
@@ -95,40 +95,40 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   cannot see the body: `ServiceEndpoints` checks the identity's list once the request is well-formed and before it says whether
   the pipeline exists or is armed, so a launcher learns nothing of a pipeline off its list; a run off the list is read as no run (404). It cancels only a run it started (`RunView.LaunchedBy` is its client id), a run of
   another identity or of a person being no run to it as well; a person's `/api/runs/cancel` is unchanged.
-  `[local: DtPipe.Coordinator.Server.Tests TrustedIdpTests, ServiceRoutesTests, NodeChannelHubTests, the lab's smoke.py rights, bricks - health, a service launches a run]`
+  `[CI: DtPipe.Coordinator.Server.Tests TrustedIdpTests, ServiceRoutesTests, NodeChannelHubTests] [local: the lab's smoke.py rights, bricks - health, a service launches a run]`
 - **The public address is a setting, never a header.** The server listens in plain HTTP and a proxy in front terminates TLS.
   `Coordinator:PublicUrl` (a scheme, a host, a port; no path, user, query or fragment: it stops the start without echoing the value)
   makes `MapCoordinatorServerAsync` read every request as made to that address, first in the pipeline, whatever `Host` or `X-Forwarded-*` it
   carries; no forwarded header is ever applied. `OriginOf` (the metadata document, the `WWW-Authenticate` challenge), the OpenID
   Connect return address and the `SameAsRequest` cookies (session, correlation, nonce) all read the request's scheme and host, so
   they follow. Unset, the request stands as it came, which is right for a server reached directly. A deployment behind a TLS proxy
-  must set it, or the sign-in's return address says `http://`. `[local: PublicUrlTests]` `[unchecked: a real TLS proxy]`
+  must set it, or the sign-in's return address says `http://`. `[CI: PublicUrlTests]` `[unchecked: a real TLS proxy]`
 - **A refused page gives a way out.** A person with no role who opens a page is signed out here
   and at the provider and lands on `/account/denied`: keeping the provider's session would sign
   the same person in again on the next try. A person who lacks only the admin role gets a 403 page
   linking back to `/` and to `/account/logout`. A person of a key signs out here alone, the provider never having signed them in.
   `AccountPages` writes both and the sign-in form; a message it shows is HTML-encoded first.
-  `[local: PersonKeyTests; the lab's smoke.py rights — roles and sessions]`
+  `[CI: PersonKeyTests] [local: the lab's smoke.py rights — roles and sessions]`
 - **A request that changes something carries `X-Dtpipe-Csrf`** (`RequireCsrfHeader`, on every
   `/api` group), a bearer's too: another site cannot set it without a CORS preflight this server
   never answers. The pages' `api()` helpers send it. Never add a cookie-authenticated route outside
   those groups.
-  `[local: RouteTableTests, the lab's smoke.py rights]`
+  `[CI: RouteTableTests] [local: the lab's smoke.py rights]`
 - **A route's authorization is the group it is mapped on, and `MapCoordinatorServerAsync` declares the groups.** The reader,
   designer and admin groups of `/api` (their roles, and the CSRF filter they inherit) are built once there. `NodeEndpoints`,
   `LibraryEndpoints`, `RightsEndpoints` and `RunEndpoints` each map their domain on the reader group they extend and on
   the designer or admin group they receive, as a host maps its own routes on the groups returned (`CoordinatorApiGroups`); `HealthEndpoints`
   maps `/health` on its own group, outside `/api`, for a monitor, and `/api/health` on the reader group; `ServiceEndpoints` maps `/service`
   on its own group, outside `/api`, for a launcher, with no CSRF filter since a service's token is bearer only; `CoordinatorServer` keeps
-  the `account` group, `/healthz`, `/livez`, the metadata document, `/account/*` and the hubs. `[local: RouteTableTests]`
+  the `account` group, `/healthz`, `/livez`, the metadata document, `/account/*` and the hubs. `[CI: RouteTableTests]`
 - **Every rights change names its author** (`AuditEntry.By`, by `TrustedIdp.CallerOf`: the signed-in email, or the identity's
   id when it has none, a person verified by a key; a person of the provider with no email by its name and ` (idp)`, which no id
-  holds; `Coordinator:Bootstrap` for what the bootstrap adds). `[local: PersonKeyTests, ProviderPersonTests, KeyOnlyCoordinatorTests]`
+  holds; `Coordinator:Bootstrap` for what the bootstrap adds). `[CI: PersonKeyTests, ProviderPersonTests, KeyOnlyCoordinatorTests]`
 - **The last administrator stays.** `RightsStore.Edit`, under the write gate and whatever the route, refuses a change that leaves
   no administrator where there was one, naming who was: revoking the last live key of the last one, disabling, removing or
   demoting them. An administrator is an enabled person whose role is `admin`, of the IdP or with a live key; while a provider
   signs people in, anyone `Coordinator:Roles:Admin` lists counts too, and then nothing is refused. A key that expires changes
-  nothing: an administrator whose keys all lapsed stays, the bootstrap leaves an identity of its id as it is, and the start says so. `[local: KeyOnlyCoordinatorTests, ProviderPersonTests]`
+  nothing: an administrator whose keys all lapsed stays, the bootstrap leaves an identity of its id as it is, and the start says so. `[CI: KeyOnlyCoordinatorTests, ProviderPersonTests]`
 - **An identity is verified by the IdP or by a key, chosen when it is added.** `Identity.Auth` (`IdentityAuth`): `idp`, the default
   and what an identity written without it reads as, holds no key; `key` holds `IdentityKey` records, each the SHA-256 of a key
   (`ClearKey`: `dtp_{clientId}_{secret}`, 256 random bits as 43 base64url characters), its last four characters and its dates. An
@@ -138,7 +138,7 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   with its date and cuts the identity's replicas). `GET …/keys` and `/api/rights` name a key by its id, its four characters and its
   dates. `ClearKey` has no `ToString` that shows the secret. `RightsStore.KeyHolder` is the one judge of a presented key: the client
   id it names only finds the identity, a disabled one or one the IdP verifies opens nothing, and every live key is compared in constant
-  time. `[local: IdentityKeyRoutesTests, IdentityKeyTests (its PostgreSQL and SQL Server cases need DTPIPE_TEST_REUSE_INFRA)]`
+  time. `[CI: IdentityKeyRoutesTests, IdentityKeyTests (SQLite and PostgreSQL)] [local: their SQL Server cases, which need DTPIPE_TEST_SQLSERVER or DTPIPE_TEST_REUSE_INFRA]`
 - **The server issues the tokens of a key, and trusts them as it trusts the provider's.** `KeyIssuer`'s issuer is
   `Coordinator:PublicUrl`; there is none without it, and then an identity verified by a key is refused
   when it is added and a start whose rights hold one stops naming it. An `Authority` equal to the issuer stops the start: the issuer
@@ -169,7 +169,7 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   `KeyBearer` or `IdpBearer`, which validate it in full and fail, on every request, a key issuer's token for an identity not
   verified by a key and a provider's token for one that is (a subject the rights do not know stays the provider's, for enrollment).
   `RightsIdentityProvider`, `ServiceKindHandler` and the announcement sit behind it, TransportR's renewal included.
-  `[local: KeyIssuerTests, IdentityKeyRoutesTests; Hosting.Tests KeyTokenTests — a node's token client, a real SQLite store]`
+  `[CI: KeyIssuerTests, IdentityKeyRoutesTests; Hosting.Tests KeyTokenTests — a node's token client, a real SQLite store]`
   `[unchecked: two instances that make a key at the same first start]`
 - **The state is kept in one store, SQLite unless the deployment chose another.** `Coordinator:Store` is `sqlite` (the default),
   `postgresql` or `sqlserver`; `StoreRegistration` registers the seven stores of the chosen kind, opened when the first is
@@ -214,7 +214,7 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   the key ring before anything is served: a repository that fails throws, never returns nothing, since DataProtection would then mint a
   key and sign everyone out unannounced. A restart signs nobody out. **Limit**: the keys are stored as DataProtection hands them over,
   unencrypted (as the directory they replace held them), and they cross the network: the database is as readable as the account that owns it.
-  `[local: SessionKeysTests, SqlStoreTests]`
+  `[CI: SessionKeysTests, SqlStoreTests]`
   `[local: lab.sh stack restart-check, on either store]`
 - **The rights are kept in the store, read once, and memory is the truth.** `RightsStore` is a thin face over `IRightsStore`
   (`SqlRightsStore`): one JSON document and its version in the `rights` table, on the connection every store borrows
@@ -226,17 +226,17 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   write that timed out and was kept) reads the document again and refuses that change (409): **a 503 on a change may still have
   been applied**, and then the route's other effects (cutting an identity's replicas) did not run: repeating the change finds nothing to change, and `POST /api/rights/identities/{id}/reconnect` cuts them. A store with no document starts from `Coordinator:RightsSeed` once (`Create` is atomic, and a start that loses
   the race reads the winner's document) or empty, and refuses unless `Coordinator:Initialize` is true, since rights begun
-  again could grant what was revoked. `[local: RightsStoreTests, RightsRoutesTests, SqlStoreTests]`
+  again could grant what was revoked. `[CI: RightsStoreTests, RightsRoutesTests, SqlStoreTests]`
 - **A host adds to the server through two seams, never through a setting.** `MapCoordinatorServerAsync` returns the groups
   of `/api` behind every guard (`CoordinatorApiGroups`), and `AddCoordinatorServer` takes the host's own pages as `AdminView`s:
   under the view's path a page navigation signs in as any page does, and anyone but an admin gets the 403 page that names the
   view. The product's host adds neither. The lab's bench (the Lab view, its scenario catalog, planning by hand and fault
   injection) is its own coordinator's, `samples/distributed-lab/Lab.Coordinator`: nothing of it enters this project or its
-  pages. `[CI: validate_distributed_boundary.sh — names under src/]` `[local: RouteTableTests — the bench's routes; the lab's
+  pages. `[CI: validate_distributed_boundary.sh — names under src/]` `[CI: RouteTableTests — the bench's routes] [local: the lab's
   smoke.py rights — a reader opens the Lab view]` `[unchecked: whether a new route belongs to the bench]`
 - **Fault injection ends a fragment's child only on a replica whose host enabled it.** A replica that did
   not answers that it ended none, and `DeploymentManager.KillAsync` (`FaultInjection`) returns the count of children ended
-  over every replica of the node: `0` says none was. The product's host maps no route to it. `[local: PipelineNode.Tests FaultInjectionTests, RunQueueTests]`
+  over every replica of the node: `0` says none was. The product's host maps no route to it. `[CI: PipelineNode.Tests FaultInjectionTests, RunQueueTests]`
 - **The server never opens a node's data.** What reads it asks the node that hosts it, through
   `NodeRequests`: a brick preview and a
   library save's check (`DesignValidator`): each source brick's node sends its first row as Arrow IPC
@@ -251,7 +251,7 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   a backfill, a priority in the queue (`RunDispatch` stays a first-come admission check), or a transformation
   (it runs no dtpipe: see "The server never opens a node's data"). A supervisor asks it whether a pipeline can be
   launched and it answers (`PipelineHealth`); it checks nothing on its own account. A distribution plan is a placement, not a
-  calendar. `[local: RunDispatchTests — the order of the queue, TrustedIdpTests — a service never reaches /api]`
+  calendar. `[CI: RunDispatchTests — the order of the queue, TrustedIdpTests — a service never reaches /api]`
   `[unchecked: the rest; nothing fails when a scheduler, a trigger or a retry is added]`
 - **What `dtpipe studio` calls is a contract** (`DtPipe.Jobs/Coordinator`: `CoordinatorApi`, the
   records): the server maps those routes and writes those records, and the metadata document
@@ -263,22 +263,21 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   the catalog), so the studio never decides a brick itself; `/api/bricks/{node}/{id}/sample` asks the node for at most
   `MaxSampleRows` rows as Arrow IPC (`SampleBrick`, which the node host bounds in bytes before it
   sends, below the channel's message limit), and `/api/bricks/{node}/{id}/preview` for the first rows and their types, read when a
-  person looks at a brick and kept nowhere. `[local: CoordinatorContractTests, StudioRoutesTests,
-  the lab's smoke.py bricks — the studio's routes]`
+  person looks at a brick and kept nowhere. `[CI: CoordinatorContractTests, StudioRoutesTests] [local: the lab's smoke.py bricks — the studio's routes]`
 - **Every save into the library is checked first, and a refused one writes nothing.** The handler of
   `PUT /api/library/{id}` passes the text as received to `DesignValidator`, after the rights and the
   CSRF header and before `SaveAsync`: a job it refuses answers 422 with `LibraryRefused` (its report),
   and with no runner or no brick node online the check cannot run, so it refuses by name; never a
   commit that was not checked. It covers the studio and the pages alike, and `PUT /api/library/{id}/bindings`, which
   checks the job the library holds under the bindings it receives; `DeleteAsync` and the seeds loaded at
-  start check nothing, and the arming checks a seed's references (see "A binding decides"). The push to the library's remote comes after the check and the write, never before. `[local: StudioRoutesTests, the lab's smoke.py bricks — a library save's check, a sink that refuses]`
+  start check nothing, and the arming checks a seed's references (see "A binding decides"). The push to the library's remote comes after the check and the write, never before. `[CI: StudioRoutesTests] [local: the lab's smoke.py bricks — a library save's check, a sink that refuses]`
 - **A save may say which version it read.** `PUT /api/library/{id}` with `If-None-Match: *` creates
   only, with `If-Match: "<commit>"` replaces only that version: 412 otherwise, with the commit in
   place. The check runs under the library's lock. The version is the last commit of the job file,
   never the directory's: bindings saved beside it are no edit, and `GET /api/library/{id}` and the listing
   give that same commit. Without either header a save overwrites,
   as the pages do. The answer says when a deployment still runs another version (`deployed`), judged by content: the hashes
-  of the job and of the bindings it was armed with, so a commit that puts the old text back is the same version. `[local: StudioRoutesTests, the lab's smoke.py
+  of the job and of the bindings it was armed with, so a commit that puts the old text back is the same version. `[CI: StudioRoutesTests] [local: the lab's smoke.py
   library — a studio publishes]`
 - **A save may carry the bindings it knows.** `LibrarySave.Bindings` sets the
   bindings it names into the ones the library keeps, entry by entry, in the same commit as the job; an alias it does not name
@@ -287,9 +286,9 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   a publisher that names no mode must not turn a `tolerant` binding back into `strict`; `dtpipe studio` sends none. The modes are `strict`, `contract`, `compatible` and `tolerant`; a request for another is refused (400),
   and **a pin a request brings is never read**: the check writes it. A reference names its node and its brick, so the binding of its alias holds the mode and the pin
   alone, and `BrickReferences.Expand` puts the node and the brick back, inside the library's lock, whatever the request names.
-  `[local: BindingTests, StudioRoutesTests, StudioPublishTests]`
+  `[CI: BindingTests, StudioRoutesTests, StudioPublishTests]`
 - **The library keeps a job and its bindings, no plan.** `pipelines/<id>/` holds `pipeline.yaml` and
-  `bindings.json`. `[local: LibraryRemoteTests, BindingTests]` `[unchecked: that nothing else is written there]`
+  `bindings.json`. `[CI: LibraryRemoteTests, BindingTests]` `[unchecked: that nothing else is written there]`
 - **The binding decides where a brick branch runs, and a bound branch never runs on the runner.** `bindings.json` maps the
   alias of each branch that references a brick to `{mode, pin}`; every branch that is neither a reference nor bound goes
   to the runner, which is stateless and never named. `AutoPlacer.Plan` places a referenced alias on its node or refuses the
@@ -316,7 +315,7 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   the pins of those aliases alone in a commit of its own, and arms the library as it is then; a pin that exists is never moved by an arming, so a
   `brick-changed` waits for a save, and a pipeline with any other blocking problem is refused before the check runs. A contract the node did
   not send leaves a `contract` or `compatible` binding unpinned, so `unchecked`, never pinned to something that passes.
-  `[local: BindingTests, ArmedDeploymentTests (the arming), LaunchRoutesTests, StudioRoutesTests]`
+  `[CI: BindingTests, ArmedDeploymentTests (the arming), LaunchRoutesTests, StudioRoutesTests]`
 - **A brick that changed since its binding was checked is judged once per version, by the node that hosts it, and a verdict that
   breaks refuses the run by name.** `BindingVerifier` gives, per non-strict binding of a launch: `unchanged` when the brick is at the
   pin's version; `tolerated` for `tolerant` with no node asked; otherwise the node's answer: a source's `CheckSource` (its own sample
@@ -327,7 +326,7 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   version that does not know the request). A verdict is kept by pipeline, armed commit, alias, brick version and the binding's own
   hash (a bindings save moves no commit but re-pins); `unread` is never kept; `StateOf` says known, in flight or absent without
   asking a node. Limit: a `tolerant` source that changed upstream leaves the sink's pinned contract mute on the new schema. A pin
-  moves only by a check a person triggers, never by a verdict. `[local: ArmedDeploymentTests, BindingTests, Hosting.Tests BrickCheckTests]`
+  moves only by a check a person triggers, never by a verdict. `[CI: ArmedDeploymentTests, BindingTests, Hosting.Tests BrickCheckTests]`
 - **Health is read, never acted on, and a read is kept.** `PipelineHealth` says whether each armed pipeline can be launched, from
   the job at its armed commit (`IJobSource`, never the library as it is now) and its armed bindings: `AutoPlacer.Check`, the plan
   `LaunchPlanner.ChooseAsync` makes (`Launch.Causes`: no runner, no admissible runner, an edge the matrix forbids, a fragment with
@@ -346,7 +345,7 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   eligible, since that state ends with a registration and nothing publishes it. `GET /health/pipelines[/{id}]` (a monitor) and `GET /api/health` (the pages) answer 200 whenever the caller is
   admitted, with the status in the body; an id that is not armed is `critical`, so that a disarming alerts. "Launchable" is a
   plan that holds and a replica that could run each fragment, not that the run will succeed: the replicas' `Check` and `CheckSink`
-  stay at arming and launching. `[local: ArmedDeploymentTests (Health), TrustedIdpTests, RouteTableTests, the lab's smoke.py bricks - health, ui_check.py]`
+  stay at arming and launching. `[CI: ArmedDeploymentTests (Health), TrustedIdpTests, RouteTableTests] [local: the lab's smoke.py bricks - health, ui_check.py]`
   `[unchecked: that a status is right for a state no test builds]`
 - **A new state starts from the seeds, or empty.** `Coordinator:LibrarySeed` (one
   `.yaml` per pipeline, for a library that has no history, here or at its remote) and `Coordinator:RightsSeed` (for rights the store does not hold); with neither, the library has no pipeline
@@ -385,11 +384,11 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   guarantee that nothing was kept**; after any other failure the push may have reached the remote, and the save shows here at the next save or
   start. The studio's contract is unchanged: it reads the `error` of a status it does not know. `JobAtAsync` (every launch, the health read, the binding verifier)
   reads an immutable commit without the lock once the library is open, so no launch waits for a save or for the remote; every other read waits for a
-  push in flight, `Timeout` at most. `[local: LibraryRemoteTests]` `[unchecked: a git server that goes down in the middle of a push and
+  push in flight, `Timeout` at most. `[CI: LibraryRemoteTests]` `[unchecked: a git server that goes down in the middle of a push and
   applies it; an https remote with a token; Windows; the health read after an alignment, which publishes no event and so may stay stale up to Coordinator:Health:MaxAge]`
 - **Only a plan in `PlanMode.Manual` sends a data node a fragment written as a job.** No route of the product plans that
   way; the lab's coordinator's `/api/plan` and `/api/deploy` do, and only to a host that announces `raw-fragments`; every other
-  caller plans in `Library`. `[local: PlanModeTests; the lab's smoke.py lab and sandbox (through /api/deploy), ui_check.py
+  caller plans in `Library`. `[CI: PlanModeTests] [local: the lab's smoke.py lab and sandbox (through /api/deploy), ui_check.py
   (the Lab view plans through /api/plan)]` `[unchecked: a new route that plans in Manual]`
 - **A job names a brick by reference, a node holds its text, and the reference decides the placement.** A source is read
   by `input: brick:<node>/<brick>`, a sink written by `output: brick:<node>/<brick>` with the one branch it reads in `from`
@@ -404,14 +403,14 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   announced brick and reads a brick announced again anew; the node's name and whether it is online are read at every call, so a
   brick is offline as soon as its node has no connected replica, one in its grace period included. A branch that holds text is
   no brick: nothing matches a branch against a text. The planner never takes a branch apart.
-  `[local: BrickCatalogTests, MinimalBrickTests, the lab's smoke.py, ui_check.py]` `[unchecked: concurrent readers of the branch
+  `[CI: BrickCatalogTests, MinimalBrickTests] [local: the lab's smoke.py, ui_check.py]` `[unchecked: concurrent readers of the branch
   kept per brick; that an entry goes with its announcement]`
 - **A fragment declares each edge alias once**, so a branch that writes somewhere, is read on its own node or feeds
   several nodes sends on through a relay of its own alias, never with a second `output: arrow:-` on itself.
   `[local: the lab's smoke.py lab]`
 - **A plan's edges join fragments of the plan.** A fragment the planner refuses is not in `Fragments`, and neither is an edge
   that names it, so a plan with errors still reads as a whole to the page, the run and any client of `/plan`.
-  `[local: PlanModeTests]`
+  `[CI: PlanModeTests]`
 - **The server designs nothing.** A pipeline reaches the library by a save that is checked
   (`PUT /api/library/{id}`) from `dtpipe studio`, whose designer is `DtPipe.Jobs`' (rule in the root
   `CLAUDE.md`); the pages list, read, restore, bind and run it, and show its job read only. A
@@ -419,7 +418,7 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   the key, gives every brick a new version. `HashValueTests` pins the values of the hashes the server compares or shows (a saved
   plan's job, a brick's version, a replica's bricks), and `Hosting.Tests FragmentJobTests` a fragment's version;
   they are computed by `ContentHash` (`DtPipe.Coordinator.Contracts`).
-  `[local: DtPipe.Coordinator.Server.Tests, Hosting.Tests FragmentJobTests, the lab's smoke.py, ui_check.py]`
+  `[CI: DtPipe.Coordinator.Server.Tests, Hosting.Tests FragmentJobTests] [local: the lab's smoke.py, ui_check.py]`
   `[unchecked: a site that hashes on its own]`
 - **A deployment is the coordinator's, and nothing of it is left on a node.** A library pipeline is *armed*: `{pipeline, commit
   of the job, the bindings at that commit, when, by whom}` (`ArmedDeployment`), kept in the store once its deployment is ready and read
@@ -433,7 +432,7 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   node and why (`refused by <node>: …`), and a refused deployment is not kept. A replica that arrives
   later is as good as one that was asked, and one that goes takes nothing with it: what decides a run is
   admission, at the run. A deployment's gate is held while it is deployed or removed; a run passes it to
-  read the state and does not hold it. `[local: DeploymentManagerTests, RunQueueTests, ArmedDeploymentTests, the lab's smoke.py]`
+  read the state and does not hold it. `[CI: DeploymentManagerTests, RunQueueTests, ArmedDeploymentTests] [local: the lab's smoke.py]`
 - **The armed deployments are in the store, read once, and memory is the truth.** `DeploymentStore` is a thin face over
   `IDeploymentStore` (`SqlDeploymentStore`): the `deployments` table, a row per pipeline holding its JSON document, on the
   connection every store borrows. `DeploymentService` loads it when it is built, so a store that cannot be read stops the start; a
@@ -450,7 +449,7 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   record was kept while memory refused it is read back ready at the next start, with no check; an undeploy or a replacement whose
   forgetting was kept while the call timed out leaves the deployment in memory until the next start, when it is gone. Arm the pipeline
   again (it replaces the record), or undeploy it after the restart.
-  `[local: ArmedDeploymentTests, DeploymentRoutesTests; SqlStoreTests]`
+  `[CI: ArmedDeploymentTests, DeploymentRoutesTests; SqlStoreTests]`
   `[local: lab.sh stack restart-check — an armed pipeline read back, on either store]` `[unchecked: a write that times out and is applied]`
 - **The hosts set aside are in the store, read once, and an announcement never waits on it.** `EnrollmentQueue` loads an
   `IIgnoredHostStore` (`SqlIgnoredHostStore`: the `ignored_hosts` table, a row per subject with the instant it is let
@@ -461,12 +460,12 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   first. The hosts that wait stay in memory: a host announces again within seconds, and what it proposed is untrusted text that
   expires with the host. **Limit**: an `Ignore` that timed out may have been applied, and then the host is set aside in the store
   while it still waits in memory until it announces again after the next start.
-  `[local: EnrollmentQueueTests, RightsRoutesTests; SqlStoreTests]`
+  `[CI: EnrollmentQueueTests, RightsRoutesTests; SqlStoreTests]`
 - **Deployments and runs are decided under one lock.** `DeploymentManager` is what the routes call, over three
   parts and the one `DeploymentLedger` they share: `DeploymentService` (the deployments), `RunQueue` (the queue
   and the dispatch) and `FaultInjection`. A decision that reads both sides, such as a deployment refused while a run of
   its pipeline is queued or in flight, is taken under the ledger's lock; give a part no lock of its own.
-  `[local: RunQueueTests]` `[unchecked: the lock itself]`
+  `[CI: RunQueueTests]` `[unchecked: the lock itself]`
 - **One run at a time per data node, first come first served.** `RunDispatch` decides, at each
   enqueue and each finish, which waiting runs `RunQueue` sends: one that no run already
   sent, and no older run still waiting, shares a data node with. A run's data nodes are the nodes its deployment's bindings name
@@ -474,7 +473,7 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   (fail-closed). A run holds them from being sent until it finishes, and is never sent twice. Its plan is computed afterwards, and
   a plan that reaches a data node the run does not hold is refused (`RunDispatch.Unheld`). A runner never counts, so its fragments of two runs share
   its host with no resource bound. With no id, `/api/runs/cancel` refuses (409) while several runs
-  are in flight rather than guess. `[local: RunDispatchTests, RunQueueTests, ArmedDeploymentTests, the lab's smoke.py library and sandbox]`
+  are in flight rather than guess. `[CI: RunDispatchTests, RunQueueTests, ArmedDeploymentTests] [local: the lab's smoke.py library and sandbox]`
 - **A node is one identity carried by one or more replicas, and `ReplicaRegistry` is the one table of
   them.** `NodeInventory` adds what the registry does not hold: the name the rights give the node, the
   groups, the last announcement of a node with no replica connected, and the page's view. The node is
@@ -491,7 +490,7 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   `description`, `groups` or `enabled`) leaves it as the identity has it: the omission neither enables, renames
   nor empties. `Origin`, where a replica says it runs, is untrusted
   text: cut at `Announce`, the ground of no decision.
-  `[local: NodeChannelHubTests, RightsRoutesTests; the lab's smoke.py rights - identity, disabled; tools/campaign.py F3, S7]`
+  `[CI: NodeChannelHubTests, RightsRoutesTests] [local: the lab's smoke.py rights - identity, disabled; tools/campaign.py F3, S7]`
 - **A run names who launched it, and a service may launch it only once.** `RunView.LaunchedBy` is a person's email or the id of
   the identity that launched it, a service or a person verified by a key, or `CallerOf`'s name for a person of the provider with
   none (an id holds no `@`, and no two identities share one, so a
@@ -502,13 +501,13 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   key for another pipeline is a conflict, and a request with no key is never a repeat. The key lives as long as its run is
   journaled (`IRunStore.Window`, applied at start as when recording); a run in flight when the server stops is ended at the next
   start (`RunJournal.RestartedRefusal`) and answers its key as that run. `RunJournal.Find` scans every kept run, `List`'s limit being a page.
-  `[local: RunQueueTests, RunJournalTests, ServiceRoutesTests, the lab's smoke.py bricks - a service launches a run]`
+  `[CI: RunQueueTests, RunJournalTests, ServiceRoutesTests] [local: the lab's smoke.py bricks - a service launches a run]`
 - **A state is written as a lowercase word, by the converter on the property that carries it.** `RunView.State` and
   `DeploymentView.State` are a `RunState` and a `DeploymentState`; the pages, the event stream and the journal's documents
   carry the name of the value in lowercase, never as declared. Where no property carries a deployment's state (the
   `deploy` event, the text of a refusal), `StateWords.Word` writes it; `undeployed` is the word of an event, not a
   state. A journal document whose state is none of the values, or a number, is skipped when the server starts.
-  `[local: StateWireTests, RunQueueTests]`
+  `[CI: StateWireTests, RunQueueTests]`
 - **A run is journaled as it goes, and a restart ends what it interrupted.** `RunJournal` keeps the runs in an `IRunStore`, which is
   `SqlRunStore`: the `runs` table (a document per run, whether it is over, its instant), the `owed` table and the `counters` table that draws ids. `RunQueue` draws the id and writes the run when it is queued (under the ledger's lock, before
   the ticket is visible), when it starts and when it ends. History (`List`, `Find`, `PipelineHealth`) holds the runs that are over and
@@ -526,12 +525,12 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   A reason that goes into `RunView.Refusal` is the server's own text, never a driver's message.
   A run that had started carries `RunView.SinkMayBePartial` (also in `/service/runs`), true: its fragments had been launched and a sink may hold part of
   what they wrote. It is a label only: nothing ranks resumption strategies or reruns the run, and a run that was only queued, or that ended any other way, has none.
-  `[local: RunJournalTests (the label), RunQueueTests, OrphanRunsTests, NodeChannelHubTests; SqlStoreTests; tools/campaign.py F4]` `[unchecked: a wired
+  `[CI: RunJournalTests (the label), RunQueueTests, OrphanRunsTests, NodeChannelHubTests; SqlStoreTests] [local: tools/campaign.py F4]` `[unchecked: a wired
   child with nothing to write ends only once a relay touches its torn-down transfer]`
 - **A run that was placed records the replica of each fragment.** `RunJournal` keeps the `RunResult` whole,
   `RunResult.Replicas` included: an instance id and the `Origin` the replica announced, untrusted text the pages
   escape. A run refused at admission has none, and a document that names none reads as a run with none.
-  `[local: RunJournalTests]` `[unchecked: the pages' escaping of Origin]`
+  `[CI: RunJournalTests]` `[unchecked: the pages' escaping of Origin]`
 - **A run names the subject and the groups of each fragment's node.** `RunQueue` reads them from the
   rights when the run starts, through `LaunchPlanner.RunFragmentsOf` (`RightsStore.SubjectOf`: the client id of
   the identity named after the fragment's node, the `sub` its tokens carry; `GroupsOf`), and puts them in each
@@ -539,7 +538,7 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   then places the run only on replicas whose connection attests that subject and whose data plane client holds
   exactly those groups. A node that no identity carries any more, or whose identity is disabled, refuses the
   run (`refused`), and the server never sets `AdmissionOptions.AdmitUnboundFragments`.
-  `[local: RightsStoreTests, DeploymentManagerTests (disabled, removed), RunQueueTests, the lab's smoke.py rights - a foreign replica]`
+  `[CI: RightsStoreTests, DeploymentManagerTests (disabled, removed), RunQueueTests] [local: the lab's smoke.py rights - a foreign replica]`
 - **One source of rights.** `RightsStore` holds the identities and the flow matrix;
   `RightsFlowControl` replaces TransportR's `IFlowControlService`, so the hub checks the matrix as
   it is now on every transfer, and the planner and a deployment check every edge against it, each by one
@@ -550,7 +549,7 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   `POST /api/rights/matrix/edges` (the page sends the pairs of groups a plan's refused edges lack), and `exchangeWithRunners` on a
   node added or accepted, in the same change as the identity, both ways between its groups and those the rights give every runner the
   inventory knows (the rights do not say which node is a runner, its announcement does; none known refuses the request).
-  `[local: FlowMatrixEvaluationTests, MatrixEdgesTests, LaunchRoutesTests, the lab's smoke.py rights]`
+  `[CI: FlowMatrixEvaluationTests, MatrixEdgesTests, LaunchRoutesTests] [local: the lab's smoke.py rights]`
 - **A library pipeline is planned when it is launched, and the runner is chosen by one function.** `RunQueue.RunOneAsync`, once
   the run is sent and outside the ledger's lock, asks `LaunchPlanner.ChooseAsync` for the plan of the armed job under the armed
   bindings, and so do `GET /api/library/{id}/plan` (the plan a launch would make now, nothing written) and arming. The
@@ -559,10 +558,10 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   used. A plan that does not use the runner fails whichever is chosen and is returned at once; when none serves, the refusal
   names each runner and why. `NodeInventory.PreferredRunner` is for reads that need any runner, never a plan. The groups a plan
   names are the rights' at that moment, so a node's groups changing needs no redistribution.
-  `[local: ArmedDeploymentTests, LaunchRoutesTests, PlanRightsTests, RightsStoreTests, the lab's smoke.py rights - several groups]`
+  `[CI: ArmedDeploymentTests, LaunchRoutesTests, PlanRightsTests, RightsStoreTests] [local: the lab's smoke.py rights - several groups]`
 - **A run records the plan it ran.** `RunView.Plan` (`RunPlan`): the plan's id, the runner it used, each fragment at its version, and
   each binding with the brick version it met and its mode's verdict. A run refused before it had a plan has none.
-  `[local: ArmedDeploymentTests, RunJournalTests]`
+  `[CI: ArmedDeploymentTests, RunJournalTests]`
 - **A cursor is kept per sink branch, and only at the verdict of the run.** `CursorKeeper` holds a `CursorRecord` per (pipeline, sink
   alias) in memory (the truth, read once at start) and in `ICursorStore` (the `cursors` table; the
   store is written first). `RunQueue.RunOneAsync` asks `Launches` after the plan, which puts the kept value in the `RunFragment` of the
@@ -574,7 +573,7 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   refuses a launch while a run of a pipeline that has a cursor is queued or in flight, and so do the reset and set routes (both under
   the ledger's lock); before the first cursor exists the dispatch's one-run-per-data-node already serialises two runs. The routes are
   `CoordinatorApi.CursorsRoute` and `CursorRoute`: the reader group reads, the designer group (the right to launch) sets and resets, and
-  `/service` has none. `[local: CursorRunTests, CursorRoutesTests, SqlStoreTests, RouteTableTests]` `[unchecked: a store write that times out and is applied]`
+  `/service` has none. `[CI: CursorRunTests, CursorRoutesTests, SqlStoreTests, RouteTableTests]` `[unchecked: a store write that times out and is applied]`
 - **A data node only reads and writes, and runs only its bricks, which it composes by id.**
   `PlanBuilder` gives a data node's fragment as `FragmentUnit`s and composes the job with
   `FragmentJob` (`DtPipe.Coordinator.Contracts`), the function the node calls again on its own
@@ -583,7 +582,7 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   (`PlanMode.Manual`) sends a job as written, and only to a host that announces `raw-fragments`; the library
   and `AutoPlacer` never do. `BrickRules.Processors` is the one list of processors, shared with `JobGraph`;
   it must equal the `stream-processor` entries of `dtpipe providers --format json`. The replica decides again at
-  `Launch`, with the same function. `[local: PipelineNode.Tests BrickRulesProcessorsTests, the lab's smoke.py
+  `Launch`, with the same function. `[CI: PipelineNode.Tests BrickRulesProcessorsTests] [local: the lab's smoke.py
   bricks, sandbox]`
 - The pages are this library's `wwwroot`, which `dotnet publish` puts at the root of the `wwwroot` beside any host that
   references it, beside the host's own pages: `index.html` + `js/` (the coordinator's views, ES modules, no build). `/healthz`, the protected resource
