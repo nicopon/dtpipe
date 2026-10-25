@@ -191,7 +191,7 @@ docker compose -f deploy/compose.yaml down -v
 |:---|:---|
 | Know what each piece is for, and run the trial in Docker alone | [Try a distributed pipeline](distributed-trial.md) |
 | Declare bricks on a real database | [`dtpipe node`](../../REFERENCE.md#a-node-from-the-cli-dtpipe-node) |
-| Run the coordinator and the runner for real: volumes, Redis, TLS, secrets, backup | [deploy/README.md](../../deploy/README.md) |
+| Run the coordinator and the runner for real: volumes, databases, TLS, secrets, backup | [deploy/README.md](../../deploy/README.md) |
 | Cut a job in two at the point a pipeline could be split | [`dtpipe split`](../../REFERENCE.md#offering-the-points-a-job-could-be-cut-at) |
 
 ---

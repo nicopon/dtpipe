@@ -125,7 +125,7 @@ the control plane, over each replica's node channel; TransportR carries the data
   environment, never of the command line) is added at start where the rights lack it, in one change the audit names
   `Coordinator:Bootstrap`, and never replaces an identity. The product's recipe (`deploy/compose.yaml`) has a one-off service
   write its keys into a volume that the coordinator and the runner read by `@path`. `[local: Server.Tests KeyIssuerTests,
-  PersonKeyTests, KeyOnlyCoordinatorTests; Hosting.Tests KeyTokenTests]` `[unchecked: Redis's shelf of signing keys; a real
+  PersonKeyTests, KeyOnlyCoordinatorTests; Hosting.Tests KeyTokenTests]` `[unchecked: a real
   TLS proxy; two instances that bootstrap at the same first start; deploy/compose.yaml, until a Docker host runs it]` Detail:
   `src/DtPipe.Coordinator.Server/CLAUDE.md`.
 - **The CLI hosts a node only through one assembly, and never a hub.** `dtpipe` is the child a node drives, reached through

@@ -225,12 +225,12 @@ while any replica is connected.
 ## State and availability
 
 - **The coordinator is one instance that restarts fast, not a highly available service.** What a host must not lose - the run journal,
-  the rights, the armed deployments, the session keys, the pipeline library - is kept outside the process (the server's are Redis and a
+  the rights, the armed deployments, the session keys, the pipeline library - is kept outside the process (the server's are its database, SQLite, PostgreSQL or SQL Server, and a
   git remote: `src/DtPipe.Coordinator.Server/CLAUDE.md`), so a restart on an empty state directory loses none of it. What lives in the
   process is lost: the replica registry (rebuilt as replicas announce), the plans, the runs in flight and the transfers they carried,
   and TransportR's own store (the default, in memory). **A restart is read from the host's run journal, never from what the
   nodes do next**: a replica announcing again is an ordinary announcement, never evidence of a run. The host journals each
-  run when it is queued, when it starts and when it ends, in a store that outlives the process (the server's is Redis);
+  run when it is queued, when it starts and when it ends, in a store that outlives the process (the server's is its database);
   after a restart it ends the runs it finds in flight, and asks each
   replica of a node that carried a started run to abandon those fragments (`INodeLink.CancelAsync`, answered false by a
   replica that holds none). No message tells a node to drop what it holds on a guess: the authority is a journaled run.

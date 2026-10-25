@@ -124,7 +124,7 @@ library: a host owns `Program` and calls `AddCoordinatorServer` and `MapCoordina
   with its date and cuts the identity's replicas). `GET …/keys` and `/api/rights` name a key by its id, its four characters and its
   dates. `ClearKey` has no `ToString` that shows the secret. `RightsStore.KeyHolder` is the one judge of a presented key: the client
   id it names only finds the identity, a disabled one or one the IdP verifies opens nothing, and every live key is compared in constant
-  time. `[local: IdentityKeyRoutesTests, IdentityKeyTests (its Redis case needs DTPIPE_TEST_REDIS or DTPIPE_TEST_REUSE_INFRA)]`
+  time. `[local: IdentityKeyRoutesTests, IdentityKeyTests (its PostgreSQL and SQL Server cases need DTPIPE_TEST_REUSE_INFRA)]`
 - **The server issues the tokens of a key, and trusts them as it trusts the provider's.** `KeyIssuer`'s issuer is
   `Coordinator:PublicUrl`; there is none without it, and then an identity verified by a key is refused
   when it is added and a start whose rights hold one stops naming it. An `Authority` equal to the issuer stops the start: the issuer
@@ -148,7 +148,7 @@ library: a host owns `Program` and calls `AddCoordinatorServer` and `MapCoordina
   `AllowHttpKeys`), `PersonKeys` and `Coordinator:Bootstrap:AdminKey`, and refuses `Ui:ClientSecret`. **Same checks, local
   key source**: `KeyBearer` checks signature, issuer, audience and lifetime (30 seconds of skew) as `IdpBearer` does, with the keys of
   `IssuerKeys`, never through a request to the server's own address. `IssuerKeys` keeps RSA keys on a shelf of their own in the store
-  (`issuer_keys`, `{prefix}issuer-keys`: an `IXmlRepository` keyed `IssuerKeys.Shelf`, since DataProtection's key manager reads every
+  (`issuer_keys`: an `IXmlRepository` keyed `IssuerKeys.Shelf`, since DataProtection's key manager reads every
   element of its own repository as one of its keys), each protected by DataProtection, so a restored store or a second instance
   validates the same tokens, and a key the session keys cannot open is skipped with a warning. **The issuer must be the one that
   verifies the identity**: the service scheme (`Bearer`) reads a token's `iss` without believing it and hands the token to
@@ -156,10 +156,10 @@ library: a host owns `Program` and calls `AddCoordinatorServer` and `MapCoordina
   verified by a key and a provider's token for one that is (a subject the rights do not know stays the provider's, for enrollment).
   `RightsIdentityProvider`, `ServiceKindHandler` and the announcement sit behind it, TransportR's renewal included.
   `[local: KeyIssuerTests, IdentityKeyRoutesTests; Hosting.Tests KeyTokenTests — a node's token client, a real SQLite store]`
-  `[unchecked: Redis's shelf; two instances that make a key at the same first start]`
+  `[unchecked: two instances that make a key at the same first start]`
 - **The state is kept in one store, SQLite unless the deployment chose another.** `Coordinator:Store` is `sqlite` (the default),
-  `postgresql`, `sqlserver` or `redis`; `StoreRegistration` registers the seven stores of the chosen kind, opened when the first is
-  asked for, which the server does before it serves. A setting of another store (`Coordinator:Redis:*`, `Coordinator:Sqlite:Directory`,
+  `postgresql` or `sqlserver`; `StoreRegistration` registers the seven stores of the chosen kind, opened when the first is
+  asked for, which the server does before it serves. A setting of another store (`Coordinator:Sqlite:Directory`,
   `Coordinator:ConnectionString`) stops the start rather than being ignored. **One coordinator holds a database**: `SqlDatabase` is one
   connection for the life of the process, out of the pool, on which every read and write runs, and which holds the database: SQLite's
   file exclusively (`coordinator.db` in `Coordinator:Sqlite:Directory`, the state directory unless set; WAL, `synchronous=FULL`, no
@@ -177,30 +177,29 @@ library: a host owns `Program` and calls `AddCoordinatorServer` and `MapCoordina
   the host included: they name the provider, the setting and the driver's code. `Coordinator:Initialize` has one meaning for every
   store: a document or counter that is absent begins only when it is true. A new store takes its contract from `IRunStore`,
   `IRightsStore`, `IDeploymentStore`, `ICursorStore`, `IIgnoredHostStore` and `IXmlRepository`, and its own tests, as `SqlStoreTests`
-  (per provider) and the Redis ones. `[CI: SqlStoreTests on SQLite and PostgreSQL (agentic-ci.yml)]` `[local: SqlStoreTests on SQL
+  (per provider). `[CI: SqlStoreTests on SQLite and PostgreSQL (agentic-ci.yml)]` `[local: SqlStoreTests on SQL
   Server (DTPIPE_TEST_REUSE_INFRA, or coordinator-sqlserver.yml by hand); lab.sh stack restart-check with LAB_STACK_STORE=sqlite,
   restored from a copy as deploy/README.md's backup]` `[unchecked: the file on a network volume; a power cut between a write and its
   sync; a key longer than SQL Server's columns]`
-- **The session cookie's keys are in Redis, and a start that cannot read them stops.** `TrustedIdp.AddSessionKeys` points
-  DataProtection at the `IXmlRepository` the host registers (`RedisXmlRepository`: a list at `{prefix}session-keys`, one element per
-  entry), under a fixed application name so that two hosts of one coordinator read each other's cookies, and `EnsureSessionKeys` reads
+- **The session cookie's keys are in the store, and a start that cannot read them stops.** `TrustedIdp.AddSessionKeys` points
+  DataProtection at the `IXmlRepository` the host registers (`SqlXmlRepository`: the `session_keys` table, one row per
+  element), under a fixed application name so that two hosts of one coordinator read each other's cookies, and `EnsureSessionKeys` reads
   the key ring before anything is served: a repository that fails throws, never returns nothing, since DataProtection would then mint a
   key and sign everyone out unannounced. A restart signs nobody out. **Limit**: the keys are stored as DataProtection hands them over,
-  unencrypted (as the directory they replace held them), and they cross the network: protect Redis with TLS and an ACL.
-  `[local: SessionKeysTests; RedisSessionKeysTests (needs DTPIPE_TEST_REDIS or DTPIPE_TEST_REUSE_INFRA)]`
+  unencrypted (as the directory they replace held them), and they cross the network: the database is as readable as the account that owns it.
+  `[local: SessionKeysTests, SqlStoreTests]`
   `[local: lab.sh stack restart-check, on either store]`
-- **The rights are kept in Redis, read once, and memory is the truth.** `RightsStore` is a thin face over `IRightsStore`
-  (`RedisRightsStore`): one JSON document and its version in a hash at `{prefix}rights`, on the connection every store borrows
-  (`RedisConnection`, which the container disposes). It is loaded at start, and every reader (`CanSend` on each transfer, `Find` on
-  each request) takes the document in memory without a lock, so none waits on Redis. A change is made on a copy, written with a
+- **The rights are kept in the store, read once, and memory is the truth.** `RightsStore` is a thin face over `IRightsStore`
+  (`SqlRightsStore`): one JSON document and its version in the `rights` table, on the connection every store borrows
+  (`SqlDatabase`, which the container disposes). It is loaded at start, and every reader (`CanSend` on each transfer, `Find` on
+  each request) takes the document in memory without a lock, so none waits on the store. A change is made on a copy, written with a
   compare-and-set on the version and published only when the store kept it: a store that refuses (`StoreUnavailableException`, 503)
-  leaves the rights as they were. One write gate serializes the changes and is held across the Redis call, which fails at once when
-  disconnected and after `RedisConnection.SyncTimeout` otherwise. A write that finds another version (another writer, or an earlier
+  leaves the rights as they were. One write gate serializes the changes and is held across the store call, which fails at once when
+  the connection is lost and after the driver's command timeout otherwise. A write that finds another version (another writer, or an earlier
   write that timed out and was kept) reads the document again and refuses that change (409): **a 503 on a change may still have
   been applied**, and then the route's other effects (cutting an identity's replicas) did not run: repeating the change finds nothing to change, and `POST /api/rights/identities/{id}/reconnect` cuts them. A store with no document starts from `Coordinator:RightsSeed` once (`Create` is atomic, and a start that loses
   the race reads the winner's document) or empty, and refuses unless `Coordinator:Initialize` is true, since rights begun
-  again could grant what was revoked. `[local: RightsStoreTests, RightsRoutesTests; RedisRightsStoreTests (needs DTPIPE_TEST_REDIS
-  or DTPIPE_TEST_REUSE_INFRA)]` `[unchecked: a Redis that loses a write it acknowledged]`
+  again could grant what was revoked. `[local: RightsStoreTests, RightsRoutesTests, SqlStoreTests]`
 - **A host adds to the server through two seams, never through a setting.** `MapCoordinatorServerAsync` returns the groups
   of `/api` behind every guard (`CoordinatorApiGroups`), and `AddCoordinatorServer` takes the host's own pages as `AdminView`s:
   under the view's path a page navigation signs in as any page does, and anyone but an admin gets the 403 page that names the
@@ -323,7 +322,7 @@ library: a host owns `Program` and calls `AddCoordinatorServer` and `MapCoordina
   stay at arming and launching. `[local: ArmedDeploymentTests (Health), TrustedIdpTests, RouteTableTests, the lab's smoke.py bricks - health, ui_check.py]`
   `[unchecked: that a status is right for a state no test builds]`
 - **A new state starts from the seeds, or empty.** `Coordinator:LibrarySeed` (one
-  `.yaml` per pipeline, for a library that has no history, here or at its remote) and `Coordinator:RightsSeed` (for rights Redis does not hold); with neither, the library has no pipeline
+  `.yaml` per pipeline, for a library that has no history, here or at its remote) and `Coordinator:RightsSeed` (for rights the store does not hold); with neither, the library has no pipeline
   and the rights no identity and an empty matrix: nobody may send anything until an administrator
   says so. **`Coordinator:Bootstrap` then adds what the deployment gives** (`RightsStore.Bootstrap`, before anything is served, in one
   change by `Coordinator:Bootstrap`, after the seed, at every start): `AdminKey`, the first administrator, a person of the id its key
@@ -333,7 +332,7 @@ library: a host owns `Program` and calls `AddCoordinatorServer` and `MapCoordina
   one that is malformed stops the start without being written. The server makes no key, and the matrix is not bootstrapped. The library is a git repository of its own, `library/` under the state directory unless
   `Coordinator:Library:Directory` puts it elsewhere, driven by the `git` command line with a fixed identity and with
   its own directory trusted (`safe.directory`, whoever owns a mounted volume; the image needs `git`), and starts with a commit of its own (empty without seeds)
-  so that a write always has a commit to go back to; armed deployments and run history are in Redis
+  so that a write always has a commit to go back to; armed deployments and run history are in the store
   (see "A deployment is the coordinator's" and "A run is journaled as it goes"); a plan fixed by hand is in memory.
   `Coordinator:Initialize` lets every one of these begin where nothing is kept, the library's remote included.
 - **The library is pushed to a git remote when one is configured, and the remote is the authority.** `Coordinator:Library:Remote:Url`
@@ -396,7 +395,7 @@ library: a host owns `Program` and calls `AddCoordinatorServer` and `MapCoordina
   `[local: DtPipe.Coordinator.Server.Tests, Hosting.Tests FragmentJobTests, the lab's smoke.py, ui_check.py]`
   `[unchecked: a site that hashes on its own]`
 - **A deployment is the coordinator's, and nothing of it is left on a node.** A library pipeline is *armed*: `{pipeline, commit
-  of the job, the bindings at that commit, when, by whom}` (`ArmedDeployment`), kept in Redis once its deployment is ready and read
+  of the job, the bindings at that commit, when, by whom}` (`ArmedDeployment`), kept in the store once its deployment is ready and read
   back at start as ready, with no check, since no replica is connected yet. A run reads the job at the armed
   commit (`IJobSource`, the library) and the armed bindings, never the library as it is now. A node whose identity is gone stays
   armed, and a run is refused naming it. `DeployAsync` deploys a plan fixed by hand, in memory only. Deploying plans as a launch
@@ -408,10 +407,10 @@ library: a host owns `Program` and calls `AddCoordinatorServer` and `MapCoordina
   later is as good as one that was asked, and one that goes takes nothing with it: what decides a run is
   admission, at the run. A deployment's gate is held while it is deployed or removed; a run passes it to
   read the state and does not hold it. `[local: DeploymentManagerTests, RunQueueTests, ArmedDeploymentTests, the lab's smoke.py]`
-- **The armed deployments are in Redis, read once, and memory is the truth.** `DeploymentStore` is a thin face over
-  `IDeploymentStore` (`RedisDeploymentStore`): one hash at `{prefix}deployments`, a field per pipeline holding its JSON document, on the
-  connection every store borrows. `DeploymentService` loads it when it is built, so a Redis that cannot be read stops the start; a
-  document that cannot be read, or that names another pipeline than its field, is skipped with a warning, and its pipeline is then not
+- **The armed deployments are in the store, read once, and memory is the truth.** `DeploymentStore` is a thin face over
+  `IDeploymentStore` (`SqlDeploymentStore`): the `deployments` table, a row per pipeline holding its JSON document, on the
+  connection every store borrows. `DeploymentService` loads it when it is built, so a store that cannot be read stops the start; a
+  document that cannot be read, or that names another pipeline than its row, is skipped with a warning, and its pipeline is then not
   armed (`/health/pipelines/{id}` says `critical`, `not-armed`, for a supervisor that asks for it, and the pipeline is absent from the
   listing). A write names no version: the deployment's gate and `ThrowIfBusy` serialize the writers of one pipeline and one
   coordinator writes. **The store is written before memory changes and never under the ledger's lock.** A deployment replaces another
@@ -419,23 +418,23 @@ library: a host owns `Program` and calls `AddCoordinatorServer` and `MapCoordina
   forgets it in the store before memory does. A store that refuses (`StoreUnavailableException`, 503) therefore leaves the earlier
   deployment as it was, or, when it refuses the record of a deployment whose check passed, removes that deployment from memory and
   answers 503 (the clean-up that follows only logs when it fails, so the error the caller reads is the one that ended the arming). An id that is no library id
-  (a plan fixed by hand) has no record and never reaches the store. Redis that comes back empty is no failure to open: a pipeline with
+  (a plan fixed by hand) has no record and never reaches the store. A store that comes back empty is no failure to open: a pipeline with
   no record is not armed and nothing runs, which `/health` reports. **Limit**: a write that timed out may have been applied. An arming whose
   record was kept while memory refused it is read back ready at the next start, with no check; an undeploy or a replacement whose
   forgetting was kept while the call timed out leaves the deployment in memory until the next start, when it is gone. Arm the pipeline
   again (it replaces the record), or undeploy it after the restart.
-  `[local: ArmedDeploymentTests, DeploymentRoutesTests; RedisDeploymentStoreTests (needs DTPIPE_TEST_REDIS or DTPIPE_TEST_REUSE_INFRA)]`
-  `[local: lab.sh stack restart-check — an armed pipeline read back, on either store]` `[unchecked: a Redis that loses a write it acknowledged; a write that times out and is applied]`
-- **The hosts set aside are in Redis, read once, and an announcement never waits on it.** `EnrollmentQueue` loads an
-  `IIgnoredHostStore` (`RedisIgnoredHostStore`: a sorted set at `{prefix}ignored-hosts`, each subject scored by the instant it is let
-  back in) when it is built, and the server builds it at start, so a Redis that cannot be read stops the start. `Propose`, which every
+  `[local: ArmedDeploymentTests, DeploymentRoutesTests; SqlStoreTests]`
+  `[local: lab.sh stack restart-check — an armed pipeline read back, on either store]` `[unchecked: a write that times out and is applied]`
+- **The hosts set aside are in the store, read once, and an announcement never waits on it.** `EnrollmentQueue` loads an
+  `IIgnoredHostStore` (`SqlIgnoredHostStore`: the `ignored_hosts` table, a row per subject with the instant it is let
+  back in) when it is built, and the server builds it at start, so a store that cannot be read stops the start. `Propose`, which every
   announcement runs under the queue's lock, asks memory only. `Ignore` writes the store first, outside that lock, then memory; a store
   that refuses (`StoreUnavailableException`, 503) leaves the host waiting and not set aside. The instant is absolute, so a restart does
   not extend the 24 hours, and the bound `MaxIgnored` is kept by the store's write as by memory, the subject let back in soonest going
   first. The hosts that wait stay in memory: a host announces again within seconds, and what it proposed is untrusted text that
   expires with the host. **Limit**: an `Ignore` that timed out may have been applied, and then the host is set aside in the store
   while it still waits in memory until it announces again after the next start.
-  `[local: EnrollmentQueueTests, RightsRoutesTests; RedisIgnoredHostStoreTests (needs DTPIPE_TEST_REDIS or DTPIPE_TEST_REUSE_INFRA)]`
+  `[local: EnrollmentQueueTests, RightsRoutesTests; SqlStoreTests]`
 - **Deployments and runs are decided under one lock.** `DeploymentManager` is what the routes call, over three
   parts and the one `DeploymentLedger` they share: `DeploymentService` (the deployments), `RunQueue` (the queue
   and the dispatch) and `FaultInjection`. A decision that reads both sides, such as a deployment refused while a run of
@@ -484,29 +483,24 @@ library: a host owns `Program` and calls `AddCoordinatorServer` and `MapCoordina
   state. A journal document whose state is none of the values, or a number, is skipped when the server starts.
   `[local: StateWireTests, RunQueueTests]`
 - **A run is journaled as it goes, and a restart ends what it interrupted.** `RunJournal` keeps the runs in an `IRunStore`, which is
-  Redis (`RedisRunStore`): one document per run, the ids of the runs in flight, the ids of the latest `IRunStore.Window` over, and
-  the counter that draws ids (`INCR`). `RunQueue` draws the id and writes the run when it is queued (under the ledger's lock, before
+  `SqlRunStore`: the `runs` table (a document per run, whether it is over, its instant), the `owed` table and the `counters` table that draws ids. `RunQueue` draws the id and writes the run when it is queued (under the ledger's lock, before
   the ticket is visible), when it starts and when it ends. History (`List`, `Find`, `PipelineHealth`) holds the runs that are over and
   is read from memory, loaded at start: one coordinator writes the store, so the window in memory is the store's, and a key's
-  lookup `(LaunchedBy, key)` costs no call to Redis under the ledger's lock. **A run not yet over that the store cannot keep
+  lookup `(LaunchedBy, key)` costs no call to the store under the ledger's lock. **A run not yet over that the store cannot keep
   throws `StoreUnavailableException`** (503 from the middleware of `CoordinatorServer`), so none is queued or started
   without its record; a run that is over is kept in memory whatever the store says and only logged, and a store that missed it
-  leaves it in flight for the next start to end. A command that finds Redis disconnected fails at once instead of waiting in a
-  backlog. At start `RunJournal` gives each run it finds queued or running the state `error` and `RestartedRefusal`, and owes
+  leaves it in flight for the next start to end. A call that finds the connection lost fails at once. At start `RunJournal` gives each run it finds queued or running the state `error` and `RestartedRefusal`, and owes
   the fragments of the ones that had started (`RunJournal.Owed`, written to the store before the run is ended, and kept until a replica gives
   the fragment up or a day passes); `OrphanRuns` asks every replica of an owed fragment's node, once, when it announces with
   its data plane client (`NodeChannelHub.Announce`, off the hub's thread), to abandon it, until a replica answers that it held it,
   so a second restart before the replicas announce keeps the obligation; the authority is the journal, never what an announcement says. **An id is never given twice**: the counter is raised at start to
-  the highest id read and never lowered, and a store with no counter and no run (a first start, or Redis that lost its data) refuses
-  to start unless `Coordinator:Initialize` is true, since the ids would begin again. Redis must therefore persist every write
-  (`appendonly yes`, `appendfsync always`: the lab's and `tests/infra`'s). `Coordinator:Redis:ConnectionString` is a secret
-  (read it from the environment) and is in no log or message, only the endpoints; `KeyPrefix` separates coordinators on one Redis.
-  A reason that goes into `RunView.Refusal` is the server's own text, never a Redis message.
+  the highest id read and never lowered, and a store with no counter and no run (a first start, or a database that lost its data) refuses
+  to start unless `Coordinator:Initialize` is true, since the ids would begin again. A write is durable before its call returns (`synchronous=FULL` on SQLite, the commit on a server).
+  A reason that goes into `RunView.Refusal` is the server's own text, never a driver's message.
   A run that had started carries `RunView.SinkMayBePartial` (also in `/service/runs`), true: its fragments had been launched and a sink may hold part of
   what they wrote. It is a label only: nothing ranks resumption strategies or reruns the run, and a run that was only queued, or that ended any other way, has none.
-  `[local: RunJournalTests (the label), RunQueueTests, OrphanRunsTests, NodeChannelHubTests; RedisRunStoreTests (needs DTPIPE_TEST_REDIS or
-  DTPIPE_TEST_REUSE_INFRA); tools/campaign.py F4]` `[unchecked: a wired
-  child with nothing to write ends only once a relay touches its torn-down transfer; a Redis that loses a write it acknowledged]`
+  `[local: RunJournalTests (the label), RunQueueTests, OrphanRunsTests, NodeChannelHubTests; SqlStoreTests; tools/campaign.py F4]` `[unchecked: a wired
+  child with nothing to write ends only once a relay touches its torn-down transfer]`
 - **A run that was placed records the replica of each fragment.** `RunJournal` keeps the `RunResult` whole,
   `RunResult.Replicas` included: an instance id and the `Origin` the replica announced, untrusted text the pages
   escape. A run refused at admission has none, and a document that names none reads as a run with none.
@@ -543,7 +537,7 @@ library: a host owns `Program` and calls `AddCoordinatorServer` and `MapCoordina
   each binding with the brick version it met and its mode's verdict. A run refused before it had a plan has none.
   `[local: ArmedDeploymentTests, RunJournalTests]`
 - **A cursor is kept per sink branch, and only at the verdict of the run.** `CursorKeeper` holds a `CursorRecord` per (pipeline, sink
-  alias) in memory (the truth, read once at start) and in `ICursorStore` (a `cursors` table, or the hash `{prefix}cursors` in Redis; the
+  alias) in memory (the truth, read once at start) and in `ICursorStore` (the `cursors` table; the
   store is written first). `RunQueue.RunOneAsync` asks `Launches` after the plan, which puts the kept value in the `RunFragment` of the
   one source brick upstream of the sink (through `plan.Units` dependencies), and `Commit` after `RunOutcome.Succeeded`, before the run
   leaves the ledger, so the next run of the pipeline reads it; the run records what became of each cursor (`RunView.Cursors`: kept, or the
@@ -553,8 +547,7 @@ library: a host owns `Program` and calls `AddCoordinatorServer` and `MapCoordina
   refuses a launch while a run of a pipeline that has a cursor is queued or in flight, and so do the reset and set routes (both under
   the ledger's lock); before the first cursor exists the dispatch's one-run-per-data-node already serialises two runs. The routes are
   `CoordinatorApi.CursorsRoute` and `CursorRoute`: the reader group reads, the designer group (the right to launch) sets and resets, and
-  `/service` has none. `[local: CursorRunTests, CursorRoutesTests, SqlStoreTests, RedisCursorStoreTests (needs DTPIPE_TEST_REDIS or
-  DTPIPE_TEST_REUSE_INFRA), RouteTableTests]` `[unchecked: a Redis that loses a write it acknowledged; a store write that times out and is applied]`
+  `/service` has none. `[local: CursorRunTests, CursorRoutesTests, SqlStoreTests, RouteTableTests]` `[unchecked: a store write that times out and is applied]`
 - **A data node only reads and writes, and runs only its bricks, which it composes by id.**
   `PlanBuilder` gives a data node's fragment as `FragmentUnit`s and composes the job with
   `FragmentJob` (`DtPipe.Coordinator.Contracts`), the function the node calls again on its own

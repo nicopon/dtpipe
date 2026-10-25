@@ -62,8 +62,8 @@ reaches its library from a studio. The command is in the
 
 - **The coordinator is one process, not a highly available service.** The history of its runs, its
   armed deployments, its rights and its session keys are in a SQLite file in its state directory
-  (`Coordinator:Sqlite:Directory` moves it), or in a Redis (`Coordinator:Store` set to `redis`,
-  with `Coordinator:Redis:ConnectionString`). A first start on an empty store needs
+  (`Coordinator:Sqlite:Directory` moves it), or in a PostgreSQL or SQL Server database
+  (`Coordinator:Store` and `Coordinator:ConnectionString`). A first start on an empty store needs
   `Coordinator:Initialize` set to true. Its library is a git repository in
   its state directory; with a git remote configured (`Coordinator:Library:Remote:Url`, and the
   token in `Coordinator__Library__Remote__Token`) every save is pushed before it is accepted, a

@@ -16,12 +16,13 @@ settings a node host takes are `DtPipeNode__*` (the runner) or the host team's o
 docker compose -f deploy/compose.yaml up --wait
 ```
 
-**Not for production.** The recipe starts a coordinator on Redis and a runner, with no identity
-provider: every identity is verified by a key (below). It listens in plain HTTP on the loopback of
-the host only, so a key crosses the network in clear. Every file it mounts is under `deploy/`; the
-images of the coordinator and the runner come from GHCR. It gives the rights two identities, the
-first administrator and the runner, and no flow: a person adds the nodes in Access, as
-[Your first distributed pipeline](../docs/guides/distributed-first-pipeline.md) shows.
+**Not for production.** The recipe starts a coordinator, which keeps its state in a SQLite file on
+its volume, and a runner, with no identity provider: every identity is verified by a key (below). It
+listens in plain HTTP on the loopback of the host only, so a key crosses the network in clear. Every
+file it mounts is under `deploy/`; the images of the coordinator and the runner come from GHCR. It
+gives the rights two identities, the first administrator and the runner, and no flow: a person adds
+the nodes in Access, as [Your first distributed
+pipeline](../docs/guides/distributed-first-pipeline.md) shows.
 
 To run everything in Docker, add `deploy/compose.trial.yaml`: it builds a data node from the
 checkout (the first start takes a few minutes), gives it and a scheduler a key, and seeds the flow
@@ -130,11 +131,46 @@ docker run -d --init --name coordinator -p 8080:8080 -v coordinator-state:/state
   its own mounted at `/data`, and `Coordinator__Library__Directory` does the same for the library's
   git repository (`library` under `/state` by default). Both must be writable by `1654`; the
   server trusts the library's directory itself, whoever owns the volume.
-- A SQLite coordinator is one coordinator. To run several, or to keep the state off the host, use
-  Redis: `Coordinator__Store=redis` with `Coordinator__Redis__ConnectionString` (a secret). Redis
-  settings given while the store is SQLite stop the start. Persist every Redis write
-  (`appendonly yes`, `appendfsync always`), and protect it with TLS and an ACL: the session keys
-  are stored unencrypted.
+
+## Keeping the state in a database
+
+SQLite is the default. When the state belongs in a database the operator already runs, with its
+backups and its availability, the coordinator keeps it in PostgreSQL or SQL Server instead. Two
+settings switch it. The connection string is a secret: it comes from the environment or as `@path`
+to a file, and one given on the command line stops the start.
+
+```bash
+-e Coordinator__Store=postgresql                          # or sqlserver
+-e Coordinator__ConnectionString=@/secrets/state.connection
+```
+
+The database holds the rights, the run journal, the armed pipelines, the cursors, the hosts set
+aside, the session keys and the signing keys of the key issuer. The library stays a git
+repository, in the volume or at its remote.
+
+- **One database for each coordinator.** The tables have generic names (`runs`, `rights`) in the
+  user's default schema, and the lock below is the database's. Give each coordinator a database
+  of its own, or at least a default schema of its own.
+- **The lock.** A coordinator holds its database for the life of its process: an advisory lock
+  on PostgreSQL, an application lock (`sp_getapplock`) on SQL Server, the file itself on SQLite.
+  A start that finds it held retries every second for `Coordinator__StoreLockWait` (30 seconds
+  unless set), then stops, naming the store.
+- **A lost session stops the coordinator.** The connection that holds the lock is the only one the
+  coordinator uses, and it is probed every 5 seconds. When it is lost the coordinator exits with
+  code 1, since another may take the database; it never reconnects by itself, because a session
+  opened again holds no lock.
+- **Kubernetes: use the `Recreate` strategy.** The default rolling update starts the new pod
+  before it stops the old one, and the new one stops once `StoreLockWait` has passed. With
+  `Recreate` the old pod is gone first.
+- **Keep-alives, so that a dead coordinator lets go of the lock.** On PostgreSQL the coordinator
+  sets TCP keep-alives on its session (idle 10 s, interval 5 s, count 3), and the server ends a
+  vanished session, and its lock, within about 25 seconds. On SQL Server the server's own
+  keep-alive does it, 30 seconds unless the server sets another.
+- **Rights the user needs.** To create tables in its database, and, on SQL Server, to call
+  `sp_getapplock`. The coordinator creates its tables on a start that may begin
+  (`Coordinator__Initialize`) and refuses a database whose schema is newer than itself.
+- **Tested** on PostgreSQL 18 and on Azure SQL Edge. The SQL is a portable subset, but no other
+  version of SQL Server is tested.
 
 ## Backing up a SQLite coordinator
 
@@ -170,13 +206,19 @@ both.
   at the start: the remote is the authority, so a save pushed since the copy is kept. Without one,
   `library/` in the volume is the only copy, and a restore brings it back as it was at the copy.
 - Keep the copy as private as the volume: it holds the session keys, unencrypted.
-- A Redis coordinator is backed up through Redis (`appendonly` file or snapshot), and its library
-  as above.
+
+## Backing up a PostgreSQL or SQL Server coordinator
+
+The state is in the database, so the database's own tools back it up (`pg_dump`, a snapshot, a
+SQL Server backup), without stopping the coordinator. The library is not in it: it is at the
+remote, or in the volume as described above. Restore the database, start the coordinator
+**without** `Coordinator__Initialize`, and what comes back is the state of the copy. A copy holds
+the session keys unencrypted: keep it as private as the database.
 
 ## What a deployment provides
 
-- **A store**: the coordinator's volume (SQLite, the default), or a Redis
-  (`Coordinator__Store=redis`).
+- **A store**: the coordinator's volume (SQLite, the default), or a PostgreSQL or SQL Server
+  database of its own, [above](#keeping-the-state-in-a-database).
 - **The library.** With `Coordinator__Library__Remote__Url` (and `__Token`, a secret, `__User`,
   `__Timeout`), every save is pushed to that git remote before it is accepted. Without it,
   `/state/library` holds the **only copy**: it is in the volume, so back the volume up, or accept
@@ -219,7 +261,7 @@ long requests open. A node may also reach the coordinator directly, inside the n
 
 ## Secrets
 
-The Redis connection string, the remote's token and the pages' client secret are given to the
+The database's connection string, the remote's token and the pages' client secret are given to the
 container as environment variables by the orchestrator's secret mechanism, and a key the deployment
 gives as a file it mounts (`@path`). The coordinator keeps a key as its hash only. They are in no
 `ARG`, no `ENV` of the image and no command line, and the server writes none of them to a log or a
@@ -227,7 +269,8 @@ response. The token reaches git in the environment of the one process that talks
 person who may inspect the container (`docker inspect`, the pod's spec) can read its environment:
 give that right with the same care as the secrets.
 
-Checked: the public address, in `PublicUrlTests`, and the SQLite store, in `SqlStoreTests`, of
+Checked: the public address, in `PublicUrlTests`, and the stores, in `SqlStoreTests` (SQLite and
+PostgreSQL in CI, SQL Server by hand), of
 [tests/DtPipe.Coordinator.Server.Tests](../tests/DtPipe.Coordinator.Server.Tests). Checked on the
 real containers, on SQLite: the coordinator ended and started again, and a copy of its state
 directory put back, read back the rights, the library, the armed pipelines, the run journal and a

@@ -1408,9 +1408,10 @@ read from the environment first (`Coordinator__PublicUrl`), then from command-li
 | `Auth__ServiceTokenLifetime` / `__PersonTokenLifetime` | How long a token exchanged for a service's or a person's key lasts, five minutes at least. Default: 10 minutes / 1 hour |
 | `Bootstrap__AdminKey` | The first administrator's key, `dtp_<id>_<secret>`, as `@path` to a file or a value of the environment. Required without `Authority`; added while the rights hold no administrator with a live key |
 | `Bootstrap__Identities__<n>__Id` / `__Key` / `__Kind` / `__Name` / `__Groups__<n>` / `__Pipelines__<n>` / `__Role` | An identity the deployment gives with its key (`@path` or the environment), added at start when its id is absent, never changed after. Default kind: `node` |
-| `Store` | `sqlite` (default; one coordinator, a file in the state directory) or `redis` |
+| `Store` | `sqlite` (default; a file in the state directory), `postgresql` or `sqlserver`: one coordinator holds a database |
 | `Sqlite__Directory` | Where the SQLite file lives, if not the state directory |
-| `Redis__ConnectionString` / `Redis__KeyPrefix` | The Redis to use with `Store=redis` (a secret), and the prefix of its keys |
+| `ConnectionString` | The database of `Store=postgresql` or `sqlserver` (a secret: the environment or `@path`); refused with `sqlite` |
+| `StoreLockWait` | How long a start waits for another coordinator to leave the database before it refuses. Default: 30 seconds |
 | `Initialize` | `true` lets a store that holds nothing begin: the first start, or after data was lost |
 | `StateDirectory` | Where the library, the rights and scratch files live. Default: `./state` |
 | `Library__Directory` | Where the library's git repository lives. Default: `library` under `StateDirectory` |
@@ -1421,7 +1422,9 @@ read from the environment first (`Coordinator__PublicUrl`), then from command-li
 | `Health__MaxAge` | The longest a health read is kept. Default: five minutes |
 
 The state directory is the coordinator's whole state when the store is SQLite: back it up stopped,
-as described in [deploy/README.md](./deploy/README.md#backing-up-a-sqlite-coordinator).
+as described in [deploy/README.md](./deploy/README.md#backing-up-a-sqlite-coordinator). With
+PostgreSQL or SQL Server the state is in the database, [one database for each
+coordinator](./deploy/README.md#keeping-the-state-in-a-database).
 `GET /healthz` answers 200, anonymously, once the server serves.
 
 An identity in **Access** is verified by the provider or by a key the coordinator makes,

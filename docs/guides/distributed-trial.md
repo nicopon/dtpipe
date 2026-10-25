@@ -141,7 +141,7 @@ build` before starting, or the trial node keeps the old build.
 
 | I want to… | Read |
 |:---|:---|
-| Run the coordinator and the runner for real: volumes, Redis, TLS, secrets, backup | [deploy/README.md](../../deploy/README.md) |
+| Run the coordinator and the runner for real: volumes, databases, TLS, secrets, backup | [deploy/README.md](../../deploy/README.md) |
 | See every setting of the coordinator and of a node host | [REFERENCE.md](../../REFERENCE.md#distributed-pipeline-experimental) |
 | Declare bricks on my own data and run a pipeline over them | [Your first distributed pipeline](distributed-first-pipeline.md) |
 | See every option of `dtpipe node` | [`dtpipe node`](../../REFERENCE.md#a-node-from-the-cli-dtpipe-node) |
