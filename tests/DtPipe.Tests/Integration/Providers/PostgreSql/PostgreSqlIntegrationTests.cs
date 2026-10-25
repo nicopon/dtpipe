@@ -77,6 +77,55 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task PostgreSqlReader_ReadsJsonbAndJsonpathWithoutTheBinaryVersionByte()
+    {
+        if (!DockerHelper.IsAvailable() || _connectionString is null) return;
+
+        const string table = "zz_reader_jsonb_prefix";
+        await using var setup = new NpgsqlConnection(_connectionString);
+        await setup.OpenAsync();
+        try
+        {
+            await using (var ddl = setup.CreateCommand())
+            {
+                ddl.CommandText =
+                    $"DROP TABLE IF EXISTS {table}; " +
+                    $"CREATE TABLE {table}(jb jsonb, jbn jsonb, ja jsonb[], jp jsonpath); " +
+                    $"INSERT INTO {table} VALUES ('{{\"a\": 1,   \"b\": [1, 2]}}', NULL, ARRAY['{{\"k\": 1}}']::jsonb[], '$.a')";
+                await ddl.ExecuteNonQueryAsync();
+            }
+
+            string expectedJsonb, expectedElement, expectedPath;
+            await using (var q = setup.CreateCommand())
+            {
+                q.CommandText = $"SELECT jb::text, ja[1]::text, jp::text FROM {table}";
+                await using var r = await q.ExecuteReaderAsync();
+                Assert.True(await r.ReadAsync());
+                (expectedJsonb, expectedElement, expectedPath) = (r.GetString(0), r.GetString(1), r.GetString(2));
+            }
+
+            await using var reader = new PostgreSqlReader(_connectionString, $"SELECT jb, jbn, ja, jp FROM {table}", timeout: 30);
+            await reader.OpenAsync();
+
+            var rows = new List<object?[]>();
+            await foreach (var batch in reader.ReadBatchesAsync(10))
+                for (int i = 0; i < batch.Length; i++) rows.Add(batch.Span[i]);
+
+            var row = Assert.Single(rows);
+            Assert.Equal(expectedJsonb, row[0]);
+            Assert.Null(row[1]);
+            Assert.Equal(expectedElement, Assert.Single(((System.Collections.IEnumerable)row[2]!).Cast<object?>()));
+            Assert.Equal(expectedPath, row[3]);
+        }
+        finally
+        {
+            await using var drop = setup.CreateCommand();
+            drop.CommandText = $"DROP TABLE IF EXISTS {table}";
+            await drop.ExecuteNonQueryAsync();
+        }
+    }
+
+    [Fact]
     public async Task PostgreSqlWriter_WritesRows()
     {
         if (!DockerHelper.IsAvailable() || _connectionString is null) return;

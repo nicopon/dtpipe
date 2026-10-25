@@ -29,6 +29,10 @@ public sealed partial class PostgreSqlReader : IColumnarStreamReader, IBatchSize
     private readonly int _timeout;
     private NpgsqlConnection? _connection;
 
+    // The type Npgsql reports per column (null when it has none, e.g. an enum). A string column
+    // is read under it: read as Text, a jsonb keeps the format-version byte of its binary form.
+    private NpgsqlTypes.NpgsqlDbType?[] _reportedTypes = [];
+
     public IReadOnlyList<PipeColumnInfo>? Columns { get; private set; }
     public Schema? Schema { get; private set; }
 
@@ -71,6 +75,8 @@ public sealed partial class PostgreSqlReader : IColumnarStreamReader, IBatchSize
                 Precision: (int?)c.NumericPrecision,
                 Scale: (int?)c.NumericScale
             )).ToList();
+
+            _reportedTypes = dbColumns.Select(c => (c as Npgsql.Schema.NpgsqlDbColumn)?.NpgsqlDbType).ToArray();
         }
 
         // Build Arrow schema from PipeColumnInfo via ArrowTypeMapper — guarantees consistency
@@ -124,7 +130,7 @@ public sealed partial class PostgreSqlReader : IColumnarStreamReader, IBatchSize
             for (int i = 0; i < Columns.Count; i++)
             {
                 var npgsqlType = PostgreSqlTypeConverter.Instance.MapToNpgsqlDbType(Columns[i].ClrType);
-                readers[i] = BuildBinaryColumnReader(npgsqlType, Schema.FieldsList[i].DataType, AddBytes);
+                readers[i] = BuildBinaryColumnReader(npgsqlType, Schema.FieldsList[i].DataType, AddBytes, _reportedTypes[i]);
             }
 
             int rowsInBuffer = 0;
@@ -200,13 +206,16 @@ public sealed partial class PostgreSqlReader : IColumnarStreamReader, IBatchSize
 
     #region Binary Column Readers
 
-    private static (Action<NpgsqlBinaryExporter> Read, Func<IArrowArray> Build) BuildBinaryColumnReader(NpgsqlTypes.NpgsqlDbType npgsqlType, IArrowType arrowType, Action<long> addBytes)
+    private static (Action<NpgsqlBinaryExporter> Read, Func<IArrowArray> Build) BuildBinaryColumnReader(NpgsqlTypes.NpgsqlDbType npgsqlType, IArrowType arrowType, Action<long> addBytes, NpgsqlTypes.NpgsqlDbType? reportedType)
     {
         // The array built here must match the field the schema declares. The fallback case below
         // builds a StringArray from Read<object>().ToString(), so without this an array column
         // declared as a list silently produced a column of whitespace and exit 0.
         if (arrowType is ListType listType)
-            return BuildBinaryListReader(listType);
+            return BuildBinaryListReader(listType, reportedType);
+
+        // Which builder runs follows the CLR type; only the type the exporter decodes with follows the column.
+        var textReadType = reportedType ?? npgsqlType;
 
         return npgsqlType switch
         {
@@ -248,7 +257,7 @@ public sealed partial class PostgreSqlReader : IColumnarStreamReader, IBatchSize
             NpgsqlTypes.NpgsqlDbType.Text or NpgsqlTypes.NpgsqlDbType.Varchar
                 or NpgsqlTypes.NpgsqlDbType.Char or NpgsqlTypes.NpgsqlDbType.Name => BuildTyped(
                 new StringArray.Builder(),
-                (e, b) => { if (e.IsNull) { e.Skip(); b.AppendNull(); } else { var s = e.Read<string>(npgsqlType); b.Append(s); addBytes(System.Text.Encoding.UTF8.GetByteCount(s)); } },
+                (e, b) => { if (e.IsNull) { e.Skip(); b.AppendNull(); } else { var s = e.Read<string>(textReadType); b.Append(s); addBytes(System.Text.Encoding.UTF8.GetByteCount(s)); } },
                 b => b.Build()),
 
             NpgsqlTypes.NpgsqlDbType.Bytea => BuildTyped(
@@ -297,7 +306,7 @@ public sealed partial class PostgreSqlReader : IColumnarStreamReader, IBatchSize
     /// at compile time here; the shared list builder walks it. Element conversion stays with
     /// <see cref="ArrowTypeMapper"/>, which owns the CLR↔Arrow map.
     /// </summary>
-    private static (Action<NpgsqlBinaryExporter> Read, Func<IArrowArray> Build) BuildBinaryListReader(ListType listType)
+    private static (Action<NpgsqlBinaryExporter> Read, Func<IArrowArray> Build) BuildBinaryListReader(ListType listType, NpgsqlTypes.NpgsqlDbType? reportedType)
     {
         var builder = ArrowTypeMapper.CreateBuilder(listType);
 
@@ -313,7 +322,11 @@ public sealed partial class PostgreSqlReader : IColumnarStreamReader, IBatchSize
             FloatType => e => e.Read<float?[]>(),
             DoubleType => e => e.Read<double?[]>(),
             Decimal128Type => e => e.Read<decimal?[]>(),
-            StringType => e => e.Read<string?[]>(),
+            // Under the column's own array type, jsonb[] elements drop their version byte; an
+            // array type Npgsql does not name (an enum[]) keeps the untyped read.
+            StringType => reportedType is { } arrayType
+                ? e => e.Read<string?[]>(arrayType)
+                : e => e.Read<string?[]>(),
             TimestampType => e => e.Read<DateTime?[]>(),
             Date32Type => e => e.Read<DateOnly?[]>(),
             _ => throw new NotSupportedException(
