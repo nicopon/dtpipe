@@ -10,7 +10,7 @@ stdin/stdout and TransportR. It speaks to no coordinator itself.
 
 - **A run is a `FragmentRun`; `PipelineNode` holds what surrounds it, once per replica.** `FragmentRun` owns the
   child, the named pipes of the excess edges, the relays, the first fault and the row counts -
-  `LaunchChild`, `ConnectPipeAsync`, `Rupture`, `WatchChild`, `Fault`, `RunToCompletionAsync` and
+  `LaunchChild`, `ConnectPipeAsync`, `Rupture`, `ObserveChildExit`, `WatchChild`, `Fault`, `RunToCompletionAsync` and
   `WaitForChildExitAsync` below are its - and knows neither the TransportR client nor the coordinator: it
   is given each transfer handle once resolved, and says how it ended (`FragmentOutcome`). `PipelineNode` holds
   the one client of the replica and the book of the handles it is given, launches runs (`Launch`, from a
@@ -51,10 +51,15 @@ stdin/stdout and TransportR. It speaks to no coordinator itself.
   then gives the relays `RelayDrainAfterChildFailureMs` to fail on their own and reports without a
   relay still waiting on its peer; the coordinator's teardown ends that transfer.
   `[CI: FaultVerdictTests]`
-- **The child's exit is awaited by polling `HasExited` beside `WaitForExitAsync`.**
-  `RunToCompletionAsync` uses `WaitForChildExitAsync`: `Process.WaitForExitAsync` alone can stay
-  pending after the child has exited, which holds the `Exited` report, and so the run's verdict,
-  back for good; a cancelled fragment whose child ends on its own is the case that shows it. `[unchecked: the race is not reproducible on demand]`
+- **One task owns the child's end and reads its exit code once.** `ObserveChildExit` waits through
+  `WaitForChildExitAsync`, reads `Process.ExitCode` once and publishes it; `WatchChild`,
+  `RunToCompletionAsync` and the outbound relay take that value and read no code themselves. The runtime
+  stores `Process`'s exited flag before its code, unlocked, so a second reader woken by the same exit can
+  see the flag with a code of 0. A child that cannot be observed faults the value, never reads as 0.
+  `WaitForChildExitAsync` polls `HasExited` beside `WaitForExitAsync`: `Process.WaitForExitAsync` alone
+  can stay pending after the child has exited, which holds the `Exited` report, and so the run's verdict,
+  back for good; a cancelled fragment whose child ends on its own is the case that shows it.
+  `ChildHasExited` and `DisposeAsync` read `HasExited` only. `[unchecked: neither race is reproducible on demand]`
 - **The client's registration is renewed with the client's own call.** The groups the hub holds for a client
   are those it registered with. `RefreshRegistrationAsync` has the hub take the identity's groups now and a fresh
   token: the client keeps its connection, and the hub keeps the transfers the new groups allow and ends the others.

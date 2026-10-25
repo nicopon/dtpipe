@@ -44,6 +44,12 @@ public sealed class FragmentRun : IAsyncDisposable
 
     /// <summary>Completed when the child exits with a non-zero code, whatever its relays are doing.</summary>
     private readonly TaskCompletionSource _childFailed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>
+    /// The child's exit code, read once by <see cref="ObserveChildExit"/> and published here: no other member reads
+    /// <c>Process.ExitCode</c>. It faults, never completes with a code, when the child cannot be observed.
+    /// </summary>
+    private readonly TaskCompletionSource<int> _childExit = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int _ruptured;
 
     /// <summary>The first fault, origin and reason together: one value, so a reader never sees a reason without its origin.</summary>
@@ -80,6 +86,7 @@ public sealed class FragmentRun : IAsyncDisposable
     internal void Launch()
     {
         (_child, _pipes) = LaunchChild(_options, _logger);
+        ObserveChildExit();
         WatchChild();
     }
 
@@ -232,14 +239,14 @@ public sealed class FragmentRun : IAsyncDisposable
                 sending = false;
             }
 
-            await _child.WaitForExitAsync();
-            if (_child.ExitCode == 0)
+            var exitCode = await _childExit.Task;
+            if (exitCode == 0)
             {
                 sending = true;
                 await send.CompleteAsync();
             }
             else
-                Fault(FaultOrigin.Local, $"outbound edge '{alias}': child dtpipe exited {_child.ExitCode}");
+                Fault(FaultOrigin.Local, $"outbound edge '{alias}': child dtpipe exited {exitCode}");
         }
         catch (ObjectDisposedException) when (sending)
         {
@@ -350,6 +357,25 @@ public sealed class FragmentRun : IAsyncDisposable
     }
 
     /// <summary>
+    /// The one place the child's exit code is read: waits for the exit, reads <c>Process.ExitCode</c> once and
+    /// publishes it to <see cref="_childExit"/>. The runtime stores the exit before the code, unlocked, so two
+    /// readers woken by the same exit could each see a different code; every reader takes this value instead.
+    /// A child that cannot be observed (disposed with the node) faults <see cref="_childExit"/>, never reads as exit 0.
+    /// </summary>
+    private void ObserveChildExit()
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await WaitForChildExitAsync(CancellationToken.None);
+                _childExit.TrySetResult(_child.ExitCode);
+            }
+            catch (Exception ex) { _childExit.TrySetException(ex); }
+        });
+    }
+
+    /// <summary>
     /// Watches the child independently of the relays: a child that exits non-zero is this fragment's
     /// own failure from that instant. A relay only notices it on its next read or write, which a
     /// fragment waiting on a silent peer never makes, so without this the fragment would never report.
@@ -360,8 +386,7 @@ public sealed class FragmentRun : IAsyncDisposable
         {
             try
             {
-                await WaitForChildExitAsync(CancellationToken.None);
-                var code = _child.ExitCode;
+                var code = await _childExit.Task;
                 if (code == 0) return;
                 Fault(FaultOrigin.Local, $"child dtpipe exited {code}");
                 _childFailed.TrySetResult();
@@ -390,8 +415,8 @@ public sealed class FragmentRun : IAsyncDisposable
             try { _child.StandardOutput.Close(); } catch { }
         }
 
-        await WaitForChildExitAsync(ct);
-        return _faulted != 0 ? Math.Max(_child.ExitCode, 1) : _child.ExitCode;
+        var exitCode = await _childExit.Task.WaitAsync(ct);
+        return _faulted != 0 ? Math.Max(exitCode, 1) : exitCode;
     }
 
     /// <summary>
