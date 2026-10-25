@@ -303,9 +303,10 @@ internal sealed class RunQueue
     private void Finish(Ticket ticket, RunView final)
     {
         final = final with { FinishedAt = DateTimeOffset.UtcNow };
-        _journal.Record(final);
         lock (_ledger.Lock)
         {
+            // Journaled before it leaves the ledger, under the one lock, so a launch, a find or a key's retry sees the run in one or the other.
+            _journal.Record(final);
             _ledger.Queued.Remove(ticket);
             _ledger.Sent.Remove(ticket);
         }
