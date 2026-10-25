@@ -30,6 +30,8 @@
 #                        restart-check [restore|restore-alone]: ends the coordinator's process and starts it again and checks that its state came
 #                            back, a session included. restore does it on a copy of the state directory, as deploy/README.md's backup; restore-alone
 #                            also empties the library's remote. Named only
+#                        failover-check: starts a passive second coordinator (the profile failover), kills the first, waits for the
+#                            second to serve and runs smoke against it. PostgreSQL only; named only
 #   LAB_STACK_STORE=sqlite  the stack's coordinator keeps its state in .stack/coordinator and the postgres service stays out
 #                           (postgresql, the default, keeps it in that service, whose data is in .stack/postgres); a stack is made
 #                           on one store, so purge .stack/ to change it. LAB_POSTGRES_SECRET sets the database's password
@@ -437,6 +439,24 @@ stack_cycle() {
     nodes_report "$STACK_URL" strict 90 || { echo "The stack's node hosts did not come back after the coordinator's $how." >&2; exit 1; }
 }
 
+# Two coordinators on the stack's database: the standby waits passive (/healthz 503, /livez 200) while the first holds it, takes it
+# once the first is killed, and smoke then passes against it. The stack is left on the standby; down, then up, puts it back.
+stack_failover() {
+    [[ "${LAB_STACK_STORE:-postgresql}" == postgresql ]] || { echo "failover-check needs LAB_STACK_STORE=postgresql: SQLite has no standby" >&2; exit 1; }
+    stack_nodes_mode strict
+    mkdir -p "$STACK/coordinator-standby"
+    compose --profile failover up -d --wait coordinator-standby
+    [[ "$(compose exec -T coordinator-standby curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/healthz)" == 503 ]] \
+        || { echo "The standby is not passive while the first coordinator holds the database." >&2; exit 1; }
+    compose kill coordinator
+    for _ in $(seq 1 90); do
+        [[ "$(compose exec -T coordinator-standby curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/healthz)" == 200 ]] && break
+        sleep 1
+    done
+    nodes_report "$STACK_URL" strict 90 || { echo "The stack's node hosts did not reach the standby." >&2; exit 1; }
+    LAB_TARGET=stack LAB_COORDINATOR_SERVICE=coordinator-standby smoke_passes stack_nodes_mode "$STACK_URL" "$STACK"
+}
+
 stack() {
     local command="${1:-}"; [[ $# -gt 0 ]] && shift
     case "$command" in
@@ -456,6 +476,7 @@ stack() {
             local how="${1:-restart}"
             stack_nodes_mode strict
             LAB_TARGET=stack LAB_COORDINATOR_RESTART="$LAB/lab.sh stack cycle $how" python3 -u "$LAB/smoke.py" "$STACK_URL" "$DTPIPE" "$STACK" restart ;;
+        failover-check) stack_failover ;;
         status)
             compose ps --format '  {{.Service}}  {{.Status}}'
             if curl -fs "$STACK_URL/healthz" >/dev/null 2>&1; then
@@ -466,7 +487,7 @@ stack() {
         ui) LAB_TARGET=stack python3 "$LAB/tools/ui_check.py" "$STACK_URL" "$STACK/ui" ;;
         studio) python3 "$LAB/tools/studio_check.py" "$STACK_URL" "$DTPIPE" "$STACK/studio" ;;
         logs) compose logs --tail 20 -f ;;
-        *) echo "usage: $0 stack up|down|nodes M|status|smoke [pass]|restart-check [restore|restore-alone]|ui|studio|logs" >&2; exit 1 ;;
+        *) echo "usage: $0 stack up|down|nodes M|status|smoke [pass]|restart-check [restore|restore-alone]|failover-check|ui|studio|logs" >&2; exit 1 ;;
     esac
 }
 

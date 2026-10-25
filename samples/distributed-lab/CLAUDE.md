@@ -130,7 +130,8 @@ project's `CLAUDE.md`); the nodes are `src/DtPipe.PipelineNode.Hosting` hosts
 - **The compose stack mounts nothing across services.** `compose.yaml` gives each service its own
   directory under `.stack/` (a node its database, the coordinator its state and its library remote, the IdP its key) and
   the runner none: the stack is the proof that the coordinator reads no node's data, so a volume
-  shared between two services voids it. A node seeds its own database on first start
+  shared between two services voids it. The one exception is the coordinator's own: its standby
+  (`coordinator-standby`) mounts the library's remote too, as a git server is both instances'. A node seeds its own database on first start
   (`docker/node-entrypoint.sh`, `seed.sh` with its name) and refuses a scale other than the one it
   recorded. `[local: lab.sh stack smoke]`
 - **The IdP has one name for browsers and containers.** The proxy carries `idp.localtest.me` as a
@@ -170,6 +171,12 @@ project's `CLAUDE.md`); the nodes are `src/DtPipe.PipelineNode.Hosting` hosts
   the stack, whose coordinator sets `Coordinator:Auth:AllowHttpKeys` beside the IdP; the local lab has no `PublicUrl`, so no key
   issuer, and the pass refuses it by name. It makes a node and a person verified by a key, uses and revokes their keys, and removes
   both identities; the key stays in its process. `[local: lab.sh stack smoke keys]`
+- **The coordinator's failover is checked on the stack, named only, on PostgreSQL.** `lab.sh stack failover-check` starts
+  `coordinator-standby` (the profile `failover`: the lab's coordinator with `Coordinator__Standby=passive`, a state directory of
+  its own, the network alias `coordinator`, so the nodes and the proxy reach whichever instance serves), checks that it answers
+  `/healthz` 503 while the first holds the database, kills the first, waits for the standby's `/healthz` and runs `smoke` with
+  `LAB_COORDINATOR_SERVICE=coordinator-standby`, the service whose log `smoke.py` reads. The stack is left on the standby:
+  `down`, then `up`, puts it back. `[local: lab.sh stack failover-check]`
 - **The coordinator's restart is checked on the stack, named only.** `lab.sh stack restart-check [restore|restore-alone]` runs `smoke.py restart`:
   a rights edit, a library save, an armed pipeline, a run and a session cookie are recorded, the container is stopped and started (`restore`: on
   a copy of its state directory put back, as `deploy/README.md` describes a backup; `restore-alone`: with the library's remote emptied too), and

@@ -145,7 +145,7 @@ services:
       target: coordinator-lab
       additional_contexts:
         product-coordinator: service:product-coordinator
-    environment:
+    environment: &coordinator-environment
       HOME: /tmp
       Coordinator__Authority: http://idp.localtest.me${LAB_STACK_HTTP_PORT:+:}${LAB_STACK_HTTP_PORT:-}
       # The address browsers reach the coordinator at, through the proxy.
@@ -175,6 +175,30 @@ services:
       postgres: { condition: service_healthy, required: false }
     healthcheck:
       test: ["CMD", "curl", "-fs", "http://localhost:8080/healthz"]
+      interval: 2s
+      retries: 60
+
+  # A second instance of the coordinator, passive (Coordinator:Standby) until the first leaves the database: the profile failover,
+  # on PostgreSQL only, which lab.sh stack failover-check starts. It answers to the name coordinator too, so the nodes and the
+  # proxy reach whichever serves, a passive one answering 503 until it does. Its state directory is its own; the library's
+  # remote is the one the first pushes to, as a git server would be both instances'.
+  coordinator-standby:
+    <<: [*dotnet-service, *host-user]
+    profiles: [failover]
+    image: dtpipe-lab-stack/coordinator-lab
+    environment:
+      <<: *coordinator-environment
+      Coordinator__Standby: passive
+    volumes:
+      - ./.stack/coordinator-standby:/state
+      - ./.stack/library.git:/lab/library.git
+    networks:
+      default:
+        aliases: [coordinator]
+    depends_on:
+      coordinator: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:8080/livez"]
       interval: 2s
       retries: 60
 

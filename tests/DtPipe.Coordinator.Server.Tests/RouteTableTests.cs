@@ -72,6 +72,7 @@ public sealed class RouteTableTests
         "GET /health/pipelines [monitor]",
         "GET /health/pipelines/{id} [monitor]",
         "GET /healthz [none]",
+        "GET /livez [none]",
         "GET /service/runs/{id} [launcher]",
         "GET api/stream/{transferId}/receive [default]",
         "POST /api/bricks/recognize [reader]",

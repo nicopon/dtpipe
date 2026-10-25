@@ -37,23 +37,35 @@ internal sealed class SqlDatabase : IDisposable
 
     /// <summary>
     /// Takes the database (<see cref="StoreDialect.TryConnect"/>), trying each second for <paramref name="wait"/> while another
-    /// coordinator holds it, then refusing naming the provider; and creates what it lacks. Refuses a database that a newer version of
-    /// this server wrote. <paramref name="lost"/> is called once, off the caller's thread, if the database is lost; the probe runs every
-    /// <paramref name="probeEvery"/>, 5 seconds unless given.
+    /// coordinator holds it, then refusing naming the provider, or without bound when <paramref name="wait"/> is null (a passive
+    /// standby); and creates what it lacks. The connection that took the database is the one it keeps: no try leaves one behind, and
+    /// none is let go and taken again. <paramref name="stopping"/> ends the wait with an <see cref="OperationCanceledException"/>,
+    /// nothing taken. Refuses a database that a newer version of this server wrote. <paramref name="lost"/> is called once, off the
+    /// caller's thread, if the database is lost; the probe runs every <paramref name="probeEvery"/>, 5 seconds unless given.
     /// </summary>
-    public static SqlDatabase Open(StoreDialect dialect, bool initialize, TimeSpan wait, ILogger logger, Action? lost = null, TimeSpan? probeEvery = null)
+    public static SqlDatabase Open(StoreDialect dialect, bool initialize, TimeSpan? wait, ILogger logger, Action? lost = null, TimeSpan? probeEvery = null,
+        CancellationToken stopping = default)
     {
         var waited = System.Diagnostics.Stopwatch.StartNew();
+        var held = false;
         DbConnection? connection;
         while ((connection = dialect.TryConnect()) is null)
         {
-            if (waited.Elapsed >= wait)
+            if (wait is { } bound && waited.Elapsed >= bound)
                 throw new InvalidOperationException(
-                    $"The coordinator's database ({dialect.Where}) is held by another coordinator, still after Coordinator:StoreLockWait ({wait.TotalSeconds:0.#} s): one coordinator runs on a database.");
-            if (waited.Elapsed < Retry)
-                logger.LogWarning("Another coordinator holds the database ({Where}): waiting up to {Wait} s for it to leave (Coordinator:StoreLockWait)", dialect.Where, wait.TotalSeconds);
-            Thread.Sleep(Retry);
+                    $"The coordinator's database ({dialect.Where}) is held by another coordinator, still after Coordinator:StoreLockWait ({bound.TotalSeconds:0.#} s): one coordinator runs on a database.");
+            if (!held)
+            {
+                if (wait is { } limit)
+                    logger.LogWarning("Another coordinator holds the database ({Where}): waiting up to {Wait} s for it to leave (Coordinator:StoreLockWait)", dialect.Where, limit.TotalSeconds);
+                else
+                    logger.LogWarning("Another coordinator holds the database ({Where}): this one is passive (Coordinator:Standby) and waits for it to leave, without bound", dialect.Where);
+                held = true;
+            }
+            stopping.WaitHandle.WaitOne(Retry);
+            stopping.ThrowIfCancellationRequested();
         }
+        if (held && wait is null) logger.LogWarning("The database ({Where}) is this coordinator's now: it leaves the passive state and starts", dialect.Where);
         var database = new SqlDatabase(dialect, connection, initialize, logger, lost ?? (() => { }), probeEvery ?? TimeSpan.FromSeconds(5));
         try
         {

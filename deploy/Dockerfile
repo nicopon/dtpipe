@@ -89,9 +89,11 @@ COPY --from=hosts-build /out/coordinator /app
 ENV Coordinator__StateDirectory=/state
 LABEL org.opencontainers.image.revision=${SOURCE_REVISION:-unknown}
 EXPOSE 8080
-# /healthz is anonymous and answers 200 once the server serves, which is after its store is open, and its library
-# too when it has a remote. An orchestrator that probes on its own (a compose file, a pod spec) replaces this check.
-HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=3 CMD curl -fs http://localhost:8080/healthz || exit 1
+# Liveness: /livez is anonymous and answers 200 while the process answers, a passive standby (Coordinator:Standby)
+# included, which a check on /healthz would mark unhealthy and an orchestrator replace. Without a standby it answers
+# at the moment /healthz does: once the server serves, its store open, and its library too when it has a remote.
+# Readiness is /healthz (503 passive on a standby). An orchestrator that probes on its own replaces this check.
+HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=3 CMD curl -fs http://localhost:8080/livez || exit 1
 ENTRYPOINT ["dotnet", "/app/DtPipe.Coordinator.Host.dll"]
 
 FROM with-dtpipe AS runner

@@ -71,6 +71,15 @@ internal sealed class SqlTestBed : IDisposable
         Run(raw, sql);
     }
 
+    /// <summary>The first column of the first row <paramref name="sql"/> gives, read from another session while the coordinator runs.</summary>
+    public object? Read(string sql)
+    {
+        using var raw = Raw(_provider == "sqlite" ? $"Data Source={Path.Combine(_directory, SqliteDialect.FileName)};Pooling=False" : ConnectionString!);
+        using var command = raw.CreateCommand();
+        command.CommandText = sql;
+        return command.ExecuteScalar();
+    }
+
     /// <summary>Ends, from another session, every session but this one on the bed's database: what an administrator or a failover does.</summary>
     public void CutSessions()
     {

@@ -413,6 +413,9 @@ public sealed class SqlStoreTests : IDisposable
     [InlineData("postgresql", "Sqlite:Directory", "/state/db", "Coordinator:Sqlite:Directory is given")]
     [InlineData("1", null, null, "Coordinator:Store must be")]
     [InlineData("sqlite", "StoreLockWait", "-00:00:01", "Coordinator:StoreLockWait")]
+    [InlineData("sqlite", "Standby", "passive", "Coordinator:Store is 'sqlite'")]
+    [InlineData("postgresql", "Standby", "passive", "Coordinator:Library:Remote:Url is not set")]
+    [InlineData("postgresql", "Standby", "warm", "Coordinator:Standby must be")]
     public void A_Store_Setting_That_Does_Not_Fit_The_Store_Stops_The_Start_Without_Its_Value(string store, string? key, string? value, string expected)
     {
         var settings = new Dictionary<string, string?>
@@ -431,6 +434,7 @@ public sealed class SqlStoreTests : IDisposable
 
         configuration["Coordinator:Store"] = "SqlServer";
         configuration["Coordinator:Sqlite:Directory"] = null;
+        configuration["Coordinator:Standby"] = null;
         configuration["Coordinator:StoreLockWait"] = "00:00:05";
         configuration["Coordinator:ConnectionString"] = "Server=db.example";
         var options = CoordinatorServerOptions.FromConfiguration(configuration);

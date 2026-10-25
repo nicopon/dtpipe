@@ -79,9 +79,18 @@ public sealed class CoordinatorServerOptions
 
     /// <summary>
     /// How long a start waits for another coordinator to leave the database before it refuses (<c>Coordinator:StoreLockWait</c>, a time
-    /// span, 30 seconds unless set): the earlier instance of a rolling update. Never without bound.
+    /// span, 30 seconds unless set): the earlier instance of a rolling update. Never without bound: a start that is to wait without bound
+    /// is <see cref="Passive"/>.
     /// </summary>
     public TimeSpan StoreLockWait { get; init; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// Whether a start that finds the database held waits for it without bound, as a standby (<c>Coordinator:Standby</c> =
+    /// <c>passive</c>): until it holds the database it serves only <see cref="PassiveResponder"/>'s answers, reads nothing and writes
+    /// nothing, then starts as any start does. PostgreSQL or SQL Server, with a remote for the library, since the standby has neither
+    /// the file nor the directory of the other instance.
+    /// </summary>
+    public bool Passive { get; init; }
 
     /// <summary>
     /// Whether the state may begin where none is kept (<c>Coordinator:Initialize</c>): the first start, or after the store (or the library's
@@ -217,6 +226,20 @@ public sealed class CoordinatorServerOptions
         var lockWait = section.GetValue<TimeSpan?>("StoreLockWait") ?? TimeSpan.FromSeconds(30);
         if (lockWait < TimeSpan.Zero)
             throw new InvalidOperationException("Coordinator:StoreLockWait must not be negative.");
+        var passive = section["Standby"] is { Length: > 0 } standby
+            ? string.Equals(standby, "passive", StringComparison.OrdinalIgnoreCase) ? true
+                : throw new InvalidOperationException("Coordinator:Standby must be 'passive', or unset.")
+            : false;
+        var libraryRemote = LibraryRemoteSettings.FromConfiguration(section);
+        if (passive)
+        {
+            if (store == StoreKind.Sqlite)
+                throw new InvalidOperationException("Coordinator:Standby is 'passive' but Coordinator:Store is 'sqlite': a SQLite file is held by the one process that opened it, so no standby on another host can take it. Use 'postgresql' or 'sqlserver'.");
+            if (libraryRemote is null)
+                throw new InvalidOperationException("Coordinator:Standby is 'passive' but Coordinator:Library:Remote:Url is not set: the library would be in the other instance's directory alone, and the standby would start without it.");
+            if (section["StoreLockWait"] is { Length: > 0 })
+                throw new InvalidOperationException("Coordinator:StoreLockWait is given but Coordinator:Standby is 'passive', which waits for the database without bound: remove one.");
+        }
         var authority = section["Authority"] is { Length: > 0 } external ? external.TrimEnd('/') : null;
         var keyIssuer = publicUrl?.GetLeftPart(UriPartial.Authority);
         // The issuer is what tells the two providers' tokens apart: one address for both would let either sign for the other.
@@ -265,9 +288,10 @@ public sealed class CoordinatorServerOptions
             Store = store,
             ConnectionString = connectionString,
             StoreLockWait = lockWait,
+            Passive = passive,
             Initialize = section.GetValue<bool>("Initialize"),
             SqliteDirectory = PathOf("Sqlite:Directory"),
-            LibraryRemote = LibraryRemoteSettings.FromConfiguration(section),
+            LibraryRemote = libraryRemote,
             HealthMaxAge = section.GetValue<TimeSpan?>("Health:MaxAge") is { } age && age > TimeSpan.Zero ? age : TimeSpan.FromMinutes(5),
         };
         // The first administrator of a server with no provider signs in with the key the deployment gave it: the server makes none.

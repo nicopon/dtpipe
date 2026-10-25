@@ -100,7 +100,8 @@ def service_log(name):
 
 
 def coordinator_log():
-    return service_log("coordinator")
+    """The log of the coordinator that serves: LAB_COORDINATOR_SERVICE names it once the stack's standby took over."""
+    return service_log(os.environ.get("LAB_COORDINATOR_SERVICE", "coordinator"))
 
 
 def until(predicate, timeout, what):

@@ -99,9 +99,21 @@ public static class CoordinatorServer
 
     /// <summary>
     /// Checks what a start needs (a failure stops it before anything is served), then builds the request pipeline and maps the routes.
-    /// The host adds nothing to the pipeline after it: its routes go on the groups returned.
+    /// The host adds nothing to the pipeline after it: its routes go on the groups returned. A passive coordinator
+    /// (<see cref="CoordinatorServerOptions.Passive"/>) first waits for the database, its <see cref="PassiveResponder"/> on the host's
+    /// addresses, and returns once it holds it and has done the rest: the host's server then listens where the responder did.
     /// </summary>
     public static async Task<CoordinatorApiGroups> MapCoordinatorServerAsync(this WebApplication app)
+    {
+        if (!app.Services.GetRequiredService<CoordinatorServerOptions>().Passive) return await MapAsync(app);
+        // The database is the first thing a standby opens, so nothing is read before it holds the lock; the responder answers until the
+        // routes are mapped, and what no one answers is the host's own start, until its server listens.
+        await using var responder = await PassiveResponder.StartAsync(app.Configuration);
+        app.Services.GetRequiredService<SqlDatabase>();
+        return await MapAsync(app);
+    }
+
+    private static async Task<CoordinatorApiGroups> MapAsync(WebApplication app)
     {
         var server = app.Services.GetRequiredService<CoordinatorServerOptions>();
         var adminViews = app.Services.GetRequiredService<AdminViews>();
@@ -211,8 +223,10 @@ public static class CoordinatorServer
         app.MapDataHub(requireAuth: true);
         app.MapHub<NodeChannelHub>(NodeChannel.Path).RequireAuthorization();
 
-        // Anonymous: whether the server answers at all, for a container's health check.
+        // Anonymous: whether the server serves, its store open (readiness), and whether the process answers at all (liveness), which a
+        // passive standby answers too.
         app.MapGet("/healthz", () => Results.Ok());
+        app.MapGet("/livez", () => Results.Ok());
         // Anonymous: where a person signs in for dtpipe studio, and the contract this server speaks.
         app.MapGet(CoordinatorApi.Metadata, (HttpContext context, CoordinatorServerOptions options) =>
             new ResourceMetadata(OriginOf(context), options.AuthorizationServers, ["header"], CoordinatorApi.Contract, options.StudioClientId, options.PersonAuth));

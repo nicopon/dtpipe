@@ -11,14 +11,16 @@ internal static class StoreRegistration
     /// </summary>
     public static IServiceCollection AddCoordinatorStores(this IServiceCollection services, CoordinatorServerOptions server)
     {
-        // A database lost stops the coordinator with an exit code that says it failed.
+        // A database lost stops the coordinator with an exit code that says it failed. A passive standby waits for it without bound,
+        // until the host is stopped.
         services.AddSingleton(provider => SqlDatabase.Open(
-            DialectOf(server), server.Initialize, server.StoreLockWait, provider.GetRequiredService<ILoggerFactory>().CreateLogger<SqlDatabase>(),
+            DialectOf(server), server.Initialize, server.Passive ? null : server.StoreLockWait, provider.GetRequiredService<ILoggerFactory>().CreateLogger<SqlDatabase>(),
             () =>
             {
                 Environment.ExitCode = 1;
                 provider.GetRequiredService<IHostApplicationLifetime>().StopApplication();
-            }));
+            },
+            stopping: provider.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping));
         services.AddSingleton<IRightsStore, SqlRightsStore>();
         services.AddSingleton<IRunStore, SqlRunStore>();
         services.AddSingleton<IDeploymentStore, SqlDeploymentStore>();
