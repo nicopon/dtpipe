@@ -69,7 +69,9 @@ none. One node per process, which is one replica of its node's identity; a secon
   through `NodeClientOptions.AccessTokenProvider`, so `NodeAgent` binds it to
   `OidcTokenClient.GetAsync(fresh: true)`, and asks once before connecting because TransportR
   swallows a provider that throws. The provider is `Oidc:Authority` or, left out, the first the coordinator's protected resource metadata names (never an HTTP provider for an HTTPS coordinator): its key issuer when it trusts no other; the client is `Oidc:ClientId` or the node's `Name`; the token endpoint comes from the provider's discovery document.
-  `[CI: Hosting.Tests KeyTokenTests]` `[unchecked: the fresh token on retry]`
+  A provider that answers and refuses the client is a `TokenRefusedException`: the connect loop logs it as a refusal that names the
+  provider and the client to add or enable, and only a coordinator that does not answer reads as not reachable.
+  `[CI: Hosting.Tests KeyTokenTests]` `[unchecked: the fresh token on retry; the refusal's text]`
 - **A secret is the host's value or a file's, read once.** `Oidc:ClientSecret` is the secret, or `@path` to the file that holds it
   (a coordinator's key mounted in a container), read once when `OidcTokenClient` is made (`SecretReference`, the one place): a file
   that cannot be read, or is empty, stops the start by the setting's name, never by its path or its content. A secret that begins

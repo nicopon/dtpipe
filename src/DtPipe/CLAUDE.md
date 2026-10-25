@@ -137,8 +137,11 @@ only if it reads (`input`) or writes (`output`), never both, never `from`; the a
 - **A secret is a reference.** `--client-secret` takes `keyring://alias`, `${{NAME}}` or `@file` and refuses a value; the
   environment's `DtPipeNode__Oidc__ClientSecret` may hold a reference too. It is resolved once, at start, by
   `CompositeStringContentResolver.Standard`. The host is built without the command line, and a token that names a node setting
-  (`DtPipeNode:…`, `DtPipeNode__…`) is refused, so no argument reaches a setting the options do not name.
-  `[CI: PipelineNode.Tests NodeCommandTests]`
+  (`DtPipeNode:…`, `DtPipeNode__…`) is refused, so no argument reaches a setting the options do not name. A reference the
+  resolver leaves as written (a variable not set, an alias the keyring lacks) stops the start by its name, never passing for the
+  secret, and a file that cannot be read is named by its exception's type, never its path, which may be a key pasted after the
+  `@`. `NodeBricks.ReadSecretAsync` is the one reading, which `dtpipe studio --key` shares.
+  `[CI: PipelineNode.Tests NodeCommandTests; DtPipe.Tests StudioKeyTests]` `[unchecked: the refusals of an unset variable, an absent alias and an unreadable file]`
 - **A brick holds no credential as a value.** Its version is the hash of its text; `ConnectionStringSanitizer.CarriesLiteralSecret`
   judges every scalar of the branch as written, with its key, and a hit stops the start by naming the branch. Best-effort by
   construction, in both directions (the vocabulary is the one `Sanitize` uses): an unknown key passes, a query comparing a

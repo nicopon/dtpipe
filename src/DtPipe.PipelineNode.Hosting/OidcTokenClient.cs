@@ -1,7 +1,20 @@
 using System.Net.Http.Json;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace DtPipe.PipelineNode.Hosting;
+
+/// <summary>The provider answered and refused the client: no identity of that name holds this secret there. The coordinator is reachable.</summary>
+internal sealed class TokenRefusedException(string clientId, string provider, string reason)
+    : InvalidOperationException($"The identity provider refused {clientId}: {reason}")
+{
+    public string ClientId { get; } = clientId;
+
+    /// <summary>The provider's address (scheme, host and port): where the client is judged.</summary>
+    public string Provider { get; } = provider;
+
+    public string Reason { get; } = reason;
+}
 
 /// <summary>
 /// Obtains this node's tokens from its OpenID Connect provider (client credentials), and reuses one
@@ -50,7 +63,7 @@ internal sealed class OidcTokenClient(NodeOidcOptions options, string nodeName, 
             if (!string.IsNullOrWhiteSpace(options.Scope)) form["scope"] = options.Scope;
             using var response = await _http.PostAsync(_tokenEndpoint, new FormUrlEncodedContent(form));
             if (!response.IsSuccessStatusCode)
-                throw new InvalidOperationException($"The identity provider refused {ClientId}: {(int)response.StatusCode} {await response.Content.ReadAsStringAsync()}");
+                throw new TokenRefusedException(ClientId, new Uri(_tokenEndpoint!).GetLeftPart(UriPartial.Authority), Describe((int)response.StatusCode, await response.Content.ReadAsStringAsync()));
             var token = await response.Content.ReadFromJsonAsync<TokenResponse>() ?? throw new InvalidOperationException("Empty token response.");
             (_token, _expires) = (token.AccessToken, DateTimeOffset.UtcNow.AddSeconds(token.ExpiresIn));
             return _token;
@@ -59,6 +72,22 @@ internal sealed class OidcTokenClient(NodeOidcOptions options, string nodeName, 
         {
             _gate.Release();
         }
+    }
+
+    // An OAuth error answer reads "error: description"; any other body is shown as it came.
+    private static string Describe(int status, string body)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            var root = document.RootElement;
+            if (root.TryGetProperty("error", out var error) && error.GetString() is { Length: > 0 } code)
+                return root.TryGetProperty("error_description", out var description) && description.GetString() is { Length: > 0 } text
+                    ? $"{code}: {text}"
+                    : code;
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException) { }
+        return $"{status} {body}";
     }
 
     private async Task<string> DiscoverAsync()

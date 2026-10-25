@@ -153,6 +153,14 @@ internal sealed class NodeAgent : BackgroundService
     private static readonly TimeSpan AnnounceTimeout = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan RetryDelayCap = TimeSpan.FromSeconds(15);
 
+    // The provider's refusal may arrive wrapped by the connection that asked for the token.
+    private static TokenRefusedException? RefusalOf(Exception ex)
+    {
+        for (var e = ex; e is not null; e = e.InnerException)
+            if (e is TokenRefusedException refused) return refused;
+        return null;
+    }
+
     /// <summary>The wait before the next try of the connect loop after <paramref name="failures"/> failures in a row: 1 s, doubling, up to <see cref="RetryDelayCap"/>.</summary>
     internal static TimeSpan RetryDelay(int failures)
     {
@@ -185,7 +193,11 @@ internal sealed class NodeAgent : BackgroundService
             // fails with an OperationCanceledException too.
             catch (Exception ex) when (!ct.IsCancellationRequested)
             {
-                _logger.LogInformation("Coordinator not reachable at {Url} yet, retrying ({Reason})", _options.CoordinatorUrl, ex.Message);
+                if (RefusalOf(ex) is { } refused)
+                    _logger.LogWarning("The identity provider at {Provider} refused '{ClientId}' ({Reason}): it holds no enabled client '{ClientId}' with the secret this node reads. Where the coordinator issues the keys, add or enable an identity '{ClientId}' in Access and read its key here; retrying",
+                        refused.Provider, refused.ClientId, refused.Reason, refused.ClientId, refused.ClientId);
+                else
+                    _logger.LogInformation("Coordinator not reachable at {Url} yet, retrying ({Reason})", _options.CoordinatorUrl, ex.Message);
                 if (hub.State != HubConnectionState.Disconnected)
                 {
                     try { await hub.StopAsync(ct); } catch (Exception) when (!ct.IsCancellationRequested) { }

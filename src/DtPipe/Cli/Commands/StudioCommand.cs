@@ -139,17 +139,8 @@ public sealed class StudioCommand : Command
     /// The key <paramref name="reference"/> names, read once (<c>${{NAME}}</c>, <c>keyring://alias</c> or <c>@file</c>), or why not. A
     /// value is refused as <c>--client-secret</c> refuses one: an argument is listed by any process of the host, and a shell keeps it.
     /// </summary>
-    public static async Task<(string? Key, string? Refusal)> ReadKeyAsync(string reference, ISecretsManager secrets, CancellationToken ct)
-    {
-        if (!NodeBricks.IsSecretReference(reference))
-            return (null, "--key takes a reference, never the key: ${{NAME}}, keyring://alias or @file.");
-        string? key;
-        try { key = await CompositeStringContentResolver.Standard(secrets).ResolveAsync(reference, ct); }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            return (null, $"The key could not be read: {ex.Message}");
-        }
-        key = key?.Trim();
-        return string.IsNullOrEmpty(key) ? (null, "The key resolves to nothing.") : (key, null);
-    }
+    public static async Task<(string? Key, string? Refusal)> ReadKeyAsync(string reference, ISecretsManager secrets, CancellationToken ct) =>
+        NodeBricks.IsSecretReference(reference)
+            ? await NodeBricks.ReadSecretAsync(reference, "key", secrets, ct)
+            : (null, NodeBricks.NotAReference("--key", "key", "DTPIPE_KEY"));
 }

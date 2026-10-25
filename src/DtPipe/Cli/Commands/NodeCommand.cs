@@ -47,7 +47,7 @@ public sealed class NodeCommand : Command
             var reference = parseResult.GetValue(clientSecret);
             if (reference is { } literal && !NodeBricks.IsSecretReference(literal))
             {
-                Console.Error.WriteLine("[ERROR] --client-secret takes a reference, never the secret: keyring://alias, ${{NAME}} or @file.");
+                Console.Error.WriteLine($"[ERROR] {NodeBricks.NotAReference("--client-secret", "secret", "DTPIPE_NODE_KEY")}");
                 return 1;
             }
             reference ??= Environment.GetEnvironmentVariable($"{EnvironmentPrefix}__Oidc__ClientSecret") is { } fromEnvironment
@@ -56,15 +56,10 @@ public sealed class NodeCommand : Command
             string? secret = null;
             if (reference is not null)
             {
-                try { secret = await CompositeStringContentResolver.Standard(secrets).ResolveAsync(reference, ct); }
-                catch (Exception ex) when (ex is not OperationCanceledException)
+                (secret, var unreadable) = await NodeBricks.ReadSecretAsync(reference, "client secret", secrets, ct);
+                if (unreadable is not null)
                 {
-                    Console.Error.WriteLine($"[ERROR] The client secret could not be read: {ex.Message}");
-                    return 1;
-                }
-                if (string.IsNullOrEmpty(secret))
-                {
-                    Console.Error.WriteLine("[ERROR] The client secret resolves to nothing.");
+                    Console.Error.WriteLine($"[ERROR] {unreadable}");
                     return 1;
                 }
             }
