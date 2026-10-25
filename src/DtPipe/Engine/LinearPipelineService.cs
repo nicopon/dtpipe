@@ -108,7 +108,7 @@ public class LinearPipelineService
         if (job.Limit < 0)
             throw new ArgumentException($"--limit value must be >= 0 (got {job.Limit}).");
 
-        // F5: consume the orchestrator's typed channel endpoints directly — no CLI flag
+        // Consume the orchestrator's typed channel endpoints directly — no CLI flag
         // syntax is synthesized; reader/writer factories are selected by capability.
         InternalChannelEndpoint? inputEndpoint = ctx?.InputEndpoint;
         InternalChannelEndpoint? outputEndpoint = ctx?.OutputEndpoint;
@@ -382,7 +382,7 @@ public class LinearPipelineService
         return (match, raw, null);
     }
 
-    // F5 — capability-based selection of internal channel transports, which are absent from
+    // Capability-based selection of internal channel transports, which are absent from
     // the factories ResolveFactory routes by name.
     private IStreamReaderFactory? PickChannelReader(InternalChannelKind kind)
         => _serviceProvider.GetRequiredService<InternalChannelTransports>().Reader(kind);

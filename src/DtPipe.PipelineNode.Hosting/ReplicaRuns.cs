@@ -172,7 +172,7 @@ internal sealed class ReplicaRuns : IAsyncDisposable
     {
         if (!_runs.TryGetValue((runId, fragment), out var entry) || entry.Run.Edges.All(e => e.Alias != alias)) return false;
         entry.Run.NoteWireRequested();
-        // Every edge asked for: the run is the coordinator's to finish, and no longer to abandon for want of a Wire.
+        // Every edge asked for: the run is the coordinator's to finish, not to abandon for want of a Wire.
         if (entry.Run.WireRequests >= entry.Run.Edges.Count) entry.Unwired.Cancel();
         _ = WireInBackgroundAsync((runId, fragment), entry, alias, transferId);
         return true;

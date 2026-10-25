@@ -336,9 +336,9 @@ public class McpHelpService : IMcpHelpService
             sw.WriteLine();
         }
 
-        // What 'mappings:' encodes is not an 'options:' key. The list used to be written by hand
-        // and keyed on the component name, which hid project's own 'project' option (it works, and
-        // --export-job emits it) while publishing null's 'columns' (it binds and does nothing).
+        // What 'mappings:' encodes is not an 'options:' key. The list comes from the option type,
+        // never written by hand and keyed on the component name: such a list hides an option that
+        // works while publishing one that binds and does nothing.
         var primary = OptionObjectExporter.PrimaryMappingPropertyFor(factory.OptionsType);
         var skipNames = primary is null ? Array.Empty<string>() : new[] { primary.ToKebabCase() };
         using (var section = new StringWriter())

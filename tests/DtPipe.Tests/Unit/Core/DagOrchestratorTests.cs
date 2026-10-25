@@ -282,7 +282,7 @@ public class DagOrchestratorTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Typed channel endpoints — producer contract (F5)
+    // Typed channel endpoints — producer contract
     //
     // These tests verify that DagOrchestrator produces correct typed endpoints in the
     // BranchChannelContext before calling the branchExecutor. The CLI layer consumes

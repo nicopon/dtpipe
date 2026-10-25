@@ -11,8 +11,8 @@ namespace DtPipe.Cli.Mcp;
 /// Reading the session store.
 ///
 /// There is deliberately no create-checkpoint tool: materialising is an effect of running a
-/// pipeline, not an action of its own. A second way to trigger the same thing is the
-/// duplication this cycle removes, reintroduced at the protocol layer.
+/// pipeline, not an action of its own. A second way to trigger the same thing would be a
+/// second path to one effect, at the protocol layer.
 /// </summary>
 public partial class DtPipeMcpTools
 {

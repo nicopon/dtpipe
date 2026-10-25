@@ -4,7 +4,7 @@ namespace DtPipe.Core.Pipelines.Dag;
 
 /// <summary>
 /// Describes the channel wiring provided by the orchestrator for a single branch execution.
-/// F5: routing is carried in typed endpoints — the engine never emits CLI flag syntax
+/// Routing is carried in typed channel endpoints — the engine never emits CLI flag syntax
 /// (<c>-i</c>, <c>-o</c>, a channel prefix) for the host to re-parse.
 /// </summary>
 public record BranchChannelContext

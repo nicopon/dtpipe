@@ -3,10 +3,10 @@ using DtPipe.Core.Abstractions;
 namespace DtPipe.Cli.Infrastructure;
 
 /// <summary>
-/// F13 — component catalog. Replaces the manual 31-call registration block in
-/// Program.cs with a single deterministic discovery pass: every descriptor/factory in
-/// the supplied assemblies is found via its interface, instantiated once, and sorted by
-/// ComponentName so help/completion ordering never depends on assembly scan order.
+/// The component catalog: a single deterministic discovery pass in which every
+/// descriptor/factory in the supplied assemblies is found via its interface, instantiated
+/// once, and sorted by ComponentName so help/completion ordering never depends on assembly
+/// scan order.
 /// </summary>
 public sealed class ComponentCatalog
 {

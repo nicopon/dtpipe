@@ -38,9 +38,9 @@ public enum TurnStatus
 /// plan-mode "next steps" line, which speaks to the plan this turn made — not one an earlier turn
 /// left on the trajectory.</param>
 /// <param name="ClosingWords">What the model said to finish the turn, when it finished with words
-/// rather than a tool call. The exchange band shows it: a turn that ended on a sentence used to
-/// leave a tally in its place, so the sentence — a question among them — was only reachable by
-/// selecting the last step.</param>
+/// rather than a tool call. The exchange band shows it: a turn that ended on a sentence would
+/// otherwise leave a tally in its place, and the sentence — a question among them — would be
+/// reachable only by selecting the last step.</param>
 /// <param name="Tokens">Completion tokens the turn consumed, as the provider reported them. Zero
 /// when no provider reported any. The scrollback table does not print it — its rows are a fixed
 /// contract — so this reaches the reader through the full-screen exchange only.</param>

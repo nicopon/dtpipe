@@ -403,8 +403,8 @@ public static class OptionBinder
     /// Why a value could not be bound, and what the option does accept.
     /// </summary>
     /// <remarks>
-    /// A value that does not parse used to warn and leave the default in place, so
-    /// <c>--strategy Banana</c> wrote three rows with <c>Append</c> and exited 0: the run did
+    /// A value that does not parse fails: warning and leaving the default in place would let
+    /// <c>--strategy Banana</c> write three rows with <c>Append</c> and exit 0, the run doing
     /// something other than what was asked, which is worse than not running. An enum names its
     /// members, since "Requested value 'Banana' was not found" does not say what would have been.
     /// </remarks>

@@ -10,7 +10,7 @@ using DtPipe.Services;
 
 namespace DtPipe.Engine;
 
-// ── Execution phase (P1-8): writer preparation (cursor decorators, schema validation,
+// ── Execution phase: writer preparation (cursor decorators, schema validation,
 //    pre-hook, progress) and the segmented pipeline execution with hooks/metrics. ──
 internal sealed partial class ExportRunState
 {

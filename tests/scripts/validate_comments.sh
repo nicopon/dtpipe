@@ -4,7 +4,8 @@ set -e
 # validate_comments.sh
 # 1. A code comment may only cite what a clone of this repository can open. Planning documents live
 #    in .notes/, which .gitignore excludes, so "voie 4 §6 lot E2b" points at nothing. Names the
-#    repository carries stay legal: F1-F7, F16, REFERENCE.md anchors.
+#    repository carries stay legal: F1-F7, F16, REFERENCE.md anchors. A plan label ("P1-8") and
+#    "this cycle" in a C# comment are the same citation.
 # 2. Guidance files (CLAUDE.md at any depth, .claude/rules/, .claude/skills/) state rules, not history: no ISO
 #    date, no cycle name, no commit hash. History lives in git.
 
@@ -35,6 +36,17 @@ if [ -n "$offenders" ]; then
     fail "a comment cites a planning document (.notes/ is gitignored — a clone cannot open it)"
 fi
 pass "no comment cites a document absent from the repository"
+
+# A plan label ("P1-8") or "this cycle": a story of the work, not of the code.
+labels="$(cd "$PROJECT_ROOT" && grep -rnE '\bP[0-9]+-[0-9]+\b|\bthis cycle\b' src/ tests/ \
+    --include="*.cs" 2>/dev/null \
+    | grep -v "/obj/" | grep -v "/bin/" || true)"
+
+if [ -n "$labels" ]; then
+    echo "$labels" | sed 's/^/    /'
+    fail "a C# comment carries a plan label or the name of a work cycle"
+fi
+pass "no C# comment carries a plan label or a cycle name"
 
 # Untracked files are included: a new CLAUDE.md must be checked before its first commit.
 guidance="$(cd "$PROJECT_ROOT" && git ls-files -co --exclude-standard \

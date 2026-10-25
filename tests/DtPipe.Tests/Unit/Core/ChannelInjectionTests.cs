@@ -5,7 +5,7 @@ using Xunit;
 namespace DtPipe.Tests.Unit.Core;
 
 /// <summary>
-/// F5 — typed channel endpoints. The orchestrator hands branches structured routing;
+/// Typed channel endpoints. The orchestrator hands branches structured routing;
 /// these tests pin the endpoints each golden shape hands its branches.
 /// </summary>
 public class ChannelInjectionTests

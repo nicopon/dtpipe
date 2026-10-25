@@ -53,7 +53,7 @@ public class CliProviderFactory<TService> : ICliContributor, IDataFactory
     public Type OptionsType => _descriptor.OptionsType;
 
     /// <summary>
-    /// F5: forwards the internal-channel capability of the wrapped descriptor, if any,
+    /// Forwards the internal-channel capability of the wrapped descriptor, if any,
     /// so typed endpoint routing can pick this factory without adapter-identity strings.
     /// </summary>
     public InternalChannelKind? CapabilityKind => (_descriptor as IInternalChannelCapable)?.ChannelKind;
@@ -82,7 +82,7 @@ public class CliDataWriterFactory : CliProviderFactory<IDataWriter>, IDataWriter
         var route = registry.Get<ConnectionRoute>();
 
         // Validate that a target table was provided (OptionBinder set it from --table; YAML path via provider-options).
-        // F13: typed capability instead of GetProperty("Table") reflection.
+        // A typed capability, not GetProperty("Table") reflection.
         if (specificOptions is ITableAwareOptions tableOpts && string.IsNullOrWhiteSpace(tableOpts.Table))
         {
             // Both spellings, because the caller may have no command line: a model driving the MCP

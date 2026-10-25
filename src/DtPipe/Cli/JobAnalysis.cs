@@ -173,9 +173,8 @@ public sealed class JobAnalysis(IServiceProvider services, IEnumerable<IStreamRe
     ///
     /// It goes through JobService like any other run — the same reader, transformers,
     /// segmentation and bridges — because a tool that answered from its own walk over the data
-    /// would be a second engine, and this cycle just removed the last one. Before this, the
-    /// dry-run tool opened the reader and listed columns; it never ran a transformer at all,
-    /// so it could not have told a model that its --window step produced nothing.
+    /// would be a second engine. Such a tool never runs a transformer, so it could not tell a
+    /// model that its --window step produced nothing.
     /// </summary>
     public async Task<object> RunSampleAsync(ParsedJob parsed, int rows, int shownRows, CancellationToken ct, string? nextStep = null)
     {

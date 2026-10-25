@@ -320,8 +320,8 @@ public class SqlServerDataWriter : BaseSqlDataWriter, IColumnarDataWriter
         await _bulkCopy!.WriteToServerAsync(_bufferTable, ct);
     }
 
-    // P2-11: single implementation of the row→staging-buffer mapping (was copy-pasted
-    // between bulk insert and merge staging).
+    // The one implementation of the row→staging-buffer mapping, shared by bulk insert and
+    // merge staging.
     private void FillBufferRows(IEnumerable<object?[]> rows)
     {
         _bufferTable!.Clear();

@@ -19,11 +19,11 @@ namespace DtPipe.Adapters.DuckDB;
 /// Reads a DuckDB query through the Arrow C Data interface.
 /// </summary>
 /// <remarks>
-/// DuckDB is columnar, so a row reader made the data cross into rows and back into columns to
-/// reach Arrow — a detour that boxed every cell and lost any type the driver's schema table could
-/// not name, which is why a STRUCT or a MAP used to arrive as text. The interface takes the
-/// columns as they already are, and it is the same one the SQL processor reads through, so the
-/// two paths cannot report different values for the same column again.
+/// DuckDB is columnar, so a row reader would make the data cross into rows and back into columns
+/// to reach Arrow — a detour that boxes every cell and loses any type the driver's schema table
+/// cannot name, so a STRUCT or a MAP would arrive as text. The interface takes the columns as
+/// they already are, and it is the same one the SQL processor reads through, so the two paths
+/// cannot report different values for the same column.
 /// </remarks>
 public sealed partial class DuckDataSourceReader : IColumnarStreamReader, IRequiresOptions<DuckDbReaderOptions>, IBatchSizeConfigurable
 {

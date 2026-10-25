@@ -68,11 +68,10 @@ public record BranchDefinition
     /// linear path's synthetic branch all come through here.
     /// </summary>
     /// <remarks>
-    /// Four call sites used to spell this out by hand and the copies drifted: two of them left
-    /// <see cref="PreParsedJob"/> unset, so <c>get-dag-topology</c> promised a branch's
-    /// transformers without emitting them and the CLI panel listed branches with no stages while
-    /// the results table below it showed those stages running. Reintroducing a hand-written
-    /// initializer reopens that class of defect.
+    /// A hand-written initializer drifts from this one: leaving <see cref="PreParsedJob"/> unset
+    /// makes <c>get-dag-topology</c> promise a branch's transformers without emitting them, and
+    /// the CLI panel list branches with no stages while the results table below it shows those
+    /// stages running. Build every branch through here.
     /// </remarks>
     /// <param name="alias">The branch's key in the job dictionary.</param>
     /// <param name="job">The hydrated job this branch runs.</param>

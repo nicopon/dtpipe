@@ -8,16 +8,14 @@ using Xunit;
 namespace DtPipe.Tests.Unit.Cli;
 
 /// <summary>
-/// F13 capability-completeness convention: every READER descriptor that declares
+/// Capability-completeness convention: every READER descriptor that declares
 /// RequiresQuery must expose options implementing BOTH IQueryAwareOptions (the
 /// fail-closed check in CliProviderFactory) and ITableAwareOptions (the --table
 /// auto-build in LinearPipelineService).
 ///
-/// Regression context: commit 85186aa8 introduced ITableAwareOptions but added it
-/// only to writer option classes — QueryableReaderOptions was left out, so every
-/// reader-side --table run failed with "A query is required". A convention scan
-/// over the component catalog catches that class of error at the interface level,
-/// not per-incident.
+/// A reader whose options lack ITableAwareOptions fails every --table run with
+/// "A query is required". A convention scan over the component catalog catches that
+/// class of error at the interface level, not per-incident.
 /// </summary>
 public class ComponentCatalogCapabilityTests
 {

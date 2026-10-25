@@ -7,9 +7,8 @@ namespace DtPipe.DryRun;
 /// </summary>
 /// <param name="TotalSeen">
 /// How many rows passed the stage, capture quota or not. This is what lets a reader see that
-/// a stage changed cardinality — a 1:N expansion or an N:1 window — which the older
-/// "one row and its stages" model could not express, and why a windowed pipeline used to be
-/// reported as dropping everything.
+/// a stage changed cardinality — a 1:N expansion or an N:1 window — which a "one row and its
+/// stages" model cannot express: a windowed pipeline would read as dropping everything.
 /// </param>
 public sealed record StageCapture(
     int Index,

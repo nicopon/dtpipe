@@ -4,7 +4,7 @@ using Xunit;
 namespace DtPipe.Tests.Unit.Core;
 
 /// <summary>
-/// F13 — component catalog: discovery finds every documented provider, ordering is
+/// The component catalog: discovery finds every documented provider, ordering is
 /// deterministic (ComponentName sort), and duplicate names are detected.
 /// </summary>
 public class ComponentCatalogTests

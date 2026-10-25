@@ -212,8 +212,7 @@ public sealed class ComputeDataTransformer : IDataTransformer, IRequiresOptions<
         return (engine.Evaluate($"({asStatements})"), asStatements);
     }
 
-    // Dispose handled by DI scope? No, provider is singleton/scoped.
-    // ComputeDataTransformer does not own the engine anymore.
+    // Not IDisposable: the engine is the caller's, passed to each method.
 
     private void EnsureFunctionsCompiled(Engine engine)
     {

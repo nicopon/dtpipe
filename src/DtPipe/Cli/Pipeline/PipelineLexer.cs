@@ -12,7 +12,7 @@ namespace DtPipe.Cli.Pipeline;
 /// BuildBranch: flags must appear in the correct stage (reader before transformers, writer after -o).
 /// Strictness: a non-repeatable flag may appear at most ONCE per stage within a branch, and a
 /// global scalar flag at most once per command line — duplicates are hard errors, not warnings
-/// (the previously silent last-wins behavior made the executed configuration ambiguous).
+/// (a silent last-wins would make the executed configuration ambiguous).
 /// </summary>
 public class PipelineLexer
 {
@@ -252,7 +252,7 @@ public class PipelineLexer
     /// <summary>
     /// A second '--from' opens a new branch, so '--from a --from b' yields two branches rather than
     /// one branch reading two sources — and the first is left with nothing to do. Writing it that
-    /// way is a mistake for 'a,b', and the failure it used to produce named a downstream component
+    /// way is a mistake for 'a,b', and the failure it would produce names a downstream component
     /// instead of the flag. Consumers of a fan-out ('--from j -o dst') and the stages of a diamond
     /// ('--from s --filter … --alias hi') all carry an alias, an output or a transformer, so only
     /// the empty branch is rejected.
@@ -382,11 +382,10 @@ public class PipelineLexer
 
     /// <summary>
     /// A branch opened by '--from' has no reader of its own, so a flag that is not valid in the
-    /// pipeline stage has nothing to bind to. Such a flag used to be dropped in silence:
-    /// '--from a --ref b --query "&lt;join&gt;"' ran as a pass-through of 'a', wrote a file missing
-    /// b's columns and exited 0, while the same line misspelt '--quer' failed closed and even
-    /// named --sql as the fix. Reject the right spelling in the wrong place the way the
-    /// misspelling already is.
+    /// pipeline stage has nothing to bind to. Dropped in silence, '--from a --ref b --query
+    /// "&lt;join&gt;"' would run as a pass-through of 'a', write a file missing b's columns and
+    /// exit 0, while the same line misspelt '--quer' fails closed and even names --sql as the
+    /// fix. Reject the right spelling in the wrong place the way the misspelling is.
     /// </summary>
     private void RejectReaderFlagsWithoutAReader(BranchSpec branch)
     {

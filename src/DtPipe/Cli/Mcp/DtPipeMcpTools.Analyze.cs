@@ -150,7 +150,7 @@ public partial class DtPipeMcpTools
         CancellationToken ct = default) => _analysis.SampleAsync(yamlContent, rows, shownRows: 10, ct,
             // Not a pointer to 'execute-yaml-job': in plan mode that tool is hidden and the role
             // prompt forbids it, so naming it here sends the reader after something it cannot
-            // reach — the same mistake 'help' made and had removed.
+            // reach.
             nextStep: "This was a preview: nothing was written to the target. Running the pipeline "
                     + "for real is a separate, deliberate step.",
             hints: McpHints);

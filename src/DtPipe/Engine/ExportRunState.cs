@@ -18,7 +18,7 @@ using DtPipe.Services;
 namespace DtPipe.Engine;
 
 /// <summary>
-/// Carries the per-run state of one export execution through its phases (P1-8):
+/// Carries the per-run state of one export execution through its phases:
 /// Preflight → Schema → Execution → Hooks/Cursor/Metrics. Phases are partial methods
 /// spread across ExportRunState.*.cs so each concern stays a readable unit.
 /// </summary>
@@ -188,7 +188,7 @@ internal sealed partial class ExportRunState
         // ── Execution ──────────────────────────────────────────────────────
         // Sample mode is not a branch here. It is the same execution with the writer
         // neutralised and the reader bounded — which is the whole point: a preview that took
-        // a different path could disagree with the run it previews, and used to.
+        // a different path could disagree with the run it previews.
         Logger.LogDebug("[Execution] target '{Writer}', {Columns} columns", WriterFactory.ComponentName, CurrentSchema.Count);
         await PrepareWriterAsync(ct);
         await ExecutePipelineAsync(ct);

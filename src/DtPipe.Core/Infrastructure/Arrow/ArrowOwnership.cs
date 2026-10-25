@@ -45,17 +45,14 @@ public static class ArrowOwnership
     /// Its column buffers hold no shared handle; the whole message body is a single allocation
     /// owned by the <see cref="RecordBatch"/>. So <see cref="RetainArray"/> bumps nothing, and the
     /// segment runner's dispose of the input frees the body under an output that aliases it.
-    /// Reading it back then dereferences freed native memory: <c>--mask</c>, <c>--fake</c>,
-    /// <c>--null</c> and <c>--format</c> each crashed with a <c>NullReferenceException</c> raised
-    /// from inside Arrow, on an <c>arrow:</c> source and on <c>--from-checkpoint</c>, while the same
-    /// transformers over <c>parquet:</c> were correct.
+    /// Reading it back then dereferences freed native memory: any transformer that returns a
+    /// column of its input fails with a <c>NullReferenceException</c> raised from inside Arrow.
     ///
     /// <para>
     /// The machinery for sharing a buffer is <c>internal</c> to Apache.Arrow, so the handle cannot
     /// be attached from here: the copy is what buys the contract. It is one allocator copy per
-    /// batch — measured at roughly three times the cost of reading the batch, ~3 ns per row — paid
-    /// on the IPC readers only, and it is what lets every consumer downstream obey one rule instead
-    /// of asking where its batch came from.
+    /// batch, paid on the IPC readers only, and it is what lets every consumer downstream obey one
+    /// rule instead of asking where its batch came from.
     /// </para>
     /// </remarks>
     public static RecordBatch TakeOwnership(RecordBatch batch)

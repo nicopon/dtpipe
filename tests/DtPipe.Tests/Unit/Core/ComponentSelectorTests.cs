@@ -5,8 +5,7 @@ namespace DtPipe.Tests.Unit.Core;
 
 /// <summary>
 /// ComponentSelector is the single authority on the "{component}[+{variant}]:" grammar. It exists
-/// because this logic used to be reimplemented at every routing site (pipeline, inspect, MCP
-/// analyze, job export, DAG rendering, provider configuration) and the copies drifted apart.
+/// because a copy of this logic at a routing site drifts from the others.
 /// </summary>
 public class ComponentSelectorTests
 {

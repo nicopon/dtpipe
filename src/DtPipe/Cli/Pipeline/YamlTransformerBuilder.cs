@@ -17,10 +17,10 @@ namespace DtPipe.Cli.Pipeline;
 /// </para>
 ///
 /// <para>
-/// Both halves used to live in each factory as a hand-written list of key names, and the list drifted
-/// from the properties the help advertises: <c>compute-types</c> worked on the command line, bound
-/// nothing in YAML, and warned about neither — while an unknown key was dropped without a word.
-/// Binding reflectively is what keeps the help and the loader describing one surface.
+/// A hand-written list of key names in each factory drifts from the properties the help
+/// advertises: a key works on the command line, binds nothing in YAML and warns about neither,
+/// while an unknown key is dropped without a word. Binding reflectively is what keeps the help
+/// and the loader describing one surface.
 /// </para>
 /// </summary>
 public static class YamlTransformerBuilder

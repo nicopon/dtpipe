@@ -133,7 +133,7 @@ public class ExportServiceTests
 public class PipelinePhaseOrderTests
 {
     /// <summary>
-    /// P1-8 — phase composition: a successful run persists metrics (MetricsPhase) only
+    /// Phase composition: a successful run persists metrics (MetricsPhase) only
     /// after the writer completed its output (ExecutionPhase), and hook files run in the
     /// documented order. Uses real temp files as observable phase markers.
     /// </summary>

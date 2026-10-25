@@ -28,19 +28,17 @@ public sealed record SampleSafetyVerdict(
 /// --sql. And <c>--limit 10</c> bounds what the client reads, never what the server already
 /// destroyed.
 ///
-/// Two differences from the guardrail that existed before:
+/// Two properties:
 ///
 /// <list type="bullet">
 /// <item><b>It classifies the RESOLVED pipeline, not the YAML text.</b> A <c>query: "@/tmp/x.sql"</c>
 /// is judged by its contents; <see cref="JobSqlSafety"/> applies the same rule to a job before a real run.</item>
-/// <item><b>It covers the CLI too.</b> There was exactly one call site for ISqlSafetyPolicy in
-/// the repository, on execute-yaml-job; the MCP dry-run tool and --dry-run had none — they were
-/// protected by not executing, and this path executes.</item>
+/// <item><b>It covers every sample entry</b>: execute-yaml-job, the MCP dry-run tool and --dry-run.
+/// A sample executes its source, so none can rely on not executing.</item>
 /// </list>
 ///
 /// It reuses <see cref="ISqlSafetyPolicy"/> rather than growing a second policy: two
-/// classifications of "destructive" that could disagree is the duplication this cycle removes,
-/// transposed onto safety.
+/// classifications of "destructive" could disagree.
 /// </summary>
 public static class SampleModeSafetyGate
 {

@@ -421,7 +421,7 @@ public class AgentExecutor
                 else
                 {
                     // No tool call and no text: the model stopped with nothing to show. Not a
-                    // success — this path used to report one, so an empty turn read as "done".
+                    // success: an empty turn must not read as "done".
                     if (recordTrajectory)
                         Trajectory.AddStep(currentStepNum, "Model returned an empty response with no tool call.", isError: true, thinking: currentThinking, usage: currentUsage);
                     success = false;

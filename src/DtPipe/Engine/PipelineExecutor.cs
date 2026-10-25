@@ -127,8 +127,7 @@ public sealed class PipelineExecutor
         //
         // The Arrow round-trip this introduces is not an artefact of the bridge: a checkpoint
         // IS Arrow, so resuming from one pays the same conversion whatever we do here. Refusing
-        // did not avoid the round-trip, it only prevented checkpointing. (That was the reasoning
-        // behind the original refusal, and it was wrong.)
+        // would not avoid the round-trip, it would only prevent checkpointing.
         //
         // It costs an ordinary run nothing, structurally: without --checkpoint the segment is
         // never added and not one branch below sees a difference.

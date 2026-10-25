@@ -29,9 +29,9 @@ public static class DuckDbConnectionHelper
     /// Turns an already selector-stripped DuckDB target into an ADO connection string.
     /// <para>
     /// This method never sees a "duck:" or "duck+" prefix: ComponentSelector removes it before any
-    /// descriptor is called. It used to re-check both prefixes defensively, which quietly split the
-    /// in-memory handling across two code paths — the prefixed one was covered by tests while the
-    /// real runtime path was not, so "duck:memory" created a database FILE named "memory".
+    /// descriptor is called. Re-checking either prefix here would split the in-memory handling
+    /// across two code paths, one of them never reached at runtime, so "duck:memory" would create
+    /// a database FILE named "memory".
     /// </para>
     /// </summary>
     public static string GetConnectionString(string connectionString)

@@ -163,7 +163,7 @@ public class DagOrchestrator : IDagOrchestrator
                         aliasMap[branch.RefAliases[i]] = actualRefAliases[i];
                 var branchCtx = new BranchChannelContext { AliasMap = aliasMap };
 
-                // F5: no argv mutation. Stream-transformer branches keep logical aliases in
+                // No argv mutation. Stream-transformer branches keep logical aliases in
                 // their args (factories resolve physical channels via AliasMap); fan-out
                 // consumers receive the physical sub-channel through their typed endpoint.
                 var updatedBranch = branch with { RefAliases = actualRefAliases };
@@ -357,7 +357,7 @@ public class DagOrchestrator : IDagOrchestrator
 
         try
         {
-            // F5: typed channel endpoints instead of a routing plan the CLI re-interprets.
+            // Typed channel endpoints instead of a routing plan the CLI re-interprets.
             InternalChannelEndpoint? inputEndpoint = null;
             if (!branch.HasStreamTransformer && string.IsNullOrEmpty(branch.Input) && !string.IsNullOrEmpty(resolvedFromAlias))
                 inputEndpoint = new InternalChannelEndpoint(resolvedFromAlias, InternalChannelKind.Arrow);

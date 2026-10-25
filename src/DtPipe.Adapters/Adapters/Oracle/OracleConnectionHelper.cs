@@ -15,6 +15,6 @@ public static class OracleConnectionHelper
 
     public static string GetConnectionString(string original)
     {
-        return original; // No prefix stripping needed anymore
+        return original; // The selector is already stripped: nothing to remove here
     }
 }

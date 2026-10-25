@@ -23,11 +23,9 @@ public readonly record struct ComponentSelection(bool Matched, string Cleaned, s
 /// The single authority on the <c>{component}[+{variant}]:</c> selector syntax used to route a
 /// connection string to a provider.
 /// <para>
-/// This logic used to be reimplemented at every routing site (pipeline, inspect, MCP analyze,
-/// job export, DAG rendering, provider configuration). The copies drifted: only the pipeline
-/// path learned that "s3://bucket/key" is a URI rather than an "s3:"-prefixed selector, so
-/// <c>inspect</c> and the MCP tools kept handing providers a mangled "//bucket/key". Centralizing
-/// the grammar means a routing fix lands once instead of seven times.
+/// A routing site that reimplements this logic drifts from it: a copy that does not know that
+/// "s3://bucket/key" is a URI rather than an "s3:"-prefixed selector hands providers a mangled
+/// "//bucket/key". Centralizing the grammar means a routing fix lands once.
 /// </para>
 /// </summary>
 public static class ComponentSelector

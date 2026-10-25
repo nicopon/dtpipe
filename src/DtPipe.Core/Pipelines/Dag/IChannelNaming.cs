@@ -1,7 +1,7 @@
 namespace DtPipe.Core.Pipelines.Dag;
 
 /// <summary>
-/// Single definition of internal channel naming conventions (F5).
+/// Single definition of internal channel naming conventions.
 /// </summary>
 public interface IChannelNaming
 {

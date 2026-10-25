@@ -148,16 +148,16 @@ public class ExpandDataTransformer : IMultiRowTransformer, IRequiresOptions<DtPi
                 }
                 catch (Exception ex)
                 {
-                    // The generated symbol and the Jint wrapper used to go to the user, who had no
-                    // way to connect '__expand_80f14686' to anything they had written.
+                    // Name the person's expression: the generated symbol ('__expand_80f14686')
+                    // and the Jint wrapper connect to nothing they wrote.
                     throw new InvalidOperationException(
                         $"--expand could not evaluate {Quote(expression)}: {ex.Message}. "
                       + "It takes a JavaScript expression over 'row' — a bare column name is not one, "
                       + "write 'row.<column>'.", ex);
                 }
 
-                // A result of the wrong shape used to yield no rows at all, with no message and
-                // exit code 0 — a whole source silently discarded.
+                // A result of the wrong shape is an error: yielding no rows would discard a whole
+                // source silently, with exit code 0.
                 if (!TryGetElements(engine, result, out var elements))
                     throw new InvalidOperationException(
                         $"--expand expects {Quote(expression)} to return an array of row objects, "

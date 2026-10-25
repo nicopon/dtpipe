@@ -15,7 +15,7 @@ public interface IDataFactory : IComponentDescriptor
     bool SupportsStdio => false;
 
     /// <summary>
-    /// F5: when non-null, this factory transports data over internal memory channels of
+    /// When non-null, this factory transports data over internal memory channels of
     /// the given kind. Lets typed endpoint routing select the transport without
     /// adapter-identity string comparisons.
     /// </summary>

@@ -211,11 +211,11 @@ public partial class DtPipeMcpTools
                 }
             }
 
-            // apply=false => a real sample run, not an absence of one. The safety no longer
-            // comes from abstaining: the sample-mode sink cannot reach a user target
+            // apply=false => a real sample run, not an absence of one. The safety does not
+            // come from abstaining: the sample-mode sink cannot reach a user target
             // (SampleModeSinkTests), and SampleModeSafetyGate refuses a source that could
-            // mutate. Fail-closed is preserved and the model finally learns what the
-            // pipeline would actually do — which is the loop this cycle exists to close.
+            // mutate. It stays fail-closed, and the model learns what the pipeline would
+            // actually do.
             if (!consentedApply)
             {
                 var sample = await _analysis.RunSampleAsync(parsed, rows: 10, shownRows: 10, ct,

@@ -132,7 +132,7 @@ public class JobExecutor
 
             var mainContext = contexts.Values.FirstOrDefault();
 
-            // P1-8: the linear path goes through DagOrchestrator too — a single-branch
+            // The linear path goes through DagOrchestrator too: a single-branch
             // DAG gives uniform cancellation, channel wiring and exit-code semantics.
             // Jobs without an output (validation-only mode) keep the direct path.
             if (!string.IsNullOrEmpty(mainJob.Output))

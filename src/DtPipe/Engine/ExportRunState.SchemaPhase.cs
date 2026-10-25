@@ -12,7 +12,7 @@ using DtPipe.DryRun;
 
 namespace DtPipe.Engine;
 
-// ── Schema phase (P1-8): transformer initialization, segmentation support,
+// ── Schema phase: transformer initialization, segmentation support,
 //    branch schema publication and dry-run inference advisory. ──────────────
 internal sealed partial class ExportRunState
 {

@@ -8,8 +8,8 @@ namespace DtPipe.Cli.Mcp;
 /// <para>
 /// This is the only frame a model gets when dtpipe is driven as a plain MCP server. The agent
 /// command pushes <see cref="DtPipe.Cli.Agent.AgentSystemPrompt"/> as the first message of every
-/// session; nothing does that for an external host, so a model reaching dtpipe through one used to
-/// receive fifteen tool descriptions and no relationship between them. Hosts typically hand these
+/// session; nothing does that for an external host, so a model reaching dtpipe through one would
+/// receive the tool descriptions and no relationship between them. Hosts typically hand these
 /// instructions to the model as a system message, which is what makes this the right slot rather
 /// than a prompt — a prompt has to be asked for, and only a person can ask.
 /// </para>

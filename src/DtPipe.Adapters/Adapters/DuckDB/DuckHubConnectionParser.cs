@@ -45,9 +45,8 @@ public static class DuckHubConnectionParser
     /// Builds the ATTACH plan for a hub connection.
     /// <para>
     /// Takes the variant and the connection details separately: <c>ComponentSelector</c> has already
-    /// split "duck+mysql:Host=…" into variant "mysql" and details "Host=…". This method used to
-    /// re-parse the "duck+" prefix itself, which is exactly the prefix knowledge an adapter is not
-    /// supposed to carry.
+    /// split "duck+mysql:Host=…" into variant "mysql" and details "Host=…". This method never
+    /// re-parses the "duck+" prefix: that is prefix knowledge an adapter does not carry.
     /// </para>
     /// </summary>
     /// <param name="variant">The selector variant ("mysql"), or null/empty for a non-hub connection.</param>

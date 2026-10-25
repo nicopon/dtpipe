@@ -8,7 +8,7 @@ public enum InternalChannelKind
 }
 
 /// <summary>
-/// A typed channel endpoint handed to a branch by the orchestrator (F5): the engine
+/// A typed channel endpoint handed to a branch by the orchestrator: the engine
 /// passes structured routing instead of emitting CLI flag syntax for the host to re-parse.
 /// </summary>
 public sealed record InternalChannelEndpoint(string Alias, InternalChannelKind Kind);

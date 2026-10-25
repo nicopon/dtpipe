@@ -1,8 +1,8 @@
 namespace DtPipe.Core.Options;
 
 /// <summary>
-/// F13 — implemented by writer/reader options that carry a target table concept.
-/// Replaces reflection <c>GetProperty("Table")</c> lookups with a typed capability.
+/// Implemented by writer/reader options that carry a target table concept: a typed capability,
+/// so no caller looks the table up by reflection (<c>GetProperty("Table")</c>).
 /// </summary>
 public interface ITableAwareOptions
 {

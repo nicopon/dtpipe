@@ -9,9 +9,9 @@ namespace DtPipe.Tests.Unit.Sessions;
 /// <summary>
 /// Neutralising the writer is a claim about the WRITER. A reader can mutate on its way past —
 /// DELETE … RETURNING streams rows while the server destroys them, and --limit bounds what the
-/// client reads, never what was already deleted. Before this gate the exposure was live: there
-/// was exactly one ISqlSafetyPolicy call site in the repository, on execute-yaml-job, so the
-/// MCP dry-run tool executed an LLM's query with no SQL check at all.
+/// client reads, never what was already deleted. Without the gate a sample entry other than
+/// execute-yaml-job, such as the MCP dry-run tool, would execute an LLM's query with no SQL
+/// check at all.
 /// </summary>
 public class SampleModeSafetyGateTests
 {

@@ -5,8 +5,8 @@ namespace DtPipe.Cli.Agent;
 /// and so the session summary's verdict matches what actually happened.
 ///
 /// Only <see cref="Succeeded"/> maps to exit code 0. The rest are the ways a turn stops without a
-/// finished result; they were previously indistinguishable at the summary, and
-/// <see cref="EmptyResponse"/> in particular was reported as a success.
+/// finished result; they stay distinguishable at the summary, and
+/// <see cref="EmptyResponse"/> in particular is never reported as a success.
 ///
 /// <see cref="AwaitingUserInput"/> is the odd one out: not a failure, just unfinished. It reports
 /// a non-zero exit like the failures — an agent that could not finish for want of an answer did

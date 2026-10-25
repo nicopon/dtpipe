@@ -54,9 +54,9 @@ public static class TypeHelper
     /// The CLR type a hint names, refusing one that names none.
     /// </summary>
     /// <remarks>
-    /// Every call site used to drop an unresolved hint and carry on with the column's incoming
-    /// type, so a typo left no trace at all: the run wrote a String column where an Int32 was
-    /// asked for and exited 0.
+    /// A caller that drops an unresolved hint and carries on with the column's incoming type
+    /// leaves a typo no trace at all: the run writes a String column where an Int32 was asked
+    /// for and exits 0.
     /// </remarks>
     public static Type RequireTypeHint(string flag, string column, string? hint)
         => string.IsNullOrWhiteSpace(hint)

@@ -46,8 +46,8 @@ class Program
         // DEBUG=1 because the top-level handler in LinearPipelineService already decides
         // how a fault is presented: the full causal chain for everyone, the stack behind
         // DEBUG=1. An unconditional {Exception} here defeats that decision rather than
-        // complementing it -- it fires first, so a broken pipe printed thirteen stack
-        // frames through SafeFileHandle and Apache.Arrow.Ipc at ordinary verbosity.
+        // complementing it: it fires first, so a fault would print its whole stack at
+        // ordinary verbosity.
         var outputTemplate = isDebug
             ? "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}"
             : "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}";
@@ -335,7 +335,7 @@ class Program
         services.AddSingleton<DtPipe.Core.Expressions.IStringContentResolver>(sp =>
             DtPipe.Cli.Expressions.CompositeStringContentResolver.Standard(sp.GetRequiredService<DtPipe.Cli.Security.ISecretsManager>()));
 
-        // F13 — deterministic component discovery replaces the manual registration list.
+        // Deterministic component discovery: one pass over the assemblies, no registration list.
         var catalog = ComponentCatalog.Discover(
             typeof(Program).Assembly,
             typeof(DtPipe.Adapters.Csv.CsvReaderDescriptor).Assembly,

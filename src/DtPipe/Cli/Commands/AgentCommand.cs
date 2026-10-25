@@ -456,7 +456,7 @@ public class AgentCommand : Command
             catch (OperationCanceledException)
             {
                 // F16: user cancellation must not mask as success — report the POSIX SIGINT
-                // convention. A slow or dead endpoint no longer lands here: the LLM clients turn
+                // convention. A slow or dead endpoint does not land here: the LLM clients turn
                 // a request timeout into a stated error instead of a bare cancellation.
                 console.MarkupLine("[yellow]Interrupted — stopping.[/]");
                 return 130;
