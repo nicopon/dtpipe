@@ -99,7 +99,7 @@ internal sealed class StudioFakes : IAsyncDisposable
 
     private static async Task<(WebApplication, string)> ServeAsync(RequestDelegate handler)
     {
-        var builder = WebApplication.CreateEmptyBuilder(new WebApplicationOptions());
+        var builder = WebApplication.CreateEmptyBuilder(new WebApplicationOptions { ContentRootPath = AppContext.BaseDirectory });
         builder.WebHost.UseKestrelCore().ConfigureKestrel(o => o.Listen(IPAddress.Loopback, 0));
         var app = builder.Build();
         app.Run(handler);
