@@ -11,6 +11,20 @@ the plan a launch makes, deployments and the run queue, rights, and the pages. I
 library: a host owns `Program` and calls `AddCoordinatorServer` and `MapCoordinatorServerAsync`
 (`CoordinatorServer.cs`); the product's host is `DtPipe.Coordinator.Host`, whose `Program` adds nothing.
 
+The files sit in one folder per domain, and a namespace follows its folder (`DtPipe.Coordinator.Server.<Folder>`). The root
+holds what a host calls and what no domain owns. The rules below name classes, not paths.
+
+| Folder | Object |
+|---|---|
+| root | `CoordinatorServer`, `CoordinatorServerOptions`, `EventBus`, `States`, `HealthEndpoints`, `SecretReference` |
+| `Runs/` | the run queue, its dispatch, journal and orphans, and the run and service routes |
+| `Deployments/` | deployments and their ledger, arming, planning and placement, fault injection |
+| `Library/` | the git-backed library, its routes, remote and arming, the designer's check, bricks and bindings, pipeline health |
+| `Nodes/` | the node inventory, enrollment, the node routes and the requests a node answers |
+| `Access/` | rights, their routes and bootstrap, the trusted IdP, the account pages, the key issuer and identity keys |
+| `Cursors/` | `CursorKeeper` |
+| `Stores/` | the store interfaces, their SQL implementations, `SqlDatabase`, the dialects, `StoreRegistration`, `PassiveResponder` |
+
 - **The server trusts an IdP for who, and decides what.** `TrustedIdp` validates the tokens of
   `Coordinator:Authority` for `Coordinator:Audience`, and those of its own key issuer (see "An identity is verified by the IdP
   or by a key"); a token names its client (`sub`) and grants nothing. `RightsIdentityProvider` replaces TransportR's `IClientIdentityProvider` and gives the

@@ -7,3 +7,5 @@
 b6f2723fabdb203c83b556655da1cd479e848aec
 # refactor(cli): move the engine into the DtPipe.Engine namespace
 aa37501af03d1106a7ff5356d29f3229cd6ce213
+# refactor(coordinator): group the server's files and namespaces by domain
+4fa4491ea5dee51bb4b554ba673f7c775804cccb
