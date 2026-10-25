@@ -1412,6 +1412,7 @@ read from the environment first (`Coordinator__PublicUrl`), then from command-li
 | `Sqlite__Directory` | Where the SQLite file lives, if not the state directory |
 | `ConnectionString` | The database of `Store=postgresql` or `sqlserver` (a secret: the environment or `@path`); refused with `sqlite` |
 | `StoreLockWait` | How long a start waits for another coordinator to leave the database before it refuses. Default: 30 seconds |
+| `Standby` | `passive`: a start that finds the database held waits for it without bound, serving `/livez` 200 and `/healthz` 503 `passive`, then takes over. `postgresql` or `sqlserver` with `Library__Remote__Url` only; refused beside `StoreLockWait` |
 | `Initialize` | `true` lets a store that holds nothing begin: the first start, or after data was lost |
 | `StateDirectory` | Where the library, the rights and scratch files live. Default: `./state` |
 | `Library__Directory` | Where the library's git repository lives. Default: `library` under `StateDirectory` |

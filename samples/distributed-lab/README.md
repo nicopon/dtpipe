@@ -349,7 +349,7 @@ replica ran each fragment.
 - A transfer the hub refuses under the flow matrix shows in the run's verdict as an unresponsive
   fragment: the coordinator's log carries the refusal.
 - One run at a time per data node: the runner's fragments of two runs share its host with no bound
-  on either. The coordinator is not highly available: a restart ends the runs in flight as errors (they keep their ids and the journal
+  on either. The coordinator is not highly available (its standby, `lab.sh stack failover-check`, takes over as a restart does): a restart ends the runs in flight as errors (they keep their ids and the journal
   holds them, in the store), and asks the node hosts that carried them to abandon their fragments when they announce again; the library, the armed
   deployments, the rights, the session keys and the finished runs survive, the library by being read back from its remote. A host that does not announce again keeps its fragments until it is restarted
   (`./lab.sh down`, then `./lab.sh up`). Nothing reconstructs a run from the nodes reconnecting: the journal is the authority.

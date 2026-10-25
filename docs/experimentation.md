@@ -60,17 +60,19 @@ reaches its library from a studio. The command is in the
 
 ## Limits to know first
 
-- **The coordinator is one process, not a highly available service.** The history of its runs, its
-  armed deployments, its rights and its session keys are in a SQLite file in its state directory
-  (`Coordinator:Sqlite:Directory` moves it), or in a PostgreSQL or SQL Server database
+- **The coordinator is one active process, not a highly available service.** The history of its
+  runs, its armed deployments, its rights and its session keys are in a SQLite file in its state
+  directory (`Coordinator:Sqlite:Directory` moves it), or in a PostgreSQL or SQL Server database
   (`Coordinator:Store` and `Coordinator:ConnectionString`). A first start on an empty store needs
-  `Coordinator:Initialize` set to true. Its library is a git repository in
-  its state directory; with a git remote configured (`Coordinator:Library:Remote:Url`, and the
-  token in `Coordinator__Library__Remote__Token`) every save is pushed before it is accepted, a
-  save the remote refuses is undone, and a state directory that is lost is read back from the
-  remote. Without one, that directory holds the only copy of the library. All of it survives a
-  restart. A run in flight does not: it is ended as an error, keeps its id, and the nodes that
-  carried it are asked to abandon its fragments.
+  `Coordinator:Initialize` set to true. Its library is a git repository in its state directory; with
+  a git remote configured (`Coordinator:Library:Remote:Url`, and the token in
+  `Coordinator__Library__Remote__Token`) every save is pushed before it is accepted, a save the
+  remote refuses is undone, and a state directory that is lost is read back from the remote. Without
+  one, that directory holds the only copy of the library. All of it survives a restart. A run in
+  flight does not: it is ended as an error, keeps its id, and the nodes that carried it are asked to
+  abandon its fragments. On PostgreSQL or SQL Server a second instance can wait as a passive standby
+  (`Coordinator:Standby`) and take over when the first dies, as a restart does: it saves the time to
+  start a new one, never a run in flight.
 - **One machine; Windows untried.** The lab has been exercised on a single macOS machine, as local
   processes and as a compose stack of Linux containers. A node is designed to run on Windows, which
   has not been tried.

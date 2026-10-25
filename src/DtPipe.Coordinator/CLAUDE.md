@@ -224,7 +224,7 @@ while any replica is connected.
 
 ## State and availability
 
-- **The coordinator is one instance that restarts fast, not a highly available service.** What a host must not lose - the run journal,
+- **The coordinator is one active instance that restarts fast, not a highly available service.** What a host must not lose - the run journal,
   the rights, the armed deployments, the session keys, the pipeline library - is kept outside the process (the server's are its database, SQLite, PostgreSQL or SQL Server, and a
   git remote: `src/DtPipe.Coordinator.Server/CLAUDE.md`), so a restart on an empty state directory loses none of it. What lives in the
   process is lost: the replica registry (rebuilt as replicas announce), the plans, the runs in flight and the transfers they carried,
@@ -235,9 +235,11 @@ while any replica is connected.
   replica of a node that carried a started run to abandon those fragments (`INodeLink.CancelAsync`, answered false by a
   replica that holds none). No message tells a node to drop what it holds on a guess: the authority is a journaled run.
   A restart that finds no journal, or a replica that never announces again, still falls to the operator, who restarts the
-  node hosts, which kills their fragment children. No second instance takes over: TransportR's hub is highly available only
-  with its Redis store and sticky sessions, its transfers stay local to the instance, and it refuses a transfer a host opens
-  between two instances, so the state outside the process serves a fast restart and never an active/active pair.
+  node hosts, which kills their fragment children. A second instance takes over only as the server's passive standby
+  (`Coordinator:Standby`), once the first has let go of its database, and its takeover is a restart: it serves nothing before, and
+  the runs in flight are lost. Never two active instances: TransportR's hub is highly available only with its Redis store and
+  sticky sessions, its transfers stay local to the instance, and it refuses a transfer a host opens between two instances, so the
+  state outside the process serves a fast restart and never an active/active pair.
   `[local: tools/campaign.py F4 - the lost run keeps its id, the abandon reaches the children]`
 - **A node renews its own token, and the hub closes a connection whose token ran out.** A node built
   with `AccessTokenProvider` renews ahead of the expiry, so an idle or a long-running node outlives

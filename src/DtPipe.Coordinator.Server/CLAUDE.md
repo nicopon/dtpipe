@@ -106,7 +106,7 @@ library: a host owns `Program` and calls `AddCoordinatorServer` and `MapCoordina
   the designer or admin group they receive, as a host maps its own routes on the groups returned (`CoordinatorApiGroups`); `HealthEndpoints`
   maps `/health` on its own group, outside `/api`, for a monitor, and `/api/health` on the reader group; `ServiceEndpoints` maps `/service`
   on its own group, outside `/api`, for a launcher, with no CSRF filter since a service's token is bearer only; `CoordinatorServer` keeps
-  the `account` group, `/healthz`, the metadata document, `/account/*` and the hubs. `[local: RouteTableTests]`
+  the `account` group, `/healthz`, `/livez`, the metadata document, `/account/*` and the hubs. `[local: RouteTableTests]`
 - **Every rights change names its author** (`AuditEntry.By`, by `TrustedIdp.CallerOf`: the signed-in email, or the identity's
   id when it has none, a person verified by a key; a person of the provider with no email by its name and ` (idp)`, which no id
   holds; `Coordinator:Bootstrap` for what the bootstrap adds). `[local: PersonKeyTests, ProviderPersonTests, KeyOnlyCoordinatorTests]`
@@ -164,7 +164,9 @@ library: a host owns `Program` and calls `AddCoordinatorServer` and `MapCoordina
   connection for the life of the process, out of the pool, on which every read and write runs, and which holds the database: SQLite's
   file exclusively (`coordinator.db` in `Coordinator:Sqlite:Directory`, the state directory unless set; WAL, `synchronous=FULL`, no
   shared memory, so the file can sit on a network volume), PostgreSQL's session advisory lock, SQL Server's session application lock.
-  A start that finds it held tries each second for `Coordinator:StoreLockWait` (30 s), then refuses naming the provider. Never a
+  A start that finds it held tries each second for `Coordinator:StoreLockWait` (30 s), then refuses naming the provider; with
+  `Coordinator:Standby=passive` (PostgreSQL or SQL Server, with a library remote: refused otherwise, and beside `StoreLockWait`) it
+  tries without bound, as a standby, and then starts as a restart does. Never a
   second connection and never a reconnection (`ConnectRetryCount=0` for SqlClient): a session opened again would hold no lock. A server's
   connection is probed every 5 seconds and PostgreSQL's asks the server for `tcp_keepalives_*`; lost, every call fails and the
   coordinator stops with exit code 1, since another may take the database. Nothing else can open SQLite's file while the process runs,
@@ -181,6 +183,17 @@ library: a host owns `Program` and calls `AddCoordinatorServer` and `MapCoordina
   Server (DTPIPE_TEST_REUSE_INFRA, or coordinator-sqlserver.yml by hand); lab.sh stack restart-check with LAB_STACK_STORE=sqlite,
   restored from a copy as deploy/README.md's backup]` `[unchecked: the file on a network volume; a power cut between a write and its
   sync; a key longer than SQL Server's columns]`
+- **A passive standby reads nothing until it holds the database.** `MapCoordinatorServerAsync` starts `PassiveResponder` on the
+  host's addresses before anything else, opens `SqlDatabase` (whose wait is the standby's), then stops the responder and runs the
+  start as it is. The responder is a server of its own over the host's configuration: it reads none of the server's services,
+  so it opens neither the store, the library nor the session keys, and answers `/livez` 200, `/healthz` 503 `passive` and
+  anything else 503 with `Retry-After`. The connection that took the lock is the one `SqlDatabase` keeps: never let go and
+  taken again, or another standby would take it between. Nothing answers between the responder stopping and the host's server
+  listening, the time of the start. A stop signal during the wait ends the process, nothing taken; `ApplicationStopping` ends
+  the wait for a host that stops it. The image's health check reads `/livez`; `/healthz` stays readiness.
+  `[CI: PassiveCoordinatorTests on PostgreSQL (agentic-ci.yml), SqlStoreTests — the refusals]` `[local: PassiveCoordinatorTests on
+  SQL Server; lab.sh stack failover-check]` `[unchecked: a node's real reconnection, which the tests stand for by its token and
+  its negotiation]`
 - **The session cookie's keys are in the store, and a start that cannot read them stops.** `TrustedIdp.AddSessionKeys` points
   DataProtection at the `IXmlRepository` the host registers (`SqlXmlRepository`: the `session_keys` table, one row per
   element), under a fixed application name so that two hosts of one coordinator read each other's cookies, and `EnsureSessionKeys` reads
@@ -561,5 +574,5 @@ library: a host owns `Program` and calls `AddCoordinatorServer` and `MapCoordina
 - The pages are this library's `wwwroot`, which `dotnet publish` puts at the root of the `wwwroot` beside any host that
   references it, beside the host's own pages: `index.html` + `js/` (the coordinator's views, ES modules, no build). `/healthz`, the protected resource
   metadata (`CoordinatorApi.Metadata`, RFC 9728: the provider, the contract, the studio's client) and
-  the key issuer's routes are the only anonymous routes; `/health` is a monitor's and `/service` a launcher's. Verify a change with the lab's `./lab.sh smoke`, and a page change with
+  the key issuer's routes are the only anonymous routes, with `/livez`; `/health` is a monitor's and `/service` a launcher's. Verify a change with the lab's `./lab.sh smoke`, and a page change with
   `./lab.sh ui` too.

@@ -93,9 +93,11 @@ docker build -f deploy/Dockerfile --target runner \
   write `/state` and `/tmp`; the coordinator under a uid with no home is not checked.
 - Run them under an init (`docker run --init`, `init: true` in compose): the runner starts
   `dtpipe` child processes, and dotnet as PID 1 ignores the signal of its own crash.
-- `GET /healthz` answers 200 whenever the coordinator serves; it is anonymous. The coordinator
-  image checks it itself (`docker ps` shows `healthy`); an orchestrator's own probe replaces that
-  check. The runner has no such route and its image no check.
+- Two anonymous probes. `GET /healthz` is readiness: 200 whenever the coordinator serves, its
+  store open, and 503 `passive` on a [standby](#a-passive-standby). `GET /livez` is liveness: 200
+  while the process answers, a standby included. The coordinator image checks `/livez` itself
+  (`docker ps` shows `healthy`); an orchestrator's own probes replace that check. The runner has
+  no such route and its image no check.
 
 ## The smallest coordinator
 
@@ -161,7 +163,8 @@ repository, in the volume or at its remote.
   opened again holds no lock.
 - **Kubernetes: use the `Recreate` strategy.** The default rolling update starts the new pod
   before it stops the old one, and the new one stops once `StoreLockWait` has passed. With
-  `Recreate` the old pod is gone first.
+  `Recreate` the old pod is gone first. A [standby](#a-passive-standby) changes what an update
+  can be.
 - **Keep-alives, so that a dead coordinator lets go of the lock.** On PostgreSQL the coordinator
   sets TCP keep-alives on its session (idle 10 s, interval 5 s, count 3), and the server ends a
   vanished session, and its lock, within about 25 seconds. On SQL Server the server's own
@@ -171,6 +174,44 @@ repository, in the volume or at its remote.
   (`Coordinator__Initialize`) and refuses a database whose schema is newer than itself.
 - **Tested** on PostgreSQL 18 and on Azure SQL Edge. The SQL is a portable subset, but no other
   version of SQL Server is tested.
+
+### A passive standby
+
+A second coordinator on the same database can wait for it, ready to take over when the first one
+dies. Give it the same settings and one more:
+
+```bash
+-e Coordinator__Standby=passive
+```
+
+- **What it does.** A start that finds the database held waits for it without bound, trying each
+  second, instead of stopping after `StoreLockWait` (which it refuses beside it). Meanwhile it
+  reads nothing and writes nothing: `/livez` answers 200, `/healthz` 503 `passive`, and every
+  other request 503 with `Retry-After`, a node's connection included. Once it holds the database
+  it starts as any restart does: it reads the state, ends the runs the other left in flight and
+  asks the nodes to give up their fragments. The nodes retry every 2 seconds and find it. Between
+  the responder stopping and the coordinator serving, while it reads its state and fetches its
+  library, nothing answers on its port.
+- **What it needs.** PostgreSQL or SQL Server: a SQLite file belongs to one process, and the
+  setting is refused on it. A library remote (`Coordinator__Library__Remote__Url`): without one
+  the library would be in the other instance's volume alone, and the setting is refused. Each
+  instance has a state directory of its own.
+- **How fast it takes over.** As fast as the database lets the lock go. A coordinator that stops
+  closes its session, and the lock goes at once; one that dies holds it until the keep-alives
+  above end its session, about 25 seconds on PostgreSQL and 30 on SQL Server. Then the standby
+  reads the state and the library. Runs in flight are lost, as at any restart.
+- **Probes.** Route traffic by `/healthz` (a Kubernetes readiness probe), restart by `/livez` (a
+  liveness probe): a probe of liveness on `/healthz` would restart a standby forever.
+- **Updates on Kubernetes.** A standby is never ready, so a rolling update whose floor is one
+  ready pod waits for it forever: the new pod is ready only once the old one has gone, which the
+  update does only once the new one is ready. With `replicas: 1`, `maxSurge: 1` and
+  `maxUnavailable: 1`, the new pod starts passive while the old one stops, and takes the
+  database once it has left: the update saves the scheduling and the image pull, not the
+  restart. With two replicas, an active and a standby, `maxUnavailable` must be 2, which stops
+  both: `Recreate` stays the simpler choice there.
+- **Stopping it.** A stop signal while it waits ends the process (exit code 143 on `SIGTERM`),
+  nothing taken.
+- **Tested** by `PassiveCoordinatorTests`, on PostgreSQL in CI and by hand on SQL Server.
 
 ## Backing up a SQLite coordinator
 
