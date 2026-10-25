@@ -1,3 +1,6 @@
+using DtPipe.Coordinator.Server.Access;
+using DtPipe.Coordinator.Server.Library;
+using DtPipe.Coordinator.Server.Stores;
 using DtPipe.Jobs.Coordinator;
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.Authentication.JwtBearer;

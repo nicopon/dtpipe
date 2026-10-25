@@ -1,4 +1,6 @@
 using DtPipe.Coordinator.Contracts;
+using DtPipe.Coordinator.Server.Library;
+using DtPipe.Coordinator.Server.Nodes;
 using Xunit;
 using DtPipe.Tests.Shared;
 

@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using DtPipe.Coordinator.Contracts;
+using DtPipe.Coordinator.Server.Runs;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 

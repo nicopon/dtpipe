@@ -1,4 +1,7 @@
 using System.Security.Claims;
+using DtPipe.Coordinator.Server.Access;
+using DtPipe.Coordinator.Server.Deployments;
+using DtPipe.Coordinator.Server.Stores;
 using Xunit;
 
 namespace DtPipe.Coordinator.Server.Tests;

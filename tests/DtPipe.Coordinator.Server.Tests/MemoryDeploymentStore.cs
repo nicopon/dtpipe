@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using DtPipe.Coordinator.Server.Deployments;
+using DtPipe.Coordinator.Server.Stores;
 
 namespace DtPipe.Coordinator.Server.Tests;
 

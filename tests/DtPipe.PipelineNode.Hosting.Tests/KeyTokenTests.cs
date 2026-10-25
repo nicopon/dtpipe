@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using DtPipe.Coordinator.Server;
+using DtPipe.Coordinator.Server.Access;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;

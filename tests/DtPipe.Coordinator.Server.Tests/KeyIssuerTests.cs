@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using DtPipe.Coordinator.Server.Access;
+using DtPipe.Coordinator.Server.Nodes;
 using DtPipe.Jobs.Coordinator;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;

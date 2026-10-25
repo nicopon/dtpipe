@@ -1,5 +1,7 @@
 using System.Security.Claims;
 using DtPipe.Coordinator.Contracts;
+using DtPipe.Coordinator.Server.Nodes;
+using DtPipe.Coordinator.Server.Stores;
 using Microsoft.Extensions.Time.Testing;
 using Xunit;
 using DtPipe.Tests.Shared;

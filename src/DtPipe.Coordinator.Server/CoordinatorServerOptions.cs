@@ -1,3 +1,7 @@
+using DtPipe.Coordinator.Server.Access;
+using DtPipe.Coordinator.Server.Library;
+using DtPipe.Coordinator.Server.Stores;
+
 namespace DtPipe.Coordinator.Server;
 
 /// <summary>Where the coordinator keeps its state beyond the process (<c>Coordinator:Store</c>).</summary>
@@ -297,9 +301,9 @@ public sealed class CoordinatorServerOptions
         // The first administrator of a server with no provider signs in with the key the deployment gave it: the server makes none.
         if (authority is null && options.Bootstrap.Admin is null)
             throw new InvalidOperationException("Coordinator:Bootstrap:AdminKey is required when Coordinator:Authority is not set: it is the key of the first administrator (dtp_<id>_<secret>, given through the environment or as @path to a file), and this server makes none.");
-        if (!options.Bootstrap.IsEmpty && Server.KeyIssuer.Unavailable(options) is { } reason)
+        if (!options.Bootstrap.IsEmpty && Access.KeyIssuer.Unavailable(options) is { } reason)
             throw new InvalidOperationException($"Coordinator:Bootstrap names identities verified by a key, but {reason}.");
-        if (options.Bootstrap.People is { Count: > 0 } people && Server.KeyIssuer.PersonUnavailable(options) is { } refusal)
+        if (options.Bootstrap.People is { Count: > 0 } people && Access.KeyIssuer.PersonUnavailable(options) is { } refusal)
             throw new InvalidOperationException($"Coordinator:Bootstrap names people ({string.Join(", ", people)}), but {refusal}.");
         return options;
     }

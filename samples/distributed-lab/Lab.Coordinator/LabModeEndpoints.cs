@@ -1,4 +1,5 @@
 using DtPipe.Coordinator.Server;
+using DtPipe.Coordinator.Server.Deployments;
 
 namespace DtPipe.Lab.Coordinator;
 

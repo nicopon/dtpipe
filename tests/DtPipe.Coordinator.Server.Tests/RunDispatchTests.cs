@@ -1,4 +1,6 @@
 using DtPipe.Coordinator.Contracts;
+using DtPipe.Coordinator.Server.Deployments;
+using DtPipe.Coordinator.Server.Runs;
 using Xunit;
 
 namespace DtPipe.Coordinator.Server.Tests;

@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using DtPipe.Coordinator.Server.Access;
 using DtPipe.Jobs.Coordinator;
 using Microsoft.Extensions.Configuration;
 using Xunit;

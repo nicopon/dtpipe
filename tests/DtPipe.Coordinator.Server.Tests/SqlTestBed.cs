@@ -1,4 +1,5 @@
 using System.Data.Common;
+using DtPipe.Coordinator.Server.Stores;
 using Microsoft.Data.SqlClient;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;

@@ -1,3 +1,5 @@
+using DtPipe.Coordinator.Server.Stores;
+
 namespace DtPipe.Coordinator.Server.Tests;
 
 /// <summary>An ignored-hosts store that can be taken down: every call then fails as a store that cannot be reached does.</summary>

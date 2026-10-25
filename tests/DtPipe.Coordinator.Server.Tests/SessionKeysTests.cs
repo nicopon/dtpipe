@@ -1,5 +1,7 @@
 using System.Security.Cryptography;
 using System.Xml.Linq;
+using DtPipe.Coordinator.Server.Access;
+using DtPipe.Coordinator.Server.Stores;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.DataProtection.Repositories;
 using Microsoft.Extensions.DependencyInjection;
