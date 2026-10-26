@@ -4,9 +4,12 @@
 
 ## `--dry-run N` is the real run, with the writer switched off
 
-It is not a separate analyser — same reader, same transformers, same mode changes — so it cannot
-disagree with the run it previews. `N` bounds the **source**, not the display: a step that expands
-or aggregates shows a different row count from its neighbour, and says so (`10 → 3 rows`).
+It is not a separate analyser — same reader, same transformers, same mode changes — and it asks the
+writer what the run asks before the target is touched, so a column type the target cannot hold fails
+the preview as it fails the run. It cannot see what only writing finds: a constraint, a value too
+wide for its column, a row beyond the first N. `N` bounds the **source**, not the display: a step
+that expands or aggregates shows a different row count from its neighbour, and says so
+(`10 → 3 rows`).
 
 ```bash
 dtpipe -i people.csv --compute "domain:row.email.split('@')[1]" \
@@ -37,6 +40,7 @@ It answers three questions at once:
 | | |
 |:---|:---|
 | The writer | Neutralised. Not initialised, never written to, never completed — a file is not created and a table is not migrated. The target is *inspected* for the compatibility report, never modified |
+| Column types | Asked of the writer as the run asks: a column it refuses fails the preview, with the cast that fixes it ([types a writer cannot write](../../REFERENCE.md#types-a-writer-cannot-write)) |
 | Hooks | None of the four (`--pre-exec`, `--post-exec`, `--on-error-exec`, `--finally-exec`) runs |
 | Cursor, metrics | Not advanced, not written |
 | The **source** | Classified first: a query carrying `DELETE`, `UPDATE`, `DROP`, `TRUNCATE`, `ALTER`, `INSERT` or `ATTACH` is refused |

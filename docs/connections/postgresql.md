@@ -41,6 +41,20 @@ row-by-row `INSERT`.
 | `uuid` | A first-class `Guid`, written as a native UUID wherever the target has one |
 | A type with no mapping (`point`) | Refused when the schema is built, rather than read as something else — cast it in the query (`col::json`) |
 
+Writing, a column PostgreSQL has no type for is refused before the table is touched: an 8-bit or
+an unsigned integer (from DuckDB, Parquet or MySQL) is never widened behind your back. The refusal
+names each column and the cast that brings it to a type PostgreSQL holds:
+
+```unknown
+The pg writer cannot write this column as it arrives, and nothing was written:
+  'qty': uint16; accepted instead: int32.
+Cast each column to an accepted type in a SQL step before the writer: give this branch --alias src, and write to the target from the step:
+  --from src --sql "SELECT * REPLACE (CAST(qty AS INTEGER) AS qty) FROM src" -o <target>
+```
+
+[Types a writer cannot write](../../REFERENCE.md#types-a-writer-cannot-write) has the rule for
+every writer.
+
 Identifiers fold **down**: `--table StockMoves` creates `stockmoves`. Quote the value yourself
 (`--table '"StockMoves"'`) to keep the spelling, and remember it is then addressable only in
 quotes.

@@ -403,6 +403,26 @@ anything else.
 > the table — columns already folded. On Oracle it produced `"stock_moves"`, which
 > `SELECT * FROM stock_moves` cannot reach (`ORA-00942`): a table dtpipe alone could address.
 
+### Types a writer cannot write
+
+A writer writes each column under the type its target format has for it — a DuckDB `DATE` stays a
+`DATE` in DuckDB, Parquet and PostgreSQL, an unsigned integer stays unsigned where the format has
+one. A type the format does not carry is **refused, never converted** and never written as text:
+PostgreSQL has no unsigned integer, MySQL no type for an instant, Oracle no time of day. The
+refusal comes before the target is touched — no file is created, no table emptied — names every
+column at once, and gives the step that casts each one to a type the writer accepts:
+
+```unknown
+The pg writer cannot write these 2 columns as they arrive, and nothing was written:
+  'qty': uint16; accepted instead: int32.
+  'total': uint64; accepted instead: decimal(20, 0).
+Cast each column to an accepted type in a SQL step before the writer: give this branch --alias src, and write to the target from the step:
+  --from src --sql "SELECT * REPLACE (CAST(qty AS INTEGER) AS qty, CAST(total AS DECIMAL(20,0)) AS total) FROM src" -o <target>
+```
+
+The cast is yours to choose: a wider type changes what the target holds. `--dry-run` refuses in
+the same words.
+
 ### Schema modes
 
 Before writing to a database target, dtpipe compares the source schema with the target's and acts
@@ -946,7 +966,10 @@ pipeline execution will fail immediately.
 
 A dry-run is **the real execution over N source rows with the writer neutralised** — the same
 reader, the same transformers, the same segmentation and row/columnar bridges. It is not a
-separate analyser, and it cannot disagree with the run it previews.
+separate analyser. Before either touches the target, both ask the writer the same question —
+whether its format carries each column's type — so a column the writer refuses fails the preview
+where it fails the run, with the same message. What a preview cannot see is what only writing
+finds: a constraint, a value too wide for its column, a row beyond the first N.
 
 ```bash
 dtpipe -i pg:"Host=db;Database=app" --query "SELECT * FROM orders" \
@@ -964,6 +987,7 @@ trace says so (`10 → 3 rows`) rather than leaving a blank cell that would read
 |:---|:---|
 | The writer | Neutralised. `InitializeAsync`, the write methods and `CompleteAsync` are never called on it — so a file target is not created and a table is not migrated. The target is *inspected* for the compatibility report, never mutated. |
 | Hooks | None of the four (`--pre-exec`, `--post-exec`, `--on-error-exec`, `--finally-exec`) runs. They are SQL on the target connection. |
+| Column types | Asked of the writer on the schema it would receive, as the run asks. A refused column fails the preview, names every column the writer refuses and the SQL step that casts each one to a type it accepts. |
 | Cursor, metrics | Not advanced, not written. |
 | The **source** | Classified before the run: a query carrying `DELETE`, `UPDATE`, `DROP`, `TRUNCATE`, `ALTER`, `INSERT` or `ATTACH` is refused. Where the engine supports it, the session is also set read-only so the **server** refuses a write: PostgreSQL, Oracle, MySQL (`SET TRANSACTION READ ONLY`) and SQLite (`PRAGMA query_only`). **SQL Server has no equivalent** — `ApplicationIntent=ReadOnly` routes to a replica and does not make a session read-only — so there the guarantee is the verb scan alone, and the run says so. |
 

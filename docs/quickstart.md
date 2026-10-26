@@ -77,7 +77,8 @@ dtpipe -i people.csv -o people.parquet
 ## 4. Preview a load before running it
 
 `--dry-run N` runs the **real** pipeline over N source rows with the writer switched off. It is not
-a separate analyser, so it cannot disagree with the run it previews.
+a separate analyser: it asks the writer the same questions the run asks, so a column the target
+cannot hold fails the preview with the same message, and the same fix.
 
 ```bash
 dtpipe -i people.csv -o duck:analytics.duckdb --table people --dry-run 3
