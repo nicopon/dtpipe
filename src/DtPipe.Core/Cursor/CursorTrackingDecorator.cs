@@ -2,6 +2,7 @@ namespace DtPipe.Core.Cursor;
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 using Apache.Arrow;
@@ -30,14 +31,19 @@ public class CursorTrackingRowDecorator : IRowDataWriter, ICursorTracker
         {
             if (_maxValueRaw == null) return null;
 
+            // Every digit the value carries, at least three: a bound shorter than the column makes
+            // `col > bound` true for the row that produced it, and a strict `>` re-reads it on every
+            // run. A whole-millisecond value keeps its three digits, the literal a SQL Server
+            // `datetime` or an Oracle `FF3` mask accepts.
             string formattedValue;
             if (_maxValueRaw is DateTime dt)
             {
-                formattedValue = dt.ToString("yyyy-MM-ddTHH:mm:ss.fff");
+                formattedValue = dt.ToString("yyyy-MM-ddTHH:mm:ss.", CultureInfo.InvariantCulture) + Fraction(dt.Ticks);
             }
             else if (_maxValueRaw is DateTimeOffset dto)
             {
-                formattedValue = dto.ToString("yyyy-MM-ddTHH:mm:ss.fffK");
+                formattedValue = dto.ToString("yyyy-MM-ddTHH:mm:ss.", CultureInfo.InvariantCulture) + Fraction(dto.Ticks)
+                    + dto.ToString("zzz", CultureInfo.InvariantCulture);
             }
             else
             {
@@ -46,6 +52,15 @@ public class CursorTrackingRowDecorator : IRowDataWriter, ICursorTracker
 
             return new CursorValue(_cursorColumn, formattedValue, _cursorType);
         }
+    }
+
+    /// <summary>The seven digits of the second's fraction, without the zeros that follow the third.</summary>
+    private static string Fraction(long ticks)
+    {
+        var digits = (ticks % TimeSpan.TicksPerSecond).ToString("D7", CultureInfo.InvariantCulture);
+        var length = digits.Length;
+        while (length > 3 && digits[length - 1] == '0') length--;
+        return digits[..length];
     }
 
     public async ValueTask InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)

@@ -143,6 +143,21 @@ public class CursorTrackingDecoratorTests
         Assert.Equal(baseTime.AddHours(5).ToString("yyyy-MM-ddTHH:mm:ss.fff"), max.Value);
     }
 
+    [Theory]
+    [InlineData("2026-01-02T00:00:00.6543210", "2026-01-02T00:00:00.654321")]
+    [InlineData("2026-01-02T00:00:00.6543217", "2026-01-02T00:00:00.6543217")]
+    [InlineData("2026-01-02T00:00:00.6540000", "2026-01-02T00:00:00.654")]
+    [InlineData("2026-01-02T00:00:01.0000000", "2026-01-02T00:00:01.000")]
+    public async Task TrackedMaxValue_KeepsEveryDigitTheValueCarries(string seen, string kept)
+    {
+        var decorator = new CursorTrackingRowDecorator(new FakeRowDataWriter(), "updated_at");
+        await decorator.InitializeAsync([new PipeColumnInfo("updated_at", typeof(DateTime), false)]);
+
+        await decorator.WriteBatchAsync([[DateTime.Parse(seen, System.Globalization.CultureInfo.InvariantCulture)]]);
+
+        Assert.Equal(kept, decorator.TrackedMaxValue!.Value);
+    }
+
     [Fact]
     public async Task WriteBatchAsync_TracksMaxInt()
     {

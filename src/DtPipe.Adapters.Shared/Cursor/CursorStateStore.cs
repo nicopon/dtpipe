@@ -134,7 +134,9 @@ public static class CursorStateStore
 
         var options = new JsonSerializerOptions
         {
-            WriteIndented = true
+            WriteIndented = true,
+            // The file is read by people: an instant keeps its '+01:00' rather than '+01:00'.
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
         };
 
         var json = JsonSerializer.Serialize(dto, options);

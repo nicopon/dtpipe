@@ -64,7 +64,7 @@ the format the state file writes. Wrap it:
 
 ```bash
 dtpipe -i "ora:Data Source=localhost:1521/FREEPDB1;User Id=app;Password=…" \
-  -q "SELECT * FROM invoices WHERE updated_at > TO_TIMESTAMP('${{cursor://state/invoices.json|1970-01-01T00:00:00.000}}', 'YYYY-MM-DD\"T\"HH24:MI:SS.FF3')" \
+  -q "SELECT * FROM invoices WHERE updated_at > TO_TIMESTAMP('${{cursor://state/invoices.json|1970-01-01T00:00:00.000}}', 'YYYY-MM-DD\"T\"HH24:MI:SS.FF')" \
   -o invoices.parquet \
   --cursor UPDATED_AT --state state/invoices.json
 ```
@@ -73,9 +73,9 @@ Three details decide whether it runs, and each fails with its own `ORA-` code:
 
 | Detail | Get it wrong | Oracle says |
 |:---|:---|:---|
-| `\"T\"` quotes the literal T between date and time | `YYYY-MM-DDTHH24:MI:SS.FF3` | `ORA-01821: date format not recognized` |
+| `\"T\"` quotes the literal T between date and time | `YYYY-MM-DDTHH24:MI:SS.FF` | `ORA-01821: date format not recognized` |
 | A space instead of that T | `YYYY-MM-DD HH24:MI:SS` | `ORA-01858: A non-numeric character was found instead of a numeric character` |
-| `.FF3` for the three fractional digits the state file writes | mask stops at `SS` | `ORA-01830: Date format picture ends before converting entire input string` |
+| `.FF` for the three to seven fractional digits the state file writes | mask stops at `SS`, or `.FF3` on a `TIMESTAMP(6)` | `ORA-01830: Date format picture ends before converting entire input string` |
 
 `--cursor` also names the column as the reader returns it, which for an unquoted Oracle identifier
 is upper case: `UPDATED_AT`, not `updated_at`.

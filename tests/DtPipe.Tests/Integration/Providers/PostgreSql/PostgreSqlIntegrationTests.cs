@@ -161,6 +161,52 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
         }
     }
 
+    [Theory]
+    [InlineData("timestamp(6)", "2026-01-02 00:00:00.654321")]
+    [InlineData("timestamptz", "2026-01-02 00:00:00.654321+00")]
+    public async Task Cursor_StrictBoundAndAppend_AddNoRowAfterTheFirstRun(string columnType, string latest)
+    {
+        if (!DockerHelper.IsAvailable() || _connectionString is null) return;
+
+        const string table = "zz_cursor_microseconds";
+        var dir = Path.Combine(Path.GetTempPath(), $"cursor_us_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        var (state, target) = (Path.Combine(dir, "c.state"), Path.Combine(dir, "t.duckdb"));
+        await using var setup = new NpgsqlConnection(_connectionString);
+        await setup.OpenAsync();
+        try
+        {
+            await using (var create = setup.CreateCommand())
+            {
+                create.CommandText = $"DROP TABLE IF EXISTS {table}; CREATE TABLE {table} (id int, updated_at {columnType}); "
+                    + $"INSERT INTO {table} VALUES (1, '2026-01-01 00:00:00.123456+00'), (2, '{latest}')";
+                await create.ExecuteNonQueryAsync();
+            }
+
+            var query = $"SELECT id, updated_at FROM {table} WHERE updated_at > '${{{{cursor://{state}|1970-01-01T00:00:00.000}}}}'";
+            var counts = new List<long>();
+            for (int run = 0; run < 3; run++)
+            {
+                Assert.Equal(0, await DtPipe.Program.Main(["-i", $"pg:{_connectionString}", "--query", query, "-o", $"duck:{target}",
+                    "--table", "t", "--strategy", "Append", "--cursor", "updated_at", "--state", state, "--no-stats"]));
+                await using var duck = new DuckDB.NET.Data.DuckDBConnection($"Data Source={target}");
+                await duck.OpenAsync();
+                await using var count = duck.CreateCommand();
+                count.CommandText = "SELECT count(*) FROM t";
+                counts.Add(Convert.ToInt64(await count.ExecuteScalarAsync()));
+            }
+
+            Assert.Equal([2L, 2L, 2L], counts);
+        }
+        finally
+        {
+            await using var drop = setup.CreateCommand();
+            drop.CommandText = $"DROP TABLE IF EXISTS {table}";
+            await drop.ExecuteNonQueryAsync();
+            try { Directory.Delete(dir, recursive: true); } catch { /* best effort */ }
+        }
+    }
+
     [Fact]
     public async Task PostgreSqlWriter_WritesRows()
     {

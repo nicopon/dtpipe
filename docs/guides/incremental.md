@@ -51,7 +51,7 @@ Plain JSON — readable, diffable, and safe to commit or to keep in a mounted vo
 ```json
 {
   "version": 1,
-  "cursor": { "column": "updated_at", "value": "2026-06-15T23:59:59.000", "type": "datetime" },
+  "cursor": { "column": "updated_at", "value": "2026-06-15T23:59:59.654321", "type": "datetime" },
   "last_run": {
     "started_at": "2026-06-16T02:00:00Z",
     "completed_at": "2026-06-16T02:03:42Z",
@@ -71,9 +71,16 @@ again — losing rows written in the same instant as the last one read. With `>=
 are re-read and re-written each run, which is only safe with `--strategy Upsert`. Pick the pair
 deliberately: `>` + `Append`, or `>=` + `Upsert`.
 
+**The mark keeps every digit down to the microsecond.** It is written with three to seven
+fractional digits, as many as the value read carries: `.654321` for a `timestamp(6)`, `.654` for
+a whole millisecond, so a SQL Server `datetime` still gets the three digits it accepts. A column
+finer than the microsecond (`datetime2(7)`, Oracle `TIMESTAMP(9)`, DuckDB `TIMESTAMP_NS`) is read at
+the microsecond, so its last row stays above the mark: there, only `>=` + `Upsert` is safe.
+
 **Oracle needs a format mask.** A `TIMESTAMP` compared against a bare literal is parsed with the
 session's `NLS_TIMESTAMP_FORMAT`, which is not the format the state file writes. Wrap it in
-`TO_TIMESTAMP(…, 'YYYY-MM-DD"T"HH24:MI:SS.FF3')` — see [Oracle](../connections/oracle.md).
+`TO_TIMESTAMP(…, 'YYYY-MM-DD"T"HH24:MI:SS.FF')`: `FF` takes the mark's three to seven digits,
+`FF3` refuses more than three — see [Oracle](../connections/oracle.md).
 
 **One writer, one state file.** Two branches writing the same state file would corrupt each
 other's cursor, so the DAG validator refuses it before anything runs.

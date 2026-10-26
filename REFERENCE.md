@@ -920,7 +920,7 @@ The state file is stored as a simple, human-readable JSON file:
   "version": 1,
   "cursor": {
     "column": "updated_at",
-    "value": "2026-06-15T23:59:59.000",
+    "value": "2026-06-15T23:59:59.654321",
     "type": "datetime"
   },
   "last_run": {
