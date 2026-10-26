@@ -155,7 +155,9 @@ public sealed class DuckDbDataWriter : IColumnarDataWriter, ISchemaInspector, IK
             case decimal dec: row.AppendValue(dec); break;
             case string str: row.AppendValue(str); break;
             case DateTime dt: row.AppendValue(dt); break;
-            case DateTimeOffset dto: row.AppendValue(dto.DateTime); break;
+            case DateTimeOffset dto: row.AppendValue(dto); break;
+            case DateOnly date: row.AppendValue((global::DuckDB.NET.Native.DuckDBDateOnly)date); break;
+            case TimeOnly time: row.AppendValue((global::DuckDB.NET.Native.DuckDBTimeOnly)time); break;
             case Guid g: row.AppendValue(g); break;
             case byte[] bytes: row.AppendValue(bytes); break;
             default:

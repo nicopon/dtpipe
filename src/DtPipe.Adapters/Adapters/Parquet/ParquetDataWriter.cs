@@ -1,4 +1,5 @@
 using Apache.Arrow;
+using Apache.Arrow.Types;
 using DtPipe.Adapters.Shared.Infrastructure;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Helpers;
@@ -16,7 +17,7 @@ namespace DtPipe.Adapters.Parquet;
 /// Writes data to Parquet format with row group streaming.
 /// Supports safe dry-run inspection.
 /// </summary>
-public sealed class ParquetDataWriter(string outputPath) : IColumnarDataWriter, IRequiresOptions<ParquetWriterOptions>, ISchemaInspector
+public sealed class ParquetDataWriter(string outputPath) : IColumnarDataWriter, IRequiresOptions<ParquetWriterOptions>, ISchemaInspector, IColumnTypeGate
 {
     private string _outputPath = outputPath;
     private Stream? _outputStream;
@@ -25,6 +26,8 @@ public sealed class ParquetDataWriter(string outputPath) : IColumnarDataWriter, 
     private ParquetWriter? _writer;
     private IReadOnlyList<PipeColumnInfo>? _columns;
     private ParquetField[]? _dataFields;
+    private bool _createdFile;
+    private bool _firstBatchChecked;
 
     public bool RequiresTargetInspection => false;
 
@@ -114,6 +117,7 @@ public sealed class ParquetDataWriter(string outputPath) : IColumnarDataWriter, 
                 Directory.CreateDirectory(directory); // no-op if already exists
 
             _outputStream = new FileStream(_outputPath, FileMode.Create, FileAccess.Write, FileShare.None);
+            _createdFile = true;
         }
 
         _columns = columns;
@@ -130,6 +134,20 @@ public sealed class ParquetDataWriter(string outputPath) : IColumnarDataWriter, 
 
         using (batch)
         {
+            // The engine asked before InitializeAsync on the schema it computed; the first batch is
+            // what the format receives, so it is asked again, and a refusal leaves no file behind.
+            if (!_firstBatchChecked)
+            {
+                _firstBatchChecked = true;
+                var refusals = RefuseColumns(batch.Schema);
+                if (refusals.Count > 0)
+                {
+                    await DiscardFileAsync();
+                    throw new ColumnTypeRefusedException("parquet", refusals,
+                        "Parquet cannot write: " + string.Join(", ", refusals.Select(r => $"'{r.Received.Name}' ({r.Received.DataType.Name})")));
+                }
+            }
+
             // Parquet carries a LIST natively, so a column declared as one keeps its shape. A
             // composite the schema declared as text — a struct, or a list whose source gave no
             // element type — becomes JSON rather than failing the write: the declared field is
@@ -142,9 +160,31 @@ public sealed class ParquetDataWriter(string outputPath) : IColumnarDataWriter, 
             for (int i = 0; i < payload.Batch.ColumnCount; i++)
             {
                 var arrowArray = payload.Batch.Column(i);
-                await ArrowToParquetConverter.WriteColumnAsync(rowGroup, arrowArray, _dataFields[i], ct);
+                await ArrowToParquetConverter.WriteColumnAsync(rowGroup, arrowArray, payload.Batch.Schema.GetFieldByIndex(i), _dataFields[i], ct);
             }
         }
+    }
+
+    /// <summary>
+    /// Parquet carries every integer width, signed or not, a date, a time of day and an instant under
+    /// their own logical type. It has no duration type, so a duration column is refused.
+    /// </summary>
+    public IReadOnlyList<ColumnTypeRefusal> RefuseColumns(Schema schema)
+    {
+        var refusals = new List<ColumnTypeRefusal>();
+        foreach (var field in schema.FieldsList)
+        {
+            if (field.DataType is DurationType)
+                refusals.Add(new ColumnTypeRefusal(field, [Int64Type.Default, StringType.Default]));
+        }
+        return refusals;
+    }
+
+    private async ValueTask DiscardFileAsync()
+    {
+        if (_writer != null) { await _writer.DisposeAsync(); _writer = null; }
+        if (_outputStream != null) { await _outputStream.DisposeAsync(); _outputStream = null; }
+        if (_createdFile && File.Exists(_outputPath)) File.Delete(_outputPath);
     }
 
     private static ParquetField[] BuildDataFields(IReadOnlyList<PipeColumnInfo> columns)
@@ -200,6 +240,9 @@ public sealed class ParquetDataWriter(string outputPath) : IColumnarDataWriter, 
             Type t when t == typeof(byte) => new DataField<byte?>(col.Name),
             Type t when t == typeof(sbyte) => new DataField<sbyte?>(col.Name),
             Type t when t == typeof(short) => new DataField<short?>(col.Name),
+            Type t when t == typeof(ushort) => new DataField<ushort?>(col.Name),
+            Type t when t == typeof(uint) => new DataField<uint?>(col.Name),
+            Type t when t == typeof(ulong) => new DataField<ulong?>(col.Name),
             Type t when t == typeof(int) => new DataField<int?>(col.Name),
             Type t when t == typeof(long) => new DataField<long?>(col.Name),
             Type t when t == typeof(float) => new DataField<float?>(col.Name),
@@ -211,8 +254,12 @@ public sealed class ParquetDataWriter(string outputPath) : IColumnarDataWriter, 
                 ? new DecimalDataField(col.Name, p, s, isNullable: true)
                 : new DataField<decimal?>(col.Name),
             Type t when t == typeof(DateTime) => new DataField<DateTime?>(col.Name),
-            Type t when t == typeof(DateTimeOffset) => new DataField<DateTimeOffset?>(col.Name),
-            Type t when t == typeof(TimeSpan) => new DataField<TimeSpan?>(col.Name),
+            // An instant: a UTC timestamp, which Parquet marks isAdjustedToUTC.
+            Type t when t == typeof(DateTimeOffset) => new DateTimeDataField(col.Name, DateTimeFormat.Timestamp, isAdjustedToUTC: true, unit: DateTimeTimeUnit.Micros, isNullable: true),
+            Type t when t == typeof(DateOnly) => new DataField<DateOnly?>(col.Name),
+            // A time of day, in microseconds since midnight: TIME(MICROS), not adjusted to UTC, which
+            // Parquet.Net otherwise marks it and a reader then takes for a time with a zone.
+            Type t when t == typeof(TimeOnly) => new TimeDataField(col.Name, TimeUnitPrecision.Micros, isNullable: true) { IsAdjustedToUtc = false },
             Type t when t == typeof(Guid) => new DataField<Guid?>(col.Name),
             Type t when t == typeof(byte[]) => new DataField<byte[]>(col.Name),
             _ => new DataField<string?>(col.Name)

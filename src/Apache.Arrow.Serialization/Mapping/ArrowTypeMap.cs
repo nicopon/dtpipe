@@ -189,7 +189,10 @@ public static class ArrowTypeMap
             ArrowTypeId.String => typeof(string),
             ArrowTypeId.Binary => typeof(byte[]),
             ArrowTypeId.Timestamp => typeof(DateTimeOffset), // fallback, covered by TimestampType check above
-            ArrowTypeId.Date32 => typeof(DateTime),
+            // The inverse of GetLogicalType: a date is a DateOnly and a time of day a TimeOnly, so a
+            // writer can tell them from a timestamp and a number.
+            ArrowTypeId.Date32 => typeof(DateOnly),
+            ArrowTypeId.Time32 or ArrowTypeId.Time64 => typeof(TimeOnly),
             ArrowTypeId.Date64 => typeof(DateTime),
             ArrowTypeId.Decimal128 => typeof(decimal),
             ArrowTypeId.Decimal256 => typeof(decimal),
@@ -278,12 +281,12 @@ public static class ArrowTypeMap
             Decimal128Array a => a.GetValue(index),
             Decimal256Array a => a.GetValue(index),
             FixedSizeBinaryArray a => a.GetBytes(index).ToArray(),
-            Date32Array a => a.GetDateTime(index),
+            Date32Array a => a.GetDateOnly(index),
             Date64Array a => a.GetDateTime(index),
             TimestampArray a => a.GetTimestamp(index),
             DurationArray a => a.GetValue(index),
-            Time32Array a => a.GetValue(index),
-            Time64Array a => a.GetValue(index),
+            Time32Array a => a.GetTime(index),
+            Time64Array a => a.GetTime(index),
             StructArray a => GetStructValue(a, index),
             // Before ListArray: MapArray derives from it, so the general case would win and a map
             // would come back as a list of {key,value} structs, contradicting the Dictionary that

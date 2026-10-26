@@ -228,15 +228,15 @@ public sealed class CsvDataWriter : IRowDataWriter, IRequiresOptions<CsvWriterOp
             return _options.NullValue;
         }
 
-        var baseType = Nullable.GetUnderlyingType(column.ClrType) ?? column.ClrType;
-
         return value switch
         {
-            // Dates - ISO 8601 format for DuckDB
-            DateTime dt when baseType == typeof(DateTime) && dt.TimeOfDay == TimeSpan.Zero
-                => dt.ToString(_options.DateFormat, CultureInfo.InvariantCulture),
+            // Each temporal type in its own ISO 8601 form: a date as a date, a time of day to the
+            // microsecond, a wall clock as a timestamp, and an instant with the offset that makes it one.
+            DateOnly d => d.ToString(_options.DateFormat, CultureInfo.InvariantCulture),
+            TimeOnly t => t.ToString("HH:mm:ss.ffffff", CultureInfo.InvariantCulture),
             DateTime dt => dt.ToString(_options.TimestampFormat, CultureInfo.InvariantCulture),
-            DateTimeOffset dto => dto.ToString(_options.TimestampFormat, CultureInfo.InvariantCulture),
+            DateTimeOffset dto => dto.ToString(_options.TimestampFormat, CultureInfo.InvariantCulture)
+                + dto.ToString("zzz", CultureInfo.InvariantCulture),
 
             // Numbers - use invariant culture with configured decimal separator
             decimal d => FormatDecimal(d),

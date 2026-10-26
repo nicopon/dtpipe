@@ -12,8 +12,23 @@ using Microsoft.Extensions.Logging;
 
 namespace DtPipe.Adapters.Sqlite;
 
-public sealed class SqliteDataWriter : BaseSqlDataWriter
+public sealed class SqliteDataWriter : BaseSqlDataWriter, IColumnTypeGate
 {
+    /// <summary>
+    /// SQLite's INTEGER is a signed 64-bit value, so an unsigned 64-bit column is refused. A date and a
+    /// time of day are written as the ISO text SQLite's date functions read.
+    /// </summary>
+    public IReadOnlyList<ColumnTypeRefusal> RefuseColumns(Apache.Arrow.Schema schema)
+        => ColumnTypeRefusals.Collect(schema, f =>
+            f.DataType is Apache.Arrow.Types.UInt64Type ? [Apache.Arrow.Types.StringType.Default] : null);
+
+    private static object? ToBindValue(object? value) => value switch
+    {
+        DateOnly d => d.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+        TimeOnly t => t.ToString("HH:mm:ss.ffffff", System.Globalization.CultureInfo.InvariantCulture),
+        _ => value
+    };
+
     private readonly SqliteWriterOptions _options;
     private readonly ILogger<SqliteDataWriter> _logger;
     private readonly ITypeMapper _typeMapper;
@@ -135,7 +150,7 @@ public sealed class SqliteDataWriter : BaseSqlDataWriter
             {
                 for (int i = 0; i < _columns.Count; i++)
                 {
-                    cmd.Parameters[i].Value = CompositeCellJson.RenderIfComposite(row[i]) ?? DBNull.Value;
+                    cmd.Parameters[i].Value = ToBindValue(CompositeCellJson.RenderIfComposite(row[i])) ?? DBNull.Value;
                 }
                 await cmd.ExecuteNonQueryAsync(ct);
             }

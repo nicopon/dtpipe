@@ -45,7 +45,7 @@ internal sealed class ObjectArrayDataReader : IDataReader
         if (_currentIndex < 0 || _currentIndex >= _rows.Count)
             throw new InvalidOperationException("No current row.");
 
-        return _rows[_currentIndex][i] ?? DBNull.Value;
+        return _rows[_currentIndex][i] is { } value ? OracleTypeConverter.ToBindValue(value) : DBNull.Value;
     }
 
     public int GetValues(object[] values)

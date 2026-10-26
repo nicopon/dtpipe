@@ -44,10 +44,6 @@ public class MySqlTypeConverter : ITypeMapper
             // covers the CLR decimal range without truncating the scale the source carried.
             Type t when t == typeof(decimal) => "DECIMAL(38,9)",
             Type t when t == typeof(DateTime) => "DATETIME(6)",
-            // Deliberately DATETIME, not TIMESTAMP: TIMESTAMP is limited to 1970-2038 and would
-            // reject dates a source can legitimately hold. The zone offset is not preserved —
-            // MySQL has no offset-carrying type — so this narrows DateTimeOffset to a local instant.
-            Type t when t == typeof(DateTimeOffset) => "DATETIME(6)",
             Type t when t == typeof(DateOnly) => "DATE",
             Type t when t == typeof(TimeSpan) => "TIME(6)",
             Type t when t == typeof(TimeOnly) => "TIME(6)",

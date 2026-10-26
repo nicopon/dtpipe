@@ -12,8 +12,19 @@ using Microsoft.Extensions.Logging;
 
 namespace DtPipe.Adapters.SqlServer;
 
-public class SqlServerDataWriter : BaseSqlDataWriter, IColumnarDataWriter
+public class SqlServerDataWriter : BaseSqlDataWriter, IColumnarDataWriter, IColumnTypeGate
 {
+    /// <summary>
+    /// SQL Server's only unsigned integer is TINYINT, and it has no signed 8-bit one: the other
+    /// integer widths are refused, never widened.
+    /// </summary>
+    public IReadOnlyList<ColumnTypeRefusal> RefuseColumns(Apache.Arrow.Schema schema)
+        => DtPipe.Adapters.Shared.Infrastructure.ColumnTypeRefusals.Collect(schema, f =>
+            f.DataType is Apache.Arrow.Types.Int8Type or Apache.Arrow.Types.UInt16Type or Apache.Arrow.Types.UInt32Type or Apache.Arrow.Types.UInt64Type
+            && !(f.HasMetadata && f.Metadata.TryGetValue("ARROW:extension:name", out var ext) && ext == "arrow.bool8")
+                ? DtPipe.Adapters.Shared.Infrastructure.ColumnTypeRefusals.SignedHolding(f.DataType)
+                : null);
+
     private readonly SqlServerWriterOptions _options;
     private SqlBulkCopy? _bulkCopy;
     private DataTable? _bufferTable;

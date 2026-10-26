@@ -9,8 +9,17 @@ using DtPipe.Adapters.Oracle;
 using Microsoft.Extensions.Logging;
 using DtPipe.Core.Helpers;
 
-public sealed class OracleDataWriter : BaseSqlDataWriter
+public sealed class OracleDataWriter : BaseSqlDataWriter, IColumnTypeGate
 {
+    /// <summary>
+    /// Oracle has no type for a time of day (INTERVAL is a duration): such a column is refused.
+    /// </summary>
+    public IReadOnlyList<ColumnTypeRefusal> RefuseColumns(Apache.Arrow.Schema schema)
+        => ColumnTypeRefusals.Collect(schema, f =>
+            f.DataType is Apache.Arrow.Types.Time32Type or Apache.Arrow.Types.Time64Type
+                ? [Apache.Arrow.Types.StringType.Default]
+                : null);
+
     private readonly OracleWriterOptions _options;
     private readonly ILogger<OracleDataWriter> _logger;
     private readonly ITypeMapper _typeMapper;
@@ -343,7 +352,8 @@ public sealed class OracleDataWriter : BaseSqlDataWriter
         _converters = new Func<object?, object?>[_columns!.Count];
         for (int i = 0; i < _columns.Count; i++)
         {
-            _converters[i] = CompositeCellJson.Wrap(ColumnConverterFactory.Build(_columns[i].ClrType, _columns[i].ClrType));
+            var convert = CompositeCellJson.Wrap(ColumnConverterFactory.Build(_columns[i].ClrType, _columns[i].ClrType));
+            _converters[i] = v => convert(v) is { } c ? OracleTypeConverter.ToBindValue(c) : null;
         }
 
         if (_options.Strategy == OracleWriteStrategy.Upsert || _options.Strategy == OracleWriteStrategy.Ignore)

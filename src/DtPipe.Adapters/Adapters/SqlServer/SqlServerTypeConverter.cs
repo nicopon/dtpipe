@@ -23,6 +23,10 @@ public class SqlServerTypeConverter : ITypeMapper
         if (type == typeof(DateTimeOffset)) return "DATETIMEOFFSET";
         if (type == typeof(bool)) return "BIT";
         if (type == typeof(double)) return "FLOAT";
+        if (type == typeof(float)) return "REAL";
+        if (type == typeof(DateOnly)) return "DATE";
+        // TIME(6): the microseconds an Arrow time64 carries, no more.
+        if (type == typeof(TimeOnly)) return "TIME(6)";
         if (type == typeof(decimal)) return "DECIMAL(18,2)";
         if (type == typeof(Guid)) return "UNIQUEIDENTIFIER";
         if (type == typeof(byte[])) return "VARBINARY(MAX)";
@@ -43,7 +47,9 @@ public class SqlServerTypeConverter : ITypeMapper
             "decimal" or "numeric" or "money" => typeof(decimal),
             "float" => typeof(double),
             "real" => typeof(float),
-            "datetime" or "datetime2" or "date" => typeof(DateTime),
+            "datetime" or "datetime2" => typeof(DateTime),
+            "date" => typeof(DateOnly),
+            "time" => typeof(TimeOnly),
             "datetimeoffset" => typeof(DateTimeOffset),
             "uniqueidentifier" => typeof(Guid),
             "nvarchar" or "varchar" or "text" or "ntext" or "char" or "nchar" => typeof(string),

@@ -238,7 +238,11 @@ internal class Time32Handler : ScalarArrowHandler<Time32Type, Time32Array, Time3
     public override IArrowArrayBuilder CreateBuilder(IArrowType type) => new Time32Array.Builder((Time32Type)type);
     protected override void AppendNullTyped(Time32Array.Builder b) => b.AppendNull();
     protected override IArrowArray BuildTyped(Time32Array.Builder b) => b.Build();
-    protected override void AppendValueTyped(Time32Array.Builder b, object v) => b.Append(Convert.ToInt32(v));
+    protected override void AppendValueTyped(Time32Array.Builder b, object v)
+    {
+        if (v is TimeOnly t) b.Append(t);
+        else b.Append(Convert.ToInt32(v));
+    }
 }
 
 internal class Time64Handler : ScalarArrowHandler<Time64Type, Time64Array, Time64Array.Builder>
@@ -248,7 +252,8 @@ internal class Time64Handler : ScalarArrowHandler<Time64Type, Time64Array, Time6
     protected override IArrowArray BuildTyped(Time64Array.Builder b) => b.Build();
     protected override void AppendValueTyped(Time64Array.Builder b, object v)
     {
-        if (v is TimeOnly t) b.Append(t.ToTimeSpan().Ticks * 100);
+        // The builder scales a TimeOnly to the column's unit; a raw number is already in it.
+        if (v is TimeOnly t) b.Append(t);
         else b.Append(Convert.ToInt64(v));
     }
 }

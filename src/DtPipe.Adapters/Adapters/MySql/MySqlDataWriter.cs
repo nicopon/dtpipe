@@ -12,8 +12,18 @@ using MySqlConnector;
 
 namespace DtPipe.Adapters.MySql;
 
-public sealed partial class MySqlDataWriter : BaseSqlDataWriter, IColumnarDataWriter
+public sealed partial class MySqlDataWriter : BaseSqlDataWriter, IColumnarDataWriter, IColumnTypeGate
 {
+    /// <summary>
+    /// MySQL has no type for an instant: DATETIME is a wall clock, and TIMESTAMP stops at 2038. An
+    /// instant is refused; the wall clock of its choice is the person's to make.
+    /// </summary>
+    public IReadOnlyList<ColumnTypeRefusal> RefuseColumns(Apache.Arrow.Schema schema)
+        => DtPipe.Adapters.Shared.Infrastructure.ColumnTypeRefusals.Collect(schema, f =>
+            f.DataType is Apache.Arrow.Types.TimestampType { Timezone.Length: > 0 } ts
+                ? [new Apache.Arrow.Types.TimestampType(ts.Unit, (string?)null)]
+                : null);
+
     private readonly MySqlWriterOptions _options;
     private readonly ILogger<MySqlDataWriter> _logger;
     private readonly ITypeMapper _typeMapper;

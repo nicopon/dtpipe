@@ -21,6 +21,12 @@ public class OracleTypeConverter : ITypeMapper
         if (type == typeof(long)) return "NUMBER(19)";
         if (type == typeof(short)) return "NUMBER(5)";
         if (type == typeof(byte)) return "NUMBER(3)";
+        // NUMBER(p) is Oracle's only integer type: every width, signed or not, is one.
+        if (type == typeof(sbyte)) return "NUMBER(3)";
+        if (type == typeof(ushort)) return "NUMBER(5)";
+        if (type == typeof(uint)) return "NUMBER(10)";
+        if (type == typeof(ulong)) return "NUMBER(20)";
+        if (type == typeof(DateOnly)) return "DATE";
         if (type == typeof(bool)) return "NUMBER(1)";
         if (type == typeof(float)) return "FLOAT";
         if (type == typeof(double)) return "FLOAT";
@@ -72,6 +78,24 @@ public class OracleTypeConverter : ITypeMapper
     // === Oracle-specific methods (not part of ITypeMapper) ===
 
     /// <summary>
+    /// The value ODP.NET binds for <paramref name="value"/> so the column holds what it says: a UUID as
+    /// its RFC 4122 bytes, an instant with its offset (a bare DateTimeOffset is read in the session's
+    /// zone), a date as the midnight an Oracle DATE stores, an unsigned integer as the number it is.
+    /// </summary>
+    public static object ToBindValue(object value) => value switch
+    {
+        Guid g => Apache.Arrow.Serialization.Mapping.Rfc4122Guid.ToBigEndianBytes(g),
+        DateTimeOffset dto => new global::Oracle.ManagedDataAccess.Types.OracleTimeStampTZ(
+            dto.DateTime, dto.Offset.ToString(dto.Offset < TimeSpan.Zero ? "\\-hh\\:mm" : "\\+hh\\:mm")),
+        DateOnly d => d.ToDateTime(TimeOnly.MinValue),
+        sbyte i8 => (int)i8,
+        ushort u16 => (int)u16,
+        uint u32 => (long)u32,
+        ulong u64 => (decimal)u64,
+        _ => value
+    };
+
+    /// <summary>
     /// Maps a CLR type to OracleDbType for parameter binding.
     /// This is Oracle-specific and not part of the generic interface.
     /// </summary>
@@ -79,10 +103,12 @@ public class OracleTypeConverter : ITypeMapper
     {
         type = Nullable.GetUnderlyingType(type) ?? type;
 
-        if (type == typeof(int) || type == typeof(short) || type == typeof(byte))
+        if (type == typeof(int) || type == typeof(short) || type == typeof(byte) || type == typeof(sbyte) || type == typeof(ushort))
             return OracleDbType.Int32;
-        if (type == typeof(long))
+        if (type == typeof(long) || type == typeof(uint))
             return OracleDbType.Int64;
+        if (type == typeof(ulong))
+            return OracleDbType.Decimal;
         if (type == typeof(decimal))
             return OracleDbType.Decimal;
         if (type == typeof(bool))
@@ -91,7 +117,7 @@ public class OracleTypeConverter : ITypeMapper
             return OracleDbType.Single;
         if (type == typeof(double))
             return OracleDbType.Double;
-        if (type == typeof(DateTime))
+        if (type == typeof(DateTime) || type == typeof(DateOnly))
             return OracleDbType.Date;
         if (type == typeof(DateTimeOffset))
             return OracleDbType.TimeStampTZ;
@@ -108,8 +134,9 @@ public class OracleTypeConverter : ITypeMapper
     /// </summary>
     public static OracleDbType? MapNativeTypeToOracleDbType(string nativeType)
     {
-        var parenIndex = nativeType.IndexOf('(');
-        var baseType = parenIndex > 0 ? nativeType[..parenIndex] : nativeType;
+        // Every parenthesised precision goes, not only the text after the first one: cutting at the
+        // first parenthesis reads TIMESTAMP(6) WITH TIME ZONE as TIMESTAMP and drops the zone.
+        var baseType = System.Text.RegularExpressions.Regex.Replace(nativeType, @"\s*\([^)]*\)", "").Trim();
 
         return baseType.ToUpperInvariant() switch
         {

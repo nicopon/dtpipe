@@ -126,6 +126,43 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task PostgreSqlReader_ReadsATimeOfDayWithItsSecondsAndMicroseconds()
+    {
+        if (!DockerHelper.IsAvailable() || _connectionString is null) return;
+
+        const string table = "zz_reader_time_of_day";
+        await using var setup = new NpgsqlConnection(_connectionString);
+        await setup.OpenAsync();
+        try
+        {
+            await using (var ddl = setup.CreateCommand())
+            {
+                ddl.CommandText =
+                    $"DROP TABLE IF EXISTS {table}; CREATE TABLE {table}(t time, tn time); " +
+                    $"INSERT INTO {table} VALUES ('23:59:59.999999', NULL)";
+                await ddl.ExecuteNonQueryAsync();
+            }
+
+            await using var reader = new PostgreSqlReader(_connectionString, $"SELECT t, tn FROM {table}", timeout: 30);
+            await reader.OpenAsync();
+
+            var rows = new List<object?[]>();
+            await foreach (var batch in reader.ReadBatchesAsync(10))
+                for (int i = 0; i < batch.Length; i++) rows.Add(batch.Span[i]);
+
+            var row = Assert.Single(rows);
+            Assert.Equal(new TimeOnly(23, 59, 59).Add(TimeSpan.FromTicks(9_999_990)), row[0]);
+            Assert.Null(row[1]);
+        }
+        finally
+        {
+            await using var drop = setup.CreateCommand();
+            drop.CommandText = $"DROP TABLE IF EXISTS {table}";
+            await drop.ExecuteNonQueryAsync();
+        }
+    }
+
+    [Fact]
     public async Task PostgreSqlWriter_WritesAJsonlObjectOfVaryingShapeKeyForKey()
     {
         if (!DockerHelper.IsAvailable() || _connectionString is null) return;

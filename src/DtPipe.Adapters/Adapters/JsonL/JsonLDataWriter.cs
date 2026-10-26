@@ -161,13 +161,23 @@ public sealed class JsonLDataWriter : IRowDataWriter, IRequiresOptions<JsonLWrit
         {
             case string s: writer.WriteStringValue(s); break;
             case bool b: writer.WriteBooleanValue(b); break;
+            case sbyte i8: writer.WriteNumberValue(i8); break;
+            case short i16: writer.WriteNumberValue(i16); break;
             case int i: writer.WriteNumberValue(i); break;
             case long l: writer.WriteNumberValue(l); break;
+            case byte u8: writer.WriteNumberValue(u8); break;
+            case ushort u16: writer.WriteNumberValue(u16); break;
+            case uint u32: writer.WriteNumberValue(u32); break;
+            case ulong u64: writer.WriteNumberValue(u64); break;
             case double d: writer.WriteNumberValue(d); break;
             case decimal dec: writer.WriteNumberValue(dec); break;
             case float f: writer.WriteNumberValue(f); break;
             case DateTime dt: writer.WriteStringValue(dt.ToString("O")); break;
             case DateTimeOffset dto: writer.WriteStringValue(dto.ToString("O")); break;
+            case DateOnly date: writer.WriteStringValue(date.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)); break;
+            case TimeOnly time: writer.WriteStringValue(time.ToString("HH:mm:ss.ffffff", System.Globalization.CultureInfo.InvariantCulture)); break;
+            // Before IEnumerable: bytes are one value, written as the base64 text System.Text.Json reads back.
+            case byte[] bytes: writer.WriteBase64StringValue(bytes); break;
             case IDictionary dict:
                 writer.WriteStartObject();
                 foreach (DictionaryEntry entry in dict)

@@ -111,12 +111,73 @@ public class ExportServiceTests
         await Task.CompletedTask;
     }
 
+    /// <summary>A writer that refuses every unsigned column, and records whether its target was touched.</summary>
+    private sealed class UnsignedRefusingWriter : IRowDataWriter, IColumnTypeGate
+    {
+        public bool Initialized { get; private set; }
+
+        public IReadOnlyList<ColumnTypeRefusal> RefuseColumns(Apache.Arrow.Schema schema)
+            => schema.FieldsList
+                .Where(f => f.DataType is Apache.Arrow.Types.UInt16Type or Apache.Arrow.Types.UInt32Type)
+                .Select(f => new ColumnTypeRefusal(f, [Apache.Arrow.Types.Int64Type.Default]))
+                .ToList();
+
+        public ValueTask InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
+        {
+            Initialized = true;
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask WriteBatchAsync(IReadOnlyList<object?[]> rows, CancellationToken ct = default) => ValueTask.CompletedTask;
+        public ValueTask CompleteAsync(CancellationToken ct = default) => ValueTask.CompletedTask;
+        public ValueTask ExecuteCommandAsync(string command, CancellationToken ct = default) => ValueTask.CompletedTask;
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public async Task A_Writer_Refusing_Columns_Fails_The_Run_And_The_Sample_Alike_Before_Its_Target_Is_Touched(int dryRunCount)
+    {
+        var mockReader = new Mock<IStreamReader>();
+        mockReader.Setup(r => r.OpenAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        mockReader.Setup(r => r.Columns).Returns(new List<PipeColumnInfo>
+        {
+            new("id", typeof(int), true), new("a", typeof(ushort), true), new("b", typeof(uint), true)
+        });
+        mockReader.Setup(r => r.ReadBatchesAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+                  .Returns(ToAsyncEnumerable(new[] { new object?[] { 1, (ushort)2, 3u } }));
+        mockReader.Setup(r => r.DisposeAsync()).Returns(ValueTask.CompletedTask);
+        _mockReaderFactory.Setup(f => f.OptionsType).Returns(typeof(EmptyOptions));
+        _mockReaderFactory.Setup(f => f.Create(It.IsAny<OptionsRegistry>())).Returns(mockReader.Object);
+
+        var writer = new UnsignedRefusingWriter();
+        _mockWriterFactory.Setup(f => f.ComponentName).Returns("test-target");
+        _mockWriterFactory.Setup(f => f.OptionsType).Returns(typeof(EmptyOptions));
+        _mockWriterFactory.Setup(f => f.Create(It.IsAny<OptionsRegistry>())).Returns(writer);
+
+        var refused = await Assert.ThrowsAsync<ColumnTypeRefusedException>(() => _service.RunExportAsync(
+            new PipelineOptions { NoStats = true, DryRunCount = dryRunCount }, "test-source", "target-path", CancellationToken.None,
+            new List<IDataTransformer>(), _mockReaderFactory.Object, _mockWriterFactory.Object, new OptionsRegistry()));
+
+        Assert.False(writer.Initialized);
+        Assert.Equal(["a", "b"], refused.Refusals.Select(r => r.Received.Name));
+        Assert.Equal(
+            "The test-target writer cannot write these 2 columns as they arrive, and nothing was written:" + Environment.NewLine +
+            "  'a': uint16; accepted instead: int64." + Environment.NewLine +
+            "  'b': uint32; accepted instead: int64." + Environment.NewLine +
+            "Cast each column to an accepted type in a SQL step before the writer: give this branch --alias src, and write to the target from the step:" + Environment.NewLine +
+            "  --from src --sql \"SELECT * REPLACE (CAST(a AS BIGINT) AS a, CAST(b AS BIGINT) AS b) FROM src\" -o <target>",
+            refused.Message);
+    }
+
     [Fact]
     public void InjectSchema_GivesAReaderThatTakesColumnTypeHints_TheHintsOfTheSchemaScalars()
     {
         var schema = new Apache.Arrow.Schema.Builder()
             .Field(f => f.Name("Id").DataType(Apache.Arrow.Types.Int32Type.Default))
-            .Field(f => f.Name("Born").DataType(Apache.Arrow.Types.Date32Type.Default))
+            .Field(f => f.Name("Born").DataType(new Apache.Arrow.Types.TimestampType(Apache.Arrow.Types.TimeUnit.Microsecond, (string?)null)))
+            .Field(f => f.Name("Day").DataType(Apache.Arrow.Types.Date32Type.Default))
             .Field(f => f.Name("Tags").DataType(new Apache.Arrow.Types.ListType(Apache.Arrow.Types.StringType.Default)))
             .Build();
         _mockReaderFactory.Setup(f => f.GetSupportedOptionTypes()).Returns(new[] { typeof(DtPipe.Adapters.Csv.CsvReaderOptions) });

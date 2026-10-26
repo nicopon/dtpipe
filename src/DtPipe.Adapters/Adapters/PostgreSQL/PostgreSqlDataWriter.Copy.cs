@@ -34,14 +34,26 @@ public sealed partial class PostgreSqlDataWriter
 
     private async Task WriteColumnarToCopyAsync(NpgsqlBinaryImporter writer, RecordBatch batch, CancellationToken ct)
     {
+        // A vendor's opaque column is stored as bytes but declared as the value its codec decodes:
+        // it is read through its field, never by its storage type.
+        var opaque = new Field?[_targetToSourceMap!.Length];
+        for (int j = 0; j < opaque.Length; j++)
+        {
+            var field = batch.Schema.GetFieldByIndex(_targetToSourceMap[j]);
+            if (field.HasMetadata && field.Metadata.TryGetValue("ARROW:extension:name", out var ext) && ext == "arrow.opaque")
+                opaque[j] = field;
+        }
+
         for (int row = 0; row < batch.Length; row++)
         {
             await writer.StartRowAsync(ct);
-            for (int j = 0; j < _targetToSourceMap!.Length; j++)
+            for (int j = 0; j < _targetToSourceMap.Length; j++)
             {
                 var array = batch.Column(_targetToSourceMap[j]);
                 if (array.IsNull(row))
                     writer.WriteNull();  // sync, no allocation
+                else if (opaque[j] is { } field)
+                    writer.Write(ArrowTypeMapper.GetValueForField(array, field, row)!, _columnTypes![j]);
                 else
                     _arrowColumnWriters![j](array, row, writer);  // sync, zero-boxing
             }
@@ -94,8 +106,9 @@ public sealed partial class PostgreSqlDataWriter
     private static Action<IArrowArray, int, NpgsqlBinaryImporter> BuildNpgsqlColumnWriter(
         NpgsqlTypes.NpgsqlDbType npgsqlType) => npgsqlType switch
         {
+            // A canonical bool8 is an int8 whose non-zero values mean true.
             NpgsqlTypes.NpgsqlDbType.Boolean =>
-                static (arr, row, w) => w.Write(((BooleanArray)arr).GetValue(row)!.Value, NpgsqlTypes.NpgsqlDbType.Boolean),
+                static (arr, row, w) => w.Write(arr is Int8Array bool8 ? bool8.GetValue(row)!.Value != 0 : ((BooleanArray)arr).GetValue(row)!.Value, NpgsqlTypes.NpgsqlDbType.Boolean),
 
             NpgsqlTypes.NpgsqlDbType.Smallint =>
                 static (arr, row, w) => w.Write(((Int16Array)arr).GetValue(row)!.Value, NpgsqlTypes.NpgsqlDbType.Smallint),
@@ -139,9 +152,9 @@ public sealed partial class PostgreSqlDataWriter
                 {
                     var dt = arr switch
                     {
-                        Date32Array d32 => d32.GetDateTime(row),
-                        Date64Array d64 => d64.GetDateTime(row),
-                        _ => ArrowTypeMapper.GetValue(arr, row) as DateTime? ?? default
+                        Date32Array d32 => d32.GetDateOnly(row) ?? default,
+                        Date64Array d64 => d64.GetDateOnly(row) ?? default,
+                        _ => ArrowTypeMapper.GetValue(arr, row) as DateOnly? ?? default
                     };
                     w.Write(dt, NpgsqlTypes.NpgsqlDbType.Date);
                 }

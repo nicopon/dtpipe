@@ -13,7 +13,7 @@ namespace DtPipe.Adapters.Parquet;
 
 public static class ArrowToParquetConverter
 {
-    public static Task WriteColumnAsync(ParquetRowGroupWriter writer, IArrowArray arrowArray, ParquetField field, CancellationToken ct = default)
+    public static Task WriteColumnAsync(ParquetRowGroupWriter writer, IArrowArray arrowArray, Apache.Arrow.Field arrowField, ParquetField field, CancellationToken ct = default)
     {
         if (field is ListField listField)
         {
@@ -26,10 +26,31 @@ public static class ArrowToParquetConverter
         }
 
         var dataField = (DataField)field;
+
+        // An extension type (bool8, a vendor's opaque type) is read as the CLR value its field names:
+        // the declared column, fixed from that field, is what the storage type is written under.
+        if (arrowField.HasMetadata && arrowField.Metadata.ContainsKey("ARROW:extension:name") && !IsUuid(arrowField))
+        {
+            var clr = ArrowTypeMapper.GetClrTypeFromField(arrowField);
+            if (clr == typeof(bool))
+                return writer.WriteAsync<bool>(dataField, ReadBools(arrowArray, arrowField).AsMemory(), cancellationToken: ct);
+            if (clr == typeof(string))
+                return writer.WriteAsync(dataField, (IReadOnlyCollection<string?>)ReadStrings(arrowArray, arrowField));
+        }
+
         bool isGuidField = dataField.ClrNullableIfHasNullsType == typeof(Guid)
                         || dataField.ClrNullableIfHasNullsType == typeof(Guid?);
         return arrowArray switch
         {
+            Int8Array a => writer.WriteAsync<sbyte>(dataField, ExtractPrimitiveValues<sbyte, Int8Array>(a).AsMemory(), cancellationToken: ct),
+            Int16Array a => writer.WriteAsync<short>(dataField, ExtractPrimitiveValues<short, Int16Array>(a).AsMemory(), cancellationToken: ct),
+            UInt8Array a => writer.WriteAsync<byte>(dataField, ExtractPrimitiveValues<byte, UInt8Array>(a).AsMemory(), cancellationToken: ct),
+            UInt16Array a => writer.WriteAsync<ushort>(dataField, ExtractPrimitiveValues<ushort, UInt16Array>(a).AsMemory(), cancellationToken: ct),
+            UInt32Array a => writer.WriteAsync<uint>(dataField, ExtractPrimitiveValues<uint, UInt32Array>(a).AsMemory(), cancellationToken: ct),
+            UInt64Array a => writer.WriteAsync<ulong>(dataField, ExtractPrimitiveValues<ulong, UInt64Array>(a).AsMemory(), cancellationToken: ct),
+            Date32Array a => writer.WriteAsync<DateOnly>(dataField, ExtractDateOnlyValues(a).AsMemory(), cancellationToken: ct),
+            Time32Array a => writer.WriteAsync<long>(dataField, ExtractTimeMicros(a.Length, i => a.GetTime(i)).AsMemory(), cancellationToken: ct),
+            Time64Array a => writer.WriteAsync<long>(dataField, ExtractTimeMicros(a.Length, i => a.GetTime(i)).AsMemory(), cancellationToken: ct),
             Int32Array a => writer.WriteAsync<int>(dataField, ExtractPrimitiveValues<int, Int32Array>(a).AsMemory(), cancellationToken: ct),
             Int64Array a => writer.WriteAsync<long>(dataField, ExtractPrimitiveValues<long, Int64Array>(a).AsMemory(), cancellationToken: ct),
             DoubleArray a => writer.WriteAsync<double>(dataField, ExtractPrimitiveValues<double, DoubleArray>(a).AsMemory(), cancellationToken: ct),
@@ -42,7 +63,8 @@ public static class ArrowToParquetConverter
             // Timestamp: no-timezone fields are typed as DateTime — coerce DateTimeOffset to DateTime
             TimestampArray a when (Nullable.GetUnderlyingType(dataField.ClrNullableIfHasNullsType) ?? dataField.ClrNullableIfHasNullsType) == typeof(DateTime) =>
                 writer.WriteAsync<DateTime>(dataField, ExtractTimestampAsDateTimeValues(a).AsMemory(), cancellationToken: ct),
-            TimestampArray a => writer.WriteAsync<DateTimeOffset>(dataField, ExtractTimestampValues(a).AsMemory(), cancellationToken: ct),
+            // An instant is written as its UTC time under an isAdjustedToUTC timestamp.
+            TimestampArray a => writer.WriteAsync<DateTime>(dataField, ExtractTimestampAsUtcValues(a).AsMemory(), cancellationToken: ct),
             // FixedSizeBinaryArray(16) with arrow.uuid → DtPipe internal UUID format
             FixedSizeBinaryArray a when isGuidField => writer.WriteAsync<Guid>(dataField, ExtractGuidValuesFromFixed(a).AsMemory(), cancellationToken: ct),
             // BinaryArray legacy: kept for sources that still emit BinaryType for UUID
@@ -146,6 +168,50 @@ public static class ArrowToParquetConverter
         return result;
     }
 
+    private static bool IsUuid(Apache.Arrow.Field field)
+        => field.Metadata.TryGetValue("ARROW:extension:name", out var name) && name == "arrow.uuid";
+
+    private static bool?[] ReadBools(IArrowArray array, Apache.Arrow.Field field)
+    {
+        var result = new bool?[array.Length];
+        for (int i = 0; i < array.Length; i++)
+            result[i] = (bool?)ArrowTypeMapper.GetValueForField(array, field, i);
+        return result;
+    }
+
+    private static string?[] ReadStrings(IArrowArray array, Apache.Arrow.Field field)
+    {
+        var result = new string?[array.Length];
+        for (int i = 0; i < array.Length; i++)
+            result[i] = (string?)ArrowTypeMapper.GetValueForField(array, field, i);
+        return result;
+    }
+
+    private static DateOnly?[] ExtractDateOnlyValues(Date32Array array)
+    {
+        var result = new DateOnly?[array.Length];
+        for (int i = 0; i < array.Length; i++)
+            result[i] = array.GetDateOnly(i);
+        return result;
+    }
+
+    /// <summary>Microseconds since midnight, the unit of the TIME(MICROS) field the schema declares.</summary>
+    private static long?[] ExtractTimeMicros(int length, Func<int, TimeOnly?> get)
+    {
+        var result = new long?[length];
+        for (int i = 0; i < length; i++)
+            result[i] = get(i) is TimeOnly t ? t.Ticks / TimeSpan.TicksPerMicrosecond : null;
+        return result;
+    }
+
+    private static DateTime?[] ExtractTimestampAsUtcValues(TimestampArray array)
+    {
+        var result = new DateTime?[array.Length];
+        for (int i = 0; i < array.Length; i++)
+            result[i] = array.GetTimestamp(i)?.UtcDateTime;
+        return result;
+    }
+
     private static Guid?[] ExtractGuidValuesFromFixed(FixedSizeBinaryArray array)
     {
         var result = new Guid?[array.Length];
@@ -230,16 +296,6 @@ public static class ArrowToParquetConverter
             if (array.IsNull(i)) { result[i] = null; continue; }
             var dto = array.GetTimestamp(i);
             result[i] = dto?.DateTime;
-        }
-        return result;
-    }
-
-    private static DateTimeOffset?[] ExtractTimestampValues(TimestampArray array)
-    {
-        var result = new DateTimeOffset?[array.Length];
-        for (int i = 0; i < array.Length; i++)
-        {
-            result[i] = array.IsNull(i) ? null : array.GetTimestamp(i);
         }
         return result;
     }

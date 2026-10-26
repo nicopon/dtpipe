@@ -59,10 +59,21 @@ public class MySqlProviderTests
         => Assert.Equal(expected, MySqlTypeConverter.Instance.MapToProviderType(clrType));
 
     [Fact]
-    public void DateTimeOffset_Maps_To_Datetime_Not_Timestamp()
+    public void An_Instant_Is_Refused_And_Its_Wall_Clock_Named_Instead()
     {
-        // TIMESTAMP would cap the range at 2038 and reject dates a source can legitimately hold.
-        Assert.Equal("DATETIME(6)", MySqlTypeConverter.Instance.MapToProviderType(typeof(DateTimeOffset)));
+        // DATETIME is a wall clock and TIMESTAMP stops at 2038: MySQL has no type for an instant.
+        var writer = new MySqlDataWriter("Server=localhost;Database=x", new MySqlWriterOptions(),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<MySqlDataWriter>.Instance, MySqlTypeConverter.Instance);
+        var schema = new Apache.Arrow.Schema.Builder()
+            .Field(f => f.Name("at").DataType(new Apache.Arrow.Types.TimestampType(Apache.Arrow.Types.TimeUnit.Microsecond, "UTC")))
+            .Field(f => f.Name("wall").DataType(new Apache.Arrow.Types.TimestampType(Apache.Arrow.Types.TimeUnit.Microsecond, (string?)null)))
+            .Build();
+
+        var refusal = Assert.Single(writer.RefuseColumns(schema));
+
+        Assert.Equal("at", refusal.Received.Name);
+        var accepted = Assert.IsType<Apache.Arrow.Types.TimestampType>(Assert.Single(refusal.Accepted));
+        Assert.True(string.IsNullOrEmpty(accepted.Timezone));
     }
 
     [Theory]

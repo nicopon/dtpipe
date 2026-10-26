@@ -294,6 +294,12 @@ public sealed partial class PostgreSqlReader : IColumnarStreamReader, IBatchSize
                 (e, b) => { if (e.IsNull) { e.Skip(); b.AppendNull(); } else b.Append(Apache.Arrow.Serialization.Mapping.TemporalNormalization.ToOffset(e.Read<DateTime>())); },
                 b => b.Build()),
 
+            // A time of day is read as one: the fallback below builds text, which would sit under a time64 field.
+            NpgsqlTypes.NpgsqlDbType.Time => BuildTyped(
+                new Time64Array.Builder((Time64Type)arrowType),
+                (e, b) => { if (e.IsNull) { e.Skip(); b.AppendNull(); } else b.Append(e.Read<TimeOnly>()); },
+                b => b.Build()),
+
             NpgsqlTypes.NpgsqlDbType.Interval => BuildTyped(
                 new DurationArray.Builder((DurationType)arrowType),
                 (e, b) => { if (e.IsNull) { e.Skip(); b.AppendNull(); } else b.Append(e.Read<TimeSpan>().Ticks / TimeSpan.TicksPerMillisecond); },

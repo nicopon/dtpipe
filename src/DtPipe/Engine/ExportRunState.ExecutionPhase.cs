@@ -25,6 +25,9 @@ internal sealed partial class ExportRunState
         // the line, not about the writer, and a sample run never reaches ValidateAndMigrateAsync.
         var writerSchemaSettings = Registry.Get(WriterFactory.OptionsType) as ISchemaValidationAware;
 
+        // Before the paths part: a sample refuses where the run refuses, and neither has touched the target yet.
+        RefuseColumnsTheWriterCannotWrite(exportableSchema);
+
         if (IsSampleMode)
         {
             SchemaValidationService.RejectContradictorySettings(writerSchemaSettings);
@@ -80,6 +83,31 @@ internal sealed partial class ExportRunState
         LinkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
 
         PropagateSegmentArrowSchemas();
+    }
+
+    /// <summary>
+    /// Asks the writer which columns its format cannot carry, on the Arrow schema it is about to receive,
+    /// and refuses them all at once with the step that would bring each one to a type it accepts. The
+    /// question reads the schema only, so a sample asks it as the run does without opening the target.
+    /// </summary>
+    private void RefuseColumnsTheWriterCannotWrite(IReadOnlyList<PipeColumnInfo> exportableSchema)
+    {
+        if (Writer is not IColumnTypeGate gate) return;
+        var refusals = gate.RefuseColumns(WriterArrowSchema(exportableSchema));
+        if (refusals.Count > 0)
+            throw ColumnTypeAdvice.Refuse(WriterFactory.ComponentName, refusals);
+    }
+
+    /// <summary>
+    /// The Arrow schema the writer receives: the exportable columns, with the zone, decimal width and
+    /// extension the reader's own schema carries wherever a transformer left the column's type alone.
+    /// </summary>
+    private Schema WriterArrowSchema(IReadOnlyList<PipeColumnInfo> exportableSchema)
+    {
+        Schema? readerArrowSchema = (Reader as IStreamTransformer)?.Schema ?? (Reader as IColumnarStreamReader)?.Schema;
+        return readerArrowSchema != null
+            ? ArrowSchemaFactory.CreateEnriched(exportableSchema, readerArrowSchema)
+            : ArrowSchemaFactory.Create(exportableSchema);
     }
 
     /// <summary>
@@ -365,6 +393,11 @@ internal sealed partial class ExportRunState
                 Logger.LogError(hookEx, "On-Error Hook failed");
                 Observer.LogError(hookEx);
             }
+
+            // A writer that refused at its first batch says what it refused; the advice is the engine's.
+            for (var e = ex; e is not null; e = e.InnerException)
+                if (e is ColumnTypeRefusedException refused)
+                    throw ColumnTypeAdvice.Refuse(WriterFactory.ComponentName, refused.Refusals);
 
             throw;
         }

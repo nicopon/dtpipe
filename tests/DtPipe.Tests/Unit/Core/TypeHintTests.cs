@@ -116,7 +116,8 @@ public class TypeHintTests
             (new Field("d", DoubleType.Default, true), "double"),
             (new Field("m", new Decimal128Type(18, 4), true), "decimal"),
             (new Field("b", BooleanType.Default, true), "bool"),
-            (new Field("d32", Date32Type.Default, true), "datetime"),
+            // A date is no timestamp, and no hint names a date alone.
+            (new Field("d32", Date32Type.Default, true), null),
             (new Field("t", new TimestampType(TimeUnit.Microsecond, (string?)null), true), "datetime"),
             (new Field("tz", new TimestampType(TimeUnit.Microsecond, "UTC"), true), "datetimeoffset"),
             (uuid, "uuid"),
