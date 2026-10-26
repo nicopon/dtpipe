@@ -14,8 +14,10 @@ public class SchemaDiscoveryHelperTests
     [Fact]
     public void Merging_Writes_Nothing_Into_The_Records_And_Counts_Every_List_Item()
     {
-        var first = Obj(("payload", Obj(("a", 1L))), ("steps", new List<object?> { Obj(("n", 1L)) }));
-        var second = Obj(("payload", Obj(("b", 2L))), ("steps", new List<object?> { Obj(("ok", true)), Obj(("z", 0L)) }));
+        var first = Obj(("payload", Obj(("a", 1L))), ("steps", new List<object?> { Obj(("n", 1L)) }),
+            ("grid", new List<object?> { new List<object?> { Obj(("a", 1L)) }, new List<object?> { Obj(("b", 2L)) } }));
+        var second = Obj(("payload", Obj(("b", 2L))), ("steps", new List<object?> { Obj(("ok", true)), Obj(("z", 0L)) }),
+            ("grid", new List<object?> { new List<object?> { Obj(("c", 3L)) } }));
 
         var schema = new Dictionary<string, object?>();
         SchemaDiscoveryHelper.DeepMergeSchemas(schema, first);
@@ -23,11 +25,13 @@ public class SchemaDiscoveryHelperTests
 
         KeysOf(schema["payload"]).Should().BeEquivalentTo("a", "b");
         KeysOf(((List<object?>)schema["steps"]!)[0]).Should().BeEquivalentTo("n", "ok", "z");
+        KeysOf(((List<object?>)((List<object?>)schema["grid"]!)[0]!)[0]).Should().BeEquivalentTo("a", "b", "c");
 
         // The records are what a reader replays after discovery: they keep their own keys.
         KeysOf(first["payload"]).Should().BeEquivalentTo("a");
         KeysOf(second["payload"]).Should().BeEquivalentTo("b");
         KeysOf(((List<object?>)first["steps"]!)[0]).Should().BeEquivalentTo("n");
         KeysOf(((List<object?>)second["steps"]!)[0]).Should().BeEquivalentTo("ok");
+        KeysOf(((List<object?>)((List<object?>)first["grid"]!)[0]!)[0]).Should().BeEquivalentTo("a");
     }
 }

@@ -47,7 +47,8 @@ public static class SchemaDiscoveryHelper
 
     /// <summary>
     /// A list stands in the schema by one element, the one its type is read from. Every object the source's
-    /// elements hold adds its keys to that element, so an item that comes after the first still counts.
+    /// elements hold adds its keys to that element, so an item that comes after the first still counts, and so
+    /// does an item of a list within a list.
     /// </summary>
     private static void MergeLists(List<object?> target, List<object?> source)
     {
@@ -56,14 +57,25 @@ public static class SchemaDiscoveryHelper
         if (target.Count == 0)
         {
             target.AddRange(DetachList(source));
+            return;
         }
-        else if (target[0] is Dictionary<string, object?> items)
+
+        switch (target[0])
         {
-            foreach (var element in source)
-            {
-                if (element is Dictionary<string, object?> sourceItem)
-                    DeepMergeSchemas(items, sourceItem);
-            }
+            case Dictionary<string, object?> items:
+                foreach (var element in source)
+                {
+                    if (element is Dictionary<string, object?> sourceItem)
+                        DeepMergeSchemas(items, sourceItem);
+                }
+                break;
+            case List<object?> innerItems:
+                foreach (var element in source)
+                {
+                    if (element is List<object?> sourceInner)
+                        MergeLists(innerItems, sourceInner);
+                }
+                break;
         }
     }
 
@@ -88,14 +100,7 @@ public static class SchemaDiscoveryHelper
         if (source.Count == 0) return copy;
 
         copy.Add(Detach(source[0]));
-        if (copy[0] is Dictionary<string, object?> items)
-        {
-            for (var i = 1; i < source.Count; i++)
-            {
-                if (source[i] is Dictionary<string, object?> sourceItem)
-                    DeepMergeSchemas(items, sourceItem);
-            }
-        }
+        MergeLists(copy, source.GetRange(1, source.Count - 1));
         return copy;
     }
 }
