@@ -95,7 +95,7 @@ grep -q "$EXPECTED_TS_1" "$TMP_DIR/pg_a.csv" || fail "[pg] expected wall clock '
 $(cat "$TMP_DIR/pg_a.csv")"
 grep -q "$EXPECTED_TS_2" "$TMP_DIR/pg_a.csv" || fail "[pg] expected wall clock '$EXPECTED_TS_2' absent:
 $(cat "$TMP_DIR/pg_a.csv")"
-grep -q "2026-08-28 00:00:00" "$TMP_DIR/pg_a.csv" || fail "[pg] DATE column drifted off its calendar day"
+grep -q "^1,2026-08-28," "$TMP_DIR/pg_a.csv" || fail "[pg] DATE column drifted off its calendar day"
 pass "identical under both zones, wall clocks preserved (timestamp, timestamptz, date)"
 
 # ------------------------------------------------------------------------------
