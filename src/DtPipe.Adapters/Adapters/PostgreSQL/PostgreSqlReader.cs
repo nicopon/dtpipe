@@ -92,6 +92,12 @@ public sealed partial class PostgreSqlReader : IColumnarStreamReader, IBatchSize
     /// </summary>
     private static Type ResolveClrType(System.Data.Common.DbColumn column)
     {
+        // Npgsql reports timestamptz as DateTime, which would make the column a zone-less Arrow
+        // timestamp: the instant would then be written and read back as a wall clock, which the
+        // server resolves against the session's zone.
+        if (column is Npgsql.Schema.NpgsqlDbColumn { NpgsqlDbType: NpgsqlTypes.NpgsqlDbType.TimestampTz })
+            return typeof(DateTimeOffset);
+
         var declared = column.DataType ?? typeof(object);
         if (declared != typeof(System.Array)) return declared;
 

@@ -208,6 +208,53 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Cursor_OnTimestamptz_ReadsALaterRowUnderASessionZoneOtherThanUtc()
+    {
+        if (!DockerHelper.IsAvailable() || _connectionString is null) return;
+
+        const string table = "zz_cursor_session_zone";
+        var dir = Path.Combine(Path.GetTempPath(), $"cursor_tz_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        var (state, target) = (Path.Combine(dir, "c.state"), Path.Combine(dir, "t.duckdb"));
+        var source = $"pg:{_connectionString};Timezone=America/New_York";
+        var query = $"SELECT id, updated_at FROM {table} WHERE updated_at > '${{{{cursor://{state}|1970-01-01T00:00:00.000}}}}'";
+        string[] args = ["-i", source, "--query", query, "-o", $"duck:{target}",
+            "--table", "t", "--strategy", "Append", "--cursor", "updated_at", "--state", state, "--no-stats"];
+        await using var setup = new NpgsqlConnection(_connectionString);
+        await setup.OpenAsync();
+        try
+        {
+            await using (var create = setup.CreateCommand())
+            {
+                create.CommandText = $"DROP TABLE IF EXISTS {table}; CREATE TABLE {table} (id int, updated_at timestamptz); "
+                    + $"INSERT INTO {table} VALUES (1, '2026-01-02 00:00:00.5+00')";
+                await create.ExecuteNonQueryAsync();
+            }
+            Assert.Equal(0, await DtPipe.Program.Main(args));
+
+            await using (var later = setup.CreateCommand())
+            {
+                later.CommandText = $"INSERT INTO {table} VALUES (2, '2026-01-02 02:00:00+00')";
+                await later.ExecuteNonQueryAsync();
+            }
+            Assert.Equal(0, await DtPipe.Program.Main(args));
+
+            await using var duck = new DuckDB.NET.Data.DuckDBConnection($"Data Source={target}");
+            await duck.OpenAsync();
+            await using var ids = duck.CreateCommand();
+            ids.CommandText = "SELECT string_agg(id::varchar, ',' ORDER BY id) FROM t";
+            Assert.Equal("1,2", await ids.ExecuteScalarAsync());
+        }
+        finally
+        {
+            await using var drop = setup.CreateCommand();
+            drop.CommandText = $"DROP TABLE IF EXISTS {table}";
+            await drop.ExecuteNonQueryAsync();
+            try { Directory.Delete(dir, recursive: true); } catch { /* best effort */ }
+        }
+    }
+
+    [Fact]
     public async Task PostgreSqlWriter_WritesRows()
     {
         if (!DockerHelper.IsAvailable() || _connectionString is null) return;
