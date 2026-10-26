@@ -276,10 +276,8 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
         await foreach (var record in EnumerateRawRecordsAsync(ct))
         {
             var current = record as Dictionary<string, object?> ?? new Dictionary<string, object?> { ["_value"] = record };
-            if (merged == null)
-                merged = new Dictionary<string, object?>(current, StringComparer.OrdinalIgnoreCase);
-            else
-                SchemaDiscoveryHelper.DeepMergeSchemas(merged, current);
+            merged ??= new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            SchemaDiscoveryHelper.DeepMergeSchemas(merged, current);
 
             _stdinBuffer?.Add(current);
 

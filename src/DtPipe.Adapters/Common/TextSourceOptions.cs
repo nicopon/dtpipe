@@ -18,7 +18,7 @@ public abstract class TextSourceOptions : ISchemaPersistenceAware
     [ComponentOption("--auto-column-types", Description = "Infer column types from first sample rows")]
     public bool AutoColumnTypes { get; set; } = false;
 
-    [ComponentOption("--max-sample", Description = "Max rows to sample for type inference (0 = reader default)")]
+    [ComponentOption("--max-sample", Description = "Rows sampled to infer the schema (JSONL: default 1000, 0 = no inference, the schema must then be declared)")]
     public int MaxSample { get; set; } = 0;
 
     [ComponentOption("--schema-save", Description = "Save discovered schema to a .dtschema file after open")]

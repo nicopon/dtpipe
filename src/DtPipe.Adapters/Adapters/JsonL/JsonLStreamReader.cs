@@ -45,6 +45,11 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
     private IReadOnlyDictionary<string, string>? _autoAppliedTypes;
     public IReadOnlyDictionary<string, string>? AutoAppliedTypes => _autoAppliedTypes;
 
+    // Set when the columns come from the data or from a declared Arrow schema: a record with a key the
+    // schema has no column for is then refused, never written without it. --column-types is a projection.
+    private JsonLRecordShape? _shape;
+    private bool _shapeIsDeclared;
+
     public async Task OpenAsync(CancellationToken ct = default)
     {
         if (!string.IsNullOrWhiteSpace(_options.Schema))
@@ -52,6 +57,8 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
             // Highest priority: full Arrow schema provided (from --schema-load or --export-job YAML).
             // Captures complete structure including nested StructType / ListType.
             BuildSchemaFromArrowJson(_options.Schema);
+            _shape = JsonLRecordShape.Of(Schema!);
+            _shapeIsDeclared = true;
             await ResetReaderAsync();
         }
         else if (!string.IsNullOrWhiteSpace(_options.ColumnTypes))
@@ -62,9 +69,17 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
         }
         else
         {
+            if (_options.MaxSample <= 0)
+            {
+                throw new InvalidOperationException(
+                    $"JSONL: '--max-sample {_options.MaxSample}' leaves no record to infer the schema from, and no schema was declared. " +
+                    "Declare the columns with '--schema-load' or '--column-types', or give a sample of 1 or more.");
+            }
+
             await ResetReaderAsync();
             await InferSchemaAsync(ct);
             await ResetReaderAsync();
+            _shape = JsonLRecordShape.Of(Schema!);
         }
 
         _isBufferingActive = false; // Stop adding new records to buffer, but keep what we have.
@@ -133,10 +148,8 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
         {
             if (record is Dictionary<string, object?> current)
             {
-                if (merged == null)
-                    merged = new Dictionary<string, object?>(current, StringComparer.OrdinalIgnoreCase);
-                else
-                    SchemaDiscoveryHelper.DeepMergeSchemas(merged, current);
+                merged ??= new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                SchemaDiscoveryHelper.DeepMergeSchemas(merged, current);
             }
 
             count++;
@@ -232,10 +245,8 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
                 if (string.IsNullOrWhiteSpace(line)) continue;
 
                 var dict = ParseLineToDictionary(line);
-                if (merged == null)
-                    merged = new Dictionary<string, object?>(dict, StringComparer.OrdinalIgnoreCase);
-                else
-                    SchemaDiscoveryHelper.DeepMergeSchemas(merged, dict);
+                merged ??= new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                SchemaDiscoveryHelper.DeepMergeSchemas(merged, dict);
                 count++;
             }
         }
@@ -251,10 +262,8 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
                 var converted = ToValue(element);
                 if (converted is Dictionary<string, object?> d)
                 {
-                    if (merged == null)
-                        merged = new Dictionary<string, object?>(d, StringComparer.OrdinalIgnoreCase);
-                    else
-                        SchemaDiscoveryHelper.DeepMergeSchemas(merged, d);
+                    merged ??= new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                    SchemaDiscoveryHelper.DeepMergeSchemas(merged, d);
                 }
                 count++;
                 if (count >= sampleRows) break;
@@ -393,10 +402,12 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
             throw new InvalidOperationException("Call OpenAsync first.");
 
         var batch = new List<Dictionary<string, object?>>(batchSize);
+        long number = 0;
 
         await foreach (var record in EnumerateRawRecordsAsync(ct))
         {
             var dict = record as Dictionary<string, object?> ?? new Dictionary<string, object?> { ["value"] = record };
+            RefuseKeyOutsideSchema(dict, ++number);
             batch.Add(dict);
 
             if (batch.Count >= batchSize)
@@ -421,10 +432,13 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
 
         var batch = new object?[batchSize][];
         var index = 0;
+        long number = 0;
 
         await foreach (var record in EnumerateRawRecordsAsync(ct))
         {
-            batch[index++] = MapDictToRow(record as Dictionary<string, object?> ?? new Dictionary<string, object?> { ["value"] = record });
+            var dict = record as Dictionary<string, object?> ?? new Dictionary<string, object?> { ["value"] = record };
+            RefuseKeyOutsideSchema(dict, ++number);
+            batch[index++] = MapDictToRow(dict);
 
             if (index >= batchSize)
             {
@@ -438,6 +452,20 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
         {
             yield return new ReadOnlyMemory<object?[]>(batch, 0, index);
         }
+    }
+
+    /// <summary>
+    /// A key the schema has no column for would be dropped without a word: stop at the record that carries it.
+    /// </summary>
+    private void RefuseKeyOutsideSchema(Dictionary<string, object?> record, long number)
+    {
+        var path = _shape?.FirstUnknownKey(record);
+        if (path == null) return;
+
+        throw new InvalidOperationException(_shapeIsDeclared
+            ? $"JSONL record {number}: key '{path}' is not in the declared schema. Add it to the schema file given to '--schema-load'."
+            : $"JSONL record {number}: key '{path}' is not in the schema inferred from the first {_options.MaxSample} record(s). " +
+              "Raise '--max-sample' so the sample reaches it.");
     }
 
     private object?[] MapDictToRow(Dictionary<string, object?> dict)

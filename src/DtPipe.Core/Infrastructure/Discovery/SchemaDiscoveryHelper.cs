@@ -7,6 +7,8 @@ public static class SchemaDiscoveryHelper
     /// <summary>
     /// Recursively merges two dictionaries to build a superset schema.
     /// Used during schema discovery to handle sparse or heterogeneous data.
+    /// Whatever it inserts into <paramref name="target"/> is a copy: a schema that shares an object with a
+    /// record writes its keys into that record, which a reader replays after discovery.
     /// </summary>
     public static void DeepMergeSchemas(Dictionary<string, object?> target, Dictionary<string, object?> source)
     {
@@ -14,7 +16,7 @@ public static class SchemaDiscoveryHelper
         {
             if (!target.TryGetValue(kvp.Key, out var existing))
             {
-                target[kvp.Key] = kvp.Value;
+                target[kvp.Key] = Detach(kvp.Value);
             }
             else if (existing is Dictionary<string, object?> targetDict && kvp.Value is Dictionary<string, object?> sourceDict)
             {
@@ -22,23 +24,11 @@ public static class SchemaDiscoveryHelper
             }
             else if (existing is List<object?> targetList && kvp.Value is List<object?> sourceList)
             {
-                if (targetList.Count == 0 && sourceList.Count > 0)
-                {
-                    // If target list was empty, take the first item of source to learn the type
-                    targetList.AddRange(sourceList);
-                }
-                else if (targetList.Count > 0 && sourceList.Count > 0)
-                {
-                    // If both have items, and they are objects, merge them
-                    if (targetList[0] is Dictionary<string, object?> t0 && sourceList[0] is Dictionary<string, object?> s0)
-                    {
-                        DeepMergeSchemas(t0, s0);
-                    }
-                }
+                MergeLists(targetList, sourceList);
             }
             else if (existing == null && kvp.Value != null)
             {
-                target[kvp.Key] = kvp.Value;
+                target[kvp.Key] = Detach(kvp.Value);
             }
             // Heterogeneous promotion: Scalar vs Dictionary
             else if (existing is not Dictionary<string, object?> && kvp.Value is Dictionary<string, object?> sourceDictPromo)
@@ -53,5 +43,59 @@ public static class SchemaDiscoveryHelper
                 DeepMergeSchemas(targetDictPromo, promotedSource);
             }
         }
+    }
+
+    /// <summary>
+    /// A list stands in the schema by one element, the one its type is read from. Every object the source's
+    /// elements hold adds its keys to that element, so an item that comes after the first still counts.
+    /// </summary>
+    private static void MergeLists(List<object?> target, List<object?> source)
+    {
+        if (source.Count == 0) return;
+
+        if (target.Count == 0)
+        {
+            target.AddRange(DetachList(source));
+        }
+        else if (target[0] is Dictionary<string, object?> items)
+        {
+            foreach (var element in source)
+            {
+                if (element is Dictionary<string, object?> sourceItem)
+                    DeepMergeSchemas(items, sourceItem);
+            }
+        }
+    }
+
+    private static object? Detach(object? value) => value switch
+    {
+        Dictionary<string, object?> dictionary => DetachDictionary(dictionary),
+        List<object?> list => DetachList(list),
+        _ => value
+    };
+
+    private static Dictionary<string, object?> DetachDictionary(Dictionary<string, object?> source)
+    {
+        var copy = new Dictionary<string, object?>(source.Comparer);
+        foreach (var kvp in source)
+            copy[kvp.Key] = Detach(kvp.Value);
+        return copy;
+    }
+
+    private static List<object?> DetachList(List<object?> source)
+    {
+        var copy = new List<object?>();
+        if (source.Count == 0) return copy;
+
+        copy.Add(Detach(source[0]));
+        if (copy[0] is Dictionary<string, object?> items)
+        {
+            for (var i = 1; i < source.Count; i++)
+            {
+                if (source[i] is Dictionary<string, object?> sourceItem)
+                    DeepMergeSchemas(items, sourceItem);
+            }
+        }
+        return copy;
     }
 }

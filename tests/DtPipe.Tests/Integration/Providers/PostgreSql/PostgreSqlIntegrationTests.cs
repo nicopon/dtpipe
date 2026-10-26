@@ -126,6 +126,42 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task PostgreSqlWriter_WritesAJsonlObjectOfVaryingShapeKeyForKey()
+    {
+        if (!DockerHelper.IsAvailable() || _connectionString is null) return;
+
+        const string table = "zz_jsonl_varying_shape";
+        var events = JsonLShapeData.Events(120).ToList();
+        var source = Path.Combine(Path.GetTempPath(), $"jsonl_shape_{Guid.NewGuid()}.jsonl");
+        await File.WriteAllLinesAsync(source, events);
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync();
+        try
+        {
+            var exit = await DtPipe.Program.Main(["-i", $"jsonl:{source}", "-o", $"pg:{_connectionString}", "--table", table, "--strategy", "Recreate", "--no-stats"]);
+            Assert.Equal(0, exit);
+
+            var payloads = new Dictionary<long, string>();
+            await using (var query = connection.CreateCommand())
+            {
+                query.CommandText = $"SELECT id, payload::text FROM {table}";
+                await using var reader = await query.ExecuteReaderAsync();
+                while (await reader.ReadAsync()) payloads[reader.GetInt64(0)] = reader.GetString(1);
+            }
+
+            Assert.Equal(events.Count, payloads.Count);
+            Assert.Empty(JsonLShapeData.Differences(events, payloads));
+        }
+        finally
+        {
+            await using var drop = connection.CreateCommand();
+            drop.CommandText = $"DROP TABLE IF EXISTS {table}";
+            await drop.ExecuteNonQueryAsync();
+            try { File.Delete(source); } catch { /* best effort */ }
+        }
+    }
+
+    [Fact]
     public async Task PostgreSqlWriter_WritesRows()
     {
         if (!DockerHelper.IsAvailable() || _connectionString is null) return;
