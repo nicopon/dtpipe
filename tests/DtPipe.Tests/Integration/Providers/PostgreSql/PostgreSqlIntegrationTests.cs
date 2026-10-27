@@ -162,6 +162,107 @@ public class PostgreSqlIntegrationTests : IAsyncLifetime
         }
     }
 
+    // One case per way a type the reader does not read went wrong: a wrong value with exit 0
+    // (timetz lost its offset, interval came out a thousand times too small, a regclass decoded
+    // as text), a refusal that named neither the column nor a remedy (inet, inet[]), and a value
+    // whose scale the binary form does not carry (money).
+    [Theory]
+    [InlineData("'10:00+02'::timetz", "time with time zone", "c::text AS c")]
+    [InlineData("'1 day 2 hours'::interval", "interval", "c::text AS c")]
+    [InlineData("16706::oid::regclass", "regclass", "c::text AS c")]
+    [InlineData("'10.0.0.1'::inet", "inet", "c::text AS c")]
+    [InlineData("ARRAY['10.0.0.1'::inet]", "inet[]", "c::text[] AS c")]
+    [InlineData("'12.34'::money", "money", "c::numeric AS c")]
+    public async Task PostgreSqlReader_RefusesAtOpenATypeItDoesNotRead_AndItsRemedyReadsTheServersValue(
+        string expression, string sourceType, string remedy)
+    {
+        if (!DockerHelper.IsAvailable() || _connectionString is null) return;
+
+        var query = $"SELECT {expression} AS c";
+        await using (var reader = new PostgreSqlReader(_connectionString, query, timeout: 30))
+        {
+            var refused = await Assert.ThrowsAsync<DtPipe.Core.Abstractions.ColumnReadRefusedException>(() => reader.OpenAsync());
+            Assert.Equal("pg", refused.Reader);
+            Assert.Equal(new DtPipe.Core.Abstractions.ColumnReadRefusal("c", sourceType, remedy), Assert.Single(refused.Refusals));
+        }
+
+        var remedied = $"SELECT {remedy} FROM ({query}) AS q";
+        await using var setup = new NpgsqlConnection(_connectionString);
+        await setup.OpenAsync();
+        object expected;
+        await using (var q = setup.CreateCommand())
+        {
+            q.CommandText = remedied;
+            expected = (await q.ExecuteScalarAsync())!;
+        }
+
+        Assert.Equal(Render(expected), Render(Assert.Single(await ReadAllAsync(remedied))[0]!));
+
+        static string Render(object value)
+            => value is string s ? s : value is decimal d ? d.ToString("G29", System.Globalization.CultureInfo.InvariantCulture) : value is System.Collections.IEnumerable e ? string.Join(",", e.Cast<object?>()) : Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture)!;
+    }
+
+    [Fact]
+    public async Task PostgreSqlReader_RefusesEveryColumnItDoesNotRead_AtOnce_AndStillReadsTheRest()
+    {
+        if (!DockerHelper.IsAvailable() || _connectionString is null) return;
+
+        const string table = "zz_reader_refused_columns";
+        await using var setup = new NpgsqlConnection(_connectionString);
+        await setup.OpenAsync();
+        try
+        {
+            await using (var ddl = setup.CreateCommand())
+            {
+                ddl.CommandText =
+                    $"DROP TABLE IF EXISTS {table}; DROP TYPE IF EXISTS zz_pair; DROP TYPE IF EXISTS zz_mood; " +
+                    "CREATE TYPE zz_pair AS (a int, b text); CREATE TYPE zz_mood AS ENUM ('sad', 'happy'); " +
+                    $"CREATE TABLE {table}(id int, mood zz_mood, b bit(3), tags text[], at timestamptz, p zz_pair, \"Ip\" inet, t timetz); " +
+                    $"INSERT INTO {table} VALUES (1, 'happy', B'101', ARRAY['x'], '2026-01-02 03:04:05+00', ROW(1, 'one'), '10.0.0.1', '10:00+02')";
+                await ddl.ExecuteNonQueryAsync();
+            }
+
+            // A pool loads the server's types once; one opened before the CREATE TYPE knows neither.
+            var fresh = $"{_connectionString};Application Name={table}";
+            await using (var reader = new PostgreSqlReader(fresh, $"SELECT * FROM {table}", timeout: 30))
+            {
+                var refused = await Assert.ThrowsAsync<DtPipe.Core.Abstractions.ColumnReadRefusedException>(() => reader.OpenAsync());
+                Assert.Equal(
+                    [
+                        new("p", "public.zz_pair", "p::text AS p"),
+                        new("Ip", "inet", "\"Ip\"::text AS \"Ip\""),
+                        new("t", "time with time zone", "t::text AS t")
+                    ],
+                    refused.Refusals.ToArray<DtPipe.Core.Abstractions.ColumnReadRefusal>());
+                Assert.Contains("The pg reader cannot read these 3 columns", refused.Message);
+                Assert.Contains("'Ip': inet; select it as: \"Ip\"::text AS \"Ip\"", refused.Message);
+            }
+
+            var row = Assert.Single(await ReadAllAsync($"SELECT id, mood, b, tags, at FROM {table}", fresh));
+            Assert.Equal(1, row[0]);
+            Assert.Equal("happy", row[1]);
+            Assert.Equal("101", row[2]);
+            Assert.Equal("x", Assert.Single(((System.Collections.IEnumerable)row[3]!).Cast<object?>()));
+            Assert.Equal(new DateTimeOffset(2026, 1, 2, 3, 4, 5, TimeSpan.Zero), row[4]);
+        }
+        finally
+        {
+            await using var drop = setup.CreateCommand();
+            drop.CommandText = $"DROP TABLE IF EXISTS {table}; DROP TYPE IF EXISTS zz_pair; DROP TYPE IF EXISTS zz_mood";
+            await drop.ExecuteNonQueryAsync();
+        }
+    }
+
+    private async Task<List<object?[]>> ReadAllAsync(string query, string? connectionString = null)
+    {
+        await using var reader = new PostgreSqlReader(connectionString ?? _connectionString!, query, timeout: 30);
+        await reader.OpenAsync();
+        var rows = new List<object?[]>();
+        await foreach (var batch in reader.ReadBatchesAsync(10))
+            for (int i = 0; i < batch.Length; i++) rows.Add(batch.Span[i]);
+        return rows;
+    }
+
     [Fact]
     public async Task PostgreSqlWriter_WritesAJsonlObjectOfVaryingShapeKeyForKey()
     {

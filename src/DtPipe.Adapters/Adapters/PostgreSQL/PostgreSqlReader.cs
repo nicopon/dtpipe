@@ -29,10 +29,6 @@ public sealed partial class PostgreSqlReader : IColumnarStreamReader, IBatchSize
     private readonly int _timeout;
     private NpgsqlConnection? _connection;
 
-    // The type Npgsql reports per column (null when it has none, e.g. an enum). A string column
-    // is read under it: read as Text, a jsonb keeps the format-version byte of its binary form.
-    private NpgsqlTypes.NpgsqlDbType?[] _reportedTypes = [];
-
     public IReadOnlyList<PipeColumnInfo>? Columns { get; private set; }
     public Schema? Schema { get; private set; }
 
@@ -64,19 +60,25 @@ public sealed partial class PostgreSqlReader : IColumnarStreamReader, IBatchSize
         {
             if (_timeout > 0) schemaCommand.CommandTimeout = _timeout;
             using var schemaReader = await schemaCommand.ExecuteReaderAsync(CommandBehavior.SchemaOnly, ct);
-            var dbColumns = await schemaReader.GetColumnSchemaAsync(ct);
+            var dbColumns = (await schemaReader.GetColumnSchemaAsync(ct)).Cast<Npgsql.Schema.NpgsqlDbColumn>().ToList();
 
-            // Build PipeColumnInfo from DB schema (CLR types) — authoritative for DtPipe pipeline
-            Columns = dbColumns.Select(c => new PipeColumnInfo(
+            // Every column is judged before the schema is built: a type the schema factory cannot
+            // map would otherwise fail on its own, without the column, and hide the others.
+            var plans = dbColumns.Select(Plan).ToList();
+            var refusals = dbColumns.Where((_, i) => plans[i] is null).Select(Refusal).ToList();
+            if (refusals.Count > 0)
+                throw new ColumnReadRefusedException(PostgreSqlMetadata.ComponentName, refusals);
+
+            Columns = dbColumns.Select((c, i) => new PipeColumnInfo(
                 c.ColumnName,
-                ResolveClrType(c),
+                plans[i]!.Value.ClrType,
                 c.AllowDBNull ?? true,
                 IsCaseSensitive: c.ColumnName != c.ColumnName.ToLowerInvariant(),
                 Precision: (int?)c.NumericPrecision,
                 Scale: (int?)c.NumericScale
             )).ToList();
 
-            _reportedTypes = dbColumns.Select(c => (c as Npgsql.Schema.NpgsqlDbColumn)?.NpgsqlDbType).ToArray();
+            _plans = plans.Select(p => p!.Value).ToArray();
         }
 
         // Build Arrow schema from PipeColumnInfo via ArrowTypeMapper — guarantees consistency
@@ -84,30 +86,98 @@ public sealed partial class PostgreSqlReader : IColumnarStreamReader, IBatchSize
     }
 
     /// <summary>
-    /// CLR type for a column. Npgsql reports every array column as the abstract
-    /// <see cref="System.Array"/>, which carries no element type, so the schema factory has nothing
-    /// to map. The element is recovered from the provider type name ("integer[]" → int[]) using the
-    /// same table the writer maps with. Resolving it here rather than in the shared mapper keeps
-    /// Postgres' spelling in the Postgres adapter.
+    /// How a column is read: the CLR type the pipeline sees, the builder that reads it (a scalar's
+    /// reported type) and the type the exporter decodes with (null for an untyped read).
     /// </summary>
-    private static Type ResolveClrType(System.Data.Common.DbColumn column)
+    private readonly record struct ColumnPlan(Type ClrType, NpgsqlTypes.NpgsqlDbType Builder, NpgsqlTypes.NpgsqlDbType? DecodeAs);
+
+    private ColumnPlan[] _plans = [];
+
+    // The scalar types read natively, by the type Npgsql reports. Closed: a type absent here is
+    // refused, never read through a fallback that turns its binary form into text.
+    private static readonly Dictionary<NpgsqlTypes.NpgsqlDbType, Type> NativeScalars = new()
     {
+        [NpgsqlTypes.NpgsqlDbType.Boolean] = typeof(bool),
+        [NpgsqlTypes.NpgsqlDbType.Smallint] = typeof(short),
+        [NpgsqlTypes.NpgsqlDbType.Integer] = typeof(int),
+        [NpgsqlTypes.NpgsqlDbType.Bigint] = typeof(long),
+        [NpgsqlTypes.NpgsqlDbType.Real] = typeof(float),
+        [NpgsqlTypes.NpgsqlDbType.Double] = typeof(double),
+        [NpgsqlTypes.NpgsqlDbType.Numeric] = typeof(decimal),
+        [NpgsqlTypes.NpgsqlDbType.Bytea] = typeof(byte[]),
+        [NpgsqlTypes.NpgsqlDbType.Uuid] = typeof(Guid),
+        [NpgsqlTypes.NpgsqlDbType.Date] = typeof(DateOnly),
+        [NpgsqlTypes.NpgsqlDbType.Timestamp] = typeof(DateTime),
         // Npgsql reports timestamptz as DateTime, which would make the column a zone-less Arrow
         // timestamp: the instant would then be written and read back as a wall clock, which the
         // server resolves against the session's zone.
-        if (column is Npgsql.Schema.NpgsqlDbColumn { NpgsqlDbType: NpgsqlTypes.NpgsqlDbType.TimestampTz })
-            return typeof(DateTimeOffset);
+        [NpgsqlTypes.NpgsqlDbType.TimestampTz] = typeof(DateTimeOffset),
+        [NpgsqlTypes.NpgsqlDbType.Time] = typeof(TimeOnly),
+    };
 
-        var declared = column.DataType ?? typeof(object);
-        if (declared != typeof(System.Array)) return declared;
+    // The types whose text Npgsql decodes itself, read as strings under their own type: read as
+    // Text, a jsonb keeps the format-version byte of its binary form.
+    private static readonly HashSet<NpgsqlTypes.NpgsqlDbType> TextScalars =
+    [
+        NpgsqlTypes.NpgsqlDbType.Text, NpgsqlTypes.NpgsqlDbType.Varchar, NpgsqlTypes.NpgsqlDbType.Char,
+        NpgsqlTypes.NpgsqlDbType.Name, NpgsqlTypes.NpgsqlDbType.Citext, NpgsqlTypes.NpgsqlDbType.Xml,
+        NpgsqlTypes.NpgsqlDbType.Json, NpgsqlTypes.NpgsqlDbType.Jsonb, NpgsqlTypes.NpgsqlDbType.JsonPath,
+        NpgsqlTypes.NpgsqlDbType.LTree, NpgsqlTypes.NpgsqlDbType.LQuery, NpgsqlTypes.NpgsqlDbType.LTxtQuery,
+        NpgsqlTypes.NpgsqlDbType.Bit, NpgsqlTypes.NpgsqlDbType.Varbit,
+    ];
 
-        var name = column.DataTypeName;
-        if (string.IsNullOrEmpty(name) || !name.EndsWith("[]", StringComparison.Ordinal))
-            return typeof(string[]);
+    // The element types BuildBinaryListReader has an array read for.
+    private static readonly HashSet<Type> ListElements =
+    [
+        typeof(bool), typeof(short), typeof(int), typeof(long), typeof(float), typeof(double),
+        typeof(decimal), typeof(string), typeof(DateTime), typeof(DateTimeOffset), typeof(DateOnly),
+    ];
 
-        var element = PostgreSqlTypeConverter.Instance.MapFromProviderType(name[..^2]);
-        return element.MakeArrayType();
+    /// <summary>
+    /// The plan for a column, or null when the reader does not read its type. A domain arrives as its
+    /// base type; an array is judged by its element, never by the spelling of its name.
+    /// </summary>
+    private static ColumnPlan? Plan(Npgsql.Schema.NpgsqlDbColumn column)
+    {
+        if (column.PostgresType is Npgsql.PostgresTypes.PostgresArrayType array)
+        {
+            var elementType = column.NpgsqlDbType is { } t ? t & ~NpgsqlTypes.NpgsqlDbType.Array : (NpgsqlTypes.NpgsqlDbType?)null;
+            return Scalar(array.Element, elementType) is { } element && ListElements.Contains(element.ClrType)
+                ? new ColumnPlan(element.ClrType.MakeArrayType(), NpgsqlTypes.NpgsqlDbType.Array, column.NpgsqlDbType)
+                : null;
+        }
+        return Scalar(column.PostgresType, column.NpgsqlDbType);
     }
+
+    private static ColumnPlan? Scalar(Npgsql.PostgresTypes.PostgresType? type, NpgsqlTypes.NpgsqlDbType? reported)
+    {
+        // An enum's binary form is its label.
+        if (type is Npgsql.PostgresTypes.PostgresEnumType)
+            return new ColumnPlan(typeof(string), NpgsqlTypes.NpgsqlDbType.Text, NpgsqlTypes.NpgsqlDbType.Text);
+        if (type is not Npgsql.PostgresTypes.PostgresBaseType || reported is not { } r)
+            return null;
+        if (TextScalars.Contains(r))
+            return new ColumnPlan(typeof(string), NpgsqlTypes.NpgsqlDbType.Text, r);
+        return NativeScalars.TryGetValue(r, out var clr) ? new ColumnPlan(clr, r, r) : null;
+    }
+
+    /// <summary>
+    /// The refusal of a column, with the cast that reads it: its text, or for money the number, whose
+    /// scale the binary form does not carry.
+    /// </summary>
+    private static ColumnReadRefusal Refusal(Npgsql.Schema.NpgsqlDbColumn column)
+    {
+        var isArray = column.PostgresType is Npgsql.PostgresTypes.PostgresArrayType;
+        var element = isArray ? ((Npgsql.PostgresTypes.PostgresArrayType)column.PostgresType).Element : column.PostgresType;
+        var target = element.Name == "money" ? "numeric" : "text";
+        var name = QuoteIfNeeded(column.ColumnName);
+        return new ColumnReadRefusal(column.ColumnName, column.DataTypeName, $"{name}::{target}{(isArray ? "[]" : "")} AS {name}");
+    }
+
+    private static readonly DtPipe.Adapters.Shared.Dialects.PostgreSqlDialect Dialect = new();
+
+    private static string QuoteIfNeeded(string name)
+        => Dialect.NeedsQuoting(name) ? "\"" + name.Replace("\"", "\"\"") + "\"" : name;
 
     public async IAsyncEnumerable<RecordBatch> ReadRecordBatchesAsync(
         [EnumeratorCancellation] CancellationToken ct = default)
@@ -134,10 +204,7 @@ public sealed partial class PostgreSqlReader : IColumnarStreamReader, IBatchSize
 
             var readers = new (Action<NpgsqlBinaryExporter> Read, Func<IArrowArray> Build)[Columns.Count];
             for (int i = 0; i < Columns.Count; i++)
-            {
-                var npgsqlType = PostgreSqlTypeConverter.Instance.MapToNpgsqlDbType(Columns[i].ClrType);
-                readers[i] = BuildBinaryColumnReader(npgsqlType, Schema.FieldsList[i].DataType, AddBytes, _reportedTypes[i]);
-            }
+                readers[i] = BuildBinaryColumnReader(_plans[i], Schema.FieldsList[i].DataType, AddBytes);
 
             int rowsInBuffer = 0;
             bool streamEnded = false;
@@ -212,18 +279,14 @@ public sealed partial class PostgreSqlReader : IColumnarStreamReader, IBatchSize
 
     #region Binary Column Readers
 
-    private static (Action<NpgsqlBinaryExporter> Read, Func<IArrowArray> Build) BuildBinaryColumnReader(NpgsqlTypes.NpgsqlDbType npgsqlType, IArrowType arrowType, Action<long> addBytes, NpgsqlTypes.NpgsqlDbType? reportedType)
+    private static (Action<NpgsqlBinaryExporter> Read, Func<IArrowArray> Build) BuildBinaryColumnReader(ColumnPlan plan, IArrowType arrowType, Action<long> addBytes)
     {
-        // The array built here must match the field the schema declares. The fallback case below
-        // builds a StringArray from Read<object>().ToString(), so without this an array column
-        // declared as a list silently produced a column of whitespace and exit 0.
         if (arrowType is ListType listType)
-            return BuildBinaryListReader(listType, reportedType);
+            return BuildBinaryListReader(listType, plan.DecodeAs);
 
-        // Which builder runs follows the CLR type; only the type the exporter decodes with follows the column.
-        var textReadType = reportedType ?? npgsqlType;
+        var textReadType = plan.DecodeAs ?? NpgsqlTypes.NpgsqlDbType.Text;
 
-        return npgsqlType switch
+        return plan.Builder switch
         {
             NpgsqlTypes.NpgsqlDbType.Boolean => BuildTyped(
                 new BooleanArray.Builder(),
@@ -260,8 +323,7 @@ public sealed partial class PostgreSqlReader : IColumnarStreamReader, IBatchSize
                 (e, b) => { if (e.IsNull) { e.Skip(); b.AppendNull(); } else b.Append(e.Read<decimal>()); },
                 b => b.Build()),
 
-            NpgsqlTypes.NpgsqlDbType.Text or NpgsqlTypes.NpgsqlDbType.Varchar
-                or NpgsqlTypes.NpgsqlDbType.Char or NpgsqlTypes.NpgsqlDbType.Name => BuildTyped(
+            NpgsqlTypes.NpgsqlDbType.Text => BuildTyped(
                 new StringArray.Builder(),
                 (e, b) => { if (e.IsNull) { e.Skip(); b.AppendNull(); } else { var s = e.Read<string>(textReadType); b.Append(s); addBytes(System.Text.Encoding.UTF8.GetByteCount(s)); } },
                 b => b.Build()),
@@ -294,21 +356,13 @@ public sealed partial class PostgreSqlReader : IColumnarStreamReader, IBatchSize
                 (e, b) => { if (e.IsNull) { e.Skip(); b.AppendNull(); } else b.Append(Apache.Arrow.Serialization.Mapping.TemporalNormalization.ToOffset(e.Read<DateTime>())); },
                 b => b.Build()),
 
-            // A time of day is read as one: the fallback below builds text, which would sit under a time64 field.
             NpgsqlTypes.NpgsqlDbType.Time => BuildTyped(
                 new Time64Array.Builder((Time64Type)arrowType),
                 (e, b) => { if (e.IsNull) { e.Skip(); b.AppendNull(); } else b.Append(e.Read<TimeOnly>()); },
                 b => b.Build()),
 
-            NpgsqlTypes.NpgsqlDbType.Interval => BuildTyped(
-                new DurationArray.Builder((DurationType)arrowType),
-                (e, b) => { if (e.IsNull) { e.Skip(); b.AppendNull(); } else b.Append(e.Read<TimeSpan>().Ticks / TimeSpan.TicksPerMillisecond); },
-                b => b.Build()),
-
-            _ => BuildTyped(
-                new StringArray.Builder(),
-                (e, b) => { if (e.IsNull) { e.Skip(); b.AppendNull(); } else { var s = e.Read<object>(npgsqlType)?.ToString(); b.Append(s); addBytes(s?.Length ?? 0); } },
-                b => b.Build())
+            // OpenAsync refuses every type it has no plan for, so no column reaches here unplanned.
+            _ => throw new InvalidOperationException($"No reader for the planned type {plan.Builder}.")
         };
     }
 

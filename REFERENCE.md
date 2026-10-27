@@ -423,6 +423,23 @@ Cast each column to an accepted type in a SQL step before the writer: give this 
 The cast is yours to choose: a wider type changes what the target holds. `--dry-run` refuses in
 the same words.
 
+### Types a reader cannot read
+
+A reader reads natively each type it knows and **refuses the rest when it opens**, before the first
+row, naming every such column at once with its type and the expression, in the source's own SQL,
+that reads it. It never decodes a type it does not know as text. The PostgreSQL reader refuses
+`timetz`, `interval`, the network, geometric, range and text-search types, `money`, `oid` and the
+`reg*` types, composites, and arrays of any of them:
+
+```
+The pg reader cannot read these 2 columns, and nothing was read:
+  'ip': inet; select it as: ip::text AS ip
+  'price': money; select it as: price::numeric AS price
+Write each expression in the query where the column is selected.
+```
+
+`--dry-run` refuses in the same words.
+
 ### Schema modes
 
 Before writing to a database target, dtpipe compares the source schema with the target's and acts

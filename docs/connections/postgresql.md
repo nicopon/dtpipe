@@ -39,7 +39,18 @@ row-by-row `INSERT`.
 | `int[]`, `text[]` and other arrays | A real collection column. A NULL array, an empty array and a NULL element stay distinct end to end |
 | `jsonb` / `json` | Carried as text; address a field with `--compute "sev:row.payload.severity"` to land it in its own typed column |
 | `uuid` | A first-class `Guid`, written as a native UUID wherever the target has one |
-| A type with no mapping (`point`) | Refused when the schema is built, rather than read as something else — cast it in the query (`col::json`) |
+| A type the reader does not read (`inet`, `interval`, `timetz`, `money`, `point`) | Refused when the reader opens, every such column at once, with the cast that reads it |
+
+Reading, nothing is guessed: a column whose type the reader does not know is refused before the
+first row, with the expression to select instead:
+
+```
+The pg reader cannot read this column, and nothing was read:
+  'c': inet[]; select it as: c::text[] AS c
+Write each expression in the query where the column is selected.
+```
+
+[Types a reader cannot read](../../REFERENCE.md#types-a-reader-cannot-read) has the full list.
 
 Writing, a column PostgreSQL has no type for is refused before the table is touched: an 8-bit or
 an unsigned integer (from DuckDB, Parquet or MySQL) is never widened behind your back. The refusal
