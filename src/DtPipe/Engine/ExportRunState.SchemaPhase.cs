@@ -22,11 +22,34 @@ internal sealed partial class ExportRunState
         var schemaLoadName = readerSchemaPersist?.SchemaLoad;
         if (string.IsNullOrEmpty(schemaLoadName)) return;
 
-        var loadedSchema = SchemaStore.Load(schemaLoadName);
-        if (loadedSchema != null)
-            ExportService.InjectSchema(ReaderFactory, Registry, ArrowSchemaSerializer.SerializeCompact(loadedSchema));
-        else
-            Logger.LogWarning("Schema file '{Name}' not found — falling back to inference.", schemaLoadName);
+        var loadedSchema = SchemaStore.Load(schemaLoadName)
+            ?? throw new FileNotFoundException($"Schema file '{schemaLoadName}' could not be found.");
+
+        ExportService.InjectSchema(ReaderFactory, Registry, ArrowSchemaSerializer.SerializeCompact(loadedSchema));
+    }
+
+    internal void SavePersistedSchema()
+    {
+        var readerSchemaPersist = Registry.Get(ReaderFactory.OptionsType) as ISchemaPersistenceAware;
+        var schemaSaveName = readerSchemaPersist?.SchemaSave;
+        if (string.IsNullOrEmpty(schemaSaveName) || ReaderFactory is IStreamProcessorSource)
+            return;
+
+        var schema = (Reader as IColumnarStreamReader)?.Schema;
+        if (schema is { FieldsList.Count: > 0 })
+        {
+            SchemaStore.Save(schemaSaveName, ProviderName, schema);
+            Logger.LogInformation("Schema saved: {Name}.dtschema ({Count} fields)", schemaSaveName, schema.FieldsList.Count);
+        }
+        else if (Reader.Columns is { Count: > 0 })
+        {
+            var fields = Reader.Columns
+                .Select(c => ArrowTypeMapper.GetField(c.Name, c.ClrType, c.IsNullable))
+                .ToList();
+            var rowSchema = new Schema(fields, null);
+            SchemaStore.Save(schemaSaveName, ProviderName, rowSchema);
+            Logger.LogInformation("Schema saved: {Name}.dtschema ({Count} fields)", schemaSaveName, fields.Count);
+        }
     }
 
     internal async Task InitializeTransformersAsync(CancellationToken ct)

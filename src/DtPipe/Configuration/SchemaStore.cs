@@ -83,7 +83,10 @@ public static class SchemaStore
     }
 
     private static string GetFilePath(string name, string dir)
-        => Path.Combine(dir, $"{name}.dtschema");
+    {
+        var fileName = name.EndsWith(".dtschema", StringComparison.OrdinalIgnoreCase) ? name : $"{name}.dtschema";
+        return Path.Combine(dir, fileName);
+    }
 
     /// <summary>Indents each line of a JSON string by <paramref name="indent"/>.</summary>
     private static string IndentJson(string json, string indent)

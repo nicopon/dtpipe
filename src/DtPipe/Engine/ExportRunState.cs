@@ -172,6 +172,7 @@ internal sealed partial class ExportRunState
         }
 
         CurrentSchema = columns;
+        SavePersistedSchema();
 
         if (!SilenceInternal && Reader is IColumnTypeInferenceCapable autoCapable
             && autoCapable.AutoAppliedTypes?.Count > 0)
