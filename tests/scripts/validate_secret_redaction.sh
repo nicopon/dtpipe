@@ -97,8 +97,9 @@ pass "every helper the check lets through is defined over Redact"
 #
 #    `Fault` (`outcome.Fault` outside RunOutcome) is the exception a run threw: the same object an
 #    `ex.Message` names where the caller catches it, so its message is prose too.
+#    `unresolved` is an unset variable token or missing keyring reference in NodeBricks.
 # ----------------------------------------------------------------------------
-PROSE_ARGUMENTS='ex\.Message|(outcome\.)?Fault\.Message|reason|text|kv\.Value|f\.Value|report\.SchemaInspectionError|JobYaml\.Serialize\(|WithFileContent\(|\$"'
+PROSE_ARGUMENTS='ex\.Message|(outcome\.)?Fault\.Message|reason|text|unresolved|kv\.Value|f\.Value|report\.SchemaInspectionError|JobYaml\.Serialize\(|WithFileContent\(|\$"'
 
 UNDECLARED=""
 while IFS= read -r line; do

@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using Xunit;
 
@@ -12,8 +11,18 @@ namespace DtPipe.Coordinator.Server.Tests;
 /// </summary>
 public sealed class KeyWindowTests
 {
-    private static string Pages([CallerFilePath] string here = "") =>
-        Path.GetFullPath(Path.Combine(Path.GetDirectoryName(here)!, "..", "..", "src", "DtPipe.Coordinator.Server", "wwwroot"));
+    private static string Pages()
+    {
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            var candidate = Path.Combine(dir.FullName, "src", "DtPipe.Coordinator.Server", "wwwroot");
+            if (Directory.Exists(candidate))
+                return candidate;
+        }
+
+        throw new DirectoryNotFoundException(
+            $"src/DtPipe.Coordinator.Server/wwwroot not found walking up from {AppContext.BaseDirectory}");
+    }
 
     private static string Access() => File.ReadAllText(Path.Combine(Pages(), "js", "access.js"));
 
