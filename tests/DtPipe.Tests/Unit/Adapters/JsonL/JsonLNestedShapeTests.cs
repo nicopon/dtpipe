@@ -129,6 +129,17 @@ public class JsonLNestedShapeTests : IDisposable
     }
 
     [Fact]
+    public async Task A_Column_Types_Hint_Naming_No_Type_Is_Refused_Not_Defaulted_To_String()
+    {
+        var source = TempFile(".jsonl", new[] { """{"id":1,"col":"x"}""" });
+
+        await using var reader = new JsonLStreamReader(source, new JsonLReaderOptions { ColumnTypes = "id:int64,col:jsno" });
+        var refused = async () => await reader.OpenAsync();
+        (await refused.Should().ThrowAsync<InvalidOperationException>())
+            .WithMessage("*'col'*'jsno'*names no type*");
+    }
+
+    [Fact]
     public async Task A_Declared_Schema_Refuses_A_Key_It_Lacks_Too()
     {
         var declared = new Schema(new[]

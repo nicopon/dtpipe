@@ -213,7 +213,7 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
 
         foreach (var kvp in overrides)
         {
-            var clrType = ResolveHintToClrType(kvp.Value) ?? typeof(string);
+            var clrType = DtPipe.Core.Helpers.TypeHelper.RequireTypeHint("--column-types", kvp.Key, kvp.Value);
             var arrowResult = ArrowTypeMapper.GetLogicalType(clrType);
             columns.Add(new PipeColumnInfo(kvp.Key, clrType, true));
             if (arrowResult.Metadata != null)
@@ -603,8 +603,6 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
         }
         return result;
     }
-
-    private static Type? ResolveHintToClrType(string hint) => DtPipe.Core.Helpers.TypeHelper.ParseTypeHint(hint);
 
     private bool _disposed;
 
