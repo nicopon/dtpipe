@@ -189,4 +189,113 @@ public class CsvReaderTests : IAsyncLifetime
         factory.CanHandle("data.parquet").Should().BeFalse();
         factory.CanHandle("sqlite:test.db").Should().BeFalse();
     }
+
+    [Fact]
+    public async Task CsvReader_MaxSample_LimitsInferenceRowSampleCount()
+    {
+        var csvPath = Path.Combine(Path.GetTempPath(), $"test_sample_{Guid.NewGuid()}.csv");
+        var content = """
+            Id,Score
+            1,100
+            2,200
+            3,not_a_number
+            4,400
+            5,500
+            """;
+        await File.WriteAllTextAsync(csvPath, content);
+
+        try
+        {
+            // Sample only the first 2 rows: both are numeric, so Score is inferred as int
+            var optionsLimited = new CsvReaderOptions { AutoColumnTypes = true, MaxSample = 2 };
+            await using (var reader = new CsvStreamReader(csvPath, optionsLimited))
+            {
+                await reader.OpenAsync();
+                reader.Columns!.First(c => c.Name == "Score").ClrType.Should().Be(typeof(int));
+            }
+
+            // Sample 5 rows: row 3 is not_a_number, so Score falls back to string
+            var optionsBroader = new CsvReaderOptions { AutoColumnTypes = true, MaxSample = 5 };
+            await using (var reader = new CsvStreamReader(csvPath, optionsBroader))
+            {
+                await reader.OpenAsync();
+                reader.Columns!.First(c => c.Name == "Score").ClrType.Should().Be(typeof(string));
+            }
+        }
+        finally
+        {
+            if (File.Exists(csvPath)) File.Delete(csvPath);
+        }
+    }
+
+    [Fact]
+    public async Task CsvReader_MaxSample_Zero_DisablesAutoColumnTypesInference()
+    {
+        var csvPath = Path.Combine(Path.GetTempPath(), $"test_sample0_{Guid.NewGuid()}.csv");
+        var content = """
+            Id,Score
+            1,100
+            2,200
+            """;
+        await File.WriteAllTextAsync(csvPath, content);
+
+        try
+        {
+            // MaxSample = 0 turns inference off: columns remain strings
+            var optionsZero = new CsvReaderOptions { AutoColumnTypes = true, MaxSample = 0 };
+            await using (var reader = new CsvStreamReader(csvPath, optionsZero))
+            {
+                await reader.OpenAsync();
+                reader.Columns!.First(c => c.Name == "Score").ClrType.Should().Be(typeof(string));
+                reader.AutoAppliedTypes.Should().BeNull();
+            }
+
+            // MaxSample <= 0 also turns inference off
+            var optionsNegative = new CsvReaderOptions { AutoColumnTypes = true, MaxSample = -1 };
+            await using (var reader = new CsvStreamReader(csvPath, optionsNegative))
+            {
+                await reader.OpenAsync();
+                reader.Columns!.First(c => c.Name == "Score").ClrType.Should().Be(typeof(string));
+                reader.AutoAppliedTypes.Should().BeNull();
+            }
+
+            // Explicit column types still apply when MaxSample = 0
+            var optionsDeclared = new CsvReaderOptions { AutoColumnTypes = true, MaxSample = 0, ColumnTypes = "Score:int32" };
+            await using (var reader = new CsvStreamReader(csvPath, optionsDeclared))
+            {
+                await reader.OpenAsync();
+                reader.Columns!.First(c => c.Name == "Score").ClrType.Should().Be(typeof(int));
+            }
+        }
+        finally
+        {
+            if (File.Exists(csvPath)) File.Delete(csvPath);
+        }
+    }
+
+    [Fact]
+    public async Task CsvReader_MaxSample_CliExecutionHonorsFlag()
+    {
+        var csvPath = Path.Combine(Path.GetTempPath(), $"test_cli_{Guid.NewGuid()}.csv");
+        var outPath = Path.Combine(Path.GetTempPath(), $"test_cli_out_{Guid.NewGuid()}.csv");
+        var content = """
+            Id,Score
+            1,100
+            2,200
+            3,300
+            """;
+        await File.WriteAllTextAsync(csvPath, content);
+
+        try
+        {
+            var exit = await Program.Main(["-i", $"csv:{csvPath}", "--auto-column-types", "--max-sample", "2", "-o", $"csv:{outPath}", "--no-stats"]);
+            exit.Should().Be(0);
+            File.Exists(outPath).Should().BeTrue();
+        }
+        finally
+        {
+            if (File.Exists(csvPath)) File.Delete(csvPath);
+            if (File.Exists(outPath)) File.Delete(outPath);
+        }
+    }
 }

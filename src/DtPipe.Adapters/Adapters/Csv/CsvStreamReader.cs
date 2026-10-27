@@ -128,14 +128,14 @@ public class CsvStreamReader : IStreamReader, IColumnTypeInferenceCapable
         // Build column parsers from --column-types option (or auto-inferred types)
         var typeOverrides = ParseColumnTypesOption(_options.ColumnTypes);
 
-        // Auto-infer types when --auto-column-types is set and no explicit --column-types given
+        // Auto-infer types when --auto-column-types is set, no explicit --column-types given, and MaxSample > 0
         if (_options.AutoColumnTypes && string.IsNullOrWhiteSpace(_options.ColumnTypes)
-            && !string.IsNullOrEmpty(_filePath) && _filePath != "-")
+            && !string.IsNullOrEmpty(_filePath) && _filePath != "-"
+            && _options.MaxSample > 0)
         {
             try
             {
-                const int autoSampleCount = 100;
-                var inferred = await InferColumnTypesAsync(autoSampleCount, default);
+                var inferred = await InferColumnTypesAsync(_options.MaxSample, default);
                 if (inferred.Count > 0)
                 {
                     _autoAppliedTypes = inferred;
@@ -232,7 +232,7 @@ public class CsvStreamReader : IStreamReader, IColumnTypeInferenceCapable
     /// <inheritdoc />
     public async Task<IReadOnlyDictionary<string, string>> InferColumnTypesAsync(int sampleRows, CancellationToken ct = default)
     {
-        if (string.IsNullOrEmpty(_filePath) || _filePath == "-")
+        if (sampleRows <= 0 || string.IsNullOrEmpty(_filePath) || _filePath == "-")
             return new Dictionary<string, string>();
 
         var encoding = Encoding.GetEncoding(_options.Encoding);

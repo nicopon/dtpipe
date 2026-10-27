@@ -7,7 +7,7 @@ namespace DtPipe.Adapters.Xml;
 
 [Description("Reads data from an XML file, extracting records at a configurable element path.")]
 [ComponentHelp(
-    usageNotes: "Connection string is a file path ending in '.xml' (or the 'xml:' prefix; '-' for stdin). '--path' selects the records to extract: an absolute slash-path (e.g. '/Catalog/Product') matches from the root, while a leading '//' (e.g. '//Product') recursively matches by element name at any depth; attributes are exposed as fields prefixed with '--xml-attribute-prefix' (default '_').",
+    usageNotes: "Connection string is a file path ending in '.xml' (or the 'xml:' prefix; '-' for stdin). '--path' selects the records to extract: an absolute slash-path (e.g. '/Catalog/Product') matches from the root, while a leading '//' (e.g. '//Product') recursively matches by element name at any depth; attributes are exposed as fields prefixed with '--xml-attribute-prefix' (default '_'). The schema is inferred from the first 1000 records ('--max-sample'); '--max-sample 0' turns inference off and requires a schema from '--schema-load' or '--column-types'.",
     examples: new[] {
         "main:\n  input: \"catalog.xml\"\n  provider-options:\n    xml:\n      path: \"//Product\"\n      auto-column-types: true\n  output: \"<adapter-prefix>:<target>\""
     })]
@@ -15,6 +15,14 @@ public class XmlReaderOptions : NavigableSourceOptions, IOptionSet, IHasSchemaOv
 {
     public static string Prefix => XmlConstants.ProviderName;
     public static string DisplayName => "XML Reader";
+
+    /// <summary>Records sampled to infer the schema when '--max-sample' is not given.</summary>
+    public const int DefaultMaxSample = 1000;
+
+    public XmlReaderOptions()
+    {
+        MaxSample = DefaultMaxSample;
+    }
 
     [Description("XML file path (use '-' for stdin)")]
     public string Xml { get; set; } = "";

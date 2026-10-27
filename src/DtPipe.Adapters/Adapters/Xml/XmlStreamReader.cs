@@ -84,9 +84,9 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
         await ResetReaderAsync(ct);
 
         // Pass 1 (optional): auto-discover types from sample
-        if (_options.AutoColumnTypes)
+        if (_options.AutoColumnTypes && _options.MaxSample > 0)
         {
-            var inferred = await InferColumnTypesAsync(100, ct);
+            var inferred = await InferColumnTypesAsync(_options.MaxSample, ct);
             _autoAppliedTypes = inferred;
             await ResetReaderAsync(ct);
         }
@@ -103,6 +103,13 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
         }
         else
         {
+            if (_options.MaxSample <= 0)
+            {
+                throw new InvalidOperationException(
+                    $"XML: '--max-sample {_options.MaxSample}' leaves no record to infer the schema from, and no schema was declared. " +
+                    "Declare the columns with '--schema-load' or '--column-types', or give a sample of 1 or more.");
+            }
+
             await InferSchemaAsync(ct);
             await ResetReaderAsync(ct);
         }
@@ -127,7 +134,7 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
     /// </summary>
     private bool CanBuildSchemaFromTypeOverrides()
     {
-        return !_options.AutoColumnTypes
+        return (!_options.AutoColumnTypes || _options.MaxSample <= 0)
             && _typeOverrides != null
             && _typeOverrides.Count > 0
             && _typeOverrides.Keys.All(k => !k.Contains('.'));
@@ -267,7 +274,7 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 
         Dictionary<string, object?>? merged = null;
         int count = 0;
-        const int maxSample = 1000;
+        int maxSample = _options.MaxSample;
 
         // For STDIN we cannot reset after inference — buffer records so they can be replayed during data extraction.
         if (!_isResetSupported)
@@ -449,6 +456,7 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 
     public async Task<IReadOnlyDictionary<string, string>> InferColumnTypesAsync(int sampleRows, CancellationToken ct = default)
     {
+        if (sampleRows <= 0) return new Dictionary<string, string>();
         var sampleData = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         int rowCount = 0;
 
