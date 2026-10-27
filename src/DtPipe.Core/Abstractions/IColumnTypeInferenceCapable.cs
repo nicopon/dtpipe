@@ -20,4 +20,10 @@ public interface IColumnTypeInferenceCapable
     /// The value is the map of column name → type hint that was applied.
     /// </summary>
     IReadOnlyDictionary<string, string>? AutoAppliedTypes => null;
+
+    /// <summary>
+    /// The row count this reader actually sampled (or will sample) to infer column types —
+    /// its own <c>--max-sample</c>, whether explicit or the reader's default.
+    /// </summary>
+    int MaxSample { get; }
 }

@@ -371,6 +371,7 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 
 
     public IReadOnlyDictionary<string, string>? AutoAppliedTypes => _autoAppliedTypes;
+    public int MaxSample => _options.MaxSample;
 
     // For STDIN: records consumed during schema inference are buffered here and replayed during data extraction.
     private List<Dictionary<string, object?>>? _stdinBuffer;

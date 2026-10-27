@@ -105,6 +105,42 @@ public class ExportServiceTests
         _mockProgress.Verify(p => p.Complete(), Times.Once);
     }
 
+    [Fact]
+    public async Task RunExportAsync_AutoAppliedTypes_AnnouncesTheReaderOwnMaxSample()
+    {
+        var pipeline = new List<IDataTransformer>();
+
+        var mockReader = new Mock<IStreamReader>();
+        mockReader.Setup(r => r.OpenAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        mockReader.Setup(r => r.Columns).Returns(new List<PipeColumnInfo> { new("col1", typeof(int), true) });
+        mockReader.Setup(r => r.ReadBatchesAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+                  .Returns(ToAsyncEnumerable(new[] { new object?[] { 1 } }));
+        mockReader.Setup(r => r.DisposeAsync()).Returns(ValueTask.CompletedTask);
+
+        var autoApplied = new Dictionary<string, string> { ["col1"] = "int32" };
+        var inferenceCapable = mockReader.As<IColumnTypeInferenceCapable>();
+        inferenceCapable.Setup(r => r.AutoAppliedTypes).Returns(autoApplied);
+        inferenceCapable.Setup(r => r.MaxSample).Returns(7); // a reader default/override that is not 100
+
+        _mockReaderFactory.Setup(f => f.OptionsType).Returns(typeof(EmptyOptions));
+        _mockReaderFactory.Setup(f => f.Create(It.IsAny<OptionsRegistry>())).Returns(mockReader.Object);
+
+        var mockWriter = new Mock<IRowDataWriter>();
+        mockWriter.Setup(w => w.InitializeAsync(It.IsAny<IReadOnlyList<PipeColumnInfo>>(), It.IsAny<CancellationToken>())).Returns(ValueTask.CompletedTask);
+        mockWriter.Setup(w => w.WriteBatchAsync(It.IsAny<IReadOnlyList<object?[]>>(), It.IsAny<CancellationToken>())).Returns(ValueTask.CompletedTask);
+        mockWriter.Setup(w => w.CompleteAsync(It.IsAny<CancellationToken>())).Returns(ValueTask.CompletedTask);
+        mockWriter.Setup(w => w.DisposeAsync()).Returns(ValueTask.CompletedTask);
+
+        _mockWriterFactory.Setup(f => f.ComponentName).Returns("test-target");
+        _mockWriterFactory.Setup(f => f.OptionsType).Returns(typeof(EmptyOptions));
+        _mockWriterFactory.Setup(f => f.Create(It.IsAny<OptionsRegistry>())).Returns(mockWriter.Object);
+
+        await _service.RunExportAsync(new PipelineOptions { NoStats = true }, "test-source", "target-path",
+            CancellationToken.None, pipeline, _mockReaderFactory.Object, _mockWriterFactory.Object, new OptionsRegistry());
+
+        _mockObserver.Verify(o => o.ShowColumnTypeInferenceSuggestion(autoApplied, 7, true), Times.Once);
+    }
+
     private static async IAsyncEnumerable<ReadOnlyMemory<object?[]>> ToAsyncEnumerable(IEnumerable<object?[]> data)
     {
         yield return new ReadOnlyMemory<object?[]>(System.Linq.Enumerable.ToArray(data));

@@ -176,7 +176,7 @@ internal sealed partial class ExportRunState
 
         if (!SilenceInternal && Reader is IColumnTypeInferenceCapable autoCapable
             && autoCapable.AutoAppliedTypes?.Count > 0)
-            Observer.ShowColumnTypeInferenceSuggestion(autoCapable.AutoAppliedTypes, 100, applied: true);
+            Observer.ShowColumnTypeInferenceSuggestion(autoCapable.AutoAppliedTypes, autoCapable.MaxSample, applied: true);
 
         // ── Schema ─────────────────────────────────────────────────────────
         Logger.LogDebug("[Schema] initializing transformers and segmenting pipeline");

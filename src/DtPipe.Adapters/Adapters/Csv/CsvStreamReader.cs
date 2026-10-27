@@ -163,6 +163,7 @@ public class CsvStreamReader : IStreamReader, IColumnTypeInferenceCapable
 
     private IReadOnlyDictionary<string, string>? _autoAppliedTypes;
     public IReadOnlyDictionary<string, string>? AutoAppliedTypes => _autoAppliedTypes;
+    public int MaxSample => _options.MaxSample;
 
     private readonly SemaphoreSlim _lock = new(1, 1);
     private bool _isDisposed;

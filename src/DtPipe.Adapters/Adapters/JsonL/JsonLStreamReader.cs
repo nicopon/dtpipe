@@ -50,6 +50,7 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
 
     private IReadOnlyDictionary<string, string>? _autoAppliedTypes;
     public IReadOnlyDictionary<string, string>? AutoAppliedTypes => _autoAppliedTypes;
+    public int MaxSample => _options.MaxSample;
 
     // Set when the columns come from the data or from a declared Arrow schema: a record with a key the
     // schema has no column for is then refused, never written without it. --column-types is a projection.
