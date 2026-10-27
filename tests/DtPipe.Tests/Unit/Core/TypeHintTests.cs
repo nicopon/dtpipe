@@ -21,7 +21,6 @@ public class TypeHintTests
     [InlineData("string", typeof(string))]
     [InlineData("str", typeof(string))]
     [InlineData("text", typeof(string))]
-    [InlineData("json", typeof(string))]
     [InlineData("int", typeof(int))]
     [InlineData("int32", typeof(int))]
     [InlineData("integer", typeof(int))]

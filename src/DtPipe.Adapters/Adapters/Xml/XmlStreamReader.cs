@@ -277,8 +277,10 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
         int maxSample = _options.MaxSample;
 
         // For STDIN we cannot reset after inference — buffer records so they can be replayed during data extraction.
+        // The capacity is a hint, not the sample bound: List<T> grows past it on its own, so a huge
+        // '--max-sample' pre-allocates a small array instead of one sized for the whole sample up front.
         if (!_isResetSupported)
-            _stdinBuffer = new List<Dictionary<string, object?>>(maxSample);
+            _stdinBuffer = new List<Dictionary<string, object?>>(Math.Clamp(maxSample, 0, 1024));
 
         await foreach (var record in EnumerateRawRecordsAsync(ct))
         {

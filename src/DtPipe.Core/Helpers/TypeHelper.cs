@@ -21,7 +21,7 @@ public static class TypeHelper
     private static readonly (Type Type, string[] Names)[] Table =
     [
         (typeof(Guid), ["uuid", "guid"]),
-        (typeof(string), ["string", "str", "text", "json"]),
+        (typeof(string), ["string", "str", "text"]),
         (typeof(int), ["int32", "int", "integer"]),
         (typeof(long), ["int64", "long"]),
         (typeof(double), ["double", "float64", "number"]),

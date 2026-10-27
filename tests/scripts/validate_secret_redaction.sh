@@ -97,9 +97,12 @@ pass "every helper the check lets through is defined over Redact"
 #
 #    `Fault` (`outcome.Fault` outside RunOutcome) is the exception a run threw: the same object an
 #    `ex.Message` names where the caller catches it, so its message is prose too.
-#    `unresolved` is an unset variable token or missing keyring reference in NodeBricks.
+#
+#    `unresolved` is not in the name list below: it is an unset variable token or missing keyring
+#    reference, which only `NodeBricks.ReadSecretAsync` names that way, so the entry is scoped to
+#    that one file rather than to the name everywhere it might appear in `src/`.
 # ----------------------------------------------------------------------------
-PROSE_ARGUMENTS='ex\.Message|(outcome\.)?Fault\.Message|reason|text|unresolved|kv\.Value|f\.Value|report\.SchemaInspectionError|JobYaml\.Serialize\(|WithFileContent\(|\$"'
+PROSE_ARGUMENTS='ex\.Message|(outcome\.)?Fault\.Message|reason|text|kv\.Value|f\.Value|report\.SchemaInspectionError|JobYaml\.Serialize\(|WithFileContent\(|\$"'
 
 UNDECLARED=""
 while IFS= read -r line; do
@@ -109,7 +112,16 @@ while IFS= read -r line; do
         */bin/*|*/obj/*|*/Security/ConnectionStringSanitizer.cs) continue ;;
     esac
     arg=$(echo "$line" | sed 's/.*ConnectionStringSanitizer\.Sanitize(//')
-    echo "$arg" | grep -qE "^(${PROSE_ARGUMENTS})" || UNDECLARED="${UNDECLARED}${line}"$'\n'
+    if echo "$arg" | grep -qE "^(${PROSE_ARGUMENTS})"; then continue; fi
+
+    # 'unresolved' is prose only at the one site its reason holds for; elsewhere it is undeclared
+    # like any other name, so a second variable of that name does not inherit the exemption.
+    if echo "$arg" | grep -qE '^unresolved\b'; then
+        case "$file" in
+            */Cli/Node/NodeBricks.cs) continue ;;
+        esac
+    fi
+    UNDECLARED="${UNDECLARED}${line}"$'\n'
 done <<< "$(grep -rn 'ConnectionStringSanitizer\.Sanitize(' "$PROJECT_ROOT/src" --include="*.cs" 2>/dev/null || true)"
 
 if [ -n "$UNDECLARED" ]; then

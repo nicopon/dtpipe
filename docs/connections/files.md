@@ -62,7 +62,9 @@ dtpipe -i orders.csv --column-types "amount:decimal,order_id:int32" --alias o �
 
 `--column-types` and `--auto-column-types` apply to the text readers (CSV, JSONL, XML). A hint
 that names no known type is refused rather than silently ignored — the vocabulary is in
-[REFERENCE.md](../../REFERENCE.md#type-hints).
+[REFERENCE.md](../../REFERENCE.md#type-hints). `--max-sample` sets how many rows feed inference
+(`0` disables it); each reader's default is its own — see
+[REFERENCE.md](../../REFERENCE.md#source-reader-options).
 
 ## Nested and repeated values
 

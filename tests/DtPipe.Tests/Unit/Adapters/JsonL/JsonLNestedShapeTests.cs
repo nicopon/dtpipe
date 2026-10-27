@@ -60,6 +60,36 @@ public class JsonLNestedShapeTests : IDisposable
     }
 
     [Fact]
+    public async Task A_Value_Gets_The_Same_Text_Whether_The_Sample_Saw_It_Or_Not()
+    {
+        var events = new[]
+        {
+            """{"id":1,"col":"abc"}""",
+            """{"id":2,"col":42}""",
+            """{"id":3,"col":99}""",
+            """{"id":4,"col":"z"}"""
+        };
+        var source = TempFile(".jsonl", events);
+        var target = TempFile(".jsonl");
+
+        // max-sample 2 buffers the first two records (where 'col' is inferred string from
+        // record 1, then record 2's number must already resolve to text); records 3 and 4
+        // come from the fresh read that follows.
+        var exit = await Program.Main(["-i", $"jsonl:{source}", "--max-sample", "2", "-o", $"jsonl:{target}", "--no-stats"]);
+
+        exit.Should().Be(0);
+        var lines = await File.ReadAllLinesAsync(target);
+        lines.Should().HaveCount(4);
+
+        var values = lines.Select(l =>
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(l);
+            return doc.RootElement.GetProperty("col").GetString();
+        }).ToList();
+        values.Should().Equal("abc", "42", "99", "z");
+    }
+
+    [Fact]
     public async Task Sample_Zero_Turns_Inference_Off_And_Asks_For_A_Declared_Schema()
     {
         var source = TempFile(".jsonl", JsonLShapeData.Events(3));
@@ -160,6 +190,22 @@ public class JsonLNestedShapeTests : IDisposable
     }
 
     [Fact]
+    public async Task A_String_Column_Keeps_The_Raw_Json_Text_Of_A_Scalar_Too()
+    {
+        var source = TempFile(".jsonl", new[] { """{"id":1,"f":true,"n":1.50}""" });
+        var target = TempFile(".jsonl");
+
+        var exit = await Program.Main(["-i", $"jsonl:{source}", "--column-types", "id:string,f:string,n:string", "-o", $"jsonl:{target}", "--no-stats"]);
+
+        exit.Should().Be(0);
+        var line = (await File.ReadAllLinesAsync(target)).Single();
+        using var doc = System.Text.Json.JsonDocument.Parse(line);
+        doc.RootElement.GetProperty("id").GetString().Should().Be("1");
+        doc.RootElement.GetProperty("f").GetString().Should().Be("true");
+        doc.RootElement.GetProperty("n").GetString().Should().Be("1.50");
+    }
+
+    [Fact]
     public async Task Reader_Direct_ReadRecordBatchesAsync_With_ColumnTypes_String_On_Object()
     {
         var events = new[]
@@ -202,7 +248,7 @@ public class JsonLNestedShapeTests : IDisposable
     }
 
     [Fact]
-    public async Task Object_Column_Edge_Cases_Null_Empty_Nested_And_Json_Hint()
+    public async Task Object_Column_Edge_Cases_Null_Empty_And_Nested()
     {
         var events = new[]
         {
@@ -215,7 +261,7 @@ public class JsonLNestedShapeTests : IDisposable
         var source = TempFile(".jsonl", events);
         var target = TempFile(".jsonl");
 
-        var exit = await Program.Main(["-i", $"jsonl:{source}", "--column-types", "id:int64,payload:json", "-o", $"jsonl:{target}", "--no-stats"]);
+        var exit = await Program.Main(["-i", $"jsonl:{source}", "--column-types", "id:int64,payload:string", "-o", $"jsonl:{target}", "--no-stats"]);
 
         exit.Should().Be(0);
         var lines = await File.ReadAllLinesAsync(target);

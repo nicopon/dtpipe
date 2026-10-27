@@ -232,7 +232,8 @@ strings:
 | `--csv-has-header` | `false` | Whether the CSV has a header row (default: `true`). Takes `true` or `false`: see [Boolean flags](#boolean-flags) |
 | `--encoding` | `ISO-8859-1` | Text file encoding |
 | `--column-types` | `"Id:uuid,Qty:int32"` | Explicit column type declarations for text readers. A hint naming no type is refused — see [Type hints](#type-hints) |
-| `--auto-column-types` | | Infer column types from the first 100 rows |
+| `--auto-column-types` | | Infer column types from a sample of rows (size is `--max-sample`, default varies by reader) |
+| `--max-sample` | `500` | Rows sampled to infer schema or column types for a text reader (CSV, JSONL, XML); `0` disables inference. Default: 100 for CSV, 1000 for JSONL and XML |
 | `--path` | `"//Product"` | XPath / JSON path for record selection (XML, JsonL) |
 | `--query` / `-q` | `"SELECT ..."` | SQL query executed by database readers (or a path to a `.sql` file) |
 | `--table` / `-t` | `"users"` | Source table name — auto-builds `SELECT * FROM <table>` when no `--query` is given (database readers). A qualified name is split on the dot and each part quoted the way the source engine spells it: `eshop.customers` reads `"eshop"."customers"` on PostgreSQL, `` `eshop`.`customers` `` on MySQL, `[eshop].[customers]` on SQL Server. Spell the value yourself — `'"an.awkward.name"'` — to keep a dot inside a single identifier |

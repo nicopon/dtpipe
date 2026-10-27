@@ -299,19 +299,26 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
         return result;
     }
 
+    // Raw material only: a line's text (classic) or a standalone JsonElement (hierarchical). Replaying
+    // a buffered sample record through the same builder a fresh read uses — rather than keeping the
+    // dict built while buffering — means its text columns are never decided before the schema is: the
+    // schema (and _textColumns) is known only once InferSchemaAsync returns, after the buffer fills.
     private async IAsyncEnumerable<object?> EnumerateRawRecordsAsync([EnumeratorCancellation] CancellationToken ct)
     {
         if (_streamReader == null) yield break;
+
+        bool isHierarchical = !string.IsNullOrEmpty(_options.Path);
 
         // 1. DRAIN the buffer first (if any)
         while (_bufferPos < _inferenceBuffer.Count)
         {
             if (ct.IsCancellationRequested) yield break;
-            yield return _inferenceBuffer[_bufferPos++];
+            var raw = _inferenceBuffer[_bufferPos++];
+            yield return isHierarchical ? ToRecord((JsonElement)raw) : ParseLineToDictionary((string)raw);
         }
 
         // 2. Read new records from the stream
-        if (string.IsNullOrEmpty(_options.Path))
+        if (!isHierarchical)
         {
             // Classic JSONL: 1 line = 1 record
             while (!ct.IsCancellationRequested)
@@ -320,10 +327,9 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
                 if (line == null) break;
                 if (string.IsNullOrWhiteSpace(line)) continue;
 
-                var record = ParseLineToDictionary(line);
-                if (_isBufferingActive) _inferenceBuffer.Add(record);
+                if (_isBufferingActive) _inferenceBuffer.Add(line);
                 _bufferPos++;
-                yield return record;
+                yield return ParseLineToDictionary(line);
             }
         }
         else
@@ -333,16 +339,15 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
 
             if (_isResetSupported)
             {
-                // File-based: continue reading from the current stream if possible, 
+                // File-based: continue reading from the current stream if possible,
                 // but hierarchical streaming usually needs a fresh reader for subtree matches.
                 // However, for the simple case where we only read once, it works.
                 await foreach (var element in JsonStreamingPathReader.StreamArrayAsync(_fileStream!, pathParts, ct))
                 {
-                    var converted = ToRecordValue(element);
-                    var record = converted is Dictionary<string, object?> d ? d : new Dictionary<string, object?> { ["value"] = converted };
-                    if (_isBufferingActive) _inferenceBuffer.Add(record);
+                    // Already a standalone clone (JsonStreamingPathReader), safe to buffer as is.
+                    if (_isBufferingActive) _inferenceBuffer.Add(element);
                     _bufferPos++;
-                    yield return record;
+                    yield return ToRecord(element);
                 }
             }
             else
@@ -366,14 +371,23 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
                 {
                     foreach (var item in current.EnumerateArray())
                     {
-                        var record = ToRecordValue(item) as Dictionary<string, object?> ?? new Dictionary<string, object?> { ["value"] = ToRecordValue(item) };
-                        if (_isBufferingActive) _inferenceBuffer.Add(record);
+                        // Cloned: 'doc' is disposed when this iterator ends, including an early
+                        // break by a consumer that stops at the sample size, and a buffered element
+                        // must outlive that to be replayed later.
+                        var cloned = item.Clone();
+                        if (_isBufferingActive) _inferenceBuffer.Add(cloned);
                         _bufferPos++;
-                        yield return record;
+                        yield return ToRecord(cloned);
                     }
                 }
             }
         }
+    }
+
+    private Dictionary<string, object?> ToRecord(JsonElement element)
+    {
+        var converted = ToRecordValue(element);
+        return converted as Dictionary<string, object?> ?? new Dictionary<string, object?> { ["value"] = converted };
     }
 
     private (Type ClrType, IArrowType ArrowType) InferTypes(string key, object? value)
