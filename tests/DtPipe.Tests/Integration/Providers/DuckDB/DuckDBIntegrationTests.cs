@@ -314,4 +314,47 @@ public class DuckDBIntegrationTests : IAsyncLifetime
             if (File.Exists(duckDbPath)) File.Delete(duckDbPath);
         }
     }
+
+    [Fact]
+    public async Task DuckDbDataWriter_Append_FailedCell_LeavesNoHalfBuiltRowInTheTarget()
+    {
+        var duckDbPath = Path.Combine(Path.GetTempPath(), $"test_append_failed_{Guid.NewGuid():N}.duckdb");
+        var connectionString = $"Data Source={duckDbPath}";
+
+        try
+        {
+            await using (var connection = new DuckDBConnection(connectionString))
+            {
+                await connection.OpenAsync();
+                using var cmd = connection.CreateCommand();
+                cmd.CommandText = "CREATE TABLE t (id INTEGER, c INTEGER); INSERT INTO t VALUES (1, 10)";
+                await cmd.ExecuteNonQueryAsync();
+            }
+
+            var columns = new List<Core.Models.PipeColumnInfo> { new("id", typeof(int), false), new("c", typeof(string), true) };
+            var batch = new List<object?[]> { new object?[] { 2, "abc" } };
+
+            await using (var writer = new DuckDbDataWriter(connectionString,
+                new DuckDbWriterOptions { Table = "t", Strategy = DuckDbWriteStrategy.Append },
+                NullLogger<DuckDbDataWriter>.Instance, DuckDbTypeConverter.Instance))
+            {
+                await writer.InitializeAsync(columns);
+                var write = async () => await writer.WriteRecordBatchAsync(batch.ToRecordBatch(columns));
+                await write.Should().ThrowAsync<Exception>();
+            }
+
+            await using var check = new DuckDBConnection(connectionString);
+            await check.OpenAsync();
+            using var read = check.CreateCommand();
+            read.CommandText = "SELECT id, c FROM t ORDER BY id";
+            var rows = new List<(int, int)>();
+            using (var reader = await read.ExecuteReaderAsync())
+                while (await reader.ReadAsync()) rows.Add((reader.GetInt32(0), reader.GetInt32(1)));
+            rows.Should().Equal((1, 10));
+        }
+        finally
+        {
+            if (File.Exists(duckDbPath)) File.Delete(duckDbPath);
+        }
+    }
 }

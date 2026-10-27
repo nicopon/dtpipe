@@ -132,8 +132,18 @@ public sealed class DuckDbDataWriter : IColumnarDataWriter, ISchemaInspector, IK
         catch (Exception ex)
         {
             _logger.LogError(ex, "DuckDB Arrow Appender Failed: {Message}", ex.Message);
+            DiscardBufferedRows();
             throw;
         }
+    }
+
+    // Closing the appender flushes its buffer, and a row left half-built by a failed cell is flushed with
+    // its missing columns at the type's default: a row that looks real. Clearing first drops that row
+    // (and the buffered rows after the last flush) so a failed run writes none of them.
+    private void DiscardBufferedRows()
+    {
+        try { ((DuckDBAppender?)_appender)?.Clear(); }
+        catch (Exception ex) { _logger.LogDebug(ex, "DuckDB appender could not discard its buffer"); }
     }
 
     private void AppendValue(IDuckDBAppenderRow row, object val, Func<object?, object?> converter)
