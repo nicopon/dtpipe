@@ -128,4 +128,142 @@ public class JsonLNestedShapeTests : IDisposable
             return total;
         }
     }
+
+    [Fact]
+    public async Task Declaring_An_Object_Column_As_String_Keeps_Raw_Json_Text()
+    {
+        var events = new[]
+        {
+            """{"id":1,"payload":{"severity":"info"}}""",
+            """{"id":2,"payload":{"severity":"warn","error_code":"E1"}}"""
+        };
+        var source = TempFile(".jsonl", events);
+        var target = TempFile(".jsonl");
+
+        var exit = await Program.Main(["-i", $"jsonl:{source}", "--column-types", "id:int64,payload:string", "-o", $"jsonl:{target}", "--no-stats"]);
+
+        exit.Should().Be(0);
+        var outputLines = await File.ReadAllLinesAsync(target);
+        outputLines.Should().HaveCount(2);
+
+        using (var doc0 = System.Text.Json.JsonDocument.Parse(outputLines[0]))
+        {
+            doc0.RootElement.GetProperty("id").GetInt64().Should().Be(1);
+            doc0.RootElement.GetProperty("payload").GetString().Should().Be("""{"severity":"info"}""");
+        }
+
+        using (var doc1 = System.Text.Json.JsonDocument.Parse(outputLines[1]))
+        {
+            doc1.RootElement.GetProperty("id").GetInt64().Should().Be(2);
+            doc1.RootElement.GetProperty("payload").GetString().Should().Be("""{"severity":"warn","error_code":"E1"}""");
+        }
+    }
+
+    [Fact]
+    public async Task Reader_Direct_ReadRecordBatchesAsync_With_ColumnTypes_String_On_Object()
+    {
+        var events = new[]
+        {
+            """{"id":1,"payload":{"severity":"info"}}"""
+        };
+        var source = TempFile(".jsonl", events);
+        await using var reader = new JsonLStreamReader(source, new JsonLReaderOptions { ColumnTypes = "id:int64,payload:string" });
+        await reader.OpenAsync();
+        var batches = new List<RecordBatch>();
+        await foreach (var batch in reader.ReadRecordBatchesAsync())
+        {
+            batches.Add(batch);
+        }
+
+        batches.Should().HaveCount(1);
+        var array = batches[0].Column("payload").Should().BeOfType<StringArray>().Subject;
+        array.GetString(0).Should().Be("""{"severity":"info"}""");
+        foreach (var b in batches) b.Dispose();
+    }
+
+    [Fact]
+    public async Task Reader_Direct_ReadBatchesAsync_With_ColumnTypes_String_On_Object()
+    {
+        var events = new[]
+        {
+            """{"id":1,"payload":{"severity":"info"}}"""
+        };
+        var source = TempFile(".jsonl", events);
+        await using var reader = new JsonLStreamReader(source, new JsonLReaderOptions { ColumnTypes = "id:int64,payload:string" });
+        await reader.OpenAsync();
+        var rows = new List<object?[]>();
+        await foreach (var memory in reader.ReadBatchesAsync(10))
+        {
+            for (int i = 0; i < memory.Length; i++) rows.Add(memory.Span[i]);
+        }
+
+        rows.Should().HaveCount(1);
+        rows[0][1].Should().Be("""{"severity":"info"}""");
+    }
+
+    [Fact]
+    public async Task Object_Column_Edge_Cases_Null_Empty_Nested_And_Json_Hint()
+    {
+        var events = new[]
+        {
+            """{"id":1,"payload":{"nested":{"a":[1,2],"b":"xyz"}}}""",
+            """{"id":2,"payload":null}""",
+            """{"id":3,"payload":{}}""",
+            """{"id":4,"payload":""}""",
+            """{"id":5,"payload":[{"k":1}]}"""
+        };
+        var source = TempFile(".jsonl", events);
+        var target = TempFile(".jsonl");
+
+        var exit = await Program.Main(["-i", $"jsonl:{source}", "--column-types", "id:int64,payload:json", "-o", $"jsonl:{target}", "--no-stats"]);
+
+        exit.Should().Be(0);
+        var lines = await File.ReadAllLinesAsync(target);
+        lines.Should().HaveCount(5);
+
+        using (var d1 = System.Text.Json.JsonDocument.Parse(lines[0]))
+            d1.RootElement.GetProperty("payload").GetString().Should().Be("""{"nested":{"a":[1,2],"b":"xyz"}}""");
+
+        using (var d2 = System.Text.Json.JsonDocument.Parse(lines[1]))
+            d2.RootElement.GetProperty("payload").ValueKind.Should().Be(System.Text.Json.JsonValueKind.Null);
+
+        using (var d3 = System.Text.Json.JsonDocument.Parse(lines[2]))
+            d3.RootElement.GetProperty("payload").GetString().Should().Be("{}");
+
+        using (var d4 = System.Text.Json.JsonDocument.Parse(lines[3]))
+            d4.RootElement.GetProperty("payload").GetString().Should().Be("");
+
+        using (var d5 = System.Text.Json.JsonDocument.Parse(lines[4]))
+            d5.RootElement.GetProperty("payload").GetString().Should().Be("""[{"k":1}]""");
+    }
+
+    [Fact]
+    public async Task Declared_Schema_With_StringType_Keeps_Raw_Json_Text()
+    {
+        var declared = new Schema(new[]
+        {
+            new Field("id", Int64Type.Default, true),
+            new Field("payload", StringType.Default, true)
+        }, null);
+        var events = new[]
+        {
+            """{"id":1,"payload":{"severity":"info"}}""",
+            """{"id":2,"payload":{"severity":"warn"}}"""
+        };
+        var source = TempFile(".jsonl", events);
+        await using var reader = new JsonLStreamReader(source, new JsonLReaderOptions
+        {
+            Schema = ArrowSchemaSerializer.SerializeCompact(declared)
+        });
+        await reader.OpenAsync();
+
+        var batches = new List<RecordBatch>();
+        await foreach (var batch in reader.ReadRecordBatchesAsync()) batches.Add(batch);
+
+        batches.Should().HaveCount(1);
+        var array = batches[0].Column("payload").Should().BeOfType<StringArray>().Subject;
+        array.GetString(0).Should().Be("""{"severity":"info"}""");
+        array.GetString(1).Should().Be("""{"severity":"warn"}""");
+        foreach (var b in batches) b.Dispose();
+    }
 }

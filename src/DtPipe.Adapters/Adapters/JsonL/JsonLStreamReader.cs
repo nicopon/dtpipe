@@ -49,6 +49,20 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
     // schema has no column for is then refused, never written without it. --column-types is a projection.
     private JsonLRecordShape? _shape;
     private bool _shapeIsDeclared;
+    private HashSet<string>? _textColumns;
+
+    private void UpdateTextColumns()
+    {
+        if (Columns == null)
+        {
+            _textColumns = null;
+            return;
+        }
+
+        _textColumns = new HashSet<string>(
+            Columns.Where(c => c.ClrType == typeof(string)).Select(c => c.Name),
+            StringComparer.OrdinalIgnoreCase);
+    }
 
     public async Task OpenAsync(CancellationToken ct = default)
     {
@@ -95,6 +109,7 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
         Columns = arrowSchema.FieldsList
             .Select(f => new PipeColumnInfo(f.Name, GetSimplifiedClrType(f), f.IsNullable))
             .ToList();
+        UpdateTextColumns();
         _logger.LogInformation("JsonLStreamReader: Schema loaded from JSON ({Count} fields). Path: {Path}",
             arrowSchema.FieldsList.Count, _options.Path ?? "(root)");
     }
@@ -180,6 +195,7 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
         _autoAppliedTypes = autoApplied;
         Columns = columns;
         Schema = new Schema(fields, null);
+        UpdateTextColumns();
         _logger.LogInformation("JsonLStreamReader: Inferred schema with {Count} columns. Path: {Path}", columns.Count, _options.Path ?? "(root)");
     }
 
@@ -202,6 +218,7 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
 
         Columns = columns;
         Schema = new Schema(fields, null);
+        UpdateTextColumns();
         _logger.LogInformation("JsonLStreamReader: Schema built from ColumnTypes with {Count} columns. Path: {Path}", columns.Count, _options.Path ?? "(root)");
     }
 
@@ -321,7 +338,7 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
                 // However, for the simple case where we only read once, it works.
                 await foreach (var element in JsonStreamingPathReader.StreamArrayAsync(_fileStream!, pathParts, ct))
                 {
-                    var converted = ToValue(element);
+                    var converted = ToRecordValue(element);
                     var record = converted is Dictionary<string, object?> d ? d : new Dictionary<string, object?> { ["value"] = converted };
                     if (_isBufferingActive) _inferenceBuffer.Add(record);
                     _bufferPos++;
@@ -349,7 +366,7 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
                 {
                     foreach (var item in current.EnumerateArray())
                     {
-                        var record = ToValue(item) as Dictionary<string, object?> ?? new Dictionary<string, object?> { ["value"] = ToValue(item) };
+                        var record = ToRecordValue(item) as Dictionary<string, object?> ?? new Dictionary<string, object?> { ["value"] = ToRecordValue(item) };
                         if (_isBufferingActive) _inferenceBuffer.Add(record);
                         _bufferPos++;
                         yield return record;
@@ -506,14 +523,40 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
 
         foreach (var prop in root.EnumerateObject())
         {
-            dict[prop.Name] = ToValue(prop.Value);
+            var isText = _textColumns != null && _textColumns.Contains(prop.Name);
+            dict[prop.Name] = ToValue(prop.Value, isText);
         }
 
         return dict;
     }
 
-    private object? ToValue(JsonElement element)
+    private object? ToRecordValue(JsonElement element)
     {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            var dict = new Dictionary<string, object?>();
+            foreach (var prop in element.EnumerateObject())
+            {
+                var isText = _textColumns != null && _textColumns.Contains(prop.Name);
+                dict[prop.Name] = ToValue(prop.Value, isText);
+            }
+            return dict;
+        }
+        return ToValue(element, false);
+    }
+
+    private object? ToValue(JsonElement element, bool isTextColumn = false)
+    {
+        if (isTextColumn)
+        {
+            return element.ValueKind switch
+            {
+                JsonValueKind.Null => null,
+                JsonValueKind.String => element.GetString(),
+                _ => element.GetRawText()
+            };
+        }
+
         return element.ValueKind switch
         {
             JsonValueKind.String => element.GetString(),
@@ -524,7 +567,7 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
             JsonValueKind.True => true,
             JsonValueKind.False => false,
             JsonValueKind.Object => element.EnumerateObject().ToDictionary(p => p.Name, p => ToValue(p.Value)),
-            JsonValueKind.Array => element.EnumerateArray().Select(ToValue).ToList<object?>(),
+            JsonValueKind.Array => element.EnumerateArray().Select(e => ToValue(e)).ToList<object?>(),
             JsonValueKind.Null => null,
             _ => element.GetRawText()
         };
