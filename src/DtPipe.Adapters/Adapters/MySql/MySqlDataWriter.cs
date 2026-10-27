@@ -20,9 +20,10 @@ public sealed partial class MySqlDataWriter : BaseSqlDataWriter, IColumnarDataWr
     /// </summary>
     public IReadOnlyList<ColumnTypeRefusal> RefuseColumns(Apache.Arrow.Schema schema)
         => DtPipe.Adapters.Shared.Infrastructure.ColumnTypeRefusals.Collect(schema, f =>
-            f.DataType is Apache.Arrow.Types.TimestampType { Timezone.Length: > 0 } ts
+            DtPipe.Adapters.Shared.Infrastructure.ColumnTypeRefusals.WideInteger(f)
+            ?? (f.DataType is Apache.Arrow.Types.TimestampType { Timezone.Length: > 0 } ts
                 ? [new Apache.Arrow.Types.TimestampType(ts.Unit, (string?)null)]
-                : null);
+                : null));
 
     private readonly MySqlWriterOptions _options;
     private readonly ILogger<MySqlDataWriter> _logger;

@@ -69,6 +69,13 @@ public static class ArrowDeserializer
             return Expression.Call(createGuidMethod, Expression.Call(castedArray, getBytesMethod!, indexExpr));
         }
 
+        if (underlyingType == typeof(Int128) || underlyingType == typeof(UInt128))
+        {
+            var getBytesMethod = arrayType.GetMethod("GetBytes", new[] { typeof(int) });
+            var create = typeof(ArrowDeserializer).GetMethod(underlyingType == typeof(Int128) ? "CreateInt128" : "CreateUInt128", BindingFlags.NonPublic | BindingFlags.Static)!;
+            return Expression.Call(create, Expression.Call(castedArray, getBytesMethod!, indexExpr));
+        }
+
         if (underlyingType.IsEnum)
             return Expression.Convert(Expression.Convert(Expression.Call(castedArray, typeof(Int32Array).GetMethod("GetValue", new[] { typeof(int) })!, indexExpr), typeof(int)), targetType);
 
@@ -173,6 +180,8 @@ public static class ArrowDeserializer
     }
 
     internal static Guid CreateGuid(ReadOnlySpan<byte> span) => ArrowTypeMap.FromArrowUuidBytes(span);
+    internal static Int128 CreateInt128(ReadOnlySpan<byte> span) => System.Buffers.Binary.BinaryPrimitives.ReadInt128LittleEndian(span);
+    internal static UInt128 CreateUInt128(ReadOnlySpan<byte> span) => System.Buffers.Binary.BinaryPrimitives.ReadUInt128LittleEndian(span);
 
     private class TypedDeserializer<T> where T : new()
     {

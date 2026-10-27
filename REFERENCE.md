@@ -423,6 +423,11 @@ Cast each column to an accepted type in a SQL step before the writer: give this 
 The cast is yours to choose: a wider type changes what the target holds. `--dry-run` refuses in
 the same words.
 
+A DuckDB 128-bit integer (`HUGEINT`) is written as one only by the `duck:` writer, from `-2^127+1`
+to `2^127-1`, which is all it can hold; `UHUGEINT` is refused there too, since half its values lie
+past that. Every other writer refuses both, with `CAST(col AS VARCHAR)` as the step, because no
+number type it has keeps 39 digits. `csv:` and `jsonl:` write the digits as a number.
+
 ### Types a reader cannot read
 
 A reader reads natively each type it knows and **refuses the rest when it opens**, before the first

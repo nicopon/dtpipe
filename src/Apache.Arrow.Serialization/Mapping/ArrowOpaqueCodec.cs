@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Globalization;
 using System.Numerics;
 
@@ -17,23 +18,30 @@ namespace Apache.Arrow.Serialization.Mapping;
 /// </remarks>
 public static class ArrowOpaqueCodec
 {
+    /// <summary>The vendor and type name an <c>arrow.opaque</c> field gives a signed 128-bit integer.</summary>
+    public const string HugeIntMetadata = "{\"type_name\":\"hugeint\",\"vendor_name\":\"DuckDB\"}";
+
+    /// <summary>The vendor and type name an <c>arrow.opaque</c> field gives an unsigned 128-bit integer.</summary>
+    public const string UHugeIntMetadata = "{\"type_name\":\"uhugeint\",\"vendor_name\":\"DuckDB\"}";
+
     /// <summary>
-    /// Renders an opaque payload as its exact text form, or null when the pair is unknown.
+    /// Decodes an opaque payload into the value it holds, or null when the pair is unknown.
     /// </summary>
     /// <remarks>
-    /// Text, not a numeric CLR type: no CLR type holds a 128-bit integer or a zone-qualified
-    /// time-of-day, and an exact decimal string is what the row-mode DuckDB reader already
-    /// produces for these — so the two read paths agree instead of offering a third answer.
+    /// A 128-bit integer decodes to <see cref="Int128"/> or <see cref="UInt128"/>, so a writer sees an
+    /// integer and writes it as one or refuses it; never a number spelled as text. The other pairs
+    /// have no CLR type and decode to their exact text form, which the row-mode DuckDB reader also
+    /// produces for them, so the two read paths agree.
     /// </remarks>
-    public static string? TryDecode(string vendorName, string typeName, ReadOnlySpan<byte> payload)
+    public static object? TryDecode(string vendorName, string typeName, ReadOnlySpan<byte> payload)
     {
         if (!string.Equals(vendorName, "DuckDB", StringComparison.OrdinalIgnoreCase))
             return null;
 
         return typeName.ToLowerInvariant() switch
         {
-            "hugeint" => new BigInteger(payload, isUnsigned: false, isBigEndian: false).ToString(CultureInfo.InvariantCulture),
-            "uhugeint" => new BigInteger(payload, isUnsigned: true, isBigEndian: false).ToString(CultureInfo.InvariantCulture),
+            "hugeint" => payload.Length == 16 ? BinaryPrimitives.ReadInt128LittleEndian(payload) : null,
+            "uhugeint" => payload.Length == 16 ? BinaryPrimitives.ReadUInt128LittleEndian(payload) : null,
             "time_tz" => DecodeTimeTz(payload),
             "bit" => DecodeBit(payload),
             "bignum" => DecodeBignum(payload),
@@ -41,10 +49,36 @@ public static class ArrowOpaqueCodec
         };
     }
 
-    /// <summary>Whether a vendor/type pair has a text form, used to type the column.</summary>
-    public static bool CanDecode(string vendorName, string typeName)
-        => string.Equals(vendorName, "DuckDB", StringComparison.OrdinalIgnoreCase)
-           && typeName.ToLowerInvariant() is "hugeint" or "uhugeint" or "time_tz" or "bit" or "bignum";
+    /// <summary>The CLR type a vendor/type pair decodes to, or null when it has none; used to type the column.</summary>
+    public static Type? DecodedType(string vendorName, string typeName)
+    {
+        if (!string.Equals(vendorName, "DuckDB", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        return typeName.ToLowerInvariant() switch
+        {
+            "hugeint" => typeof(Int128),
+            "uhugeint" => typeof(UInt128),
+            "time_tz" or "bit" or "bignum" => typeof(string),
+            _ => null
+        };
+    }
+
+    /// <summary>The 16-byte payload of a 128-bit integer, little-endian as DuckDB stores it.</summary>
+    public static byte[] Encode(Int128 value)
+    {
+        var bytes = new byte[16];
+        BinaryPrimitives.WriteInt128LittleEndian(bytes, value);
+        return bytes;
+    }
+
+    /// <inheritdoc cref="Encode(Int128)"/>
+    public static byte[] Encode(UInt128 value)
+    {
+        var bytes = new byte[16];
+        BinaryPrimitives.WriteUInt128LittleEndian(bytes, value);
+        return bytes;
+    }
 
     // 64 bits little-endian: microseconds since midnight in the upper 40, and an offset in the
     // low 24 stored as (MaxOffsetSeconds - actual), so a larger stored value is a westward zone.

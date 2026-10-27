@@ -1,6 +1,7 @@
 using Apache.Arrow;
 using Apache.Arrow.Types;
 using DtPipe.Core.Abstractions;
+using DtPipe.Core.Infrastructure.Arrow;
 
 namespace DtPipe.Adapters.Shared.Infrastructure;
 
@@ -21,6 +22,16 @@ public static class ColumnTypeRefusals
         }
         return refusals ?? (IReadOnlyList<ColumnTypeRefusal>)[];
     }
+
+    /// <summary>
+    /// What a 128-bit integer (DuckDB's HUGEINT, the <c>arrow.opaque</c> field of an <see cref="Int128"/>)
+    /// is accepted as by a format with no type that holds every value: its text, the one form that keeps
+    /// all 39 digits; null for any other field. The writer never spells the number itself.
+    /// </summary>
+    public static IReadOnlyList<IArrowType>? WideInteger(Field field)
+        => ArrowTypeMapper.GetClrTypeFromField(field) is var t && (t == typeof(Int128) || t == typeof(UInt128))
+            ? [StringType.Default]
+            : null;
 
     /// <summary>
     /// The narrowest signed type that holds every value of an integer width a format lacks, for the

@@ -16,9 +16,10 @@ public sealed class OracleDataWriter : BaseSqlDataWriter, IColumnTypeGate
     /// </summary>
     public IReadOnlyList<ColumnTypeRefusal> RefuseColumns(Apache.Arrow.Schema schema)
         => ColumnTypeRefusals.Collect(schema, f =>
-            f.DataType is Apache.Arrow.Types.Time32Type or Apache.Arrow.Types.Time64Type
+            ColumnTypeRefusals.WideInteger(f)
+            ?? (f.DataType is Apache.Arrow.Types.Time32Type or Apache.Arrow.Types.Time64Type
                 ? [Apache.Arrow.Types.StringType.Default]
-                : null);
+                : null));
 
     private readonly OracleWriterOptions _options;
     private readonly ILogger<OracleDataWriter> _logger;

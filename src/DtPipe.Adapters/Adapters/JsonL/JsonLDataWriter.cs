@@ -169,6 +169,9 @@ public sealed class JsonLDataWriter : IRowDataWriter, IRequiresOptions<JsonLWrit
             case ushort u16: writer.WriteNumberValue(u16); break;
             case uint u32: writer.WriteNumberValue(u32); break;
             case ulong u64: writer.WriteNumberValue(u64); break;
+            // A JSON number has no width; the writer has no overload past 64 bits, so the digits go raw.
+            case Int128 i128: writer.WriteRawValue(i128.ToString(System.Globalization.CultureInfo.InvariantCulture)); break;
+            case UInt128 u128: writer.WriteRawValue(u128.ToString(System.Globalization.CultureInfo.InvariantCulture)); break;
             case double d: writer.WriteNumberValue(d); break;
             case decimal dec: writer.WriteNumberValue(dec); break;
             case float f: writer.WriteNumberValue(f); break;

@@ -20,7 +20,8 @@ public sealed class SqliteDataWriter : BaseSqlDataWriter, IColumnTypeGate
     /// </summary>
     public IReadOnlyList<ColumnTypeRefusal> RefuseColumns(Apache.Arrow.Schema schema)
         => ColumnTypeRefusals.Collect(schema, f =>
-            f.DataType is Apache.Arrow.Types.UInt64Type ? [Apache.Arrow.Types.StringType.Default] : null);
+            ColumnTypeRefusals.WideInteger(f)
+            ?? (f.DataType is Apache.Arrow.Types.UInt64Type ? [Apache.Arrow.Types.StringType.Default] : null));
 
     private static object? ToBindValue(object? value) => value switch
     {

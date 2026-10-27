@@ -71,6 +71,10 @@ public static class ArrowTypeMap
         if (type == typeof(TimeOnly) || type == typeof(TimeOnly?)) return new ArrowTypeResult(new Time64Type(TimeUnit.Microsecond));
 #endif
         if (type == typeof(Guid) || type == typeof(Guid?)) return new ArrowTypeResult(new FixedSizeBinaryType(16), new Dictionary<string, string> { { "ARROW:extension:name", "arrow.uuid" } });
+        // Arrow has no 128-bit integer; DuckDB's opaque extension is the form a 128-bit column
+        // travels in, and the one DuckDB reads back as HUGEINT.
+        if (type == typeof(Int128) || type == typeof(Int128?)) return Opaque128(ArrowOpaqueCodec.HugeIntMetadata);
+        if (type == typeof(UInt128) || type == typeof(UInt128?)) return Opaque128(ArrowOpaqueCodec.UHugeIntMetadata);
         if (type == typeof(byte[])) return new ArrowTypeResult(BinaryType.Default);
         if (type == typeof(object)) return new ArrowTypeResult(StringType.Default); // Placeholder for dynamic/complex types
 
@@ -81,6 +85,12 @@ public static class ArrowTypeMap
 
         throw new NotSupportedException($"Type {type.FullName} is not a valid scalar type supported by ArrowTypeMap.");
     }
+
+    private static ArrowTypeResult Opaque128(string metadata) => new(new FixedSizeBinaryType(16), new Dictionary<string, string>
+    {
+        { ArrowExtensionInfo.NameKey, "arrow.opaque" },
+        { ArrowExtensionInfo.MetadataKey, metadata }
+    });
 
     /// <summary>
     /// Attempts to get the logical Arrow type for a CLR type without throwing.
@@ -218,8 +228,8 @@ public static class ArrowTypeMap
         {
             if (ext.Is("arrow.uuid")) return typeof(Guid);
             if (ext.Is("arrow.bool8")) return typeof(bool);
-            if (ext.Is("arrow.opaque") && ArrowOpaqueCodec.CanDecode(ext.VendorName, ext.TypeName))
-                return typeof(string);
+            if (ext.Is("arrow.opaque") && ArrowOpaqueCodec.DecodedType(ext.VendorName, ext.TypeName) is { } decoded)
+                return decoded;
         }
         return GetClrType(field.DataType);
     }

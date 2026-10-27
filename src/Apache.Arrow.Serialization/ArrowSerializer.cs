@@ -296,6 +296,10 @@ public static class ArrowSerializer
             {
                 return (val, builder) => ((FixedSizeBinaryArrayBuilder)builder).Append(ArrowTypeMap.ToArrowUuidBytes((Guid)val));
             }
+            if (underlyingType == typeof(Int128))
+                return (val, builder) => ((FixedSizeBinaryArrayBuilder)builder).Append(Mapping.ArrowOpaqueCodec.Encode((Int128)val));
+            if (underlyingType == typeof(UInt128))
+                return (val, builder) => ((FixedSizeBinaryArrayBuilder)builder).Append(Mapping.ArrowOpaqueCodec.Encode((UInt128)val));
             if (underlyingType.IsEnum)
             {
                 return (val, builder) => ((Int32Array.Builder)builder).Append(Convert.ToInt32(val));

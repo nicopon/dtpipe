@@ -21,11 +21,11 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter, IColumnarD
     /// PostgreSQL has no 8-bit and no unsigned integer: such a column is refused, never widened.
     /// </summary>
     public IReadOnlyList<ColumnTypeRefusal> RefuseColumns(Apache.Arrow.Schema schema)
-        => ColumnTypeRefusals.Collect(schema, f => f.DataType is Apache.Arrow.Types.Int8Type or Apache.Arrow.Types.UInt8Type
+        => ColumnTypeRefusals.Collect(schema, f => ColumnTypeRefusals.WideInteger(f) ?? (f.DataType is Apache.Arrow.Types.Int8Type or Apache.Arrow.Types.UInt8Type
                 or Apache.Arrow.Types.UInt16Type or Apache.Arrow.Types.UInt32Type or Apache.Arrow.Types.UInt64Type
             && !IsBool8(f)
             ? ColumnTypeRefusals.SignedHolding(f.DataType)
-            : null);
+            : null));
 
     private static bool IsBool8(Apache.Arrow.Field f)
         => f.HasMetadata && f.Metadata.TryGetValue("ARROW:extension:name", out var ext) && ext == "arrow.bool8";

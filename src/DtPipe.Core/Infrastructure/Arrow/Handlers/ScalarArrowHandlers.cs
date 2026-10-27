@@ -181,6 +181,8 @@ internal class FixedSizeBinaryHandler : ScalarArrowHandler<FixedSizeBinaryType, 
     protected override void AppendValueTyped(FixedSizeBinaryArrayBuilder b, object v)
     {
         if (v is Guid guid) b.Append(ArrowTypeMapper.ToArrowUuidBytes(guid));
+        else if (v is Int128 i128) b.Append(Apache.Arrow.Serialization.Mapping.ArrowOpaqueCodec.Encode(i128));
+        else if (v is UInt128 u128) b.Append(Apache.Arrow.Serialization.Mapping.ArrowOpaqueCodec.Encode(u128));
         else if (v is byte[] bytes && bytes.Length == b.ByteWidth) b.Append(bytes);
         else b.AppendNull();
     }

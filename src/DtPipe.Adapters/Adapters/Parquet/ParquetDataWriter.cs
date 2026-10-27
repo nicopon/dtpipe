@@ -176,6 +176,8 @@ public sealed class ParquetDataWriter(string outputPath) : IColumnarDataWriter, 
         {
             if (field.DataType is DurationType)
                 refusals.Add(new ColumnTypeRefusal(field, [Int64Type.Default, StringType.Default]));
+            else if (ColumnTypeRefusals.WideInteger(field) is { } accepted)
+                refusals.Add(new ColumnTypeRefusal(field, accepted));
         }
         return refusals;
     }

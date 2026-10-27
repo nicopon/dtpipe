@@ -19,8 +19,17 @@ namespace DtPipe.Adapters.DuckDB;
 /// A natively columnar data writer for DuckDB that focuses on high-performance Arrow ingestion.
 /// Does not support IRowDataWriter; row-based sources are automatically bridged to Arrow by the orchestrator.
 /// </summary>
-public sealed class DuckDbDataWriter : IColumnarDataWriter, ISchemaInspector, IKeyValidator, ISchemaMigrator
+public sealed class DuckDbDataWriter : IColumnarDataWriter, ISchemaInspector, IKeyValidator, ISchemaMigrator, IColumnTypeGate
 {
+    /// <summary>
+    /// The appender takes a 128-bit integer only inside the signed range (see <see cref="AppendValue"/>),
+    /// so an unsigned 128-bit column (UHUGEINT), half of whose values lie outside it, is refused whole
+    /// rather than written until the first large value.
+    /// </summary>
+    public IReadOnlyList<ColumnTypeRefusal> RefuseColumns(Schema schema)
+        => ColumnTypeRefusals.Collect(schema, f =>
+            ArrowTypeMapper.GetClrTypeFromField(f) == typeof(UInt128) ? ColumnTypeRefusals.WideInteger(f) : null);
+
     private readonly string _connectionString;
     private readonly DuckHubConnectionInfo _hubInfo;
     private readonly DuckDbWriterOptions _options;
@@ -150,6 +159,11 @@ public sealed class DuckDbDataWriter : IColumnarDataWriter, ISchemaInspector, IK
             case ushort us: row.AppendValue(us); break;
             case uint ui: row.AppendValue(ui); break;
             case ulong ul: row.AppendValue(ul); break;
+            // The appender writes a 128-bit integer from a BigInteger bounded to ±(2^127 - 1); the one
+            // value past it, -2^127, would otherwise fail without saying why.
+            case Int128 hi when hi == Int128.MinValue:
+                throw new InvalidOperationException("The DuckDB appender cannot write -2^127 (-170141183460469231731687303715884105728); its HUGEINT range is -2^127+1 to 2^127-1.");
+            case Int128 hi: row.AppendValue((System.Numerics.BigInteger?)hi); break;
             case float f: row.AppendValue(f); break;
             case double d: row.AppendValue(d); break;
             case decimal dec: row.AppendValue(dec); break;

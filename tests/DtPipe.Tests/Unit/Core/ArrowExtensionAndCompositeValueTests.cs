@@ -95,8 +95,12 @@ public class ArrowExtensionAndCompositeValueTests
         var array = BuildFixedSizeBinary(payload);
         var field = OpaqueField(typeName, new FixedSizeBinaryType(payload.Length));
 
-        ArrowTypeMap.GetValue(array, 0, field).Should().Be(expected);
-        ArrowTypeMap.GetClrTypeFromField(field).Should().Be<string>();
+        var value = ArrowTypeMap.GetValue(array, 0, field);
+
+        // A 128-bit integer is one, never its digits: a writer then writes it natively or refuses it.
+        value.Should().BeOfType(typeName == "hugeint" ? typeof(Int128) : typeof(UInt128));
+        Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture).Should().Be(expected);
+        ArrowTypeMap.GetClrTypeFromField(field).Should().Be(typeName == "hugeint" ? typeof(Int128) : typeof(UInt128));
     }
 
     [Theory]
