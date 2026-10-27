@@ -5,6 +5,7 @@ using DtPipe.Core.Pipelines;
 using DtPipe.Core.Pipelines.Dag;
 using DtPipe.Feedback;
 using Spectre.Console;
+using Spectre.Console.Rendering;
 
 namespace DtPipe.Observers;
 
@@ -127,11 +128,19 @@ public class SpectreConsoleObserver : IExportObserver
         string header = applied
             ? $" [green]Column types auto-applied[/] [grey](sampled {sampleCount} rows)[/] "
             : $" [yellow]Type inference suggestion[/] [grey](sampled {sampleCount} rows)[/] ";
+        // Sized on its body alone, the panel cuts a longer header with an ellipsis that swallows the sample
+        // count. Each text needs four cells more: two edges, plus the body's padding or the border line on
+        // either side of the header, which the border trims.
+        var options = RenderOptions.Create(_console);
+        int Cells(string markup) => ((IRenderable)new Markup(markup)).Measure(options, _console.Profile.Width).Max;
+        int headerWidth = Cells(header.Trim()) + 4;
+        int bodyWidth = Cells(body) + 4;
         var panel = new Panel(body)
         {
             Header = new PanelHeader(header),
             Border = BoxBorder.Rounded,
-            Padding = new Padding(1, 0)
+            Padding = new Padding(1, 0),
+            Width = Math.Max(headerWidth, bodyWidth)
         };
         _console.Write(panel);
     }
