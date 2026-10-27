@@ -39,6 +39,12 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
     // Records consumed during schema inference are buffered here and replayed during data extraction.
     // This enables single-pass processing even for large files where Reset() would be expensive.
     private readonly List<object> _inferenceBuffer = new();
+
+    // --path only: held across the inference pass and the real pass instead of re-navigating from a
+    // cold reader each time, which would resume wherever the first pass left the stream (end of file
+    // for a small array, mid-array for a large one) rather than at the start of the target array.
+    private IAsyncEnumerator<JsonElement>? _pathElementEnumerator;
+    private readonly CancellationTokenSource _pathElementsCts = new();
     private int _bufferPos = 0;
     private bool _isBufferingActive = true;
 
@@ -334,53 +340,46 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
         }
         else
         {
-            // Hierarchical JSON: stream elements from the target path array.
+            // Hierarchical JSON: stream elements from the target path array, via an enumerator kept
+            // alive on the reader (see _pathElementEnumerator) so a consumer that stops early (the
+            // inference pass) leaves it positioned for the next one (the real pass) to continue from.
             var pathParts = _options.Path.Split('.', StringSplitOptions.RemoveEmptyEntries);
+            _pathElementEnumerator ??= _isResetSupported
+                ? JsonStreamingPathReader.StreamArrayAsync(_fileStream!, pathParts, _pathElementsCts.Token).GetAsyncEnumerator()
+                : EnumeratePathElementsFromStdinAsync(pathParts, _pathElementsCts.Token).GetAsyncEnumerator();
 
-            if (_isResetSupported)
+            while (!ct.IsCancellationRequested && await _pathElementEnumerator.MoveNextAsync())
             {
-                // File-based: continue reading from the current stream if possible,
-                // but hierarchical streaming usually needs a fresh reader for subtree matches.
-                // However, for the simple case where we only read once, it works.
-                await foreach (var element in JsonStreamingPathReader.StreamArrayAsync(_fileStream!, pathParts, ct))
-                {
-                    // Already a standalone clone (JsonStreamingPathReader), safe to buffer as is.
-                    if (_isBufferingActive) _inferenceBuffer.Add(element);
-                    _bufferPos++;
-                    yield return ToRecord(element);
-                }
+                var element = _pathElementEnumerator.Current;
+                // Already a standalone clone (JsonStreamingPathReader, or Clone() below), safe to buffer as is.
+                if (_isBufferingActive) _inferenceBuffer.Add(element);
+                _bufferPos++;
+                yield return ToRecord(element);
             }
-            else
-            {
-                // STDIN path is already handled by loading into memory or similar logic.
-                // (Kept for compatibility with previous logic)
-                var fullJson = await _streamReader!.ReadToEndAsync(ct);
-                if (string.IsNullOrEmpty(fullJson)) yield break;
+        }
+    }
 
-                using var doc = JsonDocument.Parse(fullJson);
-                var root = doc.RootElement;
-                var current = root;
-                bool found = true;
-                foreach (var part in pathParts)
-                {
-                    if (current.TryGetProperty(part, out var next)) current = next;
-                    else { found = false; break; }
-                }
+    // STDIN: the whole input is loaded once here; later calls keep draining the same in-memory
+    // document instead of calling ReadToEndAsync again on a stream the first call already emptied.
+    private async IAsyncEnumerable<JsonElement> EnumeratePathElementsFromStdinAsync(
+        string[] pathParts, [EnumeratorCancellation] CancellationToken ct)
+    {
+        var fullJson = await _streamReader!.ReadToEndAsync(ct);
+        if (string.IsNullOrEmpty(fullJson)) yield break;
 
-                if (found && current.ValueKind == JsonValueKind.Array)
-                {
-                    foreach (var item in current.EnumerateArray())
-                    {
-                        // Cloned: 'doc' is disposed when this iterator ends, including an early
-                        // break by a consumer that stops at the sample size, and a buffered element
-                        // must outlive that to be replayed later.
-                        var cloned = item.Clone();
-                        if (_isBufferingActive) _inferenceBuffer.Add(cloned);
-                        _bufferPos++;
-                        yield return ToRecord(cloned);
-                    }
-                }
-            }
+        using var doc = JsonDocument.Parse(fullJson);
+        var current = doc.RootElement;
+        foreach (var part in pathParts)
+        {
+            if (!current.TryGetProperty(part, out var next)) yield break;
+            current = next;
+        }
+
+        if (current.ValueKind != JsonValueKind.Array) yield break;
+
+        foreach (var item in current.EnumerateArray())
+        {
+            yield return item.Clone();
         }
     }
 
@@ -609,6 +608,17 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
 
     public async ValueTask DisposeAsync()
     {
+        // Cancelled before the enumerator is disposed: JsonStreamingPathReader's background producer
+        // only unblocks from a channel write by observing this token, never from Dispose alone.
+        _pathElementsCts.Cancel();
+
+        if (_pathElementEnumerator != null)
+        {
+            await _pathElementEnumerator.DisposeAsync();
+            _pathElementEnumerator = null;
+        }
+        _pathElementsCts.Dispose();
+
         if (_streamReader != null)
         {
             _streamReader.Dispose();

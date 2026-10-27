@@ -60,6 +60,27 @@ public class JsonLNestedShapeTests : IDisposable
     }
 
     [Fact]
+    public async Task A_Max_Sample_Below_The_Target_Arrays_Size_Still_Yields_Every_Element()
+    {
+        var source = TempFile(".jsonl", new[]
+        {
+            """{"items":[{"id":1,"v":"a"},{"id":2,"v":"b"},{"id":3,"v":"c"},{"id":4,"v":"d"},{"id":5,"v":"e"}]}"""
+        });
+
+        await using var reader = new JsonLStreamReader(source, new JsonLReaderOptions { Path = "items", MaxSample = 2 });
+        await reader.OpenAsync();
+
+        var total = 0;
+        await foreach (var batch in reader.ReadRecordBatchesAsync())
+        {
+            total += batch.Length;
+            batch.Dispose();
+        }
+
+        total.Should().Be(5);
+    }
+
+    [Fact]
     public async Task A_Value_Gets_The_Same_Text_Whether_The_Sample_Saw_It_Or_Not()
     {
         var events = new[]
