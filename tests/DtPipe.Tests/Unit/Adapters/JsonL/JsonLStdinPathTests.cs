@@ -7,8 +7,7 @@ namespace DtPipe.Tests.Unit.Adapters.JsonL;
 /// <summary>
 /// '--path' over stdin loads the whole input once into memory and streams the array from that
 /// copy. A reader-level test cannot exercise this: Console.OpenStandardInput() opens the OS stream
-/// directly and ignores Console.SetIn, so this spawns the real CLI with its stdin redirected,
-/// exactly as the shell repro that found the defect does.
+/// directly and ignores Console.SetIn, so this spawns the real CLI with its stdin redirected.
 /// </summary>
 public class JsonLStdinPathTests
 {

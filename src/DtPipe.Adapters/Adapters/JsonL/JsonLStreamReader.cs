@@ -606,8 +606,13 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
 
     private static Type? ResolveHintToClrType(string hint) => DtPipe.Core.Helpers.TypeHelper.ParseTypeHint(hint);
 
+    private bool _disposed;
+
     public async ValueTask DisposeAsync()
     {
+        if (_disposed) return;
+        _disposed = true;
+
         // Cancelled before the enumerator is disposed: JsonStreamingPathReader's background producer
         // only unblocks from a channel write by observing this token, never from Dispose alone.
         _pathElementsCts.Cancel();
