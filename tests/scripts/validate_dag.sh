@@ -2,7 +2,7 @@
 set -e
 
 # validate_dag.sh
-# Validates all canonical DAG topologies defined in CLAUDE.md.
+# Validates all canonical DAG topologies defined in .claude/rules/engine-invariants.md.
 # No Docker required: uses generate:, CSV, Parquet, Arrow, DuckDB (in-memory).
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

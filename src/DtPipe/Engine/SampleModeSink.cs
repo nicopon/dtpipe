@@ -78,7 +78,7 @@ internal sealed class SampleModeColumnarSink : IColumnarDataWriter, ISampleModeS
         => ValueTask.CompletedTask;
 
     /// <summary>
-    /// Takes ownership like any columnar writer (CLAUDE.md › "RecordBatch ownership") and
+    /// Takes ownership like any columnar writer (.claude/rules/engine-invariants.md › "RecordBatch ownership") and
     /// disposes. Arrow buffers are off-heap: a sink that only dropped the reference would leak
     /// native memory the GC never reports.
     /// </summary>

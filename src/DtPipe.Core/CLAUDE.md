@@ -1,6 +1,6 @@
 # DtPipe.Core — DAG orchestrator, Arrow ownership, redaction
 
-Mechanics for editing Core. The rules themselves are in the root `CLAUDE.md`.
+Mechanics for editing Core. The rules themselves are in the root `CLAUDE.md` and `.claude/rules/engine-invariants.md`.
 
 ## DAG engine
 

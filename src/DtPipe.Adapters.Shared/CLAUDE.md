@@ -1,6 +1,6 @@
 # DtPipe.Adapters.Shared — the DuckDB read path
 
-Mechanics behind the root rule "One way to read DuckDB".
+Mechanics behind the rule "One way to read DuckDB" of `.claude/rules/adapters.md`.
 
 `DuckDbArrowNative` + `DuckDbArrowResultReader` (`Infrastructure/DuckDb/`) own the whole
 prepare-to-batch half: `duckdb_prepare` → schema off the prepared statement →

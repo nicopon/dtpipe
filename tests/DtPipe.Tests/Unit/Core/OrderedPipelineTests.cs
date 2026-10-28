@@ -351,7 +351,7 @@ public class OrderedPipelineTests
         rows[2].Should().Equal(3L, null);
     }
 
-    // LinearPipelineService dispatch (CLAUDE.md engine-change obligation): a YAML branch with no
+    // LinearPipelineService dispatch (.claude/rules/engine-invariants.md engine-change obligation): a YAML branch with no
     // raw args must be routed through the CreateFromJob surface, never the CLI string[] surface.
     [Fact]
     public async Task ExecuteAsync_YamlBranch_NoRawArgs_UsesCreateFromJobSurface()
@@ -411,7 +411,7 @@ public class OrderedPipelineTests
         fakeFactory.CliCreateCalls.Should().Be(0, "the CLI string[] surface must not be used for a YAML branch");
     }
 
-    // LinearPipelineService failure reporting (CLAUDE.md engine-change obligation): a branch that
+    // LinearPipelineService failure reporting (.claude/rules/engine-invariants.md engine-change obligation): a branch that
     // faults must leave the reason on the service, not only on the console. A caller that silences
     // the console to read a tool result got `exitCode: 1` with nothing to act on — and
     // validate-yaml-job now sends every caller to the tool that does exactly that.

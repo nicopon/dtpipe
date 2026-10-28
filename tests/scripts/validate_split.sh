@@ -9,7 +9,7 @@ set -e
 # what decides it: a column a --compute creates appears from ITS stage on and not before, and its
 # name is nowhere in the job file except inside a JavaScript expression nobody parsed. A list built
 # by walking the transformer configs cannot produce it. That is the same property `--dry-run` has,
-# for the same reason (CLAUDE.md › "Sample mode — there is no second engine").
+# for the same reason (.claude/rules/engine-invariants.md › "Sample mode — there is no second engine").
 #
 # Case 5 is the safety claim: `split` runs the pipeline, so it has to be shown writing nothing.
 #

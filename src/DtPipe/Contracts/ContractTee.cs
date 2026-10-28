@@ -10,7 +10,7 @@ namespace DtPipe.Contracts;
 /// Unlike <c>CheckpointTee</c> this holds no reference to a <see cref="RecordBatch"/> and retains
 /// no buffer: a <see cref="Apache.Arrow.Schema"/> is managed metadata, so keeping it after the
 /// batch is disposed is safe, while keeping the batch would make this an owner and put a second
-/// dispose on a path that already has exactly one (CLAUDE.md › "RecordBatch ownership").
+/// dispose on a path that already has exactly one (.claude/rules/engine-invariants.md › "RecordBatch ownership").
 /// </para>
 /// </summary>
 public sealed class ContractTee

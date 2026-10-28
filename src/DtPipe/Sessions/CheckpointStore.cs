@@ -13,7 +13,7 @@ namespace DtPipe.Sessions;
 /// buys the property that matters here: reading the first rows decrypts one frame rather than
 /// the file, and a frame that fails its tag check does not take the rest of the file with it.
 ///
-/// <b>Ownership</b> (CLAUDE.md › "RecordBatch ownership"):
+/// <b>Ownership</b> (.claude/rules/engine-invariants.md › "RecordBatch ownership"):
 /// <list type="bullet">
 /// <item><see cref="WriteAsync"/> is a terminal consumer — it disposes every batch it is given.</item>
 /// <item><see cref="ReadAsync"/> is a producer — the caller owns and disposes what it yields.</item>
@@ -139,7 +139,7 @@ public sealed class CheckpointStore
 /// outcome of a failed run.
 ///
 /// It does NOT take ownership of the batches it is shown — a tee still owes its consumer the
-/// batch it is teeing (CLAUDE.md › "RecordBatch ownership").
+/// batch it is teeing (.claude/rules/engine-invariants.md › "RecordBatch ownership").
 /// </summary>
 public sealed class CheckpointWriter : IAsyncDisposable
 {

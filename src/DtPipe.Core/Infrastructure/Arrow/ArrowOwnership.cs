@@ -4,7 +4,7 @@ using Apache.Arrow.Memory;
 namespace DtPipe.Core.Infrastructure.Arrow;
 
 /// <summary>
-/// Shared-ownership helpers for the columnar pipeline. See <c>CLAUDE.md</c> ›
+/// Shared-ownership helpers for the columnar pipeline. See <c>.claude/rules/engine-invariants.md</c> ›
 /// "RecordBatch ownership (columnar path)" for the contract these enforce.
 ///
 /// A <see cref="RecordBatch"/> has one owner at a time; the owner calls <c>Dispose()</c>

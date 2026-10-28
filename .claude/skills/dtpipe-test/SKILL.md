@@ -20,7 +20,7 @@ prints only the filter, build errors, each failure and the summary.
 
 Put every class you need in one filter, joined with `|`, so the project builds once. `--changed`
 prints the filter it derived; when it finds nothing, name the classes yourself. The tests an area
-owes are the guard tags and "Engine-change obligations" of the root `CLAUDE.md`. Widen to the whole
+owes are the guard tags in `.claude/rules/` and "Engine-change obligations" of `.claude/rules/engine-invariants.md`. Widen to the whole
 unit tier only when asked: `build.sh` runs it.
 
 ## Report

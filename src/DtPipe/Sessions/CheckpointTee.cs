@@ -10,7 +10,7 @@ namespace DtPipe.Sessions;
 /// This is the broadcast situation from <c>DagOrchestrator</c>, with two consumers instead of N:
 /// one upstream owner, an extra reference per additional consumer via
 /// <see cref="ArrowOwnership.RetainAll"/> — a refcount bump, never a deep copy — and each
-/// consumer disposing the reference it was given (CLAUDE.md › "RecordBatch ownership").
+/// consumer disposing the reference it was given (.claude/rules/engine-invariants.md › "RecordBatch ownership").
 ///
 /// A checkpoint is a snapshot, not a derivation: nothing here detects staleness. The session TTL
 /// is the housekeeping mechanism, and the content-addressed key is what keeps two different

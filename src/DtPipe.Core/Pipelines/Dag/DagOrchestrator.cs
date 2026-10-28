@@ -424,7 +424,7 @@ public class DagOrchestrator : IDagOrchestrator
     /// Reads each upstream batch once and hands every consumer its own independently-disposable
     /// view via <see cref="ArrowOwnership.RetainAll"/> (a reference-count bump, not a deep copy),
     /// then disposes the broadcaster's own reference. Each consumer disposes the batch it receives
-    /// (CLAUDE.md › "RecordBatch ownership").
+    /// (.claude/rules/engine-invariants.md › "RecordBatch ownership").
     /// </summary>
     private static Task BroadcastAsync(
         ChannelReader<RecordBatch> source,

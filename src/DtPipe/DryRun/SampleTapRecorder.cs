@@ -75,7 +75,7 @@ public sealed class SampleTapRecorder : ISampleTap
 
     /// <summary>
     /// Extracts what is still missing and lets the batch go: the segment runner owns it
-    /// (CLAUDE.md › "RecordBatch ownership"), so nothing here disposes it or keeps it.
+    /// (.claude/rules/engine-invariants.md › "RecordBatch ownership"), so nothing here disposes it or keeps it.
     ///
     /// Values come out through <see cref="ArrowTypeMapper.GetValueForField"/> — the
     /// metadata-aware reader — and never through the storage-only GetValue. Reading a

@@ -393,7 +393,7 @@ public sealed class PipelineExecutor
         ISampleTap? tap = null,
         int stageBase = 0)
     {
-        // Ownership (see CLAUDE.md › "RecordBatch ownership"): this method owns every batch it
+        // Ownership (see .claude/rules/engine-invariants.md › "RecordBatch ownership"): this method owns every batch it
         // pulls from `source`. It disposes each input once the transformer chain has consumed it —
         // a transformer that returns a new batch reusing input columns has retained them, so the
         // dispose is safe. A transformer returning the same reference is pure pass-through; that

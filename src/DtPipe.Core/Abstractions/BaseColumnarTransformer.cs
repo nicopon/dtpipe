@@ -6,7 +6,7 @@ using DtPipe.Core.Infrastructure.Arrow;
 namespace DtPipe.Core.Abstractions;
 
 /// <summary>
-/// Base class for columnar transformers. See <c>CLAUDE.md</c> › "RecordBatch ownership
+/// Base class for columnar transformers. See <c>.claude/rules/engine-invariants.md</c> › "RecordBatch ownership
 /// (columnar path)" for the disposal contract the segment runner and these implementations share.
 /// </summary>
 public abstract class BaseColumnarTransformer : IColumnarTransformer

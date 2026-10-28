@@ -40,7 +40,7 @@ public sealed class ArrowMemoryChannelStreamReader : IStreamReader, IColumnarStr
     public async IAsyncEnumerable<RecordBatch> ReadRecordBatchesAsync([EnumeratorCancellation] CancellationToken ct = default)
     {
         // Batches flow downstream unchanged — the segment runner or writer that consumes this
-        // stream owns and disposes each one (CLAUDE.md › "RecordBatch ownership").
+        // stream owns and disposes each one (.claude/rules/engine-invariants.md › "RecordBatch ownership").
         await foreach (var batch in _reader.ReadAllAsync(ct))
         {
             yield return batch;

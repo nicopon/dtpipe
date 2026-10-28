@@ -16,7 +16,7 @@ namespace DtPipe.Core.Abstractions;
 /// <item>It may only READ. Altering what flows would make the sampled run differ from the
 /// real one, which is the whole thing this seam exists to prevent.</item>
 /// <item>It must not dispose a <see cref="RecordBatch"/> it is shown, nor keep a reference to
-/// one past the call — the segment runner still owns it (CLAUDE.md › "RecordBatch
+/// one past the call — the segment runner still owns it (.claude/rules/engine-invariants.md › "RecordBatch
 /// ownership"). Extract the values needed and let go.</item>
 /// </list>
 /// </summary>

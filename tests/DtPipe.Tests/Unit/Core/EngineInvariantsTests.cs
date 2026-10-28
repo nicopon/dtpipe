@@ -22,7 +22,7 @@ namespace DtPipe.Tests.Unit.Core;
 /// The three canonical engine cases as CI-gated facts.
 /// These drive DagOrchestrator/PipelineExecutor directly (no CLI) with in-memory
 /// readers and writers, mirroring the shapes in GoldenDagDefinitions.cs.
-/// CLAUDE.md's "run before commit" obligation is enforced here.
+/// The "run before commit" obligation of .claude/rules/engine-invariants.md is enforced here.
 /// </summary>
 public class EngineInvariantsTests
 {

@@ -16,7 +16,7 @@ namespace DtPipe.Cli.Commands;
 /// <para>
 /// The candidates are read off a <b>sample run</b> of the job itself — the real reader, the real
 /// transformers, the writer neutralised — through the tap the engine already offers each stage.
-/// There is no analyser beside <c>PipelineExecutor</c> (CLAUDE.md › "Sample mode — there is no
+/// There is no analyser beside <c>PipelineExecutor</c> (.claude/rules/engine-invariants.md › "Sample mode — there is no
 /// second engine"), and one that walked the transformer list to guess what each would emit would
 /// be <c>DryRunAnalyzer</c> again: it reported a windowed pipeline as dropping every row, because
 /// what a transformer emits is not derivable from what it is.

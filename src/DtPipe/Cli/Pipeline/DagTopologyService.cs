@@ -14,7 +14,7 @@ namespace DtPipe.Cli.Pipeline;
 /// list, wrap it in a <see cref="JobDagDefinition"/>. The MCP validate/execute path, the agent's
 /// Spectre topology box, the <c>get-dag-topology</c> tool and the full-screen plan panel all read it
 /// from here — the <c>yaml → DAG</c> construction is not re-typed at each call site (the duplication
-/// CLAUDE.md's init-SQL note warns about).
+/// the init-SQL note of .claude/rules/adapters.md warns about).
 /// </summary>
 public sealed class DagTopologyService
 {

@@ -58,7 +58,7 @@ public static class CompositeCellJson
     /// are — Parquet passes it to keep a real LIST.
     /// </summary>
     /// <remarks>
-    /// Ownership, per <c>CLAUDE.md</c> › "RecordBatch ownership": the caller keeps ownership of
+    /// Ownership, per <c>.claude/rules/engine-invariants.md</c> › "RecordBatch ownership": the caller keeps ownership of
     /// <paramref name="batch"/> and still disposes it. A batch holding no composite comes back as
     /// the SAME reference, so the ordinary case pays one schema scan and no copy — which is why
     /// the result is a <see cref="RenderedBatch"/> rather than a bare batch: disposing that

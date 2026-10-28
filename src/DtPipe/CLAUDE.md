@@ -1,6 +1,6 @@
 # DtPipe (CLI) — parsing, engine and host, options, sample mode, checkpoints, MCP, agent, studio
 
-Mechanics for editing the CLI project. The rules themselves are in the root `CLAUDE.md`; those of MCP
+Mechanics for editing the CLI project. The rules themselves are in the root `CLAUDE.md` and `.claude/rules/engine-invariants.md`; those of MCP
 and the agent are in `.claude/rules/mcp-and-agent.md`.
 
 ## From args to a DAG
@@ -218,7 +218,7 @@ Mandatory MCP directives:
 
 ### One run, one report collection
 
-A process runs one pipeline at a time (root `CLAUDE.md`), so a run started beside another waits for
+A process runs one pipeline at a time (`.claude/rules/engine-invariants.md`), so a run started beside another waits for
 it at `JobExecutor.ExecuteAsync`, behind `JobService.ExecutePipelineAsync`. The agent orders its own runs before they reach that gate
 (F5); `dtpipe mcp` relies on the gate alone, since the SDK handles a client's requests concurrently. `JobRunner` is the only caller-facing way to run a resolved job
 (MCP's sample and real write, `split`, `contract`, the studio): it arms a `RunReports` for the run
