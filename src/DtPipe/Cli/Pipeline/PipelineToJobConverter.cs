@@ -125,8 +125,9 @@ public static class PipelineToJobConverter
             interpolate: interpolate && string.IsNullOrEmpty(parsed.Globals.ExportJobFile));
         var flags = parsed.Globals.AllFlags;
 
-        // Apply CLI overrides to all loaded jobs — driven by EngineOverrideFlags.All
-        // (F11 single source), preserving the historical >0/non-empty guard semantics.
+        // Apply the engine controls of the line to every loaded job. The lexer lets a flag of a branch
+        // through beside --job only if EngineOverrideFlags.All lists it, so a control read here is listed
+        // there: a value is applied only when it is above zero or not empty.
         int? limitOverride = GetInt(flags, "--limit");
         int? batchOverride = GetInt(flags, "--batch-size", "-b");
         long? maxBatchBytesOverride = GetLong(flags, "--max-batch-bytes");

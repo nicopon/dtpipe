@@ -451,15 +451,18 @@ public class PipelineLexerTests
         Assert.Equal("out.csv", consumer.Output);
     }
 
-    /// <summary>With a job file the reader comes from YAML, so a CLI reader flag is an override.</summary>
+    /// <summary>
+    /// A job file supplies the branches, so a reader flag on a branch of the line is no override:
+    /// the line is refused at its first branch flag.
+    /// </summary>
     [Fact]
-    public void Parse_ReaderFlagOnAFromBranch_IsAcceptedWithAJobFile()
+    public void Parse_ReaderFlagOnAFromBranch_IsRefusedWithAJobFile()
     {
         var args = new[] { "--job", "j.yaml", "--from", "A", "--query", "SELECT 1", "-o", "out.csv" };
 
-        var pipeline = _lexer.Parse(args);
+        var ex = Assert.Throws<InvalidOperationException>(() => _lexer.Parse(args));
 
-        Assert.Equal("j.yaml", pipeline.Globals.JobFile);
+        Assert.Contains("Flag '--from' cannot be combined with --job", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -515,6 +518,40 @@ public class PipelineLexerTests
         var ex = Assert.Throws<InvalidOperationException>(() => _lexer.Parse(args));
 
         Assert.Contains($"'--job' is given twice: '{first}' and '{second}'", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A job file is the source of the branches: a flag of a branch given beside it would be lexed,
+    /// then dropped with exit 0, so it is refused, named as typed (<c>-o</c>, not <c>--output</c>).
+    /// The engine controls the conversion applies to the loaded job stay allowed, spelled by name or
+    /// by alias, with the flags of the whole command line; one the conversion does not read
+    /// (<c>--checkpoint</c>) is refused like a branch flag.
+    /// </summary>
+    [Theory]
+    [InlineData(new[] { "--job", "ja.yaml", "-i", "generate:2", "-o", "x.csv" }, "-i")]
+    [InlineData(new[] { "-i", "generate:2", "-o", "x.csv", "--job", "ja.yaml" }, "-i")]
+    [InlineData(new[] { "--job", "ja.yaml", "--from", "s", "-o", "x.csv" }, "--from")]
+    [InlineData(new[] { "--job", "ja.yaml", "-o", "x.csv" }, "-o")]
+    [InlineData(new[] { "--job", "ja.yaml", "--output", "x.csv" }, "--output")]
+    [InlineData(new[] { "-j", "ja.yaml", "--alias", "z" }, "--alias")]
+    [InlineData(new[] { "--job", "ja.yaml", "--fake", "GenerateIndex:name.fullName" }, "--fake")]
+    [InlineData(new[] { "--job", "ja.yaml", "--filter", "GenerateIndex > 0" }, "--filter")]
+    [InlineData(new[] { "--job", "ja.yaml", "--sql", "SELECT 1" }, "--sql")]
+    [InlineData(new[] { "--job", "ja.yaml", "--limit", "2", "-o", "x.csv" }, "-o")]
+    [InlineData(new[] { "--job", "ja.yaml", "--checkpoint", "stage1" }, "--checkpoint")]
+    [InlineData(new[] { "--job", "ja.yaml", "--limit", "2", "-b", "10", "--prefix", "p_", "--sample-rate", "0.5", "--sampling-seed", "-5", "--dry-run", "1", "--no-stats" }, null)]
+    [InlineData(new[] { "--job", "ja.yaml", "-p", "p_", "--cursor", "Id", "--state", "s.json", "--max-batch-bytes", "1", "--session", "s", "--metrics-path", "m.json" }, null)]
+    public void A_Branch_Flag_Beside_A_Job_File_Is_Refused_Naming_The_Flag(string[] args, string? refused)
+    {
+        if (refused is null)
+        {
+            Assert.Equal("ja.yaml", _lexer.Parse(args).Globals.JobFile);
+            return;
+        }
+
+        var ex = Assert.Throws<InvalidOperationException>(() => _lexer.Parse(args));
+        Assert.Contains($"Flag '{refused}' cannot be combined with --job", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("'ja.yaml' is the source of the branches", ex.Message, StringComparison.Ordinal);
     }
 }
 

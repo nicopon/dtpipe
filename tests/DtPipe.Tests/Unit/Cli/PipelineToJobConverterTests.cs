@@ -85,8 +85,8 @@ public class PipelineToJobConverterTests
 }
 
 /// <summary>
-/// F11 — EngineOverrideFlags is the single source consumed by both the job-file override
-/// pass and engine-settings derivation; the two flag sets must be identical.
+/// F11 — EngineOverrideFlags lists the engine controls a command line may give beside a job file:
+/// the lexer lets exactly these through, so each control the conversion applies must be in it.
 /// </summary>
 public class EngineOverrideFlagsParityTests
 {

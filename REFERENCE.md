@@ -44,7 +44,7 @@ dtpipe --job FILE [OVERRIDES]
 | `-o`, `--output DEST` | Target ADO.NET connection string or file path |
 | `-q`, `--query SQL` | SQL query (required for database sources) |
 | `--dry-run [N]` | Preview N rows without writing (default: 10) |
-| `--job FILE`, `-j FILE` | Load a pipeline from a YAML job file; given once per command line |
+| `--job FILE`, `-j FILE` | Load a pipeline from a YAML job file; given once per command line. The file is the source of the branches: [only engine controls](#execution--statistics) may be given beside it |
 | `--export-job FILE` | Serialize the current CLI pipeline to YAML and exit |
 | `--alias NAME` | Name the current branch for DAG references |
 | `--cursor COLUMN` | Cursor column for incremental loading (writer-side tracking) |
@@ -590,6 +590,15 @@ DuckDB extensions (`excel`, `httpfs`, `azure`, `ducklake`…) are reached throug
 | `--from-checkpoint` | `<key>` | Resume this branch from a stored checkpoint instead of its input |
 | `--contract-save` | `orders.json` | Write the schema this branch produces to a contract file — see [Contracts](#the-schema-a-pipeline-produces-is-a-contract) |
 | `--from-contract` | `orders.json` | Take this branch's source schema from a contract, with no rows — see [Contracts](#the-schema-a-pipeline-produces-is-a-contract) |
+
+**Beside `--job`**, a command line gives no branch: `-i`, `-o`, `--from`, `--alias`, a transformer
+or a provider option is refused, naming the flag, since the file holds the branches and the flag
+would change nothing. The flags that apply to every branch of the loaded job are `--limit`,
+`--batch-size`, `--max-batch-bytes`, `--sampling-rate`, `--sampling-seed`, `--prefix`, `--cursor`,
+`--state`, `--metrics-path`, `--dry-run` and `--session`; `--checkpoint`, `--from-checkpoint`,
+`--contract-save` and `--from-contract` are keys of the file, not overrides. The flags of the whole
+command line (`--no-stats`, `--log`, `--strict-bindings`, `--export-job`, `--cursor-from`,
+`--bind-input`, `--bind-output`) are given beside it as anywhere.
 
 ---
 
@@ -1515,14 +1524,14 @@ pinned runs the check and writes the pin.
 
 `dtpipe node` is a data node whose bricks are the branches of the [pipeline grammar](#dag-syntax): a
 branch that only reads (`-i`) is a source, one that only writes (`-o`) is a sink, and its `--alias`
-is the brick's id. `--job FILE` gives the same branches in a job file, which is how a sink sits
-beside sources: a command line holds as many sources as it likes, or one sink. A branch that reads
-another (`--from`), transforms, or both reads and writes is refused by name, since everything
-between a read and a write belongs on a runner. A `--job` file is read as written, like a command
-line: a `${{NAME}}`, a `keyring://` alias and a `${{cursor://|default}}` stay in the brick's text,
-in its version and in the job of the fragment, and are resolved only when the child runs. The node's
-settings are the `DtPipeNode__*` of the table above, from the environment; four options override
-them.
+is the brick's id. `--job FILE` gives the same branches in a job file instead of on the line (a flag
+of a branch beside `--job` is refused), which is how a sink sits beside sources: a command line
+holds as many sources as it likes, or one sink. A branch that reads another (`--from`), transforms,
+or both reads and writes is refused by name, since everything between a read and a write belongs on
+a runner. A `--job` file is read as written, like a command line: a `${{NAME}}`, a `keyring://`
+alias and a `${{cursor://|default}}` stay in the brick's text, in its version and in the job of the
+fragment, and are resolved only when the child runs. The node's settings are the `DtPipeNode__*` of
+the table above, from the environment; four options override them.
 
 | Option | Description |
 |---|---|

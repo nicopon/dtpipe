@@ -23,7 +23,10 @@ flags via `IStreamTransformerFactory.CliTriggerFlags`.
 
 `--job` / `-j` opens no branch: it is a global flag, and the lexer refuses a second one, naming both
 files, since a command line runs one job file (a job file itself holds as many branches as it
-declares). It loads that YAML job and applies the engine controls given on the line as overrides.
+declares). The file is the source of the branches: `PipelineToJobConverter.ConvertFromJobFile` never
+reads the branches of the line, so the lexer refuses, naming it as typed, every flag of a branch given
+beside `--job` that `EngineOverrideFlags.All` does not list. That list is what the conversion applies
+to the loaded job; a control joins it only when the conversion reads it, never the other way round.
 `--export-job <file>` serialises the CLI pipeline through `JobFileWriter` and exits without running.
 `[CI: PipelineLexerTests]`
 

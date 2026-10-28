@@ -69,13 +69,18 @@ name**, and the error names the one that would have worked.
 A command line runs one job file: a second `--job` (or `-j`, the same flag) is refused, naming both
 files. To run two files, run two commands; one file holds as many branches as it declares.
 
-CLI flags applied alongside `--job` override the file. That is how one job serves several
-environments without a template engine:
+The file is the source of the branches, so no branch is given beside it: a flag of a branch (`-i`,
+`-o`, `--from`, `--alias`, a transformer, a provider option) is refused, naming the flag. What the
+command line adds is the engine controls, which override the file's values for every branch. That
+is how one job serves several environments without a template engine:
 
 ```bash
 dtpipe --job load-people.yaml --limit 1000 --dry-run 5
 dtpipe --job load-people.yaml --prefix staging_
 ```
+
+To change a branch, change the file; to run another pipeline, leave `--job` out. The controls that
+override a job are listed in [Execution & Statistics](../../REFERENCE.md#execution--statistics).
 
 ## Values that must not be in the file
 

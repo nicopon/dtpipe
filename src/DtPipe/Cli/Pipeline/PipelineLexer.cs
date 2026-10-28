@@ -17,6 +17,8 @@ namespace DtPipe.Cli.Pipeline;
 /// (<see cref="FlagStage.Any"/>) takes one value on each side; a global scalar flag at most once
 /// per command line, <c>--job</c> and <c>-j</c> included, since a command line runs one job file.
 /// Duplicates are hard errors, not warnings: a silent last-wins drops a value the user gave.
+/// Beside <c>--job</c> no branch is given: the file holds them, and the only flags of a branch the
+/// line may carry are the engine controls of <see cref="EngineOverrideFlags"/>.
 /// </summary>
 public class PipelineLexer
 {
@@ -254,16 +256,43 @@ public class PipelineLexer
         if (currentBranchArgs.Count > 0)
             branches.Add(BuildBranch(currentBranchFlags, currentBranchArgs));
 
-        // A job file supplies each branch's reader from YAML, so CLI reader flags are overrides
-        // there rather than flags with nothing to bind to.
-        bool hasJobFile = globalDict.ContainsKey("--job");
+        var jobFile = globalDict.TryGetValue("--job", out var job) ? job?.ToString() : null;
         foreach (var branch in branches)
         {
+            if (jobFile is not null) RejectBranchFlagsBesideAJobFile(branch, jobFile);
             RejectOrphanBranch(branch);
-            if (!hasJobFile) RejectReaderFlagsWithoutAReader(branch);
+            RejectReaderFlagsWithoutAReader(branch);
         }
 
         return new ParsedPipeline(MapGlobals(globalDict), branches);
+    }
+
+    /// <summary>
+    /// A job file is the source of the branches: the conversion loads them from it and never opens the
+    /// branches of the line, so a flag of a branch given beside <c>--job</c> would be lexed, validated
+    /// and dropped, with exit 0. It is refused, named as typed. Only the engine controls the conversion
+    /// applies to the loaded job (<see cref="EngineOverrideFlags"/>) stay; an unrecognised switch is
+    /// not a flag of the grammar and keeps the policy of any other line.
+    /// </summary>
+    private void RejectBranchFlagsBesideAJobFile(BranchSpec branch, string jobFile)
+    {
+        var tokens = branch.RawArgs;
+        for (int i = 0; i < tokens.Length; i++)
+        {
+            var def = _registry.Lookup(tokens[i]);
+            if (def == null) continue;
+
+            var token = tokens[i];
+            if (def.ConsumesNextToken) i++;
+            if (EngineOverrideFlags.All.Contains(def.Name, StringComparer.OrdinalIgnoreCase)) continue;
+
+            throw new InvalidOperationException(
+                $"Flag '{token}' cannot be combined with --job: the job file '{jobFile}' is the source of the "
+              + "branches, so a flag of a branch on the command line would be dropped. Change the file, or leave "
+              + "--job out and give the whole pipeline on the command line. Beside --job, only the engine controls "
+              + $"that override the job ({string.Join(", ", EngineOverrideFlags.All.Where(f => f.StartsWith("--")))}) "
+              + "and the flags of the whole command line (such as --no-stats) are accepted.");
+        }
     }
 
     /// <summary>

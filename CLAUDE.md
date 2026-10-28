@@ -141,8 +141,10 @@ every other value flag is scalar. Where a second occurrence fails is read off th
 `FlagStage`: a branch flag (`All`) fails anywhere in its branch, since `-o` opens a stage and not a
 branch; any other flag fails in the same stage, so one the reader and the writer both take (`Any`)
 binds each side; a global flag (`--job` included: a command line runs one job file) fails anywhere
-in the command line. How many aliases `--from` accepts is the processor's business, not the
-grammar's. Semantics: `REFERENCE.md#dag-syntax`. `[CI: PipelineLexerTests]`
+in the command line. A flag of a branch beside `--job` is refused too: the file is the source of the
+branches, and only the engine controls the conversion applies may follow it. How many aliases `--from`
+accepts is the processor's business, not the grammar's. Semantics: `REFERENCE.md#dag-syntax`.
+`[CI: PipelineLexerTests]`
 
 ## Invariants
 
