@@ -27,8 +27,8 @@ public enum FlagStage
     Reader = 1,          // valid in reader scope (before first transformer trigger or -o)
     Pipeline = 2,          // valid in transformer scope (transformer triggers + transformer options)
     Writer = 4,          // valid in writer scope (after -o)
-    Any = Reader | Writer,         // valid in reader and writer, but NOT pipeline (e.g. --table, --query, --key)
-    All = Reader | Pipeline | Writer  // valid anywhere (engine controls, DAG routing flags)
+    Any = Reader | Writer,         // valid in reader and writer, but NOT pipeline (e.g. --table): each side binds its own value, so the lexer takes it once per stage
+    All = Reader | Pipeline | Writer  // valid anywhere (engine controls, DAG routing flags); a per-branch one holds one value for the whole branch, so the lexer takes it once per branch
 }
 
 /// <param name="BooleanValued">

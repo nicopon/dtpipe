@@ -218,8 +218,11 @@ that joins. The recipe is in
 refused with the rewrite to apply.
 
 **A flag belongs to the branch and stage it sits in.** Reader options go before the alias, writer
-options after `-o`. The same flag in two different stages is two independent bindings; the same
-flag twice in one stage is a hard error rather than a silent last-wins.
+options after `-o`. A flag both the reader and the writer take is two independent bindings, one
+per stage; twice in one stage it is a hard error rather than a silent last-wins. A flag of the
+branch itself (`--alias`, `--ref`, `--limit`) is a hard error the second time anywhere in the
+branch: `-o` opens the writer stage, not a new branch, so `--alias a -o out.csv --alias b` is
+refused, naming both values.
 
 ## Topologies that already work
 

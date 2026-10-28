@@ -466,9 +466,9 @@ run_test "T141" "$DTPIPE -i artifacts/test_data.csv --alias s --from s \
   --sql \"SELECT * FROM s\" --sql \"SELECT count(*) AS c FROM s\" \
   -o artifacts/output_t141.csv" "Flag '--sql' appears more than once"
 
-# T142: [ERROR] Duplicate scalar flag (--alias) in the same branch stage
+# T142: [ERROR] Duplicate branch flag (--alias): refused once per branch, naming both values
 run_test "T142" "$DTPIPE -i artifacts/test_data.csv --alias a --alias b \
-  -o artifacts/output_t142.csv" "Flag '--alias' appears more than once"
+  -o artifacts/output_t142.csv" "Flag '--alias' is given twice in this branch: 'a' and 'b'"
 
 # T143: [ERROR] A positional query is normalised into --sql, so pairing it with an explicit --sql
 # is the duplicate-flag case — which is what the message reports.

@@ -74,8 +74,8 @@ built:
 
 Repeating `-i`, `--from` or `--job` does **not** add a value — it opens a new branch. That is the
 one rule that makes a multi-source pipeline expressible on a single command line, and it is why
-every other value flag rejects a second occurrence in the same stage instead of silently taking
-the last one. A list is therefore comma-separated:
+every other value flag rejects a second occurrence instead of silently taking the last one. A
+list is therefore comma-separated:
 
 ```bash
 # Two branches, two independent copies
@@ -86,7 +86,10 @@ dtpipe -i sales.csv -o sales.parquet  -i stock.csv -o stock.parquet
 ```
 
 A flag also belongs to the **stage** it sits in: reader options go before the alias, writer options
-after `-o`. The same flag in two stages is two independent bindings.
+after `-o`. A flag both the reader and the writer take (`--table`, `--csv-separator`) is two
+independent bindings, one per stage. A flag of the branch itself (`--alias`, `--limit`, `-o`) is
+given once in the branch, whichever stage it sits in: `-o` opens the writer stage, not a new
+branch.
 
 ## Row mode and columnar mode
 

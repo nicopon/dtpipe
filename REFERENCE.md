@@ -667,15 +667,22 @@ Neither `--sql` nor boolean processor flags (e.g. `--merge`) trigger a split.
 
 #### Duplicate flags are an error
 
-A non-repeatable flag may appear **at most once per stage** within a branch — stages being
-reader (before the first transformer), pipeline (transformer scope) and writer (after `-o`).
-A repeated flag in the same stage is a hard error, not a silent last-wins:
+A flag of the branch itself — the DAG flags (`--alias`, `--ref`, `-o`) and the engine controls
+(`--limit`, `--batch-size`, `--cursor`, `--checkpoint`, …) — may appear **at most once per
+branch**, whichever stage it is written in: `-o` opens the writer stage, not a new branch. Any
+other non-repeatable flag may appear **at most once per stage** — stages being reader (before the
+first transformer), pipeline (transformer scope) and writer (after `-o`) — so a flag both the
+reader and the writer take binds each side. A repeated flag is a hard error that names both
+values, not a silent last-wins:
 
 ```
+# ERROR: --alias given twice in one branch: 'orders' and 'report'
+dtpipe -i src.csv --alias orders -o out.csv --alias report
+
 # ERROR: --sql provided twice in the same branch
 dtpipe -i src.csv --alias s --from s --sql "SELECT * FROM s" --sql "SELECT count(*) FROM s" -o out.csv
 
-# OK: same flag in two different stages = two independent bindings
+# OK: a reader flag and a writer flag of the same name = two independent bindings
 dtpipe -i in.csv --csv-separator ";" -o out.csv --csv-separator "|"
 ```
 

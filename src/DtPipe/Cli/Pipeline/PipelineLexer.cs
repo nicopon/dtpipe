@@ -10,9 +10,12 @@ namespace DtPipe.Cli.Pipeline;
 /// Branches are split implicitly by the second occurrence of -i/--input or by any --from flag.
 /// All flags belong to the branch in which they appear, with strict stage-scoping enforced by
 /// BuildBranch: flags must appear in the correct stage (reader before transformers, writer after -o).
-/// Strictness: a non-repeatable flag may appear at most ONCE per stage within a branch, and a
-/// global scalar flag at most once per command line — duplicates are hard errors, not warnings
-/// (a silent last-wins would make the executed configuration ambiguous).
+/// Strictness, read off each flag's declared <see cref="FlagStage"/>: a branch flag
+/// (<see cref="FlagStage.All"/>) may appear at most ONCE per branch, whatever the stage; any other
+/// non-repeatable flag at most once per stage, so a flag the reader and the writer each bind
+/// (<see cref="FlagStage.Any"/>) takes one value on each side; a global scalar flag at most once
+/// per command line. Duplicates are hard errors, not warnings: a silent last-wins drops a value the
+/// user gave.
 /// </summary>
 public class PipelineLexer
 {
@@ -46,8 +49,10 @@ public class PipelineLexer
         var currentBranchFlags = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         var currentBranchArgs = new List<string>();
 
-        // Duplicate-detection state: (flag → stages where it was already consumed) per branch,
-        // plus one process-wide set for global scalar flags. Cleared on branch split.
+        // Duplicate-detection state, per branch and cleared on branch split: (branch flag → the
+        // value it was first given) and (other flag → stages where it was already consumed); plus
+        // one process-wide set for global scalar flags.
+        var seenPerBranch = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         var seenPerStage = new Dictionary<string, HashSet<LexStage>>(StringComparer.OrdinalIgnoreCase);
         var seenGlobalScalars = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         LexStage currentStage = LexStage.Reader;
@@ -104,6 +109,7 @@ public class PipelineLexer
                     branches.Add(BuildBranch(currentBranchFlags, currentBranchArgs));
                     currentBranchFlags = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
                     currentBranchArgs = new List<string>();
+                    seenPerBranch.Clear();
                     seenPerStage.Clear();
                     currentStage = LexStage.Reader;
                 }
@@ -129,7 +135,20 @@ public class PipelineLexer
                     continue;
                 }
 
-                if (def.Arity != FlagArity.Repeatable && !IsMultiInstanceOption(def))
+                if (def.Arity != FlagArity.Repeatable && def.Stage == FlagStage.All)
+                {
+                    // A branch flag has one value for the whole branch, wherever it is written. -o
+                    // opens the writer stage, not a branch, so a second occurrence would replace
+                    // the first in silence.
+                    if (seenPerBranch.TryGetValue(def.Name, out var first))
+                        throw new InvalidOperationException(
+                            $"Flag '{token}' is given twice in this branch"
+                          + (def.ConsumesNextToken ? $": '{first}' and '{value}'. " : ". ")
+                          + "It applies to the whole branch, whichever stage it is written in, so it is given once: "
+                          + "-o opens the writer stage, not a new branch." + AliasListHint(def.Name));
+                    seenPerBranch[def.Name] = value;
+                }
+                else if (def.Arity != FlagArity.Repeatable && !IsMultiInstanceOption(def))
                 {
                     if (!seenPerStage.TryGetValue(def.Name, out var stages))
                     {
@@ -202,6 +221,7 @@ public class PipelineLexer
                         branches.Add(BuildBranch(currentBranchFlags, currentBranchArgs));
                         currentBranchFlags = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
                         currentBranchArgs = new List<string>();
+                        seenPerBranch.Clear();
                         seenPerStage.Clear();
                         currentStage = LexStage.Reader;
                     }

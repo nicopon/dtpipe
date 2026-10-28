@@ -6,9 +6,10 @@ namespace DtPipe.Processors;
 public static class BranchArgParser
 {
     /// <summary>
-    /// Returns the last value following <paramref name="flag"/> (last-occurrence-wins, matching
-    /// the CLI lexer's documented duplicate policy), or <see langword="null"/> if the flag is absent
-    /// or every occurrence's next token looks like another flag.
+    /// Returns the last value following <paramref name="flag"/>, or <see langword="null"/> if the
+    /// flag is absent or every occurrence's next token looks like another flag. This is no
+    /// duplicate policy: the CLI lexer refuses a branch flag given twice in a branch, and any other
+    /// flag given twice in one stage.
     /// </summary>
     public static string? ExtractValue(string[] args, string flag)
     {

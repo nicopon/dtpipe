@@ -472,6 +472,35 @@ public class PipelineLexerTests
         Assert.Single(pipeline.Branches);
         Assert.Contains("--query", pipeline.Branches[0].ReaderArgs);
     }
+
+    // ── A flag given twice in one branch ────────────────────────────────
+
+    /// <summary>
+    /// A flag of the whole branch (FlagStage.All) is refused the second time it is given, in the
+    /// same stage or in another, and the refusal names both values: kept last, the first one would
+    /// be dropped without a word, since -o does not open a branch. A flag the reader and the writer
+    /// each bind (FlagStage.Any) still takes one value in each stage.
+    /// </summary>
+    [Theory]
+    [InlineData(new[] { "-i", "shop.db", "-t", "orders", "--alias", "a", "--alias", "b", "-o", "x.csv" }, "--alias", "a", "b")]
+    [InlineData(new[] { "-i", "shop.db", "-t", "orders", "--alias", "orders", "-o", "x.csv", "--alias", "report" }, "--alias", "orders", "report")]
+    [InlineData(new[] { "-i", "shop.db", "-t", "orders", "--alias", "A", "-o", "x.csv", "--alias", "B", "--export-job", "e.yaml" }, "--alias", "A", "B")]
+    [InlineData(new[] { "-i", "shop.db", "-t", "orders", "--limit", "3", "-o", "x.csv", "--limit", "5" }, "--limit", "3", "5")]
+    [InlineData(new[] { "-i", "shop.db", "-t", "orders", "-o", "copy.db", "-t", "copy" }, null, null, null)]
+    public void A_Branch_Flag_Is_Given_Once_Per_Branch_A_Stage_Flag_Once_Per_Stage(
+        string[] args, string? flag, string? first, string? second)
+    {
+        if (flag is null)
+        {
+            var branch = Assert.Single(_lexer.Parse(args).Branches);
+            Assert.Equal(new[] { "-i", "shop.db", "-t", "orders" }, branch.ReaderArgs);
+            Assert.Equal(new[] { "-o", "copy.db", "-t", "copy" }, branch.WriterArgs);
+            return;
+        }
+
+        var ex = Assert.Throws<InvalidOperationException>(() => _lexer.Parse(args));
+        Assert.Contains($"'{flag}' is given twice in this branch: '{first}' and '{second}'", ex.Message, StringComparison.Ordinal);
+    }
 }
 
 [Collection("console-serial")]

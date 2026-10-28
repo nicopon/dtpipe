@@ -137,9 +137,11 @@ Providers implement `IProviderDescriptor<TService>`, registered in `Program.cs`;
 
 `-i`, `--from` and `--job` open a new branch (exact rules: `src/DtPipe/CLAUDE.md`). **An alias list
 is always comma-separated, and repeating a flag never accumulates**: repetition already means "new
-branch", so every other value flag is scalar and rejects a second occurrence in the same stage. How
-many aliases `--from` accepts is the processor's business, not the grammar's. Semantics:
-`REFERENCE.md#dag-syntax`.
+branch", so every other value flag is scalar. Where a second occurrence fails is read off the
+flag's declared `FlagStage`: a branch flag (`All`) fails anywhere in its branch, since `-o` opens a
+stage and not a branch; any other flag fails in the same stage, so one the reader and the writer
+both take (`Any`) binds each side. How many aliases `--from` accepts is the processor's business,
+not the grammar's. Semantics: `REFERENCE.md#dag-syntax`. `[CI: PipelineLexerTests]`
 
 ## Invariants
 
