@@ -49,17 +49,18 @@ public sealed class NodeCommandTests
     }
 
     [Theory]
-    [InlineData("a:\n  input: generate:5\n  output: csv:/x.csv\n", "reads and writes")]
+    [InlineData("a:\n  input: generate:5\n  output: csv:/x.csv\n", "reads and writes", "a --job file holds several")]
     [InlineData("a:\n  from: b\n  output: csv:/x.csv\n", "reads another branch")]
     [InlineData("a:\n  input: \"pg:Host=h;Database=d;Password=hunter2\"\n", "holds a credential")]
     [InlineData("a:\n  input: \"duck::memory:\"\n  provider-options:\n    duck-reader:\n      query: SELECT * FROM t WHERE password = 'x'\n", "holds a credential")]
-    public void A_Branch_That_Is_No_Brick_Or_Holds_A_Credential_Is_Refused_By_Name(string job, string reason)
+    public void A_Branch_That_Is_No_Brick_Or_Holds_A_Credential_Is_Refused_By_Name(string job, string reason, string? form = null)
     {
         var (bricks, refusal) = NodeBricks.Read(job);
 
         Assert.Empty(bricks);
         Assert.Contains("'a'", refusal);
         Assert.Contains(reason, refusal);
+        if (form is not null) Assert.Contains(form, refusal);
     }
 
     [Fact]

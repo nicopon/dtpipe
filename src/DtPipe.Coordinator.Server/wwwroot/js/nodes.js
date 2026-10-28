@@ -53,7 +53,7 @@ function render() {
         ${n.role === "Runner" ? `<p class="hint">Carries every step between the bricks: transformers, SQL, merges.</p>` : ""}
         ${bricks.length ? `<h3>Bricks</h3>${bricks.map(brickRow).join("")}` : n.role === "Runner" ? "" : `<p class="hint">No brick offered.</p>`}
         ${replicas.length ? `<h3 title="A replica is one host carrying this node's identity: a run is placed on one of them that can run its fragment.">Replicas (${replicas.filter((r) => r.connected).length}/${replicas.length})</h3>
-        ${n.replicasDisagree ? `<p class="hint mismatch">The replicas do not offer the same bricks: a rolling update is under way, and a run goes to a replica that composes its plan.</p>` : ""}
+        ${n.replicasDisagree ? `<p class="hint mismatch">The replicas do not offer the same bricks: usually a rolling update, or two hosts started under the same name. A run goes to a replica that composes its plan.</p>` : ""}
         ${replicas.map((r) => `
           <div class="frag-line" title="${esc(r.origin ?? "")}"><span><code>${esc(r.id)}</code>${r.dtpipeVersion ? ` <span class="chip">dtpipe ${esc(r.dtpipeVersion)}</span>` : ""} <span class="hint">${esc(r.origin ?? "")}</span></span>
           <span class="state ${r.connected ? "Registered" : "Failed"}">${r.connected ? "connected" : "away"}${r.runs ? ` · ${r.runs} run${r.runs > 1 ? "s" : ""}` : ""}</span></div>`).join("")}`

@@ -40,7 +40,9 @@ internal static class NodeBricks
         if (JobYaml.Has(branch, JobKeys.From))
             return $"Branch '{alias}' reads another branch (from): a brick reads a source or writes a sink, and everything between belongs on a runner.";
         if (reads == writes)
-            return $"Branch '{alias}' {(reads ? "reads and writes" : "neither reads nor writes")}: a brick is either a source (-i) or a sink (-o).";
+            return reads
+                ? $"Branch '{alias}' reads and writes: a brick is either a source (-i) or a sink (-o). Each brick is a branch of its own, and a --job file holds several."
+                : $"Branch '{alias}' neither reads nor writes: a brick is either a source (-i) or a sink (-o).";
         return null;
     }
 

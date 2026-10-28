@@ -18,7 +18,7 @@ public sealed class NodeCommand : Command
     private const string EnvironmentPrefix = "DtPipeNode";
 
     public NodeCommand(IServiceProvider serviceProvider)
-        : base("node", "Run as a data node of a distributed pipeline: each branch given is a brick it offers")
+        : base("node", "Run as a data node of a distributed pipeline: each branch given is a brick it offers; --job <file.yaml> carries several, sources and sinks together")
     {
         var name = new Option<string?>("--name") { Description = "The node's name (default: DtPipeNode__Name)" };
         var coordinator = new Option<string?>("--coordinator") { Description = "The coordinator's address (default: DtPipeNode__CoordinatorUrl)" };
