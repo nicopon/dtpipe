@@ -198,7 +198,7 @@ Both inputs are streamed — `← [a]  +from [b]`, where the join above read `+r
 
 ## The rules that catch people out
 
-**Repeating `-i`, `--from` or `--job` opens a new branch.** That is the only way a single command
+**Repeating `-i` or `--from` opens a new branch.** That is the only way a single command
 line can express several paths, and it is why an alias list is comma-separated:
 
 ```bash

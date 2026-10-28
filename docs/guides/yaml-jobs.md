@@ -66,6 +66,9 @@ name**, and the error names the one that would have worked.
 
 ## Overrides
 
+A command line runs one job file: a second `--job` (or `-j`, the same flag) is refused, naming both
+files. To run two files, run two commands; one file holds as many branches as it declares.
+
 CLI flags applied alongside `--job` override the file. That is how one job serves several
 environments without a template engine:
 

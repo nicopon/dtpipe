@@ -233,7 +233,7 @@ public class PipelineLexerTests
     }
 
     /// <summary>
-    /// --session is scalar like every other value flag. Only -i, --from and --job give repetition
+    /// --session is scalar like every other value flag. Only -i and --from give repetition
     /// a meaning, and that meaning is "open a branch".
     /// </summary>
     [Fact]
@@ -246,8 +246,8 @@ public class PipelineLexerTests
     }
 
     /// <summary>
-    /// Neither materialisation flag opens a branch. Only -i, --from and --job do, and giving a
-    /// fourth flag that meaning would make the grammar unlearnable.
+    /// Neither materialisation flag opens a branch. Only -i and --from do, and giving a
+    /// third flag that meaning would make the grammar unlearnable.
     /// </summary>
     [Fact]
     public void Parse_CheckpointFlags_DoNotSplitTheBranch()
@@ -500,6 +500,21 @@ public class PipelineLexerTests
 
         var ex = Assert.Throws<InvalidOperationException>(() => _lexer.Parse(args));
         Assert.Contains($"'{flag}' is given twice in this branch: '{first}' and '{second}'", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A command line runs one job file, and -j is the same flag as --job. A second one would
+    /// replace the first in silence, so the refusal names both files.
+    /// </summary>
+    [Theory]
+    [InlineData(new[] { "--job", "ja.yaml", "--job", "jb.yaml", "--no-stats" }, "ja.yaml", "jb.yaml")]
+    [InlineData(new[] { "--job", "ja.yaml", "-j", "jb.yaml" }, "ja.yaml", "jb.yaml")]
+    [InlineData(new[] { "-j", "ja.yaml", "--job", "jb.yaml" }, "ja.yaml", "jb.yaml")]
+    public void A_Second_Job_File_Is_Refused_Naming_Both_Files(string[] args, string first, string second)
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() => _lexer.Parse(args));
+
+        Assert.Contains($"'--job' is given twice: '{first}' and '{second}'", ex.Message, StringComparison.Ordinal);
     }
 }
 

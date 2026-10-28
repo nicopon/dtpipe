@@ -7,15 +7,16 @@ namespace DtPipe.Cli.Pipeline;
 
 /// <summary>
 /// Sequential lexer for DtPipe pipelines.
-/// Branches are split implicitly by the second occurrence of -i/--input or by any --from flag.
+/// Branches are split implicitly by the second occurrence of -i/--input or by a --from flag that
+/// follows an input or another --from.
 /// All flags belong to the branch in which they appear, with strict stage-scoping enforced by
 /// BuildBranch: flags must appear in the correct stage (reader before transformers, writer after -o).
 /// Strictness, read off each flag's declared <see cref="FlagStage"/>: a branch flag
 /// (<see cref="FlagStage.All"/>) may appear at most ONCE per branch, whatever the stage; any other
 /// non-repeatable flag at most once per stage, so a flag the reader and the writer each bind
 /// (<see cref="FlagStage.Any"/>) takes one value on each side; a global scalar flag at most once
-/// per command line. Duplicates are hard errors, not warnings: a silent last-wins drops a value the
-/// user gave.
+/// per command line, <c>--job</c> and <c>-j</c> included, since a command line runs one job file.
+/// Duplicates are hard errors, not warnings: a silent last-wins drops a value the user gave.
 /// </summary>
 public class PipelineLexer
 {
@@ -51,10 +52,10 @@ public class PipelineLexer
 
         // Duplicate-detection state, per branch and cleared on branch split: (branch flag → the
         // value it was first given) and (other flag → stages where it was already consumed); plus
-        // one process-wide set for global scalar flags.
+        // one process-wide map (global scalar flag → the value it was first given).
         var seenPerBranch = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         var seenPerStage = new Dictionary<string, HashSet<LexStage>>(StringComparer.OrdinalIgnoreCase);
-        var seenGlobalScalars = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seenGlobalScalars = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         LexStage currentStage = LexStage.Reader;
 
         // The unrecognised flag last seen, if it was the immediately preceding token. An unknown
@@ -101,7 +102,6 @@ public class PipelineLexer
                 // from the flags accumulated so far in the current branch.
                 var state = new BranchSplitState(
                     HasInput: currentBranchFlags.ContainsKey("--input") || currentBranchFlags.ContainsKey("-i"),
-                    HasJob: currentBranchFlags.ContainsKey("--job") || currentBranchFlags.ContainsKey("-j"),
                     HasFrom: currentBranchFlags.ContainsKey("--from"));
 
                 if (BranchSplitDecision.Decide(state, def.Name) != SplitDecision.Stay)
@@ -128,10 +128,18 @@ public class PipelineLexer
 
                 if (def.Scope == FlagScope.Global)
                 {
-                    // --job is a split trigger (multi-job DAGs are legitimate), never a duplicate.
-                    if (def.Arity != FlagArity.Repeatable && def.Name != "--job" && !seenGlobalScalars.Add(def.Name))
-                        throw new InvalidOperationException(
-                            $"Global flag '{def.Name}' appears more than once; a global flag may be specified only once.");
+                    // A global flag has one value for the whole command line, wherever it is
+                    // written, and opens no branch: a second occurrence would replace the first
+                    // in silence. The registry resolves -j to --job, so both spellings count.
+                    if (def.Arity != FlagArity.Repeatable)
+                    {
+                        if (seenGlobalScalars.TryGetValue(def.Name, out var firstGlobal))
+                            throw new InvalidOperationException(
+                                $"Flag '{def.Name}' is given twice"
+                              + (def.ConsumesNextToken ? $": '{firstGlobal}' and '{value}'. " : ". ")
+                              + "It applies to the whole command line, so it is given once." + GlobalFlagHint(def.Name));
+                        seenGlobalScalars[def.Name] = value;
+                    }
                     continue;
                 }
 
@@ -266,6 +274,17 @@ public class PipelineLexer
     private static string AliasListHint(string flagName) => flagName switch
     {
         "--ref" => " To name several aliases, list them on a single flag: --ref a,b.",
+        _ => ""
+    };
+
+    /// <summary>
+    /// Extra sentence for a global flag whose repetition has a tempting reading. Two job files are
+    /// the mistake of someone who means "run both", which one command line does not do.
+    /// </summary>
+    private static string GlobalFlagHint(string flagName) => flagName switch
+    {
+        "--job" => " -j is the same flag. A command line runs one job file: run each file with its own "
+                 + "dtpipe, or write their branches in a single file.",
         _ => ""
     };
 

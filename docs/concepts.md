@@ -72,7 +72,7 @@ built:
 →  fake → fake → mask
 ```
 
-Repeating `-i`, `--from` or `--job` does **not** add a value — it opens a new branch. That is the
+Repeating `-i` or `--from` does **not** add a value — it opens a new branch. That is the
 one rule that makes a multi-source pipeline expressible on a single command line, and it is why
 every other value flag rejects a second occurrence instead of silently taking the last one. A
 list is therefore comma-separated:
@@ -89,7 +89,8 @@ A flag also belongs to the **stage** it sits in: reader options go before the al
 after `-o`. A flag both the reader and the writer take (`--table`, `--csv-separator`) is two
 independent bindings, one per stage. A flag of the branch itself (`--alias`, `--limit`, `-o`) is
 given once in the branch, whichever stage it sits in: `-o` opens the writer stage, not a new
-branch.
+branch. A flag of the whole command line (`--job`, `--log`) is given once, full stop: a command
+line runs one job file, and a second `--job` is refused with both files named.
 
 ## Row mode and columnar mode
 

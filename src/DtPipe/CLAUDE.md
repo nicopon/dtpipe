@@ -13,16 +13,19 @@ and the agent are in `.claude/rules/mcp-and-agent.md`.
    JobDagDefinition)`.
 3. Linear: `LinearPipelineService` → `ExportService.RunExportAsync()` → `PipelineExecutor`.
 
-Implicit branch split — exactly three tokens:
-- `-i` / `--input` — when an input or job file was already seen in the current branch;
-- `--from <alias[,alias...]>` — when a `--from`, `--input` or `--job` was already seen (the first
-  `--from` in a fresh branch stays in it);
-- `--job` / `-j <file>` — when a job file or input was already seen.
+Implicit branch split — exactly two tokens:
+- `-i` / `--input` — when an input was already seen in the current branch;
+- `--from <alias[,alias...]>` — when a `--from` or `--input` was already seen (the first `--from` in
+  a fresh branch stays in it).
 
 Neither `--sql` nor boolean processor flags (`--merge`) split. Each processor declares its trigger
-flags via `IStreamTransformerFactory.CliTriggerFlags`. `--job` loads a YAML job and applies extra CLI
-flags as overrides; `--export-job <file>` serialises the CLI pipeline through `JobFileWriter` and
-exits without running.
+flags via `IStreamTransformerFactory.CliTriggerFlags`.
+
+`--job` / `-j` opens no branch: it is a global flag, and the lexer refuses a second one, naming both
+files, since a command line runs one job file (a job file itself holds as many branches as it
+declares). It loads that YAML job and applies the engine controls given on the line as overrides.
+`--export-job <file>` serialises the CLI pipeline through `JobFileWriter` and exits without running.
+`[CI: PipelineLexerTests]`
 
 ## The engine and its host
 

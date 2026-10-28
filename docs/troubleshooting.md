@@ -20,7 +20,7 @@ and sends you to the page that explains it properly.
 | `No writer factory resolved` | The `-o` value matches no provider — often a prefix typo, or an extension outside the supported set | [Connection catalog](connections/README.md) |
 | `--strategy` refused | The target is a file or an object: it is replaced wholesale, there is nothing to append to | [Write strategies](guides/write-strategies.md) |
 | `ORA-01821` / `ORA-01858` / `ORA-01830` on an incremental run | The cursor literal is parsed with `NLS_TIMESTAMP_FORMAT` | [Incremental loading](guides/incremental.md#things-that-bite) |
-| A second identical flag is refused | Repetition means "new branch" for `-i`/`--from`/`--job`, and is an error for every other scalar flag: anywhere in the branch for a flag of the branch (`--alias`, `--limit`), in the same stage for one the reader and the writer both take | [Concepts](concepts.md#order-matters-and-repetition-means-something) |
+| A second identical flag is refused | Repetition means "new branch" for `-i`/`--from`, and is an error for every other scalar flag: anywhere in the command line for `--job` (a command line runs one job file; the error names both), anywhere in the branch for a flag of the branch (`--alias`, `--limit`), in the same stage for one the reader and the writer both take | [Concepts](concepts.md#order-matters-and-repetition-means-something) |
 | A branch cannot be read by another | It declares an `-o` of its own, so it publishes nothing | [DAG pipelines](guides/dag.md#the-rules-that-catch-people-out) |
 | The run exits `130` | Cancelled — Ctrl-C, or a branch that reported a cancellation. Not an error | [Concepts](concepts.md#exit-codes) |
 

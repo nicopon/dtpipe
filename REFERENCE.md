@@ -44,7 +44,7 @@ dtpipe --job FILE [OVERRIDES]
 | `-o`, `--output DEST` | Target ADO.NET connection string or file path |
 | `-q`, `--query SQL` | SQL query (required for database sources) |
 | `--dry-run [N]` | Preview N rows without writing (default: 10) |
-| `--job FILE`, `-j FILE` | Load a pipeline from a YAML job file |
+| `--job FILE`, `-j FILE` | Load a pipeline from a YAML job file; given once per command line |
 | `--export-job FILE` | Serialize the current CLI pipeline to YAML and exit |
 | `--alias NAME` | Name the current branch for DAG references |
 | `--cursor COLUMN` | Cursor column for incremental loading (writer-side tracking) |
@@ -610,7 +610,7 @@ DuckDB extensions (`excel`, `httpfs`, `azure`, `ducklake`…) are reached throug
 > into memory so the query engine can build a cost-based plan. Only the `--from` source streams.
 
 > **An alias list is comma-separated; repeating a flag never adds to it.** Repetition has one
-> meaning in this grammar — `-i`, `--from` and `--job` open a new branch — so `--from a --from b`
+> meaning in this grammar — `-i` and `--from` open a new branch — so `--from a --from b`
 > declares two branches, not one branch reading two sources. Write `--ref a,b`; `--ref a --ref b`
 > is refused.
 
@@ -657,12 +657,13 @@ Branches are separated implicitly while walking the arguments. One pure function
 
 | Token | Splits when |
 |:---|:---|
-| `-i` / `--input` | an input **or** job file was already seen in the current branch |
-| `--from` | a `--from`, `--input` or `--job` was already seen — the first `--from` in a fresh branch stays in the current branch |
-| `--job` / `-j` | a job file **or** input was already seen |
+| `-i` / `--input` | an input was already seen in the current branch |
+| `--from` | a `--from` or `--input` was already seen — the first `--from` in a fresh branch stays in the current branch |
 | *positional SQL text* | a bare (non-flag) token starts a new branch that becomes the `--sql` processor branch |
 
-Neither `--sql` nor boolean processor flags (e.g. `--merge`) trigger a split.
+Neither `--sql` nor boolean processor flags (e.g. `--merge`) trigger a split, and neither does
+`--job`: it is given once per command line, `-j` being the same flag, and a second one is refused
+with both files named. A job file holds as many branches as it declares.
 > Pre-filter large lookup tables upstream before using them as `--ref`.
 
 #### Duplicate flags are an error

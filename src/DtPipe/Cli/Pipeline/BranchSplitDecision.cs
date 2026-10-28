@@ -7,28 +7,25 @@ public enum SplitDecision
     Stay,
     /// <summary>A second -i/--input: flush the current branch and start a new one.</summary>
     NewInput,
-    /// <summary>A --from after existing input/job/from: start a new consumer branch.</summary>
+    /// <summary>A --from after an existing input or --from: start a new consumer branch.</summary>
     NewFrom,
-    /// <summary>A second --job/-j: flush and start a new job branch.</summary>
-    NewJob,
 }
 
 /// <summary>State accumulated by the lexer while walking a branch.</summary>
 /// <param name="HasInput">An -i/--input was already seen in the current branch.</param>
-/// <param name="HasJob">A --job/-j was already seen in the current branch.</param>
 /// <param name="HasFrom">A --from was already seen in the current branch.</param>
-public readonly record struct BranchSplitState(bool HasInput, bool HasJob, bool HasFrom);
+public readonly record struct BranchSplitState(bool HasInput, bool HasFrom);
 
 /// <summary>
-/// F6 — single pure function deciding implicit DAG branch splits. The lexer's main loop
-/// and shell completion both consume it, so parsing semantics have exactly one definition.
+/// F6 — single pure function deciding implicit DAG branch splits. The lexer's main loop consumes
+/// it, so parsing semantics have exactly one definition.
 ///
 /// Triggers (documented in REFERENCE.md §DAG Syntax):
-/// - second -i/--input when an input or job file was already seen;
-/// - any --from when a --from, --input or --job was already seen (first --from in a fresh
-///   branch stays in the current branch);
-/// - second --job/-j when a job file or input was already seen.
-/// Neither --sql nor boolean processor flags trigger a split.
+/// - second -i/--input when an input was already seen;
+/// - any --from when a --from or --input was already seen (first --from in a fresh branch stays
+///   in the current branch).
+/// Neither --sql nor boolean processor flags trigger a split, and neither does --job: it is a
+/// global flag, given once per command line.
 /// </summary>
 public static class BranchSplitDecision
 {
@@ -36,17 +33,12 @@ public static class BranchSplitDecision
     {
         if (token.Equals("--from", StringComparison.OrdinalIgnoreCase))
         {
-            return (s.HasFrom || s.HasInput || s.HasJob) ? SplitDecision.NewFrom : SplitDecision.Stay;
+            return (s.HasFrom || s.HasInput) ? SplitDecision.NewFrom : SplitDecision.Stay;
         }
 
         if (token.Equals("-i", StringComparison.OrdinalIgnoreCase) || token.Equals("--input", StringComparison.OrdinalIgnoreCase))
         {
-            return (s.HasInput || s.HasJob) ? SplitDecision.NewInput : SplitDecision.Stay;
-        }
-
-        if (token.Equals("--job", StringComparison.OrdinalIgnoreCase) || token.Equals("-j", StringComparison.OrdinalIgnoreCase))
-        {
-            return (s.HasJob || s.HasInput) ? SplitDecision.NewJob : SplitDecision.Stay;
+            return s.HasInput ? SplitDecision.NewInput : SplitDecision.Stay;
         }
 
         return SplitDecision.Stay;
