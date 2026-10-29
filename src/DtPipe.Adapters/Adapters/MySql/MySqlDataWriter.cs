@@ -239,9 +239,23 @@ public sealed partial class MySqlDataWriter : BaseSqlDataWriter, IColumnarDataWr
         await InsertBufferAsync(destination, ct);
     }
 
+    /// <summary>
+    /// Loads one batch inside its own transaction. LOAD DATA stores a value its column cannot
+    /// hold clamped to the column's bound and reports a warning instead of failing, so the batch
+    /// commits only when the load reported none; any other exit (a warning, a driver exception,
+    /// cancellation) disposes the transaction uncommitted, which rolls it back and leaves the
+    /// connection with no open transaction. The transaction spans this load only: the strategy's
+    /// DDL runs before it, and earlier batches stay committed. A non-transactional engine
+    /// (MyISAM) keeps the rows whatever the rollback.
+    /// </summary>
     private async Task BulkCopyAsync(string destination, IDataReader reader, CancellationToken ct)
     {
-        var bulk = new MySqlBulkCopy((MySqlConnection)_connection!)
+        var connection = (MySqlConnection)_connection!;
+        await using var transaction = await connection.BeginTransactionAsync(ct);
+
+        // The transaction must be handed to the bulk copy: MySqlConnector refuses a command
+        // that does not carry the connection's active transaction.
+        var bulk = new MySqlBulkCopy(connection, transaction)
         {
             DestinationTableName = destination,
             BulkCopyTimeout = 0,
@@ -252,15 +266,14 @@ public sealed partial class MySqlDataWriter : BaseSqlDataWriter, IColumnarDataWr
 
         var result = await bulk.WriteToServerAsync(reader, ct);
 
-        // MySqlBulkCopy reports per-row problems as warnings instead of throwing, because
-        // LOAD DATA itself does. Surfacing them keeps a partially-rejected load from being
-        // reported as a clean success.
         if (result.Warnings.Count > 0)
         {
             throw new InvalidOperationException(
                 $"MySQL bulk load into {destination} reported {result.Warnings.Count} warning(s); " +
-                $"first: {result.Warnings[0].Message}");
+                $"first: {result.Warnings[0].Message}. The batch's load was rolled back.");
         }
+
+        await transaction.CommitAsync(ct);
     }
 
     /// <summary>

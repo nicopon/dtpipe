@@ -210,5 +210,29 @@ MISMATCH=$(pg_scalar "SELECT COUNT(*) FROM mysql_e2e_src s JOIN mysql_e2e_back b
 [ "$MISMATCH" = "0" ] || fail "$MISMATCH rows differ after the pg -> mysql -> pg round trip"
 pass "$ROWS rows returned, uid still a native uuid, no value drift on any column"
 
+# ------------------------------------------------------------------------------
+# 8. A value the column cannot hold. LOAD DATA stores it clamped to the column's bound
+#    and reports a warning; the writer must fail the run and leave none of the batch's
+#    rows behind. A value that fits is written exactly.
+# ------------------------------------------------------------------------------
+echo -e "\n--- Test 8: a refused bulk load leaves the table as it was ---"
+for cell in "3000000000|INT|1|0=NULL" "123456|DECIMAL(5,2)|1|0=NULL" "5|INT|0|0=NULL,1=5"; do
+    IFS='|' read -r VALUE COLTYPE WANT_RC WANT_ROWS <<< "$cell"
+    "${MY_EXEC[@]}" -e "DROP TABLE IF EXISTS mysql_e2e_refused;
+                        CREATE TABLE mysql_e2e_refused (id INT, n $COLTYPE);
+                        INSERT INTO mysql_e2e_refused VALUES (0, NULL);" >/dev/null 2>&1
+    set +e
+    "$DTPIPE" -i "duck::memory:" --query "SELECT 1::INT AS id, ${VALUE}::BIGINT AS n" \
+        -o "$MY_CONN" --table mysql_e2e_refused --strategy Append --no-stats >/dev/null 2>&1
+    RC=$?
+    set -e
+    GOT=$(mysql_scalar "SELECT GROUP_CONCAT(CONCAT(id,'=',IFNULL(n,'NULL')) ORDER BY id) FROM mysql_e2e_refused")
+    [ "$RC" = "$WANT_RC" ] || fail "$VALUE into $COLTYPE: exit $RC, expected $WANT_RC"
+    [ "$GOT" = "$WANT_ROWS" ] || fail "$VALUE into $COLTYPE: table holds '$GOT', expected '$WANT_ROWS'"
+    echo "    $VALUE -> $COLTYPE: exit $RC, table '$GOT'"
+done
+"${MY_EXEC[@]}" -e "DROP TABLE IF EXISTS mysql_e2e_refused;" >/dev/null 2>&1
+pass "an overflow exits 1 with the table unchanged; a value that fits is written"
+
 echo ""
 echo "All native MySQL provider checks passed."
