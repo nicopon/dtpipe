@@ -136,11 +136,11 @@ public sealed partial class PostgreSqlDataWriter
                 (arr, row, w) => w.Write(((StringArray)arr).GetString(row)!, npgsqlType),
 
             NpgsqlTypes.NpgsqlDbType.Bytea =>
-                static (arr, row, w) => w.Write(arr switch
+                (arr, row, w) => w.Write(arr switch
                 {
                     BinaryArray b => b.GetBytes(row).ToArray(),
                     FixedSizeBinaryArray f => f.GetBytes(row).ToArray(),
-                    _ => System.Array.Empty<byte>()
+                    _ => throw ColumnMismatch(sourceColumn, "bytea", "BLOB", arr)
                 }, NpgsqlTypes.NpgsqlDbType.Bytea),
 
             // DtPipe UUID convention: Binary(16) = RFC 4122 big-endian bytes
