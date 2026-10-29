@@ -183,7 +183,7 @@ public class ArrowAdapterTests : IAsyncLifetime
     public void ColumnConverterFactory_DateTimeOffset_To_DateTime_ShouldWork()
     {
         var dto = new DateTimeOffset(2025, 11, 8, 23, 0, 0, TimeSpan.Zero);
-        var converter = DtPipe.Core.Helpers.ColumnConverterFactory.Build(typeof(DateTimeOffset), typeof(DateTime));
+        var converter = DtPipe.Core.Helpers.ColumnConverterFactory.Build(typeof(DateTimeOffset), typeof(DateTime), "n");
         var result = converter((object)dto);
         result.Should().BeOfType<DateTime>();
         ((DateTime)result).Should().Be(dto.UtcDateTime);

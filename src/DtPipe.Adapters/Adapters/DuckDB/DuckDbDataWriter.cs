@@ -451,7 +451,7 @@ public sealed class DuckDbDataWriter : IColumnarDataWriter, ISchemaInspector, IK
                 _checkedTypes[i] = IsChecked(targetCol) ? _targetTypes[i] : null;
                 // F12: build the per-column converter once at init instead of calling
                 // ValueConverter.ConvertValue on every cell.
-                _cellConverters[i] = CompositeCellJson.Wrap(ColumnConverterFactory.Build(null, _targetTypes[i]));
+                _cellConverters[i] = CompositeCellJson.Wrap(ColumnConverterFactory.Build(null, _targetTypes[i], targetCol.Name));
                 var sourceIdx = -1;
                 for (int s = 0; s < _columns!.Count; s++)
                 {

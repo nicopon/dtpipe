@@ -25,7 +25,7 @@ public class TypeConverterBenchmarks
     public void Setup()
     {
         // Compile once — mirrors what a writer does during InitializeAsync.
-        _delegate = ColumnConverterFactory.Build(typeof(string), typeof(int));
+        _delegate = ColumnConverterFactory.Build(typeof(string), typeof(int), "n");
     }
 
     /// <summary>

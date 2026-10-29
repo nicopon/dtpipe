@@ -163,7 +163,7 @@ public class SqlServerDataWriter : BaseSqlDataWriter, IColumnarDataWriter, IColu
                 }
             }
             _sourceIndices[i] = srcIdx;
-            _converters[i] = CompositeCellJson.Wrap(ColumnConverterFactory.Build(srcClrType, _targetTypes[i]));
+            _converters[i] = CompositeCellJson.Wrap(ColumnConverterFactory.Build(srcClrType, _targetTypes[i], colName));
         }
 
         _bulkCopy = new SqlBulkCopy((SqlConnection)_connection!, SqlBulkCopyOptions.TableLock | SqlBulkCopyOptions.UseInternalTransaction, null)

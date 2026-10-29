@@ -172,7 +172,7 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter, IColumnarD
         for (int k = 0; k < _targetToSourceMap.Length; k++)
         {
             var sourceClrType = _columns![_targetToSourceMap[k]].ClrType;
-            _converters[k] = CompositeCellJson.Wrap(ColumnConverterFactory.Build(sourceClrType, _targetTypes[k]));
+            _converters[k] = CompositeCellJson.Wrap(ColumnConverterFactory.Build(sourceClrType, _targetTypes[k], _columns[_targetToSourceMap[k]].Name));
         }
 
         // Build per-column Arrow writers — sync Npgsql Write<T>(), zero boxing (columnar path)

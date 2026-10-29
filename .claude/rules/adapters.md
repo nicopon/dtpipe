@@ -45,8 +45,8 @@ processor. `[unchecked]` Detail: `src/DtPipe.Adapters.Shared/CLAUDE.md`.
 ## Adding an adapter
 
 Full patterns: `EXTENDING.md`.
-- Row writers build `ColumnConverterFactory.Build(source, target)` once per column at init, never
-  per-cell `ValueConverter.ConvertValue()`.
+- Row writers build a `ColumnConverterFactory` converter once per column at init, never per-cell
+  `ValueConverter.ConvertValue()`.
 - Columnar writers implement `IColumnarDataWriter` and read with `GetValueForField`.
 - Text readers implement `IColumnTypeInferenceCapable` for `--auto-column-types`.
 

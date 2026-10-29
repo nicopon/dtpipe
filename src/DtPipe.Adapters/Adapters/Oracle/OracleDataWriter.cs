@@ -353,7 +353,7 @@ public sealed class OracleDataWriter : BaseSqlDataWriter, IColumnTypeGate
         _converters = new Func<object?, object?>[_columns!.Count];
         for (int i = 0; i < _columns.Count; i++)
         {
-            var convert = CompositeCellJson.Wrap(ColumnConverterFactory.Build(_columns[i].ClrType, _columns[i].ClrType));
+            var convert = CompositeCellJson.Wrap(ColumnConverterFactory.Build(_columns[i].ClrType, _columns[i].ClrType, _columns[i].Name));
             _converters[i] = v => convert(v) is { } c ? OracleTypeConverter.ToBindValue(c) : null;
         }
 

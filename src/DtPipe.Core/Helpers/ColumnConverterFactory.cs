@@ -1,4 +1,6 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 
 namespace DtPipe.Core.Helpers;
 
@@ -20,10 +22,13 @@ public static class ColumnConverterFactory
     ///   <item>Returns a typed parse lambda for the common string→primitive slow path (CSV).</item>
     ///   <item>Falls back to <see cref="ValueConverter.ConvertValue"/> for all other cases.</item>
     /// </list>
-    /// Returns <c>DBNull.Value</c> (not null) for null/missing/unparseable input,
-    /// matching the contract expected by ADO.NET parameters.
+    /// Returns <c>DBNull.Value</c> (not null) for null or DBNull input, and for an empty string
+    /// into a parsed type, matching the contract expected by ADO.NET parameters. Text that is not
+    /// empty and does not read as the target throws <see cref="InvalidOperationException"/> naming
+    /// <paramref name="columnName"/> and the target type: a value the writer cannot read is refused,
+    /// never written as NULL.
     /// </summary>
-    public static Func<object?, object?> Build(Type? sourceType, Type targetType)
+    public static Func<object?, object?> Build(Type? sourceType, Type targetType, string columnName)
     {
         var underlying = Nullable.GetUnderlyingType(targetType) ?? targetType;
 
@@ -33,7 +38,7 @@ public static class ColumnConverterFactory
 
         // String source — the dominant slow path (CSV readers, text APIs)
         if (sourceType == typeof(string))
-            return BuildFromString(underlying);
+            return BuildFromString(underlying, columnName);
 
         // Fallback: delegate to ValueConverter for numeric coercions, long→DateTime, etc.
         return v => v is null || v == DBNull.Value
@@ -41,57 +46,80 @@ public static class ColumnConverterFactory
             : ValueConverter.ConvertValue(v, underlying);
     }
 
-    private static Func<object?, object?> BuildFromString(Type target)
+    // Each parsed target: a null, DBNull or empty cell is DBNull; any other text either reads as the
+    // target or is refused. Whitespace alone is not empty.
+    private static Func<object?, object?> BuildFromString(Type target, string columnName)
     {
         if (target == typeof(int))
-            return static v => v is string s && int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var r)
-                ? (object?)r : DBNull.Value;
+            return v => v is not string { Length: > 0 } s ? DBNull.Value
+                : int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var r) ? r
+                : Unreadable(columnName, target);
 
         if (target == typeof(long))
-            return static v => v is string s && long.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var r)
-                ? (object?)r : DBNull.Value;
+            return v => v is not string { Length: > 0 } s ? DBNull.Value
+                : long.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var r) ? r
+                : Unreadable(columnName, target);
 
         if (target == typeof(short))
-            return static v => v is string s && short.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var r)
-                ? (object?)r : DBNull.Value;
+            return v => v is not string { Length: > 0 } s ? DBNull.Value
+                : short.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var r) ? r
+                : Unreadable(columnName, target);
 
         if (target == typeof(double))
-            return static v => v is string s && double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var r)
-                ? (object?)r : DBNull.Value;
+            return v => v is not string { Length: > 0 } s ? DBNull.Value
+                : double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var r) ? r
+                : Unreadable(columnName, target);
 
         if (target == typeof(float))
-            return static v => v is string s && float.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var r)
-                ? (object?)r : DBNull.Value;
+            return v => v is not string { Length: > 0 } s ? DBNull.Value
+                : float.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var r) ? r
+                : Unreadable(columnName, target);
 
         if (target == typeof(decimal))
-            return static v => v is string s && decimal.TryParse(s, NumberStyles.Number, CultureInfo.InvariantCulture, out var r)
-                ? (object?)r : DBNull.Value;
+            return v => v is not string { Length: > 0 } s ? DBNull.Value
+                : decimal.TryParse(s, NumberStyles.Number, CultureInfo.InvariantCulture, out var r) ? r
+                : Unreadable(columnName, target);
 
         if (target == typeof(bool))
-            return static v =>
+            return v =>
             {
-                if (v is not string s) return DBNull.Value;
+                if (v is not string { Length: > 0 } s) return DBNull.Value;
                 if (bool.TryParse(s, out var b)) return b;
-                return s switch { "1" or "yes" or "true" => true, "0" or "no" or "false" => false, _ => (object?)DBNull.Value };
+                return s switch
+                {
+                    "1" or "yes" or "true" => true,
+                    "0" or "no" or "false" => false,
+                    _ => Unreadable(columnName, target)
+                };
             };
 
         if (target == typeof(DateTime))
-            return static v => v is string s
-                && DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var r)
-                ? (object?)r : DBNull.Value;
+            return v => v is not string { Length: > 0 } s ? DBNull.Value
+                : DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var r) ? r
+                : Unreadable(columnName, target);
 
         if (target == typeof(DateTimeOffset))
-            return static v => v is string s
-                && DateTimeOffset.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var r)
-                ? (object?)r : DBNull.Value;
+            return v => v is not string { Length: > 0 } s ? DBNull.Value
+                : DateTimeOffset.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var r) ? r
+                : Unreadable(columnName, target);
 
         if (target == typeof(Guid))
-            return static v => v is string s && Guid.TryParse(s, out var r)
-                ? (object?)r : DBNull.Value;
+            return v => v is not string { Length: > 0 } s ? DBNull.Value
+                : Guid.TryParse(s, out var r) ? r
+                : Unreadable(columnName, target);
 
         // Fallback for all other string→T conversions
         return v => v is null || v == DBNull.Value
             ? DBNull.Value
             : ValueConverter.ConvertValue(v, target);
     }
+
+    // Kept out of the parse lambdas so the per-cell delegate stays small. The value is not quoted:
+    // a refused cell can hold anything the source holds.
+    [DoesNotReturn]
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static object Unreadable(string columnName, Type target)
+        => throw new InvalidOperationException(
+            $"Column '{columnName}' is {target.Name} and the source sends text that does not read as " +
+            $"{target.Name}, which the writer does not convert: convert it in the query.");
 }

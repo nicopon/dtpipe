@@ -421,7 +421,7 @@ public sealed partial class MySqlDataWriter : BaseSqlDataWriter, IColumnarDataWr
         for (var i = 0; i < names.Count; i++)
         {
             _bufferTable.Columns.Add(names[i], Nullable.GetUnderlyingType(_targetTypes[i]) ?? _targetTypes[i]);
-            _converters[i] = CompositeCellJson.Wrap(ColumnConverterFactory.Build(_columns![_sourceIndices[i]].ClrType, _targetTypes[i]));
+            _converters[i] = CompositeCellJson.Wrap(ColumnConverterFactory.Build(_columns![_sourceIndices[i]].ClrType, _targetTypes[i], _columns[_sourceIndices[i]].Name));
         }
     }
 
