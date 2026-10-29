@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using DuckDB.NET.Data;
 using Xunit;
 
@@ -5,10 +6,10 @@ namespace DtPipe.Tests.Unit.Adapters;
 
 /// <summary>
 /// The duck writer appending to an existing table refuses a value its column cannot hold, a decimal
-/// with more digits or an integer or floating-point number out of range: exit 1, the column named, and
-/// none of the rows it still buffers written. The refusal is the value's, not the type's: a source
-/// wider than the target column is written while its values fit, and a value the column holds after a
-/// conversion (a timestamp into a date) is written too.
+/// with more digits or an integer or floating-point number out of range, and a value the writer does
+/// not bring to its column's type: exit 1, the column named, and none of the rows it still buffers
+/// written. A source wider than the target column is written while its values fit, and a value the
+/// column holds after a conversion (a timestamp into a date, a text into a BLOB) is written too.
 /// </summary>
 [Collection("console-serial")]
 public sealed class DuckDbWriterValueOverflowTests : IDisposable
@@ -84,6 +85,63 @@ public sealed class DuckDbWriterValueOverflowTests : IDisposable
 
         Assert.Equal(0, code);
         Assert.Equal(["1 | 2024-01-01", "2 | 2024-01-02"], ReadBack(target, "n"));
+    }
+
+    // Values that fit their column, of a type the writer does not convert to the column's: the
+    // appender would store their bytes at the width of their own type.
+    [Theory]
+    [InlineData("HUGEINT", "BIGINT", "10", "10", "1200", "1225", "1250")]
+    [InlineData("DATE", "TIMESTAMP", "TIMESTAMP '2024-01-01 00:00:00'", "2024-01-01 00:00:00", "'2024-01-02'", "'2024-01-03'", "'2024-01-04'")]
+    [InlineData("INTEGER", "HUGEINT", "10", "10", "5", "6", "7")]
+    [InlineData("TIMESTAMP", "TIME", "TIME '01:00:00'", "01:00:00", "'2024-01-02 13:45:00'", "'2024-01-03 13:45:00'", "'2024-01-04 13:45:00'")]
+    public async Task A_Value_Of_Another_Type_Than_Its_Column_Is_Refused_Naming_The_Column(
+        string sourceType, string targetType, string first, string firstRead, string a, string b, string c)
+    {
+        var target = CreateTarget("n", targetType, first);
+
+        var (code, output) = await AppendAsync(target,
+            $"select * from (values (2, CAST({a} AS {sourceType})), (3, CAST({b} AS {sourceType})), (4, CAST({c} AS {sourceType}))) v(id, n)");
+
+        // None of the three rows is written.
+        Assert.Equal([$"1 | {firstRead}"], ReadBack(target, "n"));
+        Assert.Equal(1, code);
+        var message = Regex.Replace(output, @"\s+", " ");
+        Assert.Contains($"Column 'n' is {targetType} and the source sends {sourceType}", message);
+        Assert.Contains($"CAST(n AS {targetType})", message);
+    }
+
+    [Fact]
+    public async Task A_Text_Is_Written_To_A_Blob_Column()
+    {
+        var target = CreateTarget("n", "BLOB", "'z'::BLOB");
+
+        var (code, _) = await AppendAsync(target, "select 2 as id, 'ab' as n");
+
+        Assert.Equal(0, code);
+        Assert.Equal(["1 | z", "2 | ab"], ReadBack(target, "n"));
+    }
+
+    [Fact]
+    public async Task A_Narrower_Integer_Is_Written_To_A_Wider_Column()
+    {
+        var target = CreateTarget("n", "BIGINT", "10");
+
+        var (code, _) = await AppendAsync(target, "select 2 as id, 5::INTEGER as n");
+
+        Assert.Equal(0, code);
+        Assert.Equal(["1 | 10", "2 | 5"], ReadBack(target, "n"));
+    }
+
+    // The writer reads a column of a type it does not know as text, and leaves it unchecked.
+    [Fact]
+    public async Task A_Text_Is_Written_To_An_Enum_Column()
+    {
+        var target = CreateTarget("n", "ENUM('a', 'b', 'c')", "'c'");
+
+        var (code, _) = await AppendAsync(target, "select * from (values (2, 'a'), (3, 'b')) v(id, n)");
+
+        Assert.Equal(0, code);
+        Assert.Equal(["1 | c", "2 | a", "3 | b"], ReadBack(target, "n"));
     }
 
     private string CreateTarget(string column, string columnType, string firstValue)

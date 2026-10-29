@@ -54,6 +54,10 @@ public sealed class DuckDbDataWriter : IColumnarDataWriter, ISchemaInspector, IK
     private IDisposable? _appender;
     private int[]? _columnMapping;
     private Type[]? _targetTypes;
+    private IReadOnlyList<TargetColumnInfo>? _targetColumns;
+    // The type a value must have when it reaches the appender, per target column; null for a column
+    // of a type the writer does not know, whose values reach the appender unchecked.
+    private Type?[]? _checkedTypes;
     private Func<object?, object?>[]? _cellConverters;
 
     private readonly IStringContentResolver? _resolver;
@@ -121,10 +125,12 @@ public sealed class DuckDbDataWriter : IColumnarDataWriter, ISchemaInspector, IK
                                 row.AppendNullValue();
                             else
                             {
-                                // A value its column cannot hold arrives as an OverflowException that does not
-                                // name the column: the converter's, for a number or a text out of the column's
-                                // range, or the appender's, for a decimal with more digits than its precision.
-                                try { AppendValue(row, val, _cellConverters![i]); }
+                                // AppendValue refuses a value of another type than its column, naming the
+                                // column. A value its column cannot hold arrives as an OverflowException that
+                                // does not name it: the converter's, for a number or a text out of the
+                                // column's range, or the appender's, for a decimal with more digits than its
+                                // precision.
+                                try { AppendValue(row, val, i); }
                                 catch (OverflowException ex)
                                 {
                                     throw new InvalidOperationException($"Column '{_columns![sourceIndex].Name}' cannot hold a value of the source.", ex);
@@ -153,7 +159,7 @@ public sealed class DuckDbDataWriter : IColumnarDataWriter, ISchemaInspector, IK
         catch (Exception ex) { _logger.LogDebug(ex, "DuckDB appender could not discard its buffer"); }
     }
 
-    private void AppendValue(IDuckDBAppenderRow row, object val, Func<object?, object?> converter)
+    private void AppendValue(IDuckDBAppenderRow row, object val, int column)
     {
         // For Arrow path, RecordBatchDataReader already provides typed values,
         // but we still use ValueConverter to ensure perfect alignment with target types
@@ -161,40 +167,74 @@ public sealed class DuckDbDataWriter : IColumnarDataWriter, ISchemaInspector, IK
         object? valueToAppend = val;
         try
         {
-            valueToAppend = converter(val);
+            valueToAppend = _cellConverters![column](val);
         }
-        // A value the converter cannot convert goes to the appender as it is, which writes it (a timestamp
-        // into a date) or refuses it. An OverflowException is a value out of its column's range and leaves
-        // here: the appender does not check a number against the column and stores it folded, possibly in
-        // another row's cell.
+        // A value the converter cannot convert goes on as it is, and the check below refuses it unless the
+        // appender writes it right. An OverflowException is a value out of its column's range and leaves
+        // here: the appender does not check a number against the column and would store it folded,
+        // possibly in another row's cell.
         catch (Exception ex) when (ex is not OverflowException) { }
 
+        // Each case names the type it hands the appender, which must be the column's. The appender stores
+        // a value of another type as its raw bytes, at the width of that type, possibly in another row's
+        // cell, or refuses it without naming the column; such a value is refused here, before the
+        // appender sees it. A value with no case is handed as its text.
+        var columnType = _checkedTypes![column];
         switch (valueToAppend)
         {
-            case bool b: row.AppendValue(b); break;
-            case sbyte sb: row.AppendValue(sb); break;
-            case short s: row.AppendValue(s); break;
-            case int i: row.AppendValue(i); break;
-            case long l: row.AppendValue(l); break;
-            case byte b: row.AppendValue(b); break;
-            case ushort us: row.AppendValue(us); break;
-            case uint ui: row.AppendValue(ui); break;
-            case ulong ul: row.AppendValue(ul); break;
-            case Int128 hi: row.AppendValue((System.Numerics.BigInteger?)hi); break;
-            case float f: row.AppendValue(f); break;
-            case double d: row.AppendValue(d); break;
-            case decimal dec: row.AppendValue(dec); break;
-            case string str: row.AppendValue(str); break;
-            case DateTime dt: row.AppendValue(dt); break;
-            case DateTimeOffset dto: row.AppendValue(dto); break;
-            case DateOnly date: row.AppendValue((global::DuckDB.NET.Native.DuckDBDateOnly)date); break;
-            case TimeOnly time: row.AppendValue((global::DuckDB.NET.Native.DuckDBTimeOnly)time); break;
-            case Guid g: row.AppendValue(g); break;
-            case byte[] bytes: row.AppendValue(bytes); break;
+            case bool b: Expect(typeof(bool)); row.AppendValue(b); break;
+            case sbyte sb: Expect(typeof(sbyte)); row.AppendValue(sb); break;
+            case short s: Expect(typeof(short)); row.AppendValue(s); break;
+            case int i: Expect(typeof(int)); row.AppendValue(i); break;
+            case long l: Expect(typeof(long)); row.AppendValue(l); break;
+            case byte b: Expect(typeof(byte)); row.AppendValue(b); break;
+            case ushort us: Expect(typeof(ushort)); row.AppendValue(us); break;
+            case uint ui: Expect(typeof(uint)); row.AppendValue(ui); break;
+            case ulong ul: Expect(typeof(ulong)); row.AppendValue(ul); break;
+            case Int128 hi: Expect(typeof(Int128)); row.AppendValue((System.Numerics.BigInteger?)hi); break;
+            case float f: Expect(typeof(float)); row.AppendValue(f); break;
+            case double d: Expect(typeof(double)); row.AppendValue(d); break;
+            case decimal dec: Expect(typeof(decimal)); row.AppendValue(dec); break;
+            case string str: Expect(typeof(string)); row.AppendValue(str); break;
+            case DateTime dt: Expect(typeof(DateTime)); row.AppendValue(dt); break;
+            case DateTimeOffset dto: Expect(typeof(DateTimeOffset)); row.AppendValue(dto); break;
+            case DateOnly date: Expect(typeof(DateOnly)); row.AppendValue((global::DuckDB.NET.Native.DuckDBDateOnly)date); break;
+            case TimeOnly time: Expect(typeof(TimeOnly)); row.AppendValue((global::DuckDB.NET.Native.DuckDBTimeOnly)time); break;
+            case Guid g: Expect(typeof(Guid)); row.AppendValue(g); break;
+            case byte[] bytes: Expect(typeof(byte[])); row.AppendValue(bytes); break;
             default:
+                Expect(typeof(string));
                 row.AppendValue(valueToAppend?.ToString() ?? string.Empty);
                 break;
         }
+
+        void Expect(Type handed)
+        {
+            if (columnType is not null && handed != columnType && !AppenderConverts(handed, columnType))
+                throw TypeMismatch(column);
+        }
+    }
+
+    // The values of another type than its column that the appender writes right: a timestamp into a
+    // DATE, as its date, and a text into a BLOB, as its UTF-8 bytes.
+    private static bool AppenderConverts(Type handed, Type columnType)
+        => (handed == typeof(DateTime) && columnType == typeof(DateOnly))
+           || (handed == typeof(string) && columnType == typeof(byte[]));
+
+    // The mapper reads a type it does not know as text (STRUCT, ENUM, INTERVAL, …) and a list of decimals
+    // as a decimal: such a column is not checked, and its values reach the appender as they are.
+    private static bool IsChecked(TargetColumnInfo column)
+        => !column.NativeType.EndsWith(']')
+           && ((column.InferredClrType is { } type && type != typeof(string)) || column.NativeType == "VARCHAR");
+
+    private InvalidOperationException TypeMismatch(int column)
+    {
+        var target = _targetColumns![column];
+        var source = _columns![_columnMapping![column]];
+        var cast = $"CAST({SqlIdentifierHelper.GetSafeIdentifier(_dialect, source.Name)} AS {target.NativeType})";
+        return new InvalidOperationException(
+            $"Column '{source.Name}' is {target.NativeType} and the source sends {_typeMapper.MapToProviderType(source)}, " +
+            $"which the writer does not convert: cast it in the query, {cast}.");
     }
 
     public async ValueTask CompleteAsync(CancellationToken ct = default)
@@ -401,11 +441,14 @@ public sealed class DuckDbDataWriter : IColumnarDataWriter, ISchemaInspector, IK
         {
             _columnMapping = new int[targetInfo.Columns.Count];
             _targetTypes = new Type[targetInfo.Columns.Count];
+            _targetColumns = targetInfo.Columns;
+            _checkedTypes = new Type?[targetInfo.Columns.Count];
             _cellConverters = new Func<object?, object?>[targetInfo.Columns.Count];
             for (int i = 0; i < targetInfo.Columns.Count; i++)
             {
                 var targetCol = targetInfo.Columns[i];
                 _targetTypes[i] = targetCol.InferredClrType ?? typeof(string);
+                _checkedTypes[i] = IsChecked(targetCol) ? _targetTypes[i] : null;
                 // F12: build the per-column converter once at init instead of calling
                 // ValueConverter.ConvertValue on every cell.
                 _cellConverters[i] = CompositeCellJson.Wrap(ColumnConverterFactory.Build(null, _targetTypes[i]));
@@ -421,6 +464,7 @@ public sealed class DuckDbDataWriter : IColumnarDataWriter, ISchemaInspector, IK
         {
             _columnMapping = Enumerable.Range(0, _columns!.Count).ToArray();
             _targetTypes = _columns.Select(c => c.ClrType).ToArray();
+            _checkedTypes = new Type?[_columns.Count];
         }
 
         var appenderTarget = _stagingTable ?? _unquotedTable!;

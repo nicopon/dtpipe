@@ -32,9 +32,17 @@ A value its column cannot hold stops the run with exit code 1 and the column nam
 with more digits than the column, such as `123456.78` written into a `DECIMAL(5,2)`, or an integer
 or floating-point number out of its range, such as `3000000000` written into an `INTEGER`. The
 refusal is the value's, not the type's: a `DECIMAL(10,2)` or `BIGINT` source is written into that
-column as long as its values fit. The rows the writer still holds when it stops are dropped, but a
-large load is written in blocks as it goes, and the blocks written before the failing value stay
-in the table.
+column as long as its values fit.
+
+A value of a type the writer does not convert to its column's type stops the run the same way,
+even when it fits: a `HUGEINT`, which is what `sum()` returns, written into a `BIGINT`, a `DATE`
+into a `TIMESTAMP`, an `INTEGER` into a `HUGEINT`. The message names the column, its type and the
+type the source sends; cast the column to its target's type in the query, such as
+`CAST(total AS BIGINT)`. A `TIMESTAMP` written into a `DATE` keeps its date, and a `VARCHAR`
+written into a `BLOB` keeps its bytes.
+
+The rows the writer still holds when it stops are dropped, but a large load is written in blocks
+as it goes, and the blocks written before the failing value stay in the table.
 
 A 128-bit integer (`HUGEINT`) is written as one, over its whole range, `-2^127` to `2^127-1`. The
 unsigned one (`UHUGEINT`) is refused before the table is touched, with the cast that writes it as

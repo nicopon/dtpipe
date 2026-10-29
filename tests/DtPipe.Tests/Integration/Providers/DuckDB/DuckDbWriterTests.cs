@@ -263,8 +263,8 @@ public class DuckDbWriterTests : IAsyncLifetime
 
         // Assert
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(act);
-        // Native DuckDB error message is preferred
-        ex.Message.Should().MatchRegex("(?i)Cannot write .* to .* column|DuckDB Appender Failed");
+        // The writer names the column, its type and the type the source sends.
+        ex.Message.Should().StartWith("Column 'Id' is INTEGER and the source sends VARCHAR");
     }
     [Fact]
     public async Task Write_Truncate_EmptyTable_BeforeInsert()
