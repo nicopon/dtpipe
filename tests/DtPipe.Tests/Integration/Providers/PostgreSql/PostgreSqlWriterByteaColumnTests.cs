@@ -9,7 +9,7 @@ namespace DtPipe.Tests;
 
 /// <summary>
 /// The PostgreSQL writer appending to a <c>bytea</c> column writes a binary source and refuses a
-/// source that is not binary: the column named, the cast to ask for given, and none of the rows of
+/// source that is not binary: the column named, the way to convert it given, and none of the rows of
 /// the batch written.
 /// </summary>
 [Trait("Category", "Integration")]
@@ -26,7 +26,7 @@ public class PostgreSqlWriterByteaColumnTests(DtPipe.Tests.Fixtures.GlobalDataba
 
     [Theory]
     [MemberData(nameof(Refused))]
-    public async Task A_Non_Binary_Source_Is_Refused_Naming_The_Column_And_The_Cast(
+    public async Task A_Non_Binary_Source_Is_Refused_Naming_The_Column_And_The_Way_To_Convert_It(
         Type sourceType, object value, string arrowName)
     {
         if (!DockerHelper.IsAvailable() || fixture.PostgresConnectionString is not { } connectionString) return;
@@ -40,7 +40,8 @@ public class PostgreSqlWriterByteaColumnTests(DtPipe.Tests.Fixtures.GlobalDataba
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () => await writer.WriteRecordBatchAsync(batch));
 
         Assert.Contains($"Column 'n' is bytea and the source sends {arrowName}", ex.Message);
-        Assert.Contains("CAST(n AS BLOB)", ex.Message);
+        Assert.Contains("convert it in the query to a binary type", ex.Message);
+        Assert.DoesNotContain("CAST(", ex.Message);
         Assert.Empty(await ReadBackAsync(connectionString));
     }
 

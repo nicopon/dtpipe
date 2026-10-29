@@ -140,7 +140,7 @@ public sealed partial class PostgreSqlDataWriter
                 {
                     BinaryArray b => b.GetBytes(row).ToArray(),
                     FixedSizeBinaryArray f => f.GetBytes(row).ToArray(),
-                    _ => throw ColumnMismatch(sourceColumn, "bytea", "BLOB", arr)
+                    _ => throw ColumnMismatch(sourceColumn, "bytea", arr, null, "a binary type")
                 }, NpgsqlTypes.NpgsqlDbType.Bytea),
 
             // DtPipe UUID convention: Binary(16) = RFC 4122 big-endian bytes
@@ -157,7 +157,7 @@ public sealed partial class PostgreSqlDataWriter
                     {
                         Date32Array d32 => d32.GetDateOnly(row) ?? default,
                         Date64Array d64 => d64.GetDateOnly(row) ?? default,
-                        _ => throw ColumnMismatch(sourceColumn, "date", "DATE", arr)
+                        _ => throw ColumnMismatch(sourceColumn, "date", arr, "DATE", "a date type")
                     };
                     w.Write(dt, NpgsqlTypes.NpgsqlDbType.Date);
                 }
@@ -172,7 +172,7 @@ public sealed partial class PostgreSqlDataWriter
                         TimestampArray ts => ts.GetTimestamp(row)?.DateTime ?? default,
                         Date64Array d64 => d64.GetDateTime(row) ?? default,
                         Date32Array d32 => d32.GetDateTime(row) ?? default,
-                        _ => throw ColumnMismatch(sourceColumn, "timestamp", "TIMESTAMP", arr)
+                        _ => throw ColumnMismatch(sourceColumn, "timestamp", arr, arr is StringArray ? "TIMESTAMP" : null, "a timestamp type")
                     };
                     w.Write(DateTime.SpecifyKind(dt, DateTimeKind.Unspecified), NpgsqlTypes.NpgsqlDbType.Timestamp);
                 }
@@ -186,7 +186,7 @@ public sealed partial class PostgreSqlDataWriter
                         TimestampArray ts => ts.GetTimestamp(row)?.DateTime ?? default,
                         Date64Array d64 => d64.GetDateTime(row) ?? default,
                         Date32Array d32 => d32.GetDateTime(row) ?? default,
-                        _ => throw ColumnMismatch(sourceColumn, "timestamptz", "TIMESTAMPTZ", arr)
+                        _ => throw ColumnMismatch(sourceColumn, "timestamptz", arr, arr is StringArray ? "TIMESTAMPTZ" : null, "a timestamp type")
                     };
                     var utc = dt.Kind == DateTimeKind.Unspecified
                         ? DateTime.SpecifyKind(dt, DateTimeKind.Utc)
@@ -205,14 +205,18 @@ public sealed partial class PostgreSqlDataWriter
         };
 
     // A column is written from the array types it has a rule for: any other array has no value the
-    // writer would pick for it, and the cast is the caller's to choose. `columnType` is the target
-    // column as the message names it, `castType` the type the source query casts to.
+    // writer would pick for it, and the conversion is the caller's to choose. `columnType` is the target
+    // column as the message names it. `castType` is the type a cast of the source column reaches when
+    // that cast is known to work for the received array; without it the message gives a hint that names
+    // no dialect, `convertTo` being the kind of type to reach.
     private InvalidOperationException ColumnMismatch(
-        string sourceColumn, string columnType, string castType, IArrowArray source)
+        string sourceColumn, string columnType, IArrowArray source, string? castType, string convertTo)
     {
-        var cast = $"CAST({SqlIdentifierHelper.GetSafeIdentifier(_dialect, sourceColumn)} AS {castType})";
+        var advice = castType is null
+            ? $"convert it in the query to {convertTo}"
+            : $"cast it in the query, CAST({SqlIdentifierHelper.GetSafeIdentifier(_dialect, sourceColumn)} AS {castType})";
         return new InvalidOperationException(
             $"Column '{sourceColumn}' is {columnType} and the source sends {source.Data.DataType.Name}, " +
-            $"which the writer does not convert: cast it in the query, {cast}.");
+            $"which the writer does not convert: {advice}.");
     }
 }

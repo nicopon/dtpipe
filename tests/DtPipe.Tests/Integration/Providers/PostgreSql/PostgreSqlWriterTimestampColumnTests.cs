@@ -9,8 +9,9 @@ namespace DtPipe.Tests;
 
 /// <summary>
 /// The PostgreSQL writer appending to a <c>timestamp</c> or <c>timestamptz</c> column writes a
-/// temporal source and refuses a source of another type: the column named, the cast to ask for given,
-/// and none of the rows of the batch written.
+/// temporal source and refuses a source of another type: the column named, the way to convert it
+/// given (a cast when the source is text, a neutral hint otherwise), and none of the rows of the batch
+/// written.
 /// </summary>
 [Trait("Category", "Integration")]
 [Collection("Docker Integration Tests")]
@@ -21,14 +22,14 @@ public class PostgreSqlWriterTimestampColumnTests(DtPipe.Tests.Fixtures.GlobalDa
     public static TheoryData<string, Type, object, string, string> Refused => new()
     {
         { "timestamp", typeof(string), "2024-01-02 10:00:00", "utf8", "CAST(n AS TIMESTAMP)" },
-        { "timestamp", typeof(TimeOnly), new TimeOnly(10, 0, 0), "time64", "CAST(n AS TIMESTAMP)" },
-        { "timestamp", typeof(int), 5, "int32", "CAST(n AS TIMESTAMP)" },
+        { "timestamp", typeof(TimeOnly), new TimeOnly(10, 0, 0), "time64", "" },
+        { "timestamp", typeof(int), 5, "int32", "" },
         { "timestamptz", typeof(string), "2024-01-02", "utf8", "CAST(n AS TIMESTAMPTZ)" },
     };
 
     [Theory]
     [MemberData(nameof(Refused))]
-    public async Task A_Non_Temporal_Source_Is_Refused_Naming_The_Column_And_The_Cast(
+    public async Task A_Non_Temporal_Source_Is_Refused_Naming_The_Column_And_The_Way_To_Convert_It(
         string columnType, Type sourceType, object value, string arrowName, string cast)
     {
         if (!DockerHelper.IsAvailable() || fixture.PostgresConnectionString is not { } connectionString) return;
@@ -42,7 +43,13 @@ public class PostgreSqlWriterTimestampColumnTests(DtPipe.Tests.Fixtures.GlobalDa
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () => await writer.WriteRecordBatchAsync(batch));
 
         Assert.Contains($"Column 'n' is {columnType} and the source sends {arrowName}", ex.Message);
-        Assert.Contains(cast, ex.Message);
+        if (cast.Length > 0)
+            Assert.Contains(cast, ex.Message);
+        else
+        {
+            Assert.Contains("convert it in the query to a timestamp type", ex.Message);
+            Assert.DoesNotContain("CAST(", ex.Message);
+        }
         Assert.Empty(await ReadBackAsync(connectionString, "n::text"));
     }
 
