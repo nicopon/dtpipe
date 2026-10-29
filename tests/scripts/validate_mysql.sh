@@ -234,5 +234,29 @@ done
 "${MY_EXEC[@]}" -e "DROP TABLE IF EXISTS mysql_e2e_refused;" >/dev/null 2>&1
 pass "an overflow exits 1 with the table unchanged; a value that fits is written"
 
+# ------------------------------------------------------------------------------
+# 9. Text that does not read as the column's type, on the INSERT path. The writer's
+#    converter must refuse it rather than write NULL; text that reads is written exactly.
+# ------------------------------------------------------------------------------
+echo -e "\n--- Test 9: unreadable text into INT is refused on the INSERT path ---"
+for cell in "abc|1|0=NULL" "42|0|0=NULL,1=42"; do
+    IFS='|' read -r VALUE WANT_RC WANT_ROWS <<< "$cell"
+    "${MY_EXEC[@]}" -e "DROP TABLE IF EXISTS mysql_e2e_unreadable;
+                        CREATE TABLE mysql_e2e_unreadable (id INT, n INT);
+                        INSERT INTO mysql_e2e_unreadable VALUES (0, NULL);" >/dev/null 2>&1
+    set +e
+    "$DTPIPE" -i "duck::memory:" --query "SELECT 1::INT AS id, '${VALUE}' AS n" \
+        -o "$MY_CONN" --table mysql_e2e_unreadable --strategy Append --insert-mode Standard \
+        --no-stats >/dev/null 2>&1
+    RC=$?
+    set -e
+    GOT=$(mysql_scalar "SELECT GROUP_CONCAT(CONCAT(id,'=',IFNULL(n,'NULL')) ORDER BY id) FROM mysql_e2e_unreadable")
+    [ "$RC" = "$WANT_RC" ] || fail "'$VALUE' into INT: exit $RC, expected $WANT_RC"
+    [ "$GOT" = "$WANT_ROWS" ] || fail "'$VALUE' into INT: table holds '$GOT', expected '$WANT_ROWS'"
+    echo "    '$VALUE' -> INT: exit $RC, table '$GOT'"
+done
+"${MY_EXEC[@]}" -e "DROP TABLE IF EXISTS mysql_e2e_unreadable;" >/dev/null 2>&1
+pass "unreadable text exits 1 with the table unchanged; text that reads is written"
+
 echo ""
 echo "All native MySQL provider checks passed."
