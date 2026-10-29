@@ -121,7 +121,13 @@ public sealed class DuckDbDataWriter : IColumnarDataWriter, ISchemaInspector, IK
                                 row.AppendNullValue();
                             else
                             {
-                                AppendValue(row, val, _cellConverters![i]);
+                                // The appender refuses a decimal with more digits than its column's precision
+                                // by an OverflowException that does not name the column.
+                                try { AppendValue(row, val, _cellConverters![i]); }
+                                catch (OverflowException ex)
+                                {
+                                    throw new InvalidOperationException($"Column '{_columns![sourceIndex].Name}' cannot hold a value of the source.", ex);
+                                }
                             }
                         }
                     }
