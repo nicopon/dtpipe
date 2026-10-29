@@ -157,7 +157,7 @@ public sealed partial class PostgreSqlDataWriter
                     {
                         Date32Array d32 => d32.GetDateOnly(row) ?? default,
                         Date64Array d64 => d64.GetDateOnly(row) ?? default,
-                        _ => throw DateColumnMismatch(sourceColumn, arr)
+                        _ => throw ColumnMismatch(sourceColumn, "date", "DATE", arr)
                     };
                     w.Write(dt, NpgsqlTypes.NpgsqlDbType.Date);
                 }
@@ -165,28 +165,28 @@ public sealed partial class PostgreSqlDataWriter
 
             // Fix T19/T52: also handle Date64Array/Date32Array for Timestamp columns
             NpgsqlTypes.NpgsqlDbType.Timestamp =>
-                static (arr, row, w) =>
+                (arr, row, w) =>
                 {
                     var dt = arr switch
                     {
                         TimestampArray ts => ts.GetTimestamp(row)?.DateTime ?? default,
                         Date64Array d64 => d64.GetDateTime(row) ?? default,
                         Date32Array d32 => d32.GetDateTime(row) ?? default,
-                        _ => ArrowTypeMapper.GetValue(arr, row) as DateTime? ?? default
+                        _ => throw ColumnMismatch(sourceColumn, "timestamp", "TIMESTAMP", arr)
                     };
                     w.Write(DateTime.SpecifyKind(dt, DateTimeKind.Unspecified), NpgsqlTypes.NpgsqlDbType.Timestamp);
                 }
             ,
 
             NpgsqlTypes.NpgsqlDbType.TimestampTz =>
-                static (arr, row, w) =>
+                (arr, row, w) =>
                 {
                     var dt = arr switch
                     {
                         TimestampArray ts => ts.GetTimestamp(row)?.DateTime ?? default,
                         Date64Array d64 => d64.GetDateTime(row) ?? default,
                         Date32Array d32 => d32.GetDateTime(row) ?? default,
-                        _ => ArrowTypeMapper.GetValue(arr, row) as DateTime? ?? default
+                        _ => throw ColumnMismatch(sourceColumn, "timestamptz", "TIMESTAMPTZ", arr)
                     };
                     var utc = dt.Kind == DateTimeKind.Unspecified
                         ? DateTime.SpecifyKind(dt, DateTimeKind.Utc)
@@ -204,13 +204,15 @@ public sealed partial class PostgreSqlDataWriter
             }
         };
 
-    // A date column is written from a date array only: any other array has no date the writer would
-    // pick for it, and the cast is the caller's to choose.
-    private InvalidOperationException DateColumnMismatch(string sourceColumn, IArrowArray source)
+    // A column is written from the array types it has a rule for: any other array has no value the
+    // writer would pick for it, and the cast is the caller's to choose. `columnType` is the target
+    // column as the message names it, `castType` the type the source query casts to.
+    private InvalidOperationException ColumnMismatch(
+        string sourceColumn, string columnType, string castType, IArrowArray source)
     {
-        var cast = $"CAST({SqlIdentifierHelper.GetSafeIdentifier(_dialect, sourceColumn)} AS DATE)";
+        var cast = $"CAST({SqlIdentifierHelper.GetSafeIdentifier(_dialect, sourceColumn)} AS {castType})";
         return new InvalidOperationException(
-            $"Column '{sourceColumn}' is date and the source sends {source.Data.DataType.Name}, " +
+            $"Column '{sourceColumn}' is {columnType} and the source sends {source.Data.DataType.Name}, " +
             $"which the writer does not convert: cast it in the query, {cast}.");
     }
 }
