@@ -132,9 +132,12 @@ through a function — SELECT my_function() passes a verb scan, hence the server
 `Export` loads a `--job` file without interpolating, as `--export-job` does: a `${{NAME}}`, a `keyring://` alias and a
 `${{cursor://|default}}` stay in the announced text, the version and the fragment's job, and only the child resolves them. A value
 resolved at start would enter the version and the announcement. `[CI: CommandLineJobTests]` `[CI: PipelineNode.Tests NodeCommandTests]`
-System.CommandLine matches only the four options of the node (`--name`, `--coordinator`, `--description`, `--client-secret`)
+System.CommandLine matches only the options of the node (`--runner`, `--name`, `--coordinator`, `--description`, `--client-secret`)
 and leaves every other token to the lexer (`TreatUnmatchedTokensAsErrors = false`). `NodeBricks` takes a branch for a brick
 only if it reads (`input`) or writes (`output`), never both, never `from`; the alias is the id, a branch without one has none.
+`--runner` makes the node a runner (`LaunchSettings.Runner`: `RunAnyFragment()` and a default description): it hosts no data, so any
+token left to the lexer is refused by name and no brick is read, while without `--runner` a node with no brick is refused.
+`[CI: PipelineNode.Tests NodeCommandTests]`
 
 - **The CLI reaches the node host through one file.** `Cli/Node/NodeHostEntry.cs` is the only source that names
   `DtPipe.PipelineNode.Launcher`; the method that does is `NoInlining`, so the runtime compiles it, and loads the assembly and

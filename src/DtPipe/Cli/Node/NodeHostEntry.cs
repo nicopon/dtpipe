@@ -10,10 +10,10 @@ namespace DtPipe.Cli.Node;
 internal static class NodeHostEntry
 {
     [MethodImpl(MethodImplOptions.NoInlining)]
-    public static Task<int> RunAsync(string? name, string? coordinator, string? description, string? clientSecret, string dtpipe,
+    public static Task<int> RunAsync(string? name, string? coordinator, string? description, string? clientSecret, string dtpipe, bool runner,
         IReadOnlyList<DeclaredBrick> bricks, CancellationToken ct) =>
         NodeLauncher.RunAsync(
-            new LaunchSettings(name, coordinator, description, clientSecret, dtpipe),
+            new LaunchSettings(name, coordinator, description, clientSecret, dtpipe, runner),
             [.. bricks.Select(b => new LaunchedBrick(b.Id, b.IsSource, b.BranchJson))],
             ct);
 }

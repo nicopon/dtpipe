@@ -29,14 +29,20 @@ def _args(pid):
     return subprocess.run(["ps", "-o", "args=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
 
 
+# `<dtpipe> node --runner`, and no `--job`: a fragment child's command line is `<dtpipe> --job <file>`.
+RUNNER_HOST = re.compile(r"(?:^|/)dtpipe\s+node\s+--runner\s*$")
+
+
 def lab_processes():
-    """(pid, ppid, kind, args): node hosts, coordinators, toxiproxy servers and fragment children."""
+    """(pid, ppid, kind, args): node hosts (a lab data node host, or `dtpipe node --runner`), coordinators, toxiproxy servers
+    and fragment children. A runner host and its children run the same binary: the host's command line is `node --runner`,
+    a child's carries `--job`."""
     rows = []
     for pid, ppid, comm in _ps():
         base = os.path.basename(comm)
         if base == "dotnet":
             args = _args(pid)
-            if "Lab.NodeHost.dll" in args or "DtPipe.PipelineNode.Runner.dll" in args:
+            if "Lab.NodeHost.dll" in args:
                 rows.append((pid, ppid, "host", args))
             elif "Lab.Coordinator.dll" in args:
                 rows.append((pid, ppid, "coordinator", args))
@@ -46,7 +52,9 @@ def lab_processes():
             rows.append((pid, ppid, "toxiproxy", ""))
         elif base == "dtpipe":
             args = _args(pid)
-            if "--job" in args:
+            if RUNNER_HOST.search(args):
+                rows.append((pid, ppid, "host", args))
+            elif "--job" in args:
                 rows.append((pid, ppid, "fragment child", args))
     return rows
 
@@ -146,8 +154,8 @@ def _environment(pid):
 
 def launched_binaries(state_dir, node_names):
     """The dtpipe binary every fragment child runs, as the coordinator and the hosts were started with it: the value of
-    `--dtpipe` on the command line of a data node host, `DtPipeNode__DtPipe` in the environment of the official runner,
-    which takes no such flag. A runner whose environment names none yields a value that does not
+    `--dtpipe` on the command line of a data node host, `DtPipeNode__DtPipe` in the environment of a runner host
+    (`dtpipe node --runner`), which takes no such flag. A runner whose environment names none yields a value that does not
     start, so the bench check reports it."""
     values = set()
     for pid, _, kind, args in lab_processes():
@@ -155,7 +163,7 @@ def launched_binaries(state_dir, node_names):
             continue
         if m := DTPIPE_FLAG.search(args):
             values.add(m.group(1))
-        elif "DtPipe.PipelineNode.Runner.dll" in args:
+        elif RUNNER_HOST.search(args):
             m = RUNNER_ENV.search(_environment(pid))
             values.add(m.group(1) if m else f"<no DtPipeNode__DtPipe in the environment of pid {pid}>")
     return values
@@ -211,8 +219,7 @@ def frozen_problems(repo, dtpipe, state_dir, node_names, expected=None):
                  "Directory.Build.props").splitlines()
     if dirty:
         problems.append(f"{len(dirty)} tracked file(s) changed since the frozen commit, e.g. {dirty[0].strip()}")
-    for dll in (os.path.join("node", "Lab.NodeHost.dll"), os.path.join("runner", "DtPipe.PipelineNode.Runner.dll"),
-                os.path.join("coordinator", "Lab.Coordinator.dll"), os.path.join("idp", "Lab.Idp.dll")):
+    for dll in (os.path.join("node", "Lab.NodeHost.dll"), os.path.join("coordinator", "Lab.Coordinator.dll"), os.path.join("idp", "Lab.Idp.dll")):
         path = os.path.join(state_dir, "bin", dll)
         try:
             with open(path, "rb") as f:

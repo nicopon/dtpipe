@@ -1531,10 +1531,13 @@ or both reads and writes is refused by name, since everything between a read and
 a runner. A `--job` file is read as written, like a command line: a `${{NAME}}`, a `keyring://`
 alias and a `${{cursor://|default}}` stay in the brick's text, in its version and in the job of the
 fragment, and are resolved only when the child runs. The node's settings are the `DtPipeNode__*` of
-the table above, from the environment; four options override them.
+the table above, from the environment; four options override them. `dtpipe node --runner` is a
+runner instead: it hosts no data, runs any fragment the coordinator sends, and refuses a brick given
+beside it (`-i`, `-o`, `--alias`, `--job`).
 
 | Option | Description |
 |---|---|
+| `--runner` | Host no data and run any fragment the coordinator sends. Takes no value and no brick; with no `--description`, the node describes itself as a runner |
 | `--name` / `--coordinator` / `--description` | `DtPipeNode__Name`, `__CoordinatorUrl` and `__Description` |
 | `--client-secret REF` | `DtPipeNode__Oidc__ClientSecret`, as a reference: `keyring://alias`, `${{NAME}}` or `@file`. A value is refused; the environment variable takes a reference too |
 

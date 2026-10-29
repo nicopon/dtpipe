@@ -96,8 +96,6 @@ build() {
         || { cat "$STATE/logs/build.log" >&2; exit 1; }
     dotnet build "$LAB/Lab.NodeHost/Lab.NodeHost.csproj" -c Release -o "$STATE/bin/node" -v q -nologo >>"$STATE/logs/build.log" 2>&1 \
         || { cat "$STATE/logs/build.log" >&2; exit 1; }
-    dotnet build "$REPO/src/DtPipe.PipelineNode.Runner/DtPipe.PipelineNode.Runner.csproj" -c Release -o "$STATE/bin/runner" -v q -nologo >>"$STATE/logs/build.log" 2>&1 \
-        || { cat "$STATE/logs/build.log" >&2; exit 1; }
 }
 
 seed() {
@@ -217,7 +215,7 @@ exec_coordinator() {
         --Coordinator:Roles:Designer=labdesigner@dtpipe.test --Coordinator:Roles:Reader=labreader@dtpipe.test "$@"
 }
 
-# Replaces this shell with node $1's host, pointed at the coordinator $2: the official runner for a
+# Replaces this shell with node $1's host, pointed at the coordinator $2: `dtpipe node --runner` for a
 # node file whose role is runner, configured through its environment, else the lab's data node host.
 # LAB_NODE_FILE names another declaration of the node (a replica at another version of a brick).
 # The one way a node starts, for this script and for tools/campaign.py and smoke.py.
@@ -230,7 +228,7 @@ exec_node() {
         export DtPipeNode__Name="$node" DtPipeNode__Description="$description" DtPipeNode__CoordinatorUrl="$coordinator" \
             DtPipeNode__DtPipe="$DTPIPE" DtPipeNode__StateDirectory="$STATE/$node" DtPipeNode__Oidc__Authority="$IDP_URL" \
             DtPipeNode__Oidc__ClientId="$id" DtPipeNode__Oidc__ClientSecret="$secret" DtPipeNode__FaultInjection=true
-        exec dotnet "$STATE/bin/runner/DtPipe.PipelineNode.Runner.dll"
+        exec "$DTPIPE" node --runner
     fi
     exec dotnet "$STATE/bin/node/Lab.NodeHost.dll" --config "$file" --state "$STATE" --coordinator "$coordinator" --idp "$IDP_URL" --dtpipe "$DTPIPE"
 }

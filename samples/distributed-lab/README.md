@@ -14,7 +14,7 @@ job by hand and injects faults.
 
 The lab **uses** dtpipe and changes nothing in it. Its coordinator, `Lab.Coordinator`, is a host of
 the product's server, `src/DtPipe.Coordinator.Server`, that adds the bench (the Lab view, planning by
-hand and fault injection), which the product's coordinator does not have; its runner is the official `DtPipe.PipelineNode.Runner`; its data nodes are
+hand and fault injection), which the product's coordinator does not have; its runner is `dtpipe node --runner`; its data nodes are
 disposable hosts of `DtPipe.PipelineNode.Hosting`. They drive the `dtpipe` binary like a user
 (`--export-job`, `--job`). None of it is in `DtPipe.sln`: `build.yml` never builds it.
 
@@ -150,7 +150,7 @@ variable (`LAB_CRM_DB`, …) that its `dtpipe` children see, so a job names
 
 A data node is `Lab.NodeHost`, a plain .NET host that adds a node to itself with
 `DtPipe.PipelineNode.Hosting` (`AddDtPipeNode`), as any business service would. `runner-1` is the
-official runner, `DtPipe.PipelineNode.Runner`, configured only through its environment
+official runner, `dtpipe node --runner`, configured only through its environment
 (`DtPipeNode__Name`, `DtPipeNode__CoordinatorUrl`, `DtPipeNode__Oidc__Authority`, …): `lab.sh`
 starts it that way for a node file whose `role` is `runner`.
 

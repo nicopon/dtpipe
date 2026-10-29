@@ -13,13 +13,16 @@ public sealed record LaunchedBrick(string Id, bool IsSource, string BranchJson);
 
 /// <summary>
 /// What the command line gives a node beyond its environment (<c>DtPipeNode__*</c>); a null leaves the environment's value.
-/// <see cref="ClientSecret"/> is the secret already resolved from its reference.
+/// <see cref="ClientSecret"/> is the secret already resolved from its reference. A <see cref="Runner"/> hosts no data and runs any
+/// fragment it is sent.
 /// </summary>
-public sealed record LaunchSettings(string? Name, string? CoordinatorUrl, string? Description, string? ClientSecret, string DtPipe);
+public sealed record LaunchSettings(string? Name, string? CoordinatorUrl, string? Description, string? ClientSecret, string DtPipe, bool Runner = false);
 
 /// <summary>Runs the node host <c>dtpipe node</c> stands for, in this assembly so that no other starts TransportR.</summary>
 public static class NodeLauncher
 {
+    private const string RunnerDescription = "Runner: hosts no data, runs every step between the bricks";
+
     /// <summary>
     /// Serves until the process is asked to stop, which is a cancellation (130, as <c>dtpipe mcp</c> ends), or says why it cannot
     /// start (1). A node has no work of its own to finish, so a stop that returned 0 would read as a success.
@@ -43,6 +46,9 @@ public static class NodeLauncher
         Set("DtPipeNode:Name", settings.Name);
         Set("DtPipeNode:CoordinatorUrl", settings.CoordinatorUrl);
         Set("DtPipeNode:Description", settings.Description);
+        // A runner says what it is unless it was given a description, by option or environment.
+        if (settings.Runner && !overrides.ContainsKey("DtPipeNode:Description") && builder.Configuration["DtPipeNode:Description"] is not { Length: > 0 })
+            Set("DtPipeNode:Description", RunnerDescription);
         if (builder.Configuration["DtPipeNode:DtPipe"] is not { Length: > 0 }) Set("DtPipeNode:DtPipe", settings.DtPipe);
 
         Set("DtPipeNode:Oidc:ClientSecret", settings.ClientSecret);
@@ -56,6 +62,7 @@ public static class NodeLauncher
         var node = builder.Services.AddDtPipeNode(builder.Configuration.GetSection("DtPipeNode"));
         foreach (var brick in bricks)
             node.AddBrick(brick.Id, brick.IsSource ? BrickKind.Source : BrickKind.Sink, brick.Id, brick.BranchJson);
+        if (settings.Runner) node.RunAnyFragment();
 
         using var host = builder.Build();
         try

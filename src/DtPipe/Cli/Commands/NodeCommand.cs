@@ -9,17 +9,19 @@ namespace DtPipe.Cli.Commands;
 
 /// <summary>
 /// <c>dtpipe node [options] (-i … | -o …) --alias id …</c>: this process is a data node of a distributed pipeline. Each branch of
-/// the pipeline grammar is a brick the node offers, named by its alias; <c>--job</c> reads them from a file. Its settings are
-/// <c>DtPipeNode__*</c> in the environment; the options here only override the three that name it. A secret is never an argument:
-/// the client secret is a reference (<c>keyring://alias</c>, <c>${{NAME}}</c>), read once at start.
+/// the pipeline grammar is a brick the node offers, named by its alias; <c>--job</c> reads them from a file. <c>dtpipe node
+/// --runner</c> is the other kind of node: it hosts no data, so it takes no brick, and runs any fragment the coordinator sends.
+/// Its settings are <c>DtPipeNode__*</c> in the environment; the options here only override the three that name it. A secret is
+/// never an argument: the client secret is a reference (<c>keyring://alias</c>, <c>${{NAME}}</c>), read once at start.
 /// </summary>
 public sealed class NodeCommand : Command
 {
     private const string EnvironmentPrefix = "DtPipeNode";
 
     public NodeCommand(IServiceProvider serviceProvider)
-        : base("node", "Run as a data node of a distributed pipeline: each branch given is a brick it offers; --job <file.yaml> carries several, sources and sinks together")
+        : base("node", "Run as a node of a distributed pipeline: each branch given is a brick it offers (--job <file.yaml> carries several, sources and sinks together), or --runner hosts no data")
     {
+        var runner = new Option<bool>("--runner") { Description = "Host no data and run any fragment the coordinator sends; takes no brick" };
         var name = new Option<string?>("--name") { Description = "The node's name (default: DtPipeNode__Name)" };
         var coordinator = new Option<string?>("--coordinator") { Description = "The coordinator's address (default: DtPipeNode__CoordinatorUrl)" };
         var description = new Option<string?>("--description") { Description = "What the node is, shown beside its name" };
@@ -27,6 +29,7 @@ public sealed class NodeCommand : Command
         {
             Description = "The node's secret at the identity provider, as a reference: keyring://alias, ${{NAME}} or @file (default: DtPipeNode__Oidc__ClientSecret)",
         };
+        Options.Add(runner);
         Options.Add(name);
         Options.Add(coordinator);
         Options.Add(description);
@@ -64,19 +67,33 @@ public sealed class NodeCommand : Command
                 }
             }
 
-            string yaml;
-            try { yaml = CommandLineJob.Export(serviceProvider, tokens); }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            var isRunner = parseResult.GetValue(runner);
+            IReadOnlyList<DeclaredBrick> bricks = [];
+            if (isRunner)
             {
-                Console.Error.WriteLine($"[ERROR] {ex.Message}");
-                return 1;
+                if (tokens.FirstOrDefault() is { } given)
+                {
+                    Console.Error.WriteLine($"[ERROR] --runner hosts no data, so it takes no brick, and '{given}' declares one: remove --runner to host it, or remove '{given}' to run as a runner.");
+                    return 1;
+                }
             }
-
-            var (bricks, refusal) = NodeBricks.Read(yaml);
-            if (refusal is not null)
+            else
             {
-                Console.Error.WriteLine($"[ERROR] {refusal}");
-                return 1;
+                string yaml;
+                try { yaml = CommandLineJob.Export(serviceProvider, tokens); }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    Console.Error.WriteLine($"[ERROR] {ex.Message}");
+                    return 1;
+                }
+
+                var (read, refusal) = NodeBricks.Read(yaml);
+                if (refusal is not null)
+                {
+                    Console.Error.WriteLine($"[ERROR] {refusal}");
+                    return 1;
+                }
+                bricks = read;
             }
 
             // The binary every fragment runs as: this one, unless the process is the dotnet host (dotnet run).
@@ -84,7 +101,7 @@ public sealed class NodeCommand : Command
             var dtpipe = self is null || Path.GetFileNameWithoutExtension(self).Equals("dotnet", StringComparison.OrdinalIgnoreCase) ? "dtpipe" : self;
 
             return await NodeHostEntry.RunAsync(
-                parseResult.GetValue(name), parseResult.GetValue(coordinator), parseResult.GetValue(description), secret, dtpipe, bricks, ct);
+                parseResult.GetValue(name), parseResult.GetValue(coordinator), parseResult.GetValue(description), secret, dtpipe, isRunner, bricks, ct);
         });
     }
 

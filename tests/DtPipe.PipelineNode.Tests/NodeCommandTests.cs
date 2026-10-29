@@ -99,6 +99,62 @@ public sealed class NodeCommandTests
         Assert.DoesNotContain(Secret, stderr, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("-i", "generate:1", "--alias", "a")]
+    [InlineData("--job", "bricks.yaml")]
+    public void A_Runner_Given_A_Brick_Is_Refused_By_Naming_Both(params string[] given)
+    {
+        var psi = new ProcessStartInfo(DtPipeExecutableLocator.Path) { UseShellExecute = false, RedirectStandardError = true, RedirectStandardOutput = true };
+        foreach (var arg in new[] { "node", "--runner" }.Concat(given))
+            psi.ArgumentList.Add(arg);
+
+        using var process = Process.Start(psi)!;
+        var stderr = process.StandardError.ReadToEnd();
+        Assert.True(process.WaitForExit(30_000));
+
+        Assert.Equal(1, process.ExitCode);
+        Assert.Contains("--runner hosts no data", stderr, StringComparison.Ordinal);
+        Assert.Contains($"'{given[0]}'", stderr, StringComparison.Ordinal);
+        Assert.Contains("remove --runner", stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_Runner_Needs_No_Brick_And_Announces_Itself_As_A_Runner()
+    {
+        var received = new ConcurrentBag<string>();
+        await using var idp = await StartIdpAsync(received);
+        await using var coordinator = await CoordinatorTestHost.StartAsync(_ => { });
+        var dir = Directory.CreateTempSubdirectory("node-runner-").FullName;
+
+        var psi = new ProcessStartInfo(DtPipeExecutableLocator.Path) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+        foreach (var arg in new[] { "node", "--runner", "--name", "runner-cmd", "--coordinator", coordinator.Url, "--client-secret", "${{NODE_COMMAND_SECRET}}" })
+            psi.ArgumentList.Add(arg);
+        psi.Environment["NODE_COMMAND_SECRET"] = Secret;
+        psi.Environment["DtPipeNode__Oidc__Authority"] = idp.Url;
+        psi.Environment["DtPipeNode__StateDirectory"] = dir;
+
+        using var process = Process.Start(psi)!;
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+        try
+        {
+            var registry = coordinator.Host.Services.GetRequiredService<ReplicaRegistry>();
+            var deadline = DateTime.UtcNow.AddSeconds(30);
+            while (registry.Replicas("runner-cmd").Count == 0 && DateTime.UtcNow < deadline && !process.HasExited)
+                await Task.Delay(100, Ct);
+
+            var announcement = Assert.Single(registry.Replicas("runner-cmd")).Announcement;
+            Assert.Equal(NodeRole.Runner, announcement.Role);
+            Assert.Empty(announcement.Bricks);
+            Assert.Contains("hosts no data", announcement.Description, StringComparison.Ordinal);
+        }
+        finally
+        {
+            process.Kill(entireProcessTree: true);
+            await process.WaitForExitAsync(Ct);
+        }
+    }
+
     /// <summary>An identity provider reduced to the two documents a node reads; it records the secret each token request carried.</summary>
     private static async Task<Idp> StartIdpAsync(ConcurrentBag<string> secrets)
     {

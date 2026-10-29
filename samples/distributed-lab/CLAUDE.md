@@ -65,8 +65,8 @@ project's `CLAUDE.md`); the nodes are `src/DtPipe.PipelineNode.Hosting` hosts
   `ui_check.py` (the "Waiting for approval" card, whose proposed name and description are HTML and must show as text). `forget` takes it
   out of the queue, which keeps a host that is gone for a day. `[local: smoke.py rights - enrollment, ui_check.py]`
 - **Lab nodes are disposable hosts of `DtPipe.PipelineNode.Hosting`.** `Lab.NodeHost` reads
-  `nodes/<node>.json` into `AddDtPipeNode`; a node file whose `role` is `runner` starts the official
-  `DtPipe.PipelineNode.Runner` instead, configured through its environment. `lab.sh exec-node` is
+  `nodes/<node>.json` into `AddDtPipeNode`; a node file whose `role` is `runner` starts
+  `dtpipe node --runner` instead, configured through its environment. `lab.sh exec-node` is
   the one way a node starts, for `lab.sh` and `tools/campaign.py`. `smoke.py` reads the warehouse and its witness reads the databases
   `seed.sh` wrote, located from the node files, never from the coordinator. Every lab node also enables
   fault injection (`FaultInjection` in `Lab.NodeHost`'s options, `DtPipeNode__FaultInjection` in the
