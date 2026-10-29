@@ -102,6 +102,11 @@ docker build -f deploy/Dockerfile --target runner \
   while the process answers, a standby included. The coordinator image checks `/livez` itself
   (`docker ps` shows `healthy`); an orchestrator's own probes replace that check. The runner has
   no such route and its image no check.
+- Without Docker, `./build.sh` publishes the coordinator as the self-contained folder
+  `dist/release/coordinator/`, and `dist/release/coordinator/dtpipe-coordinator` (`.exe` on Windows)
+  takes the same `Coordinator__*` settings from its environment. The folder is the whole
+  coordinator, `wwwroot` and the native SQLite library included: copy it as one. The library is a
+  git repository, so `git` must be on the `PATH`, as the image carries it.
 
 ## The smallest coordinator
 

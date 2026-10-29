@@ -24,7 +24,7 @@ there.
 | `src/DtPipe.Coordinator` | Central hub of a distributed pipeline: the control plane over TransportR |
 | `src/DtPipe.PipelineNode` | Runs one distributed-pipeline fragment under the coordinator's control |
 | `src/DtPipe.Coordinator.Server` | The coordinator's server, a library a host adds (`AddCoordinatorServer`): API, pages, planner, library, rights |
-| `src/DtPipe.Coordinator.Host` | The product's coordinator: a `Program` that adds the server and nothing else, the image's entry point |
+| `src/DtPipe.Coordinator.Host` | The product's coordinator: a `Program` that adds the server and nothing else, the image's entry point, and `dtpipe-coordinator`, the executable `build.sh` publishes |
 | `src/DtPipe.Coordinator.Contracts` | Node channel messages, `BrickRules`: what coordinator and nodes share |
 | `src/DtPipe.PipelineNode.Hosting` | `AddDtPipeNode`: makes any .NET host a node (bricks, fragments, tokens) |
 | `src/DtPipe.PipelineNode.Launcher` | The assembly of `dtpipe node` (a data node, or the runner with `--runner`): the CLI's only reach into the family, loaded when a node starts and by no other command |
@@ -34,7 +34,11 @@ The **distributed family** is every
 project named `DtPipe.Coordinator*` or `DtPipe.PipelineNode*`: it references TransportR as NuGet
 packages and stays outside `DtPipe.sln`, so `build.yml` builds only what `src/DtPipe` reaches through
 `DtPipe.PipelineNode.Launcher` and tests none of it; `build.sh` discovers its test projects, so
-`agentic-ci.yml` does.
+`agentic-ci.yml` does. `build.sh` also publishes the coordinator self-contained as the folder
+`dist/release/coordinator/` (executable `dtpipe-coordinator`, set by the Host's `AssemblyName`, never by a
+command-line `-p:AssemblyName`) and starts it once, on a throwaway state, until `/livez` answers. It is a
+folder, never a single file: `wwwroot` and the native SQLite library sit beside the executable. Its
+library is a git repository, so the machine it runs on needs `git` on the `PATH`.
 `DtPipe.Coordinator` and `DtPipe.PipelineNode` are libraries; a host owns `Program`, authentication
 and the address, and an executable of the family is such a host. Nothing else in `src/` names
 TransportR; only the family, its tests and the lab do. The family references `DtPipe.Jobs` and no

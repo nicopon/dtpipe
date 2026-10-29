@@ -13,7 +13,7 @@ and runs each on a different host, with the Arrow data streaming between them.
 |:---|:---|:---|
 | **`DtPipe.Coordinator`** | The control plane of a distributed pipeline: it checks a plan, knows which nodes are present, starts every fragment and every transfer between them, and gives the run one verdict | `src/DtPipe.Coordinator/` |
 | **`DtPipe.Coordinator.Server`** | The coordinator as a server: an API and pages, the placement of a pipeline's fragments on nodes, a git-backed library of pipelines, a queue of runs, and the rights that say which nodes exist and which group may send to which | `src/DtPipe.Coordinator.Server/` |
-| **`DtPipe.Coordinator.Host`** | The coordinator as the product's image runs it: the server and nothing else | `src/DtPipe.Coordinator.Host/` |
+| **`DtPipe.Coordinator.Host`** | The coordinator as the product's image runs it, or as the folder `build.sh` publishes (it needs `git` on the `PATH`): the server and nothing else | `src/DtPipe.Coordinator.Host/` |
 | **`DtPipe.PipelineNode`** | Runs one fragment on its host as a `dtpipe` child process and relays its Arrow streams to the peers | `src/DtPipe.PipelineNode/` |
 | **`DtPipe.PipelineNode.Hosting`** | `AddDtPipeNode`: makes any .NET host a node, offering the **bricks** its owner declares, each a read or a write on the host's own data | `src/DtPipe.PipelineNode.Hosting/` |
 | **`DtPipe.PipelineNode.Launcher`** | The assembly of `dtpipe node`: a node whose bricks are the branches of the command line, or, with `--runner`, a runner that hosts no data and runs any fragment | `src/DtPipe.PipelineNode.Launcher/` |
