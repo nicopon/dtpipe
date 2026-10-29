@@ -76,7 +76,7 @@ public sealed class JobAnalysis(IServiceProvider services, IEnumerable<IStreamRe
         if (!safety.Allowed)
             throw new InvalidOperationException("The SQL safety policy refuses this job: " + string.Join(" ", safety.Violations)
                 + " The studio cannot permit what the policy refuses: change the SQL the job carries, or run the saved job"
-                + " from a terminal with dtpipe --job, which applies no SQL safety policy to a real run.");
+                + " from a terminal with dtpipe --job.");
         return (parsed.Jobs, parsed.Dag);
     }
 
