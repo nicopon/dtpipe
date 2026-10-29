@@ -30,6 +30,20 @@ does not exist yet, or when several unique indexes could match.
 > generated clause degenerates into a plain `INSERT` — dtpipe detects that and falls back to a
 > correct, slower path. See [MySQL](../connections/mysql.md).
 
+**An interrupted `Append` leaves the batches already written.** The PostgreSQL, SQL Server, Oracle,
+MySQL and SQLite writers commit each batch on its own and wrap the run in no transaction. A run
+that stops midway — a refused type, a violated constraint, any error — exits `1` with every earlier
+batch in the table, values intact, and the batch that failed writes nothing. The batch is the unit
+`--batch-size` sets, so a smaller one leaves more of the run behind. The DuckDB writer buffers its
+rows and flushes them on its own schedule, so what it leaves is not a count of batches.
+
+A second run starts from the top, so a plain `Append` writes those rows again, or stops on the key
+they already hold. Rerun with `Upsert` instead, or with `DeleteThenInsert` or `Truncate` when the
+table may be emptied: each ends with one row per key on a partly loaded table. A cursor alone does
+not help, since its mark moves only when a run succeeds and the rerun reads the same window again;
+when the query reads in cursor order, `--cursor-from` set to the highest value the target now holds
+resumes after the written batches. See [Incremental loading](incremental.md).
+
 **A file or object target has no strategies.** It is replaced wholesale, so `--strategy` is refused
 rather than accepted and quietly ignored.
 

@@ -62,7 +62,8 @@ Plain JSON — readable, diffable, and safe to commit or to keep in a mounted vo
 ```
 
 The mark advances only on success, so a failed run re-reads the same window rather than skipping
-it.
+it. An `Append` has already left the batches that run wrote, and writes them again: replay with
+`Upsert`, or see [Writing to a database](write-strategies.md).
 
 ## Things that bite
 
