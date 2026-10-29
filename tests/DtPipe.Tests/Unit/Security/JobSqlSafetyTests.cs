@@ -125,6 +125,19 @@ public sealed class JobSqlSafetyTests : IDisposable
     }
 
     [Fact]
+    public async Task The_Studio_Refusal_Does_Not_Send_The_Person_To_A_Flag_The_Command_Line_Lacks()
+    {
+        var yaml = "main:\n  input: \"generate:5\"\n  output: \"duck:t.duckdb\"\n  provider-options:\n    duck-writer:\n      pre-exec: \"DROP TABLE sales\"\n";
+
+        var refusal = await Assert.ThrowsAsync<InvalidOperationException>(() => Engine().RunAsync(yaml, StudioBindings.None, Ct));
+
+        Assert.Contains("DROP", refusal.Message);
+        Assert.DoesNotContain("appropriate --allow-", refusal.Message);
+        Assert.Contains("The studio cannot permit what the policy refuses", refusal.Message);
+        Assert.Contains("run the saved job from a terminal with dtpipe --job", refusal.Message);
+    }
+
+    [Fact]
     public async Task A_Verb_Spelled_In_A_Connection_String_Is_Not_Destructive_SQL()
     {
         var yaml = "main:\n  input: \"generate:5\"\n  output: \"duck:update.duckdb\"\n";

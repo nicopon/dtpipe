@@ -64,8 +64,9 @@ public sealed class JobAnalysis(IServiceProvider services, IEnumerable<IStreamRe
     /// <summary>
     /// A job text turned into what a real run executes: it validates, then the SQL safety policy
     /// (destructive and network access refused) judges it. The person's confirmation is the caller's,
-    /// so no approval gate is asked. A job that does not validate or that the policy refuses throws,
-    /// naming why, before anything runs.
+    /// so no approval gate is asked, and the policy runs with its defaults: nothing the caller holds
+    /// lifts a refusal. A job that does not validate or that the policy refuses throws, naming why,
+    /// before anything runs.
     /// </summary>
     public (Dictionary<string, JobDefinition> Jobs, JobDagDefinition Dag) ResolveForRun(string yamlContent, string? bindInput, string? bindOutput)
     {
@@ -74,7 +75,8 @@ public sealed class JobAnalysis(IServiceProvider services, IEnumerable<IStreamRe
         var safety = CheckSafety(parsed, new SqlSafetyOptions());
         if (!safety.Allowed)
             throw new InvalidOperationException("The SQL safety policy refuses this job: " + string.Join(" ", safety.Violations)
-                + " Run it with dtpipe --job and the appropriate --allow-* flag.");
+                + " The studio cannot permit what the policy refuses: change the SQL the job carries, or run the saved job"
+                + " from a terminal with dtpipe --job, which applies no SQL safety policy to a real run.");
         return (parsed.Jobs, parsed.Dag);
     }
 
