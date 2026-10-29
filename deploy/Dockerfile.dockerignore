@@ -2,5 +2,6 @@
 *
 !Directory.Build.props
 !src/
+!deploy/runner-entrypoint.sh
 **/bin/
 **/obj/

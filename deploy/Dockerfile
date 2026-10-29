@@ -13,14 +13,17 @@
 # libraries the image does not have.
 #
 #   coordinator   the coordinator's server, with git (its library is a git repository) and no dtpipe
-#   runner        the official runner: `dtpipe node --runner`, with dtpipe in /usr/local/bin
+#   runner        the official runner: `dtpipe node --runner`, with dtpipe in /usr/local/bin, behind
+#                 deploy/runner-entrypoint.sh, which restricts its traffic first (DTPIPE_EGRESS_ALLOW)
 #   trial-node    the data node of the trial recipe (deploy/compose.trial.yaml): `dtpipe node --job`, not for production
 #   runtime       the base of both: ASP.NET Core, curl for health checks, the unprivileged user
 #   with-dtpipe   runtime plus the dtpipe binary: the base of the runner, and of any host that runs fragments
 #
-# Every image runs as 1654:1654 (the `app` user of the .NET base images) and every HTTP service
-# listens on 8080. /state belongs to that user and holds nothing until a deployment mounts it; a
-# volume that replaces it must be writable by that uid. Another uid works if it can write /state and /tmp.
+# Every process that serves or runs a pipeline runs as 1654:1654 (the `app` user of the .NET base
+# images), and every HTTP service listens on 8080. The runner's image alone starts as root: its entry
+# point installs the network rules, then starts dtpipe as 1654:1654 with no capability. /state
+# belongs to that user and holds nothing until a deployment mounts it; a volume that replaces it must
+# be writable by that uid. Another uid works if it can write /state and /tmp.
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS source
 WORKDIR /src
@@ -85,10 +88,14 @@ EXPOSE 8080
 HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=3 CMD curl -fs http://localhost:8080/livez || exit 1
 ENTRYPOINT ["dotnet", "/app/dtpipe-coordinator.dll"]
 
+# Root for the entry point only: it needs NET_ADMIN, SETUID, SETGID and SETPCAP, and dtpipe never has them.
 FROM with-dtpipe AS runner
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends iptables && rm -rf /var/lib/apt/lists/*
+COPY --chmod=755 deploy/runner-entrypoint.sh /usr/local/bin/runner-entrypoint
 ENV DtPipeNode__DtPipe=/usr/local/bin/dtpipe \
     DtPipeNode__StateDirectory=/state
-ENTRYPOINT ["dtpipe", "node", "--runner"]
+ENTRYPOINT ["runner-entrypoint"]
 
 # The bricks are the branches of the job file the recipe mounts at /etc/trial-node/bricks.yaml.
 FROM with-dtpipe AS trial-node
