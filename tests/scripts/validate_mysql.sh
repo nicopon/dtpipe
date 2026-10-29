@@ -258,5 +258,25 @@ done
 "${MY_EXEC[@]}" -e "DROP TABLE IF EXISTS mysql_e2e_unreadable;" >/dev/null 2>&1
 pass "unreadable text exits 1 with the table unchanged; text that reads is written"
 
+echo -e "\n--- Test 10: a date into a DATE column on the INSERT path ---"
+for cell in "DATE '2024-01-02'|0|0=NULL,1=2024-01-02"; do
+    IFS='|' read -r VALUE WANT_RC WANT_ROWS <<< "$cell"
+    "${MY_EXEC[@]}" -e "DROP TABLE IF EXISTS mysql_e2e_date;
+                        CREATE TABLE mysql_e2e_date (id INT, n DATE);
+                        INSERT INTO mysql_e2e_date VALUES (0, NULL);" >/dev/null 2>&1
+    set +e
+    "$DTPIPE" -i "duck::memory:" --query "SELECT 1::INT AS id, ${VALUE} AS n" \
+        -o "$MY_CONN" --table mysql_e2e_date --strategy Append --insert-mode Standard \
+        --no-stats >/dev/null 2>&1
+    RC=$?
+    set -e
+    GOT=$(mysql_scalar "SELECT GROUP_CONCAT(CONCAT(id,'=',IFNULL(n,'NULL')) ORDER BY id) FROM mysql_e2e_date")
+    [ "$RC" = "$WANT_RC" ] || fail "${VALUE} into DATE: exit $RC, expected $WANT_RC"
+    [ "$GOT" = "$WANT_ROWS" ] || fail "${VALUE} into DATE: table holds '$GOT', expected '$WANT_ROWS'"
+    echo "    ${VALUE} -> DATE: exit $RC, table '$GOT'"
+done
+"${MY_EXEC[@]}" -e "DROP TABLE IF EXISTS mysql_e2e_date;" >/dev/null 2>&1
+pass "a date is written exactly"
+
 echo ""
 echo "All native MySQL provider checks passed."

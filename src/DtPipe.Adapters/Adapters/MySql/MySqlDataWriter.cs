@@ -386,6 +386,7 @@ public sealed partial class MySqlDataWriter : BaseSqlDataWriter, IColumnarDataWr
 
         var names = new List<string>();
         var types = new List<Type>();
+        var nativeTypes = new List<string?>();
         var sourceIndices = new List<int>();
 
         if (targetColumns is { Count: > 0 })
@@ -396,6 +397,7 @@ public sealed partial class MySqlDataWriter : BaseSqlDataWriter, IColumnarDataWr
                 if (srcIdx < 0) continue;
                 names.Add(targetCol.Name);
                 types.Add(targetCol.InferredClrType ?? _columns![srcIdx].ClrType);
+                nativeTypes.Add(targetCol.NativeType);
                 sourceIndices.Add(srcIdx);
             }
         }
@@ -408,6 +410,7 @@ public sealed partial class MySqlDataWriter : BaseSqlDataWriter, IColumnarDataWr
             {
                 names.Add(_columns[i].Name);
                 types.Add(_columns[i].ClrType);
+                nativeTypes.Add(null);
                 sourceIndices.Add(i);
             }
         }
@@ -420,10 +423,32 @@ public sealed partial class MySqlDataWriter : BaseSqlDataWriter, IColumnarDataWr
         _converters = new Func<object?, object?>[names.Count];
         for (var i = 0; i < names.Count; i++)
         {
-            _bufferTable.Columns.Add(names[i], Nullable.GetUnderlyingType(_targetTypes[i]) ?? _targetTypes[i]);
-            _converters[i] = CompositeCellJson.Wrap(ColumnConverterFactory.Build(_columns![_sourceIndices[i]].ClrType, _targetTypes[i], _columns[_sourceIndices[i]].Name));
+            var source = _columns![_sourceIndices[i]];
+            var (bufferType, convert) = BufferColumn(nativeTypes[i], _targetTypes[i], source.ClrType, source.Name);
+            _bufferTable.Columns.Add(names[i], bufferType);
+            _converters[i] = convert;
         }
     }
+
+    /// <summary>
+    /// The buffer column type and the cell converter of one written column. A DATE column holds the
+    /// type its source sends when that type is <see cref="DateOnly"/>, which MySqlConnector binds as a
+    /// date; the column's inferred type (<see cref="DateTime"/>) would refuse it, and no conversion
+    /// between the two is made here. Any other column holds its inferred type.
+    /// </summary>
+    internal static (Type BufferType, Func<object?, object?> Convert) BufferColumn(
+        string? targetNativeType, Type targetType, Type sourceType, string sourceColumn)
+    {
+        var bufferType = Nullable.GetUnderlyingType(targetType) ?? targetType;
+        if (IsDateColumn(targetNativeType) && (Nullable.GetUnderlyingType(sourceType) ?? sourceType) == typeof(DateOnly))
+            bufferType = typeof(DateOnly);
+
+        return (bufferType, CompositeCellJson.Wrap(ColumnConverterFactory.Build(sourceType, bufferType, sourceColumn)));
+    }
+
+    // COLUMN_TYPE of a DATE column is the bare name; DATETIME shares its prefix, so the match is exact.
+    private static bool IsDateColumn(string? nativeType)
+        => string.Equals(nativeType?.Trim(), "date", StringComparison.OrdinalIgnoreCase);
 
     private int IndexOfSourceColumn(string name)
     {

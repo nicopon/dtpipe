@@ -13,6 +13,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="DtPipe.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="../DtPipe.Core/DtPipe.Core.csproj" />
     <ProjectReference Include="../DtPipe.Adapters.Shared/DtPipe.Adapters.Shared.csproj" />
     <ProjectReference Include="../Apache.Arrow.Ado/Apache.Arrow.Ado.csproj" />
