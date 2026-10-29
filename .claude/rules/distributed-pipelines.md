@@ -27,8 +27,7 @@ there.
 | `src/DtPipe.Coordinator.Host` | The product's coordinator: a `Program` that adds the server and nothing else, the image's entry point |
 | `src/DtPipe.Coordinator.Contracts` | Node channel messages, `BrickRules`: what coordinator and nodes share |
 | `src/DtPipe.PipelineNode.Hosting` | `AddDtPipeNode`: makes any .NET host a node (bricks, fragments, tokens) |
-| `src/DtPipe.PipelineNode.Launcher` | The assembly of `dtpipe node`: the CLI's only reach into the family, loaded when a node starts and by no other command |
-| `src/DtPipe.PipelineNode.Runner` | The official runner: a node that hosts no data and runs any fragment |
+| `src/DtPipe.PipelineNode.Launcher` | The assembly of `dtpipe node` (a data node, or the runner with `--runner`): the CLI's only reach into the family, loaded when a node starts and by no other command |
 | `src/DtPipe.PipelineNode.TrialNode` | The trial recipe's data node: two bricks declared in a file, a model of a team's own host |
 | `deploy` | The Dockerfile of the coordinator's and the runner's images, and `deploy/README.md`: what a deployment provides |
 

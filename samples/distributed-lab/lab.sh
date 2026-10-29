@@ -106,14 +106,21 @@ seed() {
 
 is_running() { [[ -f "$STATE/run/$1.pid" ]] && kill -0 "$(cat "$STATE/run/$1.pid")" 2>/dev/null; }
 
-# Every process whose command line names the state directory, as "pid<TAB>command", except this script and its ancestors: the
-# processes of a lab that no pid file records are found this way, and so are the dtpipe children a killed host left behind.
+# Whether process $1, whose command line is $2, is a runner host of this lab: `dtpipe node --runner` names no path, so its state
+# directory is read from its environment.
+is_lab_runner() {
+    [[ "$2" == *" node --runner" ]] && [[ "$(ps eww -o command= -p "$1" 2>/dev/null)" == *"DtPipeNode__StateDirectory=$STATE/"* ]]
+}
+
+# Every process of the lab, as "pid<TAB>command", except this script and its ancestors: those whose command line names the state
+# directory, and the runner hosts whose environment does. The processes of a lab that no pid file records are found this way,
+# and so are the dtpipe children a killed host left behind.
 lab_processes() {
     local keep=" $$ " pid="$$" ppid args
     while pid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')"; [[ -n "$pid" && "$pid" -gt 1 ]]; do keep+="$pid "; done
     while read -r pid ppid args; do
         [[ "$keep" == *" $pid "* ]] && continue
-        [[ "$args" == *"$STATE/"* ]] && printf '%s\t%s\n' "$pid" "$args"
+        if [[ "$args" == *"$STATE/"* ]] || is_lab_runner "$pid" "$args"; then printf '%s\t%s\n' "$pid" "$args"; fi
     done < <(ps -ww -eo pid=,ppid=,args=)
     return 0
 }

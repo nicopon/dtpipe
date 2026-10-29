@@ -16,8 +16,7 @@ and runs each on a different host, with the Arrow data streaming between them.
 | **`DtPipe.Coordinator.Host`** | The coordinator as the product's image runs it: the server and nothing else | `src/DtPipe.Coordinator.Host/` |
 | **`DtPipe.PipelineNode`** | Runs one fragment on its host as a `dtpipe` child process and relays its Arrow streams to the peers | `src/DtPipe.PipelineNode/` |
 | **`DtPipe.PipelineNode.Hosting`** | `AddDtPipeNode`: makes any .NET host a node, offering the **bricks** its owner declares, each a read or a write on the host's own data | `src/DtPipe.PipelineNode.Hosting/` |
-| **`DtPipe.PipelineNode.Launcher`** | The assembly of `dtpipe node`: a node whose bricks are the branches of the command line | `src/DtPipe.PipelineNode.Launcher/` |
-| **`DtPipe.PipelineNode.Runner`** | The official runner: a node that hosts no data and runs any fragment | `src/DtPipe.PipelineNode.Runner/` |
+| **`DtPipe.PipelineNode.Launcher`** | The assembly of `dtpipe node`: a node whose bricks are the branches of the command line, or, with `--runner`, a runner that hosts no data and runs any fragment | `src/DtPipe.PipelineNode.Launcher/` |
 | **The lab** | A demonstrator that hosts these libraries: a coordinator, four data nodes with their own databases and a runner, as local processes or a compose stack, with a page to assemble, place and run a pipeline | `samples/distributed-lab/` |
 
 The distributed projects move the data over [TransportR](https://github.com/nicopon/TransportR), a

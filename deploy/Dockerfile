@@ -13,7 +13,7 @@
 # libraries the image does not have.
 #
 #   coordinator   the coordinator's server, with git (its library is a git repository) and no dtpipe
-#   runner        the official runner, with dtpipe in /usr/local/bin
+#   runner        the official runner: `dtpipe node --runner`, with dtpipe in /usr/local/bin
 #   trial-node    the data node of the trial recipe (deploy/compose.trial.yaml), with dtpipe: not for production
 #   runtime       the base of both: ASP.NET Core, curl for health checks, the unprivileged user
 #   with-dtpipe   runtime plus the dtpipe binary: the base of the runner, and of any host that runs fragments
@@ -51,11 +51,9 @@ FROM source AS hosts-build
 ARG SOURCE_REVISION=""
 RUN --mount=type=cache,id=dtpipe-nuget,target=/root/.nuget/packages,sharing=locked \
     dotnet publish src/DtPipe.Coordinator.Host/DtPipe.Coordinator.Host.csproj -c Release -p:SourceRevisionId="$SOURCE_REVISION" -o /out/coordinator \
-    && dotnet publish src/DtPipe.PipelineNode.Runner/DtPipe.PipelineNode.Runner.csproj -c Release -p:SourceRevisionId="$SOURCE_REVISION" -o /out/runner \
     && { [ -z "$SOURCE_REVISION" ] \
-        || { grep -qaF "+$SOURCE_REVISION" /out/coordinator/DtPipe.Coordinator.Host.dll \
-             && grep -qaF "+$SOURCE_REVISION" /out/runner/DtPipe.PipelineNode.Runner.dll; }; } \
-    || { echo "A host does not carry the revision $SOURCE_REVISION." >&2; exit 1; }
+        || grep -qaF "+$SOURCE_REVISION" /out/coordinator/DtPipe.Coordinator.Host.dll; } \
+    || { echo "The coordinator does not carry the revision $SOURCE_REVISION." >&2; exit 1; }
 
 # The trial recipe's data node, built from this checkout by compose and never published.
 FROM source AS trial-build
@@ -97,10 +95,9 @@ HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=3 CMD curl 
 ENTRYPOINT ["dotnet", "/app/DtPipe.Coordinator.Host.dll"]
 
 FROM with-dtpipe AS runner
-COPY --from=hosts-build /out/runner /app
 ENV DtPipeNode__DtPipe=/usr/local/bin/dtpipe \
     DtPipeNode__StateDirectory=/state
-ENTRYPOINT ["dotnet", "/app/DtPipe.PipelineNode.Runner.dll"]
+ENTRYPOINT ["dtpipe", "node", "--runner"]
 
 # The bricks come from the file DtPipeNode__BricksFile names, which the recipe mounts.
 FROM with-dtpipe AS trial-node

@@ -4,7 +4,7 @@ Mechanics for editing the node host. The rules themselves are in the root `CLAUD
 `.claude/rules/distributed-pipelines.md`.
 
 `AddDtPipeNode` makes any .NET host a node: a business service that offers bricks, or the official
-runner (`DtPipe.PipelineNode.Runner`, which only calls `RunAnyFragment`). It is a hosted service
+runner (`dtpipe node --runner`, which only calls `RunAnyFragment`). It is a hosted service
 (`NodeAgent`), not HTTP middleware: the node opens its connections to the coordinator, it serves
 none. One node per process, which is one replica of its node's identity; a second `AddDtPipeNode` throws.
 

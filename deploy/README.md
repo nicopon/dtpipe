@@ -93,6 +93,9 @@ docker build -f deploy/Dockerfile --target runner \
   write `/state` and `/tmp`; the coordinator under a uid with no home is not checked.
 - Run them under an init (`docker run --init`, `init: true` in compose): the runner starts
   `dtpipe` child processes, and dotnet as PID 1 ignores the signal of its own crash.
+- The runner's entry point is `dtpipe node --runner` ([REFERENCE.md](../REFERENCE.md#a-node-from-the-cli-dtpipe-node)),
+  configured by `DtPipeNode__*` and nothing else: it takes no argument that names a setting. A stop
+  signal ends it with exit code 130, a cancellation.
 - Two anonymous probes. `GET /healthz` is readiness: 200 whenever the coordinator serves, its
   store open, and 503 `passive` on a [standby](#a-passive-standby). `GET /livez` is liveness: 200
   while the process answers, a standby included. The coordinator image checks `/livez` itself
