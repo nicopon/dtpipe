@@ -52,7 +52,7 @@ ARG SOURCE_REVISION=""
 RUN --mount=type=cache,id=dtpipe-nuget,target=/root/.nuget/packages,sharing=locked \
     dotnet publish src/DtPipe.Coordinator.Host/DtPipe.Coordinator.Host.csproj -c Release -p:SourceRevisionId="$SOURCE_REVISION" -o /out/coordinator \
     && { [ -z "$SOURCE_REVISION" ] \
-        || grep -qaF "+$SOURCE_REVISION" /out/coordinator/DtPipe.Coordinator.Host.dll; } \
+        || grep -qaF "+$SOURCE_REVISION" /out/coordinator/dtpipe-coordinator.dll; } \
     || { echo "The coordinator does not carry the revision $SOURCE_REVISION." >&2; exit 1; }
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
@@ -83,7 +83,7 @@ EXPOSE 8080
 # at the moment /healthz does: once the server serves, its store open, and its library too when it has a remote.
 # Readiness is /healthz (503 passive on a standby). An orchestrator that probes on its own replaces this check.
 HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=3 CMD curl -fs http://localhost:8080/livez || exit 1
-ENTRYPOINT ["dotnet", "/app/DtPipe.Coordinator.Host.dll"]
+ENTRYPOINT ["dotnet", "/app/dtpipe-coordinator.dll"]
 
 FROM with-dtpipe AS runner
 ENV DtPipeNode__DtPipe=/usr/local/bin/dtpipe \

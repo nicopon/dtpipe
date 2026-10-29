@@ -4,6 +4,8 @@
     <TargetFramework>net10.0</TargetFramework>
     <IsPackable>false</IsPackable>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- The executable's name, here and not on a command line: a global -p:AssemblyName would rename every referenced project. -->
+    <AssemblyName>dtpipe-coordinator</AssemblyName>
   </PropertyGroup>
 
   <ItemGroup>
