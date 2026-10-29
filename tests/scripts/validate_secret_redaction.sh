@@ -25,7 +25,11 @@ echo "========================================"
 # Expressions that hold a connection string, by name.
 # The \b on the property form matters: a bare "ConnectionString" also matches the
 # sanitizer's own class name, and every call to it reports itself as an offender.
-CONNECTION_EXPRESSIONS='job\.Input|job\.Output|branch\.Input|branch\.Output|b\.Input|b\.Output|j\.Input|w\.Output|connectionString|\.ConnectionString\b'
+#
+# A bare `input` is not listed: the name also holds a brick reference or an alias elsewhere in
+# src/, so `{input}` would refuse messages that carry no connection. `inspect` renders its
+# argument through Markup.Escape, and that exact shape is what names the connection there.
+CONNECTION_EXPRESSIONS='job\.Input|job\.Output|branch\.Input|branch\.Output|b\.Input|b\.Output|j\.Input|w\.Output|connectionString|\.ConnectionString\b|Markup\.Escape\(input\)'
 
 # Helpers allowed to stand in for a Redact call inside an interpolation. Each one is
 # checked below to be defined over Redact, so renaming the body breaks the check
