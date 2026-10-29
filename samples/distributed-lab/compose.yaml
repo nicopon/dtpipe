@@ -227,12 +227,17 @@ services:
     volumes: [./.stack/node-4:/lab/state/node-4]
 
   # The official runner, configured as any deployment would: through its environment. It holds no
-  # data, so it mounts nothing.
+  # data, so it mounts nothing. Its entry point starts as root to install the network rules and
+  # runs dtpipe as 1654 with no capability (deploy/README.md).
   runner-1:
     <<: *dotnet-service
     image: dtpipe-lab-stack/runner
     build: { <<: *product-build, target: runner }
+    cap_add: [NET_ADMIN, SETUID, SETGID]
     environment:
+      # Out, Docker's local address pools, which hold the stack's network: the coordinator, and the
+      # proxy that carries the IdP. Nothing comes in.
+      DTPIPE_EGRESS_ALLOW: ${DTPIPE_EGRESS_ALLOW:-172.16.0.0/12,192.168.0.0/16}
       DtPipeNode__Name: runner-1
       DtPipeNode__Description: Runner - no database, carries every step between the bricks
       DtPipeNode__CoordinatorUrl: http://coordinator:8080

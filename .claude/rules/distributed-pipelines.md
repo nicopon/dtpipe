@@ -9,6 +9,7 @@ paths:
   - "src/DtPipe.Jobs/Coordinator/**"
   - "src/DtPipe/Cli/Node/**"
   - "tests/scripts/validate_distributed_boundary.sh"
+  - "tests/scripts/validate_runner_egress.sh"
 ---
 
 # Distributed pipelines
@@ -28,7 +29,7 @@ there.
 | `src/DtPipe.Coordinator.Contracts` | Node channel messages, `BrickRules`: what coordinator and nodes share |
 | `src/DtPipe.PipelineNode.Hosting` | `AddDtPipeNode`: makes any .NET host a node (bricks, fragments, tokens) |
 | `src/DtPipe.PipelineNode.Launcher` | The assembly of `dtpipe node` (a data node, or the runner with `--runner`): the CLI's only reach into the family, loaded when a node starts and by no other command |
-| `deploy` | The Dockerfile of the coordinator's and the runner's images, and `deploy/README.md`: what a deployment provides |
+| `deploy` | The Dockerfile of the coordinator's and the runner's images, the runner's entry point (`runner-entrypoint.sh`: its network rules), and `deploy/README.md`: what a deployment provides |
 
 The **distributed family** is every
 project named `DtPipe.Coordinator*` or `DtPipe.PipelineNode*`: it references TransportR as NuGet
@@ -81,13 +82,20 @@ the control plane, over each replica's node channel; TransportR carries the data
 - **The product's images carry the revision they were built from and run unprivileged.** `deploy/Dockerfile` takes `SOURCE_REVISION`
   (the full commit id): a value given is refused if malformed or if a `dtpipe` or host does not report it, and labels the image
   with it (`org.opencontainers.image.revision`); left out, the build warns and the label says `unknown`. `.git` is not in the
-  build context, so nothing else can supply it. The lab's stack is the strict case: its guard requires HEAD. Every image
-  runs as `1654:1654` with `/state` owned by that user. The release pushes the coordinator and the runner only, to GHCR, multi-arch, tagged with
+  build context, so nothing else can supply it. The lab's stack is the strict case: its guard requires HEAD. Every process that
+  serves or runs a pipeline runs as `1654:1654`, with `/state` owned by that user. The release pushes the coordinator and the runner only, to GHCR, multi-arch, tagged with
   the version, its major.minor and `latest`; `deploy/compose.trial.yaml` builds a `dtpipe` standard image for the trial recipe's data node (target `trial-node`), never pushed. The lab's images extend these and the product's names no lab; `deploy/`
   is scanned like `src/`. **The server listens in plain HTTP and reads no forwarded header**: a TLS proxy in front is
   told to it by `Coordinator:PublicUrl`, the address people reach it at, so it does not turn into `http://` return addresses.
   `[CI: validate_distributed_boundary.sh — deploy/ names no lab]` `[CI: PublicUrlTests] [local: the lab's smoke.py bricks - versions; the lab's tools/linux_replay.sh uid, a named volume of another uid]`
   `[unchecked: the release's push to GHCR, until a tag runs it; a Linux Docker host, where tools/linux_replay.sh is the replay; a real TLS proxy; a bind mount of another uid; deploy/README.md is in no documentation check, so keep its lines to 100 columns]`
+- **The runner's image starts as root, its `dtpipe` never does.** `deploy/runner-entrypoint.sh` installs the rules of
+  `DTPIPE_EGRESS_ALLOW` (CIDR masks, comma-separated: out, the masks and the loopback; in, nothing but replies), reads them
+  back, then starts `dtpipe node --runner` through `setpriv` as `1654:1654` with no capability, an empty bounding set and
+  `no_new_privs`. A list it cannot apply stops the start; an empty list or `DTPIPE_EGRESS_RULES=off` installs nothing and warns.
+  The rules take addresses, never names: a name resolved once is a rule that outlives the address. Every other image, the
+  coordinator's and `trial-node`, keeps `USER 1654:1654`. `[local: validate_runner_egress.sh, on the images of a checkout]`
+  `[unchecked: a Linux Docker host, Kubernetes; DNS through Docker's resolver, which the rules cannot see]`
 - **A key is never stored, logged, returned or compared but as its hash, and the hash never leaves the store.** The call that
   makes a key is the only answer that carries it, and a key the deployment gives (`Coordinator:Bootstrap`) is read once and hashed;
   the rights keep its SHA-256, which no route answers, and no log carries the key, a part of it or its hash. A presented key is

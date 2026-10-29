@@ -88,15 +88,19 @@ docker build -f deploy/Dockerfile --target runner \
   `dtpipe` binary or a host that does not report it; it is also the image's
   `org.opencontainers.image.revision` label, which is how a deployment tells what it runs. Left
   out, the build only warns: the binaries report no revision and the label says `unknown`.
-- Both run as `1654:1654` (the `app` user of the .NET images), listen on 8080 and keep their
-  state in `/state`, which that user owns. A named volume mounted there inherits the owner; a
-  bind mount must be owned by that uid. The runner's `dtpipe` runs under another uid that can
-  write `/state` and `/tmp`; the coordinator under a uid with no home is not checked.
+- The coordinator runs as `1654:1654` (the `app` user of the .NET images). The runner's image
+  starts as root, the time its entry point takes to install [its network
+  rules](#the-runners-network), and runs `dtpipe` as `1654:1654`, never as root. Both listen on
+  8080 when they serve and keep their state in `/state`, which that user owns. A named volume
+  mounted there inherits the owner; a bind mount must be owned by that uid. The runner's
+  `dtpipe` runs under another uid that can write `/state` and `/tmp`; the coordinator under a uid
+  with no home is not checked.
 - Run them under an init (`docker run --init`, `init: true` in compose): the runner starts
   `dtpipe` child processes, and dotnet as PID 1 ignores the signal of its own crash.
-- The runner's entry point is `dtpipe node --runner` ([REFERENCE.md](../REFERENCE.md#a-node-from-the-cli-dtpipe-node)),
-  configured by `DtPipeNode__*` and nothing else: it takes no argument that names a setting. A stop
-  signal ends it with exit code 130, a cancellation.
+- The runner's entry point, `deploy/runner-entrypoint.sh`, ends in `dtpipe node --runner`
+  ([REFERENCE.md](../REFERENCE.md#a-node-from-the-cli-dtpipe-node)), configured by
+  `DtPipeNode__*` and nothing else: it takes no argument that names a setting. A stop signal ends
+  it with exit code 130, a cancellation.
 - Two anonymous probes. `GET /healthz` is readiness: 200 whenever the coordinator serves, its
   store open, and 503 `passive` on a [standby](#a-passive-standby). `GET /livez` is liveness: 200
   while the process answers, a standby included. The coordinator image checks `/livez` itself
@@ -107,6 +111,65 @@ docker build -f deploy/Dockerfile --target runner \
   takes the same `Coordinator__*` settings from its environment. The folder is the whole
   coordinator, `wwwroot` and the native SQLite library included: copy it as one. The library is a
   git repository, so `git` must be on the `PATH`, as the image carries it.
+
+## The runner's network
+
+A runner runs whatever step a pipeline holds, so its image limits what it can reach.
+`DTPIPE_EGRESS_ALLOW` names the addresses it may open a connection to. The entry point installs
+the rules as root (`iptables`, `ip6tables`), reads them back, and starts `dtpipe node --runner`
+as `1654:1654` with no capability, an empty bounding set and `no_new_privs`: `dtpipe` can neither
+change the rules nor gain a privilege back.
+
+```bash
+docker run -d --init --cap-add NET_ADMIN -e DTPIPE_EGRESS_ALLOW=10.20.0.0/24 \
+    -e DtPipeNode__CoordinatorUrl=http://coordinator:8080 ... dtpipe-runner
+```
+
+- **The list.** CIDR masks separated by commas, IPv4 and IPv6; a host is written `/32` or
+  `/128`. An entry that is not a mask stops the start, named.
+- **What to list.** The coordinator (its node channel, its data plane and, when it issues the
+  keys, its token endpoint) and the identity provider, if there is one. The runner opens no other
+  connection, DuckDB included, and listens on no port.
+- **An address, not a name.** The rules hold addresses; the coordinator's may change when its
+  container is created again. Give a mask that covers its subnet, or an address the deployment
+  fixes for it.
+- **Out**: the masks and the loopback, always (`arrow:` reaches the node's pipes there, and
+  Docker's resolver listens at `127.0.0.11`). Any other connection is refused at once: a
+  coordinator outside the list shows in the runner's log as `No route to host`, retried.
+- **In**: nothing but the replies to connections the runner opened, and IPv6 neighbour
+  discovery. A health check reaches the runner on its loopback or not at all; it has none.
+- **A subnet includes its gateway**, and through it every port the Docker host publishes. The
+  recipes list Docker's local address pools, `172.16.0.0/12,192.168.0.0/16`, which hold their
+  network whatever subnet Compose gives it; set `DTPIPE_EGRESS_ALLOW` where the pools are
+  elsewhere. A deployment lists its coordinator alone, at an address it fixes.
+- **DNS** goes to Docker's resolver on the loopback, which answers the network's names and
+  forwards the others from outside the container: an outside name resolves, though its address
+  stays unreachable. The rules cannot close that channel; a network with no outside access, or a
+  policy around the runner, can. On Docker's default bridge (`docker run` with no `--network`)
+  the resolver is the host's, not on the loopback: list it, or run on a network of your own.
+- **IPv6** gets the same rules whenever the kernel has it, whether or not the network gives the
+  container an address. A kernel without IPv6 has no IPv6 traffic; its masks are then ignored,
+  with a warning.
+- **An empty list** restricts nothing: the runner starts, and warns.
+- **Capabilities, at the start only**: `NET_ADMIN` for the rules, and `SETUID`, `SETGID` and
+  `SETPCAP` to start `dtpipe` as `1654` with none. Docker's default set holds the last three, so
+  `--cap-add NET_ADMIN` is enough; with `cap_drop: [ALL]`, add all four. A list the entry point
+  cannot apply (a capability missing, no `iptables`, a kernel that refuses a rule) stops the
+  start with exit code 1 and an `[ERROR]` line that names the cause: a runner never runs as
+  though it were protected.
+- **Kubernetes**, and any profile that refuses `NET_ADMIN` or a start as root: set
+  `DTPIPE_EGRESS_RULES=off` and restrict the runner with a NetworkPolicy (out: the coordinator
+  and the provider; in: nothing) or its equivalent. The entry point then installs nothing and
+  warns that the network must do it. Started as another user it installs nothing either, and a
+  non-empty list stops the start unless the rules are `off`; give that pod
+  `allowPrivilegeEscalation: false` and no capability, since the entry point cannot drop them
+  itself.
+- **Reading the rules.** `docker exec <runner> iptables -S` shows them, and `iptables -L OUTPUT
+  -v -n` counts the connections refused, which are not logged. `docker exec` enters as root
+  with the container's capabilities: whoever may exec into the runner may change its rules.
+- **Checked** by `tests/scripts/validate_runner_egress.sh` (the images of a checkout,
+  `DTPIPE_RUNNER_IMAGE` and `DTPIPE_COORDINATOR_IMAGE`), on OrbStack only: not on a Linux Docker
+  host, nor on Kubernetes.
 
 ## The smallest coordinator
 

@@ -154,7 +154,8 @@ project's `CLAUDE.md`); the nodes are `src/DtPipe.PipelineNode.Hosting` hosts
   `SOURCE_REVISION` (`${SOURCE_REVISION:-}` in `compose.yaml`: a `:?` would fail `down` and `exec` too; an empty value
   builds images labelled `unknown`, which the `versions` guard refuses), `LAB_UID` and `LAB_GID`. The services that mount a `.stack/` directory (`node-N`, `idp`, `coordinator`,
   `postgres`) run as that user and with `HOME=/tmp`, so nothing in `.stack/` is owned by root; `lab.sh stack up` creates the directories
-  first, as docker would create them as root. The runner mounts nothing and keeps the image's own user (1654). A throwaway container
+  first, as docker would create them as root. The runner mounts nothing; its image starts as root to install the network rules of
+  `DTPIPE_EGRESS_ALLOW`, which `compose.yaml` sets to Docker's local pools, and its `dtpipe` runs as 1654 with no capability. A throwaway container
   of the stack (the enrollment check) runs as the invoking user too. `smoke.py bricks - versions` requires every node's `dtpipe` and
   the revision label of the coordinator, runner and node images to be HEAD; a tree that is dirty at the same HEAD is not seen.
   `[local: lab.sh stack smoke]` `[unchecked: Docker on Linux, where a bind mount keeps its owner]`

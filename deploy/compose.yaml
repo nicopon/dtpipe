@@ -75,10 +75,17 @@ services:
     depends_on:
       keys: { condition: service_completed_successfully }
 
+  # The entry point starts as root to install the network rules, then runs dtpipe as 1654 with no capability. SETPCAP, which
+  # it needs too, is in Docker's default set; with cap_drop: [ALL], add it here.
   runner:
     image: ${DTPIPE_RUNNER_IMAGE:-ghcr.io/nicopon/dtpipe-runner:${DTPIPE_VERSION:-latest}}
     init: true
+    cap_add: [NET_ADMIN, SETUID, SETGID]
     environment:
+      # The only addresses the runner may open a connection to: Docker's local address pools, which hold this recipe's network,
+      # whatever subnet it is given, and its gateway, so every port the host publishes too. Nothing comes in. A host whose
+      # pools are elsewhere sets DTPIPE_EGRESS_ALLOW; a deployment lists its coordinator alone (deploy/README.md).
+      DTPIPE_EGRESS_ALLOW: ${DTPIPE_EGRESS_ALLOW:-172.16.0.0/12,192.168.0.0/16}
       DtPipeNode__Name: runner-1
       DtPipeNode__Description: Runner
       # No Oidc__Authority: the node finds the coordinator's key issuer in the coordinator's metadata.
