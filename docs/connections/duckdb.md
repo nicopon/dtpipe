@@ -26,6 +26,18 @@ touches disk, useful for a one-line query or a test.
 Reads go through the Arrow C Data interface, so a batch crosses from DuckDB into the pipeline
 without being copied or re-encoded.
 
+## Writing into an existing table
+
+A decimal with more digits than its column holds, such as `123456.78` written into a
+`DECIMAL(5,2)`, stops the run with exit code 1 and the column named. The refusal is the value's,
+not the type's: a `DECIMAL(10,2)` source is written into that column as long as its values fit.
+The rows the writer still holds when it stops are dropped, but a large load is written in blocks
+as it goes, and the blocks written before the failing value stay in the table.
+
+A 128-bit integer (`HUGEINT`) is written as one, over its whole range, `-2^127` to `2^127-1`. The
+unsigned one (`UHUGEINT`) is refused before the table is touched, with the cast that writes it as
+text: see [Types a writer cannot write](../../REFERENCE.md#types-a-writer-cannot-write).
+
 ## `--duck-init`: extensions and credentials
 
 `--duck-init` runs SQL on the DuckDB connection right after it opens — before any read, write or

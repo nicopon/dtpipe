@@ -22,9 +22,9 @@ namespace DtPipe.Adapters.DuckDB;
 public sealed class DuckDbDataWriter : IColumnarDataWriter, ISchemaInspector, IKeyValidator, ISchemaMigrator, IColumnTypeGate
 {
     /// <summary>
-    /// The appender takes a 128-bit integer only inside the signed range (see <see cref="AppendValue"/>),
-    /// so an unsigned 128-bit column (UHUGEINT), half of whose values lie outside it, is refused whole
-    /// rather than written until the first large value.
+    /// The writer does not write an unsigned 128-bit column (UHUGEINT): the type mapper has no column
+    /// type for it and <see cref="AppendValue"/> no case, so it would land as text. It is refused before
+    /// the target is touched, never converted.
     /// </summary>
     public IReadOnlyList<ColumnTypeRefusal> RefuseColumns(Schema schema)
         => ColumnTypeRefusals.Collect(schema, f =>
@@ -143,9 +143,9 @@ public sealed class DuckDbDataWriter : IColumnarDataWriter, ISchemaInspector, IK
         }
     }
 
-    // Closing the appender flushes its buffer, and a row left half-built by a failed cell is flushed with
-    // its missing columns at the type's default: a row that looks real. Clearing first drops that row
-    // (and the buffered rows after the last flush) so a failed run writes none of them.
+    // Closing the appender flushes the complete rows it still buffers. Clearing first drops them, so a
+    // failed run writes none of the rows appended since the appender last flushed on its own; the rows
+    // it flushed before the failure stay in the target.
     private void DiscardBufferedRows()
     {
         try { ((DuckDBAppender?)_appender)?.Clear(); }
@@ -175,10 +175,6 @@ public sealed class DuckDbDataWriter : IColumnarDataWriter, ISchemaInspector, IK
             case ushort us: row.AppendValue(us); break;
             case uint ui: row.AppendValue(ui); break;
             case ulong ul: row.AppendValue(ul); break;
-            // The appender writes a 128-bit integer from a BigInteger bounded to ±(2^127 - 1); the one
-            // value past it, -2^127, would otherwise fail without saying why.
-            case Int128 hi when hi == Int128.MinValue:
-                throw new InvalidOperationException("The DuckDB appender cannot write -2^127 (-170141183460469231731687303715884105728); its HUGEINT range is -2^127+1 to 2^127-1.");
             case Int128 hi: row.AppendValue((System.Numerics.BigInteger?)hi); break;
             case float f: row.AppendValue(f); break;
             case double d: row.AppendValue(d); break;

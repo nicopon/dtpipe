@@ -25,7 +25,7 @@ public static class ColumnTypeRefusals
 
     /// <summary>
     /// What a 128-bit integer (DuckDB's HUGEINT, the <c>arrow.opaque</c> field of an <see cref="Int128"/>)
-    /// is accepted as by a format with no type that holds every value: its text, the one form that keeps
+    /// is accepted as by a writer with no type that holds every value: its text, the one form that keeps
     /// all 39 digits; null for any other field. The writer never spells the number itself.
     /// </summary>
     public static IReadOnlyList<IArrowType>? WideInteger(Field field)

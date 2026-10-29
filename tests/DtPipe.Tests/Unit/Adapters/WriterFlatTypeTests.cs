@@ -30,6 +30,7 @@ public sealed class WriterFlatTypeTests : IDisposable
         { "duck", "TIME '10:00:00.123456'", "TIME | 10:00:00.123456" },
         { "duck", "TIMESTAMPTZ '2025-09-05 03:43:00+00'", "TIMESTAMP WITH TIME ZONE | 2025-09-05 03:43:00+00" },
         { "duck", "170141183460469231731687303715884105727::HUGEINT", "HUGEINT | 170141183460469231731687303715884105727" },
+        { "duck", "(-170141183460469231731687303715884105727)::HUGEINT - 1", "HUGEINT | -170141183460469231731687303715884105728" },
         { "parquet", "2::TINYINT", "TINYINT | 2" },
         { "parquet", "2::SMALLINT", "SMALLINT | 2" },
         { "parquet", "2::UTINYINT", "UTINYINT | 2" },
@@ -101,7 +102,7 @@ public sealed class WriterFlatTypeTests : IDisposable
     {
         var target = Path.Combine(_dir, "out.duckdb");
 
-        // The DuckDB appender writes a 128-bit integer only up to 2^127 - 1: half of UHUGEINT lies past it.
+        // The duck writer, the one writer whose format has UHUGEINT, does not write it either.
         Assert.Equal(1, await Program.Main(["-i", "duck::memory:", "-q", $"select {expression} as c", "-o", $"duck:{target}", "-t", "t", "--no-stats"]));
 
         Assert.False(File.Exists(target));
