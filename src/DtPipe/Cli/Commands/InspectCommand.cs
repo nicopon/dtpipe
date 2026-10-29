@@ -10,6 +10,7 @@ using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using DtPipe.Core.Pipelines;
+using DtPipe.Core.Security;
 using Microsoft.Extensions.DependencyInjection;
 using Spectre.Console;
 
@@ -193,7 +194,7 @@ public class InspectCommand : Command
                     col.IsNullable ? "[green]✓[/]" : "[red]✗[/]");
             }
 
-            console.MarkupLine($"[bold]📋 Schema for[/] [cyan]{Markup.Escape(input)}[/]");
+            console.MarkupLine($"[bold]📋 Schema for[/] [cyan]{Markup.Escape(ConnectionStringSanitizer.Redact(input))}[/]");
             console.MarkupLine($"[dim]{reader.Columns.Count} columns[/]");
             console.WriteLine();
             console.Write(table);
