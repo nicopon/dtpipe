@@ -14,7 +14,7 @@
 #
 #   coordinator   the coordinator's server, with git (its library is a git repository) and no dtpipe
 #   runner        the official runner: `dtpipe node --runner`, with dtpipe in /usr/local/bin
-#   trial-node    the data node of the trial recipe (deploy/compose.trial.yaml), with dtpipe: not for production
+#   trial-node    the data node of the trial recipe (deploy/compose.trial.yaml): `dtpipe node --job`, not for production
 #   runtime       the base of both: ASP.NET Core, curl for health checks, the unprivileged user
 #   with-dtpipe   runtime plus the dtpipe binary: the base of the runner, and of any host that runs fragments
 #
@@ -99,9 +99,8 @@ ENV DtPipeNode__DtPipe=/usr/local/bin/dtpipe \
     DtPipeNode__StateDirectory=/state
 ENTRYPOINT ["dtpipe", "node", "--runner"]
 
-# The bricks come from the file DtPipeNode__BricksFile names, which the recipe mounts.
+# The bricks are the branches of the job file the recipe mounts at /etc/trial-node/bricks.yaml.
 FROM with-dtpipe AS trial-node
-COPY --from=trial-build /out/trial-node /app
 ENV DtPipeNode__DtPipe=/usr/local/bin/dtpipe \
     DtPipeNode__StateDirectory=/state
-ENTRYPOINT ["dotnet", "/app/DtPipe.PipelineNode.TrialNode.dll"]
+ENTRYPOINT ["dtpipe", "node", "--job", "/etc/trial-node/bricks.yaml"]

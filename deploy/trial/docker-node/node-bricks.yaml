@@ -1,0 +1,4 @@
+numbers:
+  input: generate:1000
+totals:
+  output: csv:/state/totals.csv

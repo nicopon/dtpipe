@@ -63,11 +63,12 @@ docker compose -f deploy/compose.yaml -f deploy/compose.trial.yaml up --build --
   metadata. `up` again keeps the keys, and `down -v` makes new ones. The coordinator makes no key
   itself. `Coordinator__Auth__AllowHttpKeys` lets it take a key over HTTP, which the log and
   every page then say; a real deployment is reached over HTTPS and sets none of it.
-- **The data node** (`src/DtPipe.PipelineNode.TrialNode`) is what a team's own service looks like to
-  the coordinator: it adds a node to itself and declares two bricks in a file. It is not published.
-  A team that writes no .NET declares its bricks with `dtpipe node` instead
-  ([REFERENCE.md](../REFERENCE.md#a-node-from-the-cli-dtpipe-node)): the recipe keeps the .NET host
-  because it gives its bricks a title and a description, which a command line has no place for. The
+- **The data node** is `dtpipe node --job`
+  ([REFERENCE.md](../REFERENCE.md#a-node-from-the-cli-dtpipe-node)), the `trial-node` target of
+  `deploy/Dockerfile`: its two bricks are the branches of
+  `deploy/trial/docker-node/node-bricks.yaml`, and the studio titles them by their ids. It is not
+  published. A team whose service is .NET adds a node to it with `AddDtPipeNode`
+  ([src/DtPipe.PipelineNode.Hosting/CLAUDE.md](../src/DtPipe.PipelineNode.Hosting/CLAUDE.md)). The
   library of the first file holds `shop-orders-by-country`, which runs on a node named `shop` that a
   person declares with `dtpipe node`.
 
