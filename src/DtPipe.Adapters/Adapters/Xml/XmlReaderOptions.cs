@@ -24,9 +24,6 @@ public class XmlReaderOptions : NavigableSourceOptions, IOptionSet, IHasSchemaOv
         MaxSample = DefaultMaxSample;
     }
 
-    [Description("XML file path (use '-' for stdin)")]
-    public string Xml { get; set; } = "";
-
     /// <summary>Full Arrow schema JSON. Set by --export-job; consumed by --job. Not a CLI flag.</summary>
     public string Schema { get; set; } = "";
 

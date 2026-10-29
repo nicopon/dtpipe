@@ -24,9 +24,6 @@ public class JsonLReaderOptions : NavigableSourceOptions, IOptionSet, IHasSchema
         MaxSample = DefaultMaxSample;
     }
 
-    [Description("JSONL file path (use '-' for stdin)")]
-    public string Jsonl { get; set; } = "";
-
     /// <summary>Full Arrow schema JSON. Set by --export-job; consumed by --job. Not a CLI flag.</summary>
     public string Schema { get; set; } = "";
 }
