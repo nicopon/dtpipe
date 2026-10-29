@@ -41,8 +41,8 @@ public static class HelpRenderer
 
         // Structural / global flags from CoreFlagRegistry
         console.WriteLine("GLOBAL OPTIONS:");
-        WriteFlag(console, "--input, -i <source>", "Input source (prefixed ADO.NET, file path, or '-' for stdin)");
-        WriteFlag(console, "--output, -o <target>", "Output target (prefixed ADO.NET, file path, or '-' for stdout)");
+        WriteFlag(console, "--input, -i <source>", "Input source (prefixed ADO.NET, file path, or '<provider>:-' for stdin, e.g. 'csv:-')");
+        WriteFlag(console, "--output, -o <target>", "Output target (prefixed ADO.NET, file path, or '<provider>:-' for stdout, e.g. 'jsonl:-')");
         WriteFlag(console, "--from <alias>", "Read from upstream branch alias (fan-out/tee)");
         WriteFlag(console, "--alias <name>", "Alias for the current DAG branch");
         WriteFlag(console, "--ref <alias>", "Secondary source alias for SQL JOINs (preloaded)");

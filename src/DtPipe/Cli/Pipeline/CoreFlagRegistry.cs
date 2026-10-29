@@ -11,8 +11,8 @@ public static class CoreFlagRegistry
     public static void RegisterCoreFlags(FlagRegistry registry)
     {
         // DAG structure — lexer uses these names explicitly for branch-split logic
-        registry.Register(new FlagDef("--input", new[] { "-i" }, FlagArity.Scalar, FlagScope.PerBranch, "Input source (prefixed ADO.NET, file, or '-')", FlagStage.All));
-        registry.Register(new FlagDef("--output", new[] { "-o" }, FlagArity.Scalar, FlagScope.PerBranch, "Output target (prefixed ADO.NET, file, or '-')", FlagStage.All));
+        registry.Register(new FlagDef("--input", new[] { "-i" }, FlagArity.Scalar, FlagScope.PerBranch, "Input source (prefixed ADO.NET, file, or '<provider>:-' for stdin)", FlagStage.All));
+        registry.Register(new FlagDef("--output", new[] { "-o" }, FlagArity.Scalar, FlagScope.PerBranch, "Output target (prefixed ADO.NET, file, or '<provider>:-' for stdout)", FlagStage.All));
         registry.Register(new FlagDef("--from", new string[] { }, FlagArity.Scalar, FlagScope.PerBranch, "Source alias(es) for this branch", FlagStage.All));
         registry.Register(new FlagDef("--alias", new string[] { }, FlagArity.Scalar, FlagScope.PerBranch, "Alias for the current branch", FlagStage.All));
         // Scalar, like every other value flag: an alias list is written with commas
