@@ -92,9 +92,10 @@ docker build -f deploy/Dockerfile --target runner \
   starts as root, the time its entry point takes to install [its network
   rules](#the-runners-network), and runs `dtpipe` as `1654:1654`, never as root. Both listen on
   8080 when they serve and keep their state in `/state`, which that user owns. A named volume
-  mounted there inherits the owner; a bind mount must be owned by that uid. The runner's
-  `dtpipe` runs under another uid that can write `/state` and `/tmp`; the coordinator under a uid
-  with no home is not checked.
+  mounted there inherits the owner; a bind mount must be owned by that uid. A runner started as
+  another uid runs `dtpipe` under it, with no rules (an empty list or `DTPIPE_EGRESS_RULES=off`),
+  and that uid must write `/state` and `/tmp`; the coordinator under a uid with no home is not
+  checked.
 - Run them under an init (`docker run --init`, `init: true` in compose): the runner starts
   `dtpipe` child processes, and dotnet as PID 1 ignores the signal of its own crash.
 - The runner's entry point, `deploy/runner-entrypoint.sh`, ends in `dtpipe node --runner`

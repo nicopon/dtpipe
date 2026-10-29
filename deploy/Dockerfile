@@ -23,7 +23,8 @@
 # images), and every HTTP service listens on 8080. The runner's image alone starts as root: its entry
 # point installs the network rules, then starts dtpipe as 1654:1654 with no capability. /state
 # belongs to that user and holds nothing until a deployment mounts it; a volume that replaces it must
-# be writable by that uid. Another uid works if it can write /state and /tmp.
+# be writable by that uid. Another uid works if it can write /state and /tmp; the runner's applies
+# no network rules, since installing them needs the start as root.
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS source
 WORKDIR /src
