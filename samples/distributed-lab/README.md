@@ -74,7 +74,8 @@ open http://lab.localtest.me        # the home page: links, health, test account
 `stack up` is `docker compose up -d --build` with what the build and the run need: `SOURCE_REVISION`, the commit
 the images are built from (without it the images say `unknown` and `stack smoke` refuses them), and `LAB_UID` / `LAB_GID`,
 the user who owns `.stack/`. The services that mount it run as that user, so `rm -rf .stack` needs no root; the
-runner mounts nothing and runs as the image's own unprivileged user. Run `docker compose` yourself with
+runner mounts nothing, and its image starts as root only to install its network rules, then runs
+`dtpipe` unprivileged (`deploy/README.md`). Run `docker compose` yourself with
 `SOURCE_REVISION=$(git rev-parse HEAD) LAB_UID=$(id -u) LAB_GID=$(id -g)` set, and with `.stack/*` created, and
 the store: `COMPOSE_PROFILES=postgresql` and `LAB_STACK_CONNECTION` (the database's connection string, from the
 environment) for the default (the `postgres` service is a profile, its password `LAB_POSTGRES_SECRET`), or

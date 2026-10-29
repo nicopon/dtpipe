@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# The images of the distributed pipeline's two hosts, built from the repository root:
+# The images of the distributed pipeline's two hosts and of the trial recipe's data node, built from the repository root:
 #
 #   docker build -f deploy/Dockerfile --target coordinator --build-arg SOURCE_REVISION=$(git rev-parse HEAD) .
 #
@@ -16,7 +16,7 @@
 #   runner        the official runner: `dtpipe node --runner`, with dtpipe in /usr/local/bin, behind
 #                 deploy/runner-entrypoint.sh, which restricts its traffic first (DTPIPE_EGRESS_ALLOW)
 #   trial-node    the data node of the trial recipe (deploy/compose.trial.yaml): `dtpipe node --job`, not for production
-#   runtime       the base of both: ASP.NET Core, curl for health checks, the unprivileged user
+#   runtime       the base of the coordinator and of with-dtpipe: ASP.NET Core, curl for health checks, the unprivileged user
 #   with-dtpipe   runtime plus the dtpipe binary: the base of the runner, and of any host that runs fragments
 #
 # Every process that serves or runs a pipeline runs as 1654:1654 (the `app` user of the .NET base
