@@ -28,11 +28,13 @@ without being copied or re-encoded.
 
 ## Writing into an existing table
 
-A decimal with more digits than its column holds, such as `123456.78` written into a
-`DECIMAL(5,2)`, stops the run with exit code 1 and the column named. The refusal is the value's,
-not the type's: a `DECIMAL(10,2)` source is written into that column as long as its values fit.
-The rows the writer still holds when it stops are dropped, but a large load is written in blocks
-as it goes, and the blocks written before the failing value stay in the table.
+A value its column cannot hold stops the run with exit code 1 and the column named: a decimal
+with more digits than the column, such as `123456.78` written into a `DECIMAL(5,2)`, or an integer
+or floating-point number out of its range, such as `3000000000` written into an `INTEGER`. The
+refusal is the value's, not the type's: a `DECIMAL(10,2)` or `BIGINT` source is written into that
+column as long as its values fit. The rows the writer still holds when it stops are dropped, but a
+large load is written in blocks as it goes, and the blocks written before the failing value stay
+in the table.
 
 A 128-bit integer (`HUGEINT`) is written as one, over its whole range, `-2^127` to `2^127-1`. The
 unsigned one (`UHUGEINT`) is refused before the table is touched, with the cast that writes it as

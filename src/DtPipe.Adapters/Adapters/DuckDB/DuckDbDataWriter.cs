@@ -121,8 +121,9 @@ public sealed class DuckDbDataWriter : IColumnarDataWriter, ISchemaInspector, IK
                                 row.AppendNullValue();
                             else
                             {
-                                // The appender refuses a decimal with more digits than its column's precision
-                                // by an OverflowException that does not name the column.
+                                // A value its column cannot hold arrives as an OverflowException that does not
+                                // name the column: the converter's, for a number or a text out of the column's
+                                // range, or the appender's, for a decimal with more digits than its precision.
                                 try { AppendValue(row, val, _cellConverters![i]); }
                                 catch (OverflowException ex)
                                 {
@@ -162,7 +163,11 @@ public sealed class DuckDbDataWriter : IColumnarDataWriter, ISchemaInspector, IK
         {
             valueToAppend = converter(val);
         }
-        catch { /* Fallback to original if conversion fails */ }
+        // A value the converter cannot convert goes to the appender as it is, which writes it (a timestamp
+        // into a date) or refuses it. An OverflowException is a value out of its column's range and leaves
+        // here: the appender does not check a number against the column and stores it folded, possibly in
+        // another row's cell.
+        catch (Exception ex) when (ex is not OverflowException) { }
 
         switch (valueToAppend)
         {
