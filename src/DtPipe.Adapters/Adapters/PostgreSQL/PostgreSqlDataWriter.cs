@@ -179,7 +179,7 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter, IColumnarD
         _arrowColumnWriters = new Action<IArrowArray, int, NpgsqlBinaryImporter>[_targetToSourceMap.Length];
         for (int k = 0; k < _targetToSourceMap.Length; k++)
         {
-            _arrowColumnWriters[k] = BuildNpgsqlColumnWriter(_columnTypes[k]);
+            _arrowColumnWriters[k] = BuildNpgsqlColumnWriter(_columnTypes[k], _columns![_targetToSourceMap[k]].Name);
         }
 
         _metaDataInitialized = true;

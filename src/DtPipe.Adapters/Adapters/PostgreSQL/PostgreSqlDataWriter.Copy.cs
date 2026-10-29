@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Apache.Arrow;
 using Apache.Arrow.Arrays;
+using DtPipe.Core.Helpers;
 using DtPipe.Core.Infrastructure.Arrow;
 using Microsoft.Extensions.Logging;
 using Npgsql;
@@ -103,8 +104,10 @@ public sealed partial class PostgreSqlDataWriter
         return sb.ToString();
     }
 
-    private static Action<IArrowArray, int, NpgsqlBinaryImporter> BuildNpgsqlColumnWriter(
-        NpgsqlTypes.NpgsqlDbType npgsqlType) => npgsqlType switch
+    // The writer of one target column; `sourceColumn` is the name the query gives its source, which a
+    // refusal quotes.
+    private Action<IArrowArray, int, NpgsqlBinaryImporter> BuildNpgsqlColumnWriter(
+        NpgsqlTypes.NpgsqlDbType npgsqlType, string sourceColumn) => npgsqlType switch
         {
             // A canonical bool8 is an int8 whose non-zero values mean true.
             NpgsqlTypes.NpgsqlDbType.Boolean =>
@@ -148,13 +151,13 @@ public sealed partial class PostgreSqlDataWriter
                         NpgsqlTypes.NpgsqlDbType.Uuid),
 
             NpgsqlTypes.NpgsqlDbType.Date =>
-                static (arr, row, w) =>
+                (arr, row, w) =>
                 {
                     var dt = arr switch
                     {
                         Date32Array d32 => d32.GetDateOnly(row) ?? default,
                         Date64Array d64 => d64.GetDateOnly(row) ?? default,
-                        _ => ArrowTypeMapper.GetValue(arr, row) as DateOnly? ?? default
+                        _ => throw DateColumnMismatch(sourceColumn, arr)
                     };
                     w.Write(dt, NpgsqlTypes.NpgsqlDbType.Date);
                 }
@@ -200,4 +203,14 @@ public sealed partial class PostgreSqlDataWriter
                 else w.Write(val, npgsqlType);
             }
         };
+
+    // A date column is written from a date array only: any other array has no date the writer would
+    // pick for it, and the cast is the caller's to choose.
+    private InvalidOperationException DateColumnMismatch(string sourceColumn, IArrowArray source)
+    {
+        var cast = $"CAST({SqlIdentifierHelper.GetSafeIdentifier(_dialect, sourceColumn)} AS DATE)";
+        return new InvalidOperationException(
+            $"Column '{sourceColumn}' is date and the source sends {source.Data.DataType.Name}, " +
+            $"which the writer does not convert: cast it in the query, {cast}.");
+    }
 }
