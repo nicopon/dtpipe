@@ -55,15 +55,6 @@ RUN --mount=type=cache,id=dtpipe-nuget,target=/root/.nuget/packages,sharing=lock
         || grep -qaF "+$SOURCE_REVISION" /out/coordinator/DtPipe.Coordinator.Host.dll; } \
     || { echo "The coordinator does not carry the revision $SOURCE_REVISION." >&2; exit 1; }
 
-# The trial recipe's data node, built from this checkout by compose and never published.
-FROM source AS trial-build
-ARG SOURCE_REVISION=""
-RUN --mount=type=cache,id=dtpipe-nuget,target=/root/.nuget/packages,sharing=locked \
-    dotnet publish src/DtPipe.PipelineNode.TrialNode/DtPipe.PipelineNode.TrialNode.csproj -c Release -p:SourceRevisionId="$SOURCE_REVISION" -o /out/trial-node \
-    && { [ -z "$SOURCE_REVISION" ] \
-        || grep -qaF "+$SOURCE_REVISION" /out/trial-node/DtPipe.PipelineNode.TrialNode.dll; } \
-    || { echo "The trial node does not carry the revision $SOURCE_REVISION." >&2; exit 1; }
-
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/* \
     && mkdir /state && chown 1654:1654 /state

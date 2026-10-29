@@ -28,7 +28,6 @@ there.
 | `src/DtPipe.Coordinator.Contracts` | Node channel messages, `BrickRules`: what coordinator and nodes share |
 | `src/DtPipe.PipelineNode.Hosting` | `AddDtPipeNode`: makes any .NET host a node (bricks, fragments, tokens) |
 | `src/DtPipe.PipelineNode.Launcher` | The assembly of `dtpipe node` (a data node, or the runner with `--runner`): the CLI's only reach into the family, loaded when a node starts and by no other command |
-| `src/DtPipe.PipelineNode.TrialNode` | The trial recipe's data node: two bricks declared in a file, a model of a team's own host |
 | `deploy` | The Dockerfile of the coordinator's and the runner's images, and `deploy/README.md`: what a deployment provides |
 
 The **distributed family** is every
@@ -80,7 +79,7 @@ the control plane, over each replica's node channel; TransportR carries the data
   with it (`org.opencontainers.image.revision`); left out, the build warns and the label says `unknown`. `.git` is not in the
   build context, so nothing else can supply it. The lab's stack is the strict case: its guard requires HEAD. Every image
   runs as `1654:1654` with `/state` owned by that user. The release pushes the coordinator and the runner only, to GHCR, multi-arch, tagged with
-  the version, its major.minor and `latest`; the trial recipe's data node is built by `deploy/compose.trial.yaml`, never pushed. The lab's images extend these and the product's names no lab; `deploy/`
+  the version, its major.minor and `latest`; `deploy/compose.trial.yaml` builds a `dtpipe` standard image for the trial recipe's data node (target `trial-node`), never pushed. The lab's images extend these and the product's names no lab; `deploy/`
   is scanned like `src/`. **The server listens in plain HTTP and reads no forwarded header**: a TLS proxy in front is
   told to it by `Coordinator:PublicUrl`, the address people reach it at, so it does not turn into `http://` return addresses.
   `[CI: validate_distributed_boundary.sh — deploy/ names no lab]` `[CI: PublicUrlTests] [local: the lab's smoke.py bricks - versions; the lab's tools/linux_replay.sh uid, a named volume of another uid]`
