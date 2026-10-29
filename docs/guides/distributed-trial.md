@@ -27,8 +27,26 @@ coordinator issues tokens for.
 ## Start the recipe
 
 You need Docker with Compose and a checkout of this repository. A second Compose file adds a trial
-data node, built from the checkout, so the first start takes a few minutes, and the rights and the
-library that name it. The coordinator and the runner are the images each release publishes on GHCR.
+data node, which is `dtpipe node --job` over the bricks file
+`deploy/trial/docker-node/node-bricks.yaml`, built from the checkout (so the first start takes a few
+minutes), and the rights and the library that name it.
+
+### Build the images
+
+Until a release publishes the authentication by key, the images on GHCR lack it: build the
+coordinator and the runner from the checkout, with the two `docker build` commands of
+[deploy/README.md](../../deploy/README.md#the-images), tagged as they are there, then point Compose
+at them:
+
+```bash
+export DTPIPE_COORDINATOR_IMAGE=dtpipe-coordinator DTPIPE_RUNNER_IMAGE=dtpipe-runner
+export SOURCE_REVISION=$(git rev-parse HEAD)
+```
+
+Both variables live in this terminal, so run every command of this page from it.
+`SOURCE_REVISION` is the commit the trial node is built from.
+
+### Start everything
 
 ```bash
 docker compose -f deploy/compose.yaml -f deploy/compose.trial.yaml up -d --wait
@@ -36,8 +54,14 @@ docker compose -f deploy/compose.yaml -f deploy/compose.trial.yaml up -d --wait
 
 The command returns once the coordinator is healthy and the one-off `keys` service, below, has
 exited with its work done. Everything listens on the loopback of your machine, in
-plain HTTP. The addresses use `localtest.me`, a public name that resolves to `127.0.0.1`; without
-a network that resolves it, add `coordinator.localtest.me` to `/etc/hosts`.
+plain HTTP, and port 8080 of the host must be free; do not expose it. The addresses use
+`localtest.me`, a public name that resolves to `127.0.0.1`; without a network that resolves it, add
+`coordinator.localtest.me` to `/etc/hosts`.
+
+The runner starts as root only long enough to install network rules (`DTPIPE_EGRESS_ALLOW`) that
+limit it to Docker's local address pools and let nothing in, then runs with no capability. Where the
+rules and their list are explained:
+[The runner's network](../../deploy/README.md#the-runners-network).
 
 On the first start, a one-off service wrote a random key for each identity of the recipe into the
 coordinator's volume, and gave each node its own; the coordinator added the identities from them.
@@ -133,15 +157,16 @@ docker compose -f deploy/compose.yaml -f deploy/compose.trial.yaml down -v
 ```
 
 `-v` removes the volumes: the next start begins from the recipe's rights and library again, with
-new keys. After
-you pull a newer checkout, run `docker compose -f deploy/compose.yaml -f deploy/compose.trial.yaml
-build` before starting, or the trial node keeps the old build.
+new keys. After you pull a newer checkout, build the two images again, then run
+`docker compose -f deploy/compose.yaml -f deploy/compose.trial.yaml build` before starting, or the
+trial node keeps the old build.
 
 ## Where to go next
 
 | I want to… | Read |
 |:---|:---|
 | Run the coordinator and the runner for real: volumes, databases, TLS, secrets, backup | [deploy/README.md](../../deploy/README.md) |
+| Run the coordinator without Docker: `./build.sh` publishes it as the folder `dist/release/coordinator/`, whose executable is `dtpipe-coordinator` | [deploy/README.md](../../deploy/README.md#the-images) |
 | See every setting of the coordinator and of a node host | [REFERENCE.md](../../REFERENCE.md#distributed-pipeline-experimental) |
 | Declare bricks on my own data and run a pipeline over them | [Your first distributed pipeline](distributed-first-pipeline.md) |
 | See every option of `dtpipe node` | [`dtpipe node`](../../REFERENCE.md#a-node-from-the-cli-dtpipe-node) |

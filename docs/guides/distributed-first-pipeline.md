@@ -5,8 +5,9 @@
 > [Experimentation](../experimentation.md) for the limits first.
 
 This page takes you from nothing to a first run that crosses two hosts. You need Docker with
-Compose, a checkout of this repository (for `deploy/compose.yaml`) and the `dtpipe` binary; you
-write no .NET project and no rights file.
+Compose, a checkout of this repository (for `deploy/compose.yaml`) and the `dtpipe` binary,
+[installed](../install.md) or built by `./build.sh` in the checkout, which writes
+`dist/release/dtpipe`; you write no .NET project and no rights file.
 
 You will start a coordinator and a runner in Docker, seed a small database on your machine, declare
 that database as a **node** with `dtpipe node`, say in the coordinator who may send rows to whom,
@@ -15,13 +16,34 @@ the node. [Try a distributed pipeline](distributed-trial.md) explains what each 
 
 ## Start the coordinator and the runner
 
+The trial of [Try a distributed pipeline](distributed-trial.md) uses the same port: stop it with
+`down -v` first.
+
+### Build the images
+
+Until a release publishes the authentication by key, the images on GHCR lack it: build the
+coordinator and the runner from the checkout, with the two `docker build` commands of
+[deploy/README.md](../../deploy/README.md#the-images), tagged as they are there, then point Compose
+at them:
+
+```bash
+export DTPIPE_COORDINATOR_IMAGE=dtpipe-coordinator DTPIPE_RUNNER_IMAGE=dtpipe-runner
+```
+
+The variables live in this terminal, so run the Compose commands of this page from it.
+
+### Start them
+
 ```bash
 docker compose -f deploy/compose.yaml up -d --wait
 ```
 
-Everything listens on the loopback of your machine, in plain HTTP. The addresses use
-`localtest.me`, a public name that resolves to `127.0.0.1`; without a network that resolves it, add
-`coordinator.localtest.me` to `/etc/hosts`.
+Everything listens on the loopback of your machine, in plain HTTP, and port 8080 of the host must
+be free; do not expose it. The addresses use `localtest.me`, a public name that resolves to
+`127.0.0.1`; without a network that resolves it, add `coordinator.localtest.me` to `/etc/hosts`.
+The runner starts as root only long enough to install network rules (`DTPIPE_EGRESS_ALLOW`), then
+runs with no capability; [The runner's network](../../deploy/README.md#the-runners-network) says
+what they allow.
 
 Every identity here is verified by a **key** the coordinator issues tokens for. On the first `up`, a
 one-off service wrote two random keys into the coordinator's volume: the first administrator's and
@@ -111,7 +133,8 @@ dtpipe node --name shop --coordinator http://coordinator.localtest.me:8080 \
 ```
 
 The node stays in the foreground and logs that it connected, with two bricks. **Access** shows
-`shop` as connected, and **Nodes** lists `orders` and `report` under it.
+`shop` as connected, and **Nodes** lists `orders` and `report` under it; **preview** on a brick
+reads a few rows through the node.
 
 ## Open the studio
 
@@ -151,6 +174,15 @@ IQ,10
 BO,9
 ```
 
+The same count on one machine, with no coordinator, gives the same file:
+
+```bash
+dtpipe -i sqlite:shop.db \
+  --query "SELECT Country, COUNT(*) AS Orders FROM orders GROUP BY Country ORDER BY Orders DESC, Country LIMIT 5" \
+  -o csv:witness.csv
+diff witness.csv report.csv && echo identical
+```
+
 ## What to know before you build on it
 
 - **A sink is judged the same before and after it has served.** A file the sink overwrites is not
@@ -176,6 +208,16 @@ BO,9
 - **A key is shown once.** Lost, it is not read back: in **Access**, **Keys**, then **Rotate: make
   a second key** gives the identity another, and revoking the first ends what it opened at its
   next request.
+
+## If something sticks
+
+| Symptom | What to do |
+|:---|:---|
+| `docker compose` starts the published images, or finds nothing, in a new terminal | The two image variables live in the terminal that exported them: export them again. |
+| The node says its client secret names a variable that is not set | The variable is empty in the node's terminal: run `read -rs DTPIPE_NODE_KEY && export DTPIPE_NODE_KEY` there. |
+| The node does not connect | Its identity must exist in **Access** first, with the name given to `--name` as client id, and the key must be that identity's. A lost key is replaced in **Keys**, **Rotate**. |
+| `--client-secret` is refused | A plain value is: give a reference, `'${{NAME}}'` in quotes, `keyring://alias` or `@file`. |
+| **Deploy** or **Run** is refused | Read the message: node offline, an edge missing from the matrix, a brick changed. `docker compose -f deploy/compose.yaml logs -f coordinator` says the rest. |
 
 ## Stop it
 
