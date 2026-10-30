@@ -64,10 +64,11 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
     // The columns whose values are read into their type here, so the Arrow serializer and a row consumer
     // both receive that type, and a value it does not hold stops the run at its cell. The type is the
     // one --column-types declares or, without it, the one the sample gave (_typesInferred); a replayed
-    // sample record is read through the same readers as a fresh one.
+    // sample record is read through the same readers as a fresh one. A struct or list column the
+    // sample gave reads each field and item the same way (Nested).
     private Dictionary<string, TypedColumn>? _typedColumns;
     private bool _typesInferred;
-    private readonly record struct TypedColumn(string Name, Type Type, Func<JsonElement, object?> Read);
+    private readonly record struct TypedColumn(string Name, Type Type, Func<JsonElement, object?> Read, JsonLNestedReader? Nested = null);
 
     // Where the record being read stands: its line in the file (blank lines counted), or its rank in
     // the array under --path.
@@ -212,6 +213,8 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
             fields.Add(new Field(kvp.Key, arrowType, true));
             if (JsonLTypedValue.BuildReader(type) is { } read)
                 typed[kvp.Key] = new TypedColumn(kvp.Key, type, read);
+            else if (JsonLNestedReader.Of(arrowType) is { } nested)
+                typed[kvp.Key] = new TypedColumn(kvp.Key, type, nested.Read, nested);
 
             var hint = DtPipe.Core.Helpers.TypeHelper.HintFor(type);
             if (hint != null) autoApplied[kvp.Key] = hint;
@@ -604,15 +607,24 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
     {
         var read = column.Read(value);
         if (ReferenceEquals(read, TypedTextCell.Unreadable))
-            Refuse(column);
+            Refuse(column, value);
         return read;
     }
 
     [DoesNotReturn]
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private void Refuse(TypedColumn column)
+    private void Refuse(TypedColumn column, JsonElement value)
     {
         var where = string.IsNullOrEmpty(_options.Path) ? $"JSONL line {_position}" : $"JSONL record {_position}";
+        if (column.Nested != null && column.Nested.FirstUnreadable(value, column.Name) is { } at)
+        {
+            var leafHint = DtPipe.Core.Helpers.TypeHelper.HintFor(at.Type) ?? at.Type.Name;
+            throw new InvalidOperationException(
+                $"{where}: field '{at.Path}' was inferred as {leafHint} from the first {_options.MaxSample} record(s), " +
+                $"and its value does not read as {leafHint}. Declare column '{column.Name}' with '--column-types' " +
+                "('string' keeps its JSON text), or raise '--max-sample' so the sample reaches values of the other kind.");
+        }
+
         if (!_typesInferred)
             TypedTextCell.Refuse(where, column.Name, column.Type, sampledRows: null);
 
@@ -624,7 +636,7 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
             "('string' keeps the value as text), or raise '--max-sample' so the sample reaches values of the other kind.");
     }
 
-    private object? ToValue(JsonElement element, bool isTextColumn = false)
+    internal static object? ToValue(JsonElement element, bool isTextColumn = false)
     {
         if (isTextColumn)
         {
