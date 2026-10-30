@@ -258,8 +258,10 @@ done
 "${MY_EXEC[@]}" -e "DROP TABLE IF EXISTS mysql_e2e_unreadable;" >/dev/null 2>&1
 pass "unreadable text exits 1 with the table unchanged; text that reads is written"
 
-echo -e "\n--- Test 10: a date into a DATE column on the INSERT path ---"
-for cell in "DATE '2024-01-02'|0|0=NULL,1=2024-01-02"; do
+echo -e "\n--- Test 10: a date into a DATE column on the INSERT path, a time of day refused ---"
+for cell in "DATE '2024-01-02'|0|0=NULL,1=2024-01-02" \
+            "TIMESTAMP '2024-01-02 13:45:00'|1|0=NULL" \
+            "TIMESTAMP '2024-01-02 00:00:00'|0|0=NULL,1=2024-01-02"; do
     IFS='|' read -r VALUE WANT_RC WANT_ROWS <<< "$cell"
     "${MY_EXEC[@]}" -e "DROP TABLE IF EXISTS mysql_e2e_date;
                         CREATE TABLE mysql_e2e_date (id INT, n DATE);
@@ -276,7 +278,7 @@ for cell in "DATE '2024-01-02'|0|0=NULL,1=2024-01-02"; do
     echo "    ${VALUE} -> DATE: exit $RC, table '$GOT'"
 done
 "${MY_EXEC[@]}" -e "DROP TABLE IF EXISTS mysql_e2e_date;" >/dev/null 2>&1
-pass "a date is written exactly"
+pass "a date and a midnight timestamp are written exactly; a time of day exits 1 with the table unchanged"
 
 echo ""
 echo "All native MySQL provider checks passed."

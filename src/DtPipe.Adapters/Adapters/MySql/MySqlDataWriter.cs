@@ -435,20 +435,46 @@ public sealed partial class MySqlDataWriter : BaseSqlDataWriter, IColumnarDataWr
     /// type its source sends when that type is <see cref="DateOnly"/>, which MySqlConnector binds as a
     /// date; the column's inferred type (<see cref="DateTime"/>) would refuse it, and no conversion
     /// between the two is made here. Any other column holds its inferred type.
+    /// <para>
+    /// A DATE column that holds <see cref="DateTime"/> refuses a value whose time of day is not
+    /// midnight: an INSERT drops that time without an error, so the row would be written wrong with
+    /// exit 0. Midnight is the date itself and is written. The refusal is on every row the buffer
+    /// carries; a columnar batch sent through LOAD DATA bypasses the buffer, and the server's warning
+    /// refuses it there.
+    /// </para>
     /// </summary>
     internal static (Type BufferType, Func<object?, object?> Convert) BufferColumn(
         string? targetNativeType, Type targetType, Type sourceType, string sourceColumn)
     {
         var bufferType = Nullable.GetUnderlyingType(targetType) ?? targetType;
-        if (IsDateColumn(targetNativeType) && (Nullable.GetUnderlyingType(sourceType) ?? sourceType) == typeof(DateOnly))
+        var isDate = IsDateColumn(targetNativeType);
+        if (isDate && (Nullable.GetUnderlyingType(sourceType) ?? sourceType) == typeof(DateOnly))
             bufferType = typeof(DateOnly);
 
-        return (bufferType, CompositeCellJson.Wrap(ColumnConverterFactory.Build(sourceType, bufferType, sourceColumn)));
+        var convert = CompositeCellJson.Wrap(ColumnConverterFactory.Build(sourceType, bufferType, sourceColumn));
+        if (!isDate || bufferType != typeof(DateTime)) return (bufferType, convert);
+
+        return (bufferType, v =>
+        {
+            var value = convert(v);
+            return value is DateTime { TimeOfDay.Ticks: not 0 } dt ? TimeOfDayIntoDate(sourceColumn, dt) : value;
+        }
+        );
     }
 
     // COLUMN_TYPE of a DATE column is the bare name; DATETIME shares its prefix, so the match is exact.
     private static bool IsDateColumn(string? nativeType)
         => string.Equals(nativeType?.Trim(), "date", StringComparison.OrdinalIgnoreCase);
+
+    // The value is quoted: it is a timestamp, not free text, and its time of day is what the person
+    // has to correct. The cast is written for the source's query, whose dialect the writer does not know.
+    [System.Diagnostics.CodeAnalysis.DoesNotReturn]
+    private static object TimeOfDayIntoDate(string sourceColumn, DateTime value)
+        => throw new InvalidOperationException(
+            $"Column '{sourceColumn}' is date and the source sends " +
+            $"{value.ToString("yyyy-MM-dd HH:mm:ss.FFFFFFF", System.Globalization.CultureInfo.InvariantCulture)}, " +
+            $"whose time of day the column does not hold and the writer does not drop: " +
+            $"cast it in the query, CAST({sourceColumn} AS DATE).");
 
     private int IndexOfSourceColumn(string name)
     {

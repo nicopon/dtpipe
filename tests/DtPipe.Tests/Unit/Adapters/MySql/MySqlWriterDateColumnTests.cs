@@ -25,4 +25,27 @@ public class MySqlWriterDateColumnTests
 
         Assert.Equal(new DateOnly(2024, 1, 2), Store(bufferType, convert(new DateOnly(2024, 1, 2))));
     }
+
+    [Fact]
+    public void A_Timestamp_At_Midnight_Is_Stored_As_It_Comes()
+    {
+        var (bufferType, convert) = MySqlDataWriter.BufferColumn("date", typeof(DateTime), typeof(DateTime), "n");
+
+        Assert.Equal(new DateTime(2024, 1, 2), Store(bufferType, convert(new DateTime(2024, 1, 2))));
+    }
+
+    [Fact]
+    public void A_Time_Of_Day_Into_A_Date_Column_Is_Refused_Naming_Column_And_Value()
+    {
+        var (_, convert) = MySqlDataWriter.BufferColumn("date", typeof(DateTime), typeof(DateTime), "n");
+
+        var ex = Assert.Throws<InvalidOperationException>(() => convert(new DateTime(2024, 1, 2, 13, 45, 0)));
+
+        Assert.Contains("'n'", ex.Message);
+        Assert.Contains("2024-01-02 13:45:00", ex.Message);
+        Assert.Contains("CAST(n AS DATE)", ex.Message);
+
+        var (_, intoDateTime) = MySqlDataWriter.BufferColumn("datetime", typeof(DateTime), typeof(DateTime), "n");
+        Assert.Equal(new DateTime(2024, 1, 2, 13, 45, 0), intoDateTime(new DateTime(2024, 1, 2, 13, 45, 0)));
+    }
 }
