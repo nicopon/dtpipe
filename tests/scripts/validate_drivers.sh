@@ -187,6 +187,35 @@ mssql_q "DROP TABLE DrvDate;" > /dev/null
 pass "MSSQL: a text date written; a time of day into date refused, named"
 
 # ----------------------------------------
+# 3c. MSSQL — a date column read from SQL Server is a date: exact into MSSQL and Postgres
+# ----------------------------------------
+echo "--- [3c] MSSQL date column read as a date ---"
+mssql_q "IF OBJECT_ID('DrvDateSrc', 'U') IS NOT NULL DROP TABLE DrvDateSrc; CREATE TABLE DrvDateSrc (id INT, n DATE);
+  INSERT INTO DrvDateSrc VALUES (1, '2024-01-02');
+  IF OBJECT_ID('DrvDate', 'U') IS NOT NULL DROP TABLE DrvDate; CREATE TABLE DrvDate (id INT, n DATE);" > /dev/null
+docker exec dtpipe-integ-postgres psql -U postgres -d integration -q \
+  -c "DROP TABLE IF EXISTS drv_date; CREATE TABLE drv_date (id INT, n DATE);" > /dev/null
+set +e
+OUT=$("$DTPIPE" -i "$MSSQL_CONN" --query "SELECT id, n FROM DrvDateSrc" \
+  -o "$MSSQL_CONN" --table DrvDate --strategy Append --strict-schema --no-stats 2>&1)
+RC=$?
+set -e
+GOT=$(mssql_q "SELECT CONCAT(id, '=', CONVERT(varchar(10), n, 23)) FROM DrvDate" | tr -d '\r')
+[ "$RC" = "0" ] && [ "$GOT" = "1=2024-01-02" ] \
+  || fail "MSSQL date -> MSSQL date --strict-schema: exit $RC, table '$GOT'; $(grep -m1 'mismatch' <<< "$OUT")"
+set +e
+OUT=$("$DTPIPE" -i "$MSSQL_CONN" --query "SELECT id, n FROM DrvDateSrc" \
+  -o "$PG" --table drv_date --strategy Append --no-stats 2>&1)
+RC=$?
+set -e
+GOT=$(docker exec dtpipe-integ-postgres psql -U postgres -d integration -tA -c "SELECT id || '=' || n FROM drv_date")
+[ "$RC" = "0" ] && [ "$GOT" = "1=2024-01-02" ] && ! grep -qi "mismatch" <<< "$OUT" \
+  || fail "MSSQL date -> PG date: exit $RC, table '$GOT'; $(grep -m1 -i 'mismatch' <<< "$OUT")"
+mssql_q "DROP TABLE DrvDateSrc; DROP TABLE DrvDate;" > /dev/null
+docker exec dtpipe-integ-postgres psql -U postgres -d integration -q -c "DROP TABLE drv_date;" > /dev/null
+pass "MSSQL: a date column copied exactly into MSSQL (--strict-schema) and Postgres"
+
+# ----------------------------------------
 # 4. Oracle — basic read/write
 # ----------------------------------------
 echo "--- [4] Oracle read/write ---"
