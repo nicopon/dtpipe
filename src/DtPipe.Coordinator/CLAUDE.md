@@ -47,8 +47,8 @@ bytes between nodes.
 - **The node channel's hub calls `ReplicaProtocol`, one line a method, and extends nothing.** The library finds
   a message's replica through its connection; what it cannot know (the rights, an enrolment queue) is the
   host's, decided before it forwards. `[CI: ReplicaAdmissionSubjectTests, the server's NodeChannelHubTests]`
-- Register the progress monitor **before** `AddDataHub()`: TransportR adds a no-op default only when
-  none is registered.
+- `AddDataHub()` registers a no-op progress monitor only when none is registered; the host's own, registered
+  before `Build()`, is the one the hub uses.
 - **Peers never address each other.** With `AccessOptions.ClientsMayOpenTransfers` at `false`, the hub refuses a
   client's `GetReceiversAsync` and `InitTransferAsync`. Only the coordinator opens a transfer, through
   `ITransferInitiator`, which the option does not touch. `[CI: PeerToPeerHubFilterTests]`

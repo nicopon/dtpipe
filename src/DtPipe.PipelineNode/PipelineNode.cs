@@ -111,7 +111,7 @@ public sealed class PipelineNode : IAsyncDisposable
         }
         catch
         {
-            // A refused registration (an identity the coordinator does not know, or has disabled) leaves a started connection behind.
+            // The caller never receives this client, so a failed connection (an identity the coordinator does not know, or has disabled) disposes it here.
             await client.DisposeAsync();
             throw;
         }

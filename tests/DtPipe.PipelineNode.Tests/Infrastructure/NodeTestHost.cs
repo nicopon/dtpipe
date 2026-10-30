@@ -43,10 +43,6 @@ public sealed class NodeTestHost : IAsyncDisposable
                     .ConfigureServices(services =>
                     {
                         services.AddLogging(logging => logging.SetMinimumLevel(LogLevel.Warning));
-                        // AddDataHub() alone registers no IHubProgressMonitor, and SignalRDataServer
-                        // requires one: without it the hub accepts a transfer and then returns 500 on
-                        // every stream request instead of forwarding bytes.
-                        services.AddSingleton<IHubProgressMonitor, SilentHubProgressMonitor>();
                         var hub = services.AddDataHub();
                         if (jwt is null)
                         {
@@ -98,11 +94,4 @@ public sealed class NodeTestHost : IAsyncDisposable
         await Host.StopAsync();
         Host.Dispose();
     }
-}
-
-file sealed class SilentHubProgressMonitor : IHubProgressMonitor
-{
-    public void InitializeTransfer(string transferId) { }
-    public void OnBytesTransferred(long bytes) { }
-    public void CompleteTransfer(string transferId) { }
 }

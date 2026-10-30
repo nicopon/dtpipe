@@ -10,8 +10,8 @@ public static class CoordinatorServiceCollectionExtensions
 {
     /// <summary>
     /// Registers the coordinator's share of hosting the hub: the flow control matrix backing
-    /// <see cref="IPlanRegistry"/>, the progress monitor <c>AddDataHub()</c> does not provide on its
-    /// own, the hub's refusal of client-opened transfers, and the replica registry, admission and orchestrator that drive runs
+    /// <see cref="IPlanRegistry"/>, the logging progress monitor that takes the place of the hub's
+    /// no-op default, the hub's refusal of client-opened transfers, and the replica registry, admission and orchestrator that drive runs
     /// over the host's node channel (<see cref="NodeLinkServiceCollectionExtensions.AddNodeLink{THub}"/> names
     /// that hub; <see cref="ReplicaProtocol"/> is what its methods call). Returns TransportR's own builder, so the
     /// caller finishes it (<c>UseDevMode</c> or a JWT identity provider, then <c>Build()</c>) the same way any
