@@ -216,6 +216,28 @@ docker exec dtpipe-integ-postgres psql -U postgres -d integration -q -c "DROP TA
 pass "MSSQL: a date column copied exactly into MSSQL (--strict-schema) and Postgres"
 
 # ----------------------------------------
+# 3d. MSSQL — the bulk load checks the target's CHECK constraint: the refused batch fails the run,
+#     the batches before it stay and the constraint stays trusted
+# ----------------------------------------
+echo "--- [3d] MSSQL bulk load against a CHECK constraint ---"
+printf 'id,n\n1,1\n2,2\n3,3\n4,4\n5,5\n6,6\n' > "$ARTIFACTS_DIR/drv_mssql_check.csv"
+mssql_q "IF OBJECT_ID('DrvCheck', 'U') IS NOT NULL DROP TABLE DrvCheck;
+  CREATE TABLE DrvCheck (id INT CONSTRAINT DrvCheck_id CHECK (id < 5), n INT);" > /dev/null
+set +e
+OUT=$("$DTPIPE" -i "$ARTIFACTS_DIR/drv_mssql_check.csv" \
+  -o "$MSSQL_CONN" --table DrvCheck --strategy Append --batch-size 2 --no-stats 2>&1)
+RC=$?
+set -e
+GOT=$(mssql_q "SELECT STRING_AGG(CAST(id AS VARCHAR(10)), ',') WITHIN GROUP (ORDER BY id) FROM DrvCheck" | tr -d '\r')
+TRUST=$(mssql_q "SELECT is_not_trusted FROM sys.check_constraints WHERE name = 'DrvCheck_id'" | tr -d '\r')
+mssql_q "DROP TABLE DrvCheck;" > /dev/null
+[ "$RC" = "1" ] || fail "MSSQL CHECK (id < 5), Append --batch-size 2: exit $RC, expected 1"
+[ "$GOT" = "1,2,3,4" ] || fail "MSSQL CHECK (id < 5): table '$GOT', expected '1,2,3,4'"
+[ "$TRUST" = "0" ] || fail "MSSQL CHECK (id < 5): is_not_trusted '$TRUST', expected 0"
+grep -q "DrvCheck_id" <<< "$OUT" || fail "MSSQL CHECK (id < 5): refusal does not name the constraint"
+pass "MSSQL: a row the CHECK constraint refuses fails the bulk load; ids 1-4 stay, constraint trusted"
+
+# ----------------------------------------
 # 4. Oracle — basic read/write
 # ----------------------------------------
 echo "--- [4] Oracle read/write ---"

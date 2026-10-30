@@ -165,7 +165,12 @@ public class SqlServerDataWriter : BaseSqlDataWriter, IColumnarDataWriter, IColu
             _converters[i] = convert;
         }
 
-        _bulkCopy = new SqlBulkCopy((SqlConnection)_connection!, SqlBulkCopyOptions.TableLock | SqlBulkCopyOptions.UseInternalTransaction, null)
+        // Without CheckConstraints a bulk load skips the target's CHECK and FOREIGN KEY constraints,
+        // writes the rows they refuse with exit 0 and leaves each constraint untrusted. The staging
+        // copies of Upsert and Ignore need no option: the staging table holds no constraint, and
+        // the MERGE into the target is an ordinary statement the constraints check.
+        _bulkCopy = new SqlBulkCopy((SqlConnection)_connection!,
+            SqlBulkCopyOptions.TableLock | SqlBulkCopyOptions.UseInternalTransaction | SqlBulkCopyOptions.CheckConstraints, null)
         {
             DestinationTableName = _quotedTargetTableName,
             BatchSize = 0,
