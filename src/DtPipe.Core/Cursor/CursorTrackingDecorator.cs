@@ -45,6 +45,13 @@ public class CursorTrackingRowDecorator : IRowDataWriter, ICursorTracker
                 formattedValue = dto.ToString("yyyy-MM-ddTHH:mm:ss.", CultureInfo.InvariantCulture) + Fraction(dto.Ticks)
                     + dto.ToString("zzz", CultureInfo.InvariantCulture);
             }
+            else if (_maxValueRaw is DateOnly d)
+            {
+                // An ISO 8601 date in the invariant culture: the literal a SQL engine compares with a
+                // date column whatever its session's date order (Oracle through `DATE '...'`). The
+                // process culture's short date is refused by some engines and read day-first by others.
+                formattedValue = d.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            }
             else
             {
                 formattedValue = _maxValueRaw.ToString() ?? "";

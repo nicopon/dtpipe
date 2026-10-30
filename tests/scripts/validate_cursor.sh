@@ -172,6 +172,41 @@ sleep 1.2 # wait to make sure mtime would change if written
 mtime_after=$(stat -f "%m" "$STATE_FILE" 2>/dev/null) || mtime_after=$(stat -c "%Y" "$STATE_FILE")
 [ "$mtime_before" -eq "$mtime_after" ] && pass "Scenario 5: state file was not modified when 0 rows processed" || fail "Scenario 5: state file was modified on empty run"
 
+# -------------------------------------------------------------
+# Scenario 6: DATE cursor column -> ISO date, replayed by DuckDB
+# -------------------------------------------------------------
+echo "--- Scenario 6: DATE cursor column ---"
+
+DUCK_DB="$ARTIFACTS_DIR/cursor_date.duckdb"
+DATE_STATE="$ARTIFACTS_DIR/cursor_date.sync"
+DATE_CSV="$ARTIFACTS_DIR/cursor_date.csv"
+rm -f "$DUCK_DB" "$DATE_STATE" "$DATE_CSV"
+
+"$DTPIPE" \
+  -i "duck:$DUCK_DB" \
+  --query "SELECT * FROM (VALUES (DATE '2024-01-02'), (DATE '2024-01-03')) t(n) WHERE n > '\${{cursor://$DATE_STATE|1900-01-01}}'" \
+  -o "csv:$DATE_CSV" \
+  --cursor n \
+  --state "$DATE_STATE" \
+  --no-stats
+
+STATE_VAL=$(grep -o '"value": "[^"]*"' "$DATE_STATE" | head -n 1 | cut -d'"' -f4)
+[ "$STATE_VAL" == "2024-01-03" ] && pass "Scenario 6: state file has the ISO date" || fail "Scenario 6: expected 2024-01-03, got $STATE_VAL"
+
+"$DTPIPE" \
+  -i "duck:$DUCK_DB" \
+  --query "SELECT * FROM (VALUES (DATE '2024-01-02'), (DATE '2024-01-03'), (DATE '2024-02-15')) t(n) WHERE n > '\${{cursor://$DATE_STATE}}'" \
+  -o "csv:$DATE_CSV" \
+  --cursor n \
+  --state "$DATE_STATE" \
+  --no-stats \
+  || fail "Scenario 6: second run failed"
+
+DATE_ROWS=$(($(wc -l < "$DATE_CSV") - 1))
+[ "$DATE_ROWS" -eq 1 ] && pass "Scenario 6: second run reads only the new row" || fail "Scenario 6: expected 1 row, got $DATE_ROWS"
+
+rm -f "$DUCK_DB" "$DATE_STATE" "$DATE_CSV"
+
 # Cleanup
 rm -f "$SRC_DB" "$TGT_DB" "$STATE_FILE" "$ARTIFACTS_DIR/error.log"
 

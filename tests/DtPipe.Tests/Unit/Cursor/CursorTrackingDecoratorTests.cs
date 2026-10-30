@@ -158,6 +158,30 @@ public class CursorTrackingDecoratorTests
         Assert.Equal(kept, decorator.TrackedMaxValue!.Value);
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("en-US")]
+    [InlineData("fr-FR")]
+    public async Task TrackedMaxValue_RecordsADateAsIsoDate_WhateverTheCulture(string culture)
+    {
+        var decorator = new CursorTrackingRowDecorator(new FakeRowDataWriter(), "n");
+        await decorator.InitializeAsync([new PipeColumnInfo("n", typeof(DateOnly), false)]);
+        await decorator.WriteBatchAsync([[new DateOnly(2024, 1, 2)], [new DateOnly(2023, 12, 31)]]);
+
+        var saved = System.Globalization.CultureInfo.CurrentCulture;
+        System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.GetCultureInfo(culture);
+        try
+        {
+            var max = decorator.TrackedMaxValue!;
+            Assert.Equal("2024-01-02", max.Value);
+            Assert.Equal(CursorType.DateTime, max.Type);
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentCulture = saved;
+        }
+    }
+
     [Fact]
     public async Task WriteBatchAsync_TracksMaxInt()
     {
