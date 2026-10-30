@@ -53,7 +53,10 @@ dtpipe -i orders.parquet \
 | `--auto-migrate` | `ALTER TABLE ADD COLUMN` for columns the target does not have yet |
 
 Rows are loaded with `SqlBulkCopy`, under a table lock and its own transaction — the same path a
-.NET application would use for a bulk load.
+.NET application would use for a bulk load. The load checks the target's `CHECK` and `FOREIGN KEY`
+constraints: a row one of them refuses fails the run with exit `1`, the error names the constraint,
+and the constraint stays trusted. What the earlier batches leave is in
+[Write strategies](../guides/write-strategies.md).
 
 Identifiers are stored as given: `--table StockMoves` creates `StockMoves`, addressable unquoted,
 because SQL Server compares case-insensitively. See
