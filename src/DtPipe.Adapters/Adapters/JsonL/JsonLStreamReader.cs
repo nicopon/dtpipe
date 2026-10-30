@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
@@ -39,7 +40,8 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
     private bool _isResetSupported;
     // Records consumed during schema inference are buffered here and replayed during data extraction.
     // This enables single-pass processing even for large files where Reset() would be expensive.
-    private readonly List<object> _inferenceBuffer = new();
+    // Each entry keeps where its record stood (see _position), so a replayed record is named as a fresh read names it.
+    private readonly List<(object Raw, long Position)> _inferenceBuffer = new();
 
     // --path only: held across the inference pass and the real pass instead of re-navigating from a
     // cold reader each time, which would resume wherever the first pass left the stream (end of file
@@ -59,10 +61,12 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
     private bool _shapeIsDeclared;
     private HashSet<string>? _textColumns;
 
-    // --column-types only: the columns whose values are read into their declared type here, so the
-    // Arrow serializer and a row consumer both receive that type, and a value it does not hold stops
-    // the run at its cell. Set before the first record is read, so no sampled record is ever replayed.
+    // The columns whose values are read into their type here, so the Arrow serializer and a row consumer
+    // both receive that type, and a value it does not hold stops the run at its cell. The type is the
+    // one --column-types declares or, without it, the one the sample gave (_typesInferred); a replayed
+    // sample record is read through the same readers as a fresh one.
     private Dictionary<string, TypedColumn>? _typedColumns;
+    private bool _typesInferred;
     private readonly record struct TypedColumn(string Name, Type Type, Func<JsonElement, object?> Read);
 
     // Where the record being read stands: its line in the file (blank lines counted), or its rank in
@@ -199,12 +203,15 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
         var columns = new List<PipeColumnInfo>();
         var fields = new List<Field>();
         var autoApplied = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var typed = new Dictionary<string, TypedColumn>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var kvp in merged)
         {
             var (type, arrowType) = InferTypes(kvp.Key, kvp.Value);
             columns.Add(new PipeColumnInfo(kvp.Key, type, true));
             fields.Add(new Field(kvp.Key, arrowType, true));
+            if (JsonLTypedValue.BuildReader(type) is { } read)
+                typed[kvp.Key] = new TypedColumn(kvp.Key, type, read);
 
             var hint = DtPipe.Core.Helpers.TypeHelper.HintFor(type);
             if (hint != null) autoApplied[kvp.Key] = hint;
@@ -214,6 +221,8 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
         Columns = columns;
         Schema = new Schema(fields, null);
         UpdateTextColumns();
+        _typedColumns = typed.Count > 0 ? typed : null;
+        _typesInferred = true;
         _logger.LogInformation("JsonLStreamReader: Inferred schema with {Count} columns. Path: {Path}", columns.Count, _options.Path ?? "(root)");
     }
 
@@ -331,13 +340,16 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
 
         bool isHierarchical = !string.IsNullOrEmpty(_options.Path);
 
-        // 1. DRAIN the buffer first (if any)
+        // 1. DRAIN the buffer first (if any), each record standing where it stood when it was read
+        var streamPosition = _position;
         while (_bufferPos < _inferenceBuffer.Count)
         {
             if (ct.IsCancellationRequested) yield break;
-            var raw = _inferenceBuffer[_bufferPos++];
+            var (raw, position) = _inferenceBuffer[_bufferPos++];
+            _position = position;
             yield return isHierarchical ? ToRecord((JsonElement)raw) : ParseLineToDictionary((string)raw, _typedColumns);
         }
+        _position = streamPosition;
 
         // 2. Read new records from the stream
         if (!isHierarchical)
@@ -350,7 +362,7 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
                 _position++;
                 if (string.IsNullOrWhiteSpace(line)) continue;
 
-                if (_isBufferingActive) _inferenceBuffer.Add(line);
+                if (_isBufferingActive) _inferenceBuffer.Add((line, _position));
                 _bufferPos++;
                 yield return ParseLineToDictionary(line, _typedColumns);
             }
@@ -369,9 +381,9 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
             {
                 var element = _pathElementEnumerator.Current;
                 // Already a standalone clone (JsonStreamingPathReader, or Clone() below), safe to buffer as is.
-                if (_isBufferingActive) _inferenceBuffer.Add(element);
-                _bufferPos++;
                 _position++;
+                if (_isBufferingActive) _inferenceBuffer.Add((element, _position));
+                _bufferPos++;
                 yield return ToRecord(element);
             }
         }
@@ -592,9 +604,24 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
     {
         var read = column.Read(value);
         if (ReferenceEquals(read, TypedTextCell.Unreadable))
-            TypedTextCell.Refuse(string.IsNullOrEmpty(_options.Path) ? $"JSONL line {_position}" : $"JSONL record {_position}",
-                column.Name, column.Type, sampledRows: null);
+            Refuse(column);
         return read;
+    }
+
+    [DoesNotReturn]
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void Refuse(TypedColumn column)
+    {
+        var where = string.IsNullOrEmpty(_options.Path) ? $"JSONL line {_position}" : $"JSONL record {_position}";
+        if (!_typesInferred)
+            TypedTextCell.Refuse(where, column.Name, column.Type, sampledRows: null);
+
+        // The value is not quoted: a refused cell can hold anything the source holds.
+        var hint = DtPipe.Core.Helpers.TypeHelper.HintFor(column.Type) ?? column.Type.Name;
+        throw new InvalidOperationException(
+            $"{where}: column '{column.Name}' was inferred as {hint} from the first {_options.MaxSample} record(s), " +
+            $"and its value does not read as {hint}. Declare the column's type with '--column-types' " +
+            "('string' keeps the value as text), or raise '--max-sample' so the sample reaches values of the other kind.");
     }
 
     private object? ToValue(JsonElement element, bool isTextColumn = false)
