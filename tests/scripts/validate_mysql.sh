@@ -280,5 +280,40 @@ done
 "${MY_EXEC[@]}" -e "DROP TABLE IF EXISTS mysql_e2e_date;" >/dev/null 2>&1
 pass "a date and a midnight timestamp are written exactly; a time of day exits 1 with the table unchanged"
 
+# ------------------------------------------------------------------------------
+# 11. A date into a DATE column passes the schema check: the target and the mysql:
+#     reader both read DATE as a date. Under --strict-schema it is written on both
+#     paths, a DATE read by mysql: included; without it, no incompatibility is reported.
+# ------------------------------------------------------------------------------
+echo -e "\n--- Test 11: a date into a DATE column passes the schema check ---"
+"${MY_EXEC[@]}" -e "DROP TABLE IF EXISTS mysql_e2e_date_src;
+                    CREATE TABLE mysql_e2e_date_src (id INT, n DATE);
+                    INSERT INTO mysql_e2e_date_src VALUES (1, '2024-01-02');" >/dev/null 2>&1
+for cell in "duck|Standard|--strict-schema" "duck|Bulk|--strict-schema" "duck|Standard|" \
+            "mysql|Standard|--strict-schema" "mysql|Bulk|--strict-schema"; do
+    IFS='|' read -r SOURCE MODE SCHEMA <<< "$cell"
+    if [ "$SOURCE" = duck ]; then
+        INPUT=(-i "duck::memory:" --query "SELECT 1::INT AS id, DATE '2024-01-02' AS n")
+    else
+        INPUT=(-i "$MY_CONN" --query "SELECT id, n FROM mysql_e2e_date_src")
+    fi
+    "${MY_EXEC[@]}" -e "DROP TABLE IF EXISTS mysql_e2e_date;
+                        CREATE TABLE mysql_e2e_date (id INT, n DATE);
+                        INSERT INTO mysql_e2e_date VALUES (0, NULL);" >/dev/null 2>&1
+    set +e
+    "$DTPIPE" "${INPUT[@]}" -o "$MY_CONN" --table mysql_e2e_date --strategy Append \
+        --insert-mode "$MODE" $SCHEMA --no-stats >"$TMP_DIR/date_schema.out" 2>&1
+    RC=$?
+    set -e
+    GOT=$(mysql_scalar "SELECT GROUP_CONCAT(CONCAT(id,'=',IFNULL(n,'NULL')) ORDER BY id) FROM mysql_e2e_date")
+    LABEL="$SOURCE DATE -> DATE, $MODE ${SCHEMA:-discard}"
+    [ "$RC" = "0" ] || fail "$LABEL: exit $RC, expected 0: $(grep -m1 'Error:' "$TMP_DIR/date_schema.out")"
+    [ "$GOT" = "0=NULL,1=2024-01-02" ] || fail "$LABEL: table holds '$GOT', expected '0=NULL,1=2024-01-02'"
+    ! grep -q "Error:" "$TMP_DIR/date_schema.out" || fail "$LABEL: $(grep -m1 'Error:' "$TMP_DIR/date_schema.out")"
+    echo "    $LABEL: exit 0, table '$GOT'"
+done
+"${MY_EXEC[@]}" -e "DROP TABLE IF EXISTS mysql_e2e_date; DROP TABLE IF EXISTS mysql_e2e_date_src;" >/dev/null 2>&1
+pass "a date is written exactly under --strict-schema on both paths, and reported compatible"
+
 echo ""
 echo "All native MySQL provider checks passed."

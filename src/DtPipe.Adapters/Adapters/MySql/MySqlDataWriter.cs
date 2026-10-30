@@ -431,10 +431,11 @@ public sealed partial class MySqlDataWriter : BaseSqlDataWriter, IColumnarDataWr
     }
 
     /// <summary>
-    /// The buffer column type and the cell converter of one written column. A DATE column holds the
-    /// type its source sends when that type is <see cref="DateOnly"/>, which MySqlConnector binds as a
-    /// date; the column's inferred type (<see cref="DateTime"/>) would refuse it, and no conversion
-    /// between the two is made here. Any other column holds its inferred type.
+    /// The buffer column type and the cell converter of one written column: the column's inferred
+    /// type, which is <see cref="DateOnly"/> for a DATE column. A DATE column whose source sends any
+    /// other type (a timestamp, text) holds <see cref="DateTime"/>, which MySqlConnector binds as a
+    /// date and which the converter reads text into; no conversion to <see cref="DateOnly"/> is made
+    /// here.
     /// <para>
     /// A DATE column that holds <see cref="DateTime"/> refuses a value whose time of day is not
     /// midnight: an INSERT drops that time without an error, so the row would be written wrong with
@@ -448,8 +449,8 @@ public sealed partial class MySqlDataWriter : BaseSqlDataWriter, IColumnarDataWr
     {
         var bufferType = Nullable.GetUnderlyingType(targetType) ?? targetType;
         var isDate = IsDateColumn(targetNativeType);
-        if (isDate && (Nullable.GetUnderlyingType(sourceType) ?? sourceType) == typeof(DateOnly))
-            bufferType = typeof(DateOnly);
+        if (isDate && (Nullable.GetUnderlyingType(sourceType) ?? sourceType) != typeof(DateOnly))
+            bufferType = typeof(DateTime);
 
         var convert = CompositeCellJson.Wrap(ColumnConverterFactory.Build(sourceType, bufferType, sourceColumn));
         if (!isDate || bufferType != typeof(DateTime)) return (bufferType, convert);

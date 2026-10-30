@@ -85,7 +85,7 @@ public class MySqlTypeConverter : ITypeMapper
             "double" or "double precision" or "real" => typeof(double),
             "decimal" or "numeric" => typeof(decimal),
             "datetime" or "timestamp" => typeof(DateTime),
-            "date" => typeof(DateTime),
+            "date" => typeof(DateOnly),
             "time" => typeof(TimeSpan),
             "year" => typeof(short),
             "binary" or "varbinary" or "tinyblob" or "blob" or "mediumblob" or "longblob" => typeof(byte[]),

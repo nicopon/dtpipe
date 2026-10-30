@@ -90,9 +90,19 @@ public class MySqlProviderTests
     [InlineData("longtext", typeof(string))]
     [InlineData("decimal(38,9)", typeof(decimal))]
     [InlineData("datetime(6)", typeof(DateTime))]
+    [InlineData("date", typeof(DateOnly))]
     [InlineData("longblob", typeof(byte[]))]
     public void MapFromProviderType_Reads_Column_Type_Not_Data_Type(string columnType, Type expected)
         => Assert.Equal(expected, MySqlTypeConverter.Instance.MapFromProviderType(columnType));
+
+    // MySqlConnector reports a DATE column as DateTime; the reader announces the date it holds, so
+    // a DATE copied to a DATE column compares equal to the target's type.
+    [Theory]
+    [InlineData(typeof(DateTime), MySqlConnector.MySqlDbType.Date, typeof(DateOnly))]
+    [InlineData(typeof(DateTime), MySqlConnector.MySqlDbType.DateTime, typeof(DateTime))]
+    [InlineData(typeof(DateTime), MySqlConnector.MySqlDbType.Timestamp, typeof(DateTime))]
+    public void The_Reader_Announces_A_Date_Column_As_A_Date(Type driverType, MySqlConnector.MySqlDbType providerType, Type expected)
+        => Assert.Equal(expected, MySqlReader.AnnouncedClrType(driverType, providerType));
 
     [Fact]
     public void BuildNativeType_Passes_Through_A_Rendered_Column_Type()
