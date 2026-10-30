@@ -13,11 +13,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="TransportR" Version="0.6.0" />
-    <PackageReference Include="TransportR.Client.SignalR" Version="0.6.0" />
-    <PackageReference Include="TransportR.Serialization.MessagePack" Version="0.6.0" />
-    <!-- TransportR.Client.SignalR brings this transitively; pinned above the versions with a known advisory (NuGet audit is an error here). -->
-    <PackageReference Include="Microsoft.AspNetCore.SignalR.Common" Version="10.0.13" />
+    <PackageReference Include="TransportR" Version="0.7.0" />
+    <PackageReference Include="TransportR.Client" Version="0.7.0" />
+    <PackageReference Include="TransportR.Serialization.MessagePack" Version="0.7.0" />
   </ItemGroup>
 
 </Project>
