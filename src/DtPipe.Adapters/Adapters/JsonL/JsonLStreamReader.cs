@@ -4,6 +4,7 @@ using System.Text.Json;
 using Apache.Arrow;
 using Apache.Arrow.Types;
 using Apache.Arrow.Serialization.Mapping;
+using DtPipe.Adapters.Common;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Core.Models;
@@ -57,6 +58,16 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
     private JsonLRecordShape? _shape;
     private bool _shapeIsDeclared;
     private HashSet<string>? _textColumns;
+
+    // --column-types only: the columns whose values are read into their declared type here, so the
+    // Arrow serializer and a row consumer both receive that type, and a value it does not hold stops
+    // the run at its cell. Set before the first record is read, so no sampled record is ever replayed.
+    private Dictionary<string, TypedColumn>? _typedColumns;
+    private readonly record struct TypedColumn(string Name, Type Type, Func<JsonElement, object?> Read);
+
+    // Where the record being read stands: its line in the file (blank lines counted), or its rank in
+    // the array under --path.
+    private long _position;
 
     private void UpdateTextColumns()
     {
@@ -211,12 +222,15 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
         var overrides = ParseColumnTypesOption(_options.ColumnTypes);
         var columns = new List<PipeColumnInfo>();
         var fields = new List<Field>();
+        var typed = new Dictionary<string, TypedColumn>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var kvp in overrides)
         {
             var clrType = DtPipe.Core.Helpers.TypeHelper.RequireTypeHint("--column-types", kvp.Key, kvp.Value);
             var arrowResult = ArrowTypeMapper.GetLogicalType(clrType);
             columns.Add(new PipeColumnInfo(kvp.Key, clrType, true));
+            if (JsonLTypedValue.BuildReader(clrType) is { } read)
+                typed[kvp.Key] = new TypedColumn(kvp.Key, clrType, read);
             if (arrowResult.Metadata != null)
                 fields.Add(new Field(kvp.Key, arrowResult.ArrowType, true, arrowResult.Metadata));
             else
@@ -226,6 +240,7 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
         Columns = columns;
         Schema = new Schema(fields, null);
         UpdateTextColumns();
+        _typedColumns = typed.Count > 0 ? typed : null;
         _logger.LogInformation("JsonLStreamReader: Schema built from ColumnTypes with {Count} columns. Path: {Path}", columns.Count, _options.Path ?? "(root)");
     }
 
@@ -321,7 +336,7 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
         {
             if (ct.IsCancellationRequested) yield break;
             var raw = _inferenceBuffer[_bufferPos++];
-            yield return isHierarchical ? ToRecord((JsonElement)raw) : ParseLineToDictionary((string)raw);
+            yield return isHierarchical ? ToRecord((JsonElement)raw) : ParseLineToDictionary((string)raw, _typedColumns);
         }
 
         // 2. Read new records from the stream
@@ -332,11 +347,12 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
             {
                 var line = await _streamReader.ReadLineAsync(ct);
                 if (line == null) break;
+                _position++;
                 if (string.IsNullOrWhiteSpace(line)) continue;
 
                 if (_isBufferingActive) _inferenceBuffer.Add(line);
                 _bufferPos++;
-                yield return ParseLineToDictionary(line);
+                yield return ParseLineToDictionary(line, _typedColumns);
             }
         }
         else
@@ -355,6 +371,7 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
                 // Already a standalone clone (JsonStreamingPathReader, or Clone() below), safe to buffer as is.
                 if (_isBufferingActive) _inferenceBuffer.Add(element);
                 _bufferPos++;
+                _position++;
                 yield return ToRecord(element);
             }
         }
@@ -529,7 +546,9 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
         return current;
     }
 
-    private Dictionary<string, object?> ParseLineToDictionary(string line)
+    // typedColumns is null outside the read itself: a sample taken to suggest types reads values as
+    // the JSON gives them.
+    private Dictionary<string, object?> ParseLineToDictionary(string line, Dictionary<string, TypedColumn>? typedColumns = null)
     {
         using var doc = JsonDocument.Parse(line);
         var root = doc.RootElement;
@@ -537,6 +556,11 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
 
         foreach (var prop in root.EnumerateObject())
         {
+            if (typedColumns != null && typedColumns.TryGetValue(prop.Name, out var typed))
+            {
+                dict[prop.Name] = ReadTyped(prop.Value, typed);
+                continue;
+            }
             var isText = _textColumns != null && _textColumns.Contains(prop.Name);
             dict[prop.Name] = ToValue(prop.Value, isText);
         }
@@ -551,12 +575,26 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
             var dict = new Dictionary<string, object?>();
             foreach (var prop in element.EnumerateObject())
             {
+                if (_typedColumns != null && _typedColumns.TryGetValue(prop.Name, out var typed))
+                {
+                    dict[prop.Name] = ReadTyped(prop.Value, typed);
+                    continue;
+                }
                 var isText = _textColumns != null && _textColumns.Contains(prop.Name);
                 dict[prop.Name] = ToValue(prop.Value, isText);
             }
             return dict;
         }
         return ToValue(element, false);
+    }
+
+    private object? ReadTyped(JsonElement value, TypedColumn column)
+    {
+        var read = column.Read(value);
+        if (ReferenceEquals(read, TypedTextCell.Unreadable))
+            TypedTextCell.Refuse(string.IsNullOrEmpty(_options.Path) ? $"JSONL line {_position}" : $"JSONL record {_position}",
+                column.Name, column.Type, sampledRows: null);
+        return read;
     }
 
     private object? ToValue(JsonElement element, bool isTextColumn = false)
