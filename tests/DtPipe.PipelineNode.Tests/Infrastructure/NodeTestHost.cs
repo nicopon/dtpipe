@@ -7,7 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using TransportR.Abstractions;
-using TransportR.Hub.SignalR;
+using TransportR.Hub;
 using TransportR.Interfaces;
 
 namespace DtPipe.PipelineNode.Tests.Infrastructure;
@@ -47,7 +47,7 @@ public sealed class NodeTestHost : IAsyncDisposable
                         // requires one: without it the hub accepts a transfer and then returns 500 on
                         // every stream request instead of forwarding bytes.
                         services.AddSingleton<IHubProgressMonitor, SilentHubProgressMonitor>();
-                        var hub = services.AddDataHub().UseHub<TestHub>();
+                        var hub = services.AddDataHub();
                         if (jwt is null)
                         {
                             hub.UseDevMode(options =>

@@ -1,10 +1,10 @@
 using System.Threading.Channels;
 using DtPipe.Coordinator.Contracts;
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using TransportR.Abstractions;
 
 namespace DtPipe.PipelineNode.Hosting;
 
@@ -295,7 +295,7 @@ internal sealed class NodeAgent : BackgroundService
                         {
                             await node.RefreshRegistrationAsync(ct);
                         }
-                        catch (HubException ex)
+                        catch (HubRequestFailedException ex)
                         {
                             await DropDataPlaneAsync(node, ex, ct);
                             await AnnounceAsync();
@@ -341,7 +341,7 @@ internal sealed class NodeAgent : BackgroundService
     /// groups it had, and has the hub take the groups of the moment when asked. That is done at once, runs in flight or not: the
     /// client keeps its connection, and the hub ends the transfers the new groups refuse. A client whose connection is not up
     /// registers by itself when it is back, with the groups of that moment, so that refusal is not retried. A hub that refuses
-    /// the refresh (<see cref="HubException"/>: the identity holds no group, so nothing is written and the old groups would
+    /// the refresh (<see cref="HubRequestFailedException"/>: the identity holds no group, so nothing is written and the old groups would
     /// stay) has the client dropped. Any other failure is logged and does not end the loop that connects the channel again.
     /// </summary>
     private async Task RefreshDataPlaneAsync(CancellationToken ct)
@@ -355,7 +355,7 @@ internal sealed class NodeAgent : BackgroundService
         {
             _logger.LogDebug(ex, "The data plane's connection is not up: it registers by itself when it is back");
         }
-        catch (HubException ex)
+        catch (HubRequestFailedException ex)
         {
             await DropDataPlaneAsync(node, ex, ct);
         }
@@ -371,7 +371,7 @@ internal sealed class NodeAgent : BackgroundService
     /// registers another. Only the client that was refused is dropped: the loop that connects the channel and the watch can both
     /// meet the refusal, and the second finds it gone.
     /// </summary>
-    private async Task DropDataPlaneAsync(PipelineNode node, HubException reason, CancellationToken ct)
+    private async Task DropDataPlaneAsync(PipelineNode node, HubRequestFailedException reason, CancellationToken ct)
     {
         await _connecting.WaitAsync(ct);
         try

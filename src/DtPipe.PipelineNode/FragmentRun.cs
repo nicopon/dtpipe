@@ -2,8 +2,8 @@ using System.Diagnostics;
 using System.IO.Pipes;
 using Microsoft.Extensions.Logging;
 using TransportR.Abstractions;
-using TransportR.Client.SignalR;
-using TransportR.Client.SignalR.Services;
+using TransportR.Client;
+using TransportR.Client.Services;
 
 namespace DtPipe.PipelineNode;
 

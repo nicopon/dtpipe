@@ -1,10 +1,9 @@
 using System.Collections.Concurrent;
-using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using TransportR.Abstractions;
-using TransportR.Client.SignalR;
-using TransportR.Client.SignalR.Services;
+using TransportR.Client;
+using TransportR.Client.Services;
 using TransportR.Serialization.MessagePack;
 
 namespace DtPipe.PipelineNode;
@@ -65,13 +64,13 @@ public sealed class PipelineNode : IAsyncDisposable
 {
     private readonly NodeClientOptions _options;
     private readonly ILogger _logger;
-    private readonly SignalRDataClient<byte[]> _client;
+    private readonly TransportRClient<byte[]> _client;
 
     private readonly ConcurrentDictionary<string, TaskCompletionSource<object>> _handles = new();
 
     public Guid ClientId => _client.ClientId;
 
-    private PipelineNode(NodeClientOptions options, ILogger logger, SignalRDataClient<byte[]> client)
+    private PipelineNode(NodeClientOptions options, ILogger logger, TransportRClient<byte[]> client)
     {
         _options = options;
         _logger = logger;
@@ -138,7 +137,7 @@ public sealed class PipelineNode : IAsyncDisposable
         }
     }
 
-    private static SignalRDataClient<byte[]> BuildClient(NodeClientOptions options, ILoggerFactory loggerFactory)
+    private static TransportRClient<byte[]> BuildClient(NodeClientOptions options, ILoggerFactory loggerFactory)
     {
         var builder = new TransportRClientBuilder<byte[]>()
             .WithUrl(options.HubUrl)
@@ -248,9 +247,7 @@ public sealed class PipelineNode : IAsyncDisposable
     /// </summary>
     public async Task<bool?> IsRegisteredAsync(CancellationToken ct = default)
     {
-        var connection = _client.ControlConnection;
-        if (connection.State != HubConnectionState.Connected) return null;
-        try { return await connection.InvokeAsync<bool>("Heartbeat", ct); }
+        try { return await _client.IsRegisteredAsync(ct); }
         catch (Exception) when (!ct.IsCancellationRequested) { return null; }
     }
 
@@ -259,7 +256,7 @@ public sealed class PipelineNode : IAsyncDisposable
     /// client keeps its connection, and the hub judges each transfer again against the new groups, keeps the ones they
     /// allow and ends the others. It returns once the hub has written both. It may be made at any time, runs in flight or
     /// not. Refused with an <see cref="InvalidOperationException"/> while the client's connection is not up (a connection
-    /// that comes back registers by itself, with the groups of that moment), and with a <c>HubException</c> when the
+    /// that comes back registers by itself, with the groups of that moment), and with a <c>HubRequestFailedException</c> when the
     /// identity holds no group: nothing is written then, and the hub keeps the groups it held until the client's next
     /// token renewal withdraws them.
     /// </summary>

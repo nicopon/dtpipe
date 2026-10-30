@@ -8,10 +8,10 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using TransportR.Client.SignalR;
-using TransportR.Client.SignalR.Services;
+using TransportR.Client;
+using TransportR.Client.Services;
 using TransportR.FlowControl;
-using TransportR.Hub.SignalR;
+using TransportR.Hub;
 using TransportR.Serialization.MessagePack;
 
 namespace DtPipe.Coordinator.Tests.Infrastructure;
@@ -174,7 +174,7 @@ public sealed class CoordinatorTestHost : IAsyncDisposable
     /// A client standing in for a pipeline node - the only kind of peer a real coordinator ever sees.
     /// <paramref name="token"/> is the bearer token a production-mode host requires.
     /// </summary>
-    public SignalRDataClient<string> CreateClient(string? token = null)
+    public TransportRClient<string> CreateClient(string? token = null)
     {
         var builder = new TransportRClientBuilder<string>()
             .WithUrl(Url)

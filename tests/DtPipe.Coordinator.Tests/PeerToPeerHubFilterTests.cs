@@ -1,5 +1,3 @@
-using Microsoft.AspNetCore.SignalR;
-using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.DependencyInjection;
 using DtPipe.Coordinator.Tests.Infrastructure;
 using TransportR.Abstractions;
@@ -10,27 +8,26 @@ using Xunit;
 namespace DtPipe.Coordinator.Tests;
 
 /// <summary>
-/// A peer calling <c>GetReceivers</c> or <c>InitTransfer</c> directly is refused; the coordinator's
-/// own path to open a transfer, <see cref="ITransferInitiator"/>, is untouched by the filter because
-/// it never invokes a hub method.
+/// A peer asking the hub for receivers or to open a transfer is refused, since <c>AddCoordinatorHub</c> sets
+/// <c>AccessOptions.ClientsMayOpenTransfers</c> to <c>false</c>; the coordinator's own path to open a transfer,
+/// <see cref="ITransferInitiator"/>, is not affected by it.
 /// </summary>
 public class PeerToPeerHubFilterTests
 {
     [Fact]
-    public async Task GetReceivers_CalledByAPeer_IsRefused()
+    public async Task GetReceivers_AskedByAPeer_IsRefused()
     {
         await using var host = await CoordinatorTestHost.StartAsync(_ => { });
 
         await using var client = host.CreateClient();
         await client.ConnectAsync();
 
-        var ex = await Assert.ThrowsAsync<HubException>(
-            () => client.ControlConnection.InvokeAsync<List<TransportR.Models.ClientInfo>>("GetReceivers"));
-        Assert.Contains("reserved to the coordinator", ex.Message);
+        var ex = await Assert.ThrowsAsync<HubRequestFailedException>(() => client.GetReceiversAsync());
+        Assert.Contains("Clients may not open transfers on this hub.", ex.Message);
     }
 
     [Fact]
-    public async Task InitTransfer_CalledByAPeer_IsRefused()
+    public async Task InitTransfer_AskedByAPeer_IsRefused()
     {
         await using var host = await CoordinatorTestHost.StartAsync(_ => { });
 
@@ -39,13 +36,13 @@ public class PeerToPeerHubFilterTests
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
 
-        var ex = await Assert.ThrowsAsync<HubException>(
-            () => sender.ControlConnection.InvokeAsync<string>("InitTransfer", receiver.ClientId, 10, 5_000));
-        Assert.Contains("reserved to the coordinator", ex.Message);
+        var ex = await Assert.ThrowsAsync<HubRequestFailedException>(
+            () => sender.InitTransferAsync(receiver.ClientId, batchSize: 10));
+        Assert.Contains("Clients may not open transfers on this hub.", ex.Message);
     }
 
     [Fact]
-    public async Task TransferOpenedByTheCoordinator_PassesDespiteTheFilter()
+    public async Task TransferOpenedByTheCoordinator_PassesDespiteTheRefusalOfPeers()
     {
         await using var host = await CoordinatorTestHost.StartAsync(
             o => o.Groups["test"] = new GroupAccess { CanSendTo = ["test"] });

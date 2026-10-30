@@ -128,7 +128,7 @@ none. One node per process, which is one replica of its node's identity; a secon
 - **A host whose identity the hub refuses to renew drops its data plane client.** An identity that holds no group
   (disabled, or not known) cannot register, and a refused refresh writes nothing: the hub would keep the client's
   registration, with the groups it had, until the client's next token renewal withdraws them or its token expires. So
-  when the refresh is refused with a `HubException`, `NodeAgent` closes the client and announces without a client id,
+  when the refresh is refused with a `HubRequestFailedException`, `NodeAgent` closes the client and announces without a client id,
   and a new client, under a new id, registers as soon as the identity can (`EnsureNodeAsync`, from the loop that
   connects the channel or from `WatchDataPlaneAsync`). Only the client that was refused is dropped, under the lock that
   guards the client's creation. The runs in flight keep their `ReplicaRuns`, which refuses a `Launch` while it holds

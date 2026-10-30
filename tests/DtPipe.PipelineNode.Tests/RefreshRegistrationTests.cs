@@ -1,7 +1,7 @@
 using DtPipe.Coordinator.Tests.Infrastructure;
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using TransportR.Abstractions;
 using TransportR.FlowControl;
 using TransportR.Identity;
 using TransportR.Interfaces;
@@ -87,7 +87,7 @@ public class RefreshRegistrationTests
         var held = await RegistrationOfAsync(host, node);
 
         rights.BySubject["node-x"] = [];
-        await Assert.ThrowsAsync<HubException>(() => node.RefreshRegistrationAsync());
+        await Assert.ThrowsAsync<HubRequestFailedException>(() => node.RefreshRegistrationAsync());
 
         var after = await RegistrationOfAsync(host, node);
         Assert.Equal("before", GroupsOf(after));
@@ -135,7 +135,7 @@ public class RefreshRegistrationTests
         await using var kept = await ConnectAsync(host, jwt, "kept");
         await using var dropped = await ConnectAsync(host, jwt, "dropped");
         var initiator = host.Host.Services.GetRequiredService<ITransferInitiator>();
-        var transfers = host.Host.Services.GetRequiredService<ITransferManager>();
+        var store = host.Host.Services.GetRequiredService<IStateStore>();
         var allowedTransfer = await initiator.InitTransferAsync(sender.ClientId, kept.ClientId, batchSize: 8, timeoutMs: 60_000);
         var refusedTransfer = await initiator.InitTransferAsync(sender.ClientId, dropped.ClientId, batchSize: 8, timeoutMs: 60_000);
         var held = await RegistrationOfAsync(host, sender);
@@ -146,8 +146,7 @@ public class RefreshRegistrationTests
         var after = await RegistrationOfAsync(host, sender);
         Assert.Equal("new", GroupsOf(after));
         Assert.Equal(held.ConnectionId, after.ConnectionId);
-        var open = transfers.GetAllParticipants();
-        Assert.DoesNotContain(refusedTransfer, open.Keys);
-        Assert.Contains(allowedTransfer, open.Keys);
+        Assert.Null(await store.GetSessionAsync(refusedTransfer));
+        Assert.NotNull(await store.GetSessionAsync(allowedTransfer));
     }
 }

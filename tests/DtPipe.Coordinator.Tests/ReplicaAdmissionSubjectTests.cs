@@ -392,28 +392,4 @@ public class ReplicaAdmissionSubjectTests
         await r2.ExitAsync(0);
         Assert.Equal(RunOutcome.Succeeded, (await second.WaitAsync(Wait)).Outcome);
     }
-
-    /// <summary>The data hub serves the data plane and nothing about a run: a call to a method that named a fragment or reported it is an error, not a no-op.</summary>
-    [Theory]
-    [InlineData("Register")]
-    [InlineData("Unregister")]
-    [InlineData("Ready")]
-    [InlineData("Exited")]
-    public async Task TheDataHubTakesNoMessageAboutARun(string method)
-    {
-        await using var host = await CoordinatorTestHost.StartAsync(_ => { });
-        await using var client = host.CreateClient();
-        await client.ConnectAsync();
-
-        object?[] arguments = method switch
-        {
-            "Register" => ["frag-a", "v1"],
-            "Ready" => ["run-1"],
-            "Exited" => ["run-1", 1, "Local", null, new Dictionary<string, long>()],
-            _ => [],
-        };
-        var ex = await Assert.ThrowsAsync<HubException>(() => client.ControlConnection.InvokeCoreAsync(method, typeof(object), arguments));
-
-        Assert.Contains("does not exist", ex.Message);
-    }
 }

@@ -15,13 +15,13 @@ bytes between nodes.
 
 - Keep every dtpipe concept (plan, fragment, edge, run, node) in this project. Change TransportR
   only for a missing transport function. `[unchecked]`
-- Put hosting policy in ASP.NET Core extension points on this side, not in TransportR:
-  `PeerToPeerHubFilter` is an `IHubFilter`.
-- TransportR is referenced as NuGet packages (`TransportR`, `TransportR.Hub.SignalR`). Bumping the
+- Put hosting policy in the hub's options on this side, not in TransportR's code:
+  `AccessOptions.ClientsMayOpenTransfers` is set to `false` by `AddCoordinatorHub`.
+- TransportR is referenced as NuGet packages (`TransportR`, `TransportR.Hub`). Bumping the
   pinned version is a port, not a copy: check each API change against this project and
   `DtPipe.PipelineNode` before moving it.
 - `DefaultFlowControlService`/`FlowControlOptions` (namespace `TransportR.FlowControl`) ship inside
-  the `TransportR.Hub.SignalR` package; there is no separate `TransportR.FlowControl` package.
+  the `TransportR.Hub` package; there is no separate `TransportR.FlowControl` package.
 - **The coordinator and every `DtPipe.PipelineNode` it drives run the same TransportR version; when they
   cannot move at once, the coordinator, which hosts the hub, moves first.** A node's refresh needs a hub of its
   own release: an older hub writes the connection's older expiry between the call's two steps, and its sweep can
@@ -40,8 +40,8 @@ bytes between nodes.
   hub**, and calls `AddCoordinatorHub`. The project references `Microsoft.AspNetCore.App` as a framework, so a
   package of it carries no executable. `[CI: validate_distributed_boundary.sh]`
 - `AddCoordinatorHub` registers the flow-control matrix, `IPlanRegistry`, `LoggingHubProgressMonitor`, the
-  peer-to-peer filter, `ReplicaRegistry`, `ReplicaAdmission`, `IRunOrchestrator` and `ReplicaProtocol`. It
-  returns TransportR's `DataHubBuilder` over its plain `CommandHub`, which carries the data plane and nothing
+  `AccessOptions` setting that refuses client-opened transfers, `ReplicaRegistry`, `ReplicaAdmission`, `IRunOrchestrator` and `ReplicaProtocol`. It
+  returns TransportR's `DataHubBuilder` over its own hub, which carries the data plane and nothing
   of dtpipe, and the caller finishes it (identity provider, then `Build()`). `AddNodeLink<THub>` names the hub
   of the node channel, which the orchestrator writes to through `INodeLink`.
 - **The node channel's hub calls `ReplicaProtocol`, one line a method, and extends nothing.** The library finds
@@ -49,12 +49,9 @@ bytes between nodes.
   host's, decided before it forwards. `[CI: ReplicaAdmissionSubjectTests, the server's NodeChannelHubTests]`
 - Register the progress monitor **before** `AddDataHub()`: TransportR adds a no-op default only when
   none is registered.
-- Register a hub filter with `AddSignalR(o => o.AddFilter<T>())`. SignalR silently ignores an
-  `IHubFilter` registered alone in DI.
-- **Peers never address each other.** `PeerToPeerHubFilter` refuses `GetReceivers` and
-  `InitTransfer`. Only the coordinator opens a transfer, through `ITransferInitiator`, which calls
-  the client directly and so is never seen by the filter.
-  `[CI: PeerToPeerHubFilterTests]`
+- **Peers never address each other.** With `AccessOptions.ClientsMayOpenTransfers` at `false`, the hub refuses a
+  client's `GetReceiversAsync` and `InitTransferAsync`. Only the coordinator opens a transfer, through
+  `ITransferInitiator`, which the option does not touch. `[CI: PeerToPeerHubFilterTests]`
 - **Check a plan before anything opens.** `PlanRegistry.Register` refuses a plan with any edge the
   flow-control matrix forbids, and names every forbidden edge. The same matrix governs runtime
   transfers. `[CI: PlanRegistryTests]`

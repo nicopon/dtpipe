@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using DtPipe.Coordinator;
 using DtPipe.Coordinator.Tests.Infrastructure;
@@ -27,7 +28,38 @@ public class RemoteFailureGraceTests
     private static Task<CoordinatorTestHost> StartHost(TimeSpan grace) =>
         CoordinatorTestHost.StartAsync(
             o => o.Groups["test"] = new GroupAccess { CanSendTo = ["test"] },
-            services => services.AddSingleton(new RunOrchestratorOptions { RemoteFailureGrace = grace }));
+            services =>
+            {
+                services.AddSingleton(new RunOrchestratorOptions { RemoteFailureGrace = grace });
+                RecordingInitiator.Decorate(services);
+            });
+
+    /// <summary>
+    /// The hub offers no public listing of its transfers, and the coordinator's own path to open one is
+    /// <see cref="ITransferInitiator"/>: wrapping it keeps the identifier of each transfer a run opens.
+    /// </summary>
+    private sealed class RecordingInitiator(ITransferInitiator inner) : ITransferInitiator
+    {
+        public ConcurrentQueue<string> Opened { get; } = new();
+
+        public async Task<string> InitTransferAsync(
+            Guid senderClientId, Guid receiverClientId, int batchSize, int timeoutMs, CancellationToken cancellationToken = default)
+        {
+            var transferId = await inner.InitTransferAsync(senderClientId, receiverClientId, batchSize, timeoutMs, cancellationToken);
+            Opened.Enqueue(transferId);
+            return transferId;
+        }
+
+        public static void Decorate(IServiceCollection services)
+        {
+            var original = services.Last(d => d.ServiceType == typeof(ITransferInitiator));
+            services.Remove(original);
+            services.AddSingleton(sp => new RecordingInitiator(
+                (ITransferInitiator)(original.ImplementationFactory?.Invoke(sp)
+                    ?? ActivatorUtilities.CreateInstance(sp, original.ImplementationType!))));
+            services.AddSingleton<ITransferInitiator>(sp => sp.GetRequiredService<RecordingInitiator>());
+        }
+    }
 
     private static RunSpec PairSpec(string runId, TestNode a, TestNode b) => new(
         runId, [a.Fragment, b.Fragment], [new RunEdge("A", "out", "B", "in")]);
@@ -44,12 +76,11 @@ public class RemoteFailureGraceTests
 
     private static async Task<string> WaitForTheTransfer(CoordinatorTestHost host)
     {
-        var transfers = host.Host.Services.GetRequiredService<ITransferManager>();
+        var opened = host.Host.Services.GetRequiredService<RecordingInitiator>().Opened;
         var deadline = DateTime.UtcNow + Bound;
         while (true)
         {
-            var open = transfers.GetAllTransfers().FirstOrDefault();
-            if (open is not null) return open.TransferId;
+            if (opened.TryPeek(out var transferId)) return transferId;
             if (DateTime.UtcNow > deadline) throw new TimeoutException("the run never opened its transfer");
             await Task.Delay(20);
         }

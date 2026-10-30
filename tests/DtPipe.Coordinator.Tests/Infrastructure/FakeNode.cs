@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using DtPipe.Coordinator.Contracts;
 using Microsoft.AspNetCore.SignalR.Client;
-using TransportR.Client.SignalR.Services;
+using TransportR.Client.Services;
 
 namespace DtPipe.Coordinator.Tests.Infrastructure;
 
@@ -42,7 +42,7 @@ public sealed class FakeNode : IAsyncDisposable
 {
     private readonly FakeNodeOptions _options;
 
-    private FakeNode(string name, HubConnection channel, SignalRDataClient<string>? dataPlane, FakeNodeOptions options)
+    private FakeNode(string name, HubConnection channel, TransportRClient<string>? dataPlane, FakeNodeOptions options)
     {
         (Name, Channel, DataPlane, _options) = (name, channel, dataPlane, options);
         InstanceId = options.InstanceId ?? Guid.NewGuid();
@@ -51,7 +51,7 @@ public sealed class FakeNode : IAsyncDisposable
     public string Name { get; }
     public Guid InstanceId { get; }
     public HubConnection Channel { get; }
-    public SignalRDataClient<string>? DataPlane { get; }
+    public TransportRClient<string>? DataPlane { get; }
     public TaskCompletionSource<LaunchRequest> Launched { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public TaskCompletionSource Cancelled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public ConcurrentQueue<LaunchRequest> Launches { get; } = new();
@@ -66,7 +66,7 @@ public sealed class FakeNode : IAsyncDisposable
     public static async Task<FakeNode> StartAsync(CoordinatorTestHost host, string name, FakeNodeOptions? options = null)
     {
         options ??= new FakeNodeOptions();
-        SignalRDataClient<string>? dataPlane = null;
+        TransportRClient<string>? dataPlane = null;
         if (options.ConnectDataPlane)
         {
             dataPlane = host.CreateClient(options.Token);

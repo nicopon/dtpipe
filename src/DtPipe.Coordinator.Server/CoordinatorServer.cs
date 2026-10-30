@@ -13,7 +13,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using TransportR.FlowControl;
-using TransportR.Hub.SignalR;
+using TransportR.Hub;
 using TransportR.Interfaces;
 
 namespace DtPipe.Coordinator.Server;

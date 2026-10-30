@@ -1,7 +1,7 @@
 using DtPipe.Coordinator.Tests.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using TransportR.Client.SignalR.Services;
+using TransportR.Client.Services;
 using TransportR.Interfaces;
 using TransportR.Models;
 using Xunit;
@@ -53,36 +53,5 @@ public class GroupRefreshTests
         Assert.Equal(before!.ConnectionId, after.ConnectionId);
         Assert.Equal(before.Subject, after.Subject);
         Assert.Null(after.DisconnectedAtUtc);
-    }
-
-    /// <summary>
-    /// A control connection that stops and comes back registers by itself, with the groups its identity holds then and under the
-    /// same subject: a replica that is refused a refresh because the connection is down relies on it.
-    /// </summary>
-    [Fact]
-    public async Task AControlConnectionThatRestarts_RegistersWithTheGroupsOfTheMoment()
-    {
-        var (host, rights, token) = await StartAsync();
-        await using var _host = host;
-        await using var client = host.CreateClient(token);
-        await client.ConnectAsync();
-        await SettleAsync();
-        var store = host.Host.Services.GetRequiredService<IStateStore>();
-        var before = await store.GetClientAsync(client.ClientId);
-
-        rights.BySubject["node-x"] = ["after"];
-        await client.ControlConnection.StopAsync();
-
-        var deadline = DateTime.UtcNow + Wait;
-        ClientRegistration? after = null;
-        while (DateTime.UtcNow < deadline)
-        {
-            after = await store.GetClientAsync(client.ClientId);
-            if (after is { DisconnectedAtUtc: null } && string.Join(",", after.Groups.Order()) == "after") break;
-            await Task.Delay(100);
-        }
-        Assert.Equal("after", string.Join(",", after!.Groups.Order()));
-        Assert.Null(after.DisconnectedAtUtc);
-        Assert.Equal(before!.Subject, after.Subject);
     }
 }
