@@ -15,7 +15,7 @@ const state = {
   deployState: "",
   run: null,
   history: [],
-  bytes: { total: 0, activeTransfers: 0 },
+  bytes: { total: 0 },
   logs: [],
 };
 
@@ -336,7 +336,7 @@ function renderStatus() {
   pill.className = "pill " + (isRunning() || state.deployState === "deploying" ? "busy" : state.deployState === "failed" ? "off" : state.deployed ? "on" : "");
   const b = state.bytes.total;
   const human = b > 1 << 30 ? (b / (1 << 30)).toFixed(2) + " GiB" : b > 1 << 20 ? (b / (1 << 20)).toFixed(1) + " MiB" : b > 1024 ? (b / 1024).toFixed(0) + " KiB" : b + " B";
-  $("bytes").textContent = `hub ${human}${state.bytes.activeTransfers > 0 ? ` · ${state.bytes.activeTransfers} transfer(s)` : ""}`;
+  $("bytes").textContent = `hub ${human}`;
 }
 
 function renderAll() {

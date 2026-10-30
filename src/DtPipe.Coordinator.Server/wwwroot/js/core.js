@@ -9,7 +9,7 @@ export const store = {
   runs: [],          // the journal, newest first
   queue: [],         // the runs in flight, then the queued ones
   logs: [],
-  bytes: { total: 0, activeTransfers: 0 },
+  bytes: { total: 0 },
   health: { status: "ok", pipelines: [] }, // whether each armed pipeline can be launched: /api/health, read again when its inputs move
   connected: false,
   httpKeys: false, // this coordinator exchanges identity keys over plain HTTP

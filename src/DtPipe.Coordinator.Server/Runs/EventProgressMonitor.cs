@@ -17,22 +17,14 @@ public sealed class EventProgressMonitor(LoggingHubProgressMonitor inner, EventB
     {
         inner.OnBytesTransferred(bytes);
         Interlocked.Add(ref _bytes, bytes);
-        Publish(force: false);
+        Publish();
     }
 
-    private void Publish(bool force)
+    private void Publish()
     {
         var now = Environment.TickCount64;
-        if (force)
-        {
-            Interlocked.Exchange(ref _lastPublishTicks, now);
-        }
-        else
-        {
-            var last = Interlocked.Read(ref _lastPublishTicks);
-            if (now - last < 250 || Interlocked.CompareExchange(ref _lastPublishTicks, now, last) != last) return;
-        }
-        // The hub reports no transfer start or end, so activeTransfers is always 0.
-        bus.Publish("bytes", new { total = Interlocked.Read(ref _bytes), activeTransfers = 0 });
+        var last = Interlocked.Read(ref _lastPublishTicks);
+        if (now - last < 250 || Interlocked.CompareExchange(ref _lastPublishTicks, now, last) != last) return;
+        bus.Publish("bytes", new { total = Interlocked.Read(ref _bytes) });
     }
 }

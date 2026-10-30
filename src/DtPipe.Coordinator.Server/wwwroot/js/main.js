@@ -36,7 +36,7 @@ function renderPills() {
   $("runs-pill").textContent = [inFlight, queued ? `${queued} queued` : ""].filter(Boolean).join(" · ") || "no run";
   $("runs-pill").title = running.map((r) => r.pipelineId).join(", ");
   $("runs-pill").className = `pill ${running.length || queued ? "busy" : ""}`;
-  $("bytes").textContent = `hub ${bytes(store.bytes.total)}${store.bytes.activeTransfers > 0 ? ` · ${store.bytes.activeTransfers} transfer(s)` : ""}`;
+  $("bytes").textContent = `hub ${bytes(store.bytes.total)}`;
 }
 
 subscribe((kind) => {
