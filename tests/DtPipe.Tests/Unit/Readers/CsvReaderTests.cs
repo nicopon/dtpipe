@@ -212,6 +212,12 @@ public class CsvReaderTests : IAsyncLifetime
             {
                 await reader.OpenAsync();
                 reader.Columns!.First(c => c.Name == "Score").ClrType.Should().Be(typeof(int));
+
+                // Line 4 lies beyond the sample: the inferred type refuses it rather than reading null.
+                var read = async () => { await foreach (var _ in reader.ReadBatchesAsync(100)) { } };
+                var refusal = (await read.Should().ThrowAsync<InvalidOperationException>()).Which.Message;
+                refusal.Should().Contain("CSV line 4").And.Contain("'Score'").And.Contain("int32")
+                    .And.Contain("--max-sample").And.Contain("--column-types").And.NotContain("not_a_number");
             }
 
             // Sample 5 rows: row 3 is not_a_number, so Score falls back to string
@@ -296,6 +302,62 @@ public class CsvReaderTests : IAsyncLifetime
         {
             if (File.Exists(csvPath)) File.Delete(csvPath);
             if (File.Exists(outPath)) File.Delete(outPath);
+        }
+    }
+
+    [Theory]
+    [InlineData("int", "abc", "int32")]
+    [InlineData("long", "abc", "int64")]
+    [InlineData("double", "abc", "double")]
+    [InlineData("decimal", "abc", "decimal")]
+    [InlineData("bool", "abc", "bool")]
+    [InlineData("datetime", "abc", "datetime")]
+    [InlineData("datetimeoffset", "abc", "datetimeoffset")]
+    [InlineData("uuid", "abc", "uuid")]
+    [InlineData("int", " ", "int32")]
+    [InlineData("uuid", " ", "uuid")]
+    public async Task CsvReader_ColumnTypes_Refuses_A_Cell_Its_Type_Does_Not_Read(string hint, string cell, string named)
+    {
+        var csvPath = Path.Combine(Path.GetTempPath(), $"test_unread_{Guid.NewGuid()}.csv");
+        await File.WriteAllTextAsync(csvPath, $"id,n\n1,\n2,{cell}\n");
+        try
+        {
+            await using var reader = new CsvStreamReader(csvPath, new CsvReaderOptions { ColumnTypes = $"n:{hint}" });
+            await reader.OpenAsync();
+
+            var read = async () => { await foreach (var _ in reader.ReadBatchesAsync(100)) { } };
+            var refusal = (await read.Should().ThrowAsync<InvalidOperationException>()).Which.Message;
+            refusal.Should().Contain("CSV line 3").And.Contain("'n'").And.Contain($"declared {named}");
+            if (cell.Trim().Length > 0) refusal.Should().NotContain(cell);
+        }
+        finally
+        {
+            if (File.Exists(csvPath)) File.Delete(csvPath);
+        }
+    }
+
+    [Fact]
+    public async Task CsvReader_ColumnTypes_Reads_An_Empty_Cell_As_Null_And_Every_Spelling_It_Accepts()
+    {
+        var bytes = Guid.NewGuid();
+        var csvPath = Path.Combine(Path.GetTempPath(), $"test_read_{Guid.NewGuid()}.csv");
+        await File.WriteAllTextAsync(csvPath,
+            $"n,b,g\n,,\n 42 ,yes,{Convert.ToBase64String(bytes.ToByteArray())}\n7,TRUE,{bytes}\n");
+        try
+        {
+            await using var reader = new CsvStreamReader(csvPath, new CsvReaderOptions { ColumnTypes = "n:int,b:bool,g:uuid" });
+            await reader.OpenAsync();
+            var rows = new List<object?[]>();
+            await foreach (var batch in reader.ReadBatchesAsync(100)) rows.AddRange(batch.ToArray());
+
+            rows.Should().HaveCount(3);
+            rows[0].Should().OnlyContain(v => v == null);
+            rows[1].Should().Equal(42, true, bytes);
+            rows[2].Should().Equal(7, true, bytes);
+        }
+        finally
+        {
+            if (File.Exists(csvPath)) File.Delete(csvPath);
         }
     }
 }

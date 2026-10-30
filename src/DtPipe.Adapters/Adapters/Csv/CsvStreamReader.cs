@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using CsvHelper;
 using CsvHelper.Configuration;
+using DtPipe.Adapters.Common;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Core.Models;
@@ -22,7 +23,7 @@ public class CsvStreamReader : IStreamReader, IColumnTypeInferenceCapable
     private string[]? _headers;
 
     // Per-column parser: null means keep as string, non-null parses the raw cell value
-    private Func<string, object?>[]? _columnParsers;
+    private Func<string, object?>?[]? _columnParsers;
 
     public IReadOnlyList<PipeColumnInfo>? Columns { get; private set; }
 
@@ -323,13 +324,23 @@ public class CsvStreamReader : IStreamReader, IColumnTypeInferenceCapable
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private object?[] ParseRow(int columnCount, Func<string, object?>[] parsers)
+    private object?[] ParseRow(int columnCount, Func<string, object?>?[] parsers)
     {
         var row = new object?[columnCount];
         for (int i = 0; i < columnCount; i++)
         {
             var raw = _csvReader!.GetField(i);
-            row[i] = raw == null ? null : parsers[i](raw);
+            if (raw == null || parsers[i] is not { } parser)
+            {
+                row[i] = raw;
+                continue;
+            }
+
+            var value = TypedTextCell.Parse(parser, raw);
+            if (ReferenceEquals(value, TypedTextCell.Unreadable))
+                TypedTextCell.Refuse($"CSV line {_csvReader.Parser.RawRow}", _headers![i], Columns![i].ClrType,
+                    _autoAppliedTypes != null ? _options.MaxSample : null);
+            row[i] = value;
         }
         return row;
     }
@@ -354,25 +365,29 @@ public class CsvStreamReader : IStreamReader, IColumnTypeInferenceCapable
     /// <summary>Maps a hint string to the CLR type the column will carry in the pipeline.</summary>
     private static Type? ResolveHintToClrType(string hint) => DtPipe.Core.Helpers.TypeHelper.ParseTypeHint(hint);
 
-    /// <summary>Builds per-column parser functions. Null parser means "keep as string".</summary>
-    private static Func<string, object?>[] BuildColumnParsers(string[] headers, Dictionary<string, Type> overrides)
+    /// <summary>
+    /// Builds per-column parser functions. A null parser keeps the cell as text; any other one reads
+    /// a non-empty cell under <see cref="TypedTextCell"/>'s rule.
+    /// </summary>
+    private static Func<string, object?>?[] BuildColumnParsers(string[] headers, Dictionary<string, Type> overrides)
     {
-        var parsers = new Func<string, object?>[headers.Length];
+        var parsers = new Func<string, object?>?[headers.Length];
         for (int i = 0; i < headers.Length; i++)
         {
-            parsers[i] = overrides.TryGetValue(headers[i], out var t)
-                ? BuildParser(t)
-                : static s => s; // string passthrough
+            parsers[i] = overrides.TryGetValue(headers[i], out var t) ? BuildParser(t) : null;
         }
         return parsers;
     }
 
-    private static Func<string, object?> BuildParser(Type clrType)
+    /// <summary>
+    /// The parser of a typed column, or null for a text column. It returns
+    /// <see cref="TypedTextCell.Unreadable"/> for a text it does not read.
+    /// </summary>
+    private static Func<string, object?>? BuildParser(Type clrType)
     {
         if (clrType == typeof(Guid))
             return static s =>
             {
-                if (string.IsNullOrWhiteSpace(s)) return null;
                 // Standard UUID string format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
                 if (Guid.TryParse(s, out var g)) return g;
                 // Base64 (24-char) fallback — stored as raw bytes, re-interpret as RFC 4122
@@ -387,39 +402,39 @@ public class CsvStreamReader : IStreamReader, IColumnTypeInferenceCapable
                     }
                     catch { /* fall through */ }
                 }
-                return null;
+                return TypedTextCell.Unreadable;
             };
 
         if (clrType == typeof(int))
-            return static s => int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v) ? v : (object?)null;
+            return static s => int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v) ? v : TypedTextCell.Unreadable;
 
         if (clrType == typeof(long))
-            return static s => long.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v) ? v : (object?)null;
+            return static s => long.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v) ? v : TypedTextCell.Unreadable;
 
         if (clrType == typeof(double))
-            return static s => double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : (object?)null;
+            return static s => double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : TypedTextCell.Unreadable;
 
         if (clrType == typeof(float))
-            return static s => float.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : (object?)null;
+            return static s => float.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : TypedTextCell.Unreadable;
 
         if (clrType == typeof(decimal))
-            return static s => decimal.TryParse(s, NumberStyles.Number, CultureInfo.InvariantCulture, out var v) ? v : (object?)null;
+            return static s => decimal.TryParse(s, NumberStyles.Number, CultureInfo.InvariantCulture, out var v) ? v : TypedTextCell.Unreadable;
 
         if (clrType == typeof(bool))
             return static s =>
             {
                 if (bool.TryParse(s, out var b)) return b;
-                return s switch { "1" or "yes" or "true" => true, "0" or "no" or "false" => false, _ => (object?)null };
+                return s switch { "1" or "yes" or "true" => true, "0" or "no" or "false" => false, _ => TypedTextCell.Unreadable };
             };
 
         if (clrType == typeof(DateTime))
-            return static s => DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var v) ? v : (object?)null;
+            return static s => DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var v) ? v : TypedTextCell.Unreadable;
 
         if (clrType == typeof(DateTimeOffset))
-            return static s => DateTimeOffset.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var v) ? v : (object?)null;
+            return static s => DateTimeOffset.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var v) ? v : TypedTextCell.Unreadable;
 
-        // Fallback: keep as string
-        return static s => s;
+        // A string column, or a type no parser reads: the cell stays text.
+        return null;
     }
 
     /// <summary>
