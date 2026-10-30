@@ -158,6 +158,35 @@ diff -u "$ARTIFACTS_DIR/expected_mssql.csv" "$ARTIFACTS_DIR/drv_mssql.csv" \
   && pass "MSSQL: Charlie and David present" || fail "MSSQL: read/write failed"
 
 # ----------------------------------------
+# 3b. MSSQL — text into a date column on the row path; a time of day is refused, named
+# ----------------------------------------
+echo "--- [3b] MSSQL text into date column ---"
+mssql_q() {
+    docker exec dtpipe-integ-mssql-tools /opt/mssql-tools/bin/sqlcmd -S dtpipe-integ-mssql -U sa -P 'Password123!' \
+      -h -1 -W -Q "SET NOCOUNT ON; $1"
+}
+for cell in "2024-01-02|0|1=2024-01-02" "2024-01-02 13:45:00|1|"; do
+    IFS='|' read -r VALUE WANT_RC WANT_ROWS <<< "$cell"
+    printf 'id,n\n1,%s\n' "$VALUE" > "$ARTIFACTS_DIR/drv_mssql_date.csv"
+    mssql_q "IF OBJECT_ID('DrvDate', 'U') IS NOT NULL DROP TABLE DrvDate; CREATE TABLE DrvDate (id INT, n DATE);" > /dev/null
+    set +e
+    OUT=$("$DTPIPE" -i "$ARTIFACTS_DIR/drv_mssql_date.csv" \
+      -o "$MSSQL_CONN" --table DrvDate --strategy Append --no-stats 2>&1)
+    RC=$?
+    set -e
+    GOT=$(mssql_q "SELECT CONCAT(id, '=', CONVERT(varchar(10), n, 23)) FROM DrvDate ORDER BY id" | tr -d '\r')
+    [ "$RC" = "$WANT_RC" ] || fail "MSSQL '${VALUE}' into date: exit $RC, expected $WANT_RC"
+    [ "$GOT" = "$WANT_ROWS" ] || fail "MSSQL '${VALUE}' into date: table '$GOT', expected '$WANT_ROWS'"
+    if [ "$WANT_RC" = "1" ]; then
+        grep -q "${VALUE}" <<< "$OUT" && grep -q "CAST(n AS DATE)" <<< "$OUT" \
+          || fail "MSSQL '${VALUE}' into date: refusal does not name the value and the cast"
+    fi
+    echo "  '${VALUE}' -> date: exit $RC, table '$GOT'"
+done
+mssql_q "DROP TABLE DrvDate;" > /dev/null
+pass "MSSQL: a text date written; a time of day into date refused, named"
+
+# ----------------------------------------
 # 4. Oracle — basic read/write
 # ----------------------------------------
 echo "--- [4] Oracle read/write ---"

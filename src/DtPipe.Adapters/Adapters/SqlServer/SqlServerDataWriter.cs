@@ -118,6 +118,7 @@ public class SqlServerDataWriter : BaseSqlDataWriter, IColumnarDataWriter, IColu
 
         _targetTypes = new Type[colCount];
         _targetColumnNames = new string[colCount];
+        var nativeTypes = new string?[colCount];
 
         if (useTargetCols)
         {
@@ -127,9 +128,7 @@ public class SqlServerDataWriter : BaseSqlDataWriter, IColumnarDataWriter, IColu
                 var targetCol = targetCols[i];
                 _targetColumnNames[i] = targetCol.Name;
                 _targetTypes[i] = targetCol.InferredClrType ?? typeof(string);
-
-                var underlying = Nullable.GetUnderlyingType(_targetTypes[i]) ?? _targetTypes[i];
-                _bufferTable.Columns.Add(targetCol.Name, underlying);
+                nativeTypes[i] = targetCol.NativeType;
             }
         }
         else
@@ -140,17 +139,15 @@ public class SqlServerDataWriter : BaseSqlDataWriter, IColumnarDataWriter, IColu
                 var col = _columns[i];
                 _targetColumnNames[i] = col.Name;
                 _targetTypes[i] = col.ClrType;
-                var underlying = Nullable.GetUnderlyingType(col.ClrType) ?? col.ClrType;
-                _bufferTable.Columns.Add(col.Name, underlying);
             }
         }
 
-        // Pre-compute source index mapping and per-column converters
+        // Pre-compute source index mapping, buffer columns and per-column converters
         _sourceIndices = new int[colCount];
         _converters = new Func<object?, object?>[colCount];
         for (int i = 0; i < colCount; i++)
         {
-            var colName = _bufferTable.Columns[i].ColumnName;
+            var colName = _targetColumnNames[i];
             int srcIdx = -1;
             Type srcClrType = typeof(object);
             for (int s = 0; s < _columns!.Count; s++)
@@ -163,7 +160,9 @@ public class SqlServerDataWriter : BaseSqlDataWriter, IColumnarDataWriter, IColu
                 }
             }
             _sourceIndices[i] = srcIdx;
-            _converters[i] = CompositeCellJson.Wrap(ColumnConverterFactory.Build(srcClrType, _targetTypes[i], colName));
+            var (bufferType, convert) = BufferColumn(nativeTypes[i], _targetTypes[i], srcClrType, colName);
+            _bufferTable.Columns.Add(colName, bufferType);
+            _converters[i] = convert;
         }
 
         _bulkCopy = new SqlBulkCopy((SqlConnection)_connection!, SqlBulkCopyOptions.TableLock | SqlBulkCopyOptions.UseInternalTransaction, null)
@@ -179,6 +178,53 @@ public class SqlServerDataWriter : BaseSqlDataWriter, IColumnarDataWriter, IColu
             _bulkCopy.ColumnMappings.Add(dc.ColumnName, dc.ColumnName);
         }
     }
+
+    /// <summary>
+    /// The buffer column type and the cell converter of one written column on the row path: the
+    /// column's inferred type, which is <see cref="DateOnly"/> for a date column. A date column whose
+    /// source sends any other type (a timestamp, text) holds <see cref="DateTime"/>, which SqlBulkCopy
+    /// sends as a date and which the converter reads text into; no conversion to
+    /// <see cref="DateOnly"/> is made here.
+    /// <para>
+    /// A date column that holds <see cref="DateTime"/> refuses a value whose time of day is not
+    /// midnight: SqlBulkCopy drops that time without an error, so the row would be written wrong with
+    /// exit 0. Midnight is the date itself and is written. A columnar batch goes to SqlBulkCopy through
+    /// <see cref="RecordBatchDataReader"/> and does not pass through this buffer.
+    /// </para>
+    /// </summary>
+    internal static (Type BufferType, Func<object?, object?> Convert) BufferColumn(
+        string? targetNativeType, Type targetType, Type sourceType, string column)
+    {
+        var bufferType = Nullable.GetUnderlyingType(targetType) ?? targetType;
+        var isDate = IsDateColumn(targetNativeType);
+        if (isDate && (Nullable.GetUnderlyingType(sourceType) ?? sourceType) != typeof(DateOnly))
+            bufferType = typeof(DateTime);
+
+        var convert = CompositeCellJson.Wrap(ColumnConverterFactory.Build(sourceType, bufferType, column));
+        if (!isDate || bufferType != typeof(DateTime)) return (bufferType, convert);
+
+        return (bufferType, v =>
+        {
+            var value = convert(v);
+            return value is DateTime { TimeOfDay.Ticks: not 0 } dt ? TimeOfDayIntoDate(column, dt) : value;
+        }
+        );
+    }
+
+    // DATA_TYPE of a date column is the bare name; datetime and datetime2 share its prefix, so the
+    // match is exact.
+    private static bool IsDateColumn(string? nativeType)
+        => string.Equals(nativeType?.Trim(), "date", StringComparison.OrdinalIgnoreCase);
+
+    // The value is quoted: it is a timestamp, not free text, and its time of day is what the person
+    // has to correct. The cast is written for the source's query, whose dialect the writer does not know.
+    [System.Diagnostics.CodeAnalysis.DoesNotReturn]
+    private static object TimeOfDayIntoDate(string column, DateTime value)
+        => throw new InvalidOperationException(
+            $"Column '{column}' is date and the source sends " +
+            $"{value.ToString("yyyy-MM-dd HH:mm:ss.FFFFFFF", System.Globalization.CultureInfo.InvariantCulture)}, " +
+            $"whose time of day the column does not hold and the writer does not drop: " +
+            $"cast it in the query, CAST({column} AS DATE), or write it to a datetime2 column.");
 
     protected override async Task<TargetSchemaInfo?> ApplyWriteStrategyAsync(string resolvedSchema, string resolvedTable, CancellationToken ct)
     {
