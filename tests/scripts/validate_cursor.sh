@@ -207,6 +207,40 @@ DATE_ROWS=$(($(wc -l < "$DATE_CSV") - 1))
 
 rm -f "$DUCK_DB" "$DATE_STATE" "$DATE_CSV"
 
+# -------------------------------------------------------------
+# Scenario 7: TIME cursor column -> seconds and fraction kept, replayed by DuckDB
+# -------------------------------------------------------------
+echo "--- Scenario 7: TIME cursor column ---"
+
+TIME_STATE="$ARTIFACTS_DIR/cursor_time.sync"
+TIME_CSV="$ARTIFACTS_DIR/cursor_time.csv"
+rm -f "$TIME_STATE" "$TIME_CSV"
+
+"$DTPIPE" \
+  -i "duck::memory:" \
+  --query "SELECT * FROM (VALUES (TIME '09:30:00'), (TIME '13:45:10.5')) t(n) WHERE n > '\${{cursor://$TIME_STATE|00:00:00}}'" \
+  -o "csv:$TIME_CSV" \
+  --cursor n \
+  --state "$TIME_STATE" \
+  --no-stats
+
+STATE_VAL=$(grep -o '"value": "[^"]*"' "$TIME_STATE" | head -n 1 | cut -d'"' -f4)
+[ "$STATE_VAL" == "13:45:10.500" ] && pass "Scenario 7: state file keeps the seconds and fraction" || fail "Scenario 7: expected 13:45:10.500, got $STATE_VAL"
+
+"$DTPIPE" \
+  -i "duck::memory:" \
+  --query "SELECT * FROM (VALUES (TIME '09:30:00'), (TIME '13:45:10.5')) t(n) WHERE n > '\${{cursor://$TIME_STATE}}'" \
+  -o "csv:$TIME_CSV" \
+  --cursor n \
+  --state "$TIME_STATE" \
+  --no-stats \
+  || fail "Scenario 7: second run failed"
+
+TIME_ROWS=$(tail -n +2 "$TIME_CSV" 2>/dev/null | wc -l | tr -d ' ')
+[ "$TIME_ROWS" -eq 0 ] && pass "Scenario 7: second run re-reads no row" || fail "Scenario 7: expected 0 rows, got $TIME_ROWS"
+
+rm -f "$TIME_STATE" "$TIME_CSV"
+
 # Cleanup
 rm -f "$SRC_DB" "$TGT_DB" "$STATE_FILE" "$ARTIFACTS_DIR/error.log"
 

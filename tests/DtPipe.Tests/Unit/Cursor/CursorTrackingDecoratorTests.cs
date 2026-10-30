@@ -182,6 +182,29 @@ public class CursorTrackingDecoratorTests
         }
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("fr-FR")]
+    public async Task TrackedMaxValue_RecordsATimeWithItsSecondsAndFraction_WhateverTheCulture(string culture)
+    {
+        var decorator = new CursorTrackingRowDecorator(new FakeRowDataWriter(), "n");
+        await decorator.InitializeAsync([new PipeColumnInfo("n", typeof(TimeOnly), false)]);
+        await decorator.WriteBatchAsync([[new TimeOnly(9, 30)], [new TimeOnly(13, 45, 10, 500)]]);
+
+        var saved = System.Globalization.CultureInfo.CurrentCulture;
+        System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.GetCultureInfo(culture);
+        try
+        {
+            var max = decorator.TrackedMaxValue!;
+            Assert.Equal("13:45:10.500", max.Value);
+            Assert.Equal(CursorType.String, max.Type);
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentCulture = saved;
+        }
+    }
+
     [Fact]
     public async Task WriteBatchAsync_TracksMaxInt()
     {

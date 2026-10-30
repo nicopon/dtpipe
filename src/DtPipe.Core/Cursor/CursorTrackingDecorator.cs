@@ -52,6 +52,12 @@ public class CursorTrackingRowDecorator : IRowDataWriter, ICursorTracker
                 // process culture's short date is refused by some engines and read day-first by others.
                 formattedValue = d.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
             }
+            else if (_maxValueRaw is TimeOnly t)
+            {
+                // A 24-hour time with its seconds, in the invariant culture: a bound cut at the minute
+                // sits below the row that produced it, which a strict `>` then re-reads.
+                formattedValue = t.ToString("HH:mm:ss.", CultureInfo.InvariantCulture) + Fraction(t.Ticks);
+            }
             else
             {
                 formattedValue = _maxValueRaw.ToString() ?? "";
