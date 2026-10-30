@@ -40,10 +40,10 @@ public static class ColumnConverterFactory
         if (sourceType == typeof(string))
             return BuildFromString(underlying, columnName);
 
-        // Fallback: delegate to ValueConverter for numeric coercions, long→DateTime, etc.
+        // Fallback: delegate to ValueConverter for numeric coercions, DateTimeOffset→DateTime, etc.
         return v => v is null || v == DBNull.Value
             ? DBNull.Value
-            : ValueConverter.ConvertValue(v, underlying);
+            : ValueConverter.ConvertValue(v, underlying, columnName);
     }
 
     // Each parsed target: a null, DBNull or empty cell is DBNull; any other text either reads as the

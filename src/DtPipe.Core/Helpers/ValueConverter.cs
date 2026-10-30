@@ -13,11 +13,14 @@ public static class ValueConverter
     /// <summary>
     /// Converts a value to the specified target CLR type.
     /// Handles null/DBNull, string parsing (DateTime, Guid, bool, etc.), and general type conversion.
+    /// An integer is never read as a Unix timestamp: into a <see cref="DateTime"/> or a
+    /// <see cref="DateTimeOffset"/> it is refused, since a count says nothing of its unit or its epoch.
     /// </summary>
     /// <param name="val">The source value to convert. May be null, DBNull, or any CLR object.</param>
     /// <param name="targetType">The target CLR type. May be a Nullable type.</param>
+    /// <param name="columnName">The column being converted, named in a refusal when the caller knows it.</param>
     /// <returns>The converted value, or DBNull.Value if the input is null/DBNull.</returns>
-    public static object ConvertValue(object? val, Type targetType)
+    public static object ConvertValue(object? val, Type targetType, string? columnName = null)
     {
         if (val is null || val == DBNull.Value) return DBNull.Value;
 
@@ -85,19 +88,10 @@ public static class ValueConverter
             return dtoVal.UtcDateTime;
         }
 
-        if (val is long longVal)
+        if (val is sbyte or byte or short or ushort or int or uint or long or ulong
+            && (underlyingTarget == typeof(DateTime) || underlyingTarget == typeof(DateTimeOffset)))
         {
-            if (underlyingTarget == typeof(DateTime))
-            {
-                // Heuristic: if > 1e12, assume milliseconds, else assume seconds
-                if (longVal > 1_000_000_000_000) return DateTimeOffset.FromUnixTimeMilliseconds(longVal).UtcDateTime;
-                return DateTimeOffset.FromUnixTimeSeconds(longVal).UtcDateTime;
-            }
-            if (underlyingTarget == typeof(DateTimeOffset))
-            {
-                if (longVal > 1_000_000_000_000) return DateTimeOffset.FromUnixTimeMilliseconds(longVal);
-                return DateTimeOffset.FromUnixTimeSeconds(longVal);
-            }
+            throw IntegerAsTimestamp(underlyingTarget, columnName);
         }
 
         if (val is IConvertible)
@@ -107,4 +101,12 @@ public static class ValueConverter
 
         return val;
     }
+
+    // Kept out of ConvertValue so the per-cell path stays small. The value is not quoted: a refused
+    // cell can hold anything the source holds.
+    private static InvalidOperationException IntegerAsTimestamp(Type target, string? columnName)
+        => new((columnName is null
+                ? $"A {target.Name} target was given an integer, which is not taken for a Unix timestamp (seconds or milliseconds). "
+                : $"Column '{columnName}' is {target.Name} and the source sends an integer, which is not taken for a Unix timestamp (seconds or milliseconds). ")
+            + "Read the value from a date/time column of the source, convert it in the query, or declare the column's type with '--column-types'.");
 }
