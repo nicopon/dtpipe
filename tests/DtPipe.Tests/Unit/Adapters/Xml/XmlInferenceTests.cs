@@ -254,4 +254,37 @@ public class XmlInferenceTests : IAsyncLifetime
             if (File.Exists(outPath)) File.Delete(outPath);
         }
     }
+
+    [Fact]
+    public async Task XmlStreamReader_ColumnTypes_Refuses_A_Cell_Its_Type_Does_Not_Read()
+    {
+        const string readable = """
+            <Root>
+              <Item>
+                <n>7</n>
+              </Item>
+              <Item>
+                <n></n>
+              </Item>
+            """;
+        var options = new XmlReaderOptions { Path = "//Item", ColumnTypes = "n:int" };
+
+        await File.WriteAllTextAsync(_testXmlPath, readable + "\n</Root>");
+        await using (var reader = new XmlStreamReader(_testXmlPath, options))
+        {
+            await reader.OpenAsync();
+            var rows = new List<object?[]>();
+            await foreach (var batch in reader.ReadBatchesAsync(10)) rows.AddRange(batch.ToArray());
+            rows.Select(r => r[0]).Should().Equal(7, null);
+        }
+
+        await File.WriteAllTextAsync(_testXmlPath, readable + "\n  <Item>\n    <n>abc</n>\n  </Item>\n</Root>");
+        await using (var reader = new XmlStreamReader(_testXmlPath, options))
+        {
+            await reader.OpenAsync();
+            var read = async () => { await foreach (var _ in reader.ReadBatchesAsync(10)) { } };
+            var refusal = (await read.Should().ThrowAsync<InvalidOperationException>()).Which.Message;
+            refusal.Should().Contain("XML line 9").And.Contain("'n'").And.Contain("declared int32").And.NotContain("abc");
+        }
+    }
 }

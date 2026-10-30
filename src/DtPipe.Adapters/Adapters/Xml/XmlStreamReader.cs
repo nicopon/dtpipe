@@ -3,6 +3,7 @@ using System.Xml;
 using System.Xml.Linq;
 using Apache.Arrow;
 using Apache.Arrow.Types;
+using DtPipe.Adapters.Common;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using Microsoft.Extensions.Logging;
@@ -567,7 +568,7 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
                 var attrKey = _options.AttributePrefix + attrLocalName;
                 var fullPath = string.IsNullOrEmpty(currentKeyPath) ? attrKey : $"{currentKeyPath}.{attrKey}";
 
-                dict[attrKey] = ApplyParser(fullPath, reader.Value);
+                dict[attrKey] = ApplyParser(fullPath, reader.Value, reader);
             }
             reader.MoveToElement();
         }
@@ -616,10 +617,10 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 
         if (!hasChildElements)
         {
-            if (dict == null) result = ApplyParser(currentKeyPath, textValue ?? "");
+            if (dict == null) result = ApplyParser(currentKeyPath, textValue ?? "", reader);
             else
             {
-                if (textValue != null) dict["_value"] = ApplyParser(string.IsNullOrEmpty(currentKeyPath) ? "_value" : $"{currentKeyPath}._value", textValue);
+                if (textValue != null) dict["_value"] = ApplyParser(string.IsNullOrEmpty(currentKeyPath) ? "_value" : $"{currentKeyPath}._value", textValue, reader);
                 result = dict;
             }
         }
@@ -627,7 +628,7 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
         {
             if (textValue != null && dict != null)
             {
-                dict["_value"] = ApplyParser(string.IsNullOrEmpty(currentKeyPath) ? "_value" : $"{currentKeyPath}._value", textValue);
+                dict["_value"] = ApplyParser(string.IsNullOrEmpty(currentKeyPath) ? "_value" : $"{currentKeyPath}._value", textValue, reader);
             }
             result = dict ?? (object?)new Dictionary<string, object?>(StringComparer.Ordinal);
         }
@@ -636,12 +637,22 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
         return result;
     }
 
-    private object? ApplyParser(string fullPath, string? value)
+    /// <summary>
+    /// The value of a cell at <paramref name="fullPath"/>: its text, or what the column's declared type
+    /// reads from it. <paramref name="at"/> is the reader on that cell, which names its line on a refusal.
+    /// </summary>
+    private object? ApplyParser(string fullPath, string? value, XmlReader at)
     {
         if (value == null) return null;
         if (_columnParsers != null && _columnParsers.TryGetValue(fullPath, out var parser))
         {
-            return parser(value);
+            var parsed = TypedTextCell.Parse(parser, value);
+            if (ReferenceEquals(parsed, TypedTextCell.Unreadable))
+            {
+                var line = at is IXmlLineInfo info && info.HasLineInfo() ? info.LineNumber.ToString(CultureInfo.InvariantCulture) : "?";
+                TypedTextCell.Refuse($"XML line {line}", fullPath, _typeOverrides![fullPath], sampledRows: null);
+            }
+            return parsed;
         }
         return value;
     }

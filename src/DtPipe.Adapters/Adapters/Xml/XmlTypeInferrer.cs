@@ -5,6 +5,7 @@ using Apache.Arrow.Serialization.Mapping;
 using Apache.Arrow.Types;
 using DtPipe.Core.Models;
 
+using DtPipe.Adapters.Common;
 using DtPipe.Core.Helpers;
 
 namespace DtPipe.Adapters.Xml;
@@ -67,49 +68,59 @@ internal static class XmlTypeInferrer
         return StringType.Default;
     }
     internal static Type? ResolveHintToClrType(string hint) => TypeHelper.ParseTypeHint(hint);
+    /// <summary>
+    /// The parser of each declared column, keyed by its dot path. A string column has none: its text
+    /// stays text. Every other one reads a non-empty cell under <see cref="TypedTextCell"/>'s rule.
+    /// </summary>
     internal static Dictionary<string, Func<string, object?>> BuildColumnParsers(Dictionary<string, Type> overrides)
     {
         var result = new Dictionary<string, Func<string, object?>>(StringComparer.OrdinalIgnoreCase);
         foreach (var kvp in overrides)
         {
-            result[kvp.Key] = BuildParser(kvp.Value);
+            if (BuildParser(kvp.Value) is { } parser) result[kvp.Key] = parser;
         }
         return result;
     }
-    internal static Func<string, object?> BuildParser(Type clrType)
+
+    /// <summary>
+    /// The parser of a typed column, or null for a text column. It returns
+    /// <see cref="TypedTextCell.Unreadable"/> for a text it does not read.
+    /// </summary>
+    internal static Func<string, object?>? BuildParser(Type clrType)
     {
         if (clrType == typeof(Guid))
-            return static s => Guid.TryParse(s, out var g) ? g : (object?)null;
+            return static s => Guid.TryParse(s, out var g) ? g : TypedTextCell.Unreadable;
 
         if (clrType == typeof(int))
-            return static s => int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v) ? v : (object?)null;
+            return static s => int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v) ? v : TypedTextCell.Unreadable;
 
         if (clrType == typeof(long))
-            return static s => long.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v) ? v : (object?)null;
+            return static s => long.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v) ? v : TypedTextCell.Unreadable;
 
         if (clrType == typeof(double))
-            return static s => double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : (object?)null;
+            return static s => double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : TypedTextCell.Unreadable;
 
         if (clrType == typeof(float))
-            return static s => float.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : (object?)null;
+            return static s => float.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : TypedTextCell.Unreadable;
 
         if (clrType == typeof(decimal))
-            return static s => decimal.TryParse(s, NumberStyles.Number, CultureInfo.InvariantCulture, out var v) ? v : (object?)null;
+            return static s => decimal.TryParse(s, NumberStyles.Number, CultureInfo.InvariantCulture, out var v) ? v : TypedTextCell.Unreadable;
 
         if (clrType == typeof(bool))
             return static s =>
             {
                 if (bool.TryParse(s, out var b)) return b;
-                return s.ToLowerInvariant() switch { "1" or "yes" or "true" => true, "0" or "no" or "false" => false, _ => (object?)null };
+                return s.ToLowerInvariant() switch { "1" or "yes" or "true" => true, "0" or "no" or "false" => false, _ => TypedTextCell.Unreadable };
             };
 
         if (clrType == typeof(DateTime))
-            return static s => DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var v) ? v : (object?)null;
+            return static s => DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var v) ? v : TypedTextCell.Unreadable;
 
         if (clrType == typeof(DateTimeOffset))
-            return static s => DateTimeOffset.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var v) ? v : (object?)null;
+            return static s => DateTimeOffset.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var v) ? v : TypedTextCell.Unreadable;
 
-        return static s => s;
+        // A string column, or a type no parser reads: the cell stays text.
+        return null;
     }
     internal static string? InferTypeHint(List<string> samples)
     {
