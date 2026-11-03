@@ -28,8 +28,13 @@ public sealed class StudioStagedRunTests : IAsyncLifetime
     private ServiceProvider _services = null!;
     private StudioServer _server = null!;
 
+    private readonly TextWriter _previousError = Console.Error;
+
     public async ValueTask InitializeAsync()
     {
+        // The jobs here carry a cursor to have a state to cut around, not to filter; the advisory
+        // that says so is not what these tests look at.
+        Console.SetError(TextWriter.Null);
         Directory.SetCurrentDirectory(_dir);
         var services = new ServiceCollection();
         Program.ConfigureServices(services);
@@ -42,6 +47,7 @@ public sealed class StudioStagedRunTests : IAsyncLifetime
     {
         await _server.DisposeAsync();
         Directory.SetCurrentDirectory(_previous);
+        Console.SetError(_previousError);
         await _services.DisposeAsync();
         _http.Dispose();
         try { Directory.Delete(_dir, recursive: true); } catch (IOException) { }

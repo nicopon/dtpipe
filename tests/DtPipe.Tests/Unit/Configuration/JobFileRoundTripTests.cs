@@ -9,6 +9,7 @@ using DtPipe.Processors.Merge;
 using DtPipe.Processors.Sql;
 using Xunit;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 
 namespace DtPipe.Tests.Unit.Configuration;
@@ -57,17 +58,25 @@ public class JobFileRoundTripTests
 
     private Dictionary<string, JobDefinition> RoundTrip(string[] cliArgs, out ParsedPipeline parsed)
     {
-        parsed = _lexer.Parse(cliArgs);
-        var converted = PipelineToJobConverter.Convert(
-            parsed,
-            streamTransformerFactories: new IStreamTransformerFactory[] { new CompositeSqlTransformerFactory(), new MergeTransformerFactory() },
-            secretsManager: null,
-            readerFactories: new IStreamReaderFactory[] { new StubCsvReaderFactory() },
-            writerFactories: new IDataWriterFactory[] { new StubCsvWriterFactory() },
-            dataTransformerFactories: TransformerFactories());
+        // A cursor without its interpolation draws the advisory on both surfaces, the command line
+        // and the job file; this invariant is about the keys, not about that advisory.
+        var original = Console.Error;
+        Console.SetError(TextWriter.Null);
+        try
+        {
+            parsed = _lexer.Parse(cliArgs);
+            var converted = PipelineToJobConverter.Convert(
+                parsed,
+                streamTransformerFactories: new IStreamTransformerFactory[] { new CompositeSqlTransformerFactory(), new MergeTransformerFactory() },
+                secretsManager: null,
+                readerFactories: new IStreamReaderFactory[] { new StubCsvReaderFactory() },
+                writerFactories: new IDataWriterFactory[] { new StubCsvWriterFactory() },
+                dataTransformerFactories: TransformerFactories());
 
-        var yaml = JobFileWriter.Serialize(converted.Jobs);
-        return JobFileParser.ParseContent(yaml);
+            var yaml = JobFileWriter.Serialize(converted.Jobs);
+            return JobFileParser.ParseContent(yaml);
+        }
+        finally { Console.SetError(original); }
     }
 
     private sealed class StubCsvReaderFactory : IStreamReaderFactory

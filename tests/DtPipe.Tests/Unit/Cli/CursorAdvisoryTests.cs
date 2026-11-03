@@ -1,5 +1,7 @@
 using DtPipe.Cli.Incremental;
+using System.IO;
 using DtPipe.Configuration;
+using DtPipe.Core.Models;
 using Xunit;
 
 namespace DtPipe.Tests.Unit.Cli;
@@ -8,8 +10,21 @@ namespace DtPipe.Tests.Unit.Cli;
 /// A job carrying 'cursor:' and no interpolation tracks and filters nothing: measured at 50 rows
 /// on the first run and 100 on the second, over the same unchanged source.
 /// </summary>
+[Collection("console-serial")]
 public class CursorAdvisoryTests
 {
+    /// <summary>
+    /// The parser already prints the advisory it is the subject of here; the tests read the
+    /// returned list, so the print is silenced rather than repeated in the test log.
+    /// </summary>
+    private static IReadOnlyDictionary<string, JobDefinition> Parse(string yaml)
+    {
+        var original = Console.Error;
+        Console.SetError(TextWriter.Null);
+        try { return JobFileParser.ParseContent(yaml); }
+        finally { Console.SetError(original); }
+    }
+
     private const string Tracking =
         "main:\n  input: \"csv:orders.csv\"\n  output: \"sqlite:Data Source=out.db\"\n" +
         "  cursor: order_id\n  state: orders.state.json\n";
@@ -17,7 +32,7 @@ public class CursorAdvisoryTests
     [Fact]
     public void A_Cursor_With_Nothing_To_Filter_On_Is_Reported()
     {
-        var advisories = CursorAdvisory.Advise(JobFileParser.ParseContent(Tracking), Tracking);
+        var advisories = CursorAdvisory.Advise(Parse(Tracking), Tracking);
 
         var only = Assert.Single(advisories);
         Assert.Contains("main", only);
@@ -33,7 +48,7 @@ public class CursorAdvisoryTests
             "  cursor: order_id\n  state: orders.state.json\n  provider-options:\n    sqlite-reader:\n" +
             "      query: \"SELECT * FROM orders WHERE order_id > ${{cursor://orders.state.json|0}}\"\n";
 
-        Assert.Empty(CursorAdvisory.Advise(JobFileParser.ParseContent(filtering), filtering));
+        Assert.Empty(CursorAdvisory.Advise(Parse(filtering), filtering));
     }
 
     /// <summary>
@@ -51,7 +66,7 @@ public class CursorAdvisoryTests
             "  cursor: order_id\n  state: orders.state.json\n  provider-options:\n    sqlite-reader:\n" +
             "      query: \"@incremental.sql\"\n";
 
-        Assert.Empty(CursorAdvisory.Advise(JobFileParser.ParseContent(Tracking), fromFile));
+        Assert.Empty(CursorAdvisory.Advise(Parse(Tracking), fromFile));
     }
 
     [Fact]
@@ -60,7 +75,7 @@ public class CursorAdvisoryTests
         const string plain =
             "main:\n  input: \"csv:orders.csv\"\n  output: \"sqlite:Data Source=out.db\"\n";
 
-        Assert.Empty(CursorAdvisory.Advise(JobFileParser.ParseContent(plain), plain));
+        Assert.Empty(CursorAdvisory.Advise(Parse(plain), plain));
     }
 
     /// <summary>
@@ -73,7 +88,7 @@ public class CursorAdvisoryTests
     [InlineData(new[] { "-i", "sqlite:Data Source=src.db", "--query", "@incremental.sql", "--cursor", "order_id", "-o", "null:" }, false)]
     public void The_Same_Rule_Reads_A_Command_Line(string[] args, bool reported)
     {
-        var advisories = CursorAdvisory.AdviseCommandLine(JobFileParser.ParseContent(Tracking), args);
+        var advisories = CursorAdvisory.AdviseCommandLine(Parse(Tracking), args);
 
         Assert.Equal(reported, advisories.Count == 1);
     }
@@ -85,6 +100,6 @@ public class CursorAdvisoryTests
             "main:\n  input: \"csv:orders.csv\"\n  output: \"sqlite:Data Source=out.db\"\n";
 
         Assert.Empty(CursorAdvisory.AdviseCommandLine(
-            JobFileParser.ParseContent(plain), new[] { "-i", "csv:orders.csv", "-o", "null:" }));
+            Parse(plain), new[] { "-i", "csv:orders.csv", "-o", "null:" }));
     }
 }
