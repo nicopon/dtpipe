@@ -10,6 +10,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.JsonWebTokens;
+using TransportR.Protocol;
 using Xunit;
 
 namespace DtPipe.Coordinator.Server.Tests;
@@ -23,7 +24,7 @@ public sealed class KeyIssuerTests : IDisposable
     private const string PublicUrl = "https://coordinator.test";
     private const string Negotiate = "/node-channel/negotiate?negotiateVersion=1";
     // A route of TransportR's control plane that has no effect without a body: a caller it admits is answered 415, one it does not, 401.
-    private const string ControlPlane = "/api/client/6f1c0d52-8d0b-4a39-9a5e-3f6d1d6a7b10/transfers";
+    private const string ControlPlane = WireRoutes.ClientBase + "/6f1c0d52-8d0b-4a39-9a5e-3f6d1d6a7b10/" + WireRoutes.TransfersSegment;
 
     private static readonly JsonSerializerOptions Web = new(JsonSerializerDefaults.Web);
 

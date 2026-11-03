@@ -6,6 +6,7 @@ using DtPipe.Coordinator.Server.Deployments;
 using DtPipe.Coordinator.Server.Nodes;
 using DtPipe.Jobs.Coordinator;
 using Microsoft.Extensions.DependencyInjection;
+using TransportR.Protocol;
 using Xunit;
 
 namespace DtPipe.Coordinator.Server.Tests;
@@ -71,7 +72,7 @@ public sealed class TrustedIdpTests : IDisposable
     public static TheoryData<string, HttpStatusCode> DataPlane => new()
     {
         { "/node-channel/negotiate?negotiateVersion=1", HttpStatusCode.OK },
-        { "/api/client/6f1c0d52-8d0b-4a39-9a5e-3f6d1d6a7b10/transfers", HttpStatusCode.UnsupportedMediaType },
+        { WireRoutes.ClientBase + "/6f1c0d52-8d0b-4a39-9a5e-3f6d1d6a7b10/" + WireRoutes.TransfersSegment, HttpStatusCode.UnsupportedMediaType },
     };
 
     [Theory]
@@ -91,7 +92,7 @@ public sealed class TrustedIdpTests : IDisposable
     [Fact]
     public async Task A_Persons_Token_Never_Reaches_A_Stream()
     {
-        using var response = await _host.Bearer(CoordinatorHost.Person(CoordinatorHost.Designer)).GetAsync("/api/stream/x/receive", Ct);
+        using var response = await _host.Bearer(CoordinatorHost.Person(CoordinatorHost.Designer)).GetAsync(WireRoutes.StreamBase + "/x/receive", Ct);
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 

@@ -5,14 +5,16 @@ using DtPipe.Coordinator.Server.Access;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using TransportR.Protocol;
 using Xunit;
 
 namespace DtPipe.Coordinator.Server.Tests;
 
 /// <summary>
-/// The server's route table as the framework holds it: each endpoint with its methods, its pattern and what authorizes it, in
-/// literals, so a route that moves, loses a policy or leaves its group changes a line here. The hubs and the routes
-/// TransportR maps are in it: moving to another TransportR can change those lines, which is not a defect of the server. Every
+/// The server's route table as the framework holds it: each endpoint with its methods, its pattern and what authorizes it. The
+/// server's own routes are literals, so a route that moves, loses a policy or leaves its group changes a line here. The routes
+/// TransportR maps are built from <see cref="WireRoutes"/>, so a segment it renames follows the constant and a route it adds
+/// or drops changes a line, which is not a defect of the server. The node channel's hub is in it too. Every
 /// route that changes something answers 403, naming the CSRF header, to a request without it.
 /// </summary>
 public sealed class RouteTableTests
@@ -36,6 +38,14 @@ public sealed class RouteTableTests
             .Order(StringComparer.Ordinal)
             .ToList();
     }
+
+    /// <summary>A control-plane route as the framework holds it: TransportR maps it without the leading slash of <see cref="WireRoutes.ClientBase"/>.</summary>
+    private static string ClientRoute(string method, string tail) =>
+        $"{method} {WireRoutes.ClientBase.TrimStart('/')}/{{clientId:guid}}/{tail} [default]";
+
+    /// <summary>A data-plane route as the framework holds it, likewise without the leading slash of <see cref="WireRoutes.StreamBase"/>.</summary>
+    private static string StreamRoute(string method, string tail) =>
+        $"{method} {WireRoutes.StreamBase.TrimStart('/')}/{{transferId}}/{tail} [default]";
 
     private static readonly string[] Expected = [
         "* /node-channel [default]",
@@ -73,9 +83,9 @@ public sealed class RouteTableTests
         "GET /healthz [none]",
         "GET /livez [none]",
         "GET /service/runs/{id} [launcher]",
-        "GET api/client/{clientId:guid}/events [default]",
-        "GET api/client/{clientId:guid}/receivers [default]",
-        "GET api/stream/{transferId}/receive [default]",
+        ClientRoute("GET", WireRoutes.EventsSegment),
+        ClientRoute("GET", WireRoutes.ReceiversSegment),
+        StreamRoute("GET", "receive"),
         "POST /api/bricks/recognize [reader]",
         "POST /api/bricks/{node}/{id}/preview [reader > designer]",
         "POST /api/bricks/{node}/{id}/sample [reader > designer]",
@@ -91,19 +101,19 @@ public sealed class RouteTableTests
         "POST /api/runs/cancel [reader > designer]",
         "POST /service/runs [launcher]",
         "POST /service/runs/{id}/cancel [launcher]",
-        "POST api/client/{clientId:guid}/presence/{connectionId} [default]",
-        "POST api/client/{clientId:guid}/replies/{requestId:guid} [default]",
-        "POST api/client/{clientId:guid}/transfers [default]",
-        "POST api/client/{clientId:guid}/transfers/{transferId}/heartbeat [default]",
-        "POST api/client/{clientId:guid}/transfers/{transferId}/ping [default]",
-        "POST api/stream/{transferId}/abort [default]",
-        "POST api/stream/{transferId}/send [default]",
+        ClientRoute("POST", $"{WireRoutes.PresenceSegment}/{{connectionId}}"),
+        ClientRoute("POST", $"{WireRoutes.RepliesSegment}/{{requestId:guid}}"),
+        ClientRoute("POST", WireRoutes.TransfersSegment),
+        ClientRoute("POST", $"{WireRoutes.TransfersSegment}/{{transferId}}/{WireRoutes.HeartbeatSegment}"),
+        ClientRoute("POST", $"{WireRoutes.TransfersSegment}/{{transferId}}/{WireRoutes.PingSegment}"),
+        StreamRoute("POST", WireRoutes.AbortSegment),
+        StreamRoute("POST", "send"),
         "PUT /api/library/{id} [reader > designer]",
         "PUT /api/library/{id}/bindings [reader > designer]",
         "PUT /api/library/{id}/cursors/{alias} [reader > designer]",
         "PUT /api/rights/identities/{id} [reader > admin]",
         "PUT /api/rights/matrix [reader > admin]",
-        "PUT api/client/{clientId:guid}/token [default]",
+        ClientRoute("PUT", WireRoutes.TokenSegment),
     ];
 
     [Fact]
@@ -152,7 +162,7 @@ public sealed class RouteTableTests
         var routes = TableOf(host)
             .Select(line => Regex.Match(line, @"^(?<methods>\S+) (?<pattern>/api/\S*) "))
             .Where(m => m.Success && !m.Groups["methods"].Value.Split('+').All(x => x is "GET" or "HEAD"))
-            .Where(m => !m.Groups["pattern"].Value.StartsWith("/api/client") && !m.Groups["pattern"].Value.StartsWith("/api/stream"))
+            .Where(m => !m.Groups["pattern"].Value.StartsWith(WireRoutes.ClientBase) && !m.Groups["pattern"].Value.StartsWith(WireRoutes.StreamBase))
             .ToList();
         Assert.NotEmpty(routes);
         var client = host.Bearer(CoordinatorHost.Person(CoordinatorHost.Admin));
