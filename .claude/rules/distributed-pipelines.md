@@ -39,7 +39,8 @@ packages and stays outside `DtPipe.sln`, so `build.yml` builds only what `src/Dt
 `dist/release/coordinator/` (executable `dtpipe-coordinator`, set by the Host's `AssemblyName`, never by a
 command-line `-p:AssemblyName`) and starts it once, on a throwaway state, until `/livez` answers. It is a
 folder, never a single file: `wwwroot` and the native SQLite library sit beside the executable. Its
-library is a git repository, so the machine it runs on needs `git` on the `PATH`.
+library is a git repository, so the machine it runs on needs `git` on the `PATH`. `release.yml` attaches the same folder to each release as `dtpipe-coordinator-<platform>`
+(`.tar.gz`, `.zip` on Windows) `[unchecked: until a tag runs it]`.
 `DtPipe.Coordinator` and `DtPipe.PipelineNode` are libraries; a host owns `Program`, authentication
 and the address, and an executable of the family is such a host. Nothing else in `src/` names
 TransportR; only the family, its tests and the lab do. The family references `DtPipe.Jobs` and no

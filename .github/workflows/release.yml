@@ -107,6 +107,29 @@ jobs:
           cd ./dist/release
           Compress-Archive -Path dtpipe.exe -DestinationPath ${{ matrix.artifact }}.zip
 
+      # The coordinator is a folder, not a file: its pages and the native SQLite library sit beside the executable. Its
+      # archive holds the folder `coordinator/`, with `dtpipe-coordinator` in it, and needs git on the PATH of the machine
+      # it runs on.
+      - name: Build coordinator
+        shell: bash
+        run: |
+          dotnet publish src/DtPipe.Coordinator.Host/DtPipe.Coordinator.Host.csproj -c Release \
+            -r ${{ matrix.rid }} \
+            --self-contained true \
+            -o ./dist/stage/coordinator
+
+      - name: Archive coordinator (Unix)
+        if: "!contains(matrix.platform, 'windows')"
+        run: |
+          chmod +x ./dist/stage/coordinator/dtpipe-coordinator
+          tar -czf ./dist/release/dtpipe-coordinator-${{ matrix.platform }}.tar.gz -C ./dist/stage coordinator
+
+      - name: Archive coordinator (Windows)
+        if: contains(matrix.platform, 'windows')
+        shell: pwsh
+        run: |
+          Compress-Archive -Path ./dist/stage/coordinator -DestinationPath ./dist/release/dtpipe-coordinator-${{ matrix.platform }}.zip
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:

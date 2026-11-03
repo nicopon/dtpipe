@@ -16,6 +16,11 @@ Every tagged version publishes a self-contained archive per platform:
 | macOS | `dtpipe-macos-x64.tar.gz`, `dtpipe-macos-arm64.tar.gz` |
 | Windows | `dtpipe-windows-x64.exe.zip`, `dtpipe-windows-arm64.exe.zip` |
 
+The coordinator of a [distributed pipeline](guides/distributed-first-pipeline.md) is published
+beside them, as the folder `coordinator/` in `dtpipe-coordinator-<platform>.tar.gz`
+(`linux-x64`, `linux-arm64`, `macos-x64`, `macos-arm64`) or `dtpipe-coordinator-<platform>.zip`
+(`windows-x64`, `windows-arm64`). It needs `git` on the `PATH`.
+
 **Windows (PowerShell)**
 
 ```powershell
