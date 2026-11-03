@@ -12,7 +12,7 @@ namespace DtPipe.PipelineNode.Tests;
 
 /// <summary>
 /// A replica takes the groups its identity holds now with the client's own call, whatever it is doing: the client keeps its
-/// connection and the transfers on it, the hub judges them again against the new groups, and an identity that holds no
+/// id and the transfers it holds, the hub judges them again against the new groups, and an identity that holds no
 /// group is refused without the hub forgetting the groups it had.
 /// </summary>
 public class RefreshRegistrationTests
@@ -114,11 +114,11 @@ public class RefreshRegistrationTests
     }
 
     /// <summary>
-    /// A refresh with transfers open does not restart the client's connection: when the call returns, the hub has judged
+    /// A refresh with transfers open leaves the client registered under its id: when the call returns, the hub has judged
     /// the transfers again, kept the one the new groups still allow and ended the one they do not.
     /// </summary>
     [Fact]
-    public async Task ARefreshWithTransfersOpen_KeepsTheConnection_AndEndsTheTransfersTheNewGroupsRefuse()
+    public async Task ARefreshWithTransfersOpen_KeepsTheAllowedTransfers_AndEndsTheTransfersTheNewGroupsRefuse()
     {
         var (host, rights, jwt) = await StartAsync(o =>
         {
@@ -138,14 +138,12 @@ public class RefreshRegistrationTests
         var store = host.Host.Services.GetRequiredService<IStateStore>();
         var allowedTransfer = await initiator.InitTransferAsync(sender.ClientId, kept.ClientId, batchSize: 8, timeoutMs: 60_000);
         var refusedTransfer = await initiator.InitTransferAsync(sender.ClientId, dropped.ClientId, batchSize: 8, timeoutMs: 60_000);
-        var held = await RegistrationOfAsync(host, sender);
 
         rights.BySubject["sender"] = ["new"];
         await sender.RefreshRegistrationAsync();
 
         var after = await RegistrationOfAsync(host, sender);
         Assert.Equal("new", GroupsOf(after));
-        Assert.Equal(held.ConnectionId, after.ConnectionId);
         Assert.Null(await store.GetSessionAsync(refusedTransfer));
         Assert.NotNull(await store.GetSessionAsync(allowedTransfer));
     }

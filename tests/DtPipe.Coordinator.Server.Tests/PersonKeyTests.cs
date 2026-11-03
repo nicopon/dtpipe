@@ -29,6 +29,8 @@ public sealed partial class PersonKeyTests : IDisposable
 {
     private const string PublicUrl = "https://coordinator.test";
     private const string Negotiate = "/node-channel/negotiate?negotiateVersion=1";
+    // A route of TransportR's control plane that has no effect without a body: a caller it admits is answered 415, one it does not, 401.
+    private const string ControlPlane = "/api/client/6f1c0d52-8d0b-4a39-9a5e-3f6d1d6a7b10/transfers";
 
     private static readonly JsonSerializerOptions Web = new(JsonSerializerDefaults.Web);
 
@@ -255,7 +257,7 @@ public sealed partial class PersonKeyTests : IDisposable
         var token = await TokenAsync(_app, "root-key", await PersonAsync(_app, "root-key", CoordinatorRoles.Admin));
 
         Assert.Equal(HttpStatusCode.Unauthorized, await StatusAsync(_app, token, Negotiate, post: true));
-        Assert.Equal(HttpStatusCode.Unauthorized, await StatusAsync(_app, token, "/hub/command/negotiate?negotiateVersion=1", post: true));
+        Assert.Equal(HttpStatusCode.Unauthorized, await StatusAsync(_app, token, ControlPlane, post: true));
         Assert.Equal(HttpStatusCode.Unauthorized, await StatusAsync(_app, token, "/health/pipelines"));
         Assert.Equal(HttpStatusCode.Unauthorized, await StatusAsync(_app, token, "/service/runs/run-1"));
         var rights = _app.Services.GetRequiredService<RightsStore>();

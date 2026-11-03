@@ -67,19 +67,24 @@ public sealed class TrustedIdpTests : IDisposable
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
-    public static TheoryData<string> DataPlane => ["/node-channel/negotiate?negotiateVersion=1", "/hub/command/negotiate?negotiateVersion=1"];
+    /// <summary>A service is admitted to the node channel (200) and to TransportR's control plane (415: the route has no effect without a body).</summary>
+    public static TheoryData<string, HttpStatusCode> DataPlane => new()
+    {
+        { "/node-channel/negotiate?negotiateVersion=1", HttpStatusCode.OK },
+        { "/api/client/6f1c0d52-8d0b-4a39-9a5e-3f6d1d6a7b10/transfers", HttpStatusCode.UnsupportedMediaType },
+    };
 
     [Theory]
     [MemberData(nameof(DataPlane))]
-    public async Task A_Persons_Token_Never_Reaches_The_Data_Plane_And_A_Services_Does(string path)
+    public async Task A_Persons_Token_Never_Reaches_The_Data_Plane_And_A_Services_Does(string path, HttpStatusCode admitted)
     {
         var person = CoordinatorHost.Person(CoordinatorHost.Designer);
         using (var header = await _host.Bearer(person).PostAsync(path, null, Ct))
             Assert.Equal(HttpStatusCode.Unauthorized, header.StatusCode);
-        using (var query = await _host.Anonymous().PostAsync(path + "&access_token=" + person, null, Ct))
+        using (var query = await _host.Anonymous().PostAsync(path + (path.Contains('?') ? "&" : "?") + "access_token=" + person, null, Ct))
             Assert.Equal(HttpStatusCode.Unauthorized, query.StatusCode);
         using (var service = await _host.Bearer(CoordinatorHost.Service("node-1")).PostAsync(path, null, Ct))
-            Assert.Equal(HttpStatusCode.OK, service.StatusCode);
+            Assert.Equal(admitted, service.StatusCode);
         Assert.Empty(_host.Services.GetRequiredService<EnrollmentQueue>().List());
     }
 

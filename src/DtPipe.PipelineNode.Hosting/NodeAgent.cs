@@ -339,7 +339,7 @@ internal sealed class NodeAgent : BackgroundService
     /// <summary>
     /// The coordinator closes a replica's channel so that it takes its rights again; its TransportR client registered with the
     /// groups it had, and has the hub take the groups of the moment when asked. That is done at once, runs in flight or not: the
-    /// client keeps its connection, and the hub ends the transfers the new groups refuse. A client whose connection is not up
+    /// client keeps its id and its transfers, and the hub ends the transfers the new groups refuse. A client whose connection is not up
     /// registers by itself when it is back, with the groups of that moment, so that refusal is not retried. A hub that refuses
     /// the refresh (<see cref="HubRequestFailedException"/>: the identity holds no group, so nothing is written and the old groups would
     /// stay) has the client dropped. Any other failure is logged and does not end the loop that connects the channel again.

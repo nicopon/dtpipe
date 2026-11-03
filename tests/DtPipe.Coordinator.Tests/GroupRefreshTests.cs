@@ -31,11 +31,11 @@ public class GroupRefreshTests
     private static Task SettleAsync() => Task.Delay(TimeSpan.FromSeconds(2));
 
     /// <summary>
-    /// Refreshing a connected client has the hub take the groups its identity holds then, under the same client id and on
-    /// the connection it already has: nothing restarts, and the call returns once the hub has written them.
+    /// Refreshing a connected client has the hub take the groups its identity holds then, under the same client id: the
+    /// call returns once the hub has written them.
     /// </summary>
     [Fact]
-    public async Task RefreshingTheRegistration_TakesTheGroupsOfTheMoment_OnTheSameConnection()
+    public async Task RefreshingTheRegistration_TakesTheGroupsOfTheMoment_UnderTheSameClientId()
     {
         var (host, rights, token) = await StartAsync();
         await using var _host = host;
@@ -50,8 +50,7 @@ public class GroupRefreshTests
 
         var after = await store.GetClientAsync(client.ClientId);
         Assert.Equal("after", string.Join(",", after!.Groups.Order()));
-        Assert.Equal(before!.ConnectionId, after.ConnectionId);
-        Assert.Equal(before.Subject, after.Subject);
+        Assert.Equal(before!.Subject, after.Subject);
         Assert.Null(after.DisconnectedAtUtc);
     }
 }

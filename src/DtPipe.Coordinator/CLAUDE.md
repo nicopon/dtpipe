@@ -51,7 +51,7 @@ bytes between nodes.
   before `Build()`, is the one the hub uses.
 - **Peers never address each other.** With `AccessOptions.ClientsMayOpenTransfers` at `false`, the hub refuses a
   client's `GetReceiversAsync` and `InitTransferAsync`. Only the coordinator opens a transfer, through
-  `ITransferInitiator`, which the option does not touch. `[CI: PeerToPeerHubFilterTests]`
+  `ITransferInitiator`, which the option does not touch. `[CI: PeerTransferRefusalTests]`
 - **Check a plan before anything opens.** `PlanRegistry.Register` refuses a plan with any edge the
   flow-control matrix forbids, and names every forbidden edge. The same matrix governs runtime
   transfers. `[CI: PlanRegistryTests]`

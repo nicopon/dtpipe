@@ -59,7 +59,13 @@ public sealed class HubNodeLink<THub>(IHubContext<THub> hub, ReplicaRegistry reg
 
 public static class NodeLinkServiceCollectionExtensions
 {
-    /// <summary>Registers <see cref="INodeLink"/> over the hub that serves <see cref="NodeChannel.Path"/>.</summary>
-    public static IServiceCollection AddNodeLink<THub>(this IServiceCollection services) where THub : Hub =>
-        services.AddSingleton<INodeLink, HubNodeLink<THub>>();
+    /// <summary>
+    /// Registers <see cref="INodeLink"/> over the hub that serves <see cref="NodeChannel.Path"/>, and SignalR itself: the
+    /// TransportR hub does not add it, and this is the one registration that needs its services.
+    /// </summary>
+    public static IServiceCollection AddNodeLink<THub>(this IServiceCollection services) where THub : Hub
+    {
+        services.AddSignalR();
+        return services.AddSingleton<INodeLink, HubNodeLink<THub>>();
+    }
 }

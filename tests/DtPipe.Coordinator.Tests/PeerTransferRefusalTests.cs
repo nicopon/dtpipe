@@ -12,7 +12,7 @@ namespace DtPipe.Coordinator.Tests;
 /// <c>AccessOptions.ClientsMayOpenTransfers</c> to <c>false</c>; the coordinator's own path to open a transfer,
 /// <see cref="ITransferInitiator"/>, is not affected by it.
 /// </summary>
-public class PeerToPeerHubFilterTests
+public class PeerTransferRefusalTests
 {
     [Fact]
     public async Task GetReceivers_AskedByAPeer_IsRefused()
@@ -23,7 +23,7 @@ public class PeerToPeerHubFilterTests
         await client.ConnectAsync();
 
         var ex = await Assert.ThrowsAsync<HubRequestFailedException>(() => client.GetReceiversAsync());
-        Assert.Contains("Clients may not open transfers on this hub.", ex.Message);
+        Assert.Contains("The hub refused the request.", ex.Message);
     }
 
     [Fact]
@@ -38,7 +38,7 @@ public class PeerToPeerHubFilterTests
 
         var ex = await Assert.ThrowsAsync<HubRequestFailedException>(
             () => sender.InitTransferAsync(receiver.ClientId, batchSize: 10));
-        Assert.Contains("Clients may not open transfers on this hub.", ex.Message);
+        Assert.Contains("The hub refused the request.", ex.Message);
     }
 
     [Fact]

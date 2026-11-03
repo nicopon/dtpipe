@@ -253,7 +253,7 @@ public sealed class PipelineNode : IAsyncDisposable
 
     /// <summary>
     /// Has the hub take the groups this node's identity holds now, and a fresh token, with the client's own call: the
-    /// client keeps its connection, and the hub judges each transfer again against the new groups, keeps the ones they
+    /// client keeps its id and its transfers, and the hub judges each transfer again against the new groups, keeps the ones they
     /// allow and ends the others. It returns once the hub has written both. It may be made at any time, runs in flight or
     /// not. Refused with an <see cref="InvalidOperationException"/> while the client's connection is not up (a connection
     /// that comes back registers by itself, with the groups of that moment), and with a <c>HubRequestFailedException</c> when the

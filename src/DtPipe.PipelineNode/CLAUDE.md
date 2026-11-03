@@ -62,7 +62,7 @@ stdin/stdout and TransportR. It speaks to no coordinator itself.
   `ChildHasExited` and `DisposeAsync` read `HasExited` only. `[unchecked: neither race is reproducible on demand]`
 - **The client's registration is renewed with the client's own call.** The groups the hub holds for a client
   are those it registered with. `RefreshRegistrationAsync` has the hub take the identity's groups now and a fresh
-  token: the client keeps its connection, and the hub keeps the transfers the new groups allow and ends the others.
+  token: the client keeps its id, and the hub keeps the transfers the new groups allow and ends the others.
   It may be made at any time, runs in flight or not. It is refused with an `InvalidOperationException` while the
   connection is down (a connection that comes back registers by itself), and with a `HubRequestFailedException` for an identity
   that holds no group, which leaves the groups the hub held until the client's next token renewal withdraws them.

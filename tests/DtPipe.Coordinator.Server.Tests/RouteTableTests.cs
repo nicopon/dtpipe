@@ -38,8 +38,6 @@ public sealed class RouteTableTests
     }
 
     private static readonly string[] Expected = [
-        "* /hub/command [default]",
-        "* /hub/command/negotiate [default]",
         "* /node-channel [default]",
         "* /node-channel/negotiate [default]",
         "DELETE /api/deployments/{id} [reader > designer]",
@@ -75,6 +73,8 @@ public sealed class RouteTableTests
         "GET /healthz [none]",
         "GET /livez [none]",
         "GET /service/runs/{id} [launcher]",
+        "GET api/client/{clientId:guid}/events [default]",
+        "GET api/client/{clientId:guid}/receivers [default]",
         "GET api/stream/{transferId}/receive [default]",
         "POST /api/bricks/recognize [reader]",
         "POST /api/bricks/{node}/{id}/preview [reader > designer]",
@@ -91,6 +91,11 @@ public sealed class RouteTableTests
         "POST /api/runs/cancel [reader > designer]",
         "POST /service/runs [launcher]",
         "POST /service/runs/{id}/cancel [launcher]",
+        "POST api/client/{clientId:guid}/presence/{connectionId} [default]",
+        "POST api/client/{clientId:guid}/replies/{requestId:guid} [default]",
+        "POST api/client/{clientId:guid}/transfers [default]",
+        "POST api/client/{clientId:guid}/transfers/{transferId}/heartbeat [default]",
+        "POST api/client/{clientId:guid}/transfers/{transferId}/ping [default]",
         "POST api/stream/{transferId}/abort [default]",
         "POST api/stream/{transferId}/send [default]",
         "PUT /api/library/{id} [reader > designer]",
