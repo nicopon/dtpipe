@@ -18,50 +18,15 @@ public sealed class KeyTokenTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    /// <summary>
-    /// A coordinator listening on <paramref name="url"/>, with its state in SQLite under a fresh directory. With an external provider no
-    /// request here reaches; without one, the deployment gives it its administrator and <paramref name="bootstrap"/>.
-    /// </summary>
-    private sealed class Coordinator(string url, string state, bool provider = true, IReadOnlyDictionary<string, string>? bootstrap = null) : WebApplicationFactory<Program>
-    {
-        protected override void ConfigureWebHost(IWebHostBuilder builder)
-        {
-            if (provider)
-            {
-                builder.UseSetting("Coordinator:Authority", "http://idp.invalid");
-                builder.UseSetting("Coordinator:Ui:ClientSecret", "ui-secret");
-            }
-            else
-            {
-                // The test host hands its settings over as command-line arguments, where a key itself is refused: a file's path is not one.
-                var admin = Path.Combine(state, "admin.key");
-                File.WriteAllText(admin, ClearKey.New("boss").Reveal());
-                builder.UseSetting("Coordinator:Bootstrap:AdminKey", "@" + admin);
-            }
-            foreach (var (key, value) in bootstrap ?? new Dictionary<string, string>()) builder.UseSetting("Coordinator:Bootstrap:" + key, value);
-            builder.UseSetting("Coordinator:StateDirectory", state);
-            builder.UseSetting("Coordinator:Initialize", "true");
-            builder.UseSetting("Coordinator:PublicUrl", url);
-            builder.UseSetting("Coordinator:Auth:AllowHttpKeys", "true");
-        }
-    }
-
-    private static int FreePort()
-    {
-        using var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        return ((IPEndPoint)listener.LocalEndpoint).Port;
-    }
-
     [Fact]
     public async Task A_Node_Exchanges_Its_Key_At_The_Coordinator_With_Its_Ordinary_Token_Client()
     {
-        var port = FreePort();
+        var port = KestrelCoordinator.FreePort();
         var url = $"http://127.0.0.1:{port}";
         var state = Path.Combine(Path.GetTempPath(), "key-token-" + Guid.NewGuid().ToString("N"));
         try
         {
-            using var coordinator = new Coordinator(url, state);
+            using var coordinator = new KestrelCoordinator(url, state);
             coordinator.UseKestrel(port);
             coordinator.StartServer();
             var rights = coordinator.Services.GetRequiredService<RightsStore>();
@@ -85,7 +50,7 @@ public sealed class KeyTokenTests
     [Fact]
     public async Task A_Node_With_No_Authority_Finds_The_Issuer_Of_A_Coordinator_That_Trusts_No_Provider_And_Reads_Its_Key_From_A_File()
     {
-        var port = FreePort();
+        var port = KestrelCoordinator.FreePort();
         var url = $"http://127.0.0.1:{port}";
         var state = Path.Combine(Path.GetTempPath(), "key-token-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(state);
@@ -94,7 +59,7 @@ public sealed class KeyTokenTests
         try
         {
             // The coordinator and the node read the same file, as a deployment's bootstrap service would give it to both.
-            using var coordinator = new Coordinator(url, state, provider: false, new Dictionary<string, string>
+            using var coordinator = new KestrelCoordinator(url, state, provider: false, new Dictionary<string, string>
             {
                 ["Identities:0:Id"] = "runner",
                 ["Identities:0:Groups:0"] = "runners",
