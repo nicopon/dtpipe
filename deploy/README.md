@@ -352,8 +352,13 @@ the sign-in's return address, and the `Secure` flag of the session cookie. It re
 it the request's own scheme and host stand, and behind a TLS proxy the sign-in would send
 `http://` return addresses.
 
-The node channel and the data plane are SignalR: the proxy must pass WebSocket upgrades and keep
-long requests open. A node may also reach the coordinator directly, inside the network.
+The node channel is SignalR: the proxy must pass WebSocket upgrades and keep long requests open.
+TransportR, which carries the data between nodes, is plain HTTP: requests, one server-sent event
+stream per client, and HTTP streams that must not be buffered. Behind nginx, the POST that sends a
+stream wants `proxy_request_buffering off`, `proxy_http_version 1.1` (the default only since
+nginx 1.29.7) and `client_max_body_size 0` (1 MB by default, then a 413). These three come from
+nginx's documentation and have not been tried here. A node may also reach the coordinator
+directly, inside the network.
 
 ## Secrets
 
