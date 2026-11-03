@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# The images of the distributed pipeline's two hosts and of the trial recipe's data node, built from the repository root:
+# The images of the distributed pipeline's two hosts, built from the repository root:
 #
 #   docker build -f deploy/Dockerfile --target coordinator --build-arg SOURCE_REVISION=$(git rev-parse HEAD) .
 #
@@ -15,7 +15,6 @@
 #   coordinator   the coordinator's server, with git (its library is a git repository) and no dtpipe
 #   runner        the official runner: `dtpipe node --runner`, with dtpipe in /usr/local/bin, behind
 #                 deploy/runner-entrypoint.sh, which restricts its traffic first (DTPIPE_EGRESS_ALLOW)
-#   trial-node    the data node of the trial recipe (deploy/compose.trial.yaml): `dtpipe node --job`, not for production
 #   runtime       the base of the coordinator and of with-dtpipe: ASP.NET Core, curl for health checks, the unprivileged user
 #   with-dtpipe   runtime plus the dtpipe binary: the base of the runner, and of any host that runs fragments
 #
@@ -97,9 +96,3 @@ COPY --chmod=755 deploy/runner-entrypoint.sh /usr/local/bin/runner-entrypoint
 ENV DtPipeNode__DtPipe=/usr/local/bin/dtpipe \
     DtPipeNode__StateDirectory=/state
 ENTRYPOINT ["runner-entrypoint"]
-
-# The bricks are the branches of the job file the recipe mounts at /etc/trial-node/bricks.yaml.
-FROM with-dtpipe AS trial-node
-ENV DtPipeNode__DtPipe=/usr/local/bin/dtpipe \
-    DtPipeNode__StateDirectory=/state
-ENTRYPOINT ["dtpipe", "node", "--job", "/etc/trial-node/bricks.yaml"]

@@ -31,8 +31,7 @@ build and nothing to publish. Every link below is a relative link inside this fo
 | Run it in a .NET estate, or call it from .NET code | [dtpipe and .NET](dotnet.md) |
 | Understand an error message | [Troubleshooting](troubleshooting.md) |
 | Run a first distributed pipeline over a database of my own (experimental) | [Your first distributed pipeline](guides/distributed-first-pipeline.md) |
-| Try a distributed pipeline from one command (experimental) | [Try a distributed pipeline](guides/distributed-trial.md) |
-| Design a job as cards in a local page (experimental) | [Try a distributed pipeline](guides/distributed-trial.md#design-a-job-in-the-studio) |
+| Design a job as cards in a local page (experimental) | [Your first distributed pipeline](guides/distributed-first-pipeline.md#open-the-studio) |
 
 ## Connections
 

@@ -351,6 +351,14 @@ OrderId,Country,Product
 2,GU,Chicken
 EOF
 
+# The library the page has a reader write is the one deploy/compose.yaml seeds, byte for byte.
+for name in shop-orders-by-country.yaml shop-orders-by-country.bindings.json; do
+    sed -n "/^cat > library\/$name <<'EOF'\$/,/^EOF\$/p" "$PROJECT_ROOT/docs/guides/distributed-first-pipeline.md" \
+        | sed '1d;$d' > "written_$name"
+    expect_file "the library file $name the page writes is the one deploy/ seeds" "written_$name" \
+        < "$PROJECT_ROOT/deploy/trial/library/$name"
+done
+
 QUERY=$(sed -n 's/^      query: //p' "$PROJECT_ROOT/deploy/trial/library/shop-orders-by-country.yaml")
 "$DTPIPE" -i sqlite:shop.db --query "$QUERY" -o top_countries.csv --no-stats > /dev/null 2>&1
 expect_file "the trial library's example counts orders by country as the page prints" top_countries.csv <<'EOF'

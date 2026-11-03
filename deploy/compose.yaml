@@ -1,14 +1,12 @@
 # The distributed pipeline's trial recipe: a coordinator, which keeps its state in a SQLite file on its volume, and a runner,
 # every identity verified by a key the coordinator issues tokens for. On the first `up`, the one-off `keys` service writes a
 # random key for the first administrator and one for the runner; the coordinator adds both identities from them, and the
-# runner reads its own. Nothing else is in the rights: docs/guides/distributed-first-pipeline.md adds a node in Access. For a
-# recipe that runs in Docker alone, add deploy/compose.trial.yaml.
+# runner reads its own. Nothing else is in the rights: docs/guides/distributed-first-pipeline.md adds a node in Access.
 # NOT FOR PRODUCTION: nothing here is behind TLS, so a key crosses the network in clear at every token request
 # (Coordinator__Auth__AllowHttpKeys, which every page names). See deploy/README.md for what a real deployment provides.
 #
 #   docker compose -f deploy/compose.yaml up --wait
 #   docker compose -f deploy/compose.yaml exec coordinator cat /secrets/admin.key
-#   docker compose -f deploy/compose.yaml -f deploy/compose.trial.yaml up --build --wait
 #
 # DTPIPE_VERSION picks the published images (default: latest); DTPIPE_COORDINATOR_IMAGE and DTPIPE_RUNNER_IMAGE
 # replace them whole, for images built from a checkout.

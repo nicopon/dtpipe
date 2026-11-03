@@ -24,32 +24,14 @@ gives the rights two identities, the first administrator and the runner, and no 
 the nodes in Access, as [Your first distributed
 pipeline](../docs/guides/distributed-first-pipeline.md) shows.
 
-To run everything in Docker, add `deploy/compose.trial.yaml`: it builds a data node from the
-checkout (the first start takes a few minutes), gives it and a scheduler a key, and seeds the flow
-matrix and the pipeline that run on it.
-
-```bash
-docker compose -f deploy/compose.yaml -f deploy/compose.trial.yaml up --build --wait
-```
-
 - **People.** The pages are at <http://coordinator.localtest.me:8080>, and the first
   administrator signs in with the key `docker compose -f deploy/compose.yaml exec coordinator cat
   /secrets/admin.key` prints; nobody else may do anything until they are added in Access. The
   address needs `localtest.me`, a public name that resolves to `127.0.0.1`; without a network that
   resolves it, add `coordinator.localtest.me` to `/etc/hosts`.
-- **A run.** With the second file, the library holds `trial-totals`: a generated source on the data
-  node, summed by the runner, written back to the data node. It runs from the pages, or as a
-  scheduler would: a `launcher-1` token (client `launcher-1`, secret its key,
-  `/secrets/launcher-1.key` in the coordinator's container, from
-  `http://coordinator.localtest.me:8080/connect/token`) posted to `/service/runs` with
-  `{"pipelineId": "trial-totals"}`. The result is in the data node's `/state/totals.csv`. The
-  pipeline is armed first, from its page: launched unarmed, the coordinator answers 409.
-- **Version.** The data node of the second file is built from the checkout you run the recipe in,
-  so run it from the checkout of a tag, with `DTPIPE_VERSION` set to that version without the `v`
-  (`DTPIPE_VERSION=1.11.0`). The first file alone builds nothing.
 - **Local images.** `DTPIPE_VERSION` picks a published version (default `latest`);
   `DTPIPE_COORDINATOR_IMAGE` and `DTPIPE_RUNNER_IMAGE` name any other image, for example one built
-  as [below](#the-images). `SOURCE_REVISION` is handed to the image the second file builds.
+  as [below](#the-images).
 - **`Coordinator__Initialize` stays on.** The recipe is meant to start again after
   `docker compose down -v`; a deployment sets it for the first start only, as
   [below](#the-smallest-coordinator).
@@ -61,16 +43,15 @@ docker compose -f deploy/compose.yaml -f deploy/compose.trial.yaml up --build --
   (`Coordinator__Bootstrap__AdminKey`, `Coordinator__Bootstrap__Identities__<n>__*`), and each node
   as `DtPipeNode__Oidc__ClientSecret`; it finds the coordinator's issuer in the coordinator's
   metadata. `up` again keeps the keys, and `down -v` makes new ones. The coordinator makes no key
-  itself. `Coordinator__Auth__AllowHttpKeys` lets it take a key over HTTP, which the log and
+  itself; outside Docker, `dtpipe keygen <id>` makes the same key.
+  `Coordinator__Auth__AllowHttpKeys` lets it take a key over HTTP, which the log and
   every page then say; a real deployment is reached over HTTPS and sets none of it.
-- **The data node** is `dtpipe node --job`
-  ([REFERENCE.md](../REFERENCE.md#a-node-from-the-cli-dtpipe-node)), the `trial-node` target of
-  `deploy/Dockerfile`: its two bricks are the branches of
-  `deploy/trial/docker-node/node-bricks.yaml`, and the studio titles them by their ids. It is not
-  published. A team whose service is .NET adds a node to it with `AddDtPipeNode`
+- **The data node** is yours: a person declares it with `dtpipe node --job`
+  ([REFERENCE.md](../REFERENCE.md#a-node-from-the-cli-dtpipe-node)) over their own database, and
+  the studio titles its bricks by their ids. A team whose service is .NET adds a node to it with
+  `AddDtPipeNode`
   ([src/DtPipe.PipelineNode.Hosting/CLAUDE.md](../src/DtPipe.PipelineNode.Hosting/CLAUDE.md)). The
-  library of the first file holds `shop-orders-by-country`, which runs on a node named `shop` that a
-  person declares with `dtpipe node`.
+  library of the recipe holds `shop-orders-by-country`, which runs on a node named `shop`.
 
 ## The images
 
@@ -107,8 +88,9 @@ docker build -f deploy/Dockerfile --target runner \
   while the process answers, a standby included. The coordinator image checks `/livez` itself
   (`docker ps` shows `healthy`); an orchestrator's own probes replace that check. The runner has
   no such route and its image no check.
-- Without Docker, `./build.sh` publishes the coordinator as the self-contained folder
-  `dist/release/coordinator/`, and `dist/release/coordinator/dtpipe-coordinator` (`.exe` on Windows)
+- Without Docker, each release attaches the coordinator as the self-contained folder
+  `coordinator/` of `dtpipe-coordinator-<platform>`, and `./build.sh` publishes it as
+  `dist/release/coordinator/`; `dist/release/coordinator/dtpipe-coordinator` (`.exe` on Windows)
   takes the same `Coordinator__*` settings from its environment. The folder is the whole
   coordinator, `wwwroot` and the native SQLite library included: copy it as one. The library is a
   git repository, so `git` must be on the `PATH`, as the image carries it.
@@ -389,7 +371,7 @@ PostgreSQL in CI, SQL Server by hand), of
 real containers, on SQLite: the coordinator ended and started again, and a copy of its state
 directory put back, read back the rights, the library, the armed pipelines, the run journal and a
 session cookie. Checked outside Docker: the recipe's coordinator settings, with keys made by the
-`keys` service's script, take the runner's key and the administrator's and bootstrap the four
-identities of the second file. Not checked: the recipe's containers since the keys (the `keys`
-service under `up --wait`, the volumes it hands over), a real TLS proxy, a Linux Docker host, a
-volume owned by another uid, a SQLite file on a network volume, an https remote with a token.
+`keys` service's script, take the runner's key and the administrator's and bootstrap both
+identities. Not checked: the recipe's containers since the keys (the `keys` service under `up
+--wait`, the volumes it hands over), a real TLS proxy, a Linux Docker host, a volume owned by
+another uid, a SQLite file on a network volume, an https remote with a token.
