@@ -1,3 +1,5 @@
+using System.Buffers.Text;
+using System.Security.Cryptography;
 using System.Text.RegularExpressions;
 
 namespace DtPipe.Jobs.Coordinator;
@@ -63,6 +65,16 @@ public static partial class CoordinatorApi
 
     /// <summary>The length of a key's secret: 256 random bits as base64url, so the client id reads from the end although base64url holds '_'.</summary>
     public const int KeySecretLength = 43;
+
+    private const int KeySecretBytes = 32;
+
+    /// <summary>
+    /// A new key for the identity <paramref name="clientId"/>: <c>dtp_{client id}_{secret}</c>, the secret 256 random bits as
+    /// base64url. The one place a key is made, for the server and for <c>dtpipe keygen</c>. A client id that
+    /// <see cref="ClientIdOfKey"/> would not read back makes a key that opens nothing: the caller checks it with <see cref="IsPipelineId"/>.
+    /// </summary>
+    public static string NewKey(string clientId) =>
+        $"{KeyPrefix}{clientId}_{Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(KeySecretBytes))}";
 
     /// <summary>
     /// The client id an identity key names, or null when <paramref name="key"/> does not have a key's shape. The coordinator finds the

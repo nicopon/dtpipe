@@ -1,4 +1,3 @@
-using System.Buffers.Text;
 using System.Security.Cryptography;
 using System.Text;
 using DtPipe.Jobs.Coordinator;
@@ -53,15 +52,13 @@ public sealed class ClearKey
 {
     public const string Prefix = CoordinatorApi.KeyPrefix;
     public const int SecretLength = CoordinatorApi.KeySecretLength;
-    private const int SecretBytes = 32;
     private const int HintLength = 4;
 
     private readonly string _text;
 
     private ClearKey(string text) => _text = text;
 
-    public static ClearKey New(string clientId) =>
-        new($"{Prefix}{clientId}_{Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(SecretBytes))}");
+    public static ClearKey New(string clientId) => new(CoordinatorApi.NewKey(clientId));
 
     /// <summary>
     /// The key <paramref name="text"/> is, or null when it does not have a key's shape: a client id, then 43 characters of base64url. For a

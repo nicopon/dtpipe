@@ -67,6 +67,7 @@ public class JobService : IRunHost
             new AgentCommand(_serviceProvider),
             new StudioCommand(_serviceProvider),
             new NodeCommand(_serviceProvider),
+            new KeygenCommand(),
         };
 
     /// <param name="branchFailures">Filled with the reason each failing branch stopped, for a caller

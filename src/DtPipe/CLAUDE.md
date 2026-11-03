@@ -139,6 +139,11 @@ only if it reads (`input`) or writes (`output`), never both, never `from`; the a
 token left to the lexer is refused by name and no brick is read, while without `--runner` a node with no brick is refused.
 `[CI: PipelineNode.Tests NodeCommandTests]`
 
+`KeygenCommand` (`dtpipe keygen <id>`) makes a key through `CoordinatorApi.NewKey`, the one place a key is made: the server's `ClearKey.New`
+calls it too, so the shape the coordinator reads and the one the command prints cannot drift. It refuses a client id `ClientIdOfKey`
+would not read back, prints nothing else on stdout, and with `--out` creates the file `CreateNew` with mode 0600, never replacing one.
+`[CI: KeygenCommandTests]`
+
 - **The CLI reaches the node host through one file.** `Cli/Node/NodeHostEntry.cs` is the only source that names
   `DtPipe.PipelineNode.Launcher`; the method that does is `NoInlining`, so the runtime compiles it, and loads the assembly and
   the transport library behind it, when a node starts. Never name the assembly from another file, never from a constructor or

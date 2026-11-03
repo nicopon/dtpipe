@@ -1556,6 +1556,27 @@ file a brick reads by `@file` (a query) stays a reference in its text: give an a
 fragments run in the node's own directory, and know that the file's content is not part of the
 brick's version. The `dtpipe` every fragment runs is the binary that started the node.
 
+#### A key from the CLI (`dtpipe keygen`)
+
+`dtpipe keygen ID` prints a new key for the identity `ID`, in the shape a coordinator reads:
+`dtp_<id>_<43 characters of base64url>`, the secret 256 random bits. `ID` is the identity's client
+id: lowercase letters, digits and `-`, a letter or digit first. The coordinator finds the identity
+by the id the key names and judges the key by its hash alone, so a text of another shape is
+refused, and it never checks how random the secret is: make keys with this command.
+
+The command reaches no coordinator and keeps nothing; the key is the only output. Give it to the
+coordinator (`Coordinator__Bootstrap__AdminKey`, `Coordinator__Bootstrap__Identities__<n>__Key`,
+each as `@file`) and to the host it opens (`--client-secret @file`).
+
+| Option | Description |
+|---|---|
+| `--out FILE` | Write the key to `FILE`, created readable by its owner only, instead of standard output. An existing file is never replaced |
+
+```bash
+dtpipe keygen admin --out admin.key
+dtpipe keygen runner-1 --out runner-1.key
+```
+
 #### Incremental loading in a distributed pipeline
 
 The coordinator keeps the cursor of each branch that writes, since replicas share no disk and a run
