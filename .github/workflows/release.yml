@@ -151,9 +151,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download all artifacts
+      # Only the archives of the build job: the image jobs leave build records (`*.dockerbuild`) that are not zip files, which
+      # a download of every artifact cannot extract.
+      - name: Download the archives
         uses: actions/download-artifact@v4
         with:
+          pattern: dtpipe-*
           path: artifacts
 
       - name: Display structure
