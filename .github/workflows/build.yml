@@ -43,7 +43,9 @@ jobs:
     # tests/scripts/lib/test_connections.sh, so sourcing it is the declaration of that need.
     # A new validator is picked up by adding the file, and excluded by the same line that gives
     # it a connection string. Databases stay local — free runners cannot host Oracle or SQL
-    # Server, and validate_xml.sh writes 2.7 GB.
+    # Server, and validate_xml.sh writes 2.7 GB. A script that tests the images of a checkout
+    # declares it by requiring DTPIPE_RUNNER_IMAGE, and stays local too: it needs a Docker host
+    # that grants NET_ADMIN.
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -70,6 +72,7 @@ jobs:
             # vitals runs the whole battery itself; xml writes 2.7 GB.
             case "$name" in validate_vitals|validate_xml) continue ;; esac
             grep -q 'lib/test_connections.sh' "$f" && continue
+            grep -q 'DTPIPE_RUNNER_IMAGE:?' "$f" && continue
 
             echo "::group::$name"
             if bash "$f"; then echo "PASS $name"; else echo "FAIL $name"; failed+=("$name"); fi
