@@ -12,7 +12,7 @@
 
   <ItemGroup>
     <PackageReference Include="Bogus" Version="35.6.5" />
-    <PackageReference Include="Jint" Version="4.16.4" />
+    <PackageReference Include="Jint" Version="4.17.0" />
   </ItemGroup>
 
   <PropertyGroup>
