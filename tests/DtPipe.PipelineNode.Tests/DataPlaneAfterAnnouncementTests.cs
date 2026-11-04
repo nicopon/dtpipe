@@ -117,6 +117,9 @@ public class DataPlaneAfterAnnouncementTests : IDisposable
             var registry = h.Host.Host.Services.GetRequiredService<ReplicaRegistry>();
             Assert.True(await EventuallyAsync(() => registry.Replicas(Node) is [{ Connected: true, DataPlaneClientId: not null }]),
                 "the replica never announced a data plane client");
+            // The client pushes its token as soon as it connects and the hub reads the groups again for it, the second
+            // resolution: a push served after the groups are withdrawn would end the client's stream itself.
+            Assert.True(await EventuallyAsync(() => h.Rights.Resolutions >= 2), "the client never pushed its first token");
 
             // The identity loses its groups and the coordinator holds the next refusal for longer than a tick of the watch.
             var announced = h.Gate.Announcements;

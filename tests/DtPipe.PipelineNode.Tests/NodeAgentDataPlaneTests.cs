@@ -110,6 +110,9 @@ public class NodeAgentDataPlaneTests : IDisposable
             var first = await AnnouncedClientAsync(registry);
             Assert.Equal("g", GroupsOf(await store.GetClientAsync(first)));
             Assert.Null((await store.GetClientAsync(first))!.DisconnectedAtUtc);
+            // The client pushes its token as soon as it connects and the hub reads the groups again for it, the second
+            // resolution: a push served after the groups are withdrawn would end the client's stream itself.
+            Assert.True(await EventuallyAsync(() => Task.FromResult(rights.Resolutions >= 2)), "the client never pushed its first token");
 
             rights.BySubject[Node] = [];
             registry.Disconnect(Node);
