@@ -26,7 +26,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '10.0.300'
+          dotnet-version: '10.0.403'
 
       # The image has no client to probe itself with: wait for the port, then for the server to take logins.
       - name: Wait for SQL Server
