@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using System.Collections.Generic;
 using Apache.Arrow;
 using Apache.Arrow.Ado;
+using Apache.Arrow.Ado.Consumer;
 using Apache.Arrow.Types;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Infrastructure.Arrow;
@@ -49,6 +50,18 @@ public abstract partial class AdoColumnarReader : IColumnarStreamReader, IBatchS
         clrType = Nullable.GetUnderlyingType(clrType) ?? clrType;
         return ArrowTypeMapper.GetLogicalType(clrType, declared?.Precision, declared?.Scale);
     };
+
+    /// <summary>
+    /// A driver reports a time of day as a <see cref="TimeSpan"/>, which carries no clock meaning of its own.
+    /// A reader announces the column as <see cref="TimeOnly"/> (Time64, microseconds) when the driver's declared
+    /// type name is <c>time</c>, and reads it through <see cref="ReadTimeOfDay"/>.
+    /// </summary>
+    protected static bool IsTimeOfDay(Type? driverType, string? dataTypeName)
+        => driverType == typeof(TimeSpan) && string.Equals(dataTypeName, "time", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>A time-of-day cell as the <see cref="TimeOnly"/> its column announces; a value outside one day is refused by column name.</summary>
+    protected TimeOnly ReadTimeOfDay(int ordinal)
+        => new(Time64Consumer.ToMicroseconds(Reader!.GetFieldValue<TimeSpan>(ordinal), Reader.GetName(ordinal)) * TimeSpan.TicksPerMicrosecond);
 
     /// <summary>
     /// Value of the current row's cell in row mode. A reader whose driver hands back a different

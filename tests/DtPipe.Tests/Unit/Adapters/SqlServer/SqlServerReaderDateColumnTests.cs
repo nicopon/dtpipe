@@ -12,7 +12,8 @@ public class SqlServerReaderDateColumnTests
     [InlineData(typeof(DateTime), "datetime2", typeof(DateTime))]
     [InlineData(typeof(DateTime), "datetime", typeof(DateTime))]
     [InlineData(typeof(DateTime), "smalldatetime", typeof(DateTime))]
-    public void The_Reader_Announces_A_Date_Column_As_A_Date(Type driverType, string dataTypeName, Type expected)
+    [InlineData(typeof(TimeSpan), "time", typeof(TimeOnly))]
+    public void The_Reader_Announces_A_Date_Or_Time_Column_As_One(Type driverType, string dataTypeName, Type expected)
         => Assert.Equal(expected, SqlServerReader.AnnouncedClrType(driverType, dataTypeName));
 
     [Fact]

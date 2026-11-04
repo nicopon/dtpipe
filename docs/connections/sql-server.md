@@ -34,6 +34,8 @@ dtpipe -i "mssql:Server=prod;Database=sales;Integrated Security=true" \
 `--table dbo.Invoices` is the shorthand for `SELECT * FROM [dbo].[Invoices]` — each part of a
 qualified name is quoted the way SQL Server spells it.
 
+A `time` column is read as a time of day, to the microsecond (`23:59:59.123456`).
+
 A stored procedure or any non-`SELECT` statement needs `--unsafe-query`, which says out loud that
 dtpipe can no longer tell whether the source is read-only.
 

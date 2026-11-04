@@ -101,7 +101,8 @@ public class MySqlProviderTests
     [InlineData(typeof(DateTime), MySqlConnector.MySqlDbType.Date, typeof(DateOnly))]
     [InlineData(typeof(DateTime), MySqlConnector.MySqlDbType.DateTime, typeof(DateTime))]
     [InlineData(typeof(DateTime), MySqlConnector.MySqlDbType.Timestamp, typeof(DateTime))]
-    public void The_Reader_Announces_A_Date_Column_As_A_Date(Type driverType, MySqlConnector.MySqlDbType providerType, Type expected)
+    [InlineData(typeof(TimeSpan), MySqlConnector.MySqlDbType.Time, typeof(TimeOnly))]
+    public void The_Reader_Announces_A_Date_Or_Time_Column_As_One(Type driverType, MySqlConnector.MySqlDbType providerType, Type expected)
         => Assert.Equal(expected, MySqlReader.AnnouncedClrType(driverType, providerType));
 
     [Fact]

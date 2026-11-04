@@ -33,7 +33,7 @@ public static class AdoToArrowUtils
 
         if (underlyingType == typeof(TimeSpan) && string.Equals(column.DataTypeName, "TIME", StringComparison.OrdinalIgnoreCase))
         {
-            return new Apache.Arrow.Serialization.Mapping.ArrowTypeResult(new Time32Type(TimeUnit.Millisecond));
+            return new Apache.Arrow.Serialization.Mapping.ArrowTypeResult(new Time64Type(TimeUnit.Microsecond));
         }
 
         // Decimals — use actual precision/scale from schema

@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Data.Common;
 using Apache.Arrow;
 using Apache.Arrow.Types;
@@ -63,6 +64,34 @@ public sealed class Time32Consumer : BaseAdoConsumer<Time32Array.Builder, Time32
             Builder.Append((int)(ts.Ticks / TimeSpan.TicksPerMillisecond));
         else
             Builder.AppendNull();
+    }
+}
+
+/// <summary>
+/// A time of day as microseconds since midnight. The driver's <see cref="TimeSpan"/> is a clock reading only
+/// inside [0, 24h): a value outside it (MySQL <c>TIME</c> reaches 838 hours and may be negative) is an elapsed
+/// time, not a time of day, and is refused by column name rather than written as a wrong hour.
+/// </summary>
+public sealed class Time64Consumer : BaseAdoConsumer<Time64Array.Builder, Time64Array, Time64Type>
+{
+    public Time64Consumer(int columnIndex) : base(columnIndex, new Time64Type(TimeUnit.Microsecond), new Time64Array.Builder(new Time64Type(TimeUnit.Microsecond))) { }
+    protected override void ConsumeValue(DbDataReader reader)
+    {
+        var obj = reader.GetValue(ColumnIndex);
+        if (obj is TimeSpan ts)
+            Builder.Append(ToMicroseconds(ts, reader.GetName(ColumnIndex)));
+        else
+            Builder.AppendNull();
+    }
+
+    /// <summary>Microseconds since midnight; a value outside one day is refused naming <paramref name="columnName"/>.</summary>
+    public static long ToMicroseconds(TimeSpan value, string columnName)
+    {
+        if (value < TimeSpan.Zero || value >= TimeSpan.FromDays(1))
+            throw new InvalidDataException(
+                $"Column '{columnName}' holds {value}, which is not a time of day (0 to 24 hours). " +
+                "Cast the column to text in the query to read it.");
+        return value.Ticks / TimeSpan.TicksPerMicrosecond;
     }
 }
 

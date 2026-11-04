@@ -17,6 +17,7 @@ public sealed class MySqlReader : AdoColumnarReader
 {
     private Func<IArrowType, int, IAdoConsumer>? _consumerFactory;
     private bool[]? _dateColumns;
+    private bool[]? _timeColumns;
 
     public MySqlReader(string connectionString, string query, int queryTimeout = 0)
     {
@@ -55,6 +56,7 @@ public sealed class MySqlReader : AdoColumnarReader
         }
         Columns = columns;
         _dateColumns = columns.Select(c => c.ClrType == typeof(DateOnly)).ToArray();
+        _timeColumns = columns.Select(c => c.ClrType == typeof(TimeOnly)).ToArray();
 
         // Build Arrow schema from PipeColumnInfo via ArrowTypeMapper — guarantees consistency
         Schema = ArrowSchemaFactory.Create(Columns);
@@ -81,18 +83,22 @@ public sealed class MySqlReader : AdoColumnarReader
 
     protected override Func<IArrowType, int, IAdoConsumer>? GetConsumerFactory() => _consumerFactory;
 
-    /// <summary>Row mode reads a DATE column as the <see cref="DateOnly"/> <see cref="AdoColumnarReader.Columns"/> declares.</summary>
+    /// <summary>Row mode reads a DATE or TIME column as the <see cref="DateOnly"/> or <see cref="TimeOnly"/> <see cref="AdoColumnarReader.Columns"/> declares.</summary>
     protected override object? GetCellValue(int ordinal) =>
-        _dateColumns![ordinal] ? Reader!.GetFieldValue<DateOnly>(ordinal) : base.GetCellValue(ordinal);
+        _dateColumns![ordinal] ? Reader!.GetFieldValue<DateOnly>(ordinal)
+        : _timeColumns![ordinal] ? ReadTimeOfDay(ordinal)
+        : base.GetCellValue(ordinal);
 
     /// <summary>
     /// MySqlConnector reports a DATE column as <see cref="DateTime"/>; the column holds a date, and
     /// is announced as one so a DATE copied to a DATE column matches its type. The columnar path
-    /// reads it through the Date32 consumer. Any other driver type is announced as the driver
-    /// reports it.
+    /// reads it through the Date32 consumer. A TIME column is announced as a <see cref="TimeOnly"/>
+    /// likewise. Any other driver type is announced as the driver reports it.
     /// </summary>
     internal static Type AnnouncedClrType(Type? driverType, MySqlDbType providerType)
         => driverType == typeof(DateTime) && providerType is MySqlDbType.Date or MySqlDbType.Newdate
             ? typeof(DateOnly)
-            : driverType ?? typeof(object);
+            : driverType == typeof(TimeSpan) && providerType == MySqlDbType.Time
+                ? typeof(TimeOnly)
+                : driverType ?? typeof(object);
 }

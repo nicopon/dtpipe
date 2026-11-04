@@ -22,6 +22,7 @@ public sealed class SqlServerReader : AdoColumnarReader, IRequiresOptions<SqlSer
     private Func<IArrowType, int, IAdoConsumer>? _consumerFactory;
     private SqlTransaction? _transaction;
     private bool[]? _dateColumns;
+    private bool[]? _timeColumns;
 
     public SqlServerReader(string connectionString, string query, SqlServerReaderOptions options, int queryTimeout = 0)
     {
@@ -78,6 +79,7 @@ public sealed class SqlServerReader : AdoColumnarReader, IRequiresOptions<SqlSer
         }
         Columns = columns;
         _dateColumns = columns.Select(c => c.ClrType == typeof(DateOnly)).ToArray();
+        _timeColumns = columns.Select(c => c.ClrType == typeof(TimeOnly)).ToArray();
 
         // Build Arrow schema from PipeColumnInfo via ArrowTypeMapper — guarantees consistency
         Schema = ArrowSchemaFactory.Create(Columns);
@@ -102,19 +104,24 @@ public sealed class SqlServerReader : AdoColumnarReader, IRequiresOptions<SqlSer
 
     protected override Func<IArrowType, int, IAdoConsumer>? GetConsumerFactory() => _consumerFactory;
 
-    /// <summary>Row mode reads a date column as the <see cref="DateOnly"/> <see cref="AdoColumnarReader.Columns"/> declares.</summary>
+    /// <summary>Row mode reads a date or time column as the <see cref="DateOnly"/> or <see cref="TimeOnly"/> <see cref="AdoColumnarReader.Columns"/> declares.</summary>
     protected override object? GetCellValue(int ordinal) =>
-        _dateColumns![ordinal] ? Reader!.GetFieldValue<DateOnly>(ordinal) : base.GetCellValue(ordinal);
+        _dateColumns![ordinal] ? Reader!.GetFieldValue<DateOnly>(ordinal)
+        : _timeColumns![ordinal] ? ReadTimeOfDay(ordinal)
+        : base.GetCellValue(ordinal);
 
     /// <summary>
     /// SqlClient reports a date column as <see cref="DateTime"/>; the column holds a date, and is
     /// announced as one so a date copied to a date column matches its type. The columnar path reads
-    /// it through the Date32 consumer. Any other driver type is announced as the driver reports it.
+    /// it through the Date32 consumer. A time column is announced as a <see cref="TimeOnly"/> likewise.
+    /// Any other driver type is announced as the driver reports it.
     /// </summary>
     internal static Type AnnouncedClrType(Type? driverType, string? dataTypeName)
         => driverType == typeof(DateTime) && string.Equals(dataTypeName, "date", StringComparison.OrdinalIgnoreCase)
             ? typeof(DateOnly)
-            : driverType ?? typeof(object);
+            : IsTimeOfDay(driverType, dataTypeName)
+                ? typeof(TimeOnly)
+                : driverType ?? typeof(object);
 
     public override async ValueTask DisposeAsync()
     {

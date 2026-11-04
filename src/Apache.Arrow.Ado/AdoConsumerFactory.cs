@@ -40,6 +40,7 @@ public static class AdoConsumerFactory
             TimestampType t => new TimestampConsumer(columnIndex, t),
             DurationType => new DurationConsumer(columnIndex),
             Time32Type => new Time32Consumer(columnIndex),
+            Time64Type => new Time64Consumer(columnIndex),
             Decimal128Type t => new Decimal128Consumer(columnIndex, t),
             Decimal256Type t => new Decimal256Consumer(columnIndex, t),
             _ => throw new NotSupportedException($"No default consumer for Arrow type: {arrowType.Name}")
