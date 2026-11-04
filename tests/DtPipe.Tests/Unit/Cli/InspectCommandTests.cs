@@ -1,4 +1,5 @@
 using System.IO;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using DtPipe.Cli;
 using Microsoft.Extensions.DependencyInjection;
@@ -32,8 +33,10 @@ public class InspectCommandTests
             .Parse(["inspect", "-i", "duck:Data Source=:memory:;Password=not-a-real-secret", "-q", "select 1 as a"])
             .InvokeAsync();
 
+        // A CI environment (GITHUB_ACTIONS) makes the command write styling sequences into the header whatever the test's console asks for.
+        var output = Regex.Replace(text.ToString(), "\u001b\\[[0-9;]*m", "");
         Assert.Equal(0, exit);
-        Assert.DoesNotContain("not-a-real-secret", text.ToString());
-        Assert.Contains("Schema for duck:Data Source=:memory:;Password=***", text.ToString());
+        Assert.DoesNotContain("not-a-real-secret", output);
+        Assert.Contains("Schema for duck:Data Source=:memory:;Password=***", output);
     }
 }
