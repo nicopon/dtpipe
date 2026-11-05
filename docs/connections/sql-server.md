@@ -27,12 +27,16 @@ The keys are the driver's, not dtpipe's, so anything Microsoft.Data.SqlClient ac
 
 ```bash
 dtpipe -i "mssql:Server=prod;Database=sales;Integrated Security=true" \
-  --query "SELECT * FROM dbo.Invoices WHERE Modified >= '2026-01-01'" \
+  --query "SELECT * FROM dbo.Invoices WHERE Modified >= '2026-01-01T00:00:00'" \
   -o invoices.parquet
 ```
 
 `--table dbo.Invoices` is the shorthand for `SELECT * FROM [dbo].[Invoices]` — each part of a
 qualified name is quoted the way SQL Server spells it.
+
+SQL Server reads a bare date literal in your query under the session's language: against a
+`datetime` column, `'2026-01-02'` means 1 February under French, British or German. Write
+`'2026-01-02T00:00:00'`, or use a `datetime2` column, and the language no longer matters.
 
 A `time` column is read as a time of day, to the microsecond (`23:59:59.123456`).
 
