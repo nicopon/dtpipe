@@ -100,7 +100,14 @@ public sealed class Decimal128Consumer : BaseAdoConsumer<Decimal128Array.Builder
     public Decimal128Consumer(int columnIndex, Decimal128Type type) : base(columnIndex, type, new Decimal128Array.Builder(type)) { }
     protected override void ConsumeValue(DbDataReader reader)
     {
-        Builder.Append(reader.GetDecimal(ColumnIndex));
+        try
+        {
+            Builder.Append(reader.GetDecimal(ColumnIndex));
+        }
+        catch (Exception e) when (e is OverflowException or InvalidCastException)
+        {
+            throw new DecimalOutOfRangeException(ColumnIndex, ArrowTypeInstance, e);
+        }
     }
 }
 
@@ -109,6 +116,13 @@ public sealed class Decimal256Consumer : BaseAdoConsumer<Decimal256Array.Builder
     public Decimal256Consumer(int columnIndex, Decimal256Type type) : base(columnIndex, type, new Decimal256Array.Builder(type)) { }
     protected override void ConsumeValue(DbDataReader reader)
     {
-        Builder.Append(reader.GetDecimal(ColumnIndex));
+        try
+        {
+            Builder.Append(reader.GetDecimal(ColumnIndex));
+        }
+        catch (Exception e) when (e is OverflowException or InvalidCastException)
+        {
+            throw new DecimalOutOfRangeException(ColumnIndex, ArrowTypeInstance, e);
+        }
     }
 }

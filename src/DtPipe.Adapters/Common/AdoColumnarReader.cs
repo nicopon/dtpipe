@@ -75,9 +75,24 @@ public abstract partial class AdoColumnarReader : IColumnarStreamReader, IBatchS
         if (Reader is null || Schema is null)
             throw new InvalidOperationException("Call OpenAsync first.");
 
-        await foreach (var batch in AdoToArrow.ReadToArrowBatchesAsync(Reader, Config, GetConsumerFactory(), ct))
+        // No yield inside a try that catches: the enumerator is driven by hand so the refusal below
+        // wraps the read of a batch and never the consumer of the stream.
+        await using var batches = AdoToArrow.ReadToArrowBatchesAsync(Reader, Config, GetConsumerFactory(), ct)
+            .GetAsyncEnumerator(ct);
+        while (true)
         {
-            yield return batch;
+            bool hasBatch;
+            try
+            {
+                hasBatch = await batches.MoveNextAsync();
+            }
+            catch (DecimalOutOfRangeException fault)
+            {
+                throw UnfitDecimalAdvice.Refuse(fault, Schema);
+            }
+
+            if (!hasBatch) yield break;
+            yield return batches.Current;
         }
     }
 
