@@ -48,9 +48,9 @@ own PRIMARY KEY or UNIQUE indexes. There is no `ON CONFLICT (…)` to name a tar
 | `DateTimeOffset` | `DATETIME(6)` | **the offset is not preserved** — MySQL has no offset-carrying type |
 | `string` | `LONGTEXT`, or `VARCHAR(255)` in a key | `LONGTEXT` cannot be indexed without a prefix length |
 
-A `TIME` column is read as a time of day, to the microsecond. MySQL lets a `TIME` run to 838 hours or
-below zero; that is an elapsed time, not a time of day, and the read stops naming the column. Cast it
-to text in the query to read it.
+A `TIME` column is read as a time of day, to the microsecond. MySQL lets a `TIME` run to 838 hours
+or below zero; that is an elapsed time, not a time of day, and the read stops naming the column.
+Cast it to text in the query to read it.
 
 ---
 
