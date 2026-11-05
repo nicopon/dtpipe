@@ -164,6 +164,14 @@ public static class ArrowTypeMap
     /// <summary>
     /// Constructs a field directly from a logical type mapping result, injecting appropriate metadata.
     /// </summary>
+    /// <summary>A type as a person reads it: a decimal with its width, any other by its Arrow name.</summary>
+    public static string Spell(IArrowType type) => type switch
+    {
+        Decimal128Type d => $"decimal({d.Precision}, {d.Scale})",
+        Decimal256Type d => $"decimal({d.Precision}, {d.Scale})",
+        _ => type.Name
+    };
+
     public static Field GetField(string name, ArrowTypeResult logicalType, bool isNullable = true)
     {
         return new Field(name, logicalType.ArrowType, isNullable,

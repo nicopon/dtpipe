@@ -330,20 +330,40 @@ public sealed class PipelineExecutor
 
         var buffer = new List<IReadOnlyList<object?>>(batchSize);
         long bufferBytes = 0;
+        long firstRecord = 1;
         await foreach (var row in rows.WithCancellation(ct))
         {
             buffer.Add(row);
             if (maxBatchBytes > 0) bufferBytes += EstimateRowBytes(row);
             if (buffer.Count >= batchSize || (maxBatchBytes > 0 && bufferBytes >= maxBatchBytes))
             {
-                yield return ArrowRowConverter.ToRecordBatch(schema, buffer, buffer.Count);
+                yield return RowsToBatch(schema, buffer, firstRecord);
+                firstRecord += buffer.Count;
                 buffer.Clear();
                 bufferBytes = 0;
             }
         }
         if (buffer.Count > 0)
         {
-            yield return ArrowRowConverter.ToRecordBatch(schema, buffer, buffer.Count);
+            yield return RowsToBatch(schema, buffer, firstRecord);
+        }
+    }
+
+    /// <summary>
+    /// The buffered rows as a batch. A row step carries a value its column's Arrow type cannot take as far
+    /// as this: a text reader has no such limit, and a transformer can compute one.
+    /// </summary>
+    private static RecordBatch RowsToBatch(Schema schema, List<IReadOnlyList<object?>> rows, long firstRecord)
+    {
+        try
+        {
+            return ArrowRowConverter.ToRecordBatch(schema, rows, rows.Count, firstRecord);
+        }
+        catch (Apache.Arrow.Serialization.ArrowValueException fault)
+        {
+            throw ColumnValueRefusedException.Unfit(
+                fault, schema, $"Record {fault.Record}",
+                "Keep it as text: declare the column 'string', or cast it in the source query.");
         }
     }
 

@@ -30,6 +30,11 @@ public static class SchemaDiscoveryHelper
             {
                 target[kvp.Key] = Detach(kvp.Value);
             }
+            // A number past a double's digits decides the column, wherever it stands in the sample.
+            else if (existing is double && kvp.Value is decimal)
+            {
+                target[kvp.Key] = kvp.Value;
+            }
             // Heterogeneous promotion: Scalar vs Dictionary
             else if (existing is not Dictionary<string, object?> && kvp.Value is Dictionary<string, object?> sourceDictPromo)
             {

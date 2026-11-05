@@ -1,6 +1,7 @@
 using System;
 using System.Data.Common;
 using Apache.Arrow;
+using Apache.Arrow.Serialization;
 using Apache.Arrow.Types;
 
 namespace Apache.Arrow.Ado;
@@ -40,11 +41,22 @@ internal sealed class CompositeAdoConsumer : IDisposable
         }
     }
 
-    public void ConsumeRow(DbDataReader reader)
+    /// <param name="reader">The reader, on the row to consume.</param>
+    /// <param name="record">One-based position of the row, for the fault of a value that does not fit.</param>
+    public void ConsumeRow(DbDataReader reader, long record)
     {
-        for (int i = 0; i < _consumers.Length; i++)
+        int i = 0;
+        try
         {
-            _consumers[i].Consume(reader);
+            for (; i < _consumers.Length; i++)
+            {
+                _consumers[i].Consume(reader);
+            }
+        }
+        catch (Exception fault) when (ArrowValueException.IsValueFault(fault))
+        {
+            var field = _schema.GetFieldByIndex(i);
+            throw new ArrowValueException(field.Name, field.DataType, fault.GetType().Name, record);
         }
     }
 

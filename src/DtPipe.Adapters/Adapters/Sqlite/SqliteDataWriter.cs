@@ -14,6 +14,8 @@ namespace DtPipe.Adapters.Sqlite;
 
 public sealed class SqliteDataWriter : BaseSqlDataWriter, IColumnTypeGate
 {
+    private long _recordsWritten;
+
     /// <summary>
     /// SQLite's INTEGER is a signed 64-bit value, so an unsigned 64-bit column is refused. A date and a
     /// time of day are written as the ISO text SQLite's date functions read.
@@ -149,8 +151,15 @@ public sealed class SqliteDataWriter : BaseSqlDataWriter, IColumnTypeGate
 
             foreach (var row in rows)
             {
+                _recordsWritten++;
                 for (int i = 0; i < _columns.Count; i++)
                 {
+                    // SQLite stores a NaN as NULL, with no error of its own.
+                    if (row[i] is double.NaN or float.NaN)
+                        throw new ColumnValueRefusedException(
+                            $"Record {_recordsWritten}", _columns[i].Name, row[i]!.GetType().Name.ToLowerInvariant(),
+                            "holds NaN, which SQLite stores as NULL",
+                            "Filter the value out, or read the column as text: declare it 'string', or cast it in the source query.");
                     cmd.Parameters[i].Value = ToBindValue(CompositeCellJson.RenderIfComposite(row[i])) ?? DBNull.Value;
                 }
                 await cmd.ExecuteNonQueryAsync(ct);
@@ -158,7 +167,7 @@ public sealed class SqliteDataWriter : BaseSqlDataWriter, IColumnTypeGate
 
             await transaction.CommitAsync(ct);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not ColumnValueRefusedException)
         {
             var analysis = await BatchFailureAnalyzer.AnalyzeAsync(this, rows, _columns!, ct);
             if (!string.IsNullOrEmpty(analysis))

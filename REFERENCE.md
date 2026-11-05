@@ -290,6 +290,11 @@ A `datetime` column is a wall clock and a `datetimeoffset` column an instant. On
 text with an offset under `datetime` reads as its UTC value, and a text with no offset under
 `datetimeoffset` reads as UTC.
 
+A `decimal`, `double` or `float` column reads a text with `.` as its decimal point and no group
+separator: `1,5` and `1,000` are refused, so a file written with `--csv-decimal-separator ,` reads
+back only as `string`. A number past the range of a `double` or a `float` is refused too; the
+spelled-out `NaN` and `Infinity` read as what they say.
+
 | Type | Accepted spellings |
 |:---|:---|
 | `string` | `string`, `str`, `text` |
@@ -449,6 +454,30 @@ Write each expression in the query where the column is selected.
 ```
 
 `--dry-run` refuses in the same words.
+
+### Values a type cannot hold
+
+A column's type can be readable and one of its values not. That value **stops the run with code 1**,
+naming where it stands, the column, its type and the way out. Nothing replaces it, and the refusal
+never quotes it:
+
+```
+Record 12: column 'valid_to' (timestamp) holds infinity, which no date or time type here can hold. Select it as: valid_to::text AS valid_to
+```
+
+| Value | Where | Way out |
+|:---|:---|:---|
+| `infinity` or `-infinity` under `date`, `timestamp`, `timestamptz`, in an array too; a year outside 1 to 9999 | `pg:` reader | `col::text` |
+| `NaN` or more digits than a `decimal` holds under `numeric`; a `text[]` of two dimensions | `pg:` reader | `col::text` |
+| A decimal past the width it reads under | The database readers | A cast in the source query |
+| A value past the width of its Arrow type, on the way to a columnar step or writer | Any reader | A cast in the source query, or a `string` column |
+| A text that does not read as the declared or inferred type: `1,5` under `decimal`, or more digits than a `decimal` holds | `csv:`, `jsonl:`, `xml:` | Correct the cell, or a `string` column |
+| A value of another kind than its `list` or `struct` column | `jsonl:` | A `string` column, which keeps its JSON text |
+| `NaN`, `Infinity`, `-Infinity`: JSON has no number for them | `jsonl:` writer | Filter it out, or read the column as text |
+| `NaN`: SQLite stores it as NULL | `sqlite:` writer | Filter it out, or read the column as text |
+
+In a sample that holds a scalar beside an object, the column is a `struct` with a `_value` field,
+and the scalar is that field's value: it is read, not refused.
 
 ### Schema modes
 

@@ -66,6 +66,11 @@ that names no known type is refused rather than silently ignored — the vocabul
 (`0` disables it); each reader's default is its own — see
 [REFERENCE.md](../../REFERENCE.md#source-reader-options).
 
+A typed number takes `.` as its decimal point and no group separator: `1,5` is refused, never read
+as 15. A cell that does not read under its type stops the run naming its line and its column; a
+`string` column keeps the text. See
+[Values a type cannot hold](../../REFERENCE.md#values-a-type-cannot-hold).
+
 ## Nested and repeated values
 
 A list or a nested object keeps its shape wherever the target has one — a Parquet `LIST`, an Arrow

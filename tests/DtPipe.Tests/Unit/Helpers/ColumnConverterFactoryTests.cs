@@ -40,6 +40,20 @@ public class ColumnConverterFactoryTests
     }
 
     [Theory]
+    [InlineData(typeof(decimal), "1,5")]
+    [InlineData(typeof(decimal), "1,000")]
+    [InlineData(typeof(double), "1,5")]
+    [InlineData(typeof(float), "1,5")]
+    [InlineData(typeof(double), "1e400")]
+    [InlineData(typeof(float), "1e50")]
+    public void A_Number_With_A_Comma_Or_Past_The_Range_Is_Refused(Type target, string text)
+    {
+        var convert = ColumnConverterFactory.Build(typeof(string), target, "n");
+
+        Assert.Throws<InvalidOperationException>(() => convert(text));
+    }
+
+    [Theory]
     [InlineData(typeof(int), "42")]
     [InlineData(typeof(long), "42")]
     [InlineData(typeof(short), "42")]

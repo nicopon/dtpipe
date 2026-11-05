@@ -78,7 +78,8 @@ internal class DynamicStructTypeAccessor : ArrowSerializer.StructTypeAccessorBas
             }
             else
             {
-                return;
+                // Appending nothing would leave the struct's children shorter than the struct.
+                throw new InvalidCastException($"A value of type {value.GetType().Name} is not a struct.");
             }
         }
 
@@ -89,7 +90,18 @@ internal class DynamicStructTypeAccessor : ArrowSerializer.StructTypeAccessorBas
             var key = entry.Key.ToString()!;
             if (_fieldMapping.TryGetValue(key, out int index))
             {
-                ChildAccessors[index].Append(entry.Value, builders[index]);
+                try
+                {
+                    ChildAccessors[index].Append(entry.Value, builders[index]);
+                }
+                catch (ArrowValueException fault)
+                {
+                    throw fault.Under(key);
+                }
+                catch (Exception fault) when (ArrowValueException.IsValueFault(fault))
+                {
+                    throw new ArrowValueException(key, _structType.Fields[index].DataType, fault.GetType().Name);
+                }
                 processedIndices.Add(index);
             }
             else

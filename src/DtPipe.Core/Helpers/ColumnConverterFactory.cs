@@ -68,17 +68,17 @@ public static class ColumnConverterFactory
 
         if (target == typeof(double))
             return v => v is not string { Length: > 0 } s ? DBNull.Value
-                : double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var r) ? r
+                : TextNumber.TryReadDouble(s, out var r) ? r
                 : Unreadable(columnName, target);
 
         if (target == typeof(float))
             return v => v is not string { Length: > 0 } s ? DBNull.Value
-                : float.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var r) ? r
+                : TextNumber.TryReadFloat(s, out var r) ? r
                 : Unreadable(columnName, target);
 
         if (target == typeof(decimal))
             return v => v is not string { Length: > 0 } s ? DBNull.Value
-                : decimal.TryParse(s, NumberStyles.Number, CultureInfo.InvariantCulture, out var r) ? r
+                : TextNumber.TryReadDecimal(s, out var r) ? r
                 : Unreadable(columnName, target);
 
         if (target == typeof(bool))

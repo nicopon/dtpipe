@@ -9,6 +9,7 @@ using System.Collections.Generic;
 using Apache.Arrow;
 using Apache.Arrow.Ado;
 using Apache.Arrow.Ado.Consumer;
+using Apache.Arrow.Serialization;
 using Apache.Arrow.Types;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Infrastructure.Arrow;
@@ -86,9 +87,10 @@ public abstract partial class AdoColumnarReader : IColumnarStreamReader, IBatchS
             {
                 hasBatch = await batches.MoveNextAsync();
             }
-            catch (DecimalOutOfRangeException fault)
+            catch (ArrowValueException fault)
             {
-                throw UnfitDecimalAdvice.Refuse(fault, Schema);
+                var ordinal = Schema.GetFieldIndex(fault.Column);
+                throw AdoValueRefusal.Of(Schema.GetFieldByIndex(ordinal), Reader.GetDataTypeName(ordinal), fault.Record, fault);
             }
 
             if (!hasBatch) yield break;
@@ -105,14 +107,11 @@ public abstract partial class AdoColumnarReader : IColumnarStreamReader, IBatchS
         var columnCount = Reader.FieldCount;
         var batch = new object?[batchSize][];
         var index = 0;
+        long record = 0;
 
         while (await Reader.ReadAsync(ct))
         {
-            var row = new object?[columnCount];
-            for (var i = 0; i < columnCount; i++)
-                row[i] = Reader.IsDBNull(i) ? null : GetCellValue(i);
-
-            batch[index++] = row;
+            batch[index++] = ReadRow(columnCount, ++record);
 
             if (index >= batchSize)
             {
@@ -124,6 +123,26 @@ public abstract partial class AdoColumnarReader : IColumnarStreamReader, IBatchS
 
         if (index > 0)
             yield return new ReadOnlyMemory<object?[]>(batch, 0, index);
+    }
+
+    /// <summary>The current row; a value the driver cannot hand over is refused by its column.</summary>
+    private object?[] ReadRow(int columnCount, long record)
+    {
+        var row = new object?[columnCount];
+        var i = 0;
+        try
+        {
+            for (; i < columnCount; i++)
+                row[i] = Reader!.IsDBNull(i) ? null : GetCellValue(i);
+        }
+        catch (Exception fault) when (ArrowValueException.IsValueFault(fault))
+        {
+            // Schema is null for a reader that builds none on open; the name and the driver's type remain.
+            var field = Schema?.GetFieldByIndex(i)
+                ?? new Field(Reader!.GetName(i), StringType.Default, true);
+            throw AdoValueRefusal.Of(field, Reader!.GetDataTypeName(i), record, inner: null);
+        }
+        return row;
     }
 
     protected virtual Func<IArrowType, int, IAdoConsumer>? GetConsumerFactory() => null;

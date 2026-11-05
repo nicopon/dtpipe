@@ -82,13 +82,13 @@ internal static class XmlTypeInferrer
             return static s => long.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v) ? v : TypedTextCell.Unreadable;
 
         if (clrType == typeof(double))
-            return static s => double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : TypedTextCell.Unreadable;
+            return static s => TextNumber.TryReadDouble(s, out var v) ? v : TypedTextCell.Unreadable;
 
         if (clrType == typeof(float))
-            return static s => float.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : TypedTextCell.Unreadable;
+            return static s => TextNumber.TryReadFloat(s, out var v) ? v : TypedTextCell.Unreadable;
 
         if (clrType == typeof(decimal))
-            return static s => decimal.TryParse(s, NumberStyles.Number, CultureInfo.InvariantCulture, out var v) ? v : TypedTextCell.Unreadable;
+            return static s => TextNumber.TryReadDecimal(s, out var v) ? v : TypedTextCell.Unreadable;
 
         if (clrType == typeof(bool))
             return static s =>
@@ -102,6 +102,12 @@ internal static class XmlTypeInferrer
 
         if (clrType == typeof(DateTimeOffset))
             return TypedTextCell.ReadDateTimeOffset;
+
+        if (clrType == typeof(DateOnly))
+            return TypedTextCell.ReadDate;
+
+        if (clrType == typeof(TimeOnly))
+            return TypedTextCell.ReadTime;
 
         // A string column, or a type no parser reads: the cell stays text.
         return null;
@@ -119,18 +125,18 @@ internal static class XmlTypeInferrer
             return samples.All(s => int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out _)) ? "int32" : "int64";
         }
 
-        if (allMatch(s => decimal.TryParse(s, NumberStyles.Number, CultureInfo.InvariantCulture, out _) && s.Contains('.')))
+        if (allMatch(s => TextNumber.HasDecimalForm(s, out _) && s.Contains('.')))
         {
             bool needsDecimalPrecision = samples.Any(s =>
             {
-                if (!decimal.TryParse(s, NumberStyles.Number, CultureInfo.InvariantCulture, out var d)) return false;
-                if (!double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var dbl)) return true;
-                return d != (decimal)dbl;
+                if (!TextNumber.HasDecimalForm(s, out var d)) return false;
+                if (!TextNumber.TryReadDouble(s, out var dbl)) return true;
+                return !TextNumber.DoubleKeepsDigits(d, dbl);
             });
             return needsDecimalPrecision ? "decimal" : "double";
         }
 
-        if (allMatch(s => double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out _))) return "double";
+        if (allMatch(s => TextNumber.TryReadDouble(s, out _))) return "double";
 
         if (allMatch(s => bool.TryParse(s, out _) || s.ToLowerInvariant() is "0" or "1" or "yes" or "no" or "true" or "false")) return "bool";
 

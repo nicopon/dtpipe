@@ -84,6 +84,8 @@ public class ParquetStreamReader : IColumnarStreamReader
             {
                 case DataField dataField:
                     {
+                        if (!ArrowTypeMap.TryGetLogicalType(LogicalClrType(dataField), out _))
+                            throw Unreadable(dataField.Name, $"of type {LogicalClrType(dataField).Name}");
                         var (precision, scale) = DeclaredDecimal(dataField);
                         columns.Add(new PipeColumnInfo(
                             dataField.Name, LogicalClrType(dataField), dataField.IsNullable,
@@ -92,6 +94,8 @@ public class ParquetStreamReader : IColumnarStreamReader
                     }
 
                 case ListField listField:
+                    if (ListItemReadError(listField) is { } itemError)
+                        throw Unreadable(listField.Name, itemError);
                     columns.Add(new PipeColumnInfo(listField.Name, ListClrType(listField), IsNullable: true));
                     break;
 
@@ -270,6 +274,37 @@ public class ParquetStreamReader : IColumnarStreamReader
     /// The CLR type standing for a list column: an array of the item type, made nullable when the
     /// item is, so a NULL element keeps its slot instead of collapsing to the type's default.
     /// </summary>
+    private static NotSupportedException Unreadable(string column, string what) => new(
+        $"Parquet column '{column}' is {what}, which this reader cannot read. " +
+        "Read it through DuckDB instead, for example with --sql over read_parquet.");
+
+    // The element types ReadListColumnAsync has a typed read for. A list of text is out because Parquet.Net
+    // carries repetition levels only through the value-type overloads, the same limit that makes the writer
+    // refuse that shape, so the two halves never disagree on it.
+    private static readonly HashSet<Type> ListItems =
+    [
+        typeof(bool), typeof(short), typeof(int), typeof(long), typeof(float), typeof(double), typeof(decimal),
+        typeof(DateTime), typeof(DateTimeOffset), typeof(DateOnly),
+    ];
+
+    /// <summary>What a list column holds when the reader cannot read its elements; null when it can.</summary>
+    private static string? ListItemReadError(ListField list)
+    {
+        if (list.Item is not DataField item)
+        {
+            return list.Item switch
+            {
+                StructField => "a list of structs",
+                ListField => "a list of lists",
+                MapField => "a list of maps",
+                _ => "a list of nested values"
+            };
+        }
+
+        var element = LogicalClrType(item);
+        return ListItems.Contains(element) ? null : $"a list of {(element == typeof(string) ? "text" : element.Name)}";
+    }
+
     private static Type ListClrType(ListField list)
     {
         var item = (DataField)list.Item;
@@ -312,15 +347,8 @@ public class ParquetStreamReader : IColumnarStreamReader
             var t when t == typeof(DateTimeOffset) => MapListAsync<DateTime, DateTimeOffset>(rowGroupReader, item, rowCount, TemporalNormalization.ToOffset, ct),
             var t when t == typeof(DateOnly) => ReadTypedListAsync<DateOnly>(rowGroupReader, item, rowCount, ct),
 
-            // Parquet.Net carries repetition levels only through the value-type overloads, which is
-            // the same limit that makes the writer refuse a list of text — so the two halves refuse
-            // the same shape rather than one writing what the other cannot read.
-            var t when t == typeof(string) => throw new NotSupportedException(
-                $"Parquet column '{item.Path}': lists of text are not supported yet. " +
-                "Read it through DuckDB instead, for example with --sql over read_parquet."),
-
-            var t => throw new NotSupportedException(
-                $"Parquet column '{item.Path}': a list of {t.Name} is not supported."),
+            // OpenAsync refuses every element type outside ListItems.
+            var t => throw new NotSupportedException($"No list read for the element type {t.Name}."),
         };
     }
 

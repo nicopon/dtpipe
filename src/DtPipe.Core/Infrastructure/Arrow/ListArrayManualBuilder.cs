@@ -24,12 +24,16 @@ internal class ListArrayManualBuilder : IArrowArrayBuilder
 
     public void AppendValue(object? value)
     {
-        if (value == null || value is not System.Collections.IEnumerable enumerable)
+        if (value == null)
         {
             AppendNull();
         }
         else
         {
+            // A text is a sequence of chars to .NET: read as one, "x" would write the list [120].
+            if (value is string or not System.Collections.IEnumerable)
+                throw new InvalidCastException($"A value of type {value.GetType().Name} is not a list.");
+            var enumerable = (System.Collections.IEnumerable)value;
             int count = 0;
             foreach (var item in enumerable)
             {

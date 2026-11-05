@@ -110,9 +110,18 @@ public static class ArrowSerializer
             // Step 3: Create pre-dimensionioned builders
             var topLevelBuilders = rootAccessor.CreateChildBuilders(allocator, globalEstimates);
 
+            long record = 0;
             foreach (var item in list)
             {
-                rootAccessor.AppendChildren(item!, topLevelBuilders);
+                record++;
+                try
+                {
+                    rootAccessor.AppendChildren(item!, topLevelBuilders);
+                }
+                catch (ArrowValueException fault)
+                {
+                    throw fault.AtRecord(record);
+                }
             }
 
             var arrays = new List<IArrowArray>();
@@ -669,9 +678,9 @@ public static class ArrowSerializer
 
         public override void CollectCapacity(object? value, CapacityInfo info)
         {
-            if (value == null) return;
+            // A value that is no sequence is refused where it is appended.
+            if (value is not IEnumerable enumerable || value is string) return;
             info.Count++;
-            var enumerable = (IEnumerable)value;
             var elementInfo = GetOrAddChildInfo(info, "_items");
             foreach (var item in enumerable)
             {
@@ -786,6 +795,8 @@ public static class ArrowSerializer
             if (value == null) { AppendNull(); }
             else
             {
+                // A text is a sequence of chars to .NET: read as one, "x" would write the list [120].
+                if (value is string) throw new InvalidCastException("A text is not a list.");
                 var enumerable = (IEnumerable)value;
                 int count = 0;
                 foreach (var item in enumerable)

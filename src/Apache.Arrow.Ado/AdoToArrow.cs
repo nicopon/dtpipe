@@ -33,6 +33,7 @@ public static class AdoToArrow
         var schema = AdoToArrowUtils.CreateSchema(reader, config);
         long maxBatchBytes = config.MaxBatchBytes;
         int rowsInBuffer = 0;
+        long record = 0;
         CompositeAdoConsumer? compositeConsumer = null;
 
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
@@ -40,7 +41,7 @@ public static class AdoToArrow
             if (compositeConsumer == null)
                 compositeConsumer = new CompositeAdoConsumer(reader, schema, consumerFactory);
 
-            compositeConsumer.ConsumeRow(reader);
+            compositeConsumer.ConsumeRow(reader, ++record);
             rowsInBuffer++;
 
             if (rowsInBuffer >= config.TargetBatchSize
@@ -74,6 +75,7 @@ public static class AdoToArrow
         long maxBatchBytes = config.MaxBatchBytes;
 
         int rowsInBuffer = 0;
+        long record = 0;
         CompositeAdoConsumer? compositeConsumer = null;
 
         while (reader.Read())
@@ -81,7 +83,7 @@ public static class AdoToArrow
             if (compositeConsumer == null)
                 compositeConsumer = new CompositeAdoConsumer(reader, schema, consumerFactory);
 
-            compositeConsumer.ConsumeRow(reader);
+            compositeConsumer.ConsumeRow(reader, ++record);
             rowsInBuffer++;
 
             if (rowsInBuffer >= config.TargetBatchSize

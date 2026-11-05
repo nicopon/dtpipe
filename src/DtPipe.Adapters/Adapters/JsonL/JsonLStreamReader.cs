@@ -7,6 +7,7 @@ using Apache.Arrow.Types;
 using Apache.Arrow.Serialization.Mapping;
 using DtPipe.Adapters.Common;
 using DtPipe.Core.Abstractions;
+using DtPipe.Core.Helpers;
 using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Core.Models;
 using Microsoft.Extensions.Logging;
@@ -134,10 +135,13 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
             .ToList();
         UpdateTextColumns();
         var typed = new Dictionary<string, TypedColumn>(StringComparer.OrdinalIgnoreCase);
-        foreach (var column in Columns)
+        for (var i = 0; i < Columns.Count; i++)
         {
+            var column = Columns[i];
             if (JsonLTypedValue.BuildReader(column.ClrType) is { } read)
                 typed[column.Name] = new TypedColumn(column.Name, column.ClrType, read);
+            else if (JsonLNestedReader.Of(arrowSchema.FieldsList[i].DataType) is { } nested)
+                typed[column.Name] = new TypedColumn(column.Name, column.ClrType, nested.Read, nested);
         }
         _typedColumns = typed.Count > 0 ? typed : null;
         _logger.LogInformation("JsonLStreamReader: Schema loaded from JSON ({Count} fields). Path: {Path}",
@@ -217,7 +221,9 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
         {
             var (type, arrowType) = InferTypes(kvp.Key, kvp.Value);
             columns.Add(new PipeColumnInfo(kvp.Key, type, true));
-            fields.Add(new Field(kvp.Key, arrowType, true));
+            fields.Add(type == typeof(decimal)
+                ? ArrowTypeMap.GetField(kvp.Key, ArrowTypeMap.DefaultDecimal)
+                : new Field(kvp.Key, arrowType, true));
             if (JsonLTypedValue.BuildReader(type) is { } read)
                 typed[kvp.Key] = new TypedColumn(kvp.Key, type, read);
             else if (JsonLNestedReader.Of(arrowType) is { } nested)
@@ -435,6 +441,7 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
         {
             long => (typeof(long), Int64Type.Default),
             double => (typeof(double), DoubleType.Default),
+            decimal => (typeof(decimal), ArrowTypeMap.DefaultDecimalType),
             bool => (typeof(bool), BooleanType.Default),
             Dictionary<string, object?> d => (typeof(object), InferStructType(d)),
             List<object?> l => (typeof(object), InferListType(l)),
@@ -482,14 +489,26 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
 
             if (batch.Count >= batchSize)
             {
-                yield return await Apache.Arrow.Serialization.ArrowSerializer.SerializeAsync(batch, Schema);
+                yield return await SerializeAsync(batch, number - batch.Count + 1);
                 batch.Clear();
             }
         }
 
         if (batch.Count > 0)
         {
-            yield return await Apache.Arrow.Serialization.ArrowSerializer.SerializeAsync(batch, Schema);
+            yield return await SerializeAsync(batch, number - batch.Count + 1);
+        }
+    }
+
+    private async Task<RecordBatch> SerializeAsync(List<Dictionary<string, object?>> batch, long firstRecord)
+    {
+        try
+        {
+            return await Apache.Arrow.Serialization.ArrowSerializer.SerializeAsync(batch, Schema!);
+        }
+        catch (Apache.Arrow.Serialization.ArrowValueException fault)
+        {
+            throw TypedTextCell.Unfit(fault, Schema!, "JSONL", firstRecord);
         }
     }
 
@@ -625,22 +644,25 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
         var where = string.IsNullOrEmpty(_options.Path) ? $"JSONL line {_position}" : $"JSONL record {_position}";
         if (column.Nested != null && column.Nested.FirstUnreadable(value, column.Name) is { } at)
         {
-            var leafHint = DtPipe.Core.Helpers.TypeHelper.HintFor(at.Type) ?? at.Type.Name;
-            throw new InvalidOperationException(
-                $"{where}: field '{at.Path}' was inferred as {leafHint} from the first {_options.MaxSample} record(s), " +
-                $"and its value does not read as {leafHint}. Declare column '{column.Name}' with '--column-types' " +
-                "('string' keeps its JSON text), or raise '--max-sample' so the sample reaches values of the other kind.");
+            throw new ColumnValueRefusedException(
+                where, at.Path,
+                _typesInferred ? $"inferred as {at.Expected} from the first {_options.MaxSample} record(s)" : $"declared {at.Expected} by the schema",
+                $"holds a value that does not read as {at.Expected}",
+                _typesInferred
+                    ? $"Declare column '{column.Name}' with '--column-types' ('string' keeps its JSON text), or raise " +
+                      "'--max-sample' so the sample reaches values of the other kind."
+                    : $"Correct the record, or declare column '{column.Name}' 'string' in the schema, which keeps its JSON text.");
         }
 
         if (!_typesInferred)
             TypedTextCell.Refuse(where, column.Name, column.Type, sampledRows: null);
 
-        // The value is not quoted: a refused cell can hold anything the source holds.
         var hint = DtPipe.Core.Helpers.TypeHelper.HintFor(column.Type) ?? column.Type.Name;
-        throw new InvalidOperationException(
-            $"{where}: column '{column.Name}' was inferred as {hint} from the first {_options.MaxSample} record(s), " +
-            $"and its value does not read as {hint}. Declare the column's type with '--column-types' " +
-            "('string' keeps the value as text), or raise '--max-sample' so the sample reaches values of the other kind.");
+        throw new ColumnValueRefusedException(
+            where, column.Name, $"inferred as {hint} from the first {_options.MaxSample} record(s)",
+            $"holds a value that does not read as {hint}",
+            "Declare the column's type with '--column-types' ('string' keeps the value as text), or raise " +
+            "'--max-sample' so the sample reaches values of the other kind.");
     }
 
     internal static object? ToValue(JsonElement element, bool isTextColumn = false)
@@ -658,10 +680,7 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
         return element.ValueKind switch
         {
             JsonValueKind.String => element.GetString(),
-            // Prefer int64 over double to avoid precision loss for large integer values (> 2^53).
-            JsonValueKind.Number => element.TryGetInt64(out var l) ? (object?)l
-                                  : element.TryGetDouble(out var d) ? d
-                                  : element.GetRawText(),
+            JsonValueKind.Number => ToNumber(element),
             JsonValueKind.True => true,
             JsonValueKind.False => false,
             JsonValueKind.Object => element.EnumerateObject().ToDictionary(p => p.Name, p => ToValue(p.Value)),
@@ -669,6 +688,21 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
             JsonValueKind.Null => null,
             _ => element.GetRawText()
         };
+    }
+
+    /// <summary>
+    /// A JSON number under the narrowest type that keeps its digits: an int64, then a double, and a decimal
+    /// for one a double would round.
+    /// </summary>
+    private static object ToNumber(JsonElement element)
+    {
+        if (element.TryGetInt64(out var integer)) return integer;
+
+        var isDouble = element.TryGetDouble(out var approximate);
+        if (element.TryGetDecimal(out var exact) && (!isDouble || !TextNumber.DoubleRoundTrips(exact, approximate)))
+            return exact;
+
+        return isDouble ? approximate : element.GetRawText();
     }
 
     // ── Type hint helpers ─────────────────────────────────────────────────────

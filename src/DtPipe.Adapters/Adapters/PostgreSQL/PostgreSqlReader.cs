@@ -79,6 +79,7 @@ public sealed partial class PostgreSqlReader : IColumnarStreamReader, IBatchSize
             )).ToList();
 
             _plans = plans.Select(p => p!.Value).ToArray();
+            _sourceTypes = dbColumns.Select(c => c.DataTypeName).ToArray();
         }
 
         // Build Arrow schema from PipeColumnInfo via ArrowTypeMapper — guarantees consistency
@@ -92,6 +93,7 @@ public sealed partial class PostgreSqlReader : IColumnarStreamReader, IBatchSize
     private readonly record struct ColumnPlan(Type ClrType, NpgsqlTypes.NpgsqlDbType Builder, NpgsqlTypes.NpgsqlDbType? DecodeAs);
 
     private ColumnPlan[] _plans = [];
+    private string[] _sourceTypes = [];
 
     // The scalar types read natively, by the type Npgsql reports. Closed: a type absent here is
     // refused, never read through a fallback that turns its binary form into text.
@@ -190,6 +192,7 @@ public sealed partial class PostgreSqlReader : IColumnarStreamReader, IBatchSize
 
         int targetBatchSize = BatchSize;
         long maxBatchBytes = MaxBatchBytes;
+        long record = 0;
 
         // Fixed part of a row's size, from the Arrow schema; variable-width columns add their
         // payload per value through the AddBytes callback below (see the dual bound in the inner loop).
@@ -216,10 +219,7 @@ public sealed partial class PostgreSqlReader : IColumnarStreamReader, IBatchSize
                     break;
                 }
 
-                for (int i = 0; i < Columns.Count; i++)
-                {
-                    readers[i].Read(exporter);
-                }
+                ReadRow(exporter, readers, ++record);
                 rowsInBuffer++;
                 batchBytes += fixedBytesPerRow;
 
@@ -242,6 +242,37 @@ public sealed partial class PostgreSqlReader : IColumnarStreamReader, IBatchSize
             if (streamEnded)
                 break;
         }
+    }
+
+    /// <summary>
+    /// One row off the export. A value that cannot be read is refused by its column: a driver's message
+    /// names neither the column nor a way out, and can quote the value.
+    /// </summary>
+    private void ReadRow(NpgsqlBinaryExporter exporter, (Action<NpgsqlBinaryExporter> Read, Func<IArrowArray> Build)[] readers, long record)
+    {
+        int i = 0;
+        try
+        {
+            for (; i < readers.Length; i++)
+                readers[i].Read(exporter);
+        }
+        catch (PostgresTemporal.UnreadableValue fault)
+        {
+            throw RefuseValue(i, record, fault.Message);
+        }
+        catch (Exception fault) when (Apache.Arrow.Serialization.ArrowValueException.IsValueFault(fault))
+        {
+            var type = Apache.Arrow.Serialization.Mapping.ArrowTypeMap.Spell(Schema!.FieldsList[i].DataType);
+            throw RefuseValue(i, record, $"holds a value that does not fit {type}");
+        }
+    }
+
+    private ColumnValueRefusedException RefuseValue(int column, long record, string problem)
+    {
+        var name = Columns![column].Name;
+        var quoted = QuoteIfNeeded(name);
+        return new ColumnValueRefusedException(
+            $"Record {record}", name, _sourceTypes[column], problem, $"Select it as: {quoted}::text AS {quoted}");
     }
 
     public async IAsyncEnumerable<ReadOnlyMemory<object?[]>> ReadBatchesAsync(
@@ -339,21 +370,21 @@ public sealed partial class PostgreSqlReader : IColumnarStreamReader, IBatchSize
                 b => b.Build()),
 
             NpgsqlTypes.NpgsqlDbType.Date => arrowType is Date64Type
-                ? BuildTyped(new Date64Array.Builder(), (e, b) => { if (e.IsNull) { e.Skip(); b.AppendNull(); } else b.Append(e.Read<DateOnly>().ToDateTime(TimeOnly.MinValue)); }, b => b.Build())
-                : BuildTyped(new Date32Array.Builder(), (e, b) => { if (e.IsNull) { e.Skip(); b.AppendNull(); } else b.Append(e.Read<DateOnly>().ToDateTime(TimeOnly.MinValue)); }, b => b.Build()),
+                ? BuildTyped(new Date64Array.Builder(), (e, b) => { if (e.IsNull) { e.Skip(); b.AppendNull(); } else b.Append(PostgresTemporal.Date(e.Read<int>(NpgsqlTypes.NpgsqlDbType.Date)).ToDateTime(TimeOnly.MinValue)); }, b => b.Build())
+                : BuildTyped(new Date32Array.Builder(), (e, b) => { if (e.IsNull) { e.Skip(); b.AppendNull(); } else b.Append(PostgresTemporal.Date(e.Read<int>(NpgsqlTypes.NpgsqlDbType.Date)).ToDateTime(TimeOnly.MinValue)); }, b => b.Build()),
 
             NpgsqlTypes.NpgsqlDbType.Timestamp => BuildTyped(
                 new TimestampArray.Builder((TimestampType)arrowType),
-                // Npgsql's binary export returns Kind=Unspecified; a raw Append would resolve it
+                // Kind=Unspecified, as PostgresTemporal builds it; a raw Append would resolve it
                 // against the local zone.
-                (e, b) => { if (e.IsNull) { e.Skip(); b.AppendNull(); } else b.Append(Apache.Arrow.Serialization.Mapping.TemporalNormalization.ToOffset(e.Read<DateTime>())); },
+                (e, b) => { if (e.IsNull) { e.Skip(); b.AppendNull(); } else b.Append(Apache.Arrow.Serialization.Mapping.TemporalNormalization.ToOffset(PostgresTemporal.Timestamp(e.Read<long>(NpgsqlTypes.NpgsqlDbType.Timestamp)))); },
                 b => b.Build()),
 
             NpgsqlTypes.NpgsqlDbType.TimestampTz => BuildTyped(
                 new TimestampArray.Builder((TimestampType)arrowType),
-                // timestamptz too: the binary export returns the UTC wall clock with no Kind, so
-                // it needs the same normalization as a zone-less column.
-                (e, b) => { if (e.IsNull) { e.Skip(); b.AppendNull(); } else b.Append(Apache.Arrow.Serialization.Mapping.TemporalNormalization.ToOffset(e.Read<DateTime>())); },
+                // timestamptz too: its binary form is the UTC wall clock, so it needs the same
+                // normalization as a zone-less column.
+                (e, b) => { if (e.IsNull) { e.Skip(); b.AppendNull(); } else b.Append(Apache.Arrow.Serialization.Mapping.TemporalNormalization.ToOffset(PostgresTemporal.Timestamp(e.Read<long>(NpgsqlTypes.NpgsqlDbType.TimestampTz)))); },
                 b => b.Build()),
 
             NpgsqlTypes.NpgsqlDbType.Time => BuildTyped(
@@ -393,8 +424,9 @@ public sealed partial class PostgreSqlReader : IColumnarStreamReader, IBatchSize
             StringType => reportedType is { } arrayType
                 ? e => e.Read<string?[]>(arrayType)
                 : e => e.Read<string?[]>(),
-            TimestampType => e => e.Read<DateTime?[]>(),
-            Date32Type => e => e.Read<DateOnly?[]>(),
+            // Off the binary form, as a scalar is: infinity has no element of its own among dates.
+            TimestampType => e => PostgresTemporal.Timestamps(e.Read<long?[]>(reportedType!.Value)),
+            Date32Type => e => PostgresTemporal.Dates(e.Read<int?[]>(reportedType!.Value)),
             _ => throw new NotSupportedException(
                 $"Postgres array of {listType.ValueDataType.Name} is not supported. " +
                 "Cast the column in your query, for example with array_to_json(col)::text.")

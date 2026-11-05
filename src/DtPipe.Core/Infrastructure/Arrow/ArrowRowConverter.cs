@@ -1,4 +1,5 @@
 using Apache.Arrow;
+using Apache.Arrow.Serialization;
 using DtPipe.Core.Models;
 using System.Collections.Generic;
 using System.Linq;
@@ -14,17 +15,36 @@ public static class ArrowRowConverter
     /// <summary>
     /// Creates a RecordBatch from a collection of rows.
     /// </summary>
-    public static RecordBatch ToRecordBatch(Schema schema, IEnumerable<IReadOnlyList<object?>> rows, int count)
+    /// <param name="schema">The batch's schema.</param>
+    /// <param name="rows">The rows, in order.</param>
+    /// <param name="count">How many rows there are.</param>
+    /// <param name="firstRecord">
+    /// One-based position of the first row in the stream, for the fault of a value a column cannot take;
+    /// null when the caller does not count them.
+    /// </param>
+    public static RecordBatch ToRecordBatch(
+        Schema schema, IEnumerable<IReadOnlyList<object?>> rows, int count, long? firstRecord = null)
     {
         var builders = schema.FieldsList.Select(f => ArrowTypeMapper.CreateBuilder(f.DataType)).ToList();
         var appenders = builders.Select(ArrowTypeMapper.ResolveAppender).ToArray();
 
-        foreach (var row in rows)
+        long position = 0;
+        int i = 0;
+        try
         {
-            for (int i = 0; i < appenders.Length; i++)
+            foreach (var row in rows)
             {
-                appenders[i](row[i]);
+                for (i = 0; i < appenders.Length; i++)
+                {
+                    appenders[i](row[i]);
+                }
+                position++;
             }
+        }
+        catch (Exception fault) when (ArrowValueException.IsValueFault(fault))
+        {
+            var field = schema.GetFieldByIndex(i);
+            throw new ArrowValueException(field.Name, field.DataType, fault.GetType().Name, firstRecord + position);
         }
 
         return BuildBatch(schema, builders, count);

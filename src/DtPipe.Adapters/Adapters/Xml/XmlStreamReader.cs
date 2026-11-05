@@ -360,6 +360,22 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
     private List<Dictionary<string, object?>>? _stdinBuffer;
     private Dictionary<string, object?>? _mergedSchemaDict;
 
+    private long _recordsSerialized;
+
+    private async Task<RecordBatch> SerializeAsync(List<Dictionary<string, object?>> batch)
+    {
+        try
+        {
+            var serialized = await Apache.Arrow.Serialization.ArrowSerializer.SerializeAsync(batch, Schema!);
+            _recordsSerialized += batch.Count;
+            return serialized;
+        }
+        catch (Apache.Arrow.Serialization.ArrowValueException fault)
+        {
+            throw TypedTextCell.Unfit(fault, Schema!, "XML", _recordsSerialized + 1);
+        }
+    }
+
     public async IAsyncEnumerable<RecordBatch> ReadRecordBatchesAsync(
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
@@ -374,7 +390,7 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
                 batch.Add(buffered);
                 if (batch.Count >= batchSize)
                 {
-                    yield return await Apache.Arrow.Serialization.ArrowSerializer.SerializeAsync(batch, Schema!);
+                    yield return await SerializeAsync(batch);
                     batch.Clear();
                 }
             }
@@ -388,14 +404,14 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 
             if (batch.Count >= batchSize)
             {
-                yield return await Apache.Arrow.Serialization.ArrowSerializer.SerializeAsync(batch, Schema!);
+                yield return await SerializeAsync(batch);
                 batch.Clear();
             }
         }
 
         if (batch.Count > 0)
         {
-            yield return await Apache.Arrow.Serialization.ArrowSerializer.SerializeAsync(batch, Schema!);
+            yield return await SerializeAsync(batch);
         }
     }
 

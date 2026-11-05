@@ -42,7 +42,6 @@ public sealed class WriteConformanceTests : IDisposable
         public static implicit operator Cell(string expected) => new(expected);
     }
 
-    private static Cell L2(string expected) => new(expected, "L2");
     private static Cell L3(string expected) => new(expected, "L3");
     private static Cell L4(string expected) => new(expected, "L4");
 
@@ -80,8 +79,8 @@ public sealed class WriteConformanceTests : IDisposable
         new("halffloat", L3("refused"), L3("refused"), L3("refused"), "halffloat | 2 rows", L3("refused"), L3("refused"), L3("refused")),
         new("float", "1.5", "1.5", "FLOAT | 1.5", "float | Single:1.5", "FLOAT | 1.5", "real | 1.5", "ok"),
         new("double", "1.5", "1.5", "DOUBLE | 1.5", "double | Double:1.5", "DOUBLE | 1.5", "real | 1.5", "ok"),
-        new("double-nan", "NaN", L2("named"), "DOUBLE | nan", "double | Double:NaN", "DOUBLE | nan", L2("named"), "ok"),
-        new("double-inf", "Infinity", L2("named"), "DOUBLE | inf", "double | Double:Infinity", "DOUBLE | inf", "real | Inf", "ok"),
+        new("double-nan", "NaN", "named", "DOUBLE | nan", "double | Double:NaN", "DOUBLE | nan", "named", "ok"),
+        new("double-inf", "Infinity", "named", "DOUBLE | inf", "double | Double:Infinity", "DOUBLE | inf", "real | Inf", "ok"),
         new("decimal32", "4.29", "4.29", L4("DECIMAL(9,2) | 4.29"), "decimal32 | Decimal:4.29", L4("DECIMAL(9,2) | 4.29"), "real | 4.29", "ok"),
         new("decimal64", "4.29", "4.29", L4("DECIMAL(18,2) | 4.29"), "decimal64 | Decimal:4.29", L4("DECIMAL(18,2) | 4.29"), "real | 4.29", "ok"),
         new("decimal128(10,2)", "4.29", "4.29", "DECIMAL(10,2) | 4.29", "decimal128 | Decimal:4.29", "DECIMAL(10,2) | 4.29", "real | 4.29", "ok"),
@@ -209,6 +208,31 @@ public sealed class WriteConformanceTests : IDisposable
         var cell = row?.For(writer) ?? "accepted";
 
         Judge(cell, WriteOutcome.GateVerdict(writer, ArrowTypeCases.Named(name).Field));
+    }
+
+    /// <summary>A text reader carries a value that fits a decimal and not the column's Arrow width.</summary>
+    [Theory]
+    [InlineData("parquet")]
+    [InlineData("arrow")]
+    public async Task A_Value_The_Column_Cannot_Take_Is_Named_On_The_Way_To_A_Columnar_Writer(string writer)
+    {
+        var source = Path.Combine(_dir, Guid.NewGuid().ToString("N") + ".csv");
+        File.WriteAllText(source, "id,v\n1,4.29\n2,0.0000000000000000000001\n");
+        var target = Path.Combine(_dir, Guid.NewGuid().ToString("N") + "." + writer);
+
+        var (stdout, stderr) = (Console.Out, Console.Error);
+        var captured = new StringWriter();
+        Console.SetOut(captured);
+        Console.SetError(captured);
+        int exit;
+        try { exit = await Program.Main(["-i", source, "--column-types", "id:int32,v:decimal", "-o", $"{writer}:{target}", "--no-stats"]); }
+        finally { Console.SetOut(stdout); Console.SetError(stderr); }
+
+        var text = Regex.Replace(captured.ToString(), @"\s+", " ");
+        Assert.Equal(1, exit);
+        Assert.Contains("Record 2: column 'v'", text);
+        Assert.Contains("declare the column 'string'", text);
+        Assert.DoesNotContain("0.0000000000000000000001", text);
     }
 
     [Fact]

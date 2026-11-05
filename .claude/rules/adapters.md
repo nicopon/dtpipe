@@ -59,6 +59,21 @@ to correct (`ParquetStreamReader.WallClock`), and a text is read through
 `TemporalNormalization.TryParseWallClock` or `TryParseInstant`.
 `[CI: ReadConformanceTests]` `[local: validate_temporal.sh]`
 
+## A value a type cannot hold
+
+**A value a reader or a writer cannot carry stops the run with `ColumnValueRefusedException`: where it
+stands, the column, its type as the source spells it and the way out, never the value.** It never
+reaches a person as a driver's or a builder's message, and no reader replaces it with another value.
+The standalone Arrow libraries raise `ArrowValueException`, which the reader that called them turns
+into that refusal. A text reads as a fractional number through `TextNumber`, for every text reader and
+for the writers' converter: `NumberStyles.Number` alone reads `1,5` as 15.
+
+**Never set `Npgsql.DisableDateTimeInfinityConversions`**: it is an `AppContext` value of the process,
+and these adapters are libraries. `PostgresTemporal` reads a temporal value off its binary form, which
+is what tells `-infinity` from a real `0001-01-01`.
+`[CI: ReadConformanceTests, WriteConformanceTests, PostgresTemporalTests]`
+`[local: validate_type_conformance.sh]` `[unchecked: a new read path that lets a driver's fault through]`
+
 ## Adding an adapter
 
 Full patterns: `EXTENDING.md`.

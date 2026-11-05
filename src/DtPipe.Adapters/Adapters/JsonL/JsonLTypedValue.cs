@@ -1,7 +1,7 @@
-using System.Globalization;
 using System.Text.Json;
 using DtPipe.Adapters.Common;
 using DtPipe.Adapters.Xml;
+using DtPipe.Core.Helpers;
 
 namespace DtPipe.Adapters.JsonL;
 
@@ -28,27 +28,26 @@ internal static class JsonLTypedValue
             return Of(static e => Integral(e, long.MinValue, long.MaxValue) ?? TypedTextCell.Unreadable,
                 XmlTypeInferrer.BuildParser(typeof(long))!);
 
-        // The text of a double or a float takes a thousands separator ("1,000" reads as 1000) and the
-        // spelled-out NaN and Infinity; a number too large for the type is refused, never read as ±∞.
+        // A JSON number too large for the type is refused, never read as ±∞; its text follows TextNumber.
         if (clrType == typeof(double))
             return Of(static e => e.TryGetDouble(out var v) && double.IsFinite(v) ? v : TypedTextCell.Unreadable,
-                static s => double.TryParse(s, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out var v)
-                    && !(double.IsInfinity(v) && Overflowed(s)) ? v : TypedTextCell.Unreadable);
+                XmlTypeInferrer.BuildParser(typeof(double))!);
 
         if (clrType == typeof(float))
             return Of(static e => e.TryGetSingle(out var v) && float.IsFinite(v) ? v : TypedTextCell.Unreadable,
-                static s => float.TryParse(s, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out var v)
-                    && !(float.IsInfinity(v) && Overflowed(s)) ? v : TypedTextCell.Unreadable);
+                XmlTypeInferrer.BuildParser(typeof(float))!);
 
-        // Off the JSON text, never through a double, which keeps 15 digits of a decimal's 28.
+        // Off the JSON text, never through a double, which keeps 15 digits of a decimal's 28. TryGetDecimal
+        // rounds past a decimal's own digits, which is a value lost like any other.
         if (clrType == typeof(decimal))
-            return Of(static e => e.TryGetDecimal(out var v) ? v : TypedTextCell.Unreadable,
+            return Of(static e => e.TryGetDecimal(out var v) && TextNumber.KeepsDigits(e.GetRawText(), v) ? v : TypedTextCell.Unreadable,
                 XmlTypeInferrer.BuildParser(typeof(decimal))!);
 
         if (clrType == typeof(bool))
             return Of(null, XmlTypeInferrer.BuildParser(typeof(bool))!, readsBoolean: true);
 
-        if (clrType == typeof(DateTime) || clrType == typeof(DateTimeOffset) || clrType == typeof(Guid))
+        if (clrType == typeof(DateTime) || clrType == typeof(DateTimeOffset) || clrType == typeof(DateOnly)
+            || clrType == typeof(TimeOnly) || clrType == typeof(Guid))
             return Of(null, XmlTypeInferrer.BuildParser(clrType)!);
 
         return null;
@@ -65,12 +64,6 @@ internal static class JsonLTypedValue
             JsonValueKind.False when readsBoolean => false,
             _ => TypedTextCell.Unreadable
         };
-
-    /// <summary>
-    /// Whether a text that parsed to ±∞ wrote a number past the type's range rather than the infinity
-    /// symbol: the symbol holds no digit.
-    /// </summary>
-    private static bool Overflowed(string text) => text.AsSpan().IndexOfAnyInRange('0', '9') >= 0;
 
     /// <summary>
     /// The integer a JSON number is, written <c>2</c>, <c>2.0</c> or <c>2e0</c>, when it lies within

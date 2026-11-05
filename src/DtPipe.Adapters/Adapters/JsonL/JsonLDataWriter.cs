@@ -18,6 +18,7 @@ public sealed class JsonLDataWriter : IRowDataWriter, IRequiresOptions<JsonLWrit
     private RecyclableMemoryStream? _memoryStream;
     private IReadOnlyList<PipeColumnInfo>? _columns;
     private int _rowsInBuffer;
+    private long _recordsWritten;
     private const int FlushThreshold = 1000;
 
     public JsonLDataWriter(string outputPath) : this(outputPath, new JsonLWriterOptions())
@@ -125,6 +126,7 @@ public sealed class JsonLDataWriter : IRowDataWriter, IRequiresOptions<JsonLWrit
 
         foreach (var row in rows)
         {
+            _recordsWritten++;
             using (var writer = new Utf8JsonWriter((Stream)_memoryStream, jsonOptions))
             {
                 writer.WriteStartObject();
@@ -134,7 +136,7 @@ public sealed class JsonLDataWriter : IRowDataWriter, IRequiresOptions<JsonLWrit
                     var val = row[i];
 
                     writer.WritePropertyName(col.Name);
-                    WriteValue(writer, val);
+                    WriteValue(writer, val, col.Name);
                 }
                 writer.WriteEndObject();
                 writer.Flush();
@@ -149,7 +151,10 @@ public sealed class JsonLDataWriter : IRowDataWriter, IRequiresOptions<JsonLWrit
         }
     }
 
-    private void WriteValue(Utf8JsonWriter writer, object? val)
+    /// <param name="writer">The JSON being written.</param>
+    /// <param name="val">The value, or an element of one.</param>
+    /// <param name="column">The column the value belongs to, for a refusal.</param>
+    private void WriteValue(Utf8JsonWriter writer, object? val, string column)
     {
         if (val == null)
         {
@@ -172,9 +177,15 @@ public sealed class JsonLDataWriter : IRowDataWriter, IRequiresOptions<JsonLWrit
             // A JSON number has no width; the writer has no overload past 64 bits, so the digits go raw.
             case Int128 i128: writer.WriteRawValue(i128.ToString(System.Globalization.CultureInfo.InvariantCulture)); break;
             case UInt128 u128: writer.WriteRawValue(u128.ToString(System.Globalization.CultureInfo.InvariantCulture)); break;
-            case double d: writer.WriteNumberValue(d); break;
+            case double d:
+                if (!double.IsFinite(d)) RefuseNonFinite(column, "double", d.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                writer.WriteNumberValue(d);
+                break;
             case decimal dec: writer.WriteNumberValue(dec); break;
-            case float f: writer.WriteNumberValue(f); break;
+            case float f:
+                if (!float.IsFinite(f)) RefuseNonFinite(column, "float", f.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                writer.WriteNumberValue(f);
+                break;
             case DateTime dt: writer.WriteStringValue(dt.ToString("O")); break;
             case DateTimeOffset dto: writer.WriteStringValue(dto.ToString("O")); break;
             case DateOnly date: writer.WriteStringValue(date.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)); break;
@@ -186,7 +197,7 @@ public sealed class JsonLDataWriter : IRowDataWriter, IRequiresOptions<JsonLWrit
                 foreach (DictionaryEntry entry in dict)
                 {
                     writer.WritePropertyName(entry.Key.ToString() ?? string.Empty);
-                    WriteValue(writer, entry.Value);
+                    WriteValue(writer, entry.Value, column);
                 }
                 writer.WriteEndObject();
                 break;
@@ -194,7 +205,7 @@ public sealed class JsonLDataWriter : IRowDataWriter, IRequiresOptions<JsonLWrit
                 writer.WriteStartArray();
                 foreach (var item in enumerable)
                 {
-                    WriteValue(writer, item);
+                    WriteValue(writer, item, column);
                 }
                 writer.WriteEndArray();
                 break;
@@ -203,6 +214,13 @@ public sealed class JsonLDataWriter : IRowDataWriter, IRequiresOptions<JsonLWrit
                 break;
         }
     }
+
+    // JSON has no number for these, and no spelling a reader would read back as one.
+    [System.Diagnostics.CodeAnalysis.DoesNotReturn]
+    private void RefuseNonFinite(string column, string type, string spelled)
+        => throw new ColumnValueRefusedException(
+            $"Record {_recordsWritten}", column, type, $"holds {spelled}, which JSON has no number for",
+            "Filter the value out, or read the column as text: declare it 'string', or cast it in the source query.");
 
     private async ValueTask FlushBufferToFileAsync(CancellationToken ct)
     {

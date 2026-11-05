@@ -52,6 +52,11 @@ Write each expression in the query where the column is selected.
 
 [Types a reader cannot read](../../REFERENCE.md#types-a-reader-cannot-read) has the full list.
 
+A value can be refused where its type is not. `'infinity'::timestamp` has no date that means it, and
+`'NaN'::numeric` no decimal, so the run stops at that record, naming the column and the expression
+that reads it as text. A real `0001-01-01` still reads as that date. The rule and the other cases
+are in [Values a type cannot hold](../../REFERENCE.md#values-a-type-cannot-hold).
+
 Writing, a column PostgreSQL has no type for is refused before the table is touched: an 8-bit or
 an unsigned integer (from DuckDB, Parquet or MySQL) is never widened behind your back. The refusal
 names each column and the cast that brings it to a type PostgreSQL holds:

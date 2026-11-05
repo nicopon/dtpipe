@@ -1,64 +1,54 @@
 using System;
-using System.Data.Common;
-using Apache.Arrow;
+using System.Data;
 using Apache.Arrow.Ado;
-using Apache.Arrow.Ado.Consumer;
+using Apache.Arrow.Serialization;
+using Apache.Arrow.Serialization.Mapping;
 using Apache.Arrow.Types;
-using Moq;
 using Xunit;
 
 namespace DtPipe.Tests.Unit.ApacheArrowAdo;
 
 /// <summary>
-/// A decimal the Arrow type cannot hold, or the driver cannot hand over as a <see cref="decimal"/>,
-/// surfaces as one exception that carries the column, never the value.
+/// A value the Arrow type cannot hold, or the driver cannot hand over, surfaces as one fault that
+/// carries the column and the record, never the value.
 /// </summary>
 public class DecimalConsumerTests
 {
     [Fact]
-    public void A_Value_That_Fits_Is_Appended()
+    public void A_Value_Past_The_Declared_Scale_Names_Its_Column_And_Record()
     {
-        var consumer = new Decimal128Consumer(2, new Decimal128Type(38, 18));
+        var fault = Assert.Throws<ArrowValueException>(() => Read(typeof(decimal), 4.29m, 1e-25m));
 
-        consumer.Consume(ReaderOf(2, 4.29m));
-
-        var array = (Decimal128Array)consumer.BuildArray();
-        Assert.Equal(4.29m, array.GetValue(0));
-    }
-
-    [Fact]
-    public void A_Value_Past_The_Declared_Scale_Names_Its_Column()
-    {
-        var consumer = new Decimal128Consumer(2, new Decimal128Type(38, 18));
-
-        var fault = Assert.Throws<DecimalOutOfRangeException>(() => consumer.Consume(ReaderOf(2, 1e-25m)));
-
-        Assert.Equal(2, fault.ColumnIndex);
+        Assert.Equal("v", fault.Column);
+        Assert.Equal(2, fault.Record);
         Assert.Equal(nameof(OverflowException), fault.CauseTypeName);
         Assert.Null(fault.InnerException);
     }
 
-    [Theory]
-    [InlineData(typeof(OverflowException))]
-    [InlineData(typeof(InvalidCastException))]
-    public void A_Driver_That_Cannot_Hand_Over_A_Decimal_Names_Its_Column(Type driverFault)
+    [Fact]
+    public void A_Driver_That_Cannot_Hand_Over_A_Decimal_Names_Its_Column()
     {
-        var reader = new Mock<DbDataReader>();
-        reader.Setup(r => r.IsDBNull(1)).Returns(false);
-        reader.Setup(r => r.GetDecimal(1)).Throws((Exception)Activator.CreateInstance(driverFault)!);
-        var consumer = new Decimal256Consumer(1, new Decimal256Type(76, 10));
+        var fault = Assert.Throws<ArrowValueException>(() => Read(typeof(string), "not a number"));
 
-        var fault = Assert.Throws<DecimalOutOfRangeException>(() => consumer.Consume(reader.Object));
-
-        Assert.Equal(1, fault.ColumnIndex);
-        Assert.Equal(driverFault.Name, fault.CauseTypeName);
+        Assert.Equal("v", fault.Column);
+        Assert.Equal(1, fault.Record);
+        Assert.Equal(nameof(InvalidCastException), fault.CauseTypeName);
     }
 
-    private static DbDataReader ReaderOf(int ordinal, decimal value)
+    private static void Read(Type columnType, params object[] values)
     {
-        var reader = new Mock<DbDataReader>();
-        reader.Setup(r => r.IsDBNull(ordinal)).Returns(false);
-        reader.Setup(r => r.GetDecimal(ordinal)).Returns(value);
-        return reader.Object;
+        using var table = new DataTable();
+        table.Columns.Add("id", typeof(int));
+        table.Columns.Add("v", columnType);
+        foreach (var value in values) table.Rows.Add(table.Rows.Count + 1, value);
+
+        var config = new AdoToArrowConfigBuilder()
+            .SetTypeResolver(column => column.ColumnName == "v"
+                ? new ArrowTypeResult(new Decimal128Type(38, 18))
+                : new ArrowTypeResult(Int32Type.Default))
+            .Build();
+
+        using var reader = table.CreateDataReader();
+        foreach (var batch in AdoToArrow.ReadToArrowBatches(reader, config)) batch.Dispose();
     }
 }
