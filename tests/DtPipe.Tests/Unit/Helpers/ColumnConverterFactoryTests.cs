@@ -5,6 +5,17 @@ namespace DtPipe.Tests.Unit.Helpers;
 
 public class ColumnConverterFactoryTests
 {
+    [Fact]
+    public void A_Text_With_An_Offset_Under_A_DateTime_Column_Is_Its_UTC_Reading()
+    {
+        var convert = ColumnConverterFactory.Build(typeof(string), typeof(DateTime), "n");
+
+        var value = Assert.IsType<DateTime>(convert("2024-01-02T03:04:05+02:00"));
+
+        Assert.Equal(new DateTime(2024, 1, 2, 1, 4, 5, DateTimeKind.Unspecified), value);
+        Assert.Equal(DateTimeKind.Unspecified, value.Kind);
+    }
+
     [Theory]
     [InlineData(typeof(int), "abc")]
     [InlineData(typeof(int), " ")]

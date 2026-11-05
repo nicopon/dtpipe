@@ -286,6 +286,10 @@ sits in, wherever it falls among the step's flags.
 `--column-types`, `--compute-types` and `--expand-types` share one vocabulary. A hint that names no
 type is **refused**, rather than leaving the column at whatever type it already had.
 
+A `datetime` column is a wall clock and a `datetimeoffset` column an instant. On every machine, a
+text with an offset under `datetime` reads as its UTC value, and a text with no offset under
+`datetimeoffset` reads as UTC.
+
 | Type | Accepted spellings |
 |:---|:---|
 | `string` | `string`, `str`, `text` |

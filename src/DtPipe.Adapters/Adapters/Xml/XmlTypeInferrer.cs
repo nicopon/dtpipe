@@ -24,12 +24,15 @@ internal static class XmlTypeInferrer
         };
     }
     /// <summary>
-    /// The Arrow type a hint names, derived from the CLR type rather than from a second switch:
-    /// the two lists had drifted, so 'int' resolved to Int32 on the CLR side and to String here,
-    /// and XmlStreamReader used both together.
+    /// What a hint names, read off <see cref="ArrowTypeMap"/>: a second table here lost the zone of a
+    /// <c>datetimeoffset</c> and the extension of a <c>uuid</c>, and named a zoned timestamp for a
+    /// <c>datetime</c>.
     /// </summary>
-    internal static IArrowType ResolveHintToArrowType(string hint)
-        => ClrToArrowType(ResolveHintToClrType(hint) ?? typeof(string));
+    internal static ArrowTypeResult ResolveHintToLogicalType(string hint)
+        => LogicalTypeOf(ResolveHintToClrType(hint) ?? typeof(string));
+
+    internal static ArrowTypeResult LogicalTypeOf(Type clrType) => ArrowTypeMapper.GetLogicalType(clrType);
+
     internal static Dictionary<string, Type> ParseColumnTypesOption(string spec)
     {
         var result = new Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase);
@@ -45,41 +48,22 @@ internal static class XmlTypeInferrer
         }
         return result;
     }
-    /// <summary>
-    /// A field for a type this class produced. Its only decimal is the default width, a hint
-    /// naming no precision, so that decimal carries the undeclared mark.
-    /// </summary>
-    internal static Field FieldFor(string name, IArrowType arrowType)
-        => arrowType is Decimal128Type
-            ? new Field(name, arrowType, true, ArrowTypeMap.DefaultDecimal.Metadata)
-            : new Field(name, arrowType, true);
+    /// <summary>A nullable field carrying the mapping's metadata: a UUID's extension, a decimal's undeclared mark.</summary>
+    internal static Field FieldFor(string name, ArrowTypeResult logical) => ArrowTypeMap.GetField(name, logical);
 
-    internal static IArrowType ClrToArrowType(Type clrType)
-    {
-        if (clrType == typeof(int)) return Int32Type.Default;
-        if (clrType == typeof(long)) return Int64Type.Default;
-        if (clrType == typeof(double)) return DoubleType.Default;
-        if (clrType == typeof(float)) return FloatType.Default;
-        if (clrType == typeof(decimal)) return new Decimal128Type(38, 18);
-        if (clrType == typeof(bool)) return BooleanType.Default;
-        if (clrType == typeof(DateTime)) return TimestampType.Default;
-        if (clrType == typeof(DateTimeOffset)) return TimestampType.Default;
-        if (clrType == typeof(Guid)) return ArrowTypeMapper.GetLogicalType(typeof(Guid)).ArrowType;
-        return StringType.Default;
-    }
     internal static Type? ResolveHintToClrType(string hint) => TypeHelper.ParseTypeHint(hint);
     /// <summary>
-    /// The parser of each declared column, keyed by its dot path. A string column has none: its text
-    /// stays text. Every other one reads a non-empty cell under <see cref="TypedTextCell"/>'s rule.
+    /// Adds the parser of each column of <paramref name="types"/>, keyed by its dot path, keeping any
+    /// the map already holds: a declared type wins over an inferred one. A string column has none: its
+    /// text stays text. Every other one reads a non-empty cell under <see cref="TypedTextCell"/>'s rule.
     /// </summary>
-    internal static Dictionary<string, Func<string, object?>> BuildColumnParsers(Dictionary<string, Type> overrides)
+    internal static void AddColumnParsers(Dictionary<string, XmlTypedColumn> parsers, IEnumerable<KeyValuePair<string, Type>> types, int? sampledRows)
     {
-        var result = new Dictionary<string, Func<string, object?>>(StringComparer.OrdinalIgnoreCase);
-        foreach (var kvp in overrides)
+        foreach (var kvp in types)
         {
-            if (BuildParser(kvp.Value) is { } parser) result[kvp.Key] = parser;
+            if (!parsers.ContainsKey(kvp.Key) && BuildParser(kvp.Value) is { } parser)
+                parsers[kvp.Key] = new XmlTypedColumn(parser, kvp.Value, sampledRows);
         }
-        return result;
     }
 
     /// <summary>
@@ -114,10 +98,10 @@ internal static class XmlTypeInferrer
             };
 
         if (clrType == typeof(DateTime))
-            return static s => DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var v) ? v : TypedTextCell.Unreadable;
+            return TypedTextCell.ReadDateTime;
 
         if (clrType == typeof(DateTimeOffset))
-            return static s => DateTimeOffset.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var v) ? v : TypedTextCell.Unreadable;
+            return TypedTextCell.ReadDateTimeOffset;
 
         // A string column, or a type no parser reads: the cell stays text.
         return null;
@@ -150,8 +134,14 @@ internal static class XmlTypeInferrer
 
         if (allMatch(s => bool.TryParse(s, out _) || s.ToLowerInvariant() is "0" or "1" or "yes" or "no" or "true" or "false")) return "bool";
 
-        if (allMatch(s => DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.None, out _))) return "datetime";
+        if (allMatch(TypedTextCell.ReadsAsDate)) return "datetime";
 
         return null;
     }
 }
+
+/// <summary>
+/// How a typed XML column reads its text: its parser, its type, and the sample the type was inferred
+/// from, null when the type was declared.
+/// </summary>
+internal sealed record XmlTypedColumn(Func<string, object?> Parser, Type Type, int? SampledRows);

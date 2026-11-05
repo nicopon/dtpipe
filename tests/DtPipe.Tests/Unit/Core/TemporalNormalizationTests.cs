@@ -19,6 +19,31 @@ public class TemporalNormalizationTests
 {
     private static readonly DateTime WallClock = new(2026, 8, 28, 9, 30, 0, DateTimeKind.Unspecified);
 
+    [Theory]
+    [InlineData("2026-08-28T09:30:00")]
+    [InlineData("2026-08-28T09:30:00Z")]
+    [InlineData("2026-08-28T11:30:00+02:00")]
+    [InlineData(" 2026-08-28T09:30:00 ")]
+    public void A_Text_Reads_As_A_Zone_Less_Wall_Clock_Whatever_It_Says(string text)
+    {
+        Assert.True(TemporalNormalization.TryParseWallClock(text, out var value));
+
+        Assert.Equal(WallClock, value);
+        Assert.Equal(DateTimeKind.Unspecified, value.Kind);
+    }
+
+    [Theory]
+    [InlineData("2026-08-28T09:30:00", 0)]
+    [InlineData("2026-08-28T09:30:00Z", 0)]
+    [InlineData("2026-08-28T11:30:00+02:00", 2)]
+    public void A_Text_Reads_As_An_Instant_And_Keeps_Its_Offset_Or_Takes_None(string text, int hours)
+    {
+        Assert.True(TemporalNormalization.TryParseInstant(text, out var value));
+
+        Assert.Equal(WallClock, value.UtcDateTime);
+        Assert.Equal(TimeSpan.FromHours(hours), value.Offset);
+    }
+
     [Fact]
     public void Unspecified_Is_Stored_As_A_Wall_Clock_Never_As_A_Local_Instant()
     {

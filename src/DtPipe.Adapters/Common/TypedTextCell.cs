@@ -1,5 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Runtime.CompilerServices;
+using Apache.Arrow.Serialization.Mapping;
 using DtPipe.Core.Helpers;
 
 namespace DtPipe.Adapters.Common;
@@ -23,6 +25,23 @@ internal static class TypedTextCell
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static object? Parse(Func<string, object?> parser, string text)
         => text.Length == 0 ? null : parser(text);
+
+    /// <summary>The value of a <c>datetime</c> cell, under <see cref="TemporalNormalization.TryParseWallClock"/>.</summary>
+    internal static object ReadDateTime(string text)
+        => TemporalNormalization.TryParseWallClock(text, out var value) ? value : Unreadable;
+
+    /// <summary>The value of a <c>datetimeoffset</c> cell, under <see cref="TemporalNormalization.TryParseInstant"/>.</summary>
+    internal static object ReadDateTimeOffset(string text)
+        => TemporalNormalization.TryParseInstant(text, out var value) ? value : Unreadable;
+
+    /// <summary>
+    /// Whether inference may call a text a date. <see cref="DateTime.TryParse(string, IFormatProvider, DateTimeStyles, out DateTime)"/>
+    /// alone also reads <c>1,5</c> as the fifth of January of the current year: a date needs a
+    /// separator or a month's name.
+    /// </summary>
+    internal static bool ReadsAsDate(string text)
+        => text.Any(c => char.IsLetter(c) || c is '-' or '/' or ':')
+           && DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out _);
 
     /// <summary>
     /// Stops the run on a cell the column's type does not read. <paramref name="sampledRows"/> is the

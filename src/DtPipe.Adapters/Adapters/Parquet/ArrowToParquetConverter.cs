@@ -59,6 +59,8 @@ public static class ArrowToParquetConverter
             StringArray a => writer.WriteAsync(dataField, (IReadOnlyCollection<string?>)ExtractStringValues(a)),
             Decimal128Array a => writer.WriteAsync<decimal>(dataField, ExtractDecimalValues<Decimal128Array>(a).AsMemory(), cancellationToken: ct),
             Decimal256Array a => writer.WriteAsync<decimal>(dataField, ExtractDecimalValues<Decimal256Array>(a).AsMemory(), cancellationToken: ct),
+            Decimal64Array a => writer.WriteAsync<decimal>(dataField, ExtractDecimalValues<Decimal64Array>(a).AsMemory(), cancellationToken: ct),
+            Decimal32Array a => writer.WriteAsync<decimal>(dataField, ExtractDecimalValues<Decimal32Array>(a).AsMemory(), cancellationToken: ct),
             Date64Array a => writer.WriteAsync<DateTime>(dataField, ExtractDate64Values(a).AsMemory(), cancellationToken: ct),
             // Timestamp: no-timezone fields are typed as DateTime — coerce DateTimeOffset to DateTime
             TimestampArray a when (Nullable.GetUnderlyingType(dataField.ClrNullableIfHasNullsType) ?? dataField.ClrNullableIfHasNullsType) == typeof(DateTime) =>

@@ -2,6 +2,7 @@ using System.Text;
 using System.Xml;
 using System.Xml.Linq;
 using Apache.Arrow;
+using Apache.Arrow.Serialization.Mapping;
 using Apache.Arrow.Types;
 using DtPipe.Adapters.Common;
 using DtPipe.Core.Abstractions;
@@ -38,7 +39,7 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
     private bool _isRecursiveSearch;
 
     private bool _isResetSupported;
-    private Dictionary<string, Func<string, object?>>? _columnParsers;
+    private readonly Dictionary<string, XmlTypedColumn> _columnParsers = new(StringComparer.OrdinalIgnoreCase);
     private Dictionary<string, Type>? _typeOverrides;
     private IReadOnlyDictionary<string, string>? _autoAppliedTypes;
 
@@ -80,7 +81,7 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
         InitializePathMatcher();
 
         _typeOverrides = XmlTypeInferrer.ParseColumnTypesOption(_options.ColumnTypes);
-        _columnParsers = XmlTypeInferrer.BuildColumnParsers(_typeOverrides);
+        XmlTypeInferrer.AddColumnParsers(_columnParsers, _typeOverrides, sampledRows: null);
         _isResetSupported = !string.IsNullOrEmpty(_filePath) && _filePath != "-";
         await ResetReaderAsync(ct);
 
@@ -89,6 +90,10 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
         {
             var inferred = await InferColumnTypesAsync(_options.MaxSample, ct);
             _autoAppliedTypes = inferred;
+            XmlTypeInferrer.AddColumnParsers(
+                _columnParsers,
+                inferred.Select(kvp => KeyValuePair.Create(kvp.Key, XmlTypeInferrer.ResolveHintToClrType(kvp.Value) ?? typeof(string))),
+                _options.MaxSample);
             await ResetReaderAsync(ct);
         }
 
@@ -124,6 +129,7 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
         Columns = arrowSchema.FieldsList
             .Select(f => new PipeColumnInfo(f.Name, XmlTypeInferrer.GetSimplifiedClrType(f), f.IsNullable))
             .ToList();
+        XmlTypeInferrer.AddColumnParsers(_columnParsers, Columns.Select(c => KeyValuePair.Create(c.Name, c.ClrType)), sampledRows: null);
         _logger.LogInformation("XmlStreamReader: Schema loaded from JSON ({Count} fields). Path: {Path}",
             arrowSchema.FieldsList.Count, _options.Path);
     }
@@ -146,7 +152,7 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
         var fields = new List<Field>();
         foreach (var kvp in _typeOverrides!)
         {
-            fields.Add(XmlTypeInferrer.FieldFor(kvp.Key, XmlTypeInferrer.ClrToArrowType(kvp.Value)));
+            fields.Add(XmlTypeInferrer.FieldFor(kvp.Key, XmlTypeInferrer.LogicalTypeOf(kvp.Value)));
         }
         Columns = fields.Select(f => new PipeColumnInfo(f.Name, _typeOverrides[f.Name], true)).ToList();
         Schema = new Schema(fields, null);
@@ -313,8 +319,8 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
                 var name = kvp.Key;
                 var sampleValue = kvp.Value;
 
-                var (clrType, arrowType) = InferTypes(sampleValue, name);
-                fields.Add(XmlTypeInferrer.FieldFor(name, arrowType));
+                var (_, logical) = InferTypes(sampleValue, name);
+                fields.Add(XmlTypeInferrer.FieldFor(name, logical));
                 seenPaths.Add(name);
             }
         }
@@ -328,8 +334,7 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
                 // If it's a top-level key (no dots) and hasn't been seen yet, add it
                 if (!kvp.Key.Contains('.') && !seenPaths.Contains(kvp.Key))
                 {
-                    var arrowType = XmlTypeInferrer.ResolveHintToArrowType(kvp.Value);
-                    fields.Add(XmlTypeInferrer.FieldFor(kvp.Key, arrowType));
+                    fields.Add(XmlTypeInferrer.FieldFor(kvp.Key, XmlTypeInferrer.ResolveHintToLogicalType(kvp.Value)));
                     seenPaths.Add(kvp.Key);
                 }
             }
@@ -343,33 +348,10 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
         }
 
         // Columns property is used for UI and SQL/transformers mapping
-        Columns = fields.Select(f =>
-        {
-            var clrType = typeof(object);
-            if (f.DataType is StringType) clrType = typeof(string);
-            else if (f.DataType is Int32Type) clrType = typeof(int);
-            else if (f.DataType is Int64Type) clrType = typeof(long);
-            else if (f.DataType is DoubleType) clrType = typeof(double);
-            else if (f.DataType is BooleanType) clrType = typeof(bool);
-            else if (f.DataType is Decimal128Type) clrType = typeof(decimal);
-            else if (f.DataType is TimestampType) clrType = typeof(DateTime);
-            return new PipeColumnInfo(f.Name, clrType, true);
-        }).ToList();
+        Columns = fields.Select(f => new PipeColumnInfo(f.Name, XmlTypeInferrer.GetSimplifiedClrType(f), true)).ToList();
         Schema = new Schema(fields, null);
         _logger.LogInformation("XmlStreamReader: Inferred hierarchical schema with {Count} top-level columns.", fields.Count);
     }
-
-    private IArrowType InferArrowTypeFromPath(string path, object? sampleValue)
-    {
-        if (_autoAppliedTypes != null && _autoAppliedTypes.TryGetValue(path, out var hint))
-        {
-            return XmlTypeInferrer.ResolveHintToArrowType(hint);
-        }
-        var (_, arrowType) = InferTypes(sampleValue, path);
-        return arrowType;
-    }
-
-
 
     public IReadOnlyDictionary<string, string>? AutoAppliedTypes => _autoAppliedTypes;
     public int MaxSample => _options.MaxSample;
@@ -644,13 +626,13 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
     private object? ApplyParser(string fullPath, string? value, XmlReader at)
     {
         if (value == null) return null;
-        if (_columnParsers != null && _columnParsers.TryGetValue(fullPath, out var parser))
+        if (_columnParsers.TryGetValue(fullPath, out var column))
         {
-            var parsed = TypedTextCell.Parse(parser, value);
+            var parsed = TypedTextCell.Parse(column.Parser, value);
             if (ReferenceEquals(parsed, TypedTextCell.Unreadable))
             {
                 var line = at is IXmlLineInfo info && info.HasLineInfo() ? info.LineNumber.ToString(CultureInfo.InvariantCulture) : "?";
-                TypedTextCell.Refuse($"XML line {line}", fullPath, _typeOverrides![fullPath], sampledRows: null);
+                TypedTextCell.Refuse($"XML line {line}", fullPath, column.Type, column.SampledRows);
             }
             return parsed;
         }
@@ -665,31 +647,29 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
 
 
 
-    private (Type ClrType, IArrowType ArrowType) InferTypes(object? value, string currentPath = "")
+    private (Type ClrType, ArrowTypeResult Logical) InferTypes(object? value, string currentPath = "")
     {
         // Check for overrides first
         if (_typeOverrides != null && _typeOverrides.TryGetValue(currentPath, out var overridenType))
         {
-            return (overridenType, XmlTypeInferrer.ClrToArrowType(overridenType));
+            return (overridenType, XmlTypeInferrer.LogicalTypeOf(overridenType));
         }
 
         if (_autoAppliedTypes != null && _autoAppliedTypes.TryGetValue(currentPath, out var hint))
         {
-            return (XmlTypeInferrer.ResolveHintToClrType(hint) ?? typeof(string), XmlTypeInferrer.ResolveHintToArrowType(hint));
+            return (XmlTypeInferrer.ResolveHintToClrType(hint) ?? typeof(string), XmlTypeInferrer.ResolveHintToLogicalType(hint));
         }
 
-        var result = value switch
+        return value switch
         {
-            bool => (typeof(bool), BooleanType.Default),
-            double => (typeof(double), DoubleType.Default),
-            long => (typeof(long), Int64Type.Default),
-            int => (typeof(int), Int32Type.Default),
-            Dictionary<string, object?> d => (typeof(object), InferStructType(d, currentPath)),
-            List<object?> l => (typeof(object), InferListType(l, currentPath)),
-            _ => (typeof(string), StringType.Default)
+            bool => (typeof(bool), XmlTypeInferrer.LogicalTypeOf(typeof(bool))),
+            double => (typeof(double), XmlTypeInferrer.LogicalTypeOf(typeof(double))),
+            long => (typeof(long), XmlTypeInferrer.LogicalTypeOf(typeof(long))),
+            int => (typeof(int), XmlTypeInferrer.LogicalTypeOf(typeof(int))),
+            Dictionary<string, object?> d => (typeof(object), new ArrowTypeResult(InferStructType(d, currentPath))),
+            List<object?> l => (typeof(object), new ArrowTypeResult(InferListType(l, currentPath))),
+            _ => (typeof(string), XmlTypeInferrer.LogicalTypeOf(typeof(string)))
         };
-
-        return result;
     }
 
     private IArrowType InferStructType(Dictionary<string, object?> dict, string currentPath)
@@ -698,8 +678,8 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
         foreach (var kvp in dict)
         {
             var childPath = string.IsNullOrEmpty(currentPath) ? kvp.Key : $"{currentPath}.{kvp.Key}";
-            var (_, arrowType) = InferTypes(kvp.Value, childPath);
-            fields.Add(XmlTypeInferrer.FieldFor(kvp.Key, arrowType));
+            var (_, logical) = InferTypes(kvp.Value, childPath);
+            fields.Add(XmlTypeInferrer.FieldFor(kvp.Key, logical));
         }
         return new StructType(fields);
     }
@@ -708,10 +688,9 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
     {
         if (list.Any())
         {
-            var first = list.First();
             // For lists, the path context stays the same as the element path
-            var (_, itemArrowType) = InferTypes(first, currentPath);
-            return new ListType(itemArrowType);
+            var (_, item) = InferTypes(list.First(), currentPath);
+            return new ListType(XmlTypeInferrer.FieldFor("item", item));
         }
         return new ListType(StringType.Default);
     }

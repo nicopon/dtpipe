@@ -178,9 +178,14 @@ public static class ArrowSerializer
             case StringArray.Builder b: b.AppendNull(); break;
             case BinaryArray.Builder b: b.AppendNull(); break;
             case Decimal128Array.Builder b: b.AppendNull(); break;
+            case Decimal256Array.Builder b: b.AppendNull(); break;
             case FixedSizeBinaryArrayBuilder b: b.AppendNull(); break;
             case TimestampArray.Builder b: b.AppendNull(); break;
             case DurationArray.Builder b: b.AppendNull(); break;
+            case Date32Array.Builder b: b.AppendNull(); break;
+            case Date64Array.Builder b: b.AppendNull(); break;
+            case Time32Array.Builder b: b.AppendNull(); break;
+            case Time64Array.Builder b: b.AppendNull(); break;
             case ListArrayManualBuilder b: b.AppendNull(); break;
             case MapArrayManualBuilder b: b.AppendNull(); break;
             case StructArrayManualBuilder b: b.AppendNull(); break;
@@ -207,8 +212,13 @@ public static class ArrowSerializer
             case StringArray.Builder b: b.Reserve(count); break;
             case BinaryArray.Builder b: b.Reserve(count); break;
             case Decimal128Array.Builder b: b.Reserve(count); break;
+            case Decimal256Array.Builder b: b.Reserve(count); break;
             case TimestampArray.Builder b: b.Reserve(count); break;
             case DurationArray.Builder b: b.Reserve(count); break;
+            case Date32Array.Builder b: b.Reserve(count); break;
+            case Date64Array.Builder b: b.Reserve(count); break;
+            case Time32Array.Builder b: b.Reserve(count); break;
+            case Time64Array.Builder b: b.Reserve(count); break;
             case FixedSizeBinaryArrayBuilder b: b.Reserve(count); break;
                 // List/Map/Struct manual builders don't have a native Reserve yet, 
                 // but their internal lists are already pre-dimensioned in their constructors.
@@ -235,42 +245,21 @@ public static class ArrowSerializer
             if (arrowType is MapType mt) return new MapTypeAccessor(type, mt);
             if (arrowType is StructType st) return new StructTypeAccessor(type, st);
             if (arrowType is ListType lt) return new ListTypeAccessor(type, lt);
-            return new ScalarTypeAccessor(type);
+            return new ScalarTypeAccessor(type, arrowType);
         }
 
-        public static TypeAccessor CreateFromArrowType(IArrowType arrowType)
+        /// <summary>
+        /// Dynamic mode: the accessor of a field, whose CLR type is <see cref="ArrowTypeMap.GetClrTypeFromField"/>'s
+        /// answer. There is no second table here: one written by hand took a decimal for a UUID,
+        /// because Decimal128Type derives from FixedSizeBinaryType, and every timestamp for a DateTime.
+        /// </summary>
+        public static TypeAccessor CreateFromField(Field field) => field.DataType switch
         {
-            // For dynamic mode, we map back to common CLR types for the scalar accessors
-            var clrType = GetClrType(arrowType);
-            if (arrowType is MapType mt) return new MapTypeAccessor(clrType, mt);
-            if (arrowType is StructType st) return new DynamicStructTypeAccessor(st);
-            if (arrowType is ListType lt) return new ListTypeAccessor(clrType, lt);
-            return new ScalarTypeAccessor(clrType);
-        }
-
-        private static Type GetClrType(IArrowType type)
-        {
-            return type switch
-            {
-                Int8Type => typeof(sbyte),
-                Int16Type => typeof(short),
-                Int32Type => typeof(int),
-                Int64Type => typeof(long),
-                UInt8Type => typeof(byte),
-                UInt16Type => typeof(ushort),
-                UInt32Type => typeof(uint),
-                UInt64Type => typeof(ulong),
-                DoubleType => typeof(double),
-                FloatType => typeof(float),
-                StringType => typeof(string),
-                BooleanType => typeof(bool),
-                TimestampType => typeof(DateTime),
-                DurationType => typeof(TimeSpan),
-                FixedSizeBinaryType ft when ft.ByteWidth == 16 => typeof(Guid),
-                Decimal128Type => typeof(decimal),
-                _ => typeof(object)
-            };
-        }
+            MapType mt => new MapTypeAccessor(typeof(object), mt),
+            StructType st => new DynamicStructTypeAccessor(st),
+            ListType lt => new ListTypeAccessor(typeof(object), lt),
+            var arrowType => new ScalarTypeAccessor(ArrowTypeMap.GetClrTypeFromField(field), arrowType),
+        };
     }
 
     private class ScalarTypeAccessor : TypeAccessor
@@ -279,10 +268,12 @@ public static class ArrowSerializer
         private readonly IArrowType _arrowType;
         private readonly Action<object, IArrowArrayBuilder> _appendDelegate;
 
-        public ScalarTypeAccessor(Type type)
+        /// <param name="type">The CLR type the column stands for.</param>
+        /// <param name="arrowType">The type the batch's schema declares, which the array must carry.</param>
+        public ScalarTypeAccessor(Type type, IArrowType arrowType)
         {
             _type = type;
-            _arrowType = ArrowReflectionEngine.GetLogicalType(type).ArrowType;
+            _arrowType = arrowType;
             _appendDelegate = CompileAppendDelegate();
         }
 
@@ -306,16 +297,34 @@ public static class ArrowSerializer
             }
             if (underlyingType == typeof(decimal))
             {
-                return (val, builder) => ((Decimal128Array.Builder)builder).Append((decimal)val);
+                return _arrowType is Decimal256Type
+                    ? (val, builder) => ((Decimal256Array.Builder)builder).Append(ToDecimal(val))
+                    : (val, builder) => ((Decimal128Array.Builder)builder).Append(ToDecimal(val));
             }
-            if (underlyingType == typeof(DateTime))
+            if (_arrowType is TimestampType)
             {
+                // Either kind fits either field: an offset names an instant, and a DateTime goes
+                // through the one rule that never lets the host's time zone into the value.
                 return (val, builder) => ((TimestampArray.Builder)builder).Append(
-                    Mapping.TemporalNormalization.ToOffset((DateTime)val));
+                    val is DateTimeOffset offset ? offset : Mapping.TemporalNormalization.ToOffset((DateTime)val));
             }
-            if (underlyingType == typeof(DateTimeOffset))
+            if (_arrowType is Date32Type)
+                return (val, builder) => AppendDate((Date32Array.Builder)builder, val);
+            if (_arrowType is Date64Type)
+                return (val, builder) => AppendDate((Date64Array.Builder)builder, val);
+#if NET6_0_OR_GREATER
+            if (_arrowType is Time32Type)
+                return (val, builder) => ((Time32Array.Builder)builder).Append(ToTimeOfDay(val));
+            if (_arrowType is Time64Type)
+                return (val, builder) => ((Time64Array.Builder)builder).Append(ToTimeOfDay(val));
+#endif
+            if (_arrowType is BinaryType)
+                return (val, builder) => ((BinaryArray.Builder)builder).Append(((byte[])val).AsSpan());
+            if (_arrowType is FixedSizeBinaryType)
             {
-                return (val, builder) => ((TimestampArray.Builder)builder).Append((DateTimeOffset)val);
+                // A Guid given for a bare 16-byte field writes the bytes the map writes for a UUID.
+                return (val, builder) => ((FixedSizeBinaryArrayBuilder)builder).Append(
+                    val is Guid guid ? ArrowTypeMap.ToArrowUuidBytes(guid) : (byte[])val);
             }
             if (underlyingType == typeof(TimeSpan))
             {
@@ -339,6 +348,12 @@ public static class ArrowSerializer
                 return (val, builder) => ((UInt8Array.Builder)builder).Append(Convert.ToByte(val));
             if (underlyingType == typeof(sbyte))
                 return (val, builder) => ((Int8Array.Builder)builder).Append(Convert.ToSByte(val));
+            if (underlyingType == typeof(ushort))
+                return (val, builder) => ((UInt16Array.Builder)builder).Append(Convert.ToUInt16(val));
+            if (underlyingType == typeof(uint))
+                return (val, builder) => ((UInt32Array.Builder)builder).Append(Convert.ToUInt32(val));
+            if (underlyingType == typeof(ulong))
+                return (val, builder) => ((UInt64Array.Builder)builder).Append(Convert.ToUInt64(val));
 
             var builderType = GetBuilderType(_arrowType);
             if (builderType == null) throw new NotSupportedException($"No builder found for {_arrowType.GetType().Name}");
@@ -371,6 +386,34 @@ public static class ArrowSerializer
             };
         }
 
+        /// <summary>A decimal, or a number of another kind widened to one. A text is not a number: a parser reads it first.</summary>
+        private static decimal ToDecimal(object val) => val switch
+        {
+            decimal d => d,
+            string => throw new InvalidCastException("Unable to cast object of type 'System.String' to type 'System.Decimal'."),
+            _ => Convert.ToDecimal(val)
+        };
+
+        private static void AppendDate<TUnderlying, TArray, TBuilder>(DateArrayBuilder<TUnderlying, TArray, TBuilder> builder, object val)
+            where TUnderlying : struct
+            where TArray : IArrowArray
+            where TBuilder : class, IArrowArrayBuilder<TArray>
+        {
+            switch (val)
+            {
+#if NET6_0_OR_GREATER
+                case DateOnly date: builder.Append(date); break;
+#endif
+                case DateTimeOffset offset: builder.Append(offset); break;
+                default: builder.Append((DateTime)val); break;
+            }
+        }
+
+#if NET6_0_OR_GREATER
+        private static TimeOnly ToTimeOfDay(object val)
+            => val is TimeSpan span ? TimeOnly.FromTimeSpan(span) : (TimeOnly)val;
+#endif
+
         public override IArrowArrayBuilder CreateBuilder(MemoryAllocator? allocator, CapacityInfo? capacity)
         {
             IArrowArrayBuilder builder = _arrowType switch
@@ -387,9 +430,16 @@ public static class ArrowSerializer
                 DoubleType => new DoubleArray.Builder(),
                 FloatType => new FloatArray.Builder(),
                 BooleanType => new BooleanArray.Builder(),
+                // Before FixedSizeBinaryType, which both decimal types derive from.
                 Decimal128Type t => new Decimal128Array.Builder(t),
+                Decimal256Type t => new Decimal256Array.Builder(t),
                 TimestampType t => new TimestampArray.Builder(t),
                 DurationType t => new DurationArray.Builder(t),
+                Date32Type => new Date32Array.Builder(),
+                Date64Type => new Date64Array.Builder(),
+                Time32Type t => new Time32Array.Builder(t),
+                Time64Type t => new Time64Array.Builder(t),
+                BinaryType => new BinaryArray.Builder(),
                 FixedSizeBinaryType ft => new FixedSizeBinaryArrayBuilder(ft.ByteWidth),
                 _ => throw new NotSupportedException($"Builder for {_arrowType.GetType().Name} not implemented.")
             };
@@ -424,9 +474,14 @@ public static class ArrowSerializer
                 StringArray.Builder b => b.Build(),
                 BinaryArray.Builder b => b.Build(),
                 Decimal128Array.Builder b => b.Build(),
+                Decimal256Array.Builder b => b.Build(),
                 FixedSizeBinaryArrayBuilder b => b.Build(),
                 TimestampArray.Builder b => b.Build(),
                 DurationArray.Builder b => b.Build(),
+                Date32Array.Builder b => b.Build(),
+                Date64Array.Builder b => b.Build(),
+                Time32Array.Builder b => b.Build(),
+                Time64Array.Builder b => b.Build(),
                 _ => throw new NotSupportedException()
             };
         }
@@ -599,7 +654,7 @@ public static class ArrowSerializer
             var elementType = GetElementType(type);
             _elementAccessor = elementType is not null && elementType != typeof(object)
                 ? TypeAccessor.Create(elementType, listType.ValueDataType)
-                : TypeAccessor.CreateFromArrowType(listType.ValueDataType);
+                : TypeAccessor.CreateFromField(listType.ValueField);
         }
 
         /// <summary>Element type of a typed collection; null in dynamic mode, where there is none.</summary>
@@ -661,8 +716,8 @@ public static class ArrowSerializer
         {
             _type = type;
             _mapType = mapType;
-            _keyAccessor = TypeAccessor.CreateFromArrowType(mapType.KeyField.DataType);
-            _valueAccessor = TypeAccessor.CreateFromArrowType(mapType.ValueField.DataType);
+            _keyAccessor = TypeAccessor.CreateFromField(mapType.KeyField);
+            _valueAccessor = TypeAccessor.CreateFromField(mapType.ValueField);
         }
 
         public override void CollectCapacity(object? value, CapacityInfo info)

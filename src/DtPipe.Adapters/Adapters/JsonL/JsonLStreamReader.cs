@@ -133,6 +133,13 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
             .Select(f => new PipeColumnInfo(f.Name, GetSimplifiedClrType(f), f.IsNullable))
             .ToList();
         UpdateTextColumns();
+        var typed = new Dictionary<string, TypedColumn>(StringComparer.OrdinalIgnoreCase);
+        foreach (var column in Columns)
+        {
+            if (JsonLTypedValue.BuildReader(column.ClrType) is { } read)
+                typed[column.Name] = new TypedColumn(column.Name, column.ClrType, read);
+        }
+        _typedColumns = typed.Count > 0 ? typed : null;
         _logger.LogInformation("JsonLStreamReader: Schema loaded from JSON ({Count} fields). Path: {Path}",
             arrowSchema.FieldsList.Count, _options.Path ?? "(root)");
     }

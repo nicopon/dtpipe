@@ -1,3 +1,4 @@
+using Apache.Arrow.Serialization.Mapping;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Runtime.CompilerServices;
@@ -95,12 +96,12 @@ public static class ColumnConverterFactory
 
         if (target == typeof(DateTime))
             return v => v is not string { Length: > 0 } s ? DBNull.Value
-                : DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var r) ? r
+                : TemporalNormalization.TryParseWallClock(s, out var r) ? r
                 : Unreadable(columnName, target);
 
         if (target == typeof(DateTimeOffset))
             return v => v is not string { Length: > 0 } s ? DBNull.Value
-                : DateTimeOffset.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var r) ? r
+                : TemporalNormalization.TryParseInstant(s, out var r) ? r
                 : Unreadable(columnName, target);
 
         if (target == typeof(Guid))

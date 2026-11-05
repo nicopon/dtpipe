@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using Apache.Arrow;
+using Apache.Arrow.Serialization.Mapping;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using Microsoft.Extensions.Logging;
@@ -72,7 +73,7 @@ public class ParquetStreamReader : IColumnarStreamReader
             _logger.LogDebug("Opening Parquet file: {FilePath}", _filePath);
 
         _fileStream = new FileStream(_filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
-        _reader = await ParquetReader.CreateAsync(_fileStream, leaveStreamOpen: true, cancellationToken: ct);
+        _reader = await ParquetReader.CreateAsync(_fileStream, new ParquetOptions { UseDateOnlyTypeForDates = true }, leaveStreamOpen: true, cancellationToken: ct);
 
         var schema = _reader.Schema;
         var columns = new List<PipeColumnInfo>();
@@ -85,7 +86,7 @@ public class ParquetStreamReader : IColumnarStreamReader
                     {
                         var (precision, scale) = DeclaredDecimal(dataField);
                         columns.Add(new PipeColumnInfo(
-                            dataField.Name, NormalizeClrType(dataField.ClrType), dataField.IsNullable,
+                            dataField.Name, LogicalClrType(dataField), dataField.IsNullable,
                             Precision: precision, Scale: scale));
                         break;
                     }
@@ -259,7 +260,7 @@ public class ParquetStreamReader : IColumnarStreamReader
 
         var data = (DataField)field;
         var (precision, scale) = DeclaredDecimal(data);
-        return (NormalizeClrType(data.ClrType), precision, scale);
+        return (LogicalClrType(data), precision, scale);
     }
 
     private static bool IsFieldNullable(ParquetField field)
@@ -272,7 +273,7 @@ public class ParquetStreamReader : IColumnarStreamReader
     private static Type ListClrType(ListField list)
     {
         var item = (DataField)list.Item;
-        var element = NormalizeClrType(item.ClrType);
+        var element = LogicalClrType(item);
 
         if (item.IsNullable && element.IsValueType && Nullable.GetUnderlyingType(element) is null)
             element = typeof(Nullable<>).MakeGenericType(element);
@@ -298,7 +299,7 @@ public class ParquetStreamReader : IColumnarStreamReader
     {
         var item = (DataField)listField.Item;
 
-        return NormalizeClrType(item.ClrType) switch
+        return LogicalClrType(item) switch
         {
             var t when t == typeof(bool) => ReadTypedListAsync<bool>(rowGroupReader, item, rowCount, ct),
             var t when t == typeof(short) => ReadTypedListAsync<short>(rowGroupReader, item, rowCount, ct),
@@ -307,8 +308,9 @@ public class ParquetStreamReader : IColumnarStreamReader
             var t when t == typeof(float) => ReadTypedListAsync<float>(rowGroupReader, item, rowCount, ct),
             var t when t == typeof(double) => ReadTypedListAsync<double>(rowGroupReader, item, rowCount, ct),
             var t when t == typeof(decimal) => ReadTypedListAsync<decimal>(rowGroupReader, item, rowCount, ct),
-            var t when t == typeof(DateTime) => ReadTypedListAsync<DateTime>(rowGroupReader, item, rowCount, ct),
-            var t when t == typeof(DateTimeOffset) => ReadTypedListAsync<DateTimeOffset>(rowGroupReader, item, rowCount, ct),
+            var t when t == typeof(DateTime) => MapListAsync<DateTime, DateTime>(rowGroupReader, item, rowCount, WallClock, ct),
+            var t when t == typeof(DateTimeOffset) => MapListAsync<DateTime, DateTimeOffset>(rowGroupReader, item, rowCount, TemporalNormalization.ToOffset, ct),
+            var t when t == typeof(DateOnly) => ReadTypedListAsync<DateOnly>(rowGroupReader, item, rowCount, ct),
 
             // Parquet.Net carries repetition levels only through the value-type overloads, which is
             // the same limit that makes the writer refuse a list of text — so the two halves refuse
@@ -320,6 +322,17 @@ public class ParquetStreamReader : IColumnarStreamReader
             var t => throw new NotSupportedException(
                 $"Parquet column '{item.Path}': a list of {t.Name} is not supported."),
         };
+    }
+
+    private static async Task<System.Array> MapListAsync<TStored, TValue>(
+        ParquetRowGroupReader rowGroupReader, DataField item, int rowCount, Func<TStored, TValue> map, CancellationToken ct)
+        where TStored : struct
+        where TValue : struct
+    {
+        var stored = (TStored?[]?[])await ReadTypedListAsync<TStored>(rowGroupReader, item, rowCount, ct);
+        return System.Array.ConvertAll(stored, list => list is null
+            ? null
+            : System.Array.ConvertAll(list, element => element is { } value ? map(value) : (TValue?)null));
     }
 
     private static async Task<System.Array> ReadTypedListAsync<T>(
@@ -381,7 +394,7 @@ public class ParquetStreamReader : IColumnarStreamReader
     private static async Task<System.Array> ReadColumnDataAsArrayAsync(ParquetRowGroupReader rowGroupReader, DataField field, CancellationToken ct)
     {
         int rowCount = (int)rowGroupReader.RowCount;
-        Type baseType = NormalizeClrType(field.ClrType);
+        Type baseType = LogicalClrType(field);
 
         if (baseType == typeof(string))
         {
@@ -406,19 +419,45 @@ public class ParquetStreamReader : IColumnarStreamReader
             _ when baseType == typeof(byte) => await ReadTypedAsync<byte>(rowGroupReader, field, rowCount, ct),
             _ when baseType == typeof(sbyte) => await ReadTypedAsync<sbyte>(rowGroupReader, field, rowCount, ct),
             _ when baseType == typeof(short) => await ReadTypedAsync<short>(rowGroupReader, field, rowCount, ct),
+            _ when baseType == typeof(ushort) => await ReadTypedAsync<ushort>(rowGroupReader, field, rowCount, ct),
             _ when baseType == typeof(int) => await ReadTypedAsync<int>(rowGroupReader, field, rowCount, ct),
+            _ when baseType == typeof(uint) => await ReadTypedAsync<uint>(rowGroupReader, field, rowCount, ct),
             _ when baseType == typeof(long) => await ReadTypedAsync<long>(rowGroupReader, field, rowCount, ct),
+            _ when baseType == typeof(ulong) => await ReadTypedAsync<ulong>(rowGroupReader, field, rowCount, ct),
             _ when baseType == typeof(float) => await ReadTypedAsync<float>(rowGroupReader, field, rowCount, ct),
             _ when baseType == typeof(double) => await ReadTypedAsync<double>(rowGroupReader, field, rowCount, ct),
             _ when baseType == typeof(decimal) => await ReadTypedAsync<decimal>(rowGroupReader, field, rowCount, ct),
-            _ when baseType == typeof(DateTime) => await ReadTypedAsync<DateTime>(rowGroupReader, field, rowCount, ct),
-            _ when baseType == typeof(DateTimeOffset) => await ReadTypedAsync<DateTimeOffset>(rowGroupReader, field, rowCount, ct),
+            _ when baseType == typeof(DateTime) => Map(await ReadTypedAsync<DateTime>(rowGroupReader, field, rowCount, ct), WallClock),
+            _ when baseType == typeof(DateTimeOffset) => Map(await ReadTypedAsync<DateTime>(rowGroupReader, field, rowCount, ct), TemporalNormalization.ToOffset),
+            _ when baseType == typeof(DateOnly) => await ReadTypedAsync<DateOnly>(rowGroupReader, field, rowCount, ct),
+            _ when baseType == typeof(TimeOnly) => await ReadTimesOfDayAsync(rowGroupReader, (TimeDataField)field, rowCount, ct),
             _ when baseType == typeof(TimeSpan) => await ReadTypedAsync<TimeSpan>(rowGroupReader, field, rowCount, ct),
             _ when baseType == typeof(Guid) => await ReadTypedAsync<Guid>(rowGroupReader, field, rowCount, ct),
             _ => throw new NotSupportedException($"Unsupported Parquet type: {baseType.Name}")
         };
     }
 
+
+    private static TValue?[] Map<TStored, TValue>(TStored?[] stored, Func<TStored, TValue> map)
+        where TStored : struct
+        where TValue : struct
+        => System.Array.ConvertAll(stored, element => element is { } value ? map(value) : (TValue?)null);
+
+    /// <summary>
+    /// A timestamp the file does not adjust to UTC is a wall clock. Parquet.Net hands it back as
+    /// <see cref="DateTimeKind.Local"/>, which <see cref="TemporalNormalization.ToOffset"/> rightly reads
+    /// as an instant, moving the value by the host's offset.
+    /// </summary>
+    private static DateTime WallClock(DateTime stored) => DateTime.SpecifyKind(stored, DateTimeKind.Unspecified);
+
+    /// <summary>A TIME column as the time of day it is: the file stores a count since midnight, in the column's unit.</summary>
+    private static async Task<TimeOnly?[]> ReadTimesOfDayAsync(ParquetRowGroupReader rowGroupReader, TimeDataField field, int rowCount, CancellationToken ct)
+        => field.Precision switch
+        {
+            TimeUnitPrecision.Millis => Map(await ReadTypedAsync<int>(rowGroupReader, field, rowCount, ct), millis => new TimeOnly(millis * TimeSpan.TicksPerMillisecond)),
+            TimeUnitPrecision.Micros => Map(await ReadTypedAsync<long>(rowGroupReader, field, rowCount, ct), micros => new TimeOnly(micros * TimeSpan.TicksPerMicrosecond)),
+            _ => Map(await ReadTypedAsync<long>(rowGroupReader, field, rowCount, ct), nanos => new TimeOnly(nanos / TimeSpan.NanosecondsPerTick)),
+        };
 
     private static async Task<T?[]> ReadTypedAsync<T>(ParquetRowGroupReader rowGroupReader, DataField field, int rowCount, CancellationToken ct)
         where T : struct
@@ -434,6 +473,18 @@ public class ParquetStreamReader : IColumnarStreamReader
     /// </summary>
     private static (int? Precision, int? Scale) DeclaredDecimal(DataField field)
          => field is DecimalDataField dec ? (dec.Precision, dec.Scale) : (null, null);
+
+    /// <summary>
+    /// The CLR type a column stands for, on both read paths: a TIME column is a time of day, and a
+    /// timestamp the file adjusts to UTC is an instant. An INT96 timestamp declares neither, and is a
+    /// wall clock, which Parquet.Net marks as adjusted all the same.
+    /// </summary>
+    private static Type LogicalClrType(DataField field) => field switch
+    {
+        TimeDataField => typeof(TimeOnly),
+        DateTimeDataField { DateTimeFormat: not DateTimeFormat.Impala, IsAdjustedToUTC: true } => typeof(DateTimeOffset),
+        _ => NormalizeClrType(field.ClrType)
+    };
 
     // Parquet.Net 6.1.0 reports string columns as ReadOnlyMemory<char> and binary columns as
     // ReadOnlyMemory<byte> in DataField.ClrType instead of string / byte[]. Map them back to the

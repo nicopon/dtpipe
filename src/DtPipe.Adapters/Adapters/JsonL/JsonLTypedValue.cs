@@ -16,8 +16,7 @@ internal static class JsonLTypedValue
 {
     /// <summary>
     /// The reader of a declared column, or null when the column keeps the value as the JSON gives it:
-    /// a string column (read as text by the reader) and a decimal one, left to the Arrow serializer.
-    /// It returns <see cref="TypedTextCell.Unreadable"/> for a value it does not read.
+    /// a string column, read as text by the reader. It returns <see cref="TypedTextCell.Unreadable"/> for a value it does not read.
     /// </summary>
     internal static Func<JsonElement, object?>? BuildReader(Type clrType)
     {
@@ -40,6 +39,11 @@ internal static class JsonLTypedValue
             return Of(static e => e.TryGetSingle(out var v) && float.IsFinite(v) ? v : TypedTextCell.Unreadable,
                 static s => float.TryParse(s, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out var v)
                     && !(float.IsInfinity(v) && Overflowed(s)) ? v : TypedTextCell.Unreadable);
+
+        // Off the JSON text, never through a double, which keeps 15 digits of a decimal's 28.
+        if (clrType == typeof(decimal))
+            return Of(static e => e.TryGetDecimal(out var v) ? v : TypedTextCell.Unreadable,
+                XmlTypeInferrer.BuildParser(typeof(decimal))!);
 
         if (clrType == typeof(bool))
             return Of(null, XmlTypeInferrer.BuildParser(typeof(bool))!, readsBoolean: true);

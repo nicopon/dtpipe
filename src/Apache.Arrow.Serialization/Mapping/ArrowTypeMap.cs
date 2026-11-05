@@ -176,8 +176,8 @@ public static class ArrowTypeMap
     /// </summary>
     public static Type GetClrType(IArrowType type)
     {
-        if (type is Decimal128Type) return typeof(decimal);
-        if (type is Decimal256Type) return typeof(decimal);
+        // Before FixedSizeBinaryType, which every decimal type derives from.
+        if (type is Decimal128Type or Decimal256Type or Decimal64Type or Decimal32Type) return typeof(decimal);
         if (type is FixedSizeBinaryType) return typeof(byte[]);
         // TimestampType: no-timezone → DateTime (local/unspecified); with timezone → DateTimeOffset
         if (type is TimestampType ts)
@@ -290,11 +290,11 @@ public static class ArrowTypeMap
             BinaryArray a => a.GetBytes(index).ToArray(),
             Decimal128Array a => a.GetValue(index),
             Decimal256Array a => a.GetValue(index),
-            FixedSizeBinaryArray a => a.GetBytes(index).ToArray(),
+            FixedSizeBinaryArray a => GetFixedWidthValue(a, index),
             Date32Array a => a.GetDateOnly(index),
             Date64Array a => a.GetDateTime(index),
             TimestampArray a => a.GetTimestamp(index),
-            DurationArray a => a.GetValue(index),
+            DurationArray a => a.GetTimeSpan(index),
             Time32Array a => a.GetTime(index),
             Time64Array a => a.GetTime(index),
             StructArray a => GetStructValue(a, index),
@@ -318,6 +318,18 @@ public static class ArrowTypeMap
 
         return val;
     }
+
+    /// <summary>
+    /// A fixed-width cell. The two narrow decimal arrays derive from <see cref="FixedSizeBinaryArray"/>:
+    /// without this test their cells would come back as the bytes of a decimal. Here rather than in the
+    /// main switch, so that only a fixed-width cell pays for it.
+    /// </summary>
+    private static object? GetFixedWidthValue(FixedSizeBinaryArray array, int index) => array switch
+    {
+        Decimal32Array a => a.GetValue(index),
+        Decimal64Array a => a.GetValue(index),
+        _ => array.GetBytes(index).ToArray()
+    };
 
     private static object? GetStructValue(StructArray array, int index)
     {
@@ -358,12 +370,13 @@ public static class ArrowTypeMap
     private static object? GetFixedSizeListValue(FixedSizeListArray array, int index)
     {
         if (array.IsNull(index)) return null;
-        var size = ((FixedSizeListType)array.Data.DataType).ListSize;
+        var type = (FixedSizeListType)array.Data.DataType;
+        var size = type.ListSize;
         var values = array.Values;
         var list = new List<object?>(size);
 
         for (var i = index * size; i < (index + 1) * size; i++)
-            list.Add(GetValue(values, i));
+            list.Add(GetValue(values, i, type.ValueField));
 
         return list;
     }
@@ -392,6 +405,7 @@ public static class ArrowTypeMap
         if (array.IsNull(index)) return null;
 
         var dict = new Dictionary<object, object?>();
+        var type = (MapType)array.Data.DataType;
         var entries = array.KeyValues;
         var keys = entries.Fields[0];
         var values = entries.Fields[1];
@@ -401,8 +415,8 @@ public static class ArrowTypeMap
 
         for (var i = start; i < end; i++)
         {
-            var key = GetValue(keys, i);
-            if (key is not null) dict[key] = GetValue(values, i);
+            var key = GetValue(keys, i, type.KeyField);
+            if (key is not null) dict[key] = GetValue(values, i, type.ValueField);
         }
 
         return dict;
@@ -413,12 +427,14 @@ public static class ArrowTypeMap
         if (array.IsNull(index)) return null;
         var list = new List<object?>();
         var valueArray = array.Values;
+        // The element's field carries what its storage does not: a UUID's extension, a timestamp's zone.
+        var elementField = ((ListType)array.Data.DataType).ValueField;
         int start = array.ValueOffsets[index];
         int end = array.ValueOffsets[index + 1];
 
         for (int i = start; i < end; i++)
         {
-            list.Add(GetValue(valueArray, i));
+            list.Add(GetValue(valueArray, i, elementField));
         }
 
         return list;

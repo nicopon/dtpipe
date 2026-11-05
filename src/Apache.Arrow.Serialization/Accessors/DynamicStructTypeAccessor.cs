@@ -19,7 +19,7 @@ internal class DynamicStructTypeAccessor : ArrowSerializer.StructTypeAccessorBas
     {
         _fieldNames = schema.FieldsList.Select(f => f.Name).ToList();
         _fieldMapping = _fieldNames.Select((name, index) => (name, index)).ToDictionary(x => x.name, x => x.index);
-        ChildAccessors = schema.FieldsList.Select(f => ArrowSerializer.TypeAccessor.CreateFromArrowType(f.DataType)).ToList();
+        ChildAccessors = schema.FieldsList.Select(ArrowSerializer.TypeAccessor.CreateFromField).ToList();
         _structType = new StructType(schema.FieldsList);
     }
 
@@ -27,7 +27,7 @@ internal class DynamicStructTypeAccessor : ArrowSerializer.StructTypeAccessorBas
     {
         _fieldNames = structType.Fields.Select(f => f.Name).ToList();
         _fieldMapping = _fieldNames.Select((name, index) => (name, index)).ToDictionary(x => x.name, x => x.index);
-        ChildAccessors = structType.Fields.Select(f => ArrowSerializer.TypeAccessor.CreateFromArrowType(f.DataType)).ToList();
+        ChildAccessors = structType.Fields.Select(ArrowSerializer.TypeAccessor.CreateFromField).ToList();
         _structType = structType;
     }
 

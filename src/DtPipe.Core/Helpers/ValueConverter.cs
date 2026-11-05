@@ -37,19 +37,11 @@ public static class ValueConverter
             }
             if (underlyingTarget == typeof(DateTime))
             {
-                if (DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var dt))
-                    return dt;
-                if (DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out dt))
-                    return dt;
-                return DateTime.Parse(s, CultureInfo.InvariantCulture);
+                return TemporalNormalization.TryParseWallClock(s, out var dt) ? dt : DateTime.Parse(s, CultureInfo.InvariantCulture);
             }
             if (underlyingTarget == typeof(DateTimeOffset))
             {
-                if (DateTimeOffset.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var dto))
-                    return dto;
-                if (DateTimeOffset.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out dto))
-                    return dto;
-                return DateTimeOffset.Parse(s, CultureInfo.InvariantCulture);
+                return TemporalNormalization.TryParseInstant(s, out var dto) ? dto : DateTimeOffset.Parse(s, CultureInfo.InvariantCulture);
             }
             if (underlyingTarget == typeof(bool))
                 return bool.TryParse(s, out var b) ? b : bool.Parse(s);

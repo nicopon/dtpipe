@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 
 namespace Apache.Arrow.Serialization.Mapping;
 
@@ -45,4 +46,25 @@ public static class TemporalNormalization
     /// </summary>
     public static DateTime ToWallClock(DateTimeOffset value)
         => DateTime.SpecifyKind(value.UtcDateTime, DateTimeKind.Unspecified);
+
+    /// <summary>
+    /// Text → a zone-less column's value: a wall clock whatever the text says. A text with an offset
+    /// names an instant, which a wall clock holds as its UTC reading and never as the host's.
+    /// <c>DateTimeStyles.RoundtripKind</c> converts it to local time, so the same text would read
+    /// differently on two machines.
+    /// </summary>
+    public static bool TryParseWallClock(string text, out DateTime value)
+    {
+        if (!DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AllowWhiteSpaces, out value))
+            return false;
+        value = DateTime.SpecifyKind(value, DateTimeKind.Unspecified);
+        return true;
+    }
+
+    /// <summary>
+    /// Text → an instant. A text with no offset is UTC, as <see cref="ToOffset"/> reads a zone-less
+    /// value; <c>DateTimeOffset.TryParse</c> alone would give it the host's offset.
+    /// </summary>
+    public static bool TryParseInstant(string text, out DateTimeOffset value)
+        => DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AllowWhiteSpaces, out value);
 }

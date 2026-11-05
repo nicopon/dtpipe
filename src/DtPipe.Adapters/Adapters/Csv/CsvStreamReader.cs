@@ -428,10 +428,10 @@ public class CsvStreamReader : IStreamReader, IColumnTypeInferenceCapable
             };
 
         if (clrType == typeof(DateTime))
-            return static s => DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var v) ? v : TypedTextCell.Unreadable;
+            return TypedTextCell.ReadDateTime;
 
         if (clrType == typeof(DateTimeOffset))
-            return static s => DateTimeOffset.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var v) ? v : TypedTextCell.Unreadable;
+            return TypedTextCell.ReadDateTimeOffset;
 
         // A string column, or a type no parser reads: the cell stays text.
         return null;
@@ -479,7 +479,7 @@ public class CsvStreamReader : IStreamReader, IColumnTypeInferenceCapable
         if (allMatch(s => bool.TryParse(s, out _) || s is "0" or "1" or "yes" or "no"))
             return "bool";
 
-        if (allMatch(s => DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.None, out _)))
+        if (allMatch(TypedTextCell.ReadsAsDate))
             return "datetime";
 
         return null;

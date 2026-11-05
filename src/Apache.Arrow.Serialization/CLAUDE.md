@@ -8,7 +8,11 @@ Apache.Arrow.Ado           ← uses ArrowTypeResult
 DtPipe.Core                ← ArrowTypeMapper is a facade over ArrowTypeMap
 ```
 
-`ArrowTypeMap` (`Mapping/ArrowTypeMap.cs`) is the canonical CLR↔Arrow map.
+`ArrowTypeMap` (`Mapping/ArrowTypeMap.cs`) is the canonical CLR↔Arrow map, in both directions. Read it
+off the field (`GetClrTypeFromField`, `GetLogicalType`), never through a second switch: the dynamic
+accessors and the XML reader each kept one, and the two disagreed with the map on a decimal, a zone and
+a UUID. `[CI: LogicalTypeRoundTripTests]`
+
 `FixedSizeBinaryArrayBuilder` exists only in `Reflection/FixedSizeBinaryArrayBuilder.cs`; Core
 consumes it by project reference. `ArrowSerializer` / `ArrowDeserializer` usage: `EXTENDING.md`.
 
@@ -22,6 +26,7 @@ delegate to it:
 |---|---|---|
 | RFC 4122 big-endian byte order | `Rfc4122Guid.ToBigEndianBytes` / `FromBigEndianBytes` | `ArrowTypeMap.ToArrowUuidBytes` / `FromArrowUuidBytes` |
 | Zone-less `DateTime` handling | `TemporalNormalization.ToOffset` / `ToWallClock` | called directly by `ArrowTypeMap.GetValue` and the readers |
+| Text under a temporal column | `TemporalNormalization.TryParseWallClock` / `TryParseInstant` | called by the text readers and the writers' converters |
 
 **`TemporalNormalization` owns both directions; change them together.** A `DateTime` with
 `Kind=Unspecified` is a wall clock with no zone. `new DateTimeOffset(dt)` and
