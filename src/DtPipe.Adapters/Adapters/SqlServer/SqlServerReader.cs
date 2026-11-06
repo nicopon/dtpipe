@@ -68,13 +68,14 @@ public sealed class SqlServerReader : AdoColumnarReader, IRequiresOptions<SqlSer
         var columns = new List<PipeColumnInfo>(dbColumns.Count);
         foreach (var col in dbColumns)
         {
+            var (precision, scale) = DeclaredWidth(col);
             columns.Add(new PipeColumnInfo(
                 col.ColumnName,
                 AnnouncedClrType(col.DataType, col.DataTypeName),
                 col.AllowDBNull ?? true,
                 IsCaseSensitive: false, // SQL Server is case-insensitive by default
-                Precision: (int?)col.NumericPrecision,
-                Scale: (int?)col.NumericScale
+                Precision: precision,
+                Scale: scale
             ));
         }
         Columns = columns;
@@ -103,6 +104,14 @@ public sealed class SqlServerReader : AdoColumnarReader, IRequiresOptions<SqlSer
     }
 
     protected override Func<IArrowType, int, IAdoConsumer>? GetConsumerFactory() => _consumerFactory;
+
+    // The two money types fix their scale in their name, which is not a width the driver reports.
+    private static (int? Precision, int? Scale) DeclaredWidth(System.Data.Common.DbColumn col) => col.DataTypeName?.ToLowerInvariant() switch
+    {
+        "money" => (19, 4),
+        "smallmoney" => (10, 4),
+        _ => ((int?)col.NumericPrecision, (int?)col.NumericScale)
+    };
 
     /// <summary>Row mode reads a date or time column as the <see cref="DateOnly"/> or <see cref="TimeOnly"/> <see cref="AdoColumnarReader.Columns"/> declares.</summary>
     protected override object? GetCellValue(int ordinal) =>

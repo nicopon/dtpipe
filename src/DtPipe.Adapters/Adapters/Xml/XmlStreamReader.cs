@@ -127,9 +127,14 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
         Schema = arrowSchema;
         // Map complex types to typeof(object) to match inference path — avoids ArrowSchemaFactory failures.
         Columns = arrowSchema.FieldsList
-            .Select(f => new PipeColumnInfo(f.Name, XmlTypeInferrer.GetSimplifiedClrType(f), f.IsNullable))
+            .Select(f =>
+            {
+                var clrType = XmlTypeInferrer.GetSimplifiedClrType(f);
+                var (precision, scale) = clrType == typeof(decimal) ? ArrowSchemaFactory.DeclaredWidth(f) : (null, null);
+                return new PipeColumnInfo(f.Name, clrType, f.IsNullable, Precision: precision, Scale: scale);
+            })
             .ToList();
-        XmlTypeInferrer.AddColumnParsers(_columnParsers, Columns.Select(c => KeyValuePair.Create(c.Name, c.ClrType)), sampledRows: null);
+        XmlTypeInferrer.AddColumnParsers(_columnParsers, Columns);
         _logger.LogInformation("XmlStreamReader: Schema loaded from JSON ({Count} fields). Path: {Path}",
             arrowSchema.FieldsList.Count, _options.Path);
     }
@@ -529,10 +534,38 @@ public class XmlStreamReader : IStreamReader, IColumnarStreamReader, IColumnType
         for (int i = 0; i < Columns.Count; i++)
         {
             var colName = Columns[i].Name;
-            row[i] = GetValueFromFlattenedDict(dict, colName);
+            var value = GetValueFromFlattenedDict(dict, colName);
+            row[i] = Schema is { } schema && schema.FieldsList.Count == row.Length && HoldsAStruct(schema.FieldsList[i].DataType)
+                ? WithEveryField(value, schema.FieldsList[i].DataType)
+                : value;
         }
 
         return row;
+    }
+
+    private static bool HoldsAStruct(IArrowType type) => type is StructType || (type is ListType list && HoldsAStruct(list.ValueDataType));
+
+    /// <summary>
+    /// A struct as its Arrow form gives it back: every field of its type in its order, an absent one as
+    /// null. A row read without it would differ from the batch by a field, on a source whose records do
+    /// not all hold the same elements.
+    /// </summary>
+    private static object? WithEveryField(object? value, IArrowType type)
+    {
+        switch (value, type)
+        {
+            case (Dictionary<string, object?> record, StructType structType):
+                var complete = new Dictionary<string, object?>(record.Comparer);
+                foreach (var field in structType.Fields)
+                    complete[field.Name] = record.TryGetValue(field.Name, out var inner) ? WithEveryField(inner, field.DataType) : null;
+                foreach (var (key, inner) in record)
+                    complete.TryAdd(key, inner);
+                return complete;
+            case (List<object?> items, ListType list):
+                return items.Select(item => WithEveryField(item, list.ValueDataType)).ToList();
+            default:
+                return value;
+        }
     }
 
     private object? GetValueFromFlattenedDict(Dictionary<string, object?> dict, string dotPath)

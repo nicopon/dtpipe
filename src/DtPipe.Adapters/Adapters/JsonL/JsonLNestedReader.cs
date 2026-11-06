@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Apache.Arrow;
+using Apache.Arrow.Serialization.Mapping;
 using Apache.Arrow.Types;
 using DtPipe.Adapters.Common;
 
@@ -12,7 +14,8 @@ namespace DtPipe.Adapters.JsonL;
 /// would write a list of its bytes. The exception is a struct with a <c>_value</c> field, which schema
 /// discovery adds when the sample holds a scalar beside an object: the scalar is that field's value. A
 /// leaf with no scalar reader keeps the value as the JSON gives it, as does a key the schema has no field
-/// for (the shape check names that one).
+/// for (the shape check names that one). A struct holds every field of its type, an absent one as null,
+/// which is what its Arrow form gives back: a row read without it would differ by a field.
 /// </summary>
 internal sealed class JsonLNestedReader
 {
@@ -23,11 +26,13 @@ internal sealed class JsonLNestedReader
     private readonly bool _isStruct;
     private readonly bool _holdsScalar;
     private readonly Dictionary<string, JsonLNestedReader>? _fields;
+    private readonly string[]? _fieldNames;
     private readonly JsonLNestedReader? _item;
 
     private JsonLNestedReader(Type? leafType, Func<JsonElement, object?>? leaf, bool isStruct, bool holdsScalar,
-        Dictionary<string, JsonLNestedReader>? fields, JsonLNestedReader? item)
+        Dictionary<string, JsonLNestedReader>? fields, JsonLNestedReader? item, string[]? fieldNames = null)
     {
+        _fieldNames = fieldNames;
         _leafType = leafType;
         _leaf = leaf;
         _isStruct = isStruct;
@@ -36,24 +41,25 @@ internal sealed class JsonLNestedReader
         _item = item;
     }
 
-    /// <summary>The reader of a column of this Arrow type, or null for a scalar no reader reads.</summary>
-    internal static JsonLNestedReader? Of(IArrowType type)
+    /// <summary>The reader of a column of this field's Arrow type, or null for a scalar no reader reads.</summary>
+    internal static JsonLNestedReader? Of(Field column)
     {
-        switch (type)
+        switch (column.DataType)
         {
             case StructType structType:
                 var fields = new Dictionary<string, JsonLNestedReader>(StringComparer.Ordinal);
                 foreach (var field in structType.Fields)
                 {
-                    if (Of(field.DataType) is { } inner)
+                    if (Of(field) is { } inner)
                         fields[field.Name] = inner;
                 }
                 return new JsonLNestedReader(null, null, isStruct: true,
-                    holdsScalar: structType.Fields.Any(f => f.Name == ScalarField), fields, null);
+                    holdsScalar: structType.Fields.Any(f => f.Name == ScalarField), fields, null,
+                    structType.Fields.Select(f => f.Name).ToArray());
             case ListType listType:
-                return new JsonLNestedReader(null, null, isStruct: false, holdsScalar: false, null, Of(listType.ValueDataType));
+                return new JsonLNestedReader(null, null, isStruct: false, holdsScalar: false, null, Of(listType.ValueField));
             default:
-                var clrType = type switch
+                var clrType = column.DataType switch
                 {
                     Int64Type => typeof(long),
                     DoubleType => typeof(double),
@@ -61,7 +67,7 @@ internal sealed class JsonLNestedReader
                     Decimal128Type => typeof(decimal),
                     _ => null
                 };
-                return clrType != null && JsonLTypedValue.BuildReader(clrType) is { } read
+                return clrType != null && JsonLTypedValue.BuildReader(clrType, DecimalWidth.Of(column)) is { } read
                     ? new JsonLNestedReader(clrType, read, isStruct: false, holdsScalar: false, null, null)
                     : null;
         }
@@ -87,18 +93,27 @@ internal sealed class JsonLNestedReader
             if (!_holdsScalar) return TypedTextCell.Unreadable;
 
             var scalar = ReadOf(_fields!.GetValueOrDefault(ScalarField), element);
-            return ReferenceEquals(scalar, TypedTextCell.Unreadable)
-                ? scalar
-                : new Dictionary<string, object?> { [ScalarField] = scalar };
+            if (ReferenceEquals(scalar, TypedTextCell.Unreadable)) return scalar;
+
+            var holding = EmptyStruct();
+            holding[ScalarField] = scalar;
+            return holding;
         }
 
-        var dict = new Dictionary<string, object?>();
+        var dict = EmptyStruct();
         foreach (var prop in element.EnumerateObject())
         {
             var value = ReadOf(_fields!.GetValueOrDefault(prop.Name), prop.Value);
             if (ReferenceEquals(value, TypedTextCell.Unreadable)) return value;
-            dict.Add(prop.Name, value);
+            dict[prop.Name] = value;
         }
+        return dict;
+    }
+
+    private Dictionary<string, object?> EmptyStruct()
+    {
+        var dict = new Dictionary<string, object?>(_fieldNames!.Length);
+        foreach (var name in _fieldNames) dict[name] = null;
         return dict;
     }
 

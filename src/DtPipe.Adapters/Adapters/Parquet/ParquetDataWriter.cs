@@ -218,7 +218,7 @@ public sealed class ParquetDataWriter(string outputPath) : IColumnarDataWriter, 
         if (baseType != typeof(byte[]) && baseType != typeof(string) &&
             TryGetElementType(baseType, out var elementType))
         {
-            var item = MapToDataField(new PipeColumnInfo("element", elementType, true));
+            var item = MapToDataField(new PipeColumnInfo("element", elementType, true, Precision: col.Precision, Scale: col.Scale));
             return new ListField(col.Name, item, "list");
         }
 

@@ -97,18 +97,20 @@ public sealed class Time64Consumer : BaseAdoConsumer<Time64Array.Builder, Time64
 
 public sealed class Decimal128Consumer : BaseAdoConsumer<Decimal128Array.Builder, Decimal128Array, Decimal128Type>
 {
-    public Decimal128Consumer(int columnIndex, Decimal128Type type) : base(columnIndex, type, new Decimal128Array.Builder(type)) { }
+    private readonly int _scale;
+    public Decimal128Consumer(int columnIndex, Decimal128Type type) : base(columnIndex, type, new Decimal128Array.Builder(type)) => _scale = type.Scale;
     protected override void ConsumeValue(DbDataReader reader)
     {
-        Builder.Append(reader.GetDecimal(ColumnIndex));
+        Builder.Append(Apache.Arrow.Serialization.Mapping.DecimalWidth.ForBuilder(reader.GetDecimal(ColumnIndex), _scale));
     }
 }
 
 public sealed class Decimal256Consumer : BaseAdoConsumer<Decimal256Array.Builder, Decimal256Array, Decimal256Type>
 {
-    public Decimal256Consumer(int columnIndex, Decimal256Type type) : base(columnIndex, type, new Decimal256Array.Builder(type)) { }
+    private readonly int _scale;
+    public Decimal256Consumer(int columnIndex, Decimal256Type type) : base(columnIndex, type, new Decimal256Array.Builder(type)) => _scale = type.Scale;
     protected override void ConsumeValue(DbDataReader reader)
     {
-        Builder.Append(reader.GetDecimal(ColumnIndex));
+        Builder.Append(Apache.Arrow.Serialization.Mapping.DecimalWidth.ForBuilder(reader.GetDecimal(ColumnIndex), _scale));
     }
 }

@@ -257,8 +257,8 @@ EOF
 
 cat > "$ARTIFACTS_DIR/expected_oracle.csv" <<'EOF'
 ID,NAME,EMAIL
-1.000000000000000000,Eve,eve@example.com
-2.000000000000000000,Frank,frank@example.com
+1,Eve,eve@example.com
+2,Frank,frank@example.com
 EOF
 
 clean_csv "$ARTIFACTS_DIR/drv_oracle.csv"

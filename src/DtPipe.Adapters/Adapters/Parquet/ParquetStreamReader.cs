@@ -96,7 +96,8 @@ public class ParquetStreamReader : IColumnarStreamReader
                 case ListField listField:
                     if (ListItemReadError(listField) is { } itemError)
                         throw Unreadable(listField.Name, itemError);
-                    columns.Add(new PipeColumnInfo(listField.Name, ListClrType(listField), IsNullable: true));
+                    var (itemPrecision, itemScale) = DeclaredDecimal((DataField)listField.Item);
+                    columns.Add(new PipeColumnInfo(listField.Name, ListClrType(listField), IsNullable: true, Precision: itemPrecision, Scale: itemScale));
                     break;
 
                 // Dropping it silently would leave Columns and the read loop disagreeing on how
@@ -184,6 +185,7 @@ public class ParquetStreamReader : IColumnarStreamReader
         {
             var batch = new object?[batchSize][];
             var index = 0;
+            Func<object, object>?[]? readings = null;
 
             // Read all row groups
             for (int rowGroupIndex = 0; rowGroupIndex < _reader.RowGroupCount; rowGroupIndex++)
@@ -204,6 +206,8 @@ public class ParquetStreamReader : IColumnarStreamReader
                 using var rowGroupReader = _reader.OpenRowGroupReader(rowGroupIndex);
                 var rowCount = (int)rowGroupReader.RowCount;
 
+                readings ??= _reader.Schema.Fields.Select(RowReading).ToArray();
+
                 // Read all columns for this row group
                 var columnDataArrays = new System.Array[Columns.Count];
                 for (int colIndex = 0; colIndex < Columns.Count; colIndex++)
@@ -220,7 +224,8 @@ public class ParquetStreamReader : IColumnarStreamReader
                     var row = new object?[Columns.Count];
                     for (int colIndex = 0; colIndex < Columns.Count; colIndex++)
                     {
-                        row[colIndex] = columnDataArrays[colIndex].GetValue(rowIndex);
+                        var cell = columnDataArrays[colIndex].GetValue(rowIndex);
+                        row[colIndex] = cell is not null && readings[colIndex] is { } reading ? reading(cell) : cell;
                     }
 
                     batch[index++] = row;
@@ -258,9 +263,58 @@ public class ParquetStreamReader : IColumnarStreamReader
             _ => throw new NotSupportedException($"Parquet column '{field.Name}' is a {field.GetType().Name}."),
         };
 
+    /// <summary>
+    /// What a batch's builders do to a column's values, for the rows that take no batch; null for a column
+    /// they leave alone. A decimal is padded to its column's scale, and a timestamp stops at the microsecond
+    /// its Arrow field holds. A list's elements take the same.
+    /// </summary>
+    private static Func<object, object>? RowReading(ParquetField field)
+    {
+        var data = field is ListField list ? (DataField)list.Item : (DataField)field;
+        var type = LogicalClrType(data);
+        Func<object, object>? scalar = null;
+        if (type == typeof(decimal))
+        {
+            var (precision, scale) = DeclaredDecimal(data);
+            var width = DecimalWidth.Of(precision, scale);
+            scalar = cell => width.TryRead((decimal)cell, out var read) ? read : cell;
+        }
+        else if (type == typeof(DateTime))
+        {
+            scalar = static cell => WholeMicroseconds((DateTime)cell);
+        }
+        else if (type == typeof(DateTimeOffset))
+        {
+            scalar = static cell =>
+            {
+                var instant = (DateTimeOffset)cell;
+                return instant.AddTicks(-(instant.Ticks % TimeSpan.TicksPerMicrosecond));
+            };
+        }
+
+        if (scalar is null || field is not ListField) return scalar;
+
+        return cell =>
+        {
+            var items = (System.Array)((System.Array)cell).Clone();
+            for (var i = 0; i < items.Length; i++)
+            {
+                if (items.GetValue(i) is { } item) items.SetValue(scalar(item), i);
+            }
+            return items;
+        };
+    }
+
+    private static DateTime WholeMicroseconds(DateTime value)
+        => value.AddTicks(-(value.Ticks % TimeSpan.TicksPerMicrosecond));
+
     private static (Type ClrType, int? Precision, int? Scale) ColumnShape(ParquetField field)
     {
-        if (field is ListField list) return (ListClrType(list), null, null);
+        if (field is ListField list)
+        {
+            var (itemPrecision, itemScale) = DeclaredDecimal((DataField)list.Item);
+            return (ListClrType(list), itemPrecision, itemScale);
+        }
 
         var data = (DataField)field;
         var (precision, scale) = DeclaredDecimal(data);

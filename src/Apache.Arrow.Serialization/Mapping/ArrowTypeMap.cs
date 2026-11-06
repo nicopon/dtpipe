@@ -154,11 +154,10 @@ public static class ArrowTypeMap
         var logical = GetLogicalType(type);
 
         if (logical.ArrowType is not Decimal128Type) return logical;
-        if (precision is not int p || p < 1 || p > 38) return logical;
-        if (scale is not int s || s < 0 || s > p) return logical;
 
         // A declared width carries no undeclared mark.
-        return new ArrowTypeResult(new Decimal128Type(p, s));
+        var width = DecimalWidth.Of(precision, scale);
+        return width.Declared ? new ArrowTypeResult(new Decimal128Type(width.Precision, width.Scale)) : logical;
     }
 
     /// <summary>
@@ -296,8 +295,8 @@ public static class ArrowTypeMap
             DoubleArray a => a.GetValue(index),
             StringArray a => a.GetString(index),
             BinaryArray a => a.GetBytes(index).ToArray(),
-            Decimal128Array a => a.GetValue(index),
-            Decimal256Array a => a.GetValue(index),
+            Decimal128Array a => ReadDecimal(a.GetValue(index), field),
+            Decimal256Array a => ReadDecimal(a.GetValue(index), field),
             FixedSizeBinaryArray a => GetFixedWidthValue(a, index),
             Date32Array a => a.GetDateOnly(index),
             Date64Array a => a.GetDateTime(index),
@@ -350,6 +349,15 @@ public static class ArrowTypeMap
             or ArrowTypeId.Date32 or ArrowTypeId.Date64 or ArrowTypeId.Time32 or ArrowTypeId.Time64
             or ArrowTypeId.Timestamp or ArrowTypeId.Duration
     };
+
+    /// <summary>
+    /// A decimal cell. A column that declared no width reads bare: the 18 decimals it stores at are the
+    /// default's, not the source's. Here rather than after the switch, so that only a decimal pays for it.
+    /// </summary>
+    private static object? ReadDecimal(decimal? value, Field? field)
+        => field is { HasMetadata: true } && value is { } stored && IsUndeclaredDecimal(field)
+            ? DecimalWidth.Bare(stored)
+            : value;
 
     /// <summary>
     /// A fixed-width cell. The two narrow decimal arrays derive from <see cref="FixedSizeBinaryArray"/>:

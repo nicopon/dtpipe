@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # validate_declared_decimals.sh — a decimal column the source declares a width for must reach the
-# output at that width; one that declares none keeps the default scale.
+# output at that width; one that declares none reads with no trailing zeros, on both paths.
 #
 # The ADO readers share one type resolver. A reader that dropped the declared precision wrote every
 # NUMBER(p,s) / DECIMAL(p,s) with 18 decimals; Oracle also reads a small NUMBER(p,s) as a double.
@@ -68,11 +68,10 @@ expect() {
   if [ "$got" = "$want" ]; then ok "$label"; else fail "$label: expected '$want', got '$got'"; fi
 }
 
-# BARE (NUMBER with no constraint) and BD (BINARY_DOUBLE) are not declared decimals: the default scale
-# and a double respectively. The row chain renders the decimal without trailing zeros, so its
-# undeclared cell differs by design; only the declared columns are compared there.
+# BARE (NUMBER with no constraint) and BD (BINARY_DOUBLE) are not declared decimals: one that reads
+# with no trailing zeros and a double respectively.
 expect "oracle columnar" "$ORA_SYS" \
-  "1,7.000000000000000000,12345.12345,12345678901234567890,12345678.12,12345.123456789,2.5"
+  "1,7,12345.12345,12345678901234567890,12345678.12,12345.123456789,2.5"
 expect "oracle row" "$ORA_SYS" \
   "1,7,12345.12345,12345678901234567890,12345678.12,12345.123456789,2.5" --compute "ID:row.ID"
 

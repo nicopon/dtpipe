@@ -68,32 +68,34 @@ public static class ArrowSchemaFactory
 
     public static IReadOnlyList<PipeColumnInfo> ToPipeColumns(Schema schema)
     {
-        return schema.FieldsList.Select(f => new PipeColumnInfo(
-            f.Name,
-            ArrowTypeMapper.GetClrTypeFromField(f),
-            f.IsNullable,
-            Precision: DeclaredPrecision(f),
-            Scale: DeclaredScale(f)
-        )).ToList();
+        return schema.FieldsList.Select(f =>
+        {
+            var (precision, scale) = DeclaredWidth(f);
+            return new PipeColumnInfo(f.Name, ArrowTypeMapper.GetClrTypeFromField(f), f.IsNullable, Precision: precision, Scale: scale);
+        }).ToList();
     }
 
     /// <summary>
-    /// Precision an Arrow decimal declares, so a column that goes Schema → PipeColumnInfo →
-    /// Schema comes back at the width it left with rather than at the default. A decimal marked
-    /// undeclared reports none: the default width it carries is not something the source said.
+    /// The width an Arrow decimal declares, a list's being its element's, so a column that goes Schema →
+    /// PipeColumnInfo → Schema comes back at the width it left with rather than at the default. A decimal
+    /// marked undeclared reports none: the default it carries is not something the source said. A
+    /// Decimal256 past what a Decimal128 holds keeps its scale, which is what a reader of it prints: a
+    /// CLR decimal never fills the digits lost.
     /// </summary>
-    private static int? DeclaredPrecision(Field f) => ArrowTypeMap.IsUndeclaredDecimal(f) ? null : f.DataType switch
+    public static (int? Precision, int? Scale) DeclaredWidth(Field f)
     {
-        Decimal128Type d => d.Precision,
-        Decimal256Type d => d.Precision,
-        _ => null
-    };
+        if (ArrowTypeMap.IsUndeclaredDecimal(f)) return (null, null);
 
-    /// <inheritdoc cref="DeclaredPrecision"/>
-    private static int? DeclaredScale(Field f) => ArrowTypeMap.IsUndeclaredDecimal(f) ? null : f.DataType switch
-    {
-        Decimal128Type d => d.Scale,
-        Decimal256Type d => d.Scale,
-        _ => null
-    };
+        var widest = ArrowTypeMap.DefaultDecimalType.Precision;
+        return f.DataType switch
+        {
+            Decimal32Type d => (d.Precision, d.Scale),
+            Decimal64Type d => (d.Precision, d.Scale),
+            Decimal128Type d => (d.Precision, d.Scale),
+            Decimal256Type d => d.Precision > widest && d.Scale < widest ? (widest, d.Scale) : (d.Precision, d.Scale),
+            ListType l => DeclaredWidth(l.ValueField),
+            FixedSizeListType l => DeclaredWidth(l.ValueField),
+            _ => (null, null)
+        };
+    }
 }

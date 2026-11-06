@@ -87,7 +87,7 @@ write.
 | `A connection was successfully established … certificate chain` | Add `TrustServerCertificate=True`, or install the server certificate |
 | `Login failed for user ''` | `Integrated Security=true` uses the *process* identity — check which account the scheduler or service runs as |
 | Upsert inserts duplicates | The key columns are not covered by a unique index on the target |
-| A `datetimeoffset` loses its offset on another engine | The offset survives to any target that has an offset-carrying type; check the target's type mapping |
+| A `datetimeoffset` reads at `+00:00` | dtpipe reads it in UTC, the same instant. To keep the offset as written, select it as text: `CAST(col AS varchar(34))` |
 
 ---
 

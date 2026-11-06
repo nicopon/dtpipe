@@ -2,6 +2,7 @@ using System.Data;
 using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using Apache.Arrow;
+using Apache.Arrow.Serialization.Mapping;
 using Apache.Arrow.Ado;
 using Apache.Arrow.Types;
 using Apache.Arrow.Arrays;
@@ -351,7 +352,7 @@ public sealed partial class PostgreSqlReader : IColumnarStreamReader, IBatchSize
 
             NpgsqlTypes.NpgsqlDbType.Numeric => BuildTyped(
                 new Decimal128Array.Builder((Decimal128Type)arrowType),
-                (e, b) => { if (e.IsNull) { e.Skip(); b.AppendNull(); } else b.Append(e.Read<decimal>()); },
+                (e, b) => { if (e.IsNull) { e.Skip(); b.AppendNull(); } else b.Append(DecimalWidth.ForBuilder(e.Read<decimal>(), ((Decimal128Type)arrowType).Scale)); },
                 b => b.Build()),
 
             NpgsqlTypes.NpgsqlDbType.Text => BuildTyped(

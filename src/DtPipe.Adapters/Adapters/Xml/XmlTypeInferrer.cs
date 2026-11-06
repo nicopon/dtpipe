@@ -66,11 +66,21 @@ internal static class XmlTypeInferrer
         }
     }
 
+    /// <summary>The same for the columns of a schema, whose decimals read at the width it declares.</summary>
+    internal static void AddColumnParsers(Dictionary<string, XmlTypedColumn> parsers, IEnumerable<PipeColumnInfo> columns)
+    {
+        foreach (var column in columns)
+        {
+            if (!parsers.ContainsKey(column.Name) && BuildParser(column.ClrType, DecimalWidth.Of(column.Precision, column.Scale)) is { } parser)
+                parsers[column.Name] = new XmlTypedColumn(parser, column.ClrType, null);
+        }
+    }
+
     /// <summary>
     /// The parser of a typed column, or null for a text column. It returns
     /// <see cref="TypedTextCell.Unreadable"/> for a text it does not read.
     /// </summary>
-    internal static Func<string, object?>? BuildParser(Type clrType)
+    internal static Func<string, object?>? BuildParser(Type clrType, DecimalWidth? width = null)
     {
         if (clrType == typeof(Guid))
             return static s => Guid.TryParse(s, out var g) ? g : TypedTextCell.Unreadable;
@@ -88,7 +98,10 @@ internal static class XmlTypeInferrer
             return static s => TextNumber.TryReadFloat(s, out var v) ? v : TypedTextCell.Unreadable;
 
         if (clrType == typeof(decimal))
-            return static s => TextNumber.TryReadDecimal(s, out var v) ? v : TypedTextCell.Unreadable;
+        {
+            var column = width ?? DecimalWidth.Undeclared;
+            return s => TextNumber.TryReadDecimal(s, out var v) && column.TryRead(v, out var read) ? read : TypedTextCell.Unreadable;
+        }
 
         if (clrType == typeof(bool))
             return static s =>

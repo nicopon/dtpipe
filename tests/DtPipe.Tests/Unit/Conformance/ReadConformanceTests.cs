@@ -106,8 +106,6 @@ public sealed class ReadConformanceTests : IDisposable
         public static implicit operator Cell(string expected) => new(expected);
     }
 
-    private static Cell L4(string expected) => new(expected, "L4");
-
     /// <param name="Reader">The reader under test.</param>
     /// <param name="Mode">How the type reaches a text reader: declared, inferred, schema, sampled (inferred from the first row alone) or mixed (inferred from both rows).</param>
     /// <param name="Type">The type's name for the reader: the hint or schema field of a text reader, the first row of a sampled or mixed cell.</param>
@@ -174,7 +172,9 @@ public sealed class ReadConformanceTests : IDisposable
         new("parquet", "", "nan", "'NaN'::DOUBLE", "Double:NaN"),
         new("parquet", "", "inf", "'Infinity'::DOUBLE", "Double:Infinity"),
         new("parquet", "", "decimal(10,2)", "4.2::DECIMAL(10,2)", "Decimal:4.20"),
-        new("parquet", "", "decimal(38,18)", "4.29::DECIMAL(38,18)", L4("Decimal:4.290000000000000000")),
+        new("parquet", "", "decimal(38,18)", "4.29::DECIMAL(38,18)", "Decimal:4.290000000000000000"),
+        new("parquet", "", "decimal(38,18)", "12345678901234567.891::DECIMAL(38,18)", "Decimal:12345678901234567.891000000000"),
+        new("parquet", "", "decimal(38,18)", "0::DECIMAL(38,18)", "Decimal:0.000000000000000000"),
         new("parquet", "", "string", "'héllo'", "String:héllo"),
         new("parquet", "", "binary", "'abc'::BLOB", "Bytes:616263"),
         new("parquet", "", "date", "DATE '2024-01-02'", "DateOnly:2024-01-02"),
@@ -183,7 +183,7 @@ public sealed class ReadConformanceTests : IDisposable
         new("parquet", "", "timestamp", "TIMESTAMP '2024-01-02 03:04:05.123456'", "DateTime:2024-01-02T03:04:05.1234560"),
         new("parquet", "", "timestamp_s", "TIMESTAMP_S '2024-01-02 03:04:05'", "DateTime:2024-01-02T03:04:05.0000000"),
         new("parquet", "", "timestamp_ms", "TIMESTAMP_MS '2024-01-02 03:04:05.123'", "DateTime:2024-01-02T03:04:05.1230000"),
-        new("parquet", "", "timestamp_ns", "TIMESTAMP_NS '2024-01-02 03:04:05.123456789'", L4("DateTime:2024-01-02T03:04:05.1234560")),
+        new("parquet", "", "timestamp_ns", "TIMESTAMP_NS '2024-01-02 03:04:05.123456789'", "DateTime:2024-01-02T03:04:05.1234560"),
         new("parquet", "", "timestamptz", "TIMESTAMPTZ '2024-01-02 03:04:05.123456+02'", "DateTimeOffset:2024-01-02T01:04:05.1234560+00:00"),
         new("parquet", "", "interval", "INTERVAL 1 DAY", "named"),
         new("parquet", "", "uuid", "UUID '6f9619ff-8b86-d011-b42d-00c04fc964ff'", "Guid:6f9619ff-8b86-d011-b42d-00c04fc964ff"),
@@ -195,7 +195,8 @@ public sealed class ReadConformanceTests : IDisposable
         new("parquet", "", "union", "union_value(a := 1)::UNION(a INTEGER, b VARCHAR)", "named"),
         new("parquet", "", "enum", "'a'::ENUM('a','b')", "String:a"),
         new("parquet", "", "list<struct>", "[{'a':1}]", "named"),
-        new("parquet", "", "list<decimal>", "[4.29::DECIMAL(10,2)]", L4("[Decimal:4.29]")),
+        new("parquet", "", "list<decimal>", "[4.29::DECIMAL(10,2)]", "[Decimal:4.29]"),
+        new("parquet", "", "list<decimal>", "[4.2::DECIMAL(10,2)]", "[Decimal:4.20]"),
         new("parquet", "", "list<timestamp>", "[TIMESTAMP '2024-01-02 03:04:05']", "[DateTime:2024-01-02T03:04:05.0000000]"),
         new("parquet", "", "list<uuid>", "[UUID '6f9619ff-8b86-d011-b42d-00c04fc964ff']", "named"),
         new("parquet", "", "struct<uuid>", "{'u':UUID '6f9619ff-8b86-d011-b42d-00c04fc964ff'}", "named"),
@@ -225,10 +226,10 @@ public sealed class ReadConformanceTests : IDisposable
         new("arrow", "", "decimal64", "", "Decimal:4.29"),
         new("arrow", "", "decimal128(10,2)", "", "Decimal:4.29"),
         new("arrow", "", "decimal128(38,18)", "", "Decimal:4.290000000000000000"),
-        new("arrow", "", "decimal-undeclared", "", L4("Decimal:4.29")),
+        new("arrow", "", "decimal-undeclared", "", "Decimal:4.29"),
         new("arrow", "", "decimal128-wide", "", "Decimal:12345678901234567.891000000000"),
-        new("arrow", "", "decimal-undeclared-wide", "", L4("Decimal:12345678901234567.891")),
-        new("arrow", "", "decimal-undeclared-fraction", "", L4("Decimal:1.23456")),
+        new("arrow", "", "decimal-undeclared-wide", "", "Decimal:12345678901234567.891"),
+        new("arrow", "", "decimal-undeclared-fraction", "", "Decimal:1.23456"),
         new("arrow", "", "decimal256", "", "Decimal:4.2900000000"),
         new("arrow", "", "string", "", "String:héllo"),
         new("arrow", "", "largestring", "", "named"),
@@ -293,7 +294,11 @@ public sealed class ReadConformanceTests : IDisposable
         new("csv", "declared", "decimal", "1,000.50", "named"),
         new("csv", "declared", "double", "1e400", "named"),
         new("csv", "declared", "decimal", "0.1234567890123456789012345678901234", "named"),
-        new("csv", "declared", "decimal", "1.5000000000000000000000000000000000", "Decimal:1.5000000000000000000000000000"),
+        new("csv", "declared", "decimal", "1.5000000000000000000000000000000000", "Decimal:1.5"),
+        new("csv", "declared", "decimal", "10.50", "Decimal:10.5"),
+        new("csv", "declared", "decimal", "0.0000000000000000000001", "named"),
+        new("csv", "declared", "decimal", "1.5000000000000000000000", "Decimal:1.5"),
+        new("csv", "declared", "decimal", "170141183460469231732", "named"),
         new("csv", "declared", "bool", "true", "Boolean:true"),
         new("csv", "declared", "bool", "yes", "Boolean:true"),
         new("csv", "declared", "datetime", "2024-01-02T03:04:05", "DateTime:2024-01-02T03:04:05.0000000"),
@@ -302,7 +307,7 @@ public sealed class ReadConformanceTests : IDisposable
         new("csv", "declared", "datetime", "2024-01-02T03:04:05Z", "DateTime:2024-01-02T03:04:05.0000000"),
         new("csv", "declared", "datetimeoffset", "2024-01-02T03:04:05Z", "DateTimeOffset:2024-01-02T03:04:05.0000000+00:00"),
         new("csv", "declared", "datetimeoffset", "2024-01-02T03:04:05", "DateTimeOffset:2024-01-02T03:04:05.0000000+00:00"),
-        new("csv", "declared", "datetimeoffset", "2024-01-02T03:04:05+02:00", "DateTimeOffset:2024-01-02T03:04:05.0000000+02:00"),
+        new("csv", "declared", "datetimeoffset", "2024-01-02T03:04:05+02:00", "DateTimeOffset:2024-01-02T01:04:05.0000000+00:00"),
         new("csv", "declared", "uuid", "6f9619ff-8b86-d011-b42d-00c04fc964ff", "Guid:6f9619ff-8b86-d011-b42d-00c04fc964ff"),
         new("csv", "declared", "int32", "abc", "named"),
         new("csv", "declared", "int64", "abc", "named"),
@@ -321,15 +326,18 @@ public sealed class ReadConformanceTests : IDisposable
         new("jsonl", "declared", "int64", "5000000000", "Int64:5000000000"),
         new("jsonl", "declared", "double", "1.5", "Double:1.5"),
         new("jsonl", "declared", "float", "1.5", "Single:1.5"),
-        new("jsonl", "declared", "decimal", "4.29", L4("Decimal:4.29")),
-        new("jsonl", "declared", "decimal", "12345678901234567.891", L4("Decimal:12345678901234567.891")),
+        new("jsonl", "declared", "decimal", "4.29", "Decimal:4.29"),
+        new("jsonl", "declared", "decimal", "12345678901234567.891", "Decimal:12345678901234567.891"),
         new("jsonl", "declared", "decimal", "\"1,5\"", "named"),
         new("jsonl", "declared", "decimal", "\"1,000\"", "named"),
         new("jsonl", "declared", "double", "\"1,000\"", "named"),
         new("jsonl", "declared", "decimal", "0.1234567890123456789012345678901234", "named"),
         new("jsonl", "declared", "decimal", "\"0.1234567890123456789012345678901234\"", "named"),
         new("jsonl", "declared", "decimal", "1e-30", "named"),
-        new("jsonl", "declared", "decimal", "0.0000000000000000000001", L4("named")),
+        new("jsonl", "declared", "decimal", "10.50", "Decimal:10.5"),
+        new("jsonl", "declared", "decimal", "1.5000000000000000000000", "Decimal:1.5"),
+        new("jsonl", "declared", "decimal", "170141183460469231732", "named"),
+        new("jsonl", "declared", "decimal", "0.0000000000000000000001", "named"),
         new("jsonl", "declared", "bool", "true", "Boolean:true"),
         new("jsonl", "declared", "bool", "\"yes\"", "Boolean:true"),
         new("jsonl", "declared", "datetime", "\"2024-01-02T03:04:05\"", "DateTime:2024-01-02T03:04:05.0000000"),
@@ -338,7 +346,7 @@ public sealed class ReadConformanceTests : IDisposable
         new("jsonl", "declared", "datetime", "\"2024-01-02T03:04:05Z\"", "DateTime:2024-01-02T03:04:05.0000000"),
         new("jsonl", "declared", "datetimeoffset", "\"2024-01-02T03:04:05Z\"", "DateTimeOffset:2024-01-02T03:04:05.0000000+00:00"),
         new("jsonl", "declared", "datetimeoffset", "\"2024-01-02T03:04:05\"", "DateTimeOffset:2024-01-02T03:04:05.0000000+00:00"),
-        new("jsonl", "declared", "datetimeoffset", "\"2024-01-02T03:04:05+02:00\"", L4("DateTimeOffset:2024-01-02T01:04:05.0000000+00:00")),
+        new("jsonl", "declared", "datetimeoffset", "\"2024-01-02T03:04:05+02:00\"", "DateTimeOffset:2024-01-02T01:04:05.0000000+00:00"),
         new("jsonl", "declared", "uuid", "\"6f9619ff-8b86-d011-b42d-00c04fc964ff\"", "Guid:6f9619ff-8b86-d011-b42d-00c04fc964ff"),
         new("jsonl", "declared", "int32", "\"abc\"", "named"),
         new("jsonl", "declared", "int64", "\"abc\"", "named"),
@@ -357,13 +365,15 @@ public sealed class ReadConformanceTests : IDisposable
         new("xml", "declared", "int64", "5000000000", "Int64:5000000000"),
         new("xml", "declared", "double", "1.5", "Double:1.5"),
         new("xml", "declared", "float", "1.5", "Single:1.5"),
-        new("xml", "declared", "decimal", "4.29", L4("Decimal:4.29")),
-        new("xml", "declared", "decimal", "12345678901234567.891", L4("Decimal:12345678901234567.891")),
+        new("xml", "declared", "decimal", "4.29", "Decimal:4.29"),
+        new("xml", "declared", "decimal", "12345678901234567.891", "Decimal:12345678901234567.891"),
         new("xml", "declared", "decimal", "1,5", "named"),
         new("xml", "declared", "decimal", "1,000", "named"),
+        new("xml", "declared", "decimal", "10.50", "Decimal:10.5"),
+        new("xml", "declared", "decimal", "1.5000000000000000000000", "Decimal:1.5"),
         new("xml", "declared", "double", "1e400", "named"),
         new("xml", "declared", "decimal", "0.1234567890123456789012345678901234", "named"),
-        new("xml", "declared", "decimal", "0.0000000000000000000001", L4("named")),
+        new("xml", "declared", "decimal", "0.0000000000000000000001", "named"),
         new("xml", "declared", "bool", "true", "Boolean:true"),
         new("xml", "declared", "bool", "yes", "Boolean:true"),
         new("xml", "declared", "datetime", "2024-01-02T03:04:05", "DateTime:2024-01-02T03:04:05.0000000"),
@@ -372,7 +382,7 @@ public sealed class ReadConformanceTests : IDisposable
         new("xml", "declared", "datetime", "2024-01-02T03:04:05Z", "DateTime:2024-01-02T03:04:05.0000000"),
         new("xml", "declared", "datetimeoffset", "2024-01-02T03:04:05Z", "DateTimeOffset:2024-01-02T03:04:05.0000000+00:00"),
         new("xml", "declared", "datetimeoffset", "2024-01-02T03:04:05", "DateTimeOffset:2024-01-02T03:04:05.0000000+00:00"),
-        new("xml", "declared", "datetimeoffset", "2024-01-02T03:04:05+02:00", L4("DateTimeOffset:2024-01-02T01:04:05.0000000+00:00")),
+        new("xml", "declared", "datetimeoffset", "2024-01-02T03:04:05+02:00", "DateTimeOffset:2024-01-02T01:04:05.0000000+00:00"),
         new("xml", "declared", "uuid", "6f9619ff-8b86-d011-b42d-00c04fc964ff", "Guid:6f9619ff-8b86-d011-b42d-00c04fc964ff"),
         new("xml", "declared", "int32", "abc", "named"),
         new("xml", "declared", "int64", "abc", "named"),
@@ -402,7 +412,7 @@ public sealed class ReadConformanceTests : IDisposable
         new("csv", "inferred", "decimal", "0.10000000000000001", "Decimal:0.10000000000000001"),
         new("csv", "inferred", "decimal", "0.1000000000000000000000000000000001", "named"),
         new("csv", "inferred", "decimal", "12345678901234567890", "Decimal:12345678901234567890"),
-        new("csv", "inferred", "decimal", "1.50-", "Decimal:-1.50"),
+        new("csv", "inferred", "decimal", "1.50-", "Decimal:-1.5"),
         new("csv", "inferred", "string", "5-", "String:5- then String:"),
         new("csv", "inferred", "string", "1234567890123456789012345678901234567890", "String:1234567890123456789012345678901234567890 then String:"),
         new("csv", "inferred", "string", "1.2345678901234567890e5", "String:1.2345678901234567890e5 then String:"),
@@ -439,17 +449,17 @@ public sealed class ReadConformanceTests : IDisposable
         new("jsonl", "inferred", "double", "0.00012345678901234567", "Double:0.00012345678901234567"),
         new("jsonl", "inferred", "double", "1.5e-25", "Double:1.5E-25"),
         new("jsonl", "inferred", "double", "0.30000000000000004", "Double:0.30000000000000004"),
-        new("jsonl", "inferred", "decimal", "0.10000000000000001", L4("Decimal:0.10000000000000001")),
+        new("jsonl", "inferred", "decimal", "0.10000000000000001", "Decimal:0.10000000000000001"),
         new("jsonl", "inferred", "decimal", "0.1000000000000000000000000000000001", "named"),
-        new("jsonl", "inferred", "decimal", "12345678901234567890", L4("Decimal:12345678901234567890")),
+        new("jsonl", "inferred", "decimal", "12345678901234567890", "Decimal:12345678901234567890"),
         new("jsonl", "inferred", "string", "1234567890123456789012345678901234567890", "String:1234567890123456789012345678901234567890"),
         new("jsonl", "inferred", "string", "1e400", "String:1e400"),
         new("jsonl", "inferred", "string", "1e-400", "String:1e-400"),
         new("jsonl", "inferred", "string", "1.2345678901234567890e5", "String:1.2345678901234567890e5"),
-        new("jsonl", "mixed", "1.5", "12345678901234567.891", L4("Decimal:1.5 then Decimal:12345678901234567.891")),
+        new("jsonl", "mixed", "1.5", "12345678901234567.891", "Decimal:1.5 then Decimal:12345678901234567.891"),
         new("jsonl", "inferred", "float", "1.5", "Double:1.5"),
         new("jsonl", "inferred", "decimal", "4.29", "Double:4.29"),
-        new("jsonl", "inferred", "decimal", "12345678901234567.891", L4("Decimal:12345678901234567.891")),
+        new("jsonl", "inferred", "decimal", "12345678901234567.891", "Decimal:12345678901234567.891"),
         new("jsonl", "inferred", "decimal", "\"1,5\"", "String:1,5"),
         new("jsonl", "inferred", "bool", "true", "Boolean:true"),
         new("jsonl", "inferred", "bool", "\"yes\"", "String:yes"),
@@ -479,16 +489,16 @@ public sealed class ReadConformanceTests : IDisposable
         new("xml", "inferred", "double", "1.5", "Double:1.5"),
         new("xml", "inferred", "float", "1.5", "Double:1.5"),
         new("xml", "inferred", "decimal", "4.29", "Double:4.29"),
-        new("xml", "inferred", "decimal", "12345678901234567.891", L4("Decimal:12345678901234567.891")),
+        new("xml", "inferred", "decimal", "12345678901234567.891", "Decimal:12345678901234567.891"),
         new("xml", "inferred", "decimal", "0.1234567890123456789012345678901234", "named"),
         new("xml", "inferred", "double", "0.30000000000000004", "Double:0.30000000000000004"),
         new("xml", "inferred", "double", "0.00012345678901234567", "Double:0.00012345678901234567"),
-        new("xml", "inferred", "decimal", "0.10000000000000001", L4("Decimal:0.10000000000000001")),
+        new("xml", "inferred", "decimal", "0.10000000000000001", "Decimal:0.10000000000000001"),
         new("xml", "inferred", "decimal", "0.1000000000000000000000000000000001", "named"),
-        new("xml", "inferred", "decimal", "12345678901234567890", L4("Decimal:12345678901234567890")),
+        new("xml", "inferred", "decimal", "12345678901234567890", "Decimal:12345678901234567890"),
         new("xml", "inferred", "string", "1234567890123456789012345678901234567890", "String:1234567890123456789012345678901234567890"),
         new("xml", "inferred", "string", "1e-400", "String:1e-400"),
-        new("xml", "mixed", "1", "12345678901234567.891", L4("Decimal:1 then Decimal:12345678901234567.891")),
+        new("xml", "mixed", "1", "12345678901234567.891", "Decimal:1 then Decimal:12345678901234567.891"),
         new("xml", "inferred", "decimal", "1,5", "String:1,5"),
         new("xml", "inferred", "bool", "true", "Boolean:true"),
         new("xml", "inferred", "bool", "yes", "Boolean:true"),
@@ -537,7 +547,10 @@ public sealed class ReadConformanceTests : IDisposable
         new("xml", "sampled", "1", "1.5", "named"),
         new("xml", "sampled", "1", "x", "named"),
         // jsonl schema
-        new("jsonl", "schema", "decimal(10,2)", "4.2", L4("Decimal:4.20")),
+        new("jsonl", "schema", "decimal(10,2)", "4.2", "Decimal:4.20"),
+        new("jsonl", "schema", "decimal(10,2)", "1.234", "named"),
+        new("jsonl", "schema", "decimal(10,2)", "1.2300", "Decimal:1.23"),
+        new("jsonl", "schema", "decimal(10,2)", "123456789.5", "named"),
         new("jsonl", "schema", "timestamp(us)", "\"2024-01-02T03:04:05\"", "DateTime:2024-01-02T03:04:05.0000000"),
         new("jsonl", "schema", "timestamp(us,UTC)", "\"2024-01-02T03:04:05Z\"", "DateTimeOffset:2024-01-02T03:04:05.0000000+00:00"),
         new("jsonl", "schema", "uuid", "\"6f9619ff-8b86-d011-b42d-00c04fc964ff\"", "Guid:6f9619ff-8b86-d011-b42d-00c04fc964ff"),
@@ -551,7 +564,8 @@ public sealed class ReadConformanceTests : IDisposable
         new("jsonl", "schema", "list<int64>", "\"x\"", "named"),
         new("jsonl", "schema", "struct<a>", "5", "named"),
         // xml schema
-        new("xml", "schema", "decimal(10,2)", "4.2", L4("Decimal:4.20")),
+        new("xml", "schema", "decimal(10,2)", "4.2", "Decimal:4.20"),
+        new("xml", "schema", "decimal(10,2)", "1.234", "named"),
         new("xml", "schema", "timestamp(us)", "2024-01-02T03:04:05", "DateTime:2024-01-02T03:04:05.0000000"),
         new("xml", "schema", "timestamp(us,UTC)", "2024-01-02T03:04:05Z", "DateTimeOffset:2024-01-02T03:04:05.0000000+00:00"),
         new("xml", "schema", "uuid", "6f9619ff-8b86-d011-b42d-00c04fc964ff", "Guid:6f9619ff-8b86-d011-b42d-00c04fc964ff"),
@@ -614,7 +628,7 @@ public sealed class ReadConformanceTests : IDisposable
 
     /// <summary>
     /// A scalar beside an object in the sample is the struct's <c>_value</c>, on both paths, where any other
-    /// scalar in a struct is refused. The two paths still differ on a struct's absent fields (L4).
+    /// scalar in a struct is refused. An absent field reads as null, as the column's Arrow form gives it back.
     /// </summary>
     [Fact]
     public async Task A_Scalar_Beside_An_Object_In_The_Sample_Is_The_Value_Field()
@@ -624,7 +638,25 @@ public sealed class ReadConformanceTests : IDisposable
         IStreamReader Open() => new JsonLStreamReader(path, new JsonLReaderOptions { AutoColumnTypes = true });
 
         Assert.Equal("{_value=null,a=Int64:1} then {_value=Int64:5,a=null}", await ReadOutcome.ColumnarAsync(Open));
-        Assert.Equal("{a=Int64:1} then {_value=Int64:5}", await ReadOutcome.RowsAsync(Open));
+        Assert.Equal("{_value=null,a=Int64:1} then {_value=Int64:5,a=null}", await ReadOutcome.RowsAsync(Open));
+    }
+
+    /// <summary>A struct holds every field of its type on both paths, an absent one as null.</summary>
+    [Fact]
+    public async Task An_Absent_Field_Of_A_Struct_Reads_As_Null_On_Both_Paths()
+    {
+        var xml = Path.Combine(_dir, "sparse.xml");
+        File.WriteAllText(xml, "<rows><r><id>1</id><v><a>1</a></v></r><r><id>2</id><v><b>2</b></v></r></rows>");
+        IStreamReader OpenXml() => new XmlStreamReader(xml, new XmlReaderOptions { Path = "/rows/r", AutoColumnTypes = true });
+
+        var jsonl = Path.Combine(_dir, "sparse.jsonl");
+        File.WriteAllText(jsonl, "{\"id\":1,\"v\":{\"a\":1}}\n{\"id\":2,\"v\":{\"b\":2}}\n");
+        IStreamReader OpenJsonl() => new JsonLStreamReader(jsonl, new JsonLReaderOptions { AutoColumnTypes = true });
+
+        Assert.Equal("{a=Int32:1,b=null} then {a=null,b=Int32:2}", await ReadOutcome.RowsAsync(OpenXml));
+        Assert.Equal(await ReadOutcome.ColumnarAsync(OpenXml), await ReadOutcome.RowsAsync(OpenXml));
+        Assert.Equal("{a=Int64:1,b=null} then {a=null,b=Int64:2}", await ReadOutcome.RowsAsync(OpenJsonl));
+        Assert.Equal(await ReadOutcome.ColumnarAsync(OpenJsonl), await ReadOutcome.RowsAsync(OpenJsonl));
     }
 
     /// <summary>A query failing once its first rows are out is a failure on both paths, never the end of its rows.</summary>
@@ -636,20 +668,6 @@ public sealed class ReadConformanceTests : IDisposable
 
         Assert.Equal("raw: InvalidOperationException", await ReadOutcome.ColumnarAsync(Open));
         Assert.Equal("raw: InvalidOperationException", await ReadOutcome.RowsAsync(Open));
-    }
-
-    /// <summary>
-    /// A value the row path carries and the column's Arrow type cannot take is named on the columnar path.
-    /// The row path's own answer is the L4 cell of the same value.
-    /// </summary>
-    [Theory]
-    [InlineData("jsonl", "0.0000000000000000000001")]
-    [InlineData("xml", "0.0000000000000000000001")]
-    public async Task A_Value_Past_The_Arrow_Width_Is_Named_On_The_Columnar_Path(string reader, string source)
-    {
-        var open = Open(new Row(reader, "declared", "decimal", source, "named"));
-
-        Assert.Equal("named", await ReadOutcome.ColumnarAsync(open));
     }
 
     private Func<IStreamReader> Open(Row row)

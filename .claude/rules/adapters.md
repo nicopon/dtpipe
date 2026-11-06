@@ -79,6 +79,14 @@ dialect: the keyword where it is exact and unbounded, else the width it travels 
 on an engine's own default: a scale narrower than the value's rounds it, in code 0.
 `[CI: WriteConformanceTests]` `[local: validate_type_conformance.sh, validate_declared_decimals.sh]`
 
+**A decimal reads at the scale its column declares, and bare when it declares none, on both paths.**
+`DecimalWidth` (`Apache.Arrow.Serialization`, `Mapping/`) holds the rule and the column's limits: Arrow
+stores one scale per column, so a path that kept each value's own scale would disagree with the one
+that went through a batch. `ArrowTypeMap.GetValue` reads the undeclared mark; a reader that hands a value
+over without a batch calls `TryRead`, which also refuses what a batch would. **A `DateTimeOffset` leaving
+a reader is in UTC**, for the same reason. `[CI: ReadConformanceTests]`
+`[local: validate_type_conformance.sh, validate_declared_decimals.sh]`
+
 ## A value a type cannot hold
 
 **A value a reader or a writer cannot carry stops the run with `ColumnValueRefusedException`: where it

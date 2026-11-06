@@ -1,4 +1,5 @@
 using DtPipe.Core.Abstractions;
+using DtPipe.Core.Models;
 
 namespace DtPipe.Adapters.DuckDB;
 
@@ -39,6 +40,20 @@ public class DuckDbTypeConverter : ITypeMapper
             _ when ListElementOf(underlying) is { } element => MapToProviderType(element) + "[]",
             _ => "VARCHAR"
         };
+    }
+
+    /// <summary>The column's type; a list of decimals carries the width its element declares.</summary>
+    public string MapToProviderType(PipeColumnInfo column)
+    {
+        var underlying = Nullable.GetUnderlyingType(column.ClrType) ?? column.ClrType;
+        if (underlying == typeof(decimal))
+            return DecimalType.Spell(column.Precision, column.Scale) ?? MapToProviderType(column.ClrType);
+
+        return ListElementOf(underlying) is { } element
+               && (Nullable.GetUnderlyingType(element) ?? element) == typeof(decimal)
+               && DecimalType.Spell(column.Precision, column.Scale) is { } spelled
+            ? spelled + "[]"
+            : MapToProviderType(column.ClrType);
     }
 
     /// <summary>

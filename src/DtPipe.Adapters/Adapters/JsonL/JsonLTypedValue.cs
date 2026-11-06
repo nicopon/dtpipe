@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Apache.Arrow.Serialization.Mapping;
 using DtPipe.Adapters.Common;
 using DtPipe.Adapters.Xml;
 using DtPipe.Core.Helpers;
@@ -18,7 +19,7 @@ internal static class JsonLTypedValue
     /// The reader of a declared column, or null when the column keeps the value as the JSON gives it:
     /// a string column, read as text by the reader. It returns <see cref="TypedTextCell.Unreadable"/> for a value it does not read.
     /// </summary>
-    internal static Func<JsonElement, object?>? BuildReader(Type clrType)
+    internal static Func<JsonElement, object?>? BuildReader(Type clrType, DecimalWidth? width = null)
     {
         if (clrType == typeof(int))
             return Of(static e => Integral(e, int.MinValue, int.MaxValue) is long v ? (int)v : TypedTextCell.Unreadable,
@@ -40,8 +41,11 @@ internal static class JsonLTypedValue
         // Off the JSON text, never through a double, which keeps 15 digits of a decimal's 28. TryGetDecimal
         // rounds past a decimal's own digits, which is a value lost like any other.
         if (clrType == typeof(decimal))
-            return Of(static e => e.TryGetDecimal(out var v) && TextNumber.KeepsDigits(e.GetRawText(), v) ? v : TypedTextCell.Unreadable,
-                XmlTypeInferrer.BuildParser(typeof(decimal))!);
+        {
+            var column = width ?? DecimalWidth.Undeclared;
+            return Of(e => e.TryGetDecimal(out var v) && TextNumber.KeepsDigits(e.GetRawText(), v) && column.TryRead(v, out var read) ? read : TypedTextCell.Unreadable,
+                XmlTypeInferrer.BuildParser(typeof(decimal), column)!);
+        }
 
         if (clrType == typeof(bool))
             return Of(null, XmlTypeInferrer.BuildParser(typeof(bool))!, readsBoolean: true);

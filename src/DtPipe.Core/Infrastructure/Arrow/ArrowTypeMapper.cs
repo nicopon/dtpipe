@@ -180,7 +180,12 @@ public static class ArrowTypeMapper
     /// <inheritdoc cref="ArrowTypeMap.GetLogicalType(Type, int?, int?)"/>
     public static Apache.Arrow.Serialization.Mapping.ArrowTypeResult GetLogicalType(Type clrType, int? precision, int? scale)
     {
-        if (TryGetCollectionElementType(clrType, out _)) return GetLogicalType(clrType);
+        // A list's width is its element's.
+        if (TryGetCollectionElementType(clrType, out var elementType))
+        {
+            var item = ArrowTypeMap.GetField("item", GetLogicalType(elementType, precision, scale), isNullable: true);
+            return new Apache.Arrow.Serialization.Mapping.ArrowTypeResult(new ListType(item));
+        }
 
         return ArrowTypeMap.GetLogicalType(clrType, precision, scale);
     }

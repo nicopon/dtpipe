@@ -43,8 +43,6 @@ public sealed class WriteConformanceTests : IDisposable
         public static implicit operator Cell(string expected) => new(expected);
     }
 
-    private static Cell L4(string expected) => new(expected, "L4");
-
     private sealed record Row(string Case, Cell Csv, Cell Jsonl, Cell Parquet, Cell Arrow, Cell Duck, Cell Sqlite, Cell Checksum)
     {
         public Cell For(string writer) => writer switch
@@ -83,15 +81,15 @@ public sealed class WriteConformanceTests : IDisposable
         new("double-inf", "Infinity", "named", "DOUBLE | inf", "double | Double:Infinity", "DOUBLE | inf", "real | Inf", "ok"),
         new("double-shortest", "0.1", "0.1", "DOUBLE | 0.1", "double | Double:0.1", "DOUBLE | 0.1", "real | 0.1", "ok"),
         new("float-shortest", "0.1", "0.1", "FLOAT | 0.1", "float | Single:0.1", "FLOAT | 0.1", "real | 0.10000000149011612", "ok"),
-        new("decimal32", "4.29", "4.29", L4("DECIMAL(9,2) | 4.29"), "decimal32 | Decimal:4.29", L4("DECIMAL(9,2) | 4.29"), "real | 4.29", "ok"),
-        new("decimal64", "4.29", "4.29", L4("DECIMAL(18,2) | 4.29"), "decimal64 | Decimal:4.29", L4("DECIMAL(18,2) | 4.29"), "real | 4.29", "ok"),
+        new("decimal32", "4.29", "4.29", "DECIMAL(9,2) | 4.29", "decimal32 | Decimal:4.29", "DECIMAL(9,2) | 4.29", "real | 4.29", "ok"),
+        new("decimal64", "4.29", "4.29", "DECIMAL(18,2) | 4.29", "decimal64 | Decimal:4.29", "DECIMAL(18,2) | 4.29", "real | 4.29", "ok"),
         new("decimal128(10,2)", "4.29", "4.29", "DECIMAL(10,2) | 4.29", "decimal128 | Decimal:4.29", "DECIMAL(10,2) | 4.29", "real | 4.29", "ok"),
         new("decimal128(38,18)", "4.290000000000000000", "4.290000000000000000", "DECIMAL(38,18) | 4.290000000000000000", "decimal128 | Decimal:4.290000000000000000", "DECIMAL(38,18) | 4.290000000000000000", "real | 4.29", "ok"),
-        new("decimal-undeclared", L4("4.29"), L4("4.29"), "DECIMAL(38,18) | 4.290000000000000000", "decimal128 | Decimal:4.290000000000000000", "DECIMAL(38,18) | 4.290000000000000000", "real | 4.29", "ok"),
+        new("decimal-undeclared", "4.29", "4.29", "DECIMAL(38,18) | 4.290000000000000000", "decimal128 | Decimal:4.29", "DECIMAL(38,18) | 4.290000000000000000", "real | 4.29", "ok"),
         new("decimal128-wide", "12345678901234567.891000000000", "12345678901234567.891000000000", "DECIMAL(38,18) | 12345678901234567.891000000000000000", "decimal128 | Decimal:12345678901234567.891000000000", "DECIMAL(38,18) | 12345678901234567.891000000000000000", "named", "ok"),
-        new("decimal-undeclared-wide", L4("12345678901234567.891"), L4("12345678901234567.891"), "DECIMAL(38,18) | 12345678901234567.891000000000000000", "decimal128 | Decimal:12345678901234567.891000000000", "DECIMAL(38,18) | 12345678901234567.891000000000000000", "named", "ok"),
-        new("decimal-undeclared-fraction", L4("1.23456"), L4("1.23456"), "DECIMAL(38,18) | 1.234560000000000000", "decimal128 | Decimal:1.234560000000000000", "DECIMAL(38,18) | 1.234560000000000000", "real | 1.23456", "ok"),
-        new("decimal256", "4.2900000000", "4.2900000000", "DECIMAL(38,18) | 4.290000000000000000", "decimal256 | Decimal:4.2900000000", L4("DECIMAL(38,10) | 4.2900000000"), "real | 4.29", "ok"),
+        new("decimal-undeclared-wide", "12345678901234567.891", "12345678901234567.891", "DECIMAL(38,18) | 12345678901234567.891000000000000000", "decimal128 | Decimal:12345678901234567.891", "DECIMAL(38,18) | 12345678901234567.891000000000000000", "named", "ok"),
+        new("decimal-undeclared-fraction", "1.23456", "1.23456", "DECIMAL(38,18) | 1.234560000000000000", "decimal128 | Decimal:1.23456", "DECIMAL(38,18) | 1.234560000000000000", "real | 1.23456", "ok"),
+        new("decimal256", "4.2900000000", "4.2900000000", "DECIMAL(38,10) | 4.2900000000", "decimal256 | Decimal:4.2900000000", "DECIMAL(38,10) | 4.2900000000", "real | 4.29", "ok"),
         new("string", "héllo", @"""h\u00E9llo""", "VARCHAR | héllo", "utf8 | String:héllo", "VARCHAR | héllo", "text | héllo", "ok"),
         new("largestring", "refused", "refused", "refused", "large_utf8 | 2 rows", "refused", "refused", "refused"),
         new("stringview", "refused", "refused", "refused", "utf8view | 2 rows", "refused", "refused", "refused"),
@@ -114,7 +112,7 @@ public sealed class WriteConformanceTests : IDisposable
         new("interval(dt)", "refused", "refused", "refused", "interval | 2 rows", "refused", "refused", "refused"),
         new("interval(mdn)", "refused", "refused", "refused", "interval | 2 rows", "refused", "refused", "refused"),
         new("list<int32>", @"""[1,2]""", "[1,2]", "INTEGER[] | [1, 2]", "list | [Int32:1,Int32:2]", "INTEGER[] | [1, 2]", "text | [1,2]", "ok"),
-        new("list<decimal(10,2)>", "[4.29]", "[4.29]", L4("DECIMAL(10,2)[] | [4.29]"), "list | [Decimal:4.29]", L4("DECIMAL(10,2)[] | [4.29]"), "text | [4.29]", "ok"),
+        new("list<decimal(10,2)>", "[4.29]", "[4.29]", "DECIMAL(10,2)[] | [4.29]", "list | [Decimal:4.29]", "DECIMAL(10,2)[] | [4.29]", "text | [4.29]", "ok"),
         new("list<timestamp>", @"""[""""2024-01-02T03:04:05.123456""""]""", """["2024-01-02T03:04:05.1234560"]""", "refused", "list | [DateTime:2024-01-02T03:04:05.1234560]", "TIMESTAMP[] | ['2024-01-02 03:04:05.123456']", """text | ["2024-01-02T03:04:05.123456"]""", "ok"),
         new("list<uuid>", @"""[""""6f9619ff-8b86-d011-b42d-00c04fc964ff""""]""", """["6f9619ff-8b86-d011-b42d-00c04fc964ff"]""", "refused", "list | [Guid:6f9619ff-8b86-d011-b42d-00c04fc964ff]", "UUID[] | [6f9619ff-8b86-d011-b42d-00c04fc964ff]", """text | ["6f9619ff-8b86-d011-b42d-00c04fc964ff"]""", "ok"),
         new("list<struct>", @"""[{""""a"""":1}]""", """[{"a":1}]""", "refused", "list | [{a=Int32:1}]", "refused", """text | [{"a":1}]""", "ok"),
@@ -212,11 +210,12 @@ public sealed class WriteConformanceTests : IDisposable
         Judge(cell, WriteOutcome.GateVerdict(writer, ArrowTypeCases.Named(name).Field));
     }
 
-    /// <summary>A text reader carries a value that fits a decimal and not the column's Arrow width.</summary>
+    /// <summary>A value that fits a decimal and not the column's width stops at the reader, whatever the writer.</summary>
     [Theory]
     [InlineData("parquet")]
     [InlineData("arrow")]
-    public async Task A_Value_The_Column_Cannot_Take_Is_Named_On_The_Way_To_A_Columnar_Writer(string writer)
+    [InlineData("csv")]
+    public async Task A_Value_Past_The_Column_Width_Is_Named_Whatever_The_Writer(string writer)
     {
         var source = Path.Combine(_dir, Guid.NewGuid().ToString("N") + ".csv");
         File.WriteAllText(source, "id,v\n1,4.29\n2,0.0000000000000000000001\n");
@@ -232,7 +231,7 @@ public sealed class WriteConformanceTests : IDisposable
 
         var text = Regex.Replace(captured.ToString(), @"\s+", " ");
         Assert.Equal(1, exit);
-        Assert.Contains("Record 2: column 'v'", text);
+        Assert.Contains("CSV line 3: column 'v'", text);
         Assert.Contains("declare the column 'string'", text);
         Assert.DoesNotContain("0.0000000000000000000001", text);
     }

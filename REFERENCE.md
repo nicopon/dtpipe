@@ -288,12 +288,20 @@ type is **refused**, rather than leaving the column at whatever type it already 
 
 A `datetime` column is a wall clock and a `datetimeoffset` column an instant. On every machine, a
 text with an offset under `datetime` reads as its UTC value, and a text with no offset under
-`datetimeoffset` reads as UTC.
+`datetimeoffset` reads as UTC. Every reader gives a `datetimeoffset` in UTC, since Arrow keeps no
+offset per value: `03:04:05+02:00` reads as `01:04:05+00:00`, the same instant. A `string` column
+keeps the text as written.
 
 A `decimal`, `double` or `float` column reads a text with `.` as its decimal point and no group
 separator: `1,5` and `1,000` are refused, so a file written with `--csv-decimal-separator ,` reads
 back only as `string`. A number past the range of a `double` or a `float` is refused too; the
 spelled-out `NaN` and `Infinity` read as what they say.
+
+A decimal reads at the scale its source declares, and with no trailing zeros when it declares none,
+whichever way the pipeline goes: `4.2` in a `DECIMAL(10,2)` reads as `4.20`, and `10.50` under
+`--column-types v:decimal`, which declares no width, as `10.5`. A column with no declared width
+holds 18 decimals: a value with more is refused, and one with only zeros past them reads without
+them. A `string` column keeps the text as written.
 
 Inference applies one rule to a number on every text reader, over the whole sample. A column is a
 `double` when a `double` writes each value back with the same digits. Otherwise it is a `decimal`
@@ -458,6 +466,9 @@ A decimal column created for a source that declared no width holds what such a c
 
 A table that already exists keeps its columns.
 
+Read back, a column created `DECIMAL(38,18)` declares that width: `1.23456` written to it reads as
+`1.234560000000000000`. A `--sql` step is the same, since DuckDB declares what it returns.
+
 A DuckDB 128-bit integer (`HUGEINT`) is written as one only by the `duck:` writer, over its whole
 range, `-2^127` to `2^127-1`. That writer does not write the unsigned one (`UHUGEINT`), and refuses
 it with `CAST(col AS VARCHAR)` as the step. Every other writer refuses both, with the same step,
@@ -500,8 +511,8 @@ Record 12: column 'valid_to' (timestamp) holds infinity, which no date or time t
 | `infinity` or `-infinity` under `date`, `timestamp`, `timestamptz`, in an array too; a year outside 1 to 9999 | `pg:` reader | `col::text` |
 | `NaN` or more digits than a `decimal` holds under `numeric`; a `text[]` of two dimensions | `pg:` reader | `col::text` |
 | A decimal past the width it reads under | The database readers | A cast in the source query |
-| A value past the width of its Arrow type, on the way to a columnar step or writer | Any reader | A cast in the source query, or a `string` column |
-| A text that does not read as the declared or inferred type: `1,5` under `decimal`, or more digits than a `decimal` holds | `csv:`, `jsonl:`, `xml:` | Correct the cell, or a `string` column |
+| A value past the width of its Arrow type | Any reader | A cast in the source query, or a `string` column |
+| A text that does not read as the declared or inferred type: `1,5` under `decimal`, more digits than a `decimal` holds, or more decimals than its column's width | `csv:`, `jsonl:`, `xml:` | Correct the cell, or a `string` column |
 | A value of another kind than its `list` or `struct` column | `jsonl:` | A `string` column, which keeps its JSON text |
 | `NaN`, `Infinity`, `-Infinity`: JSON has no number for them | `jsonl:` writer | Filter it out, or read the column as text |
 | `NaN`: SQLite stores it as NULL | `sqlite:` writer | Filter it out, or read the column as text |

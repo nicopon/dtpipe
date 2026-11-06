@@ -10,6 +10,7 @@ using Apache.Arrow;
 using Apache.Arrow.Ado;
 using Apache.Arrow.Ado.Consumer;
 using Apache.Arrow.Serialization;
+using Apache.Arrow.Serialization.Mapping;
 using Apache.Arrow.Types;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Infrastructure.Arrow;
@@ -27,6 +28,7 @@ public abstract partial class AdoColumnarReader : IColumnarStreamReader, IBatchS
     protected DbCommand? Command;
     protected DbDataReader? Reader;
     protected AdoToArrowConfig? Config;
+    private DecimalWidth[]? _decimalWidths;
 
     public int BatchSize { get; set; } = PipelineOptions.DefaultBatchSize;
     public long MaxBatchBytes { get; set; }
@@ -133,7 +135,7 @@ public abstract partial class AdoColumnarReader : IColumnarStreamReader, IBatchS
         try
         {
             for (; i < columnCount; i++)
-                row[i] = Reader!.IsDBNull(i) ? null : GetCellValue(i);
+                row[i] = Reader!.IsDBNull(i) ? null : AsArrowReadsIt(GetCellValue(i), i);
         }
         catch (Exception fault) when (ArrowValueException.IsValueFault(fault))
         {
@@ -144,6 +146,26 @@ public abstract partial class AdoColumnarReader : IColumnarStreamReader, IBatchS
         }
         return row;
     }
+
+    /// <summary>
+    /// A cell as the columnar path reads it, which keeps no scale per value and no offset per value: a
+    /// decimal at its column's width, or refused where a batch would refuse it, an instant in UTC.
+    /// </summary>
+    private object? AsArrowReadsIt(object? cell, int ordinal) => cell switch
+    {
+        decimal value => (_decimalWidths ??= BuildDecimalWidths())[ordinal].TryRead(value, out var read)
+            ? read
+            : throw new OverflowException(),
+        DateTimeOffset instant => instant.ToUniversalTime(),
+        _ => cell
+    };
+
+    private DecimalWidth[] BuildDecimalWidths()
+        => Enumerable.Range(0, Reader!.FieldCount)
+            .Select(i => Columns is { } columns && i < columns.Count
+                ? DecimalWidth.Of(columns[i].Precision, columns[i].Scale)
+                : DecimalWidth.Undeclared)
+            .ToArray();
 
     protected virtual Func<IArrowType, int, IAdoConsumer>? GetConsumerFactory() => null;
 

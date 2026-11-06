@@ -27,6 +27,7 @@ delegate to it:
 | RFC 4122 big-endian byte order | `Rfc4122Guid.ToBigEndianBytes` / `FromBigEndianBytes` | `ArrowTypeMap.ToArrowUuidBytes` / `FromArrowUuidBytes` |
 | Zone-less `DateTime` handling | `TemporalNormalization.ToOffset` / `ToWallClock` | called directly by `ArrowTypeMap.GetValue` and the readers |
 | Text under a temporal column | `TemporalNormalization.TryParseWallClock` / `TryParseInstant` | called by the text readers and the writers' converters |
+| A decimal's scale: declared, else bare | `DecimalWidth.TryRead` / `Bare` | read by `ArrowTypeMap.GetValue` and by a reader that hands over a value with no batch |
 
 **`TemporalNormalization` owns both directions; change them together.** A `DateTime` with
 `Kind=Unspecified` is a wall clock with no zone. `new DateTimeOffset(dt)` and

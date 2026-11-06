@@ -33,9 +33,12 @@ internal static class TypedTextCell
     internal static object ReadDateTime(string text)
         => TemporalNormalization.TryParseWallClock(text, out var value) ? value : Unreadable;
 
-    /// <summary>The value of a <c>datetimeoffset</c> cell, under <see cref="TemporalNormalization.TryParseInstant"/>.</summary>
+    /// <summary>
+    /// The value of a <c>datetimeoffset</c> cell, under <see cref="TemporalNormalization.TryParseInstant"/>, in
+    /// UTC: Arrow keeps no offset per value, so one kept here would be gone behind the next columnar step.
+    /// </summary>
     internal static object ReadDateTimeOffset(string text)
-        => TemporalNormalization.TryParseInstant(text, out var value) ? value : Unreadable;
+        => TemporalNormalization.TryParseInstant(text, out var value) ? value.ToUniversalTime() : Unreadable;
 
     /// <summary>The value of a <c>date32</c> or <c>date64</c> cell: an ISO date, nothing a culture spells.</summary>
     internal static object ReadDate(string text)
@@ -70,7 +73,9 @@ internal static class TypedTextCell
     internal static void Refuse(string where, string column, Type type, int? sampledRows)
     {
         var hint = TypeHelper.HintFor(type) ?? type.Name;
-        var problem = $"holds a text that does not read as {hint}";
+        var problem = type == typeof(decimal)
+            ? $"holds a text that does not read as {hint}: not a number, or more digits than its width holds"
+            : $"holds a text that does not read as {hint}";
         throw sampledRows is { } sample
             ? new ColumnValueRefusedException(
                 where, column, $"inferred as {hint} from the first {sample} row(s) by '--auto-column-types'", problem,

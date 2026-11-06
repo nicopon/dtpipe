@@ -71,6 +71,10 @@ as 15. A cell that does not read under its type stops the run naming its line an
 `string` column keeps the text. See
 [Values a type cannot hold](../../REFERENCE.md#values-a-type-cannot-hold).
 
+`decimal` declares no width, so its value reads with no trailing zeros, `10.50` as `10.5`, and holds
+18 decimals: a value with more is refused. A `datetimeoffset` reads in UTC, `+02:00` becoming the
+same instant at `+00:00`.
+
 Inference never rounds a number to fit: a column is a `double` only when a `double` writes each
 value back with the same digits. `4.29` is therefore a `double`, so declare `decimal` for exact
 arithmetic. See [Type hints](../../REFERENCE.md#type-hints).

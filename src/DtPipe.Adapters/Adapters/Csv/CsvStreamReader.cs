@@ -5,6 +5,7 @@ using CsvHelper.Configuration;
 using DtPipe.Adapters.Common;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Helpers;
+using Apache.Arrow.Serialization.Mapping;
 using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Core.Models;
 using Microsoft.Extensions.Logging;
@@ -419,7 +420,7 @@ public class CsvStreamReader : IStreamReader, IColumnTypeInferenceCapable
             return static s => TextNumber.TryReadFloat(s, out var v) ? v : TypedTextCell.Unreadable;
 
         if (clrType == typeof(decimal))
-            return static s => TextNumber.TryReadDecimal(s, out var v) ? v : TypedTextCell.Unreadable;
+            return static s => TextNumber.TryReadDecimal(s, out var v) && DecimalWidth.Undeclared.TryRead(v, out var read) ? read : TypedTextCell.Unreadable;
 
         if (clrType == typeof(bool))
             return static s =>

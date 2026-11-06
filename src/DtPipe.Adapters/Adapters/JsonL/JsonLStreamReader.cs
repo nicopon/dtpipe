@@ -131,16 +131,21 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
         // Map complex types (List, Struct, Map) to typeof(object) to match the inference path.
         // This ensures ArrowSchemaFactory.Create(Columns) doesn't fail on unsupported CLR types.
         Columns = arrowSchema.FieldsList
-            .Select(f => new PipeColumnInfo(f.Name, GetSimplifiedClrType(f), f.IsNullable))
+            .Select(f =>
+            {
+                var clrType = GetSimplifiedClrType(f);
+                var (precision, scale) = clrType == typeof(decimal) ? ArrowSchemaFactory.DeclaredWidth(f) : (null, null);
+                return new PipeColumnInfo(f.Name, clrType, f.IsNullable, Precision: precision, Scale: scale);
+            })
             .ToList();
         UpdateTextColumns();
         var typed = new Dictionary<string, TypedColumn>(StringComparer.OrdinalIgnoreCase);
         for (var i = 0; i < Columns.Count; i++)
         {
             var column = Columns[i];
-            if (JsonLTypedValue.BuildReader(column.ClrType) is { } read)
+            if (JsonLTypedValue.BuildReader(column.ClrType, DecimalWidth.Of(column.Precision, column.Scale)) is { } read)
                 typed[column.Name] = new TypedColumn(column.Name, column.ClrType, read);
-            else if (JsonLNestedReader.Of(arrowSchema.FieldsList[i].DataType) is { } nested)
+            else if (JsonLNestedReader.Of(arrowSchema.FieldsList[i]) is { } nested)
                 typed[column.Name] = new TypedColumn(column.Name, column.ClrType, nested.Read, nested);
         }
         _typedColumns = typed.Count > 0 ? typed : null;
@@ -221,12 +226,11 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
         {
             var (type, arrowType) = InferTypes(kvp.Key, kvp.Value);
             columns.Add(new PipeColumnInfo(kvp.Key, type, true));
-            fields.Add(type == typeof(decimal)
-                ? ArrowTypeMap.GetField(kvp.Key, ArrowTypeMap.DefaultDecimal)
-                : new Field(kvp.Key, arrowType, true));
+            var inferred = InferredField(kvp.Key, arrowType);
+            fields.Add(inferred);
             if (JsonLTypedValue.BuildReader(type) is { } read)
                 typed[kvp.Key] = new TypedColumn(kvp.Key, type, read);
-            else if (JsonLNestedReader.Of(arrowType) is { } nested)
+            else if (JsonLNestedReader.Of(inferred) is { } nested)
                 typed[kvp.Key] = new TypedColumn(kvp.Key, type, nested.Read, nested);
 
             var hint = DtPipe.Core.Helpers.TypeHelper.HintFor(type);
@@ -449,13 +453,19 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
         };
     }
 
+    // Inference declares no width: a decimal it finds, nested ones included, carries the mark that says so.
+    private static Field InferredField(string name, IArrowType type)
+        => type is Decimal128Type
+            ? ArrowTypeMap.GetField(name, ArrowTypeMap.DefaultDecimal)
+            : new Field(name, type, true);
+
     private IArrowType InferStructType(Dictionary<string, object?> dict)
     {
         var fields = new List<Field>();
         foreach (var prop in dict)
         {
             var (_, arrowType) = InferTypes(prop.Key, prop.Value);
-            fields.Add(new Field(prop.Key, arrowType, true));
+            fields.Add(InferredField(prop.Key, arrowType));
         }
         return new StructType(fields);
     }
@@ -466,7 +476,7 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
         {
             var first = list.First();
             var (_, itemArrowType) = InferTypes("", first);
-            return new ListType(itemArrowType);
+            return new ListType(InferredField("item", itemArrowType));
         }
         return new ListType(StringType.Default);
     }
