@@ -267,8 +267,8 @@ public class PipelineExecutorTests
     }
 
     /// <summary>
-    /// --limit cuts a batch whatever the type of its columns. A dictionary column (what DuckDB hands
-    /// over for a repeated string) has no builder, so a cut that rebuilds the batch cannot carry it;
+    /// --limit cuts a batch whatever the type of its columns. A dictionary column (dtpipe's readers decode
+    /// one, a host's reader may not) has no builder, so a cut that rebuilds the batch cannot carry it;
     /// the cut is a view, and it keeps the dictionary alive after the batch it came from is disposed.
     /// </summary>
     [Fact]

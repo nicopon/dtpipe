@@ -112,6 +112,10 @@ public static class ContractDiff
 
     private static IEnumerable<ContractChange> CompareType(string column, IArrowType before, IArrowType after)
     {
+        // A dictionary is storage: a reader hands over its values, so a contract captured on one still
+        // describes the column.
+        if (before is DictionaryType dictionary) before = dictionary.ValueType;
+
         if (Describe(before) == Describe(after)) yield break;
 
         // Decimals carry precision and scale, and losing either loses data. Checked before the

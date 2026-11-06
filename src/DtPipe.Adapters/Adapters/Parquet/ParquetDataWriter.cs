@@ -139,7 +139,7 @@ public sealed class ParquetDataWriter(string outputPath) : IColumnarDataWriter, 
             if (!_firstBatchChecked)
             {
                 _firstBatchChecked = true;
-                var refusals = RefuseColumns(batch.Schema);
+                var refusals = RefuseColumns(FormatSchema(batch.Schema));
                 if (refusals.Count > 0)
                 {
                     await DiscardFileAsync();
@@ -167,20 +167,24 @@ public sealed class ParquetDataWriter(string outputPath) : IColumnarDataWriter, 
 
     /// <summary>
     /// Parquet carries every integer width, signed or not, a date, a time of day and an instant under
-    /// their own logical type. It has no duration type, so a duration column is refused.
+    /// their own logical type. It has no duration type, so a duration column is refused. The writer has no
+    /// form for a column of nulls, a struct, a map, a fixed-size list or a dictionary, and writes a LIST
+    /// only of the element types <see cref="ArrowToParquetConverter"/> gives definition levels to.
     /// </summary>
     public IReadOnlyList<ColumnTypeRefusal> RefuseColumns(Schema schema)
-    {
-        var refusals = new List<ColumnTypeRefusal>();
-        foreach (var field in schema.FieldsList)
+        => ColumnTypeRefusals.Collect(schema, f => f.DataType switch
         {
-            if (field.DataType is DurationType)
-                refusals.Add(new ColumnTypeRefusal(field, [Int64Type.Default, StringType.Default]));
-            else if (ColumnTypeRefusals.WideInteger(field) is { } accepted)
-                refusals.Add(new ColumnTypeRefusal(field, accepted));
-        }
-        return refusals;
-    }
+            DurationType => [Int64Type.Default, StringType.Default],
+            NullType or StructType or MapType or FixedSizeListType or DictionaryType => [StringType.Default],
+            ListType { ValueDataType: not (Int16Type or Int32Type or Int64Type or FloatType or DoubleType or BooleanType or Decimal128Type) }
+                => [StringType.Default],
+            _ => ColumnTypeRefusals.WideInteger(f)
+        });
+
+    // What the format receives, for the first batch's check: a column the writer declared as text, because
+    // its source named no shape for it, is rendered as JSON whatever its Arrow type.
+    private Schema FormatSchema(Schema batch)
+        => new(batch.FieldsList.Where((_, i) => _columns![i].ClrType != typeof(object)), null);
 
     private async ValueTask DiscardFileAsync()
     {

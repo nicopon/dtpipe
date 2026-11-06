@@ -50,6 +50,15 @@ public class ContractDiffTests
     }
 
     [Fact]
+    public void A_Dictionary_Decoded_By_Its_Reader_Is_Not_A_Change()
+    {
+        var before = Of(F("e", new DictionaryType(Int32Type.Default, StringType.Default, false)));
+        var after = Of(F("e", StringType.Default));
+
+        Assert.Empty(ContractDiff.Compare(before, after));
+    }
+
+    [Fact]
     public void A_Widened_Number_Is_Not_Breaking()
     {
         var change = Single(Of(F("n", Int32Type.Default)), Of(F("n", Int64Type.Default)));

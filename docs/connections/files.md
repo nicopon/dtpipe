@@ -79,7 +79,9 @@ arithmetic. See [Type hints](../../REFERENCE.md#type-hints).
 
 A list or a nested object keeps its shape wherever the target has one — a Parquet `LIST`, an Arrow
 `ListType`, a PostgreSQL array — and is rendered as JSON text wherever it does not (`[10,20,30]`,
-`{"severity":"info"}`). The declared schema decides; the rendering never changes it.
+`{"severity":"info"}`). The declared schema decides; the rendering never changes it. A struct or a
+map read from Arrow or DuckDB is refused by `parquet:`, which has a form for them that dtpipe does
+not write, with the step that casts it to text.
 
 To land a nested field as its own typed column, name it in the pipeline:
 

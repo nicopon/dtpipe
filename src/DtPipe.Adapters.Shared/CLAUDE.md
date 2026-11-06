@@ -8,7 +8,7 @@ prepare-to-batch half: `duckdb_prepare` → schema off the prepared statement �
 **Both `DuckDataSourceReader` (`duck:`) and `DuckDBSqlProcessor` (`--sql`) read through it.**
 Adapters and Processors are siblings that cannot reference each other, which is why this code lives
 here: a copy in either is a second P/Invoke surface onto one native library, and type handling
-(`ENUM`, `ARRAY`, `BOOLEAN`, `HUGEINT`) drifts between the copies.
+(`ENUM`, decoded by `ArrowDictionaries`; `ARRAY`, `BOOLEAN`, `HUGEINT`) drifts between the copies.
 
 `[unchecked — validate_core_boundary.sh does not look here]`
 

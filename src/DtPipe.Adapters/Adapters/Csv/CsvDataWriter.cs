@@ -10,8 +10,12 @@ using Microsoft.IO;
 
 namespace DtPipe.Adapters.Csv;
 
-public sealed class CsvDataWriter : IRowDataWriter, IRequiresOptions<CsvWriterOptions>, ISchemaInspector
+public sealed class CsvDataWriter : IRowDataWriter, IRequiresOptions<CsvWriterOptions>, ISchemaInspector, IColumnTypeGate
 {
+    /// <summary>The writer reads every value and renders a composite as JSON, so it refuses only a type with no reading.</summary>
+    public IReadOnlyList<ColumnTypeRefusal> RefuseColumns(Apache.Arrow.Schema schema)
+        => DtPipe.Adapters.Shared.Infrastructure.ColumnTypeRefusals.Collect(schema, _ => null);
+
     // Shared RecyclableMemoryStreamManager for all instances
     private static readonly RecyclableMemoryStreamManager MemoryStreamManager = new(
         new RecyclableMemoryStreamManager.Options

@@ -27,7 +27,7 @@ public class SqlServerTypeConverter : ITypeMapper
         if (type == typeof(DateOnly)) return "DATE";
         // TIME(6): the microseconds an Arrow time64 carries, no more.
         if (type == typeof(TimeOnly)) return "TIME(6)";
-        if (type == typeof(decimal)) return "DECIMAL(18,2)";
+        if (type == typeof(decimal)) return DecimalType.Undeclared;
         if (type == typeof(Guid)) return "UNIQUEIDENTIFIER";
         if (type == typeof(byte[])) return "VARBINARY(MAX)";
         return "NVARCHAR(MAX)";

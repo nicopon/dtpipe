@@ -261,7 +261,8 @@ public sealed class PipelineExecutor
                     // using it as an override would cause an appender count mismatch (IndexOutOfRange).
                     var readerSchema = (reader as IColumnarStreamReader)?.Schema;
                     bool schemaUnchanged = readerSchema != null && readerSchema.FieldsList.Count == columns.Count;
-                    var richSchema = schemaUnchanged ? readerSchema : null;
+                    // A column the CLR type cannot describe (a struct) has only the reader's field to go by.
+                    var richSchema = schemaUnchanged ? readerSchema : readerSchema is null ? null : ArrowSchemaFactory.FieldsWithNoClrForm(readerSchema);
                     currentColumnarSource = BridgeRowsToColumnarAsync(currentRowSource, bridgeFac, columns, options.BatchSize, options.MaxBatchBytes, ct, richSchema);
                 }
                 // The materialisation point sits at the end of the chain, so a checkpoint holds
@@ -327,6 +328,11 @@ public sealed class PipelineExecutor
         var schema = richSchema != null
             ? ArrowSchemaFactory.CreateEnriched(columns, richSchema)
             : ArrowSchemaFactory.Create(columns);
+
+        if (schema.FieldsList.FirstOrDefault(f => !ArrowTypeMapper.HasBuilder(f.DataType)) is { } unbuilt)
+            throw new InvalidOperationException(
+                $"Column '{unbuilt.Name}' is {unbuilt.DataType.Name}, which a row step cannot hand on to this writer: " +
+                "cast it to text at the source, or drop it before the row step.");
 
         var buffer = new List<IReadOnlyList<object?>>(batchSize);
         long bufferBytes = 0;

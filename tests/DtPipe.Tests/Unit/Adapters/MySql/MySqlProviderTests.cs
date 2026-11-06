@@ -50,7 +50,7 @@ public class MySqlProviderTests
     [InlineData(typeof(int), "INT")]
     [InlineData(typeof(long), "BIGINT")]
     [InlineData(typeof(bool), "TINYINT(1)")]
-    [InlineData(typeof(decimal), "DECIMAL(38,9)")]
+    [InlineData(typeof(decimal), "DECIMAL(38,18)")]
     [InlineData(typeof(DateTime), "DATETIME(6)")]
     [InlineData(typeof(Guid), "CHAR(36)")]
     [InlineData(typeof(byte[]), "LONGBLOB")]

@@ -23,6 +23,7 @@ public sealed class ArrowAdapterDataWriter : IColumnarDataWriter, IRequiresOptio
     private ArrowFileWriter? _arrowFileWriter;
     private bool _isIpcFile;
     private Schema? _schema;
+    private IReadOnlyList<PipeColumnInfo>? _columns;
 
     public ArrowAdapterDataWriter(string path) : this(path, new ArrowWriterOptions())
     {
@@ -159,8 +160,7 @@ public sealed class ArrowAdapterDataWriter : IColumnarDataWriter, IRequiresOptio
                          _path.EndsWith(".arrowfile", StringComparison.OrdinalIgnoreCase);
         }
 
-        // What a stream with no batch declares; replaced by the first batch's own schema.
-        _schema = BuildSchema(columns);
+        _columns = columns;
     }
 
     private bool IsOpen => _arrowStreamWriter != null || _arrowFileWriter != null;
@@ -200,16 +200,26 @@ public sealed class ArrowAdapterDataWriter : IColumnarDataWriter, IRequiresOptio
             _arrowStreamWriter = new ArrowStreamWriter(_outputStream!, schema, leaveOpen: true);
     }
 
-    private static Schema BuildSchema(IReadOnlyList<PipeColumnInfo> columns)
-        => ArrowSchemaFactory.Create(columns);
+    // What a stream with no batch declares. A column the CLR type cannot describe (a struct has no Arrow
+    // form of its own) is declared by its first batch, and with none there is nothing to say of it.
+    private Schema SchemaOfTheColumns()
+    {
+        foreach (var column in _columns!)
+        {
+            if (!ArrowTypeMapper.TryGetLogicalType(column.ClrType, out _))
+                throw new InvalidOperationException(
+                    $"Arrow writer: no row arrived, and column '{column.Name}' has no Arrow type to declare without one.");
+        }
+        return ArrowSchemaFactory.Create(_columns);
+    }
 
     public async ValueTask CompleteAsync(CancellationToken ct = default)
     {
-        if (_arrowStreamWriter == null && _arrowFileWriter == null && _schema != null)
+        if (_arrowStreamWriter == null && _arrowFileWriter == null && _columns != null)
         {
             // No batch arrived. The end marker alone carries no schema, and a reader of an empty
             // stream (the next fragment of a distributed pipeline) must still learn the columns.
-            OpenIpcWriter(_schema);
+            OpenIpcWriter(SchemaOfTheColumns());
             if (_arrowStreamWriter != null) await _arrowStreamWriter.WriteStartAsync(ct);
             if (_arrowFileWriter != null) await _arrowFileWriter.WriteStartAsync(ct);
         }

@@ -21,8 +21,10 @@ namespace DtPipe.Adapters.ObjectStorage;
 /// a pipeline that faults mid-stream leaves the destination key untouched rather than replacing
 /// it with a partial object.
 /// </summary>
-public sealed class ObjectStorageDataWriter : IColumnarDataWriter
+public sealed class ObjectStorageDataWriter : IColumnarDataWriter, IColumnTypeGate
 {
+    public IReadOnlyList<ColumnTypeRefusal> RefuseColumns(Apache.Arrow.Schema schema) => _inner.RefuseColumns(schema);
+
     private const string StagingTable = "dtpipe_object_out";
 
     private readonly ObjectStorageBinding _binding;

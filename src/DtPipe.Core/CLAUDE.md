@@ -58,7 +58,7 @@ Arrow buffers are off-heap (`NativeMemoryAllocator`) and reference-counted: an u
 - **A cut is a view.** `PipelineExecutor.CutHead` is the one truncation (`--limit`, ahead of the
   transformers and at the writer): a `SliceShared` slice, the input disposed at once, the slice
   owned by whoever receives it. Never rebuild a batch to shorten it: a rebuild needs a builder for
-  each column type, and a dictionary column has none.
+  each column type, and not every type has one.
 
 `[CI: ArrowOwnershipTests — TrackingMemoryPool returns to zero after a linear chain and after a
 fan-out with a row branch; CDataOwnershipTests for C Data imports, see

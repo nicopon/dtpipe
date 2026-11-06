@@ -48,6 +48,12 @@ A 128-bit integer (`HUGEINT`) is written as one, over its whole range, `-2^127` 
 unsigned one (`UHUGEINT`) is refused before the table is touched, with the cast that writes it as
 text: see [Types a writer cannot write](../../REFERENCE.md#types-a-writer-cannot-write).
 
+A `LIST` or an `ARRAY` of scalars is written as one, into a column of its own type or an existing
+one of another element type its values fit. A `STRUCT`, a `MAP`, a `UNION`, an `INTERVAL` and a list
+of any of them are refused before the table is touched, since the driver cannot append them: cast
+them to `VARCHAR` in a SQL step. An `ENUM` read from DuckDB is text from the reader on, so a table
+recreated from one has a `VARCHAR`. A decimal with no declared width creates a `DECIMAL(38,18)`.
+
 ## `--duck-init`: extensions and credentials
 
 `--duck-init` runs SQL on the DuckDB connection right after it opens — before any read, write or

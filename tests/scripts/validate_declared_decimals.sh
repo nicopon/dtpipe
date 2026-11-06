@@ -97,9 +97,8 @@ for target in "postgres|$PG" "mysql|$MYSQL" "sqlserver|$MSSQL" "oracle|$ORA" "du
   if [ "$got" = "$want" ]; then ok "$label write keeps the declared width"; else fail "$label write: expected '$want', got '$got'"; fi
 done
 
-# Through a DAG memory channel: a decimal that declared no width creates the engine's default, as it does
-# without a channel, and one that declared (10,2) keeps it. Read from MySQL's catalog, where the default
-# (38,9) tells itself apart from the (38,18) an Arrow schema would otherwise report.
+# Through a DAG memory channel: a decimal that declared no width creates the width it travels at, as it
+# does without a channel, and one that declared (10,2) keeps it. Read from MySQL's catalog.
 mysql_shape() {
   docker exec dtpipe-integ-mysql mysql -N -utestuser -ppassword integration -e \
     "select concat(numeric_precision, ',', numeric_scale) from information_schema.columns where table_schema='integration' and table_name='$1' and column_name='amount'" 2>/dev/null
@@ -109,7 +108,7 @@ mysql_shape() {
 "$DTPIPE" -i "duck::memory:" --query "select 1.25::DECIMAL(10,2) as amount" --alias src --from src \
   -o "$MYSQL" --table probe_declared_dec_chan_decl --strategy Recreate --no-stats >/dev/null 2>&1 || fail "channel declared: dtpipe failed"
 got="$(mysql_shape probe_declared_dec_chan_none)"
-if [ "$got" = "38,9" ]; then ok "channel: undeclared decimal takes the engine default"; else fail "channel undeclared: expected '38,9', got '$got'"; fi
+if [ "$got" = "38,18" ]; then ok "channel: undeclared decimal takes the width it travels at"; else fail "channel undeclared: expected '38,18', got '$got'"; fi
 got="$(mysql_shape probe_declared_dec_chan_decl)"
 if [ "$got" = "10,2" ]; then ok "channel: declared decimal keeps its width"; else fail "channel declared: expected '10,2', got '$got'"; fi
 docker exec dtpipe-integ-mysql mysql -utestuser -ppassword integration -e "drop table if exists probe_declared_dec_chan_none; drop table if exists probe_declared_dec_chan_decl" >/dev/null 2>&1 || true

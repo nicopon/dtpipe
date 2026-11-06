@@ -29,16 +29,37 @@ public class DuckDbTypeConverter : ITypeMapper
             _ when underlying == typeof(bool) => "BOOLEAN",
             _ when underlying == typeof(float) => "FLOAT",
             _ when underlying == typeof(double) => "DOUBLE",
-            _ when underlying == typeof(decimal) => "DECIMAL",
+            _ when underlying == typeof(decimal) => DecimalType.Undeclared,
             _ when underlying == typeof(DateTime) => "TIMESTAMP",
             _ when underlying == typeof(DateTimeOffset) => "TIMESTAMPTZ",
             _ when underlying == typeof(DateOnly) => "DATE",
             _ when underlying == typeof(TimeOnly) => "TIME",
             _ when underlying == typeof(Guid) => "UUID",
             _ when underlying == typeof(byte[]) => "BLOB",
+            _ when ListElementOf(underlying) is { } element => MapToProviderType(element) + "[]",
             _ => "VARCHAR"
         };
     }
+
+    /// <summary>
+    /// The element of a list the writer's appender writes as a LIST, or null for any other type: a list
+    /// of composites or of bytes has no form there, and an untyped list says nothing of its element.
+    /// </summary>
+    public static Type? ListElementOf(Type clrType)
+    {
+        var element = clrType.IsArray ? clrType.GetElementType()
+            : clrType.IsGenericType && clrType.GetGenericTypeDefinition() == typeof(List<>) ? clrType.GetGenericArguments()[0]
+            : null;
+        return element is not null && ListElements.Contains(Nullable.GetUnderlyingType(element) ?? element) ? element : null;
+    }
+
+    private static readonly HashSet<Type> ListElements =
+    [
+        typeof(bool), typeof(sbyte), typeof(short), typeof(int), typeof(long),
+        typeof(byte), typeof(ushort), typeof(uint), typeof(ulong),
+        typeof(float), typeof(double), typeof(decimal), typeof(string),
+        typeof(DateTime), typeof(DateTimeOffset), typeof(DateOnly), typeof(TimeOnly), typeof(Guid)
+    ];
 
     public Type MapFromProviderType(string providerType)
     {

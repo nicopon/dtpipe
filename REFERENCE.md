@@ -354,22 +354,21 @@ dtpipe -i events.jsonl \
   -o "pg:Host=…" --table events
 ```
 
-Two combinations are refused rather than approximated, both with the rewrite to apply:
-
-- **A list of text into Parquet.** Writing it would need definition levels, which the Parquet
-  library exposes for value types only; without them a NULL list and an empty one cannot be told
-  apart. Project the column instead: `array_to_json(col)::text`.
-- **A NULL element inside a DuckDB `LIST`.** The DuckDB driver refuses to materialize it, whatever
-  the target. Postgres arrays have no such limit.
+**A list of text into Parquet is refused rather than approximated.** Writing it would need
+definition levels, which the Parquet library exposes for value types only; without them a NULL list
+and an empty one cannot be told apart. Project the column instead: `array_to_json(col)::text`.
 
 A **source** column whose type the reader cannot map at all — a PostgreSQL `point` — is refused
 when the schema is built, rather than read as something else. Cast it in your query: `col::json`,
 `array_to_json(col)::text`.
 
-A DuckDB `STRUCT`, `MAP` or `LIST` read through `duck:` arrives as a real composite, like any
-other source: the reader takes DuckDB's own Arrow columns. So a field is addressable in the query
+A DuckDB `STRUCT`, `MAP` or `LIST` read through `duck:` arrives as a real composite, like any other
+source: the reader takes DuckDB's own Arrow columns. So a field is addressable in the query
 (`SELECT payload.severity AS sev`), and the JSON rendering above applies only where it applies to
-everything else — at a target with no composite type of its own.
+everything else — at a target with no composite type of its own. `duck:` and `parquet:` have one
+that dtpipe does not write, so they refuse the column instead of writing it as something else: see
+[Types a writer cannot write](#types-a-writer-cannot-write). A `LIST` of scalars stays a `LIST` in
+DuckDB.
 
 ---
 
@@ -439,6 +438,26 @@ Cast each column to an accepted type in a SQL step before the writer: give this 
 The cast is yours to choose: a wider type changes what the target holds. `--dry-run` refuses in
 the same words.
 
+Every writer that reads values answers from one list, so a type it does not name is refused before
+the target, never failed at its first value: an interval, a union, and the large, view and run-end
+encodings of Arrow, along with a half-precision float. Only `arrow:` writes them, since it reads no
+value. Beyond that list, `duck:` refuses a `STRUCT`, a `MAP`, a duration and a list of anything but
+a scalar, which its driver cannot append. `parquet:` refuses a column of nulls, a struct, a map, a
+fixed-size list, a duration and a list of anything but a number or a boolean. Each gives the cast
+that brings the column to a type the writer accepts.
+
+A decimal column created for a source that declared no width holds what such a column carries:
+
+| Writer | Column |
+|:---|:---|
+| `pg:` | `NUMERIC` |
+| `ora:` | `NUMBER` |
+| `duck:`, `mysql:`, `mssql:` | `DECIMAL(38,18)`: 20 integer digits, 18 decimals. Past them, a value is refused |
+| `parquet:` | `DECIMAL(38,18)`, like a declared one |
+| `sqlite:` | `REAL`, which refuses a value a double would round: see [Values a type cannot hold](#values-a-type-cannot-hold) |
+
+A table that already exists keeps its columns.
+
 A DuckDB 128-bit integer (`HUGEINT`) is written as one only by the `duck:` writer, over its whole
 range, `-2^127` to `2^127-1`. That writer does not write the unsigned one (`UHUGEINT`), and refuses
 it with `CAST(col AS VARCHAR)` as the step. Every other writer refuses both, with the same step,
@@ -458,6 +477,11 @@ The pg reader cannot read these 2 columns, and nothing was read:
   'price': money; select it as: price::numeric AS price
 Write each expression in the query where the column is selected.
 ```
+
+A reader that produces Arrow itself (`duck:`, `--sql`, `arrow:`) hands over a dictionary-encoded
+column decoded: a DuckDB `ENUM` is text from there on, and a table recreated from one has a
+`VARCHAR`. It refuses no other type when it opens, since `arrow: → arrow:` carries any type
+untouched. A step that has to read a value of a type with no reading stops there, naming the column.
 
 `--dry-run` refuses in the same words.
 
@@ -481,6 +505,7 @@ Record 12: column 'valid_to' (timestamp) holds infinity, which no date or time t
 | A value of another kind than its `list` or `struct` column | `jsonl:` | A `string` column, which keeps its JSON text |
 | `NaN`, `Infinity`, `-Infinity`: JSON has no number for them | `jsonl:` writer | Filter it out, or read the column as text |
 | `NaN`: SQLite stores it as NULL | `sqlite:` writer | Filter it out, or read the column as text |
+| A decimal a double would round, under a `REAL` column | `sqlite:` writer | A `string` column |
 
 In a sample that holds a scalar beside an object, the column is a `struct` with a `_value` field,
 and the scalar is that field's value: it is read, not refused.
@@ -982,7 +1007,7 @@ specific one, or when the table does not exist yet and dtpipe must generate the 
 |:---|:---|:---|
 | `Guid` | `CHAR(36)` | MySQL has no UUID type; `CHAR(36)` is what round-trips back to `Guid` |
 | `bool` | `TINYINT(1)` | a bare `TINYINT` would come back as a number |
-| `decimal` | `DECIMAL(p,s)` as the source declares it, else `DECIMAL(38,9)` | MySQL's ceiling is `DECIMAL(65,30)` |
+| `decimal` | `DECIMAL(p,s)` as the source declares it, else `DECIMAL(38,18)` | MySQL's ceiling is `DECIMAL(65,30)` |
 | `DateTime` | `DATETIME(6)` | |
 | `DateTimeOffset` | `DATETIME(6)` | **the zone offset is not preserved** — MySQL has no offset-carrying type |
 | `string` | `LONGTEXT`, or `VARCHAR(255)` when part of the key | `LONGTEXT` cannot be indexed without a prefix length |
@@ -1193,9 +1218,9 @@ consumer the old one satisfied?* Exit `0` when it does, `1` when it does not.
 A decimal whose source declared no precision and scale (a `--fake`, a `--compute`, an Oracle
 `NUMBER` with no constraint) is written at the default `decimal128:38:18` and carries the field
 metadata `Apache.Arrow.Serialization:decimal-width = undeclared`. That is what lets a writer create
-the engine default instead of a `DECIMAL(38,18)` nobody asked for. A contract captured before this
-mark existed has no such metadata, so its hash differs from a fresh capture of the same pipeline;
-the diff above still reports no change, since it compares types.
+an unbounded `NUMERIC` or `NUMBER` where the engine has one, rather than a width nobody asked for. A
+contract captured before this mark existed has no such metadata, so its hash differs from a fresh
+capture of the same pipeline; the diff above still reports no change, since it compares types.
 
 #### Offering the points a job could be cut at
 

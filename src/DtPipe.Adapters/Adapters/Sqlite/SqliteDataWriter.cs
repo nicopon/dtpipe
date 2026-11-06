@@ -1,5 +1,6 @@
 using System.Data;
 using System.Data.Common;
+using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 using DtPipe.Adapters.Shared.Abstractions;
@@ -24,6 +25,18 @@ public sealed class SqliteDataWriter : BaseSqlDataWriter, IColumnTypeGate
         => ColumnTypeRefusals.Collect(schema, f =>
             ColumnTypeRefusals.WideInteger(f)
             ?? (f.DataType is Apache.Arrow.Types.UInt64Type ? [Apache.Arrow.Types.StringType.Default] : null));
+
+    // Whether a decimal bound to this column lands as a double. Under REAL affinity SQLite turns the text
+    // of a decimal into one whatever it rounds; INTEGER and NUMERIC keep a text they would round, TEXT any.
+    private bool[]? _decimalBecomesDouble;
+
+    private async ValueTask<bool[]> DecimalBecomesDoubleAsync(CancellationToken ct)
+    {
+        var target = await InspectTargetAsync(ct);
+        return _columns!.Select(c =>
+            target?.Columns.FirstOrDefault(t => string.Equals(t.Name, c.Name, StringComparison.OrdinalIgnoreCase)) is not { } column
+            || _typeMapper.MapFromProviderType(column.NativeType) == typeof(double)).ToArray();
+    }
 
     private static object? ToBindValue(object? value) => value switch
     {
@@ -143,6 +156,7 @@ public sealed class SqliteDataWriter : BaseSqlDataWriter, IColumnTypeGate
             }
 
             cmd.CommandText = sql.ToString();
+            _decimalBecomesDouble ??= await DecimalBecomesDoubleAsync(ct);
 
             for (int i = 0; i < _columns.Count; i++)
             {
@@ -160,6 +174,12 @@ public sealed class SqliteDataWriter : BaseSqlDataWriter, IColumnTypeGate
                             $"Record {_recordsWritten}", _columns[i].Name, row[i]!.GetType().Name.ToLowerInvariant(),
                             "holds NaN, which SQLite stores as NULL",
                             "Filter the value out, or read the column as text: declare it 'string', or cast it in the source query.");
+                    if (row[i] is decimal number && _decimalBecomesDouble[i]
+                        && !TextNumber.DoubleHolds(number.ToString(CultureInfo.InvariantCulture), out _))
+                        throw new ColumnValueRefusedException(
+                            $"Record {_recordsWritten}", _columns[i].Name, "decimal",
+                            "holds a number a SQLite REAL column would round",
+                            "Keep it as text: declare the column 'string', or cast it in the source query.");
                     cmd.Parameters[i].Value = ToBindValue(CompositeCellJson.RenderIfComposite(row[i])) ?? DBNull.Value;
                 }
                 await cmd.ExecuteNonQueryAsync(ct);

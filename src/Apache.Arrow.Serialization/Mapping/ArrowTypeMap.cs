@@ -313,7 +313,9 @@ public static class ArrowTypeMap
             ListArray a => GetListValue(a, index),
             FixedSizeListArray a => GetFixedSizeListValue(a, index),
             DictionaryArray a => GetDictionaryValue(a, index, field),
-            _ => throw new NotSupportedException($"Unsupported Arrow array type for value extraction: {array.GetType().Name}")
+            _ => throw new NotSupportedException(field is null
+                ? $"Unsupported Arrow array type for value extraction: {array.GetType().Name}"
+                : $"Column '{field.Name}' is {field.DataType.Name}, an Arrow type with no reading here: cast it to one that has, at the source or in a SQL step.")
         };
 
         // 3. Post-processing Coercion
@@ -326,6 +328,28 @@ public static class ArrowTypeMap
 
         return val;
     }
+
+    /// <summary>
+    /// Whether <see cref="GetValue"/> reads a value of this type, its nested types included. A writer
+    /// that reads values answers from this list, so a type it does not name is refused before a target
+    /// exists rather than failing at its first value. Change it with that switch.
+    /// </summary>
+    public static bool HasValueReading(IArrowType type) => type switch
+    {
+        StructType s => s.Fields.All(f => HasValueReading(f.DataType)),
+        MapType m => HasValueReading(m.KeyField.DataType) && HasValueReading(m.ValueField.DataType),
+        ListType l => HasValueReading(l.ValueDataType),
+        FixedSizeListType l => HasValueReading(l.ValueDataType),
+        DictionaryType d => HasValueReading(d.ValueType),
+        _ => type.TypeId is ArrowTypeId.Null or ArrowTypeId.Boolean
+            or ArrowTypeId.Int8 or ArrowTypeId.Int16 or ArrowTypeId.Int32 or ArrowTypeId.Int64
+            or ArrowTypeId.UInt8 or ArrowTypeId.UInt16 or ArrowTypeId.UInt32 or ArrowTypeId.UInt64
+            or ArrowTypeId.Float or ArrowTypeId.Double
+            or ArrowTypeId.String or ArrowTypeId.Binary or ArrowTypeId.FixedSizedBinary
+            or ArrowTypeId.Decimal32 or ArrowTypeId.Decimal64 or ArrowTypeId.Decimal128 or ArrowTypeId.Decimal256
+            or ArrowTypeId.Date32 or ArrowTypeId.Date64 or ArrowTypeId.Time32 or ArrowTypeId.Time64
+            or ArrowTypeId.Timestamp or ArrowTypeId.Duration
+    };
 
     /// <summary>
     /// A fixed-width cell. The two narrow decimal arrays derive from <see cref="FixedSizeBinaryArray"/>:
@@ -361,17 +385,17 @@ public static class ArrowTypeMap
     /// </summary>
     private static Type GetListClrType(IArrowType type)
     {
-        var valueType = type switch
+        var valueField = type switch
         {
-            ListType list => list.ValueDataType,
-            LargeListType largeList => largeList.ValueDataType,
-            FixedSizeListType fixedSize => fixedSize.ValueDataType,
+            ListType list => list.ValueField,
+            LargeListType largeList => largeList.ValueField,
+            FixedSizeListType fixedSize => fixedSize.ValueField,
             _ => null
         };
 
-        if (valueType is null) return typeof(List<object?>);
+        if (valueField is null) return typeof(List<object?>);
 
-        var elementType = GetClrType(valueType);
+        var elementType = GetClrTypeFromField(valueField);
         return elementType == typeof(object) ? typeof(List<object?>) : typeof(List<>).MakeGenericType(elementType);
     }
 

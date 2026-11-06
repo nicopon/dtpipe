@@ -25,32 +25,40 @@ public static class ArrowSchemaFactory
     /// <paramref name="richSchema"/> when the base Arrow type is compatible, e.g. to preserve
     /// Timestamp timezone, Decimal precision/scale, or arrow.uuid metadata. If a field's base
     /// Arrow type in <paramref name="richSchema"/> differs from the PipeColumnInfo-derived type
-    /// (schema mutation by a transformer), the PipeColumnInfo-derived field is kept.
+    /// (schema mutation by a transformer), the PipeColumnInfo-derived field is kept. A column the CLR type
+    /// cannot describe (a struct has no Arrow form of its own, a type with no reading reads as text) keeps
+    /// the field it arrived in, so a writer's gate answers for the type the column really has.
     /// </summary>
     public static Schema CreateEnriched(IReadOnlyList<PipeColumnInfo> columns, Schema richSchema)
     {
-        var baseSchema = Create(columns);
-        var fields = new List<Field>(baseSchema.FieldsList.Count);
-        foreach (var baseField in baseSchema.FieldsList)
+        var fields = new List<Field>(columns.Count);
+        foreach (var column in columns)
         {
-            var richIdx = richSchema.GetFieldIndex(baseField.Name);
-            if (richIdx >= 0)
+            var richIdx = richSchema.GetFieldIndex(column.Name);
+            var richField = richIdx >= 0 ? richSchema.GetFieldByIndex(richIdx) : null;
+
+            if (richField != null
+                && ArrowTypeMapper.GetClrTypeFromField(richField) == column.ClrType
+                && (!ArrowTypeMapper.TryGetLogicalType(column.ClrType, out _) || !ArrowTypeMap.HasValueReading(richField.DataType)))
             {
-                var richField = richSchema.GetFieldByIndex(richIdx);
-                // Accept the richer field only when the Arrow base type is the same C# class:
-                // - TimestampType vs TimestampType (timezone enrichment): OK.
-                // - StringType vs Int32Type (transformer mutation): NOT OK — keep PipeColumnInfo-derived field.
-                fields.Add(richField.DataType.GetType() == baseField.DataType.GetType()
-                    ? richField
-                    : baseField);
+                fields.Add(richField);
+                continue;
             }
-            else
-            {
-                fields.Add(baseField);
-            }
+
+            var baseField = ArrowTypeMapper.GetField(column.Name, column.ClrType, column.IsNullable, column.Precision, column.Scale);
+            // Accept the richer field only when the Arrow base type is the same C# class:
+            // - TimestampType vs TimestampType (timezone enrichment): OK.
+            // - StringType vs Int32Type (transformer mutation): NOT OK — keep PipeColumnInfo-derived field.
+            fields.Add(richField != null && richField.DataType.GetType() == baseField.DataType.GetType()
+                ? richField
+                : baseField);
         }
-        return new Schema(fields, baseSchema.Metadata);
+        return new Schema(fields, null);
     }
+
+    /// <summary>The fields of <paramref name="schema"/> whose CLR type has no Arrow form of its own, a struct's or a map's.</summary>
+    public static Schema FieldsWithNoClrForm(Schema schema)
+        => new(schema.FieldsList.Where(f => !ArrowTypeMapper.TryGetLogicalType(ArrowTypeMapper.GetClrTypeFromField(f), out _)), null);
 
     /// <summary>
     /// Returns true if the schema contains rich types (Struct, List, or Map).

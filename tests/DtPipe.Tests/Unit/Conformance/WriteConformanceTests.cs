@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using Apache.Arrow;
 using Apache.Arrow.Ipc;
+using Apache.Arrow.Serialization.Mapping;
 using Apache.Arrow.Types;
 using DtPipe.Adapters.MySql;
 using DtPipe.Adapters.Oracle;
@@ -42,7 +43,6 @@ public sealed class WriteConformanceTests : IDisposable
         public static implicit operator Cell(string expected) => new(expected);
     }
 
-    private static Cell L3(string expected) => new(expected, "L3");
     private static Cell L4(string expected) => new(expected, "L4");
 
     private sealed record Row(string Case, Cell Csv, Cell Jsonl, Cell Parquet, Cell Arrow, Cell Duck, Cell Sqlite, Cell Checksum)
@@ -62,7 +62,7 @@ public sealed class WriteConformanceTests : IDisposable
     // case, then csv, jsonl, parquet, arrow, duck, sqlite, checksum
     private static readonly Row[] Table =
     [
-        new("null", "", "null", L3("refused"), "null | null", "VARCHAR | null", "null | null", "ok"),
+        new("null", "", "null", "refused", "null | null", "VARCHAR | null", "null | null", "ok"),
         new("bool", "true", "true", "BOOLEAN | true", "bool | Boolean:true", "BOOLEAN | true", "integer | 1", "ok"),
         new("bool8", "true", "true", "BOOLEAN | true", "int8 | Boolean:true", "BOOLEAN | true", "integer | 1", "ok"),
         new("int8", "-5", "-5", "TINYINT | -5", "int8 | SByte:-5", "TINYINT | -5", "integer | -5", "ok"),
@@ -76,7 +76,7 @@ public sealed class WriteConformanceTests : IDisposable
         new("int128", "170141183460469231731687303715884105727", "170141183460469231731687303715884105727", "refused: utf8", "fixed_size_binary | Int128:170141183460469231731687303715884105727", "HUGEINT | 170141183460469231731687303715884105727", "refused: utf8", "ok"),
         new("int128-min", "-170141183460469231731687303715884105728", "-170141183460469231731687303715884105728", "refused: utf8", "fixed_size_binary | Int128:-170141183460469231731687303715884105728", "HUGEINT | -170141183460469231731687303715884105728", "refused: utf8", "ok"),
         new("uint128", "340282366920938463463374607431768211455", "340282366920938463463374607431768211455", "refused: utf8", "fixed_size_binary | UInt128:340282366920938463463374607431768211455", "refused: utf8", "refused: utf8", "ok"),
-        new("halffloat", L3("refused"), L3("refused"), L3("refused"), "halffloat | 2 rows", L3("refused"), L3("refused"), L3("refused")),
+        new("halffloat", "refused", "refused", "refused", "halffloat | 2 rows", "refused", "refused", "refused"),
         new("float", "1.5", "1.5", "FLOAT | 1.5", "float | Single:1.5", "FLOAT | 1.5", "real | 1.5", "ok"),
         new("double", "1.5", "1.5", "DOUBLE | 1.5", "double | Double:1.5", "DOUBLE | 1.5", "real | 1.5", "ok"),
         new("double-nan", "NaN", "named", "DOUBLE | nan", "double | Double:NaN", "DOUBLE | nan", "named", "ok"),
@@ -87,17 +87,17 @@ public sealed class WriteConformanceTests : IDisposable
         new("decimal64", "4.29", "4.29", L4("DECIMAL(18,2) | 4.29"), "decimal64 | Decimal:4.29", L4("DECIMAL(18,2) | 4.29"), "real | 4.29", "ok"),
         new("decimal128(10,2)", "4.29", "4.29", "DECIMAL(10,2) | 4.29", "decimal128 | Decimal:4.29", "DECIMAL(10,2) | 4.29", "real | 4.29", "ok"),
         new("decimal128(38,18)", "4.290000000000000000", "4.290000000000000000", "DECIMAL(38,18) | 4.290000000000000000", "decimal128 | Decimal:4.290000000000000000", "DECIMAL(38,18) | 4.290000000000000000", "real | 4.29", "ok"),
-        new("decimal-undeclared", L4("4.29"), L4("4.29"), "DECIMAL(38,18) | 4.290000000000000000", "decimal128 | Decimal:4.290000000000000000", L3("DECIMAL(38,18) | 4.290000000000000000"), "real | 4.29", "ok"),
-        new("decimal128-wide", "12345678901234567.891000000000", "12345678901234567.891000000000", "DECIMAL(38,18) | 12345678901234567.891000000000000000", "decimal128 | Decimal:12345678901234567.891000000000", "DECIMAL(38,18) | 12345678901234567.891000000000000000", L3("text | 12345678901234567.891000000000"), "ok"),
-        new("decimal-undeclared-wide", L4("12345678901234567.891"), L4("12345678901234567.891"), "DECIMAL(38,18) | 12345678901234567.891000000000000000", "decimal128 | Decimal:12345678901234567.891000000000", L3("DECIMAL(38,18) | 12345678901234567.891000000000000000"), L3("text | 12345678901234567.891"), "ok"),
-        new("decimal-undeclared-fraction", L4("1.23456"), L4("1.23456"), "DECIMAL(38,18) | 1.234560000000000000", "decimal128 | Decimal:1.234560000000000000", L3("DECIMAL(38,18) | 1.234560000000000000"), "real | 1.23456", "ok"),
+        new("decimal-undeclared", L4("4.29"), L4("4.29"), "DECIMAL(38,18) | 4.290000000000000000", "decimal128 | Decimal:4.290000000000000000", "DECIMAL(38,18) | 4.290000000000000000", "real | 4.29", "ok"),
+        new("decimal128-wide", "12345678901234567.891000000000", "12345678901234567.891000000000", "DECIMAL(38,18) | 12345678901234567.891000000000000000", "decimal128 | Decimal:12345678901234567.891000000000", "DECIMAL(38,18) | 12345678901234567.891000000000000000", "named", "ok"),
+        new("decimal-undeclared-wide", L4("12345678901234567.891"), L4("12345678901234567.891"), "DECIMAL(38,18) | 12345678901234567.891000000000000000", "decimal128 | Decimal:12345678901234567.891000000000", "DECIMAL(38,18) | 12345678901234567.891000000000000000", "named", "ok"),
+        new("decimal-undeclared-fraction", L4("1.23456"), L4("1.23456"), "DECIMAL(38,18) | 1.234560000000000000", "decimal128 | Decimal:1.234560000000000000", "DECIMAL(38,18) | 1.234560000000000000", "real | 1.23456", "ok"),
         new("decimal256", "4.2900000000", "4.2900000000", "DECIMAL(38,18) | 4.290000000000000000", "decimal256 | Decimal:4.2900000000", L4("DECIMAL(38,10) | 4.2900000000"), "real | 4.29", "ok"),
         new("string", "héllo", @"""h\u00E9llo""", "VARCHAR | héllo", "utf8 | String:héllo", "VARCHAR | héllo", "text | héllo", "ok"),
-        new("largestring", L3("refused"), L3("refused"), L3("refused"), "large_utf8 | 2 rows", L3("refused"), L3("refused"), L3("refused")),
-        new("stringview", L3("refused"), L3("refused"), L3("refused"), "utf8view | 2 rows", L3("refused"), L3("refused"), L3("refused")),
+        new("largestring", "refused", "refused", "refused", "large_utf8 | 2 rows", "refused", "refused", "refused"),
+        new("stringview", "refused", "refused", "refused", "utf8view | 2 rows", "refused", "refused", "refused"),
         new("binary", "YWJj", @"""YWJj""", "BLOB | abc", "binary | Bytes:616263", "BLOB | abc", "blob | 616263", "ok"),
-        new("largebinary", L3("refused"), L3("refused"), L3("refused"), "large_binary | 2 rows", L3("refused"), L3("refused"), L3("refused")),
-        new("binaryview", L3("refused"), L3("refused"), L3("refused"), "binaryview | 2 rows", L3("refused"), L3("refused"), L3("refused")),
+        new("largebinary", "refused", "refused", "refused", "large_binary | 2 rows", "refused", "refused", "refused"),
+        new("binaryview", "refused", "refused", "refused", "binaryview | 2 rows", "refused", "refused", "refused"),
         new("fixedbinary(8)", "YWJjZGVmZ2g=", @"""YWJjZGVmZ2g=""", "BLOB | abcdefgh", "fixed_size_binary | Bytes:6162636465666768", "BLOB | abcdefgh", "blob | 6162636465666768", "ok"),
         new("uuid", "6f9619ff-8b86-d011-b42d-00c04fc964ff", @"""6f9619ff-8b86-d011-b42d-00c04fc964ff""", "UUID | 6f9619ff-8b86-d011-b42d-00c04fc964ff", "fixed_size_binary | Guid:6f9619ff-8b86-d011-b42d-00c04fc964ff", "UUID | 6f9619ff-8b86-d011-b42d-00c04fc964ff", "text | 6F9619FF-8B86-D011-B42D-00C04FC964FF", "ok"),
         new("date32", "2024-01-02", @"""2024-01-02""", "DATE | 2024-01-02", "date32 | DateOnly:2024-01-02", "DATE | 2024-01-02", "text | 2024-01-02", "ok"),
@@ -109,25 +109,25 @@ public sealed class WriteConformanceTests : IDisposable
         new("timestamp(ns)", "2024-01-02 03:04:05.123456", @"""2024-01-02T03:04:05.1234560""", "TIMESTAMP | 2024-01-02 03:04:05.123456", "timestamp | DateTime:2024-01-02T03:04:05.1234560", "TIMESTAMP | 2024-01-02 03:04:05.123456", "text | 2024-01-02 03:04:05.123456", "ok"),
         new("timestamp(us,UTC)", "2024-01-02 03:04:05.123456+00:00", @"""2024-01-02T03:04:05.1234560\u002B00:00""", "TIMESTAMP WITH TIME ZONE | 2024-01-02 03:04:05.123456+00", "timestamp | DateTimeOffset:2024-01-02T03:04:05.1234560+00:00", "TIMESTAMP WITH TIME ZONE | 2024-01-02 03:04:05.123456+00", "text | 2024-01-02 03:04:05.123456+00:00", "ok"),
         new("timestamp(us,Asia/Tokyo)", "2024-01-02 03:04:05.123456+00:00", @"""2024-01-02T03:04:05.1234560\u002B00:00""", "TIMESTAMP WITH TIME ZONE | 2024-01-02 03:04:05.123456+00", "timestamp | DateTimeOffset:2024-01-02T03:04:05.1234560+00:00", "TIMESTAMP WITH TIME ZONE | 2024-01-02 03:04:05.123456+00", "text | 2024-01-02 03:04:05.123456+00:00", "ok"),
-        new("duration(us)", "00:01:30", @"""00:01:30""", "refused: int64, utf8", "duration | TimeSpan:00:01:30", L3("refused"), "text | 00:01:30", "ok"),
-        new("interval(ym)", L3("refused"), L3("refused"), L3("refused"), "interval | 2 rows", L3("refused"), L3("refused"), L3("refused")),
-        new("interval(dt)", L3("refused"), L3("refused"), L3("refused"), "interval | 2 rows", L3("refused"), L3("refused"), L3("refused")),
-        new("interval(mdn)", L3("refused"), L3("refused"), L3("refused"), "interval | 2 rows", L3("refused"), L3("refused"), L3("refused")),
-        new("list<int32>", @"""[1,2]""", "[1,2]", "INTEGER[] | [1, 2]", "list | [Int32:1,Int32:2]", L3("INTEGER[] | [1, 2]"), "text | [1,2]", "ok"),
-        new("list<decimal(10,2)>", "[4.29]", "[4.29]", L4("DECIMAL(10,2)[] | [4.29]"), "list | [Decimal:4.29]", L3("DECIMAL(10,2)[] | [4.29]"), "text | [4.29]", "ok"),
-        new("list<timestamp>", @"""[""""2024-01-02T03:04:05.123456""""]""", """["2024-01-02T03:04:05.1234560"]""", L3("refused"), "list | [DateTime:2024-01-02T03:04:05.1234560]", L3("TIMESTAMP[] | [2024-01-02 03:04:05.123456]"), """text | ["2024-01-02T03:04:05.123456"]""", "ok"),
-        new("list<uuid>", @"""[""""6f9619ff-8b86-d011-b42d-00c04fc964ff""""]""", """["6f9619ff-8b86-d011-b42d-00c04fc964ff"]""", L3("refused"), "list | [Guid:6f9619ff-8b86-d011-b42d-00c04fc964ff]", L3("UUID[] | [6f9619ff-8b86-d011-b42d-00c04fc964ff]"), """text | ["6f9619ff-8b86-d011-b42d-00c04fc964ff"]""", "ok"),
-        new("list<struct>", @"""[{""""a"""":1}]""", """[{"a":1}]""", L3("refused"), L3("list | [{a=Int32:1}]"), L3("refused"), L3("""text | [{"a":1}]"""), "ok"),
-        new("largelist", L3("refused"), L3("refused"), L3("refused"), "large_list | 2 rows", L3("refused"), L3("refused"), L3("refused")),
-        new("fixedlist", @"""[1,2]""", "[1,2]", L3("refused"), "fixed_size_list | [Int32:1,Int32:2]", L3("INTEGER[2] | [1, 2]"), "text | [1,2]", "ok"),
-        new("listview", L3("refused"), L3("refused"), L3("refused"), "listview | 2 rows", L3("refused"), L3("refused"), L3("refused")),
-        new("largelistview", L3("refused"), L3("refused"), L3("refused"), "large_listview | 2 rows", L3("refused"), L3("refused"), L3("refused")),
-        new("struct", @"""{""""a"""":1,""""b"""":""""x""""}""", """{"a":1,"b":"x"}""", L3("refused"), L3("struct | {a=Int32:1,b=String:x}"), L3("refused"), L3("""text | {"a":1,"b":"x"}"""), "ok"),
-        new("map", @"""{""""a"""":1}""", """{"a":1}""", L3("refused"), L3("map | {a=Int32:1}"), L3("refused"), L3("""text | {"a":1}"""), "ok"),
-        new("union(sparse)", L3("refused"), L3("refused"), L3("refused"), "union | 2 rows", L3("refused"), L3("refused"), L3("refused")),
-        new("union(dense)", L3("refused"), L3("refused"), L3("refused"), "union | 2 rows", L3("refused"), L3("refused"), L3("refused")),
-        new("dictionary", "a", @"""a""", L3("VARCHAR | a"), L3("utf8 | String:a"), "VARCHAR | a", "text | a", "ok"),
-        new("runend", L3("refused"), L3("refused"), L3("refused"), "run_end_encoded | 2 rows", L3("refused"), L3("refused"), L3("refused")),
+        new("duration(us)", "00:01:30", @"""00:01:30""", "refused: int64, utf8", "duration | TimeSpan:00:01:30", "refused", "text | 00:01:30", "ok"),
+        new("interval(ym)", "refused", "refused", "refused", "interval | 2 rows", "refused", "refused", "refused"),
+        new("interval(dt)", "refused", "refused", "refused", "interval | 2 rows", "refused", "refused", "refused"),
+        new("interval(mdn)", "refused", "refused", "refused", "interval | 2 rows", "refused", "refused", "refused"),
+        new("list<int32>", @"""[1,2]""", "[1,2]", "INTEGER[] | [1, 2]", "list | [Int32:1,Int32:2]", "INTEGER[] | [1, 2]", "text | [1,2]", "ok"),
+        new("list<decimal(10,2)>", "[4.29]", "[4.29]", L4("DECIMAL(10,2)[] | [4.29]"), "list | [Decimal:4.29]", L4("DECIMAL(10,2)[] | [4.29]"), "text | [4.29]", "ok"),
+        new("list<timestamp>", @"""[""""2024-01-02T03:04:05.123456""""]""", """["2024-01-02T03:04:05.1234560"]""", "refused", "list | [DateTime:2024-01-02T03:04:05.1234560]", "TIMESTAMP[] | ['2024-01-02 03:04:05.123456']", """text | ["2024-01-02T03:04:05.123456"]""", "ok"),
+        new("list<uuid>", @"""[""""6f9619ff-8b86-d011-b42d-00c04fc964ff""""]""", """["6f9619ff-8b86-d011-b42d-00c04fc964ff"]""", "refused", "list | [Guid:6f9619ff-8b86-d011-b42d-00c04fc964ff]", "UUID[] | [6f9619ff-8b86-d011-b42d-00c04fc964ff]", """text | ["6f9619ff-8b86-d011-b42d-00c04fc964ff"]""", "ok"),
+        new("list<struct>", @"""[{""""a"""":1}]""", """[{"a":1}]""", "refused", "list | [{a=Int32:1}]", "refused", """text | [{"a":1}]""", "ok"),
+        new("largelist", "refused", "refused", "refused", "large_list | 2 rows", "refused", "refused", "refused"),
+        new("fixedlist", @"""[1,2]""", "[1,2]", "refused", "fixed_size_list | [Int32:1,Int32:2]", "INTEGER[] | [1, 2]", "text | [1,2]", "ok"),
+        new("listview", "refused", "refused", "refused", "listview | 2 rows", "refused", "refused", "refused"),
+        new("largelistview", "refused", "refused", "refused", "large_listview | 2 rows", "refused", "refused", "refused"),
+        new("struct", @"""{""""a"""":1,""""b"""":""""x""""}""", """{"a":1,"b":"x"}""", "refused", "struct | {a=Int32:1,b=String:x}", "refused", """text | {"a":1,"b":"x"}""", "ok"),
+        new("map", @"""{""""a"""":1}""", """{"a":1}""", "refused", "map | {a=Int32:1}", "refused", """text | {"a":1}""", "ok"),
+        new("union(sparse)", "refused", "refused", "refused", "union | 2 rows", "refused", "refused", "refused"),
+        new("union(dense)", "refused", "refused", "refused", "union | 2 rows", "refused", "refused", "refused"),
+        new("dictionary", "a", @"""a""", "VARCHAR | a", "utf8 | String:a", "VARCHAR | a", "text | a", "ok"),
+        new("runend", "refused", "refused", "refused", "run_end_encoded | 2 rows", "refused", "refused", "refused"),
     ];
 
     private sealed record GateRow(string Case, Cell Pg, Cell MySql, Cell SqlServer, Cell Oracle)
@@ -152,24 +152,24 @@ public sealed class WriteConformanceTests : IDisposable
         new("int128", "refused: utf8", "refused: utf8", "refused: utf8", "refused: utf8"),
         new("int128-min", "refused: utf8", "refused: utf8", "refused: utf8", "refused: utf8"),
         new("uint128", "refused: utf8", "refused: utf8", "refused: utf8", "refused: utf8"),
-        new("halffloat", L3("refused"), L3("refused"), L3("refused"), L3("refused")),
-        new("largestring", L3("refused"), L3("refused"), L3("refused"), L3("refused")),
-        new("stringview", L3("refused"), L3("refused"), L3("refused"), L3("refused")),
-        new("largebinary", L3("refused"), L3("refused"), L3("refused"), L3("refused")),
-        new("binaryview", L3("refused"), L3("refused"), L3("refused"), L3("refused")),
+        new("halffloat", "refused", "refused", "refused", "refused"),
+        new("largestring", "refused", "refused", "refused", "refused"),
+        new("stringview", "refused", "refused", "refused", "refused"),
+        new("largebinary", "refused", "refused", "refused", "refused"),
+        new("binaryview", "refused", "refused", "refused", "refused"),
         new("time32(ms)", "accepted", "accepted", "accepted", "refused: utf8"),
         new("time64(us)", "accepted", "accepted", "accepted", "refused: utf8"),
         new("timestamp(us,UTC)", "accepted", "refused: timestamp", "accepted", "accepted"),
         new("timestamp(us,Asia/Tokyo)", "accepted", "refused: timestamp", "accepted", "accepted"),
-        new("interval(ym)", L3("refused"), L3("refused"), L3("refused"), L3("refused")),
-        new("interval(dt)", L3("refused"), L3("refused"), L3("refused"), L3("refused")),
-        new("interval(mdn)", L3("refused"), L3("refused"), L3("refused"), L3("refused")),
-        new("largelist", L3("refused"), L3("refused"), L3("refused"), L3("refused")),
-        new("listview", L3("refused"), L3("refused"), L3("refused"), L3("refused")),
-        new("largelistview", L3("refused"), L3("refused"), L3("refused"), L3("refused")),
-        new("union(sparse)", L3("refused"), L3("refused"), L3("refused"), L3("refused")),
-        new("union(dense)", L3("refused"), L3("refused"), L3("refused"), L3("refused")),
-        new("runend", L3("refused"), L3("refused"), L3("refused"), L3("refused")),
+        new("interval(ym)", "refused", "refused", "refused", "refused"),
+        new("interval(dt)", "refused", "refused", "refused", "refused"),
+        new("interval(mdn)", "refused", "refused", "refused", "refused"),
+        new("largelist", "refused", "refused", "refused", "refused"),
+        new("listview", "refused", "refused", "refused", "refused"),
+        new("largelistview", "refused", "refused", "refused", "refused"),
+        new("union(sparse)", "refused", "refused", "refused", "refused"),
+        new("union(dense)", "refused", "refused", "refused", "refused"),
+        new("runend", "refused", "refused", "refused", "refused"),
     ];
 
     public static TheoryData<string, string> Cells()
@@ -248,6 +248,114 @@ public sealed class WriteConformanceTests : IDisposable
         Assert.Equal("HUGEINT | 170141183460469231731687303715884105727", WriteOutcome.ReadBack("duck", target));
     }
 
+    /// <summary>A server cell is played only where a server stands; the column a dialect creates needs none.</summary>
+    [Theory]
+    [InlineData("duck", "DECIMAL(38,18)")]
+    [InlineData("mysql", "DECIMAL(38,18)")]
+    [InlineData("mssql", "DECIMAL(38,18)")]
+    [InlineData("ora", "NUMBER")]
+    [InlineData("pg", "NUMERIC")]
+    public void An_Undeclared_Decimal_Creates_A_Column_That_Holds_What_It_Carries(string dialect, string expected)
+    {
+        ITypeMapper mapper = dialect switch
+        {
+            "duck" => DtPipe.Adapters.DuckDB.DuckDbTypeConverter.Instance,
+            "mysql" => MySqlTypeConverter.Instance,
+            "mssql" => SqlServerTypeConverter.Instance,
+            "ora" => OracleTypeConverter.Instance,
+            _ => PostgreSqlTypeConverter.Instance
+        };
+
+        Assert.Equal(expected, mapper.MapToProviderType(new DtPipe.Core.Models.PipeColumnInfo("v", typeof(decimal), true)));
+    }
+
+    /// <summary>The list a gate answers from is the switch that reads a value: two lists, one truth.</summary>
+    [Fact]
+    public void The_Reading_List_Says_What_A_Value_Reads_As()
+    {
+        foreach (var @case in ArrowTypeCases.All)
+        {
+            var column = @case.Build();
+            var reads = true;
+            try { ArrowTypeMapper.GetValueForField(column, @case.Field, 0); }
+            catch (NotSupportedException) { reads = false; }
+
+            Assert.True(reads == ArrowTypeMap.HasValueReading(@case.Field.DataType), $"{@case.Name}: reads {reads}");
+        }
+    }
+
+    /// <summary>A dictionary is decoded by the reader, so a step that rebuilds a batch and a writer with no form for one never meet it.</summary>
+    [Theory]
+    [InlineData("--sampling-rate", "0.99", "arrow")]
+    [InlineData("--sampling-rate", "0.99", "parquet")]
+    [InlineData("--limit", "1", "parquet")]
+    public async Task An_Enum_Column_Is_Text_From_The_Reader_On(string flag, string value, string writer)
+    {
+        var target = Path.Combine(_dir, Guid.NewGuid().ToString("N") + "." + writer);
+
+        Assert.Equal(0, await Program.Main(["-i", "duck::memory:", "-q", "select (case when i % 2 = 0 then 'a' else 'b' end)::ENUM('a','b') as e, i from range(5000) t(i)",
+            flag, value, "-o", $"{writer}:{target}", "--no-stats"]));
+
+        Assert.True(new FileInfo(target).Length > 0);
+    }
+
+    /// <summary>A value too fine for a REAL column is refused; a column of the target that keeps the text takes it whole.</summary>
+    [Fact]
+    public async Task A_Sqlite_Column_That_Keeps_A_Text_Takes_A_Decimal_A_Double_Would_Round()
+    {
+        const string number = "12345678901234567.891";
+        var source = Path.Combine(_dir, "wide.csv");
+        File.WriteAllText(source, $"v\n{number}\n");
+        var target = Path.Combine(_dir, "wide.sqlite");
+        using (var connection = new SqliteConnection($"Data Source={target};Pooling=False"))
+        {
+            connection.Open();
+            using var create = connection.CreateCommand();
+            create.CommandText = "CREATE TABLE t (v TEXT)";
+            create.ExecuteNonQuery();
+        }
+
+        Assert.Equal(0, await Program.Main(["-i", source, "--column-types", "v:decimal", "-o", $"sqlite:{target}", "-t", "t", "--strategy", "Append", "--no-stats"]));
+
+        Assert.StartsWith($"text | {number}", WriteOutcome.ReadBack("sqlite", target));
+    }
+
+    /// <summary>A column the appender writes takes a list, element by element; one it has no form for is named before a row is written.</summary>
+    [Theory]
+    [InlineData("BIGINT[]", "[1, 2]::INTEGER[]", "BIGINT[] | [1, 2]")]
+    [InlineData("VARCHAR[]", "['a', 'b']::VARCHAR[]", "VARCHAR[] | [a, b]")]
+    [InlineData("DECIMAL(18,2)[]", "[4.29]::DECIMAL(10,2)[]", "DECIMAL(18,2)[] | [4.29]")]
+    [InlineData("INTEGER[2]", "[1, 2]::INTEGER[2]", "INTEGER[2] | [1, 2]")]
+    [InlineData("INTEGER[]", "'[1, 2]'", "named")]
+    [InlineData("STRUCT(a INTEGER)", "'{\"a\":1}'", "named")]
+    [InlineData("INTEGER[][]", "[[1]]::INTEGER[][]", "refused")]
+    public async Task An_Existing_Duck_Column_Takes_What_The_Appender_Can_Write(string column, string value, string expected)
+    {
+        var target = Path.Combine(_dir, "existing.duckdb");
+        using (var duck = new DuckDBConnection($"DataSource={target}"))
+        {
+            duck.Open();
+            using var create = duck.CreateCommand();
+            create.CommandText = $"CREATE TABLE t (v {column})";
+            create.ExecuteNonQuery();
+        }
+
+        var (stdout, stderr) = (Console.Out, Console.Error);
+        var captured = new StringWriter();
+        Console.SetOut(captured);
+        Console.SetError(captured);
+        int exit;
+        try { exit = await Program.Main(["-i", "duck::memory:", "-q", $"select {value} as v", "-o", $"duck:{target}", "-t", "t", "--strategy", "Append", "--no-stats"]); }
+        finally { Console.SetOut(stdout); Console.SetError(stderr); }
+
+        var text = Regex.Replace(captured.ToString(), @"\s+", " ");
+        var actual = exit == 0 ? WriteOutcome.ReadBack("duck", target)
+            : text.Contains("ColumnTypeRefusedException") ? "refused"
+            : text.Contains("'v'") ? "named"
+            : $"raw: exit {exit}";
+        Assert.Equal(expected, actual);
+    }
+
     [Fact]
     public void Every_Arrow_Type_Has_A_Case()
     {
@@ -270,6 +378,8 @@ public sealed class WriteConformanceTests : IDisposable
 
         if (cell.KnownFalse is { } lot)
             Assert.False(right, $"This cell now reads '{actual}': the correction of {lot} is in, drop its mark.");
+        else if (cell.Expected == "refused")
+            Assert.StartsWith("refused", actual);
         else
             Assert.Equal(cell.Expected, actual);
     }

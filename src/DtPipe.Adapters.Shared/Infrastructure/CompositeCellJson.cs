@@ -10,8 +10,8 @@ namespace DtPipe.Adapters.Shared.Infrastructure;
 /// Renders a composite cell — a JSON object, an Arrow struct, a list, an array column — as JSON
 /// text, for a target that has no composite type of its own.
 ///
-/// A target that carries the shape natively must not call this: DuckDB keeps a STRUCT, Parquet
-/// keeps a LIST, JSONL keeps the nesting. What is rendered is the value; the column the writer
+/// A target that carries the shape natively must not call this: DuckDB and Parquet keep a LIST,
+/// JSONL keeps the nesting. What is rendered is the value; the column the writer
 /// declared is what decides, and it is never widened or narrowed here.
 ///
 /// Every writer that lacked this went wrong in its own way on the same two rows of JSONL, and one

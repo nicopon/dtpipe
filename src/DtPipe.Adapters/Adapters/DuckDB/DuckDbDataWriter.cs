@@ -1,8 +1,11 @@
 using DtPipe.Adapters.Shared.Abstractions;
+using System.Collections;
 using System.Data;
+using System.Reflection;
 using System.Text;
 using Apache.Arrow;
 using Apache.Arrow.Ado;
+using Apache.Arrow.Types;
 using DtPipe.Adapters.Shared.Infrastructure;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Helpers;
@@ -22,13 +25,19 @@ namespace DtPipe.Adapters.DuckDB;
 public sealed class DuckDbDataWriter : IColumnarDataWriter, ISchemaInspector, IKeyValidator, ISchemaMigrator, IColumnTypeGate
 {
     /// <summary>
-    /// The writer does not write an unsigned 128-bit column (UHUGEINT): the type mapper has no column
-    /// type for it and <see cref="AppendValue"/> no case, so it would land as text. It is refused before
-    /// the target is touched, never converted.
+    /// What the DuckDB.NET appender has no form for is refused before the target is touched, never
+    /// converted: a STRUCT and a MAP, a list of anything but a scalar, a duration. So is an unsigned
+    /// 128-bit column (UHUGEINT): the type mapper has no column type for it and <see cref="AppendValue"/>
+    /// no case, so it would land as text.
     /// </summary>
     public IReadOnlyList<ColumnTypeRefusal> RefuseColumns(Schema schema)
-        => ColumnTypeRefusals.Collect(schema, f =>
-            ArrowTypeMapper.GetClrTypeFromField(f) == typeof(UInt128) ? ColumnTypeRefusals.WideInteger(f) : null);
+        => ColumnTypeRefusals.Collect(schema, f => f.DataType switch
+        {
+            StructType or MapType => [StringType.Default],
+            ListType or FixedSizeListType when DuckDbTypeConverter.ListElementOf(ArrowTypeMapper.GetClrTypeFromField(f)) is null => [StringType.Default],
+            DurationType => [Int64Type.Default, StringType.Default],
+            _ => ArrowTypeMapper.GetClrTypeFromField(f) == typeof(UInt128) ? ColumnTypeRefusals.WideInteger(f) : null
+        });
 
     private readonly string _connectionString;
     private readonly DuckHubConnectionInfo _hubInfo;
@@ -58,6 +67,8 @@ public sealed class DuckDbDataWriter : IColumnarDataWriter, ISchemaInspector, IK
     // The type a value must have when it reaches the appender, per target column; null for a column
     // of a type the writer does not know, whose values reach the appender unchecked.
     private Type?[]? _checkedTypes;
+    // Per target column, the appender of a LIST or ARRAY column; null for any other.
+    private Action<IDuckDBAppenderRow, IEnumerable>?[]? _listAppenders;
     private Func<object?, object?>[]? _cellConverters;
 
     private readonly IStringContentResolver? _resolver;
@@ -161,6 +172,14 @@ public sealed class DuckDbDataWriter : IColumnarDataWriter, ISchemaInspector, IK
 
     private void AppendValue(IDuckDBAppenderRow row, object val, int column)
     {
+        if (_listAppenders![column] is { } appendList)
+        {
+            if (val is string or byte[] or IDictionary || val is not IEnumerable elements)
+                throw TypeMismatch(column);
+            appendList(row, elements);
+            return;
+        }
+
         // For Arrow path, RecordBatchDataReader already provides typed values,
         // but we still use ValueConverter to ensure perfect alignment with target types
         // (e.g. if Arrow has Int64 but DB has Int32).
@@ -226,6 +245,45 @@ public sealed class DuckDbDataWriter : IColumnarDataWriter, ISchemaInspector, IK
     private static bool IsChecked(TargetColumnInfo column)
         => !column.NativeType.EndsWith(']')
            && ((column.InferredClrType is { } type && type != typeof(string)) || column.NativeType == "VARCHAR");
+
+    // The appender writes a LIST or an ARRAY of scalars, typed on what the target declares: handed the
+    // JSON of a list, it refuses a text, and handed another element type, it stores its raw bytes. It has
+    // no form for a STRUCT, a MAP or a UNION, or for a list of them or of lists.
+    private Action<IDuckDBAppenderRow, IEnumerable>? ListAppender(TargetColumnInfo column)
+    {
+        var isList = column.NativeType.EndsWith(']');
+        if (!isList && !IsComposite(column.NativeType)) return null;
+
+        var element = isList ? column.NativeType[..column.NativeType.LastIndexOf('[')] : column.NativeType;
+        var clr = element.EndsWith(']') || IsComposite(element) ? null : _typeMapper.MapFromProviderType(element);
+        if (clr is null || DuckDbTypeConverter.ListElementOf(typeof(List<>).MakeGenericType(clr)) is null)
+            throw new InvalidOperationException(
+                $"Column '{column.Name}' is {column.NativeType}, which the DuckDB appender cannot write: " +
+                "write to a column of another type.");
+
+        var nullable = clr.IsValueType ? typeof(Nullable<>).MakeGenericType(clr) : clr;
+        return (Action<IDuckDBAppenderRow, IEnumerable>)typeof(DuckDbDataWriter)
+            .GetMethod(nameof(BuildListAppender), BindingFlags.NonPublic | BindingFlags.Static)!
+            .MakeGenericMethod(nullable)
+            .Invoke(null, [column.Name])!;
+
+        static bool IsComposite(string nativeType)
+            => nativeType.StartsWith("STRUCT(", StringComparison.OrdinalIgnoreCase)
+               || nativeType.StartsWith("MAP(", StringComparison.OrdinalIgnoreCase)
+               || nativeType.StartsWith("UNION(", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static Action<IDuckDBAppenderRow, IEnumerable> BuildListAppender<T>(string column)
+    {
+        var convert = ColumnConverterFactory.Build(null, typeof(T), column);
+        return (row, elements) =>
+        {
+            var typed = new List<T>();
+            foreach (var element in elements)
+                typed.Add(element is null ? default! : (T)convert(element)!);
+            row.AppendValue<T>(typed);
+        };
+    }
 
     private InvalidOperationException TypeMismatch(int column)
     {
@@ -444,6 +502,7 @@ public sealed class DuckDbDataWriter : IColumnarDataWriter, ISchemaInspector, IK
             _targetColumns = targetInfo.Columns;
             _checkedTypes = new Type?[targetInfo.Columns.Count];
             _cellConverters = new Func<object?, object?>[targetInfo.Columns.Count];
+            _listAppenders = new Action<IDuckDBAppenderRow, IEnumerable>?[targetInfo.Columns.Count];
             for (int i = 0; i < targetInfo.Columns.Count; i++)
             {
                 var targetCol = targetInfo.Columns[i];
@@ -458,6 +517,7 @@ public sealed class DuckDbDataWriter : IColumnarDataWriter, ISchemaInspector, IK
                     if (string.Equals(_columns[s].Name, targetCol.Name, StringComparison.OrdinalIgnoreCase)) { sourceIdx = s; break; }
                 }
                 _columnMapping[i] = sourceIdx;
+                if (sourceIdx >= 0) _listAppenders[i] = ListAppender(targetCol);
             }
         }
         else
@@ -465,6 +525,7 @@ public sealed class DuckDbDataWriter : IColumnarDataWriter, ISchemaInspector, IK
             _columnMapping = Enumerable.Range(0, _columns!.Count).ToArray();
             _targetTypes = _columns.Select(c => c.ClrType).ToArray();
             _checkedTypes = new Type?[_columns.Count];
+            _listAppenders = new Action<IDuckDBAppenderRow, IEnumerable>?[_columns.Count];
         }
 
         var appenderTarget = _stagingTable ?? _unquotedTable!;

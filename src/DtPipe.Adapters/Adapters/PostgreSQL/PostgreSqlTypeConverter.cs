@@ -7,7 +7,7 @@ public class PostgreSqlTypeConverter : ITypeMapper
 {
     public static readonly PostgreSqlTypeConverter Instance = new();
 
-    public DecimalSpelling DecimalType { get; } = new("NUMERIC", 1000, 1000);
+    public DecimalSpelling DecimalType { get; } = new("NUMERIC", 1000, 1000, BareIsExact: true);
 
     public string MapToProviderType(Type clrType)
     {
@@ -23,7 +23,7 @@ public class PostgreSqlTypeConverter : ITypeMapper
             Type t when t == typeof(long) => "BIGINT",
             Type t when t == typeof(float) => "REAL",
             Type t when t == typeof(double) => "DOUBLE PRECISION",
-            Type t when t == typeof(decimal) => "NUMERIC",
+            Type t when t == typeof(decimal) => DecimalType.Undeclared,
             Type t when t == typeof(DateTime) => "TIMESTAMP",
             Type t when t == typeof(DateTimeOffset) => "TIMESTAMPTZ",
             Type t when t == typeof(DateOnly) => "DATE",

@@ -12,7 +12,7 @@ namespace DtPipe.Tests.Unit.Adapters.Common;
 
 /// <summary>
 /// One rule for every SQL dialect: a decimal the source declares a precision and scale for is
-/// created at that width within what the engine accepts; anything else takes the engine's default
+/// created at that width within what the engine accepts; anything else takes the dialect's type
 /// for the CLR type. SQLite has no fixed-point type to honour a declaration with.
 /// </summary>
 public class DeclaredDecimalMappingTests
@@ -50,12 +50,12 @@ public class DeclaredDecimalMappingTests
 
     [Theory]
     [MemberData(nameof(Dialects))]
-    public void An_Undeclared_Decimal_Takes_The_Engine_Default(string dialect, ITypeMapper mapper, bool honoursDeclaration)
+    public void An_Undeclared_Decimal_Takes_The_Type_Of_The_Clr_Decimal(string dialect, ITypeMapper mapper, bool honoursDeclaration)
         => Assert.Equal(mapper.MapToProviderType(typeof(decimal)), mapper.MapToProviderType(Column(typeof(decimal), null, null)));
 
     [Theory]
     [MemberData(nameof(Dialects))]
-    public void A_Declaration_Out_Of_Range_Takes_The_Engine_Default(string dialect, ITypeMapper mapper, bool honoursDeclaration)
+    public void A_Declaration_Out_Of_Range_Takes_The_Type_Of_The_Clr_Decimal(string dialect, ITypeMapper mapper, bool honoursDeclaration)
     {
         var fallback = mapper.MapToProviderType(typeof(decimal));
 

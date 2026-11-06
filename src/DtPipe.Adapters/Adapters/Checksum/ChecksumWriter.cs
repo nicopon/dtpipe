@@ -10,8 +10,12 @@ using Microsoft.Extensions.Logging;
 
 namespace DtPipe.Adapters.Checksum;
 
-public sealed class ChecksumDataWriter : IRowDataWriter, IColumnarDataWriter, IRequiresOptions<ChecksumWriterOptions>
+public sealed class ChecksumDataWriter : IRowDataWriter, IColumnarDataWriter, IRequiresOptions<ChecksumWriterOptions>, IColumnTypeGate
 {
+    /// <summary>The writer hashes the reading of every value, so it refuses only a type with no reading.</summary>
+    public IReadOnlyList<ColumnTypeRefusal> RefuseColumns(Schema schema)
+        => DtPipe.Adapters.Shared.Infrastructure.ColumnTypeRefusals.Collect(schema, _ => null);
+
     private readonly ChecksumWriterOptions _options;
     private readonly ILogger _logger;
     private readonly StringBuilder _buffer = new();

@@ -40,9 +40,7 @@ public class MySqlTypeConverter : ITypeMapper
             Type t when t == typeof(ulong) => "BIGINT UNSIGNED",
             Type t when t == typeof(float) => "FLOAT",
             Type t when t == typeof(double) => "DOUBLE",
-            // MySQL's maximum DECIMAL precision is 65 digits with at most 30 decimals. (38,9)
-            // covers the CLR decimal range without truncating the scale the source carried.
-            Type t when t == typeof(decimal) => "DECIMAL(38,9)",
+            Type t when t == typeof(decimal) => DecimalType.Undeclared,
             Type t when t == typeof(DateTime) => "DATETIME(6)",
             Type t when t == typeof(DateOnly) => "DATE",
             Type t when t == typeof(TimeSpan) => "TIME(6)",

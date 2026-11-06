@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Apache.Arrow;
 using Apache.Arrow.C;
+using DtPipe.Core.Infrastructure.Arrow;
 using DuckDB.NET.Data;
 using DuckDB.NET.Native;
 using Microsoft.Extensions.Logging;
@@ -38,6 +39,9 @@ public sealed class DuckDbArrowResultReader : IDisposable
     /// <summary>The result schema, available after <see cref="Prepare"/> and before any row is read.</summary>
     public Schema? Schema { get; private set; }
 
+    // What DuckDB hands over, an ENUM as a dictionary; the batches go on under Schema.
+    private Schema? _nativeSchema;
+
     public DuckDbArrowResultReader(DuckDBConnection connection, string query, ILogger? logger = null)
     {
         _connection = connection;
@@ -63,7 +67,8 @@ public sealed class DuckDbArrowResultReader : IDisposable
         // Arrow options carry the arrow_lossless_conversion flag, and serve both the schema
         // conversion and every chunk conversion afterwards.
         DuckDbArrowNative.DuckDBConnectionGetArrowOptions(_connection.NativeConnection, out _arrowOptions);
-        Schema = InspectSchema();
+        _nativeSchema = InspectSchema();
+        Schema = ArrowDictionaries.Decode(_nativeSchema);
         return Schema;
     }
 
@@ -205,7 +210,7 @@ public sealed class DuckDbArrowResultReader : IDisposable
             throw new InvalidOperationException($"duckdb_data_chunk_to_arrow failed: {msg}");
         }
 
-        return CArrowArrayImporter.ImportRecordBatch(&ffiArray, Schema!);
+        return ArrowDictionaries.Decode(CArrowArrayImporter.ImportRecordBatch(&ffiArray, _nativeSchema!), Schema!);
     }
 
     public void Dispose()

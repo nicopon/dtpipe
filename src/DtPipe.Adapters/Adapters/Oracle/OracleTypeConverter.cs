@@ -11,7 +11,7 @@ public class OracleTypeConverter : ITypeMapper
 {
     public static readonly OracleTypeConverter Instance = new();
 
-    public DecimalSpelling DecimalType { get; } = new("NUMBER", 38, 38);
+    public DecimalSpelling DecimalType { get; } = new("NUMBER", 38, 38, BareIsExact: true);
 
     public string MapToProviderType(Type clrType)
     {
@@ -30,7 +30,7 @@ public class OracleTypeConverter : ITypeMapper
         if (type == typeof(bool)) return "NUMBER(1)";
         if (type == typeof(float)) return "FLOAT";
         if (type == typeof(double)) return "FLOAT";
-        if (type == typeof(decimal)) return "NUMBER(38, 4)";
+        if (type == typeof(decimal)) return DecimalType.Undeclared;
         if (type == typeof(DateTime)) return "TIMESTAMP";
         if (type == typeof(DateTimeOffset)) return "TIMESTAMP WITH TIME ZONE";
         if (type == typeof(Guid)) return "RAW(16)";

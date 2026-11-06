@@ -64,6 +64,21 @@ to correct (`ParquetStreamReader.WallClock`), and a text is read through
 `TemporalNormalization.TryParseWallClock` or `TryParseInstant`.
 `[CI: ReadConformanceTests]` `[local: validate_temporal.sh]`
 
+**A gate is the list of what its writer accepts.** `ColumnTypeRefusals.Collect` refuses every type
+`ArrowTypeMap.HasValueReading` does not name, which is the switch of `GetValue`, so an Arrow type
+nobody named is refused before the target rather than failed at its first value. Only a writer that
+reads no value has no gate. `CreateEnriched` hands the gate the field a column arrived in when the CLR
+type cannot describe it: a struct and a type with no reading would otherwise answer as something else,
+or throw. `[CI: WriteConformanceTests]`
+
+**A reader that produces Arrow itself decodes a dictionary** through `ArrowDictionaries`: the sampler
+and a columnar writer have no form for one. `[CI: WriteConformanceTests]`
+
+**A decimal with no declared width creates what holds it**, `DecimalSpelling.Undeclared` of each
+dialect: the keyword where it is exact and unbounded, else the width it travels at. Never fall back
+on an engine's own default: a scale narrower than the value's rounds it, in code 0.
+`[CI: WriteConformanceTests]` `[local: validate_type_conformance.sh, validate_declared_decimals.sh]`
+
 ## A value a type cannot hold
 
 **A value a reader or a writer cannot carry stops the run with `ColumnValueRefusedException`: where it

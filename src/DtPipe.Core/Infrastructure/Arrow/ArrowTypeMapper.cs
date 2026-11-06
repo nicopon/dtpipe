@@ -186,6 +186,9 @@ public static class ArrowTypeMapper
     }
 
 
+    /// <summary>Whether <see cref="CreateBuilder"/> has a builder for the type.</summary>
+    public static bool HasBuilder(IArrowType type) => _handlers.Any(h => h.CanHandle(type));
+
     public static IArrowArrayBuilder CreateBuilder(IArrowType type)
     {
         var handler = _handlers.FirstOrDefault(h => h.CanHandle(type));

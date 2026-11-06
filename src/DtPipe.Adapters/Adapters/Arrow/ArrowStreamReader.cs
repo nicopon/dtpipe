@@ -27,7 +27,7 @@ public class ArrowAdapterStreamReader : IColumnarStreamReader
     private bool _isIpcFile;
 
     public IReadOnlyList<PipeColumnInfo>? Columns { get; private set; }
-    public Schema? Schema => _isIpcFile ? _arrowFileReader?.Schema : _arrowReader?.Schema;
+    public Schema? Schema { get; private set; }
 
     private string Source => string.IsNullOrEmpty(_path) || _path == "-" ? "STDIN" : _path;
 
@@ -80,15 +80,15 @@ public class ArrowAdapterStreamReader : IColumnarStreamReader
         if (_isIpcFile)
         {
             _arrowFileReader = new ArrowFileReader(_inputStream);
-            var schema = _arrowFileReader.Schema;
-            Columns = MapSchema(schema);
+            Schema = ArrowDictionaries.Decode(_arrowFileReader.Schema);
+            Columns = MapSchema(Schema);
         }
         else
         {
             _probe = new ArrowStreamTerminationProbe(_inputStream);
             _arrowReader = new Apache.Arrow.Ipc.ArrowStreamReader(_probe);
-            var schema = _arrowReader.Schema;
-            Columns = MapSchema(schema);
+            Schema = ArrowDictionaries.Decode(_arrowReader.Schema);
+            Columns = MapSchema(Schema);
         }
     }
 
@@ -118,7 +118,7 @@ public class ArrowAdapterStreamReader : IColumnarStreamReader
                     ?? throw new EndOfStreamException(
                         $"Arrow file '{Source}' is truncated: its footer declares {count} record " +
                         $"batches and the body runs out at {i}.");
-                yield return ArrowOwnership.TakeOwnership(batch);
+                yield return ArrowDictionaries.Decode(ArrowOwnership.TakeOwnership(batch), Schema!);
             }
         }
         else if (_arrowReader != null)
@@ -131,7 +131,7 @@ public class ArrowAdapterStreamReader : IColumnarStreamReader
                     EnsureStreamEnded();
                     yield break;
                 }
-                yield return ArrowOwnership.TakeOwnership(batch);
+                yield return ArrowDictionaries.Decode(ArrowOwnership.TakeOwnership(batch), Schema!);
             }
         }
     }
