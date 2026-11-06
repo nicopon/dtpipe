@@ -359,6 +359,130 @@ public class PipelineExecutorTests
     }
 
     /// <summary>
+    /// A writer that takes either shape is handed what the chain ends in: a chain of row steps reads the
+    /// reader's rows and takes no batch at all.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteSegmentedPipelineAsync_EitherShapeWriter_RowChain_TakesNoBridge()
+    {
+        var (reader, read) = ReaderOfBothPaths();
+        var writer = new ShapeRecordingWriter();
+
+        await RunThroughAsync(reader, writer, new PipelineSegment(false, [new IdentityRowTransformer()]));
+
+        Assert.Equal("rows", read());
+        Assert.Equal(3, writer.Rows);
+        Assert.Equal(0, writer.Batches);
+    }
+
+    /// <summary>A columnar step ahead of a row step: one bridge out of Arrow, none back in.</summary>
+    [Fact]
+    public async Task ExecuteSegmentedPipelineAsync_EitherShapeWriter_ColumnarThenRow_DoesNotGoBack()
+    {
+        var (reader, read) = ReaderOfBothPaths();
+        var writer = new ShapeRecordingWriter();
+
+        await RunThroughAsync(reader, writer,
+            new PipelineSegment(true, new List<IDataTransformer>()),
+            new PipelineSegment(false, [new IdentityRowTransformer()]));
+
+        Assert.Equal("batches", read());
+        Assert.Equal(3, writer.Rows);
+        Assert.Equal(0, writer.Batches);
+    }
+
+    /// <summary>With nothing to run, the batches go straight through.</summary>
+    [Fact]
+    public async Task ExecuteSegmentedPipelineAsync_EitherShapeWriter_NoSegment_IsADirectTransfer()
+    {
+        var (reader, read) = ReaderOfBothPaths();
+        var writer = new ShapeRecordingWriter();
+
+        await RunThroughAsync(reader, writer);
+
+        Assert.Equal("batches", read());
+        Assert.Equal(1, writer.Batches);
+        Assert.Equal(0, writer.Rows);
+    }
+
+    /// <summary>
+    /// A writer with both contracts and a bulk path for batches, which a database writer is, keeps being
+    /// pulled to Arrow: the row contract is for a reader with no batches to give.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteSegmentedPipelineAsync_WriterWithBothContracts_RowChain_StillEndsInBatches()
+    {
+        var (reader, read) = ReaderOfBothPaths();
+        var writer = new BothContractsWriter();
+
+        await RunThroughAsync(reader, writer, new PipelineSegment(false, [new IdentityRowTransformer()]));
+
+        Assert.Equal("batches", read());
+        Assert.Equal(1, writer.Batches);
+        Assert.Equal(0, writer.Rows);
+    }
+
+    private static (IColumnarStreamReader Reader, Func<string> Read) ReaderOfBothPaths()
+    {
+        var schema = new Schema.Builder().Field(f => f.Name("Value").DataType(Int32Type.Default)).Build();
+        var path = "nothing";
+        var reader = new Mock<IColumnarStreamReader>();
+        reader.As<IStreamReader>();
+        reader.SetupGet(r => r.Schema).Returns(schema);
+        reader.Setup(r => r.ReadRecordBatchesAsync(It.IsAny<CancellationToken>()))
+              .Returns(() =>
+              {
+                  path = "batches";
+                  var array = new Int32Array.Builder().AppendRange([1, 2, 3]).Build();
+                  return new[] { new RecordBatch(schema, new[] { array }, 3) }.ToAsyncEnumerable();
+              });
+        reader.Setup(r => r.ReadBatchesAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+              .Returns(() =>
+              {
+                  path = "rows";
+                  return new[] { new ReadOnlyMemory<object?[]>([[1], [2], [3]]) }.ToAsyncEnumerable();
+              });
+        return (reader.Object, () => path);
+    }
+
+    private static async Task RunThroughAsync(IStreamReader reader, IDataWriter writer, params PipelineSegment[] segments)
+    {
+        var executor = new PipelineExecutor(
+            [new DtPipe.Adapters.Infrastructure.Arrow.ArrowRowToColumnarBridgeFactory(
+                NullLogger<DtPipe.Core.Infrastructure.Arrow.ArrowRowToColumnarBridge>.Instance)],
+            [new DtPipe.Adapters.Infrastructure.Arrow.ArrowColumnarToRowBridgeFactory()],
+            NullLogger<PipelineExecutor>.Instance);
+
+        var columns = new List<PipeColumnInfo> { new("Value", typeof(int), true, false) };
+        foreach (var segment in segments) { segment.InputSchema = columns; segment.OutputSchema = columns; }
+        using var linkedCts = new CancellationTokenSource();
+
+        await executor.ExecuteSegmentedPipelineAsync(
+            reader, writer, segments.ToList(), columns, new PipelineOptions(), new Mock<IExportProgress>().Object, linkedCts, default);
+    }
+
+    private sealed class IdentityRowTransformer : IDataTransformer
+    {
+        public ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default) => new(columns);
+        public object?[]? Transform(IReadOnlyList<object?> row) => row as object?[] ?? row.ToArray();
+    }
+
+    private class BothContractsWriter : IRowDataWriter, IColumnarDataWriter
+    {
+        public int Rows { get; private set; }
+        public int Batches { get; private set; }
+
+        public ValueTask InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default) => ValueTask.CompletedTask;
+        public ValueTask WriteBatchAsync(IReadOnlyList<object?[]> rows, CancellationToken ct = default) { Rows += rows.Count; return ValueTask.CompletedTask; }
+        public ValueTask WriteRecordBatchAsync(RecordBatch batch, CancellationToken ct = default) { Batches++; batch.Dispose(); return ValueTask.CompletedTask; }
+        public ValueTask CompleteAsync(CancellationToken ct = default) => ValueTask.CompletedTask;
+        public ValueTask ExecuteCommandAsync(string command, CancellationToken ct = default) => ValueTask.CompletedTask;
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class ShapeRecordingWriter : BothContractsWriter, IEitherShapeWriter;
+
+    /// <summary>
     /// --limit counts rows READ, so a filter downstream of it yields fewer, never a topped-up N.
     /// Applying the bound a second time at the writer would answer the other question, and the two
     /// disagree exactly here.

@@ -64,6 +64,14 @@ against the local zone. `[CI: validate_core_boundary.sh]` `[local: validate_temp
 `IRowToColumnarBridge`, `IColumnarToRowBridge`. The standalone Arrow libraries never reference
 DtPipe. `[CI: validate_core_boundary.sh]`
 
+## Routing a writer
+
+`PipelineExecutor` routes by the writer's contracts. A writer with a columnar contract pulls the
+pipeline to Arrow, row contract or not: that is a database's bulk path. **Only `IEitherShapeWriter` gets
+what the chain ends in**, with no bridge, and a sink or decorator in front of one mirrors it, or the
+sample is not the run. **`IEitherShapeWriter` needs a reader that reads a cell alike on both paths**, so
+a divergence of the read paths reaches `checksum:`. `[CI: PipelineExecutorTests, WriteConformanceTests]`
+
 ## RecordBatch ownership
 
 **Every `RecordBatch` has exactly one owner. The owner disposes it exactly once, then never touches

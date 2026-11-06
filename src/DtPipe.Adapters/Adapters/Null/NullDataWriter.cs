@@ -7,13 +7,11 @@ namespace DtPipe.Adapters.Null;
 /// <summary>
 /// Discards everything, in whichever mode the pipeline is already in.
 ///
-/// It implements BOTH writer contracts on purpose. The engine picks row or columnar mode from
-/// the writer's interface, so a row-only sink forces a columnar pipeline through a row bridge —
-/// and this writer exists to measure reader and transformer throughput, which means measuring
-/// the bridge instead of the pipeline. Accepting either shape is the only way it can be
-/// transparent to what it is asked to observe.
+/// It takes either shape on purpose. This writer exists to measure reader and transformer throughput,
+/// and a sink of one shape would make the engine bridge to reach it, which measures the bridge instead of
+/// the pipeline.
 /// </summary>
-public class NullDataWriter : IRowDataWriter, IColumnarDataWriter
+public class NullDataWriter : IEitherShapeWriter
 {
     public string ComponentName => "null";
     public ValueTask InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default) => ValueTask.CompletedTask;

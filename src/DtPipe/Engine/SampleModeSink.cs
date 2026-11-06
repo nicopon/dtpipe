@@ -23,8 +23,8 @@ internal interface ISampleModeSink
 /// segmentation and the number of row/columnar bridges, and the sampled run would no longer be
 /// the run. Substituting the null writer, which is row-only, is precisely that mistake.
 ///
-/// Hence two classes chosen by the real writer's interface, the same shape
-/// CursorTracking{Row,Columnar}Decorator already uses.
+/// Hence a class per shape, chosen by the real writer's interface, the same way
+/// CursorTracking{Row,Columnar}Decorator is; a writer that takes either shape gets the sink that does.
 ///
 /// The inner writer is held for <see cref="ISchemaInspector"/> only. InitializeAsync,
 /// the write methods and CompleteAsync are NEVER forwarded: the target is inspected, never
@@ -34,10 +34,12 @@ internal interface ISampleModeSink
 internal static class SampleModeSink
 {
     /// <summary>Wraps <paramref name="inner"/> in the sink matching its capability.</summary>
-    public static IDataWriter Wrap(IDataWriter inner)
-        => inner is IColumnarDataWriter columnar
-            ? new SampleModeColumnarSink(columnar)
-            : new SampleModeRowSink(inner);
+    public static IDataWriter Wrap(IDataWriter inner) => inner switch
+    {
+        IEitherShapeWriter either => new SampleModeEitherShapeSink(either),
+        IColumnarDataWriter columnar => new SampleModeColumnarSink(columnar),
+        _ => new SampleModeRowSink(inner)
+    };
 }
 
 internal sealed class SampleModeRowSink : IRowDataWriter, ISampleModeSink
@@ -82,6 +84,35 @@ internal sealed class SampleModeColumnarSink : IColumnarDataWriter, ISampleModeS
     /// disposes. Arrow buffers are off-heap: a sink that only dropped the reference would leak
     /// native memory the GC never reports.
     /// </summary>
+    public ValueTask WriteRecordBatchAsync(RecordBatch batch, CancellationToken ct = default)
+    {
+        RowsWritten += batch.Length;
+        batch.Dispose();
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask CompleteAsync(CancellationToken ct = default) => ValueTask.CompletedTask;
+    public ValueTask ExecuteCommandAsync(string command, CancellationToken ct = default) => ValueTask.CompletedTask;
+    public ValueTask DisposeAsync() => Inner.DisposeAsync();
+}
+
+internal sealed class SampleModeEitherShapeSink : IEitherShapeWriter, ISampleModeSink
+{
+    public SampleModeEitherShapeSink(IEitherShapeWriter inner) => Inner = inner ?? throw new ArgumentNullException(nameof(inner));
+
+    public IDataWriter Inner { get; }
+    public long RowsWritten { get; private set; }
+
+    public ValueTask InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
+        => ValueTask.CompletedTask;
+
+    public ValueTask WriteBatchAsync(IReadOnlyList<object?[]> rows, CancellationToken ct = default)
+    {
+        RowsWritten += rows.Count;
+        return ValueTask.CompletedTask;
+    }
+
+    /// <summary>Takes ownership of the batch and disposes it, as <see cref="SampleModeColumnarSink"/> does.</summary>
     public ValueTask WriteRecordBatchAsync(RecordBatch batch, CancellationToken ct = default)
     {
         RowsWritten += batch.Length;

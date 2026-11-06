@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Apache.Arrow;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Infrastructure.Arrow;
@@ -10,7 +11,7 @@ using Microsoft.Extensions.Logging;
 
 namespace DtPipe.Adapters.Checksum;
 
-public sealed class ChecksumDataWriter : IRowDataWriter, IColumnarDataWriter, IRequiresOptions<ChecksumWriterOptions>, IColumnTypeGate
+public sealed class ChecksumDataWriter : IEitherShapeWriter, IRequiresOptions<ChecksumWriterOptions>, IColumnTypeGate
 {
     /// <summary>The writer hashes the reading of every value, so it refuses only a type with no reading.</summary>
     public IReadOnlyList<ColumnTypeRefusal> RefuseColumns(Schema schema)
@@ -82,6 +83,20 @@ public sealed class ChecksumDataWriter : IRowDataWriter, IColumnarDataWriter, IR
                 {
                     // Use fixed culture
                     _buffer.Append(d.ToString("G", System.Globalization.CultureInfo.InvariantCulture));
+                }
+                else if (val is byte[] bytes)
+                {
+                    _buffer.Append(Convert.ToBase64String(bytes));
+                }
+                else if (val is System.Collections.IDictionary dictionary)
+                {
+                    _buffer.Append(JsonSerializer.Serialize(dictionary));
+                }
+                else if (val is System.Collections.IEnumerable sequence and not string)
+                {
+                    // Under its runtime type, as against IEnumerable the serializer emits an empty object.
+                    // ToString() here would hash the name of the type, the same for every value of a column.
+                    _buffer.Append(JsonSerializer.Serialize(sequence, sequence.GetType()));
                 }
                 else
                 {

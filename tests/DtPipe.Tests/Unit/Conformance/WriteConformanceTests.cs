@@ -299,6 +299,83 @@ public sealed class WriteConformanceTests : IDisposable
         return values.ToArray();
     }
 
+    /// <summary>
+    /// A checksum does not depend on the road the reader took: one row step reads the reader's rows and
+    /// takes no batch, and the columnar step behind it pulls the same pipeline through Arrow from the start.
+    /// The added column is what both hash beside the column under test, which no script writes.
+    /// </summary>
+    [Theory]
+    [InlineData("decimal128(10,2)")]
+    [InlineData("decimal128(38,18)")]
+    [InlineData("decimal-undeclared")]
+    [InlineData("decimal-undeclared-fraction")]
+    [InlineData("timestamp(us,UTC)")]
+    [InlineData("uuid")]
+    [InlineData("list<decimal(10,2)>")]
+    public async Task A_Checksum_Does_Not_Depend_On_The_Road_The_Reader_Took(string name)
+    {
+        var source = Path.Combine(_dir, Guid.NewGuid().ToString("N") + ".arrow");
+        ArrowTypeCases.Named(name).WriteIpc(source);
+
+        Assert.Equal(
+            await ChecksumAsync(source, ["--compute", "zz:1", "--project", "v,zz"]),
+            await ChecksumAsync(source, ["--compute", "zz:1"]));
+    }
+
+    [Fact]
+    public async Task A_Checksum_Over_Parquet_Does_Not_Depend_On_The_Road_The_Reader_Took()
+    {
+        var source = Path.Combine(_dir, Guid.NewGuid().ToString("N") + ".parquet");
+        using (var connection = new DuckDBConnection("DataSource=:memory:"))
+        using (var command = connection.CreateCommand())
+        {
+            connection.Open();
+            command.CommandText = $"COPY (SELECT 4.29::DECIMAL(38,18) AS a, 7.5::DECIMAL(10,3) AS b, TIMESTAMP_NS '2024-01-02 03:04:05.123456789' AS c, [4.2::DECIMAL(10,2)] AS d, TIMESTAMPTZ '2024-01-02 03:04:05+02' AS e) TO '{source}' (FORMAT parquet)";
+            command.ExecuteNonQuery();
+        }
+
+        Assert.Equal(
+            await ChecksumAsync(source, ["--compute", "zz:1", "--project", "a,b,c,d,e,zz"]),
+            await ChecksumAsync(source, ["--compute", "zz:1"]));
+    }
+
+    /// <summary>A checksum hashes what a composite or a blob holds: the name of its type is the same for any two values.</summary>
+    [Theory]
+    [InlineData("[1,2,3]", "[9,9,9]")]
+    [InlineData("{'x':1}", "{'x':2}")]
+    [InlineData("MAP{'a':1}", "MAP{'a':2}")]
+    [InlineData("'abc'::BLOB", "'abd'::BLOB")]
+    public async Task A_Checksum_Sees_What_A_Column_Holds(string one, string other)
+    {
+        async Task<string> Of(string expression)
+        {
+            var source = Path.Combine(_dir, Guid.NewGuid().ToString("N") + ".arrow");
+            var (stdout, stderr) = (Console.Out, Console.Error);
+            Console.SetOut(new StringWriter());
+            Console.SetError(new StringWriter());
+            try { Assert.Equal(0, await Program.Main(["-i", "duck::memory:", "-q", $"SELECT {expression} AS v", "-o", $"arrow:{source}", "--no-stats"])); }
+            finally { Console.SetOut(stdout); Console.SetError(stderr); }
+            return await ChecksumAsync(source, []);
+        }
+
+        Assert.NotEqual(await Of(one), await Of(other));
+    }
+
+    private async Task<string> ChecksumAsync(string source, string[] steps)
+    {
+        var target = Path.Combine(_dir, Guid.NewGuid().ToString("N") + ".sum");
+        var (stdout, stderr) = (Console.Out, Console.Error);
+        Console.SetOut(new StringWriter());
+        Console.SetError(new StringWriter());
+        try
+        {
+            var exit = await Program.Main(["-i", source, .. steps, "-o", $"checksum:{target}", "--no-stats"]);
+            Assert.Equal(0, exit);
+        }
+        finally { Console.SetOut(stdout); Console.SetError(stderr); }
+        return File.ReadAllText(target);
+    }
+
     /// <summary>A value that fits a decimal and not the column's width stops at the reader, whatever the writer.</summary>
     [Theory]
     [InlineData("parquet")]

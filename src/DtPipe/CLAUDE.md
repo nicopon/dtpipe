@@ -78,12 +78,11 @@ outside — tell them apart first:
   the transformers in pipeline order. `ReportTransform` takes the same stage number and counts per
   stage, never per transformer name, so two transformers of one type keep their own count.
   `[CI: ProgressReporterTests]`
-- **`SampleModeSink`** — two decorators selected by the real writer's **capability**, the shape
-  `CursorTracking{Row,Columnar}Decorator` uses. The engine reads row-vs-columnar mode off
+- **`SampleModeSink`** — a decorator per shape, selected by the real writer's **capability**, the way
+  `CursorTracking{Row,Columnar}Decorator` is. The engine reads row-vs-columnar mode off
   `writer is IColumnarDataWriter`, so a sink of the wrong kind changes segmentation and the bridge
-  count. A sink taking both shapes does not escape this: `PipelineExecutor` tests the columnar
-  contract first, at the entry and at the writer boundary, so `NullDataWriter` pulls a row-mode
-  pipeline into Arrow and back out.
+  count. A writer with both contracts and a bulk path is pulled to Arrow; only `IEitherShapeWriter`
+  and its sink get what the chain ends in.
 - **`SampleRun`** — the capture, read by both the renderer and the checkpoint store.
 - **The sink replaces a writer that leaves the process, never the channel between two branches.**
   `ExportRunState.NeutralisesWriter` reads `WriterFactory.CapabilityKind`, the capability the

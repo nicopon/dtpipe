@@ -140,7 +140,12 @@ public class ExportService
     {
         bool readerIsColumnar = reader is IColumnarStreamReader;
         bool writerIsColumnar = writer is IColumnarDataWriter;
-        bool rowModePreferred = !writerIsColumnar;
+        bool takesEitherShape = writer is IEitherShapeWriter;
+        // A writer that takes either shape stays in the shape the chain is in, which ExecuteSegmentedPipelineAsync
+        // decides from the reader and the segments.
+        bool rowModePreferred = takesEitherShape
+            ? !readerIsColumnar || (segments.Count > 0 && !segments.Any(s => s.IsColumnar))
+            : !writerIsColumnar;
 
         var steps = new List<PipelineExecutionStep>(pipeline.Count);
         foreach (var segment in segments)
@@ -163,7 +168,7 @@ public class ExportService
             bool useColumnar = segment.IsColumnar && !rowModePreferred;
             if (useColumnar != current) { bridges++; current = useColumnar; }
         }
-        if (writerIsColumnar != current) bridges++;
+        if (!takesEitherShape && writerIsColumnar != current) bridges++;
 
         return new PipelineExecutionPlan(readerName, readerIsColumnar, writerName, writerIsColumnar, rowModePreferred, steps, bridges);
     }

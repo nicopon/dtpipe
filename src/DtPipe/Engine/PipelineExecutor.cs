@@ -142,6 +142,7 @@ public sealed class PipelineExecutor
         }
 
         bool hasColumnarSegments = segments.Any(s => s.IsColumnar);
+        bool takesEitherShape = writer is IEitherShapeWriter;
 
         if (segments.Count == 0)
         {
@@ -197,9 +198,10 @@ public sealed class PipelineExecutor
             IAsyncEnumerable<IReadOnlyList<object?>> currentRowSource = null!;
             bool isCurrentColumnar = false;
 
-            if (reader is IColumnarStreamReader columnarReader && (writer is IColumnarDataWriter || hasColumnarSegments))
+            if (reader is IColumnarStreamReader columnarReader
+                && (hasColumnarSegments || (writer is IColumnarDataWriter && !takesEitherShape)))
             {
-                // Start in Arrow mode when the writer is columnar or when columnar segments are present.
+                // Start in Arrow mode when columnar segments are present or the writer needs batches.
                 // This avoids materialising object?[] rows for data that will be processed as RecordBatches.
                 currentColumnarSource = columnarReader.ReadRecordBatchesAsync(ct);
                 if (options.SamplingRate > 0 && options.SamplingRate < 1.0)
@@ -250,7 +252,8 @@ public sealed class PipelineExecutor
                 stageBase += segment.Transformers.Count;
             }
 
-            if (writer is IColumnarDataWriter columnarWriter)
+            // A writer that takes either shape gets what the chain ends in, with no bridge to reach it.
+            if (writer is IColumnarDataWriter columnarWriter && (isCurrentColumnar || !takesEitherShape))
             {
                 if (!isCurrentColumnar)
                 {
