@@ -275,7 +275,9 @@ public sealed class CsvDataWriter : IRowDataWriter, IRequiresOptions<CsvWriterOp
 
     private string FormatDouble(double value)
     {
-        var str = value.ToString("G17", CultureInfo.InvariantCulture);
+        // The shortest spelling that reads back as the same value: a fixed 17 digits writes 0.1 as
+        // 0.10000000000000001, which inference reads back as a decimal.
+        var str = value.ToString("R", CultureInfo.InvariantCulture);
         if (_options.DecimalSeparator != ".")
             str = str.Replace(".", _options.DecimalSeparator);
         return str;
@@ -283,7 +285,7 @@ public sealed class CsvDataWriter : IRowDataWriter, IRequiresOptions<CsvWriterOp
 
     private string FormatFloat(float value)
     {
-        var str = value.ToString("G9", CultureInfo.InvariantCulture);
+        var str = value.ToString("R", CultureInfo.InvariantCulture);
         if (_options.DecimalSeparator != ".")
             str = str.Replace(".", _options.DecimalSeparator);
         return str;

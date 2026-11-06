@@ -31,12 +31,12 @@ public static class TextNumber
 
     /// <summary>
     /// Whether <paramref name="value"/> holds every digit <paramref name="number"/> writes, in plain or
-    /// exponent form. Leading and trailing zeros count for nothing; a text too short to exceed a decimal's
-    /// digits costs one comparison.
+    /// exponent form. Leading and trailing zeros count for nothing; a plain text too short to exceed a
+    /// decimal's digits costs one comparison, where a short exponent can still reach past them.
     /// </summary>
     public static bool KeepsDigits(string number, decimal value)
-        => number.Length <= MaxDigitsAlwaysKept
-           || Significant(number).SequenceEqual(Significant(value.ToString(CultureInfo.InvariantCulture)));
+        => (number.Length <= MaxDigitsAlwaysKept && number.AsSpan().IndexOfAny('e', 'E') < 0)
+           || SameDigits(number, value.ToString(CultureInfo.InvariantCulture));
 
     public static bool TryReadDouble(string text, out double value)
         => double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value)
@@ -47,20 +47,32 @@ public static class TextNumber
            && !(float.IsInfinity(value) && HoldsDigit(text));
 
     /// <summary>
-    /// Whether a double keeps the digits of the decimal the same number reads as. Inference takes it to
-    /// choose between the two, so a number with more digits than a double holds is not rounded.
+    /// Whether a number reads as a double that writes the same digits back in its shortest spelling. Every
+    /// text reader's inference asks this and nothing else: a number no double rewrites is never rounded, and
+    /// the 17 digits a double's own formatter leaves are not taken for a decimal they may not fit. It is
+    /// judged off the text, since a decimal has already rounded a number past its own digits.
     /// </summary>
-    public static bool DoubleKeepsDigits(decimal exact, double approximate)
-        => Math.Abs(approximate) < (double)decimal.MaxValue && (decimal)approximate == exact;
+    public static bool DoubleHolds(string number, out double value)
+        => TryReadDouble(number, out value) && SameDigits(number, value.ToString("R", CultureInfo.InvariantCulture));
 
     /// <summary>
-    /// Whether a double's shortest round-trip spelling reads back as the same decimal. A JSON number
-    /// usually comes from a double's own formatter, with up to 17 digits a double carries exactly, so
-    /// <see cref="DoubleKeepsDigits"/> would call it a decimal it may not fit.
+    /// The hint of a column of texts a long does not take: a double when one holds each text, a decimal when
+    /// one does not and each is written as a decimal, null otherwise, and the column stays text.
     /// </summary>
-    public static bool DoubleRoundTrips(decimal exact, double approximate)
-        => decimal.TryParse(approximate.ToString("R", CultureInfo.InvariantCulture), NumberStyles.Float, CultureInfo.InvariantCulture, out var back)
-           && back == exact;
+    public static string? InferHint(IReadOnlyCollection<string> samples)
+    {
+        if (samples.All(s => DoubleHolds(s, out _))) return "double";
+        return samples.All(IsWrittenAsDecimal) ? "decimal" : null;
+    }
+
+    // A point, or an integer past a long's range. NumberStyles.Number also takes a trailing sign, and a
+    // column of 5- and 12- with no point reads as codes rather than as negative numbers.
+    private static bool IsWrittenAsDecimal(string text)
+        => HasDecimalForm(text, out _)
+           && (text.Contains('.') || decimal.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out _));
+
+    private static bool SameDigits(string number, string other)
+        => Significant(number) == Significant(other);
 
     private static string Significant(string number)
     {

@@ -77,6 +77,8 @@ internal static class ArrowTypeCases
         new("double", F(DoubleType.Default), () => new DoubleArray.Builder().Append(1.5).AppendNull().Build()),
         new("double-nan", F(DoubleType.Default), () => new DoubleArray.Builder().Append(double.NaN).AppendNull().Build()),
         new("double-inf", F(DoubleType.Default), () => new DoubleArray.Builder().Append(double.PositiveInfinity).AppendNull().Build()),
+        new("double-shortest", F(DoubleType.Default), () => new DoubleArray.Builder().Append(0.1).AppendNull().Build()),
+        new("float-shortest", F(FloatType.Default), () => new FloatArray.Builder().Append(0.1f).AppendNull().Build()),
         new("decimal32", F(new Decimal32Type(9, 2)), () => new Decimal32Array.Builder(new Decimal32Type(9, 2)).Append(4.29m).AppendNull().Build()),
         new("decimal64", F(new Decimal64Type(18, 2)), () => new Decimal64Array.Builder(new Decimal64Type(18, 2)).Append(4.29m).AppendNull().Build()),
         new("decimal128(10,2)", F(new Decimal128Type(10, 2)), () => new Decimal128Array.Builder(new Decimal128Type(10, 2)).Append(4.29m).AppendNull().Build()),

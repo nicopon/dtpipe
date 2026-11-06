@@ -71,6 +71,10 @@ as 15. A cell that does not read under its type stops the run naming its line an
 `string` column keeps the text. See
 [Values a type cannot hold](../../REFERENCE.md#values-a-type-cannot-hold).
 
+Inference never rounds a number to fit: a column is a `double` only when a `double` writes each
+value back with the same digits. `4.29` is therefore a `double`, so declare `decimal` for exact
+arithmetic. See [Type hints](../../REFERENCE.md#type-hints).
+
 ## Nested and repeated values
 
 A list or a nested object keeps its shape wherever the target has one — a Parquet `LIST`, an Arrow

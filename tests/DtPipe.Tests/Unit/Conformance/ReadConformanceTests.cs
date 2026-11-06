@@ -110,9 +110,9 @@ public sealed class ReadConformanceTests : IDisposable
     private static Cell L4(string expected) => new(expected, "L4");
 
     /// <param name="Reader">The reader under test.</param>
-    /// <param name="Mode">How the type reaches a text reader: declared, inferred, schema, or sampled (inferred from the first row alone).</param>
-    /// <param name="Type">The type's name for the reader: the hint or schema field of a text reader, the first row of a sampled cell.</param>
-    /// <param name="Source">The first row: an SQL expression, a SQLite literal, a text, a JSON value. The second row of a sampled cell, whose first is <paramref name="Type"/>.</param>
+    /// <param name="Mode">How the type reaches a text reader: declared, inferred, schema, sampled (inferred from the first row alone) or mixed (inferred from both rows).</param>
+    /// <param name="Type">The type's name for the reader: the hint or schema field of a text reader, the first row of a sampled or mixed cell.</param>
+    /// <param name="Source">The first row: an SQL expression, a SQLite literal, a text, a JSON value. The second row of a sampled or mixed cell, whose first is <paramref name="Type"/>.</param>
     /// <param name="Expected">What both paths read from the first row, the other rows being null unless it says so.</param>
     private sealed record Row(string Reader, string Mode, string Type, string Source, Cell Expected);
 
@@ -220,6 +220,8 @@ public sealed class ReadConformanceTests : IDisposable
         new("arrow", "", "double", "", "Double:1.5"),
         new("arrow", "", "double-nan", "", "Double:NaN"),
         new("arrow", "", "double-inf", "", "Double:Infinity"),
+        new("arrow", "", "double-shortest", "", "Double:0.1"),
+        new("arrow", "", "float-shortest", "", "Single:0.1"),
         new("arrow", "", "decimal32", "", "Decimal:4.29"),
         new("arrow", "", "decimal64", "", "Decimal:4.29"),
         new("arrow", "", "decimal128(10,2)", "", "Decimal:4.29"),
@@ -327,6 +329,7 @@ public sealed class ReadConformanceTests : IDisposable
         new("jsonl", "declared", "double", "\"1,000\"", "named"),
         new("jsonl", "declared", "decimal", "0.1234567890123456789012345678901234", "named"),
         new("jsonl", "declared", "decimal", "\"0.1234567890123456789012345678901234\"", "named"),
+        new("jsonl", "declared", "decimal", "1e-30", "named"),
         new("jsonl", "declared", "decimal", "0.0000000000000000000001", L4("named")),
         new("jsonl", "declared", "bool", "true", "Boolean:true"),
         new("jsonl", "declared", "bool", "\"yes\"", "Boolean:true"),
@@ -395,6 +398,18 @@ public sealed class ReadConformanceTests : IDisposable
         new("csv", "inferred", "decimal", "1,000.50", "String:1,000.50 then String:"),
         new("csv", "inferred", "double", "1e400", "String:1e400 then String:"),
         new("csv", "inferred", "decimal", "0.1234567890123456789012345678901234", "named"),
+        new("csv", "inferred", "double", "0.30000000000000004", "Double:0.30000000000000004"),
+        new("csv", "inferred", "double", "0.00012345678901234567", "Double:0.00012345678901234567"),
+        new("csv", "inferred", "decimal", "0.10000000000000001", "Decimal:0.10000000000000001"),
+        new("csv", "inferred", "decimal", "0.1000000000000000000000000000000001", "named"),
+        new("csv", "inferred", "decimal", "12345678901234567890", "Decimal:12345678901234567890"),
+        new("csv", "inferred", "decimal", "1.50-", "Decimal:-1.50"),
+        new("csv", "inferred", "string", "5-", "String:5- then String:"),
+        new("csv", "inferred", "string", "1234567890123456789012345678901234567890", "String:1234567890123456789012345678901234567890 then String:"),
+        new("csv", "inferred", "string", "1.2345678901234567890e5", "String:1.2345678901234567890e5 then String:"),
+        new("csv", "inferred", "string", "1e-400", "String:1e-400 then String:"),
+        new("csv", "mixed", "1", "12345678901234567.891", "Decimal:1 then Decimal:12345678901234567.891"),
+        new("csv", "mixed", "1.5", "12345678901234567.891", "Decimal:1.5 then Decimal:12345678901234567.891"),
         new("csv", "inferred", "bool", "true", "Boolean:true"),
         new("csv", "inferred", "bool", "yes", "Boolean:true"),
         new("csv", "inferred", "datetime", "2024-01-02T03:04:05", "DateTime:2024-01-02T03:04:05.0000000"),
@@ -424,6 +439,15 @@ public sealed class ReadConformanceTests : IDisposable
         new("jsonl", "inferred", "decimal", "0.1234567890123456789012345678901234", "named"),
         new("jsonl", "inferred", "double", "0.00012345678901234567", "Double:0.00012345678901234567"),
         new("jsonl", "inferred", "double", "1.5e-25", "Double:1.5E-25"),
+        new("jsonl", "inferred", "double", "0.30000000000000004", "Double:0.30000000000000004"),
+        new("jsonl", "inferred", "decimal", "0.10000000000000001", L4("Decimal:0.10000000000000001")),
+        new("jsonl", "inferred", "decimal", "0.1000000000000000000000000000000001", "named"),
+        new("jsonl", "inferred", "decimal", "12345678901234567890", L4("Decimal:12345678901234567890")),
+        new("jsonl", "inferred", "string", "1234567890123456789012345678901234567890", "String:1234567890123456789012345678901234567890"),
+        new("jsonl", "inferred", "string", "1e400", "String:1e400"),
+        new("jsonl", "inferred", "string", "1e-400", "String:1e-400"),
+        new("jsonl", "inferred", "string", "1.2345678901234567890e5", "String:1.2345678901234567890e5"),
+        new("jsonl", "mixed", "1.5", "12345678901234567.891", L4("Decimal:1.5 then Decimal:12345678901234567.891")),
         new("jsonl", "inferred", "float", "1.5", "Double:1.5"),
         new("jsonl", "inferred", "decimal", "4.29", "Double:4.29"),
         new("jsonl", "inferred", "decimal", "12345678901234567.891", L4("Decimal:12345678901234567.891")),
@@ -458,6 +482,14 @@ public sealed class ReadConformanceTests : IDisposable
         new("xml", "inferred", "decimal", "4.29", "Double:4.29"),
         new("xml", "inferred", "decimal", "12345678901234567.891", L4("Decimal:12345678901234567.891")),
         new("xml", "inferred", "decimal", "0.1234567890123456789012345678901234", "named"),
+        new("xml", "inferred", "double", "0.30000000000000004", "Double:0.30000000000000004"),
+        new("xml", "inferred", "double", "0.00012345678901234567", "Double:0.00012345678901234567"),
+        new("xml", "inferred", "decimal", "0.10000000000000001", L4("Decimal:0.10000000000000001")),
+        new("xml", "inferred", "decimal", "0.1000000000000000000000000000000001", "named"),
+        new("xml", "inferred", "decimal", "12345678901234567890", L4("Decimal:12345678901234567890")),
+        new("xml", "inferred", "string", "1234567890123456789012345678901234567890", "String:1234567890123456789012345678901234567890"),
+        new("xml", "inferred", "string", "1e-400", "String:1e-400"),
+        new("xml", "mixed", "1", "12345678901234567.891", L4("Decimal:1 then Decimal:12345678901234567.891")),
         new("xml", "inferred", "decimal", "1,5", "String:1,5"),
         new("xml", "inferred", "bool", "true", "Boolean:true"),
         new("xml", "inferred", "bool", "yes", "Boolean:true"),
@@ -648,11 +680,12 @@ public sealed class ReadConformanceTests : IDisposable
     private static Func<IStreamReader> OpenText(Row row, string path)
     {
         var sampled = row.Mode == "sampled";
-        var first = sampled ? row.Type : row.Source;
-        var second = sampled ? row.Source : null;
+        var twoRows = row.Mode is "sampled" or "mixed";
+        var first = twoRows ? row.Type : row.Source;
+        var second = twoRows ? row.Source : null;
 
         var columnTypes = row.Mode == "declared" ? $"id:int32,v:{row.Type}" : "";
-        var inferred = row.Mode is "inferred" or "sampled";
+        var inferred = row.Mode is "inferred" or "sampled" or "mixed";
         var schema = row.Mode == "schema"
             ? ArrowSchemaSerializer.SerializeCompact(new Schema([new Field("id", Int32Type.Default, true), SchemaFields[row.Type]], null))
             : "";

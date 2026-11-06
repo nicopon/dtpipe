@@ -295,6 +295,12 @@ separator: `1,5` and `1,000` are refused, so a file written with `--csv-decimal-
 back only as `string`. A number past the range of a `double` or a `float` is refused too; the
 spelled-out `NaN` and `Infinity` read as what they say.
 
+Inference applies one rule to a number on every text reader, over the whole sample. A column is a
+`double` when a `double` writes each value back with the same digits. Otherwise it is a `decimal`
+when each value is written as one, and a `string` when not, so a number is never rounded to fit: a
+40-digit integer stays text. Declare `decimal` for a column that needs exact arithmetic, since
+`4.29` is inferred as a `double`.
+
 | Type | Accepted spellings |
 |:---|:---|
 | `string` | `string`, `str`, `text` |

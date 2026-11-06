@@ -459,21 +459,8 @@ public class CsvStreamReader : IStreamReader, IColumnTypeInferenceCapable
                 ? "int32" : "int64";
         }
 
-        if (allMatch(s => TextNumber.HasDecimalForm(s, out _) && s.Contains('.')))
-        {
-            // Suggest decimal when values have a decimal point and exceed double precision
-            // (any value with > 15 significant digits, or explicit decimal notation)
-            bool needsDecimalPrecision = samples.Any(s =>
-            {
-                if (!TextNumber.HasDecimalForm(s, out var d)) return false;
-                if (!TextNumber.TryReadDouble(s, out var dbl)) return true;
-                return !TextNumber.DoubleKeepsDigits(d, dbl);
-            });
-            return needsDecimalPrecision ? "decimal" : "double";
-        }
-
-        if (allMatch(s => TextNumber.TryReadDouble(s, out _)))
-            return "double";
+        if (TextNumber.InferHint(samples) is { } number)
+            return number;
 
         if (allMatch(s => bool.TryParse(s, out _) || s is "0" or "1" or "yes" or "no"))
             return "bool";

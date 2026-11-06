@@ -691,18 +691,17 @@ public class JsonLStreamReader : IStreamReader, IColumnarStreamReader, IColumnTy
     }
 
     /// <summary>
-    /// A JSON number under the narrowest type that keeps its digits: an int64, then a double, and a decimal
-    /// for one a double would round.
+    /// A JSON number under the narrowest type that keeps its digits, by the rule of the other text readers:
+    /// an int64, then a double, then a decimal when it is written as one, and text otherwise.
     /// </summary>
     private static object ToNumber(JsonElement element)
     {
         if (element.TryGetInt64(out var integer)) return integer;
 
-        var isDouble = element.TryGetDouble(out var approximate);
-        if (element.TryGetDecimal(out var exact) && (!isDouble || !TextNumber.DoubleRoundTrips(exact, approximate)))
-            return exact;
+        var text = element.GetRawText();
+        if (TextNumber.DoubleHolds(text, out var value)) return value;
 
-        return isDouble ? approximate : element.GetRawText();
+        return TextNumber.HasDecimalForm(text, out var exact) ? exact : text;
     }
 
     // ── Type hint helpers ─────────────────────────────────────────────────────

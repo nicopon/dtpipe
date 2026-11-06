@@ -81,6 +81,8 @@ public sealed class WriteConformanceTests : IDisposable
         new("double", "1.5", "1.5", "DOUBLE | 1.5", "double | Double:1.5", "DOUBLE | 1.5", "real | 1.5", "ok"),
         new("double-nan", "NaN", "named", "DOUBLE | nan", "double | Double:NaN", "DOUBLE | nan", "named", "ok"),
         new("double-inf", "Infinity", "named", "DOUBLE | inf", "double | Double:Infinity", "DOUBLE | inf", "real | Inf", "ok"),
+        new("double-shortest", "0.1", "0.1", "DOUBLE | 0.1", "double | Double:0.1", "DOUBLE | 0.1", "real | 0.1", "ok"),
+        new("float-shortest", "0.1", "0.1", "FLOAT | 0.1", "float | Single:0.1", "FLOAT | 0.1", "real | 0.10000000149011612", "ok"),
         new("decimal32", "4.29", "4.29", L4("DECIMAL(9,2) | 4.29"), "decimal32 | Decimal:4.29", L4("DECIMAL(9,2) | 4.29"), "real | 4.29", "ok"),
         new("decimal64", "4.29", "4.29", L4("DECIMAL(18,2) | 4.29"), "decimal64 | Decimal:4.29", L4("DECIMAL(18,2) | 4.29"), "real | 4.29", "ok"),
         new("decimal128(10,2)", "4.29", "4.29", "DECIMAL(10,2) | 4.29", "decimal128 | Decimal:4.29", "DECIMAL(10,2) | 4.29", "real | 4.29", "ok"),

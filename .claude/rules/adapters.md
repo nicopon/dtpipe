@@ -66,7 +66,9 @@ stands, the column, its type as the source spells it and the way out, never the 
 reaches a person as a driver's or a builder's message, and no reader replaces it with another value.
 The standalone Arrow libraries raise `ArrowValueException`, which the reader that called them turns
 into that refusal. A text reads as a fractional number through `TextNumber`, for every text reader and
-for the writers' converter: `NumberStyles.Number` alone reads `1,5` as 15.
+for the writers' converter: `NumberStyles.Number` alone reads `1,5` as 15. Inference chooses between a
+`double` and a `decimal` there too, one rule for every text reader, judged off the text: a decimal has
+already rounded a number past its own digits.
 
 **Never set `Npgsql.DisableDateTimeInfinityConversions`**: it is an `AppContext` value of the process,
 and these adapters are libraries. `PostgresTemporal` reads a temporal value off its binary form, which
