@@ -42,6 +42,11 @@ in one consumer**: a copy is a second P/Invoke surface onto the same library, an
 SQL follows the same rule: `DuckInitSqlRunner` (Core) is the single runner for reader, writer and
 processor. `[unchecked]` Detail: `src/DtPipe.Adapters.Shared/CLAUDE.md`.
 
+**A NULL from `duckdb_fetch_chunk` is not always the end of the rows.** It also answers a stream that
+failed, so `DuckDbArrowResultReader` asks the result before ending: taken for the end, a query failing
+mid-stream exits 0 with part of its rows. `[CI: ReadConformanceTests, DuckDBSqlProcessorTests,
+validate_cancellation.sh]`
+
 ## The conformance table
 
 **A reader reads a cell into the same value on both paths or refuses it naming the column; a writer

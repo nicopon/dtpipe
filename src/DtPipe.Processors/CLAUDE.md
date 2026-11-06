@@ -8,6 +8,12 @@ read (`--from`), lazy streaming fetch on write, schema inferred from the prepare
 execution. The fetch goes through the shared DuckDB read path; never reimplement it here
 (`src/DtPipe.Adapters.Shared/CLAUDE.md`).
 
+**`ChannelArrowStream` waits on the branch's token, never on its argument.** DuckDB reads it through the
+C Data exporter, which passes none: a wait with no token holds the run forever once its source stops,
+since `DagOrchestrator` returns only when every branch has ended. A cancellation stays a failure of the
+stream, never its end, or the query finishes on part of its input.
+`[CI: DagOrchestratorTests, validate_cancellation.sh]`
+
 - `DuckHubConnectionParser` parses `duck+{provider}:` strings and issues `INSTALL` / `LOAD` /
   `ATTACH`.
 - `--duck-init` / `--compute` / `--expand` values resolve through `IStringContentResolver`

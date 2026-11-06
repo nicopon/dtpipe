@@ -134,15 +134,22 @@ public sealed class DuckDbArrowResultReader : IDisposable
 
         await Task.Yield();
 
-        var result = ExecuteStreaming();
+        var result = ExecuteStreaming(ct);
         try
         {
-            while (!ct.IsCancellationRequested)
+            while (true)
             {
+                ct.ThrowIfCancellationRequested();
+
                 // Extracted as a non-async unsafe method: an async iterator cannot take the
                 // address of a local (&ffiArray).
                 var batch = FetchAndConvertChunk(result);
-                if (batch is null) yield break;
+                if (batch is null)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    ThrowIfStreamFailed(result);
+                    yield break;
+                }
                 yield return batch;
             }
         }
@@ -152,13 +159,17 @@ public sealed class DuckDbArrowResultReader : IDisposable
         }
     }
 
-    private DuckDBResult ExecuteStreaming()
+    // The execute runs the query up to its first rows, so it can read a channel too. Here and in the fetch, a
+    // stream cut by the run's cancellation is that cancellation, whatever DuckDB says of it: neither a fault
+    // of the query nor the end of its rows.
+    private DuckDBResult ExecuteStreaming(CancellationToken ct)
     {
         if (DuckDbArrowNative.DuckDBExecutePreparedStreaming(_statement!, out var result) != DuckDBState.Success)
         {
             var errPtr = DuckDbArrowNative.DuckDBResultError(ref result);
             var msg = errPtr != IntPtr.Zero ? Marshal.PtrToStringUTF8(errPtr) : "unknown error";
             DuckDbArrowNative.DuckDBDestroyResult(ref result);
+            ct.ThrowIfCancellationRequested();
             throw new InvalidOperationException($"DuckDB streaming execute failed: {msg}");
         }
 
@@ -168,6 +179,15 @@ public sealed class DuckDbArrowResultReader : IDisposable
                 "Result is correct but fully buffered in DuckDB memory before the first batch.");
 
         return result;
+    }
+
+    // duckdb_fetch_chunk answers NULL both at the end of the rows and when the stream failed: only the
+    // result tells them apart. Taking NULL for the end ends a failed query with exit 0 and part of its rows.
+    private static void ThrowIfStreamFailed(DuckDBResult result)
+    {
+        var errPtr = DuckDbArrowNative.DuckDBResultError(ref result);
+        if (errPtr != IntPtr.Zero)
+            throw new InvalidOperationException($"DuckDB failed while streaming the result: {Marshal.PtrToStringUTF8(errPtr)}");
     }
 
     // duckdb_data_chunk_to_arrow copies buffer data, so the chunk is disposed immediately.

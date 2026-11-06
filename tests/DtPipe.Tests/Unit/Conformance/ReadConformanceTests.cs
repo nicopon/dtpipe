@@ -628,6 +628,17 @@ public sealed class ReadConformanceTests : IDisposable
         Assert.Equal("{a=Int64:1} then {_value=Int64:5}", await ReadOutcome.RowsAsync(Open));
     }
 
+    /// <summary>A query failing once its first rows are out is a failure on both paths, never the end of its rows.</summary>
+    [Fact]
+    public async Task A_Query_Failing_Mid_Stream_Is_Not_The_End_Of_Its_Rows()
+    {
+        const string query = "SELECT CASE WHEN i < 200000 THEN i ELSE error('boom') END AS v FROM range(400000) t(i)";
+        IStreamReader Open() => new DuckDataSourceReader("Data Source=:memory:", query, new DuckDbReaderOptions());
+
+        Assert.Equal("raw: InvalidOperationException", await ReadOutcome.ColumnarAsync(Open));
+        Assert.Equal("raw: InvalidOperationException", await ReadOutcome.RowsAsync(Open));
+    }
+
     /// <summary>
     /// A value the row path carries and the column's Arrow type cannot take is named on the columnar path.
     /// The row path's own answer is the L4 cell of the same value.

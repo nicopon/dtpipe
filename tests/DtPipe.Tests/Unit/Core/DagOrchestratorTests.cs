@@ -1,8 +1,12 @@
 using System.Collections.Concurrent;
+using Apache.Arrow;
+using Apache.Arrow.Types;
 using DtPipe.Core.Abstractions.Dag;
 using DtPipe.Core.Pipelines.Dag;
+using DtPipe.Processors.DuckDB;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
+using Array = System.Array;
 
 namespace DtPipe.Tests.Unit.Core;
 
@@ -543,5 +547,54 @@ public class DagOrchestratorTests
         var result = await runTask;
 
         Assert.Equal(1, result);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // A branch reading a channel through DuckDB, on a thread the C Data exporter gives no token
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private static readonly TimeSpan NoHang = TimeSpan.FromSeconds(30);
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(130)]
+    public async Task Execute_SourceEndsWithACodeUnderASqlBranch_TheRunEndsAndTheBranchIsCut(int exitCode)
+    {
+        var registry = new MemoryChannelRegistry();
+        var orchestrator = new DagOrchestrator(NullLogger<DagOrchestrator>.Instance, registry);
+        var schema = new Schema([new Field("v", Int32Type.Default, true)], null);
+        Exception? seen = null;
+
+        var run = orchestrator.ExecuteAsync(GoldenDagDefinitions.Dag_SourcePlusSqlProcessor, async (b, _, ct) =>
+        {
+            if (b.Alias == "src")
+            {
+                var channel = registry.GetArrowChannel("src")!.Value.Channel;
+                registry.UpdateArrowChannelSchema("src", schema);
+                await channel.Writer.WriteAsync(new RecordBatch(schema, [new Int32Array.Builder().Append(1).Build()], 1), ct);
+                // DuckDB took the batch: its scan runs, and its next read waits for one that never comes.
+                while (channel.Reader.Count > 0) await Task.Delay(10, ct);
+                return exitCode;
+            }
+
+            try
+            {
+                await using var processor = new DuckDBSqlProcessor(
+                    registry, "SELECT v FROM src", "src", "src",
+                    refAliases: [], refChannelAliases: [],
+                    NullLogger<DuckDBSqlProcessor>.Instance);
+                await processor.OpenAsync(ct);
+                await foreach (var batch in processor.ReadRecordBatchesAsync(ct)) batch.Dispose();
+                return 0;
+            }
+            catch (Exception e)
+            {
+                seen = e;
+                throw;
+            }
+        });
+
+        Assert.Equal(exitCode, await run.WaitAsync(NoHang));
+        Assert.IsAssignableFrom<OperationCanceledException>(seen);
     }
 }

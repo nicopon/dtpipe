@@ -8,7 +8,10 @@ using Microsoft.Extensions.Logging;
 namespace DtPipe.Processors.Sql;
 
 /// <summary>
-/// Wraps a ChannelReader as an IArrowArrayStream for streaming FFI bridging.
+/// Wraps a ChannelReader as an IArrowArrayStream for streaming FFI bridging. DuckDB reads it through the C
+/// Data exporter, which passes no token, so the branch's own is what reaches the wait: without it a run
+/// that stops leaves DuckDB, and so the run, waiting on a channel nobody completes. A cancellation stays a
+/// failure of the stream, since ending it here would let the query finish on part of its input.
 /// </summary>
 internal sealed class ChannelArrowStream : IArrowArrayStream
 {
@@ -31,7 +34,7 @@ internal sealed class ChannelArrowStream : IArrowArrayStream
     {
         try
         {
-            if (await _reader.WaitToReadAsync(cancellationToken))
+            if (await _reader.WaitToReadAsync(_ct))
             {
                 if (_reader.TryRead(out var batch))
                 {
@@ -40,13 +43,11 @@ internal sealed class ChannelArrowStream : IArrowArrayStream
             }
             return null;
         }
-        catch (OperationCanceledException) { }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError(ex, "ChannelArrowStream Error: {Message}", ex.Message);
             throw;
         }
-        return null;
     }
 
     public void Dispose() { }

@@ -693,4 +693,28 @@ public class DuckDBSqlProcessorTests
         Assert.Equal("Admin", roleColumn.GetString(0));
         Assert.Equal("Guest", roleColumn.GetString(1));
     }
+
+    [Fact]
+    public async Task ReadRecordBatches_QueryFailsMidStream_FailsTheRead()
+    {
+        const string alias = "src";
+        var schema = new Schema(new[] { new Field("n", Int32Type.Default, nullable: false) }, null);
+        var registry = BuildRegistry(alias, schema, []);
+
+        await using var processor = new DuckDBSqlProcessor(
+            registry,
+            "SELECT CASE WHEN i < 200000 THEN i ELSE error('boom') END AS v FROM range(400000) t(i)",
+            alias, alias,
+            refAliases: [], refChannelAliases: [],
+            NullLogger<DuckDBSqlProcessor>.Instance);
+        await processor.OpenAsync();
+
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await foreach (var batch in processor.ReadRecordBatchesAsync()) batch.Dispose();
+        });
+
+        // Not the query's own words: with several tasks running, DuckDB may report one it interrupted instead.
+        Assert.StartsWith("DuckDB failed while streaming the result", failure.Message);
+    }
 }
