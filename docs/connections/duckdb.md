@@ -29,10 +29,11 @@ without being copied or re-encoded.
 ## Writing into an existing table
 
 A value its column cannot hold stops the run with exit code 1 and the column named: a decimal
-with more digits than the column, such as `123456.78` written into a `DECIMAL(5,2)`, or an integer
-or floating-point number out of its range, such as `3000000000` written into an `INTEGER`. The
-refusal is the value's, not the type's: a `DECIMAL(10,2)` or `BIGINT` source is written into that
-column as long as its values fit.
+with more digits than the column, such as `123456.78` written into a `DECIMAL(5,2)`, one with more
+decimals, such as `1.23456` written into a `DECIMAL(18,3)`, which the column would round, or an
+integer or floating-point number out of its range, such as `3000000000` written into an
+`INTEGER`. The refusal is the value's, not the type's: a `DECIMAL(10,2)` or `BIGINT` source is
+written into that column as long as its values fit.
 
 A value of a type the writer does not convert to its column's type stops the run the same way,
 even when it fits: a `HUGEINT`, which is what `sum()` returns, written into a `BIGINT`, a `DATE`

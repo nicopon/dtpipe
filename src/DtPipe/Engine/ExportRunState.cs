@@ -41,6 +41,7 @@ internal sealed partial class ExportRunState
     internal IStreamReader Reader = null!;
     internal IDataWriter Writer = null!;
     internal IDataWriter EffectiveWriter = null!;
+    private ISampleModeSink? SampleSink;
     internal DtPipe.Core.Cursor.ICursorTracker? CursorTracker;
     internal IReadOnlyList<PipeColumnInfo> CurrentSchema = System.Array.Empty<PipeColumnInfo>();
     internal Dictionary<IDataTransformer, (IReadOnlyList<PipeColumnInfo> In, IReadOnlyList<PipeColumnInfo> Out)> TransformerSchemas = new();

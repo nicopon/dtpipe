@@ -87,6 +87,11 @@ over without a batch calls `TryRead`, which also refuses what a batch would. **A
 a reader is in UTC**, for the same reason. `[CI: ReadConformanceTests]`
 `[local: validate_type_conformance.sh, validate_declared_decimals.sh]`
 
+**A decimal finer than the existing column it goes to is refused, not rounded.** `TargetDecimalGuard`
+stands in front of the writer, armed from the compatibility report, so a new database writer is covered
+through its `ISchemaInspector`, which must report the target's scale. `[CI: WriteConformanceTests]`
+`[local: validate_type_conformance.sh]`
+
 ## A value a type cannot hold
 
 **A value a reader or a writer cannot carry stops the run with `ColumnValueRefusedException`: where it

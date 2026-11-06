@@ -69,7 +69,8 @@ internal sealed partial class ExportRunState
         WriterHooks = Registry.Get(WriterFactory.OptionsType) as IHookAware;
 
         // Schema Validation
-        await _svc.SchemaValidator.ValidateAndMigrateAsync(Writer, exportableSchema, writerSchemaSettings, ct);
+        var targetReport = await _svc.SchemaValidator.ValidateAndMigrateAsync(Writer, exportableSchema, writerSchemaSettings, ct);
+        EffectiveWriter = TargetDecimalGuard.Wrap(EffectiveWriter, targetReport, exportableSchema);
 
         // Execute Pre-Hook (from writer options)
         await _svc.Hooks.ExecuteAsync(Writer, "Pre-Hook", WriterHooks?.PreExec, ct);
@@ -132,7 +133,9 @@ internal sealed partial class ExportRunState
     private async Task PrepareSampleWriterAsync(IReadOnlyList<PipeColumnInfo> exportableSchema, CancellationToken ct)
     {
         CursorTracker = null;
-        EffectiveWriter = SampleModeSink.Wrap(Writer);
+        var sink = SampleModeSink.Wrap(Writer);
+        SampleSink = sink as ISampleModeSink;
+        EffectiveWriter = sink;
 
         // The real run reads a target only where the writer says it needs to (ValidateAndMigrateAsync): a sample that read more would
         // judge a target the real run never looks at, and a sink would give another verdict once it had served.
@@ -153,6 +156,10 @@ internal sealed partial class ExportRunState
                 Logger.LogDebug(ex, "[Sample] target inspection failed");
             }
         }
+
+        // The run refuses a value its target would round, so a sample of it does too.
+        if (InspectedTarget is { } inspected)
+            EffectiveWriter = TargetDecimalGuard.Wrap(EffectiveWriter, DtPipe.Core.Validation.SchemaCompatibilityAnalyzer.Analyze(exportableSchema, inspected, (Writer as IHasSqlDialect)?.Dialect), exportableSchema);
 
         await EffectiveWriter.InitializeAsync(exportableSchema, ct);
 
@@ -327,7 +334,7 @@ internal sealed partial class ExportRunState
                 if (!NeutralisesWriter) await Writer.CompleteAsync(ct);
                 SampleResult = SampleTap!.Build(
                     Progress.GetMetrics().ReadCount,
-                    (EffectiveWriter as ISampleModeSink)?.RowsWritten ?? Progress.GetMetrics().WriteCount);
+                    SampleSink?.RowsWritten ?? Progress.GetMetrics().WriteCount);
                 Progress.Complete();
                 return;
             }

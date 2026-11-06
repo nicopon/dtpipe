@@ -210,6 +210,95 @@ public sealed class WriteConformanceTests : IDisposable
         Judge(cell, WriteOutcome.GateVerdict(writer, ArrowTypeCases.Named(name).Field));
     }
 
+    /// <summary>
+    /// A decimal finer than the column it goes to is refused before the target rounds it, on whichever
+    /// road reaches the writer, and one with only trailing zeros past the column's scale is not.
+    /// </summary>
+    [Theory]
+    [InlineData("1.23456", "", "named")]
+    [InlineData("1.23456", "--compute|zz:1", "named")]
+    [InlineData("1.23400", "", "1.234")]
+    [InlineData("1.23400", "--compute|zz:1", "1.234")]
+    [InlineData("1.234", "", "1.234")]
+    public async Task A_Decimal_Finer_Than_An_Existing_Column_Is_Refused(string value, string transformer, string expected)
+    {
+        var (exit, text, target) = await AppendToDecimalColumnAsync(value, "DECIMAL(18,3)", transformer.Length == 0 ? [] : transformer.Split('|'));
+
+        if (expected == "named")
+        {
+            Assert.Equal(1, exit);
+            Assert.Contains("Record 2: column 'v'", text);
+            Assert.Contains("written to DECIMAL(18,3)", text);
+            Assert.DoesNotContain(value, text);
+            Assert.Equal(["0.000"], ReadBackDecimals(target));
+            return;
+        }
+
+        Assert.Equal(0, exit);
+        Assert.Equal(["0.000", "1.000", expected], ReadBackDecimals(target));
+    }
+
+    [Fact]
+    public async Task A_Decimal_The_Existing_Column_Keeps_Passes_Unread()
+    {
+        var (exit, _, target) = await AppendToDecimalColumnAsync("1.23456", "DECIMAL(18,5)", []);
+
+        Assert.Equal(0, exit);
+        Assert.Equal(["0.00000", "1.00000", "1.23456"], ReadBackDecimals(target));
+    }
+
+    /// <summary>A sample runs the real read, so it stops where the run would, and writes nothing.</summary>
+    [Fact]
+    public async Task A_Sample_Refuses_What_The_Existing_Column_Would_Round()
+    {
+        var (exit, text, target) = await AppendToDecimalColumnAsync("1.23456", "DECIMAL(18,3)", ["--dry-run", "2"]);
+
+        Assert.Equal(1, exit);
+        Assert.Contains("column 'v'", text);
+        Assert.Equal(["0.000"], ReadBackDecimals(target));
+    }
+
+    private async Task<(int Exit, string Text, string Target)> AppendToDecimalColumnAsync(string value, string targetType, string[] extra)
+    {
+        var target = Path.Combine(_dir, Guid.NewGuid().ToString("N") + ".duckdb");
+        using (var connection = new DuckDBConnection($"DataSource={target}"))
+        using (var command = connection.CreateCommand())
+        {
+            connection.Open();
+            command.CommandText = $"CREATE TABLE t(id INTEGER, v {targetType}); INSERT INTO t VALUES (0, 0);";
+            command.ExecuteNonQuery();
+        }
+
+        var source = Path.Combine(_dir, Guid.NewGuid().ToString("N") + ".csv");
+        File.WriteAllText(source, $"id,v\n1,1\n2,{value}\n");
+
+        var (stdout, stderr) = (Console.Out, Console.Error);
+        var captured = new StringWriter();
+        Console.SetOut(captured);
+        Console.SetError(captured);
+        int exit;
+        try
+        {
+            exit = await Program.Main(["-i", source, "--column-types", "id:int32,v:decimal", .. extra,
+                "-o", $"duck:{target}", "--table", "t", "--strategy", "Append", "--no-stats"]);
+        }
+        finally { Console.SetOut(stdout); Console.SetError(stderr); }
+
+        return (exit, Regex.Replace(captured.ToString(), @"\s+", " "), target);
+    }
+
+    private static string[] ReadBackDecimals(string target)
+    {
+        using var connection = new DuckDBConnection($"DataSource={target}");
+        using var command = connection.CreateCommand();
+        connection.Open();
+        command.CommandText = "SELECT CAST(v AS VARCHAR) FROM t ORDER BY id";
+        using var reader = command.ExecuteReader();
+        var values = new List<string>();
+        while (reader.Read()) values.Add(reader.GetString(0));
+        return values.ToArray();
+    }
+
     /// <summary>A value that fits a decimal and not the column's width stops at the reader, whatever the writer.</summary>
     [Theory]
     [InlineData("parquet")]

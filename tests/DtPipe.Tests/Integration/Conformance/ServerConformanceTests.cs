@@ -166,6 +166,28 @@ public sealed class ServerConformanceTests : IDisposable
         Judge(expected, knownFalse, actual, actual);
     }
 
+    /// <summary>A decimal finer than the column already there is refused, where each engine would round it.</summary>
+    [Theory]
+    [InlineData("pg")]
+    [InlineData("mysql")]
+    [InlineData("mssql")]
+    [InlineData("ora")]
+    public async Task A_Server_Column_Does_Not_Round_A_Finer_Decimal(string server)
+    {
+        var endpoint = Endpoint(server);
+        const string table = "type_conformance_finer";
+        var narrow = Path.Combine(_dir, Guid.NewGuid().ToString("N") + ".arrow");
+        var fine = Path.Combine(_dir, Guid.NewGuid().ToString("N") + ".arrow");
+        ArrowTypeCases.Named("decimal128(10,2)").WriteIpc(narrow);
+        ArrowTypeCases.Named("decimal-undeclared-fraction").WriteIpc(fine);
+
+        Assert.Equal(0, (await RunAsync(["-i", $"arrow:{narrow}", "-o", endpoint, "-t", table, "--strategy", "Recreate", "--no-stats"])).Exit);
+        var appended = await RunAsync(["-i", $"arrow:{fine}", "-o", endpoint, "-t", table, "--strategy", "Append", "--no-stats"]);
+
+        Assert.Equal(1, appended.Exit);
+        Assert.True(appended.Named);
+    }
+
     private static string Endpoint(string server)
     {
         var endpoint = Environment.GetEnvironmentVariable("DTPIPE_CONFORMANCE_" + server.ToUpperInvariant());

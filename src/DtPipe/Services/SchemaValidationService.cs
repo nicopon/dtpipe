@@ -66,7 +66,8 @@ public sealed class SchemaValidationService
             "discard - incompatibilities are reported and the run continues; columns missing from the target are not written",
     };
 
-    public async Task ValidateAndMigrateAsync(
+    /// <returns>The report the run goes on with, null when the target was not inspected.</returns>
+    public async Task<SchemaCompatibilityReport?> ValidateAndMigrateAsync(
         IDataWriter writer,
         IReadOnlyList<PipeColumnInfo> exportableSchema,
         ISchemaValidationAware? settings,
@@ -74,18 +75,18 @@ public sealed class SchemaValidationService
     {
         RejectContradictorySettings(settings);
 
-        if (writer is not ISchemaInspector inspector) return;
+        if (writer is not ISchemaInspector inspector) return null;
 
         if (!inspector.RequiresTargetInspection)
         {
             _logger.LogDebug("Target inspection skipped for {WriterType} (not required by current strategy).", writer.GetType().Name);
-            return;
+            return null;
         }
 
         // Named before the outcome, so the line stands whether the run then warns, migrates or aborts.
         _observer.LogMessage($"Schema mode: {DescribeMode(settings)}.", MessageTone.Detail);
 
-        if (settings?.NoSchemaValidation == true) return;
+        if (settings?.NoSchemaValidation == true) return null;
 
         _observer.LogMessage("Verifying target schema compatibility...", MessageTone.Plain);
         var targetSchema = await inspector.InspectTargetAsync(ct);
@@ -128,5 +129,7 @@ public sealed class SchemaValidationService
         {
             throw new InvalidOperationException("Export aborted due to schema incompatibilities (Strict Mode).");
         }
+
+        return report;
     }
 }

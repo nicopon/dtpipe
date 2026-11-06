@@ -464,7 +464,9 @@ A decimal column created for a source that declared no width holds what such a c
 | `parquet:` | `DECIMAL(38,18)`, like a declared one |
 | `sqlite:` | `REAL`, which refuses a value a double would round: see [Values a type cannot hold](#values-a-type-cannot-hold) |
 
-A table that already exists keeps its columns.
+A table that already exists keeps its columns, and a value with more decimals than its column keeps
+is refused rather than rounded: see [Values a type cannot hold](#values-a-type-cannot-hold).
+`--no-schema-validation` does not inspect the target, so nothing checks the value there.
 
 Read back, a column created `DECIMAL(38,18)` declares that width: `1.23456` written to it reads as
 `1.234560000000000000`. A `--sql` step is the same, since DuckDB declares what it returns.
@@ -517,6 +519,7 @@ Record 12: column 'valid_to' (timestamp) holds infinity, which no date or time t
 | `NaN`, `Infinity`, `-Infinity`: JSON has no number for them | `jsonl:` writer | Filter it out, or read the column as text |
 | `NaN`: SQLite stores it as NULL | `sqlite:` writer | Filter it out, or read the column as text |
 | A decimal a double would round, under a `REAL` column | `sqlite:` writer | A `string` column |
+| A decimal with more decimals than the existing column it goes to keeps: `1.23456` into a `DECIMAL(18,3)` | The database writers, under a strategy that keeps the table | Round it in a SQL step, or widen the column |
 
 In a sample that holds a scalar beside an object, the column is a `struct` with a `_value` field,
 and the scalar is that field's value: it is read, not refused.

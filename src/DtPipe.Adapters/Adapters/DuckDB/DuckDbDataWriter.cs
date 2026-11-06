@@ -60,6 +60,10 @@ public sealed class DuckDbDataWriter : IColumnarDataWriter, ISchemaInspector, IK
 
     public void InvalidateSchemaCache() => _cachedSchema = null;
 
+    // The catalog's data_type spells a decimal's width in its name.
+    private static readonly System.Text.RegularExpressions.Regex DeclaredDecimal =
+        new(@"^DECIMAL\((\d+),\s*(\d+)\)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
+
     private IDisposable? _appender;
     private int[]? _columnMapping;
     private Type[]? _targetTypes;
@@ -628,10 +632,13 @@ public sealed class DuckDbDataWriter : IColumnarDataWriter, ISchemaInspector, IK
                 var isNullableStr = reader.GetString(2);
                 bool notNull = string.Equals(isNullableStr, "NO", StringComparison.OrdinalIgnoreCase);
 
+                var width = DeclaredDecimal.Match(type);
                 columns.Add(new TargetColumnInfo(
                     name, type.ToUpperInvariant(), _typeMapper.MapFromProviderType(type), !notNull,
                     pkCols.Contains(name, StringComparer.OrdinalIgnoreCase),
-                    uniqueCols.Contains(name, StringComparer.OrdinalIgnoreCase), null));
+                    uniqueCols.Contains(name, StringComparer.OrdinalIgnoreCase), null,
+                    Precision: width.Success ? int.Parse(width.Groups[1].ValueSpan) : null,
+                    Scale: width.Success ? int.Parse(width.Groups[2].ValueSpan) : null));
             }
         }
 
