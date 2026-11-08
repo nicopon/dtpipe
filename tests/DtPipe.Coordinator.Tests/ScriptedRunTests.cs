@@ -66,7 +66,7 @@ public class ScriptedRunTests
         public ConcurrentQueue<string> Opened { get; } = new();
         public ConcurrentQueue<string> Terminated { get; } = new();
 
-        public async Task<string> InitTransferAsync(Guid producerClientId, Guid consumerClientId, int batchSize, int timeoutMs, CancellationToken ct)
+        public async Task<string> InitTransferAsync(Guid producerClientId, Guid consumerClientId, int timeoutMs, CancellationToken ct)
         {
             var id = OnInit is null ? $"transfer-{Interlocked.Increment(ref _next)}" : await OnInit();
             Opened.Enqueue(id);

@@ -63,7 +63,7 @@ public class MemoryCeilingTests
         try
         {
             var transferId = await host.TransferInitiator.InitTransferAsync(
-                producer.ClientId, consumer.ClientId, batchSize: 8, timeoutMs: 20_000).WaitAsync(Bound);
+                producer.ClientId, consumer.ClientId, timeoutMs: 20_000).WaitAsync(Bound);
 
             await Task.WhenAll(
                 producer.WireAsync("main", transferId).WaitAsync(Bound),

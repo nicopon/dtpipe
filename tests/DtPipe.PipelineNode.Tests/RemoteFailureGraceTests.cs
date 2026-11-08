@@ -43,9 +43,9 @@ public class RemoteFailureGraceTests
         public ConcurrentQueue<string> Opened { get; } = new();
 
         public async Task<string> InitTransferAsync(
-            Guid senderClientId, Guid receiverClientId, int batchSize, int timeoutMs, CancellationToken cancellationToken = default)
+            Guid senderClientId, Guid receiverClientId, int timeoutMs, CancellationToken cancellationToken = default)
         {
-            var transferId = await inner.InitTransferAsync(senderClientId, receiverClientId, batchSize, timeoutMs, cancellationToken);
+            var transferId = await inner.InitTransferAsync(senderClientId, receiverClientId, timeoutMs, cancellationToken);
             Opened.Enqueue(transferId);
             return transferId;
         }

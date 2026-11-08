@@ -234,7 +234,7 @@ internal sealed class RunSession
                 var consumer = _chosen[edge.ConsumerFragment];
                 var transferId = await _services.TransferInitiator.InitTransferAsync(
                     producer.DataPlaneClientId!.Value, consumer.DataPlaneClientId!.Value,
-                    _services.Options.BatchSize, _services.Options.TransferTimeoutMs, Abort.Token);
+                    _services.Options.TransferTimeoutMs, Abort.Token);
                 _openTransfers.Add(transferId);
 
                 await WireAsync(_placed[edge.ProducerFragment], edge.ProducerFragment, edge.ProducerAlias, transferId);

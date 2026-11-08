@@ -136,8 +136,8 @@ public class RefreshRegistrationTests
         await using var dropped = await ConnectAsync(host, jwt, "dropped");
         var initiator = host.Host.Services.GetRequiredService<ITransferInitiator>();
         var store = host.Host.Services.GetRequiredService<IStateStore>();
-        var allowedTransfer = await initiator.InitTransferAsync(sender.ClientId, kept.ClientId, batchSize: 8, timeoutMs: 60_000);
-        var refusedTransfer = await initiator.InitTransferAsync(sender.ClientId, dropped.ClientId, batchSize: 8, timeoutMs: 60_000);
+        var allowedTransfer = await initiator.InitTransferAsync(sender.ClientId, kept.ClientId, timeoutMs: 60_000);
+        var refusedTransfer = await initiator.InitTransferAsync(sender.ClientId, dropped.ClientId, timeoutMs: 60_000);
 
         rights.BySubject["sender"] = ["new"];
         await sender.RefreshRegistrationAsync();

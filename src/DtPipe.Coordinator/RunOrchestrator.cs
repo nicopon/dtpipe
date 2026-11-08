@@ -110,7 +110,6 @@ public sealed class RunOrchestratorOptions
     /// <summary>How often admission looks again for a replica that can run every fragment, until <see cref="AdmissionTimeout"/>.</summary>
     public TimeSpan AdmissionPollInterval { get; init; } = TimeSpan.FromMilliseconds(50);
 
-    public int BatchSize { get; init; } = 8;
     public int TransferTimeoutMs { get; init; } = 20_000;
 }
 

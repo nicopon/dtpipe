@@ -41,7 +41,7 @@ public class TerminateTests
             });
 
         var transferId = await host.TransferInitiator.InitTransferAsync(
-            producer.ClientId, consumer.ClientId, batchSize: 8, timeoutMs: 20_000);
+            producer.ClientId, consumer.ClientId, timeoutMs: 20_000);
 
         await Task.WhenAll(
             producer.WireAsync("main", transferId).WaitAsync(Bound),

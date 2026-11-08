@@ -34,7 +34,7 @@ public class WireEdgeAliasTests
                 Edges = [new EdgeBinding("main", EdgeDirection.Inbound)],
             });
         var transferId = await host.TransferInitiator.InitTransferAsync(
-            producer.ClientId, consumer.ClientId, batchSize: 8, timeoutMs: 20_000);
+            producer.ClientId, consumer.ClientId, timeoutMs: 20_000);
 
         await Assert.ThrowsAsync<ArgumentException>(() => consumer.WireAsync("not-declared", transferId).WaitAsync(Bound));
 

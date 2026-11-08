@@ -86,6 +86,7 @@ public sealed class RouteTableTests
         ClientRoute("GET", WireRoutes.EventsSegment),
         ClientRoute("GET", WireRoutes.ReceiversSegment),
         StreamRoute("GET", "receive"),
+        StreamRoute("GET", "send"),
         "POST /api/bricks/recognize [reader]",
         "POST /api/bricks/{node}/{id}/preview [reader > designer]",
         "POST /api/bricks/{node}/{id}/sample [reader > designer]",

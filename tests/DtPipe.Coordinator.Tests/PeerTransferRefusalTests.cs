@@ -59,7 +59,7 @@ public class PeerTransferRefusalTests
         await receiver.ConnectAsync();
 
         var initiator = host.Host.Services.GetRequiredService<ITransferInitiator>();
-        await initiator.InitTransferAsync(sender.ClientId, receiver.ClientId, batchSize: 10, timeoutMs: 20_000);
+        await initiator.InitTransferAsync(sender.ClientId, receiver.ClientId, timeoutMs: 20_000);
 
         await using var send = await sendHandle.Task;
         await using var receive = await receiveHandle.Task;

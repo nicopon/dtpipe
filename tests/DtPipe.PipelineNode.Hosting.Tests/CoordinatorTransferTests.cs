@@ -51,7 +51,7 @@ public sealed class CoordinatorTransferTests
             await sender.ConnectAsync();
             await receiver.ConnectAsync();
             var initiator = coordinator.Services.GetRequiredService<ITransferInitiator>();
-            await initiator.InitTransferAsync(sender.ClientId, receiver.ClientId, batchSize: 10, timeoutMs: 20_000);
+            await initiator.InitTransferAsync(sender.ClientId, receiver.ClientId, timeoutMs: 20_000);
 
             await using var send = await sendHandle.Task.WaitAsync(TimeSpan.FromSeconds(30), Ct);
             await using var receive = await receiveHandle.Task.WaitAsync(TimeSpan.FromSeconds(30), Ct);
