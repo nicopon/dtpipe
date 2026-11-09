@@ -12,7 +12,6 @@ using TransportR.Client;
 using TransportR.Client.Services;
 using TransportR.FlowControl;
 using TransportR.Hub;
-using TransportR.Serialization.MessagePack;
 
 namespace DtPipe.Coordinator.Tests.Infrastructure;
 
@@ -84,7 +83,7 @@ public sealed class AnnouncementGate
 /// still connect, fragments bound to no identity are admitted, and the flow control matrix is
 /// caller-supplied instead of empty. Replicas announce themselves on the node channel (<see cref="CreateNodeChannel"/>). A real port,
 /// rather than <c>TestServer</c>'s in-memory handler, is what lets a peer connect through
-/// <see cref="TransportRClientBuilder{T}"/> - the same public API a real pipeline node uses -
+/// <see cref="ByteStreamClientBuilder"/> - the same public API a real pipeline node uses -
 /// instead of the package's internal connection plumbing, which only <c>TransportR.Tests</c> may
 /// reference. Started with a <see cref="TestJwt"/> the hub runs in production mode instead: every
 /// client is identified by a bearer token signed with that key, attests its subject, and no fragment
@@ -174,11 +173,10 @@ public sealed class CoordinatorTestHost : IAsyncDisposable
     /// A client standing in for a pipeline node - the only kind of peer a real coordinator ever sees.
     /// <paramref name="token"/> is the bearer token a production-mode host requires.
     /// </summary>
-    public TransportRClient<string> CreateClient(string? token = null)
+    public ByteStreamClient CreateClient(string? token = null)
     {
-        var builder = new TransportRClientBuilder<string>()
-            .WithUrl(Url)
-            .WithMessagePackSerialization();
+        var builder = new ByteStreamClientBuilder(batchBytes: 65536)
+            .WithUrl(Url);
         if (token is not null)
             builder.WithTokenProvider(() => Task.FromResult(token));
         return builder.Build();

@@ -37,7 +37,7 @@ public class PeerTransferRefusalTests
         await receiver.ConnectAsync();
 
         var ex = await Assert.ThrowsAsync<HubRequestFailedException>(
-            () => sender.InitTransferAsync(receiver.ClientId, batchSize: 10));
+            () => sender.InitTransferAsync(receiver.ClientId));
         Assert.Contains("The hub refused the request.", ex.Message);
     }
 
@@ -50,8 +50,8 @@ public class PeerTransferRefusalTests
         await using var sender = host.CreateClient();
         await using var receiver = host.CreateClient();
 
-        var sendHandle = new TaskCompletionSource<Send<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var sendHandle = new TaskCompletionSource<ByteSend>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var receiveHandle = new TaskCompletionSource<ByteReceive>(TaskCreationOptions.RunContinuationsAsynchronously);
         sender.OnSendRequested += send => { sendHandle.TrySetResult(send); return Task.CompletedTask; };
         receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
 
@@ -64,17 +64,23 @@ public class PeerTransferRefusalTests
         await using var send = await sendHandle.Task;
         await using var receive = await receiveHandle.Task;
 
-        var expected = Enumerable.Range(0, 100).Select(i => $"item-{i}").ToList();
+        var expected = new byte[] { 1, 2, 3, 4, 5 };
         var consumer = Task.Run(async () =>
         {
-            var items = new List<string>();
-            await foreach (var item in receive.ReceiveAsync()) items.Add(item);
+            var buffer = new byte[expected.Length];
+            int totalRead = 0;
+            while (totalRead < buffer.Length)
+            {
+                int read = await receive.ReadAsync(buffer.AsMemory(totalRead));
+                if (read == 0) break;
+                totalRead += read;
+            }
             await receive.WaitForCompletionAsync();
-            return items;
+            return buffer;
         });
 
-        await send.SendAsync(expected);
-        await send.CompleteAsync().WaitAsync(TimeSpan.FromSeconds(30));
+        await send.WriteAsync(expected);
+        await send.CompleteAsync();
         Assert.Equal(expected, await consumer.WaitAsync(TimeSpan.FromSeconds(30)));
     }
 }
