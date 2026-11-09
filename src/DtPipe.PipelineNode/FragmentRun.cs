@@ -93,15 +93,41 @@ public sealed class FragmentRun : IAsyncDisposable
     /// <summary>Counts a Wire request on arrival, before its handle is awaited.</summary>
     public void NoteWireRequested() => Interlocked.Increment(ref _wireRequests);
 
+    /// <summary>Starts relaying the outbound edge <paramref name="alias"/> through <paramref name="send"/>; true when it was the last edge declared.</summary>
+    public bool Wire(string alias, ByteSend send)
+    {
+        ArgumentNullException.ThrowIfNull(send);
+        var edge = _options.Edges.FirstOrDefault(e => e.Alias == alias)
+            ?? throw new ArgumentException($"The run declares no edge '{alias}'.", nameof(alias));
+        if (edge.Direction != EdgeDirection.Outbound)
+            throw new ArgumentException($"Edge '{alias}' is inbound but received an outbound {nameof(ByteSend)} handle.", nameof(send));
+        lock (_relayTasks) _relayTasks.Add(Task.Run(() => RelayOutboundAsync(alias, send)));
+        return Interlocked.Increment(ref _wiredCount) == _options.Edges.Count;
+    }
+
+    /// <summary>Starts relaying the inbound edge <paramref name="alias"/> through <paramref name="receive"/>; true when it was the last edge declared.</summary>
+    public bool Wire(string alias, ByteReceive receive)
+    {
+        ArgumentNullException.ThrowIfNull(receive);
+        var edge = _options.Edges.FirstOrDefault(e => e.Alias == alias)
+            ?? throw new ArgumentException($"The run declares no edge '{alias}'.", nameof(alias));
+        if (edge.Direction != EdgeDirection.Inbound)
+            throw new ArgumentException($"Edge '{alias}' is outbound but received an inbound {nameof(ByteReceive)} handle.", nameof(receive));
+        lock (_relayTasks) _relayTasks.Add(Task.Run(() => RelayInboundAsync(alias, receive)));
+        return Interlocked.Increment(ref _wiredCount) == _options.Edges.Count;
+    }
+
     /// <summary>Starts relaying the edge <paramref name="alias"/> through <paramref name="handle"/>; true when it was the last edge declared.</summary>
     public bool Wire(string alias, object handle)
     {
-        var edge = _options.Edges.First(e => e.Alias == alias);
-        if (edge.Direction == EdgeDirection.Outbound)
-            lock (_relayTasks) _relayTasks.Add(Task.Run(() => RelayOutboundAsync(alias, (ByteSend)handle)));
-        else
-            lock (_relayTasks) _relayTasks.Add(Task.Run(() => RelayInboundAsync(alias, (ByteReceive)handle)));
-        return Interlocked.Increment(ref _wiredCount) == _options.Edges.Count;
+        if (_options.Edges.All(e => e.Alias != alias))
+            throw new ArgumentException($"The run declares no edge '{alias}'.", nameof(alias));
+        return handle switch
+        {
+            ByteSend send => Wire(alias, send),
+            ByteReceive receive => Wire(alias, receive),
+            _ => throw new ArgumentException($"Unsupported transfer handle type '{handle?.GetType().Name ?? "null"}' for edge '{alias}'.", nameof(handle))
+        };
     }
 
     /// <summary>Short and random, never a readable composed name (alias + run id): the pipe name

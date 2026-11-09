@@ -191,6 +191,9 @@ public sealed class ArrowAdapterDataWriter : IColumnarDataWriter, IRequiresOptio
     private static InvalidOperationException Drift(string detail)
         => new($"Arrow writer: a batch differs from the stream's schema, which the first batch fixed: {detail}.");
 
+    // Sequential IPC streams (pipes, stdout, sequential files) inherit transport compression from
+    // the environment when no option was supplied. File-format targets (.arrow) default to uncompressed
+    // unless explicitly requested through options, so persistent storage is never silently altered.
     private CompressionCodecType? ResolveCodec()
     {
         var compression = _options.Compression;

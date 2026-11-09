@@ -63,4 +63,32 @@ public class WireEdgeAliasTests
 
         Assert.Contains("'main' is declared more than once", ex.Message);
     }
+
+    [Fact]
+    public void AWire_ThrowsArgumentException_WhenHandleTypeIsUnsupported()
+    {
+        var run = new FragmentRun(new FragmentLaunch
+        {
+            DtPipeExecutable = "dummy",
+            FragmentJobPath = "dummy.yaml",
+            Edges = [new EdgeBinding("out", EdgeDirection.Outbound)],
+        }, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+
+        var ex = Assert.Throws<ArgumentException>(() => run.Wire("out", "invalid-handle-object"));
+        Assert.Contains("Unsupported transfer handle type 'String'", ex.Message);
+    }
+
+    [Fact]
+    public void AWire_ThrowsArgumentException_WhenEdgeIsUndeclared()
+    {
+        var run = new FragmentRun(new FragmentLaunch
+        {
+            DtPipeExecutable = "dummy",
+            FragmentJobPath = "dummy.yaml",
+            Edges = [new EdgeBinding("out", EdgeDirection.Outbound)],
+        }, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+
+        var ex = Assert.Throws<ArgumentException>(() => run.Wire("missing", "invalid"));
+        Assert.Contains("The run declares no edge 'missing'", ex.Message);
+    }
 }
