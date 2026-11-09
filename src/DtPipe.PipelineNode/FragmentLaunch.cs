@@ -13,6 +13,9 @@ public sealed class FragmentLaunch
     /// <summary>Arrow IPC buffer compression codec used by the fragment child process ('lz4', 'zstd', 'none'). Defaults to 'lz4'.</summary>
     public string ArrowCompression { get; init; } = "lz4";
 
+    /// <summary>Arrow IPC buffer compression level used by the fragment child process, or null for codec default.</summary>
+    public int? ArrowCompressionLevel { get; init; }
+
     /// <summary>Variables set in the child's environment on top of this process's own, which it
     /// inherits: what a fragment resolves through <c>${{NAME}}</c>. The host's own environment is
     /// never changed for them.</summary>

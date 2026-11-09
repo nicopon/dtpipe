@@ -20,4 +20,7 @@ public class ArrowWriterOptions : IOptionSet
 
     [Description("Buffer compression codec ('lz4', 'zstd', or 'uncompressed'). Defaults to uncompressed, or DTPIPE_ARROW_COMPRESSION for sequential streams.")]
     public string? Compression { get; set; }
+
+    [Description("Buffer compression level (or DTPIPE_ARROW_COMPRESSION_LEVEL for sequential streams). Defaults to codec default.")]
+    public int? CompressionLevel { get; set; }
 }

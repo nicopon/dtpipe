@@ -46,6 +46,7 @@ internal sealed class ReplicaRuns : IAsyncDisposable
     private readonly TimeSpan _unwiredTimeout;
     private readonly bool _faultInjection;
     private readonly string _arrowCompression;
+    private readonly int? _arrowCompressionLevel;
 
     private readonly ConcurrentDictionary<(string RunId, string Fragment), Entry> _runs = new();
     private readonly List<FragmentExit> _held = [];
@@ -58,11 +59,12 @@ internal sealed class ReplicaRuns : IAsyncDisposable
     public ReplicaRuns(
         HubConnection channel, PipelineNode node, string name, string dtpipe, IReadOnlyDictionary<string, string> environment, string jobsDirectory,
         Func<FragmentSpec, (string? Yaml, string? Reason)> intake, Func<string, ILogger> loggerOf, ILogger logger, TimeSpan unwiredTimeout,
-        bool faultInjection = false, string arrowCompression = "lz4")
+        bool faultInjection = false, string arrowCompression = "lz4", int? arrowCompressionLevel = null)
     {
         (_channel, _node, _name, _dtpipe, _environment, _jobsDirectory) = (channel, node, name, dtpipe, environment, jobsDirectory);
         (_intake, _loggerOf, _logger, _unwiredTimeout, _faultInjection) = (intake, loggerOf, logger, unwiredTimeout, faultInjection);
         _arrowCompression = arrowCompression;
+        _arrowCompressionLevel = arrowCompressionLevel;
         Directory.CreateDirectory(_jobsDirectory);
     }
 
@@ -141,6 +143,7 @@ internal sealed class ReplicaRuns : IAsyncDisposable
                 FragmentJobPath = jobPath,
                 ChildEnvironment = environment,
                 ArrowCompression = _arrowCompression,
+                ArrowCompressionLevel = _arrowCompressionLevel,
                 Edges = spec.Edges
                     .Select(e => new EdgeBinding(e.Alias, e.Direction == FragmentEdgeDirection.Inbound ? EdgeDirection.Inbound : EdgeDirection.Outbound))
                     .ToList(),

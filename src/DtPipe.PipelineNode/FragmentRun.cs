@@ -149,6 +149,8 @@ public sealed class FragmentRun : IAsyncDisposable
             psi.Environment[name] = value;
         if (!string.IsNullOrEmpty(options.ArrowCompression) && !psi.Environment.ContainsKey("DTPIPE_ARROW_COMPRESSION"))
             psi.Environment["DTPIPE_ARROW_COMPRESSION"] = options.ArrowCompression;
+        if (options.ArrowCompressionLevel.HasValue && !psi.Environment.ContainsKey("DTPIPE_ARROW_COMPRESSION_LEVEL"))
+            psi.Environment["DTPIPE_ARROW_COMPRESSION_LEVEL"] = options.ArrowCompressionLevel.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
         psi.ArgumentList.Add("--job");
         psi.ArgumentList.Add(options.FragmentJobPath);
         if (bindInputPairs.Count > 0) { psi.ArgumentList.Add("--bind-input"); psi.ArgumentList.Add(string.Join(",", bindInputPairs)); }

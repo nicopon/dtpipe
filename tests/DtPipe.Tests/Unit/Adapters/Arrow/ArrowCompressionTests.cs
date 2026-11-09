@@ -241,4 +241,117 @@ public class ArrowCompressionTests : IDisposable
             Environment.SetEnvironmentVariable("DTPIPE_ARROW_COMPRESSION", prevEnv);
         }
     }
+
+    [Fact]
+    public async Task ArrowAdapter_Writer_UsesEnvironmentVariable_CompressionLevel_WhenWritingSequentialStream()
+    {
+        var prevCodec = Environment.GetEnvironmentVariable("DTPIPE_ARROW_COMPRESSION");
+        var prevLevel = Environment.GetEnvironmentVariable("DTPIPE_ARROW_COMPRESSION_LEVEL");
+        try
+        {
+            Environment.SetEnvironmentVariable("DTPIPE_ARROW_COMPRESSION", "zstd");
+            Environment.SetEnvironmentVariable("DTPIPE_ARROW_COMPRESSION_LEVEL", "7");
+            var streamPath = Path.Combine(_tempDir, $"stream_level_{Guid.NewGuid():N}.ipc");
+            var columns = new PipeColumnInfo[] { new("val", typeof(string), true) };
+
+            var writer = new ArrowAdapterDataWriter(streamPath, new ArrowWriterOptions());
+            await writer.InitializeAsync(columns);
+
+            var schema = new Schema.Builder()
+                .Field(new Field("val", StringType.Default, true))
+                .Build();
+
+            var builder = new StringArray.Builder();
+            for (int i = 0; i < 200; i++) builder.Append("Repetitive payload for compression level verification");
+            var batch = new RecordBatch(schema, [builder.Build()], 200);
+
+            await writer.WriteRecordBatchAsync(batch);
+            await writer.CompleteAsync();
+            await writer.DisposeAsync();
+
+            var reader = new ArrowAdapterStreamReader(streamPath, new ArrowReaderOptions());
+            await reader.OpenAsync();
+            var readBatches = new List<RecordBatch>();
+            await foreach (var rb in reader.ReadRecordBatchesAsync())
+            {
+                readBatches.Add(rb);
+            }
+            await reader.DisposeAsync();
+
+            readBatches.Should().HaveCount(1);
+            readBatches[0].Length.Should().Be(200);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("DTPIPE_ARROW_COMPRESSION", prevCodec);
+            Environment.SetEnvironmentVariable("DTPIPE_ARROW_COMPRESSION_LEVEL", prevLevel);
+        }
+    }
+
+    [Fact]
+    public async Task ArrowAdapter_Writer_Throws_WhenInvalidCompressionLevelInEnv()
+    {
+        var prevCodec = Environment.GetEnvironmentVariable("DTPIPE_ARROW_COMPRESSION");
+        var prevLevel = Environment.GetEnvironmentVariable("DTPIPE_ARROW_COMPRESSION_LEVEL");
+        try
+        {
+            Environment.SetEnvironmentVariable("DTPIPE_ARROW_COMPRESSION", "lz4");
+            Environment.SetEnvironmentVariable("DTPIPE_ARROW_COMPRESSION_LEVEL", "not-a-number");
+            var streamPath = Path.Combine(_tempDir, $"stream_invalid_level_{Guid.NewGuid():N}.ipc");
+            var columns = new PipeColumnInfo[] { new("val", typeof(string), true) };
+
+            var writer = new ArrowAdapterDataWriter(streamPath, new ArrowWriterOptions());
+            await writer.InitializeAsync(columns);
+
+            var schema = new Schema.Builder()
+                .Field(new Field("val", StringType.Default, true))
+                .Build();
+
+            var batch = new RecordBatch(schema, [new StringArray.Builder().Append("test").Build()], 1);
+
+            var act = async () => await writer.WriteRecordBatchAsync(batch);
+            await act.Should().ThrowAsync<ArgumentException>()
+                .WithMessage("*DTPIPE_ARROW_COMPRESSION_LEVEL*");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("DTPIPE_ARROW_COMPRESSION", prevCodec);
+            Environment.SetEnvironmentVariable("DTPIPE_ARROW_COMPRESSION_LEVEL", prevLevel);
+        }
+    }
+
+    [Fact]
+    public async Task ArrowAdapter_WriterAndReader_RoundTrip_WithExplicitCompressionLevel()
+    {
+        var streamPath = Path.Combine(_tempDir, $"stream_explicit_level_{Guid.NewGuid():N}.ipc");
+        var columns = new PipeColumnInfo[] { new("val", typeof(string), true) };
+
+        var writerOptions = new ArrowWriterOptions { Compression = "zstd", CompressionLevel = 5 };
+        var writer = new ArrowAdapterDataWriter(streamPath, writerOptions);
+        await writer.InitializeAsync(columns);
+
+        var schema = new Schema.Builder()
+            .Field(new Field("val", StringType.Default, true))
+            .Build();
+
+        var builder = new StringArray.Builder();
+        for (int i = 0; i < 100; i++) builder.Append($"String-entry-{i}");
+        var batch = new RecordBatch(schema, [builder.Build()], 100);
+
+        await writer.WriteRecordBatchAsync(batch);
+        await writer.CompleteAsync();
+        await writer.DisposeAsync();
+
+        var reader = new ArrowAdapterStreamReader(streamPath, new ArrowReaderOptions());
+        await reader.OpenAsync();
+        var readBatches = new List<RecordBatch>();
+        await foreach (var rb in reader.ReadRecordBatchesAsync())
+        {
+            readBatches.Add(rb);
+        }
+        await reader.DisposeAsync();
+
+        readBatches.Should().HaveCount(1);
+        readBatches[0].Length.Should().Be(100);
+    }
 }

@@ -207,14 +207,36 @@ public sealed class ArrowAdapterDataWriter : IColumnarDataWriter, IRequiresOptio
         };
     }
 
+    private int? ResolveCompressionLevel()
+    {
+        if (_options.CompressionLevel.HasValue) return _options.CompressionLevel.Value;
+        if (!_isIpcFile)
+        {
+            var env = Environment.GetEnvironmentVariable("DTPIPE_ARROW_COMPRESSION_LEVEL");
+            if (!string.IsNullOrWhiteSpace(env))
+            {
+                if (int.TryParse(env.Trim(), out var parsed))
+                    return parsed;
+                throw new ArgumentException($"Invalid Arrow compression level '{env}'. Expected an integer.", "DTPIPE_ARROW_COMPRESSION_LEVEL");
+            }
+        }
+        return null;
+    }
+
     private void OpenIpcWriter(Schema schema)
     {
         if (_arrowStreamWriter != null || _arrowFileWriter != null) return;
 
         _schema = schema;
         var codec = ResolveCodec();
+        var level = ResolveCompressionLevel();
         var ipcOptions = codec.HasValue
-            ? new IpcOptions { CompressionCodec = codec.Value, CompressionCodecFactory = CodecFactory }
+            ? new IpcOptions
+            {
+                CompressionCodec = codec.Value,
+                CompressionLevel = level,
+                CompressionCodecFactory = CodecFactory
+            }
             : null;
 
         if (_isIpcFile)
