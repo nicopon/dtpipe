@@ -28,6 +28,7 @@ builder.Logging.AddFilter("TransportR", LogLevel.Warning).AddFilter("Microsoft",
 
 var node = builder.Services.AddDtPipeNode(o =>
 {
+    builder.Configuration.GetSection("DtPipeNode").Bind(o);
     o.Name = name;
     o.Description = file["description"] ?? "";
     o.CoordinatorUrl = coordinator;

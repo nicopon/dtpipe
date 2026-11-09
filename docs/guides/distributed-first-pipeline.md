@@ -337,6 +337,11 @@ same header until it is `succeeded` or `failed`.
 - **A key is shown once.** Lost, it is not read back: in **Access**, **Keys**, then **Rotate: make
   a second key** gives the identity another, and revoking the first ends what it opened at its
   next request.
+- **WAN and network buffer tuning.** By default, node hosts exchange data over TransportR using
+  256 KB batches with up to 16 batches in-flight (a 4 MB window), compressed with Arrow IPC LZ4.
+  Over high-latency or cross-region WAN links (e.g. cloud runners with RTT > 30 ms), setting
+  `DtPipeNode__MaxInFlightBatches=32` (an 8 MB in-flight window) and optionally
+  `DtPipeNode__BatchBytes=524288` (512 KB) prevents network stalls and maximizes throughput.
 
 ## If something sticks
 

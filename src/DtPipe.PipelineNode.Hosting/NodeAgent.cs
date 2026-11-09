@@ -241,6 +241,9 @@ internal sealed class NodeAgent : BackgroundService
             {
                 HubUrl = _options.CoordinatorUrl.TrimEnd('/'),
                 AccessTokenProvider = () => _tokens.GetAsync(fresh: true),
+                BatchBytes = _options.BatchBytes,
+                MaxInFlightBatches = _options.MaxInFlightBatches,
+                ReadChunkBytes = _options.ReadChunkBytes,
             }, _forwarder.For(_hostLoggers, _options.Name, fragment: null), ct);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
@@ -256,7 +259,8 @@ internal sealed class NodeAgent : BackgroundService
                 _hub!, node, _options.Name, _options.DtPipe, _environment, _fragmentsDir,
                 spec => FragmentIntake.JobOf(spec, _policy, _gate, _bricks.DeclaredBranch, _bricks.DeclaredVersion, _bricks.Forms),
                 fragment => _forwarder.For(_hostLoggers, _options.Name, fragment).CreateLogger(typeof(FragmentRun).FullName!),
-                _logger, _options.UnwiredRunTimeout, _options.FaultInjection, _options.ArrowCompression, _options.ArrowCompressionLevel);
+                _logger, _options.UnwiredRunTimeout, _options.FaultInjection, _options.ArrowCompression, _options.ArrowCompressionLevel,
+                _options.ReadChunkBytes);
             runs.Bind();
             _runs = runs;
         }

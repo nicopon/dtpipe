@@ -1589,6 +1589,11 @@ own: a deployment gives the first ones through `Bootstrap__*`.
 | `Policy` | `Bricks` (default: a data node runs only its own bricks) or `AnyFragment` (a runner) |
 | `UnwiredRunTimeout` | How long a launched run may wait for its edges to be wired. Default: five minutes |
 | `FaultInjection` | `true` lets the host end a run's child when the coordinator asks, for a test bench. Default: off |
+| `ArrowCompression` | Arrow IPC buffer compression codec (`lz4`, `zstd`, `none`). Default: `lz4` |
+| `ArrowCompressionLevel` | Optional compression level for the selected codec |
+| `BatchBytes` | TransportR batch size in bytes for the data plane client. Default: `262144` (256 KB). For high-throughput WAN, 256 KB–512 KB is recommended |
+| `MaxInFlightBatches` | Maximum in-flight TransportR batches before sender pause. Default: `16` (4 MB window). On high-latency WAN links, `32` (8 MB window) is recommended |
+| `ReadChunkBytes` | Buffer size in bytes for reading/writing child fragment stdio pipes. Default: `262144` (256 KB) |
 | `Variables__<NAME>` | A value every fragment reads as `${{NAME}}`; it never leaves the node |
 
 A **brick** is a read or a write the node's owner declared on the node's own data. A pipeline names

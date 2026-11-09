@@ -75,6 +75,15 @@ public sealed class DtPipeNodeOptions
     /// <summary>Arrow IPC buffer compression level used by fragment child processes, or null for codec default.</summary>
     public int? ArrowCompressionLevel { get; set; }
 
+    /// <summary>TransportR batch size in bytes for the data plane client. Defaults to 262144 (256 KB).</summary>
+    public int BatchBytes { get; set; } = 262144;
+
+    /// <summary>Maximum in-flight TransportR batches before sender pause. Defaults to 16.</summary>
+    public int MaxInFlightBatches { get; set; } = 16;
+
+    /// <summary>Buffer size in bytes for reading/writing child fragment stdio pipes. Defaults to 262144 (256 KB).</summary>
+    public int ReadChunkBytes { get; set; } = 262144;
+
     public NodeOidcOptions Oidc { get; set; } = new();
 
     /// <summary>Variables every dtpipe child sees, which a fragment resolves through <c>${{NAME}}</c>. Their values never leave the node.</summary>
@@ -92,5 +101,8 @@ public sealed class DtPipeNodeOptions
         if (string.IsNullOrEmpty(Oidc.ClientSecret)) yield return "Oidc:ClientSecret is required.";
         if (string.IsNullOrWhiteSpace(DtPipe)) yield return "DtPipe is required.";
         if (UnwiredRunTimeout <= TimeSpan.Zero) yield return "UnwiredRunTimeout must be positive.";
+        if (BatchBytes <= 0) yield return "BatchBytes must be positive.";
+        if (MaxInFlightBatches <= 0) yield return "MaxInFlightBatches must be positive.";
+        if (ReadChunkBytes <= 0) yield return "ReadChunkBytes must be positive.";
     }
 }

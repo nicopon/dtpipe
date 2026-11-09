@@ -47,6 +47,7 @@ internal sealed class ReplicaRuns : IAsyncDisposable
     private readonly bool _faultInjection;
     private readonly string _arrowCompression;
     private readonly int? _arrowCompressionLevel;
+    private readonly int _readChunkBytes;
 
     private readonly ConcurrentDictionary<(string RunId, string Fragment), Entry> _runs = new();
     private readonly List<FragmentExit> _held = [];
@@ -59,12 +60,13 @@ internal sealed class ReplicaRuns : IAsyncDisposable
     public ReplicaRuns(
         HubConnection channel, PipelineNode node, string name, string dtpipe, IReadOnlyDictionary<string, string> environment, string jobsDirectory,
         Func<FragmentSpec, (string? Yaml, string? Reason)> intake, Func<string, ILogger> loggerOf, ILogger logger, TimeSpan unwiredTimeout,
-        bool faultInjection = false, string arrowCompression = "lz4", int? arrowCompressionLevel = null)
+        bool faultInjection = false, string arrowCompression = "lz4", int? arrowCompressionLevel = null, int readChunkBytes = 262144)
     {
         (_channel, _node, _name, _dtpipe, _environment, _jobsDirectory) = (channel, node, name, dtpipe, environment, jobsDirectory);
         (_intake, _loggerOf, _logger, _unwiredTimeout, _faultInjection) = (intake, loggerOf, logger, unwiredTimeout, faultInjection);
         _arrowCompression = arrowCompression;
         _arrowCompressionLevel = arrowCompressionLevel;
+        _readChunkBytes = readChunkBytes;
         Directory.CreateDirectory(_jobsDirectory);
     }
 
@@ -144,6 +146,7 @@ internal sealed class ReplicaRuns : IAsyncDisposable
                 ChildEnvironment = environment,
                 ArrowCompression = _arrowCompression,
                 ArrowCompressionLevel = _arrowCompressionLevel,
+                ReadChunkBytes = _readChunkBytes,
                 Edges = spec.Edges
                     .Select(e => new EdgeBinding(e.Alias, e.Direction == FragmentEdgeDirection.Inbound ? EdgeDirection.Inbound : EdgeDirection.Outbound))
                     .ToList(),
