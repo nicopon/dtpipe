@@ -69,6 +69,9 @@ public sealed class DtPipeNodeOptions
     /// </summary>
     public bool FaultInjection { get; set; }
 
+    /// <summary>Arrow IPC buffer compression codec used by fragment child processes ('lz4', 'zstd', 'none'). Defaults to 'lz4'.</summary>
+    public string ArrowCompression { get; set; } = "lz4";
+
     public NodeOidcOptions Oidc { get; set; } = new();
 
     /// <summary>Variables every dtpipe child sees, which a fragment resolves through <c>${{NAME}}</c>. Their values never leave the node.</summary>

@@ -4,7 +4,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 using TransportR.Abstractions;
 using TransportR.Client;
 using TransportR.Client.Services;
-using TransportR.Serialization.MessagePack;
 
 namespace DtPipe.PipelineNode;
 
@@ -29,16 +28,15 @@ public sealed class NodeClientOptions
     /// provider that throws leaves the previous token in place.</summary>
     public Func<Task<string>>? AccessTokenProvider { get; init; }
 
-    /// <summary>Items per TransportR batch. Bounds sender memory together with <see cref="MaxInFlightBatches"/>:
-    /// roughly <see cref="ReadChunkBytes"/> × this × <see cref="MaxInFlightBatches"/> bytes in flight.</summary>
-    public int BatchSize { get; init; } = 8;
+    /// <summary>TransportR batch size in bytes. Bounds sender memory together with <see cref="MaxInFlightBatches"/>:
+    /// roughly this × <see cref="MaxInFlightBatches"/> bytes in flight.</summary>
+    public int BatchBytes { get; init; } = 65536;
 
     /// <summary>Both bounds default to a non-null value. The client library leaves them null, and a
     /// null <see cref="MaxInFlightBatches"/> lets a sender race ahead of a slow receiver — measured
     /// at ~1 GB of receiver-side backlog against a source that finishes in seconds. 8 matches the
     /// engine's own in-process Arrow channel capacity.</summary>
     public int? MaxInFlightBatches { get; init; } = 8;
-    public int? ReceiveMaxItems { get; init; }
     public long? ReceiveMaxBytes { get; init; }
     public int ReadChunkBytes { get; init; } = 65536;
 
@@ -64,13 +62,13 @@ public sealed class PipelineNode : IAsyncDisposable
 {
     private readonly NodeClientOptions _options;
     private readonly ILogger _logger;
-    private readonly TransportRClient<byte[]> _client;
+    private readonly ByteStreamClient _client;
 
     private readonly ConcurrentDictionary<string, TaskCompletionSource<object>> _handles = new();
 
     public Guid ClientId => _client.ClientId;
 
-    private PipelineNode(NodeClientOptions options, ILogger logger, TransportRClient<byte[]> client)
+    private PipelineNode(NodeClientOptions options, ILogger logger, ByteStreamClient client)
     {
         _options = options;
         _logger = logger;
@@ -137,12 +135,10 @@ public sealed class PipelineNode : IAsyncDisposable
         }
     }
 
-    private static TransportRClient<byte[]> BuildClient(NodeClientOptions options, ILoggerFactory loggerFactory)
+    private static ByteStreamClient BuildClient(NodeClientOptions options, ILoggerFactory loggerFactory)
     {
-        var builder = new TransportRClientBuilder<byte[]>()
+        var builder = new ByteStreamClientBuilder(batchBytes: options.BatchBytes)
             .WithUrl(options.HubUrl)
-            .WithMessagePackSerialization()
-            .WithBatchSize(options.BatchSize)
             .WithLoggerFactory(loggerFactory);
 
         if (options.AccessTokenProvider is { } tokenProvider)
@@ -156,19 +152,19 @@ public sealed class PipelineNode : IAsyncDisposable
         // alone does not fix (a bound at one end only moves the backlog to the other). The client
         // applies it to each transfer it receives, so a replica running several carries one bound apiece.
         var receiveMaxBytes = options.ReceiveMaxBytes
-            ?? (long)options.ReadChunkBytes * options.BatchSize * (options.MaxInFlightBatches ?? 8);
-        builder.WithReceiveCapacity(options.ReceiveMaxItems, receiveMaxBytes);
+            ?? ((long)options.BatchBytes * (options.MaxInFlightBatches ?? 8));
+        builder.WithReceiveCapacity(receiveMaxBytes);
 
         return builder.Build();
     }
 
-    private Task HandleSendRequested(Send<byte[]> send)
+    private Task HandleSendRequested(ByteSend send)
     {
         HandleHandle(send.TransferId, send);
         return Task.CompletedTask;
     }
 
-    private Task HandleTransferStarted(Receive<byte[]> receive)
+    private Task HandleTransferStarted(ByteReceive receive)
     {
         HandleHandle(receive.TransferId, receive);
         return Task.CompletedTask;

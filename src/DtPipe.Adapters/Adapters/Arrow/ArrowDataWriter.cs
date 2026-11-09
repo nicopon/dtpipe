@@ -15,6 +15,8 @@ namespace DtPipe.Adapters.Arrow;
 /// </summary>
 public sealed class ArrowAdapterDataWriter : IColumnarDataWriter, IRequiresOptions<ArrowWriterOptions>, ISchemaInspector
 {
+    private static readonly ICompressionCodecFactory CodecFactory = new Apache.Arrow.Compression.CompressionCodecFactory();
+
     private readonly string _path;
     private readonly ArrowWriterOptions _options;
 
@@ -87,7 +89,7 @@ public sealed class ArrowAdapterDataWriter : IColumnarDataWriter, IRequiresOptio
             {
                 try
                 {
-                    using var reader = new ArrowFileReader(fs);
+                    using var reader = new ArrowFileReader(fs, CodecFactory);
                     var schema = reader.Schema;
                     var columns = MapArrowSchema(schema);
                     return Task.FromResult<TargetSchemaInfo?>(new TargetSchemaInfo(columns, true, null, fs.Length, null));
@@ -97,7 +99,7 @@ public sealed class ArrowAdapterDataWriter : IColumnarDataWriter, IRequiresOptio
 
             // Try as stream (IPC stream format)
             fs.Position = 0;
-            using var streamReader = new ArrowStreamReader(fs);
+            using var streamReader = new ArrowStreamReader(fs, CodecFactory);
             var streamSchema = streamReader.Schema;
             var streamColumns = MapArrowSchema(streamSchema);
             return Task.FromResult<TargetSchemaInfo?>(new TargetSchemaInfo(streamColumns, true, null, fs.Length, null));
@@ -189,15 +191,40 @@ public sealed class ArrowAdapterDataWriter : IColumnarDataWriter, IRequiresOptio
     private static InvalidOperationException Drift(string detail)
         => new($"Arrow writer: a batch differs from the stream's schema, which the first batch fixed: {detail}.");
 
+    private CompressionCodecType? ResolveCodec()
+    {
+        var compression = _options.Compression;
+        if (string.IsNullOrWhiteSpace(compression) && !_isIpcFile)
+            compression = Environment.GetEnvironmentVariable("DTPIPE_ARROW_COMPRESSION");
+
+        if (string.IsNullOrWhiteSpace(compression)) return null;
+        return compression.Trim().ToLowerInvariant() switch
+        {
+            "lz4" or "lz4_frame" => CompressionCodecType.Lz4Frame,
+            "zstd" => CompressionCodecType.Zstd,
+            "none" or "uncompressed" => null,
+            _ => throw new ArgumentException($"Unknown Arrow compression codec '{compression}'. Supported codecs are 'lz4' and 'zstd'.", nameof(compression))
+        };
+    }
+
     private void OpenIpcWriter(Schema schema)
     {
         if (_arrowStreamWriter != null || _arrowFileWriter != null) return;
 
         _schema = schema;
+        var codec = ResolveCodec();
+        var ipcOptions = codec.HasValue
+            ? new IpcOptions { CompressionCodec = codec.Value, CompressionCodecFactory = CodecFactory }
+            : null;
+
         if (_isIpcFile)
-            _arrowFileWriter = new ArrowFileWriter(_outputStream!, schema, leaveOpen: true);
+            _arrowFileWriter = ipcOptions != null
+                ? new ArrowFileWriter(_outputStream!, schema, leaveOpen: true, ipcOptions)
+                : new ArrowFileWriter(_outputStream!, schema, leaveOpen: true);
         else
-            _arrowStreamWriter = new ArrowStreamWriter(_outputStream!, schema, leaveOpen: true);
+            _arrowStreamWriter = ipcOptions != null
+                ? new ArrowStreamWriter(_outputStream!, schema, leaveOpen: true, ipcOptions)
+                : new ArrowStreamWriter(_outputStream!, schema, leaveOpen: true);
     }
 
     // What a stream with no batch declares. A column the CLR type cannot describe (a struct has no Arrow

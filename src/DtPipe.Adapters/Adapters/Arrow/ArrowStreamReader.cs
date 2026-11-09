@@ -11,6 +11,8 @@ namespace DtPipe.Adapters.Arrow;
 
 public class ArrowAdapterStreamReader : IColumnarStreamReader
 {
+    private static readonly Apache.Arrow.Ipc.ICompressionCodecFactory CodecFactory = new Apache.Arrow.Compression.CompressionCodecFactory();
+
     // A pipeline node's own excess edge always creates the pipe before launching the child that
     // reads this side of it, so under normal operation the connect is near-instant; the bound
     // exists only to fail loudly, naming the pipe, instead of hanging on a misconfigured one.
@@ -79,14 +81,14 @@ public class ArrowAdapterStreamReader : IColumnarStreamReader
 
         if (_isIpcFile)
         {
-            _arrowFileReader = new ArrowFileReader(_inputStream);
+            _arrowFileReader = new ArrowFileReader(_inputStream, CodecFactory);
             Schema = ArrowDictionaries.Decode(_arrowFileReader.Schema);
             Columns = MapSchema(Schema);
         }
         else
         {
             _probe = new ArrowStreamTerminationProbe(_inputStream);
-            _arrowReader = new Apache.Arrow.Ipc.ArrowStreamReader(_probe);
+            _arrowReader = new Apache.Arrow.Ipc.ArrowStreamReader(_probe, CodecFactory);
             Schema = ArrowDictionaries.Decode(_arrowReader.Schema);
             Columns = MapSchema(Schema);
         }

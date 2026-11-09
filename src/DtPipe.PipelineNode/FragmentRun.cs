@@ -98,9 +98,9 @@ public sealed class FragmentRun : IAsyncDisposable
     {
         var edge = _options.Edges.First(e => e.Alias == alias);
         if (edge.Direction == EdgeDirection.Outbound)
-            lock (_relayTasks) _relayTasks.Add(Task.Run(() => RelayOutboundAsync(alias, (Send<byte[]>)handle)));
+            lock (_relayTasks) _relayTasks.Add(Task.Run(() => RelayOutboundAsync(alias, (ByteSend)handle)));
         else
-            lock (_relayTasks) _relayTasks.Add(Task.Run(() => RelayInboundAsync(alias, (Receive<byte[]>)handle)));
+            lock (_relayTasks) _relayTasks.Add(Task.Run(() => RelayInboundAsync(alias, (ByteReceive)handle)));
         return Interlocked.Increment(ref _wiredCount) == _options.Edges.Count;
     }
 
@@ -147,6 +147,8 @@ public sealed class FragmentRun : IAsyncDisposable
         };
         foreach (var (name, value) in options.ChildEnvironment ?? new Dictionary<string, string>())
             psi.Environment[name] = value;
+        if (!string.IsNullOrEmpty(options.ArrowCompression) && !psi.Environment.ContainsKey("DTPIPE_ARROW_COMPRESSION"))
+            psi.Environment["DTPIPE_ARROW_COMPRESSION"] = options.ArrowCompression;
         psi.ArgumentList.Add("--job");
         psi.ArgumentList.Add(options.FragmentJobPath);
         if (bindInputPairs.Count > 0) { psi.ArgumentList.Add("--bind-input"); psi.ArgumentList.Add(string.Join(",", bindInputPairs)); }
@@ -217,7 +219,7 @@ public sealed class FragmentRun : IAsyncDisposable
         }
     }
 
-    private async Task RelayOutboundAsync(string alias, Send<byte[]> send)
+    private async Task RelayOutboundAsync(string alias, ByteSend send)
     {
         var counter = new ArrowIpcRowCounter();
         var buffer = new byte[_options.ReadChunkBytes];
@@ -232,10 +234,9 @@ public sealed class FragmentRun : IAsyncDisposable
             {
                 int read = await stream.ReadAsync(buffer);
                 if (read == 0) break;
-                var chunk = buffer.AsSpan(0, read).ToArray();
-                counter.Feed(chunk);
+                counter.Feed(buffer.AsSpan(0, read));
                 sending = true;
-                await send.SendAsync(chunk);
+                await send.WriteAsync(buffer.AsMemory(0, read));
                 sending = false;
             }
 
@@ -256,9 +257,9 @@ public sealed class FragmentRun : IAsyncDisposable
         }
         catch (Exception ex) when (ex is TransferFailedException or OperationCanceledException)
         {
-            // TransferFailedException is the documented contract for SendAsync/CompleteAsync. An
+            // TransferFailedException is the documented contract for WriteAsync/CompleteAsync. An
             // OperationCanceledException here is never this code's own doing - no cancellation
-            // token reaches SendAsync - so it can only be the transfer failing underneath it, the
+            // token reaches WriteAsync - so it can only be the transfer failing underneath it, the
             // same as TransferFailedException.
             Fault(FaultOrigin.Remote, $"outbound edge '{alias}': {ex.Message}");
         }
@@ -275,26 +276,29 @@ public sealed class FragmentRun : IAsyncDisposable
         }
     }
 
-    private async Task RelayInboundAsync(string alias, Receive<byte[]> receive)
+    private async Task RelayInboundAsync(string alias, ByteReceive receive)
     {
         var counter = new ArrowIpcRowCounter();
+        var buffer = new byte[_options.ReadChunkBytes];
         try
         {
             var stream = _pipes.TryGetValue(alias, out var pipe)
                 ? await ConnectPipeAsync(pipe, alias)
                 : _child.StandardInput.BaseStream;
 
-            await foreach (var chunk in receive.ReceiveAsync())
+            while (true)
             {
-                counter.Feed(chunk);
-                await stream.WriteAsync(chunk);
+                int read = await receive.ReadAsync(buffer);
+                if (read == 0) break;
+                counter.Feed(buffer.AsSpan(0, read));
+                await stream.WriteAsync(buffer.AsMemory(0, read));
             }
             await stream.FlushAsync();
             await receive.WaitForCompletionAsync();
         }
         catch (Exception ex) when (ex is TransferFailedException or OperationCanceledException)
         {
-            // Thrown by ReceiveAsync's own enumeration or WaitForCompletionAsync: the child was
+            // Thrown by receive's own ReadAsync or WaitForCompletionAsync: the child was
             // still fine, the transfer itself failed. OperationCanceledException here is never this
             // code's own doing either, for the same reason as the outbound side.
             Fault(FaultOrigin.Remote, $"inbound edge '{alias}': {ex.Message}");

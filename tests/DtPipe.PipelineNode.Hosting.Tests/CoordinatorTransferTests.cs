@@ -4,7 +4,6 @@ using TransportR.Abstractions;
 using TransportR.Client;
 using TransportR.Client.Services;
 using TransportR.Interfaces;
-using TransportR.Serialization.MessagePack;
 using Xunit;
 
 namespace DtPipe.PipelineNode.Hosting.Tests;
@@ -43,8 +42,8 @@ public sealed class CoordinatorTransferTests
             await using var sender = Client(url, sourceTokens);
             await using var receiver = Client(url, sinkTokens);
 
-            var sendHandle = new TaskCompletionSource<Send<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-            var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var sendHandle = new TaskCompletionSource<ByteSend>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var receiveHandle = new TaskCompletionSource<ByteReceive>(TaskCreationOptions.RunContinuationsAsynchronously);
             sender.OnSendRequested += send => { sendHandle.TrySetResult(send); return Task.CompletedTask; };
             receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
 
@@ -56,17 +55,24 @@ public sealed class CoordinatorTransferTests
             await using var send = await sendHandle.Task.WaitAsync(TimeSpan.FromSeconds(30), Ct);
             await using var receive = await receiveHandle.Task.WaitAsync(TimeSpan.FromSeconds(30), Ct);
 
-            var expected = Enumerable.Range(0, 100).Select(i => $"item-{i}").ToList();
+            var expected = new byte[10_000];
+            Random.Shared.NextBytes(expected);
             var consumer = Task.Run(async () =>
             {
-                var items = new List<string>();
-                await foreach (var item in receive.ReceiveAsync()) items.Add(item);
-                await receive.WaitForCompletionAsync();
-                return items;
+                using var ms = new MemoryStream();
+                var buffer = new byte[4096];
+                while (true)
+                {
+                    var read = await receive.ReadAsync(buffer, Ct);
+                    if (read == 0) break;
+                    ms.Write(buffer, 0, read);
+                }
+                await receive.WaitForCompletionAsync(Ct);
+                return ms.ToArray();
             }, Ct);
 
-            await send.SendAsync(expected);
-            await send.CompleteAsync().WaitAsync(TimeSpan.FromSeconds(30), Ct);
+            await send.WriteAsync(expected, Ct);
+            await send.CompleteAsync(Ct).WaitAsync(TimeSpan.FromSeconds(30), Ct);
             Assert.Equal(expected, await consumer.WaitAsync(TimeSpan.FromSeconds(30), Ct));
         }
         finally
@@ -75,9 +81,8 @@ public sealed class CoordinatorTransferTests
         }
     }
 
-    private static TransportRClient<string> Client(string url, OidcTokenClient tokens) => new TransportRClientBuilder<string>()
+    private static ByteStreamClient Client(string url, OidcTokenClient tokens) => new ByteStreamClientBuilder(batchBytes: 65536)
         .WithUrl(url)
-        .WithMessagePackSerialization()
         .WithTokenProvider(() => tokens.GetAsync())
         .Build();
 }
