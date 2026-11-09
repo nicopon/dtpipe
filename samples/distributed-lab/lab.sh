@@ -88,6 +88,7 @@ require_dtpipe() {
 }
 
 build() {
+    [[ "${LAB_NO_BUILD:-}" == 1 ]] && return 0
     echo "Building the lab"
     dotnet build "$LAB/Lab.Idp/Lab.Idp.csproj" -c Release -o "$STATE/bin/idp" -v q -nologo >"$STATE/logs/build.log" 2>&1 \
         || { cat "$STATE/logs/build.log" >&2; exit 1; }
