@@ -127,6 +127,13 @@ class Program
 
             if (!string.IsNullOrEmpty(parsedPipeline.Globals.ExportJobFile))
             {
+                if (string.IsNullOrWhiteSpace(parsedPipeline.Globals.ExportJobFile) ||
+                    parsedPipeline.Globals.ExportJobFile.Equals("true", StringComparison.OrdinalIgnoreCase))
+                {
+                    Console.Error.WriteLine("[ERROR] Flag '--export-job' requires a file path: the target file name is mandatory.");
+                    return 1;
+                }
+
                 if (CommandLineJob.BindingRefusal(parsedPipeline.Globals) is { } refusal)
                 {
                     Console.Error.WriteLine($"[ERROR] {refusal}");

@@ -80,6 +80,18 @@ public class PipelineLexer
             var def = _registry.Lookup(token);
             if (def != null)
             {
+                if (def.Name == "--export-job")
+                {
+                    if (i + 1 >= args.Length)
+                        throw new InvalidOperationException(
+                            $"Flag '{token}' requires a file path: the target file name is mandatory, and nothing follows it.");
+
+                    var nextToken = args[i + 1];
+                    if (string.IsNullOrWhiteSpace(nextToken) || nextToken.StartsWith('-'))
+                        throw new InvalidOperationException(
+                            $"Flag '{token}' requires a file path: the target file name is mandatory, not '{nextToken}'.");
+                }
+
                 string? value = null;
                 if (def.ConsumesNextToken)
                 {

@@ -553,6 +553,62 @@ public class PipelineLexerTests
         Assert.Contains($"Flag '{refused}' cannot be combined with --job", ex.Message, StringComparison.Ordinal);
         Assert.Contains("'ja.yaml' is the source of the branches", ex.Message, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void Export_Job_Without_File_At_End_Of_Command_Line_Throws()
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            _lexer.Parse(new[] { "-i", "in.csv", "-o", "out.csv", "--export-job" }));
+
+        Assert.Contains("'--export-job' requires a file path", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("the target file name is mandatory", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("nothing follows it", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Export_Job_Alone_Throws()
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            _lexer.Parse(new[] { "--export-job" }));
+
+        Assert.Contains("'--export-job' requires a file path", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("the target file name is mandatory", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("nothing follows it", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("-o")]
+    [InlineData("--no-stats")]
+    [InlineData("--dry-run")]
+    public void Export_Job_Followed_By_Flag_Throws(string nextFlag)
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            _lexer.Parse(new[] { "-i", "in.csv", "--export-job", nextFlag, "-o", "out.csv" }));
+
+        Assert.Contains("'--export-job' requires a file path", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("the target file name is mandatory", ex.Message, StringComparison.Ordinal);
+        Assert.Contains(nextFlag, ex.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Export_Job_With_Whitespace_Or_Empty_Target_Throws(string emptyTarget)
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            _lexer.Parse(new[] { "-i", "in.csv", "-o", "out.csv", "--export-job", emptyTarget }));
+
+        Assert.Contains("'--export-job' requires a file path", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("the target file name is mandatory", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Export_Job_With_Valid_File_Sets_ExportJobFile()
+    {
+        var pipeline = _lexer.Parse(new[] { "-i", "in.csv", "-o", "out.csv", "--export-job", "exported.yaml" });
+
+        Assert.Equal("exported.yaml", pipeline.Globals.ExportJobFile);
+    }
 }
 
 [Collection("console-serial")]

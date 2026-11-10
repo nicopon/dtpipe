@@ -126,4 +126,23 @@ public class StderrNoiseTests : IAsyncLifetime
         replayExit.Should().Be(0);
         replayStderr.Should().NotContain("[dtpipe] Warning");
     }
+
+    [Fact]
+    public async Task ExportJob_Without_Filename_Exits_NonZero_And_Creates_No_True_File()
+    {
+        var trueFile = Path.Combine(Directory.GetCurrentDirectory(), "true");
+        _cleanupPaths.Add(trueFile);
+        if (File.Exists(trueFile)) File.Delete(trueFile);
+
+        var (exitCode, stderr) = await RunCapturingStderr(
+            "-i", "generate:10",
+            "-o", "null:",
+            "--export-job");
+
+        exitCode.Should().Be(1);
+        stderr.Should().Contain("[ERROR]");
+        stderr.Should().Contain("--export-job");
+        stderr.Should().Contain("mandatory");
+        File.Exists(trueFile).Should().BeFalse();
+    }
 }
