@@ -278,7 +278,9 @@ public sealed class KeyIssuerTests : IDisposable
         await TokenAsync(allowed, "edge", await KeyedAsync(allowed, "edge"));
 
         using var reader = Client(allowed, CoordinatorHost.Person(CoordinatorHost.Reader));
-        Assert.True((await reader.GetFromJsonAsync<JsonElement>("/api/info", Ct)).GetProperty("httpKeys").GetBoolean());
+        var info = await reader.GetFromJsonAsync<JsonElement>("/api/info", Ct);
+        Assert.True(info.GetProperty("httpKeys").GetBoolean());
+        Assert.False(string.IsNullOrWhiteSpace(info.GetProperty("version").GetString()));
         Assert.Contains(log.Entries, e => e.Contains("Coordinator:Auth:AllowHttpKeys is set"));
         using var https = Client(_app, CoordinatorHost.Person(CoordinatorHost.Reader));
         Assert.False((await https.GetFromJsonAsync<JsonElement>("/api/info", Ct)).GetProperty("httpKeys").GetBoolean());

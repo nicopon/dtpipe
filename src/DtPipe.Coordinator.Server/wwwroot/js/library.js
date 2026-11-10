@@ -70,12 +70,12 @@ function deployRowActions(e) {
 function render() {
   if (!host) return;
   const rows = entries.map((e) => `
-    <tr>
-      <td><a href="#/library/${encodeURIComponent(e.id)}" class="strong">${esc(e.title)}</a><div class="hint mono">${esc(e.id)}</div></td>
-      <td class="wrap hint">${esc(e.description || "")}</td>
-      <td>${deploymentChip(e)} ${healthChip(e.id)} ${bindingsChip(e)}</td>
-      <td>${runCell(e.id)}</td>
-      <td class="hint">${esc(e.message || "")}<div>${esc(ago(e.updatedAt))}</div></td>
+    <tr class="pipeline-row">
+      <td class="col-pipeline"><span class="col-label">pipeline</span><a href="#/library/${encodeURIComponent(e.id)}" class="strong">${esc(e.title)}</a><div class="hint mono">${esc(e.id)}</div></td>
+      <td class="col-desc wrap hint"><span class="col-label">description</span>${esc(e.description || "")}</td>
+      <td class="col-state"><span class="col-label">state</span><div class="chips-wrap">${deploymentChip(e)} ${healthChip(e.id)} ${bindingsChip(e)}</div></td>
+      <td class="col-run"><span class="col-label">last run</span>${runCell(e.id)}</td>
+      <td class="col-change hint"><span class="col-label">last change</span>${esc(e.message || "")}<div>${esc(ago(e.updatedAt))}</div></td>
       <td class="actions-cell">
         <a class="button small" href="#/library/${encodeURIComponent(e.id)}" title="The plan a launch would make, and its runs">Open</a>
         ${deployRowActions(e)}
@@ -90,10 +90,12 @@ function render() {
       <h1>Library</h1>
       <p class="hint">Pipelines kept in the coordinator's own git repository. Each save is a commit; each one is a plain dtpipe job that also runs whole on one machine. Write one with <code>dtpipe studio --coordinator</code> and publish it here.</p>
     </div>
-    <section class="card">
-      <table class="library">
-        <tr><th>pipeline</th><th>description</th><th>state</th><th>last run</th><th>last change</th><th></th></tr>
-        ${rows || `<tr><td colspan="6" class="hint">The library is empty.</td></tr>`}
+    <section class="card library-card">
+      <table class="library pipelines-table">
+        <thead><tr class="head-row"><th>pipeline</th><th>description</th><th>state</th><th>last run</th><th>last change</th><th class="actions-head"></th></tr></thead>
+        <tbody>
+          ${rows || `<tr class="empty-row"><td colspan="6" class="hint">The library is empty.</td></tr>`}
+        </tbody>
       </table>
     </section>`;
 }

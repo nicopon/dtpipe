@@ -91,14 +91,18 @@ internal static class AccountPages
         return LoginForm(http, server, "/", "Too many sign-ins: try again in a minute.", StatusCodes.Status429TooManyRequests);
     }
 
-    private static IResult Page(CoordinatorServerOptions server, int status, string body) => Results.Content(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
-        + "<title>dtpipe coordinator</title><link rel=\"stylesheet\" href=\"/styles.css\"></head>"
-        + "<body style=\"max-width:40rem;margin:4rem auto;padding:0 1rem;font-family:system-ui,sans-serif;line-height:1.5\">"
-        + (server.ExchangesKeysOverHttp ? "<p style=\"background:#b00020;color:#fff;padding:.4rem .8rem;font-weight:600\">Identity keys cross the network in clear: this coordinator is reached over HTTP.</p>" : "")
-        + "<h1 style=\"font-size:1.3rem\">dtpipe coordinator</h1>"
-        + body
-        + "</body></html>",
-        "text/html; charset=utf-8",
-        statusCode: status);
+    private static IResult Page(CoordinatorServerOptions server, int status, string body)
+    {
+        var ver = CoordinatorServer.Version.Split('+')[0];
+        return Results.Content(
+            "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+            + "<title>dtpipe coordinator</title><link rel=\"stylesheet\" href=\"/styles.css\"></head>"
+            + "<body style=\"max-width:40rem;margin:4rem auto;padding:0 1rem;font-family:system-ui,sans-serif;line-height:1.5\">"
+            + (server.ExchangesKeysOverHttp ? "<p style=\"background:#b00020;color:#fff;padding:.4rem .8rem;font-weight:600\">Identity keys cross the network in clear: this coordinator is reached over HTTP.</p>" : "")
+            + $"<h1 style=\"font-size:1.3rem\">dtpipe coordinator <span style=\"font-size:.85rem;font-weight:400;color:var(--muted,#666);margin-left:.5rem\" title=\"v{CoordinatorServer.Version}\">v{ver}</span></h1>"
+            + body
+            + "</body></html>",
+            "text/html; charset=utf-8",
+            statusCode: status);
+    }
 }

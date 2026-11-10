@@ -155,7 +155,7 @@ export async function start() {
   const [me, info, nodes, bricks, matrix, deployments, runs, queue] = await Promise.all([
     api("/api/me"), api("/api/info"), api("/api/nodes"), api("/api/bricks"), api("/api/flow-matrix"), api("/api/deployments"), api("/api/runs"), api("/api/runs/queue"),
   ]);
-  Object.assign(store, { me, httpKeys: info.httpKeys, nodes, bricks, matrix: matrix.groups, deployments, runs, queue });
+  Object.assign(store, { me, httpKeys: info.httpKeys, version: info.version, nodes, bricks, matrix: matrix.groups, deployments, runs, queue });
   emit("all");
   refreshHealth();
   // ?static renders once without the live stream (a headless browser waits on it forever).

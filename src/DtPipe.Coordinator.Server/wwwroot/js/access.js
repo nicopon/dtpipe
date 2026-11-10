@@ -232,13 +232,9 @@ function render() {
     <section class="card">
       <div class="card-head"><h2>Identities <span class="hint">who</span></h2><button data-add>${adding ? "Cancel" : "Add an identity"}</button></div>
       ${adding ? `<div class="row add-identity">
+        <input type="hidden" id="a-kind" value="${currentKind.id}">
+        <span class="chip" style="font-weight:600">${esc(currentKind.label)}</span>
         <input id="a-id" class="mono" placeholder="client id">
-        <select id="a-kind" aria-label="Kind">
-          <option value="node" ${currentKind.id === "node" ? "selected" : ""}>node</option>
-          <option value="monitor" ${currentKind.id === "monitor" ? "selected" : ""}>monitor (reads /health)</option>
-          <option value="launcher" ${currentKind.id === "launcher" ? "selected" : ""}>launcher (starts runs)</option>
-          <option value="person" ${currentKind.id === "person" ? "selected" : ""}>person (signs in)</option>
-        </select>
         <select id="a-auth" aria-label="Verified by"><option value="key" ${rights.idp ? "" : "selected"}>verified by a key this coordinator makes</option>${rights.idp ? `<option value="idp" selected>verified by the identity provider</option>` : ""}</select>
         <input id="a-name" class="mono" placeholder="name (the client id by default)">
         <span data-for="node"><input id="a-groups" class="mono" placeholder="groups, separated by commas" list="groups-list">${runnersCheck(`id="a-runners"`)}</span>
@@ -283,7 +279,7 @@ function onChange(e) {
     const row = (matrixDraft[t.dataset.matrix] ||= new Set());
     t.checked ? row.add(t.dataset.to) : row.delete(t.dataset.to);
     render();
-  } else if (t.id === "a-kind" || t.id === "a-auth") shapeForm();
+  } else if (t.id === "a-auth") shapeForm();
   else if (t.id === "a-id" || t.id === "a-name") {
     // A node is proposed a group of its own, named after it, until someone types another.
     const groups = document.getElementById("a-groups");

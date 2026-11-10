@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text.Json.Serialization;
 using DtPipe.Coordinator;
 using DtPipe.Coordinator.Contracts;
@@ -45,6 +46,12 @@ internal sealed class AdminViews(IReadOnlyList<AdminView> views)
 /// </summary>
 public static class CoordinatorServer
 {
+    /// <summary>The coordinator server's version, as reported by the assembly's metadata.</summary>
+    public static string Version { get; } =
+        typeof(CoordinatorServer).Assembly.GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>()?.InformationalVersion
+        ?? typeof(CoordinatorServer).Assembly.GetName().Version?.ToString(3)
+        ?? "unknown";
+
     /// <summary>
     /// Registers the server's services, from the <c>Coordinator</c> section of the builder's configuration, which it returns read, and the
     /// pages the host adds as <paramref name="adminViews"/>.
@@ -268,7 +275,7 @@ public static class CoordinatorServer
         var account = app.MapGroup("/api").RequireAuthorization(TrustedIdp.SignedIn).AddEndpointFilter(RequireCsrfHeader);
         account.MapGet(CoordinatorApi.MeRoute, (HttpContext context) => new CoordinatorMe(
             context.User.Identity?.Name, context.User.FindFirst("email")?.Value, [.. CoordinatorRoles.All.Where(context.User.IsInRole)]));
-        account.MapGet("/info", (CoordinatorServerOptions options) => new { httpKeys = options.ExchangesKeysOverHttp });
+        account.MapGet("/info", (CoordinatorServerOptions options) => new { httpKeys = options.ExchangesKeysOverHttp, version = Version });
 
         var api = app.MapGroup("/api").RequireAuthorization(CoordinatorRoles.Reader).AddEndpointFilter(RequireCsrfHeader);
         var designer = api.MapGroup("").RequireAuthorization(CoordinatorRoles.Designer);

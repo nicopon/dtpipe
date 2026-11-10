@@ -51,6 +51,11 @@ window.addEventListener("unhandledrejection", (e) => addLog({ node: "coordinator
 
 start().then(() => {
   $("http-keys-banner").hidden = !store.httpKeys;
+  const ver = store.version?.split("+")[0] || store.version;
+  if ($("version")) {
+    $("version").textContent = ver ? `v${ver}` : "";
+    if (store.version && store.version !== ver) $("version").title = `Coordinator v${store.version}`;
+  }
   $("me").textContent = `${store.me.email || store.me.name} · ${store.me.roles[0] || "no role"}`;
   renderPills();
   route();
