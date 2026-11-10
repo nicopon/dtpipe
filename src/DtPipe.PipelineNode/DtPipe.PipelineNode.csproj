@@ -13,8 +13,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="TransportR" Version="0.11.0" />
-    <PackageReference Include="TransportR.Client" Version="0.11.0" />
+    <PackageReference Include="TransportR" Version="0.11.1" />
+    <PackageReference Include="TransportR.Client" Version="0.11.1" />
   </ItemGroup>
 
 </Project>

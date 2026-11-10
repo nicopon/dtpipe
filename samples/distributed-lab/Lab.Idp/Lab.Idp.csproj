@@ -9,9 +9,9 @@
 
   <ItemGroup>
     <!-- A stand-alone test identity provider: it knows nothing of dtpipe, TransportR or the coordinator. -->
-    <PackageReference Include="OpenIddict.AspNetCore" Version="7.7.1" />
-    <PackageReference Include="OpenIddict.EntityFrameworkCore" Version="7.7.1" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="10.0.12" />
+    <PackageReference Include="OpenIddict.AspNetCore" Version="7.8.0" />
+    <PackageReference Include="OpenIddict.EntityFrameworkCore" Version="7.8.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="10.0.14" />
   </ItemGroup>
 
 </Project>

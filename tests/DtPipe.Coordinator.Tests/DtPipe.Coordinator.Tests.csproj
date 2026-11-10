@@ -21,10 +21,10 @@
          above; only what this test project uses directly (standing in for pipeline nodes) needs
          its own PackageReference. -->
     <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.14" />
-    <PackageReference Include="TransportR.Client" Version="0.11.0" />
+    <PackageReference Include="TransportR.Client" Version="0.11.1" />
 
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.12" />
-    <PackageReference Include="Microsoft.AspNetCore.TestHost" Version="10.0.12" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.14" />
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" Version="10.0.14" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
     <PackageReference Include="xunit.v3" Version="3.2.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
