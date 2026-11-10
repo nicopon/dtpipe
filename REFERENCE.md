@@ -1456,12 +1456,13 @@ job it refuses is not saved, and the studio shows the check's report.
 A `${{NAME}}` in it stays as typed, and `--bind-input` and `--bind-output` are refused.
 
 **Write targets…** executes the job saved in the folder on this machine, as `dtpipe --job` would,
-after you confirm what it writes: each branch's target (a connection string with its secrets
-masked) and the writer's block as the file holds it. A run is real, so the page asks again if the
-job or the values it launches with changed since. A source brick reads its rows from its node
-through the coordinator; a sink brick is written to a throwaway file, never to its node. One action runs at a time (a preview, a change to what is pinned, or a run), the
-studio does not quit during a run, and **Stop** ends it with the verdict 130, however the engine
-answers the cancellation; a run that had finished before keeps its own code.
+after you confirm what it writes: each branch's target (a connection string with its secrets masked)
+and the writer's block as the file holds it. A run is real, so the page asks again if the job or the
+values it launches with changed since. A source brick reads its rows from its node through the
+coordinator; a sink brick is written to a throwaway file, never to its node. One action runs at a
+time (a preview, a change to what is pinned, or a run), the studio does not quit during a run, and
+**Stop** ends it with the verdict 130, however the engine answers the cancellation; a run that had
+finished before keeps its own code.
 
 The case **Review before writing** in the confirmation (unticked by default, and kept for the job)
 makes the run stop just before every branch that writes, whatever the cards. Nothing is written: the
