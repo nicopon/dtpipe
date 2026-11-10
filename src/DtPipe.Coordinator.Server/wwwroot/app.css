@@ -91,6 +91,11 @@ table.kv-table th { padding-right: 16px; }
 table.matrix.edit td { width: 80px; }
 table.matrix.edit input { cursor: pointer; }
 .add-identity { margin: 8px 0 12px; }
+.kind-tabs { display: flex; gap: 6px; margin: 0 0 12px; border-bottom: 1px solid var(--border); padding-bottom: 8px; flex-wrap: wrap; }
+.kind-tabs button { background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 4px 10px; font-weight: 600; font-size: 13px; color: var(--muted); cursor: pointer; }
+.kind-tabs button:hover { color: var(--text); background: var(--surface-2); }
+.kind-tabs button.active { color: var(--accent); background: var(--surface-2); border-color: var(--border); }
+.kind-tabs button .hint { font-weight: 400; margin-left: 4px; }
 tr.keys-row > td { background: var(--surface-2); }
 dialog.key-window { max-width: 680px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: inherit; box-shadow: var(--shadow); }
 dialog.key-window::backdrop { background: rgb(0 0 0 / 0.35); }

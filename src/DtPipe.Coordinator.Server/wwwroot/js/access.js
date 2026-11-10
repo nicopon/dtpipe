@@ -7,6 +7,7 @@ let host = null;
 let rights = null;
 let matrixDraft = null;      // group -> Set(targets), while edited
 let adding = false;
+let activeTab = null;        // node, launcher, monitor, person
 const openKeys = new Set();  // the identities whose keys are listed
 const keysOf = {};           // client id -> its keys as GET …/keys lists them: ids, last characters and dates, never a key
 
@@ -40,12 +41,13 @@ async function listKeys(id) {
 }
 
 const setOf = (list) => new Set(list || []);
-const KIND_CHIPS = {
-  monitor: `<span class="chip" title="A supervisor: it reads /health and nothing else">monitor</span>`,
-  launcher: `<span class="chip" title="A scheduler: it starts the runs of the pipelines listed and reads them, nothing else">launcher</span>`,
-  person: `<span class="chip" title="Someone who signs in to these pages and the studio, holding the role shown">person</span>`,
-};
 const ROLES = ["reader", "designer", "admin"];
+const KINDS = [
+  { id: "node", label: "Nodes", desc: "A node hosts pipeline fragments and exchanges data. A node sends to another only if every one of its groups may send to every group of the receiver in the flow matrix. A change of name or groups, or disabling a node, drops the control connections of its hosts, which reconnect under the new rights. Reconnect drops connections without changing anything." },
+  { id: "launcher", label: "Launchers", desc: "A launcher is a scheduler or CI/CD identity: it starts the runs of the pipelines listed on its row and reads their status via <code>/service/runs</code>, nothing else. With no pipeline listed, it can launch none." },
+  { id: "monitor", label: "Monitors", desc: "A monitor is a supervisor identity: it reads <code>/health</code> and nothing else, belongs to no group and hosts nothing." },
+  { id: "person", label: "Persons", desc: "A person signs in to these pages and the studio with the role on their row (<code>reader</code>, <code>designer</code>, or <code>admin</code>). One verified by the identity provider is identified by its account (an email by default); one verified by a key signs in with that key." },
+];
 const groupsOf = (text) => text.split(",").map((g) => g.trim()).filter(Boolean);
 const when = (date) => (date ? new Date(date).toLocaleString() : "");
 
@@ -80,7 +82,7 @@ function verification(i) {
     <button class="small ghost" data-keys>${openKeys.has(i.clientId) ? "Hide keys" : "Keys"}</button>`;
 }
 
-function keysRow(i) {
+function keysRow(i, colspan = 8) {
   const answer = keysOf[i.clientId];
   if (!openKeys.has(i.clientId) || !answer) return "";
   const rows = answer.keys.map((k) => `
@@ -88,7 +90,7 @@ function keysRow(i) {
       <td>${k.expires ? esc(when(k.expires)) : `<span class="hint">never</span>`}</td>
       <td>${k.revoked ? `<span class="chip">revoked ${esc(when(k.revoked))}</span>` : k.live ? `<span class="chip ok">live</span>` : `<span class="chip warn">expired</span>`}</td>
       <td>${k.revoked ? "" : `<button class="small ghost danger" data-revoke-key="${esc(k.id)}">Revoke</button>`}</td></tr>`).join("");
-  return `<tr class="keys-row" data-keys-of="${esc(i.clientId)}"><td colspan="8">
+  return `<tr class="keys-row" data-keys-of="${esc(i.clientId)}"><td colspan="${colspan}">
     <table><tr><th>key</th><th>ends in</th><th>label</th><th>made</th><th>expires</th><th>state</th><th></th></tr>${rows || `<tr><td colspan="7" class="hint">No key yet.</td></tr>`}</table>
     <div class="row"><input data-key-label placeholder="label (optional)" aria-label="Label of the next key of ${esc(i.clientId)}">
       <label class="check">expires <input type="datetime-local" data-key-expires aria-label="When the next key of ${esc(i.clientId)} expires (optional)"></label>
@@ -97,29 +99,93 @@ function keysRow(i) {
   </td></tr>`;
 }
 
+function renderIdentityTable(kind, items) {
+  if (kind === "node") {
+    const rows = items.map((i) => `
+      <tr data-identity="${esc(i.clientId)}">
+        <td><code>${esc(i.clientId)}</code></td>
+        <td>${verification(i)}</td>
+        <td><input class="mono narrow" data-field="name" value="${esc(i.name)}" aria-label="Node name of ${esc(i.clientId)}"></td>
+        <td><input class="mono" data-field="groups" value="${esc(i.groups.join(", "))}" list="groups-list" aria-label="Groups of ${esc(i.clientId)}, separated by commas"></td>
+        <td><input data-field="description" value="${esc(i.description)}" aria-label="Description of ${esc(i.clientId)}"></td>
+        <td><label class="check"><input type="checkbox" data-field="enabled" ${i.enabled ? "checked" : ""}> enabled</label></td>
+        <td>${i.connected ? `<span class="chip ok">connected</span>` : `<span class="chip">offline</span>`}</td>
+        <td class="actions-cell">
+          <button class="small" data-save-identity>Save</button>
+          <button class="small ghost" data-reconnect ${i.connected ? "" : "disabled"} title="Drop its control connection: its host connects again, under its current groups">Reconnect</button>
+          <button class="small ghost danger" data-remove-identity>Remove</button>
+        </td>
+      </tr>${keysRow(i, 8)}`).join("");
+    return `<table><tr><th>client</th><th>verified by</th><th>node name</th><th>groups</th><th>description</th><th></th><th>state</th><th></th></tr>
+      ${rows || `<tr><td colspan="8" class="hint">No node configured yet.</td></tr>`}</table>`;
+  }
+  if (kind === "launcher") {
+    const rows = items.map((i) => `
+      <tr data-identity="${esc(i.clientId)}">
+        <td><code>${esc(i.clientId)}</code></td>
+        <td>${verification(i)}</td>
+        <td><input class="mono narrow" data-field="name" value="${esc(i.name)}" aria-label="Name of ${esc(i.clientId)}"></td>
+        <td><input class="mono" data-field="pipelines" value="${esc((i.pipelines ?? []).join(", "))}" placeholder="none: it launches nothing" aria-label="Pipelines ${esc(i.clientId)} may launch, separated by commas"></td>
+        <td><input data-field="description" value="${esc(i.description)}" aria-label="Description of ${esc(i.clientId)}"></td>
+        <td><label class="check"><input type="checkbox" data-field="enabled" ${i.enabled ? "checked" : ""}> enabled</label></td>
+        <td class="actions-cell">
+          <button class="small" data-save-identity>Save</button>
+          <button class="small ghost danger" data-remove-identity>Remove</button>
+        </td>
+      </tr>${keysRow(i, 7)}`).join("");
+    return `<table><tr><th>client</th><th>verified by</th><th>name</th><th>pipelines it may launch</th><th>description</th><th></th><th></th></tr>
+      ${rows || `<tr><td colspan="7" class="hint">No launcher configured yet.</td></tr>`}</table>`;
+  }
+  if (kind === "monitor") {
+    const rows = items.map((i) => `
+      <tr data-identity="${esc(i.clientId)}">
+        <td><code>${esc(i.clientId)}</code></td>
+        <td>${verification(i)}</td>
+        <td><input class="mono narrow" data-field="name" value="${esc(i.name)}" aria-label="Name of ${esc(i.clientId)}"></td>
+        <td><input data-field="description" value="${esc(i.description)}" aria-label="Description of ${esc(i.clientId)}"></td>
+        <td><label class="check"><input type="checkbox" data-field="enabled" ${i.enabled ? "checked" : ""}> enabled</label></td>
+        <td class="actions-cell">
+          <button class="small" data-save-identity>Save</button>
+          <button class="small ghost danger" data-remove-identity>Remove</button>
+        </td>
+      </tr>${keysRow(i, 6)}`).join("");
+    return `<table><tr><th>client</th><th>verified by</th><th>name</th><th>description</th><th></th><th></th></tr>
+      ${rows || `<tr><td colspan="6" class="hint">No monitor configured yet.</td></tr>`}</table>`;
+  }
+  if (kind === "person") {
+    const rows = items.map((i) => `
+      <tr data-identity="${esc(i.clientId)}">
+        <td><code>${esc(i.clientId)}</code>${i.account ? `<div class="hint">${esc(i.account)}</div>` : ""}</td>
+        <td>${verification(i)}</td>
+        <td><input class="mono narrow" data-field="name" value="${esc(i.name)}" aria-label="Name of ${esc(i.clientId)}"></td>
+        <td><select data-field="role" aria-label="Role of ${esc(i.clientId)}">${ROLES.map((r) => `<option ${r === i.role ? "selected" : ""}>${r}</option>`).join("")}</select></td>
+        <td><input data-field="description" value="${esc(i.description)}" aria-label="Description of ${esc(i.clientId)}"></td>
+        <td><label class="check"><input type="checkbox" data-field="enabled" ${i.enabled ? "checked" : ""}> enabled</label></td>
+        <td class="actions-cell">
+          <button class="small" data-save-identity>Save</button>
+          <button class="small ghost danger" data-remove-identity>Remove</button>
+        </td>
+      </tr>${keysRow(i, 7)}`).join("");
+    return `<table><tr><th>client</th><th>verified by</th><th>name</th><th>role</th><th>description</th><th></th><th></th></tr>
+      ${rows || `<tr><td colspan="7" class="hint">No person configured yet.</td></tr>`}</table>`;
+  }
+  return "";
+}
+
 function render() {
   if (!host || !rights) return;
   const groups = rights.groups;
 
-  const identities = rights.identities.map((i) => `
-    <tr data-identity="${esc(i.clientId)}">
-      <td><code>${esc(i.clientId)}</code>${KIND_CHIPS[i.kind] ?? ""}${i.account ? `<div class="hint">${esc(i.account)}</div>` : ""}</td>
-      <td>${verification(i)}</td>
-      <td><input class="mono narrow" data-field="name" value="${esc(i.name)}" aria-label="${i.kind === "node" ? "Node name" : "Name"} of ${esc(i.clientId)}"></td>
-      <td>${i.kind === "launcher"
-        ? `<input class="mono" data-field="pipelines" value="${esc((i.pipelines ?? []).join(", "))}" placeholder="none: it launches nothing" aria-label="Pipelines ${esc(i.clientId)} may launch, separated by commas">`
-        : i.kind === "person"
-          ? `<select data-field="role" aria-label="Role of ${esc(i.clientId)}">${ROLES.map((r) => `<option ${r === i.role ? "selected" : ""}>${r}</option>`).join("")}</select>`
-          : `<input class="mono" data-field="groups" value="${esc(i.groups.join(", "))}" list="groups-list" aria-label="Groups of ${esc(i.clientId)}, separated by commas" ${i.kind === "monitor" ? `disabled placeholder="none"` : ""}>`}</td>
-      <td><input data-field="description" value="${esc(i.description)}" aria-label="Description of ${esc(i.clientId)}"></td>
-      <td><label class="check"><input type="checkbox" data-field="enabled" ${i.enabled ? "checked" : ""}> enabled</label></td>
-      <td>${i.connected ? `<span class="chip ok">connected</span>` : i.kind === "node" ? `<span class="chip">offline</span>` : ""}</td>
-      <td class="actions-cell">
-        <button class="small" data-save-identity>Save</button>
-        <button class="small ghost" data-reconnect ${i.connected ? "" : "disabled"} title="Drop its control connection: its host connects again, under its current groups">Reconnect</button>
-        <button class="small ghost danger" data-remove-identity>Remove</button>
-      </td>
-    </tr>${keysRow(i)}`).join("");
+  if (!activeTab) {
+    const firstWithItems = KINDS.find((k) => rights.identities.some((i) => i.kind === k.id));
+    activeTab = firstWithItems ? firstWithItems.id : "node";
+  }
+  const currentKind = KINDS.find((k) => k.id === activeTab) || KINDS[0];
+  const items = rights.identities.filter((i) => i.kind === currentKind.id);
+  const tabs = KINDS.map((k) => {
+    const count = rights.identities.filter((i) => i.kind === k.id).length;
+    return `<button class="${k.id === currentKind.id ? "active" : ""}" data-kind-tab="${k.id}">${k.label} <span class="hint">${count}</span></button>`;
+  }).join("");
 
   // What a host proposes for itself is untrusted text: shown escaped, and the administrator decides every field.
   const nameFrom = (proposed) => proposed.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 63);
@@ -167,7 +233,12 @@ function render() {
       <div class="card-head"><h2>Identities <span class="hint">who</span></h2><button data-add>${adding ? "Cancel" : "Add an identity"}</button></div>
       ${adding ? `<div class="row add-identity">
         <input id="a-id" class="mono" placeholder="client id">
-        <select id="a-kind" aria-label="Kind"><option value="node">node</option><option value="monitor">monitor (reads /health)</option><option value="launcher">launcher (starts runs)</option><option value="person">person (signs in)</option></select>
+        <select id="a-kind" aria-label="Kind">
+          <option value="node" ${currentKind.id === "node" ? "selected" : ""}>node</option>
+          <option value="monitor" ${currentKind.id === "monitor" ? "selected" : ""}>monitor (reads /health)</option>
+          <option value="launcher" ${currentKind.id === "launcher" ? "selected" : ""}>launcher (starts runs)</option>
+          <option value="person" ${currentKind.id === "person" ? "selected" : ""}>person (signs in)</option>
+        </select>
         <select id="a-auth" aria-label="Verified by"><option value="key" ${rights.idp ? "" : "selected"}>verified by a key this coordinator makes</option>${rights.idp ? `<option value="idp" selected>verified by the identity provider</option>` : ""}</select>
         <input id="a-name" class="mono" placeholder="name (the client id by default)">
         <span data-for="node"><input id="a-groups" class="mono" placeholder="groups, separated by commas" list="groups-list">${runnersCheck(`id="a-runners"`)}</span>
@@ -177,8 +248,9 @@ function render() {
         <input id="a-description" placeholder="description">
         <button class="primary" data-create>Create</button></div>` : ""}
       <datalist id="groups-list">${groups.map((g) => `<option>${esc(g)}</option>`).join("")}</datalist>
-      <table><tr><th>client</th><th>verified by</th><th>name</th><th>groups / pipelines / role</th><th>description</th><th></th><th>state</th><th></th></tr>${identities}</table>
-      <p class="hint">An identity verified by the identity provider is a client or an account the provider already knows; one verified by a key holds keys this coordinator makes, each shown once, when it is made. A person signs in to these pages and the studio with the role on its row. A monitor is the identity of a supervisor: it reads <code>/health</code> and nothing else, belongs to no group and hosts nothing. A launcher is the identity of a scheduler: it starts the runs of the pipelines listed on its row, reads them, and nothing else; with no pipeline listed it launches none. A node sends to another only if every one of its groups may send to every group of the receiver, in the matrix below. A change of name or groups, or disabling an identity, drops the control connections of its node's hosts, which connect again under the new rights. A disabled identity is refused when its hosts announce again and holds no group: the runs placed on them end. Reconnect drops the connections without changing anything.</p>
+      <div class="kind-tabs">${tabs}</div>
+      ${renderIdentityTable(currentKind.id, items)}
+      <p class="hint">${currentKind.desc}</p>
     </section>
 
     <section class="card">
@@ -278,13 +350,18 @@ async function onClick(e) {
   const keys = b.closest("[data-keys-of]");
   const waiting = b.closest("[data-pending]");
   try {
-    if (b.dataset.accept !== undefined) {
+    if (b.dataset.kindTab !== undefined) {
+      activeTab = b.dataset.kindTab;
+      render();
+      return;
+    } else if (b.dataset.accept !== undefined) {
       const subject = waiting.dataset.pending;
       await api(`/api/rights/pending/${encodeURIComponent(subject)}/accept`, {
         name: waiting.querySelector('[data-field="name"]').value.trim(),
         groups: groupsOf(waiting.querySelector('[data-field="groups"]').value),
         exchangeWithRunners: waiting.querySelector('[data-field="runners"]').checked,
       });
+      activeTab = "node";
       toast(`${subject} accepted: its host joins on its next attempt.`, "info");
     } else if (b.dataset.ignore !== undefined) {
       await api(`/api/rights/pending/${encodeURIComponent(waiting.dataset.pending)}/ignore`, {});
@@ -297,6 +374,7 @@ async function onClick(e) {
       if (identity.kind === "launcher") identity.pipelines = groupsOf(v("a-pipelines"));
       if (identity.kind === "person") Object.assign(identity, { role: v("a-role"), account: identity.auth === "idp" ? v("a-account") : null });
       await api("/api/rights/identities", identity);
+      activeTab = identity.kind;
       adding = false;
       if (identity.auth === "key") {
         openKeys.add(identity.clientId);
