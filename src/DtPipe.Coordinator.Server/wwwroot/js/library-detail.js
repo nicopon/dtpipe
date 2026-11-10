@@ -179,7 +179,8 @@ function render() {
 // the sender to each group of the receiver. An administrator allows them here, beside what the matrix allows already; anyone
 // else is told who can.
 function missingEdges() {
-  const allowed = (from, to) => (store.matrix[from] || []).some((t) => t === "*" || t.toLowerCase() === to.toLowerCase());
+  const reaches = (from, to) => (store.matrix[from] || []).some((t) => t === "*" || t.toLowerCase() === to.toLowerCase());
+  const allowed = (from, to) => reaches(from, to) || reaches("*", to);
   const pairs = plan.edges.filter((e) => !e.allowed).flatMap((e) => e.producerGroups.flatMap((from) => e.consumerGroups.map((to) => ({ from, to }))));
   const seen = new Set();
   return pairs.filter(({ from, to }) => !allowed(from, to) && !seen.has(`${from}\n${to}`) && seen.add(`${from}\n${to}`));

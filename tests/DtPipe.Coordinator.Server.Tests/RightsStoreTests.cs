@@ -200,6 +200,48 @@ public sealed class RightsStoreTests : IDisposable
         Assert.False(flow.CanSendTo(Set("crm"), Set("runner")));
     }
 
+    [Fact]
+    public void Wildcard_Edges_To_And_From_Runners_Allow_Any_Group_To_Use_Runners_Without_Allowing_Unlisted_Data_Flows()
+    {
+        var store = StoreOf(Document);
+        store.SetMatrix(new() { ["*"] = ["runner"], ["runner"] = ["*"] });
+
+        // Every group may send to runner, and runner alone may send to any group.
+        Assert.True(store.CanSend(Set("crm"), Set("runner")));
+        Assert.True(store.CanSend(Set("finance"), Set("runner")));
+        Assert.True(store.CanSend(Set("runner"), Set("warehouse")));
+        Assert.True(store.CanSend(Set("runner"), Set("crm", "warehouse")));
+
+        // Neither direct nor transitive flows between data groups are allowed until explicitly declared.
+        Assert.False(store.CanSend(Set("crm"), Set("warehouse")));
+        Assert.False(store.CanSend(Set("crm", "runner"), Set("warehouse")));
+        Assert.False(store.CanSend(Set("crm"), Set("crm")));
+        Assert.False(store.CanSend(Set("crm", "runner"), Set("crm")));
+
+        // Once crm -> warehouse is explicitly added, the transitive edge crm+runner -> warehouse passes,
+        // while finance+runner -> warehouse remains blocked.
+        store.AllowEdges([new GroupEdge("crm", "warehouse")]);
+        Assert.True(store.CanSend(Set("crm"), Set("warehouse")));
+        Assert.True(store.CanSend(Set("crm", "runner"), Set("warehouse")));
+        Assert.False(store.CanSend(Set("finance", "runner"), Set("warehouse")));
+        Assert.False(store.CanSend(Set("crm", "finance", "runner"), Set("warehouse")));
+
+        // '*' is never returned as a named group.
+        Assert.DoesNotContain("*", store.Groups());
+    }
+
+    [Fact]
+    public void Wildcard_To_Wildcard_And_Wildcard_Identity_Groups_Are_Refused()
+    {
+        var store = StoreOf(Document);
+
+        Assert.Throws<ConflictException>(() => store.SetMatrix(new() { ["*"] = ["*"] }));
+        Assert.Throws<ConflictException>(() => store.AllowEdges([new GroupEdge("*", "*")]));
+        Assert.Throws<ConflictException>(() => store.AddIdentity(new Identity("c", "node-c", "", ["*"])));
+        Assert.Throws<ConflictException>(() => store.AddIdentity(new Identity("c", "node-c", "", ["crm", "*"])));
+        Assert.Throws<ConflictException>(() => store.UpdateIdentity("a", null, null, ["*"], null));
+    }
+
     private const string WithMonitor = """
         {
           "identities": [

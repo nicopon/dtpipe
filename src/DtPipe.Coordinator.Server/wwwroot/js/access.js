@@ -51,13 +51,6 @@ const KINDS = [
 const groupsOf = (text) => text.split(",").map((g) => g.trim()).filter(Boolean);
 const when = (date) => (date ? new Date(date).toLocaleString() : "");
 
-// The groups of every runner the inventory knows, as the rights give them: what the server allows a new node to exchange with
-// when asked (RightsEndpoints.RunnerEdges). The page shows them; the server decides.
-function runnerGroups() {
-  const runners = (store.nodes || []).filter((n) => n.role === "Runner").map((n) => n.name);
-  return [...new Set(rights.identities.filter((i) => i.kind === "node" && i.enabled && runners.includes(i.name)).flatMap((i) => i.groups))].sort();
-}
-
 // The first group named after the node that no identity or matrix entry holds yet: a node accepted alone in a group of its own.
 function freeGroup(name) {
   let group = name;
@@ -65,15 +58,12 @@ function freeGroup(name) {
   return group;
 }
 
-function runnersCheck(attributes) {
-  const groups = runnerGroups();
-  return `<label class="check" title="${groups.length ? `Allows its groups and ${esc(groups.join(", "))} to send to each other, in the same change` : "No runner has announced itself yet"}">
-    <input type="checkbox" ${attributes} ${groups.length ? "checked" : "disabled"}> exchange with the runners both ways${groups.length ? ` (${esc(groups.join(", "))})` : ""}</label>`;
-}
-
 function matrixCell(from, to) {
+  if (from === "*" && to === "*") return `<td class="no" title="Each group-to-group flow is declared on its own row and column">—</td>`;
   const allowed = matrixDraft ? matrixDraft[from]?.has(to) : (rights.matrix[from] || []).includes(to);
-  return `<td class="${allowed ? "yes" : "no"}"><input type="checkbox" data-matrix="${esc(from)}" data-to="${esc(to)}" ${allowed ? "checked" : ""} aria-label="${esc(from)} may send to ${esc(to)}"></td>`;
+  const fromLabel = from === "*" ? "any group" : from;
+  const toLabel = to === "*" ? "any group" : to;
+  return `<td class="${allowed ? "yes" : "no"}"><input type="checkbox" data-matrix="${esc(from)}" data-to="${esc(to)}" ${allowed ? "checked" : ""} aria-label="${esc(fromLabel)} may send to ${esc(toLabel)}"></td>`;
 }
 
 function verification(i) {
@@ -175,6 +165,7 @@ function renderIdentityTable(kind, items) {
 function render() {
   if (!host || !rights) return;
   const groups = rights.groups;
+  const matrixGroups = groups.length ? ["*", ...groups] : [];
 
   if (!activeTab) {
     const firstWithItems = KINDS.find((k) => rights.identities.some((i) => i.kind === k.id));
@@ -197,8 +188,7 @@ function render() {
       <td>${esc(p.proposedName)}<div class="hint">${esc(p.description)}</div></td>
       <td class="hint">${p.bricks.length ? p.bricks.map(esc).join(", ") : "no brick"}</td>
       <td><input class="mono narrow" data-field="name" value="${esc(name)}" aria-label="Node name for ${esc(p.subject)}"></td>
-      <td><input class="mono" data-field="groups" value="${esc(freeGroup(name))}" placeholder="groups, separated by commas" list="groups-list" aria-label="Groups for ${esc(p.subject)}, separated by commas">
-        ${runnersCheck(`data-field="runners"`)}</td>
+      <td><input class="mono" data-field="groups" value="${esc(freeGroup(name))}" placeholder="groups, separated by commas" list="groups-list" aria-label="Groups for ${esc(p.subject)}, separated by commas"></td>
       <td class="actions-cell">
         <button class="small primary" data-accept>Accept</button>
         <button class="small ghost" data-ignore title="Set it aside for 24 hours: it is not shown again until then">Ignore for 24 h</button>
@@ -237,7 +227,7 @@ function render() {
         <input id="a-id" class="mono" placeholder="client id">
         <select id="a-auth" aria-label="Verified by"><option value="key" ${rights.idp ? "" : "selected"}>verified by a key this coordinator makes</option>${rights.idp ? `<option value="idp" selected>verified by the identity provider</option>` : ""}</select>
         <input id="a-name" class="mono" placeholder="name (the client id by default)">
-        <span data-for="node"><input id="a-groups" class="mono" placeholder="groups, separated by commas" list="groups-list">${runnersCheck(`id="a-runners"`)}</span>
+        <input id="a-groups" class="mono" data-for="node" placeholder="groups, separated by commas" list="groups-list">
         <input id="a-pipelines" class="mono" data-for="launcher" placeholder="pipelines it may launch, separated by commas">
         <select id="a-role" data-for="person" aria-label="Role">${ROLES.map((r) => `<option>${r}</option>`).join("")}</select>
         <input id="a-account" class="mono" data-for="person-idp" placeholder="account at the provider (an email by default)">
@@ -252,9 +242,9 @@ function render() {
     <section class="card">
       <div class="card-head"><h2>Flow matrix <span class="hint">to whom</span></h2>
         <span class="actions">${matrixDraft ? `<button class="ghost" data-matrix-reset>Discard</button><button class="primary" data-matrix-save>Apply</button>` : ""}</span></div>
-      <p class="hint">Rows send, columns receive. A node sends to another only if every group of the sender may send to every group of the receiver. The hub checks it on every transfer it opens, so a change applies to the next run with no redeployment; every plan is checked against it too.</p>
-      <table class="matrix edit"><tr><th>from \\ to</th>${groups.map((g) => `<th>${esc(g)}</th>`).join("")}</tr>
-        ${groups.map((g) => `<tr><th>${esc(g)}</th>${groups.map((t) => matrixCell(g, t)).join("")}</tr>`).join("")}</table>
+      <p class="hint">Rows send, columns receive; <code>*</code> stands for any group (for instance <code>* → runner</code> and <code>runner → *</code> so every group may exchange with the runners while still requiring each source group to reach its destination group). A node sends to another only if every group of the sender may send to every group of the receiver. The hub checks it on every transfer it opens, so a change applies to the next run with no redeployment; every plan is checked against it too.</p>
+      <table class="matrix edit"><tr><th>from \\ to</th>${matrixGroups.map((g) => `<th${g === "*" ? ` title="Any group"` : ""}>${esc(g)}</th>`).join("")}</tr>
+        ${matrixGroups.map((g) => `<tr><th${g === "*" ? ` title="Any group"` : ""}>${esc(g)}</th>${matrixGroups.map((t) => matrixCell(g, t)).join("")}</tr>`).join("")}</table>
     </section>
 
     <section class="card"><h2>Audit</h2>
@@ -275,7 +265,7 @@ function shapeForm() {
 function onChange(e) {
   const t = e.target;
   if (t.dataset.matrix !== undefined) {
-    if (!matrixDraft) matrixDraft = Object.fromEntries(rights.groups.map((g) => [g, setOf(rights.matrix[g])]));
+    if (!matrixDraft) matrixDraft = Object.fromEntries(["*", ...rights.groups].map((g) => [g, setOf(rights.matrix[g])]));
     const row = (matrixDraft[t.dataset.matrix] ||= new Set());
     t.checked ? row.add(t.dataset.to) : row.delete(t.dataset.to);
     render();
@@ -355,7 +345,6 @@ async function onClick(e) {
       await api(`/api/rights/pending/${encodeURIComponent(subject)}/accept`, {
         name: waiting.querySelector('[data-field="name"]').value.trim(),
         groups: groupsOf(waiting.querySelector('[data-field="groups"]').value),
-        exchangeWithRunners: waiting.querySelector('[data-field="runners"]').checked,
       });
       activeTab = "node";
       toast(`${subject} accepted: its host joins on its next attempt.`, "info");
@@ -366,7 +355,7 @@ async function onClick(e) {
     else if (b.dataset.create !== undefined) {
       const v = (id) => document.getElementById(id).value.trim();
       const identity = { clientId: v("a-id"), name: v("a-name") || null, description: v("a-description"), kind: v("a-kind"), auth: v("a-auth") };
-      if (identity.kind === "node") Object.assign(identity, { groups: groupsOf(v("a-groups")), exchangeWithRunners: document.getElementById("a-runners").checked });
+      if (identity.kind === "node") Object.assign(identity, { groups: groupsOf(v("a-groups")) });
       if (identity.kind === "launcher") identity.pipelines = groupsOf(v("a-pipelines"));
       if (identity.kind === "person") Object.assign(identity, { role: v("a-role"), account: identity.auth === "idp" ? v("a-account") : null });
       await api("/api/rights/identities", identity);

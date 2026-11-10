@@ -169,6 +169,7 @@ public sealed class RightsStore
     {
         var doc = _state.Doc;
         return doc.Identities.SelectMany(i => i.Groups).Concat(doc.Matrix.Keys).Concat(doc.Matrix.Values.SelectMany(v => v))
+            .Where(g => g != "*")
             .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
     }
 
@@ -180,10 +181,13 @@ public sealed class RightsStore
     }
 
     private static bool Allowed(RightsDocument doc, string from, string to) =>
-        doc.Matrix.TryGetValue(from, out var targets) && (targets.Contains("*") || targets.Contains(to, StringComparer.OrdinalIgnoreCase));
+        (doc.Matrix.TryGetValue(from, out var targets) && (targets.Contains("*") || targets.Contains(to, StringComparer.OrdinalIgnoreCase)))
+        || (to != "*" && doc.Matrix.TryGetValue("*", out var any) && any.Contains(to, StringComparer.OrdinalIgnoreCase));
 
     public void SetMatrix(Dictionary<string, List<string>> matrix, string? by = null) => Edit(by, doc =>
     {
+        if (matrix.TryGetValue("*", out var wildcardTargets) && wildcardTargets.Contains("*"))
+            throw new ConflictException("'* → *' cannot be allowed: declare each flow between groups, or between '*' and a specific group.");
         var changes = new List<string>();
         foreach (var group in matrix.Keys.Union(doc.Matrix.Keys).Order(StringComparer.Ordinal))
         {
@@ -193,7 +197,11 @@ public sealed class RightsStore
             foreach (var t in before.Except(after)) changes.Add($"{group} → {t} revoked");
         }
         doc.Matrix.Clear();
-        foreach (var (group, targets) in matrix) doc.Matrix[group] = targets.Distinct().Order(StringComparer.Ordinal).ToList();
+        foreach (var (group, targets) in matrix)
+        {
+            var distinct = targets.Distinct().Order(StringComparer.Ordinal).ToList();
+            if (group != "*" || distinct.Count > 0) doc.Matrix[group] = distinct;
+        }
         return changes.Count > 0 ? "Flow matrix: " + string.Join(", ", changes) : "Flow matrix saved, unchanged";
     });
 
@@ -212,6 +220,8 @@ public sealed class RightsStore
         {
             var (from, to) = (edge.From?.Trim() ?? "", edge.To?.Trim() ?? "");
             if (from.Length == 0 || to.Length == 0) throw new ConflictException("An edge names the group that sends and the group that receives.");
+            if (from == "*" && to == "*")
+                throw new ConflictException("'* → *' cannot be allowed: declare each flow between groups, or between '*' and a specific group.");
             if (Allowed(doc, from, to)) continue;
             if (!doc.Matrix.TryGetValue(from, out var targets)) doc.Matrix[from] = targets = [];
             targets.Add(to);
@@ -441,6 +451,7 @@ public sealed class RightsStore
         // Only a node belongs to groups: they are what the data plane admits it with, and a service of another kind is never admitted there.
         if (kind != IdentityKinds.Node) groups = [];
         else if (groups.Count == 0) throw new ConflictException($"'{identity.ClientId}' belongs to no group: an identity belongs to at least one.");
+        else if (groups.Contains("*")) throw new ConflictException($"'{identity.ClientId}' cannot belong to '*': '*' is the flow matrix wildcard, not a group.");
         // Only a launcher lists pipelines: a monitor reads them all, and a list on any other kind would grant nothing.
         var pipelines = (identity.Pipelines ?? []).Select(p => p.Trim()).Where(p => p.Length > 0).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
         if (kind != IdentityKinds.Launcher) pipelines = [];

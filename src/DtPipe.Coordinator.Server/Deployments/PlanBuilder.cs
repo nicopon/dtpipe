@@ -286,7 +286,7 @@ public sealed class PlanBuilder(
 
         // An edge joins two fragments of the plan: a fragment refused above is not in it, and an edge to it would point at nothing for
         // every reader of the plan. Allowed starts false: the matrix decides it, once, for the whole plan.
-        var originGroups = ComputeOriginGroups(units, placement, groupsOf);
+        var originGroups = ComputeOriginGroups(units, placement, groupsOf, nodes);
         var planned = fragments.Select(f => f.Name).ToHashSet(StringComparer.Ordinal);
         var asked = runEdges.Where(e => planned.Contains(e.Producer.Name) && planned.Contains(e.Consumer.Name)).Select(e => new PlannedEdge(
             e.Producer.Name, e.ProducerAlias, e.Consumer.Name, e.ConsumerAlias, originGroups.GetValueOrDefault(e.SourceUnitId, e.Producer.Groups), e.Consumer.Groups, Allowed: false))
@@ -298,12 +298,13 @@ public sealed class PlanBuilder(
 
     /// <summary>
     /// Computes the transitive origin groups of each unit by walking upstream dependencies in topological order,
-    /// accumulating upstream groups and the local groups of the node hosting the unit.
+    /// accumulating upstream groups, any inbound origin entering the same runner fragment, and the local groups of the node hosting the unit.
     /// </summary>
     private static Dictionary<string, IReadOnlyList<string>> ComputeOriginGroups(
         IReadOnlyList<Unit> units,
         IReadOnlyDictionary<string, string> placement,
-        IReadOnlyDictionary<string, IReadOnlyList<string>> groupsOf)
+        IReadOnlyDictionary<string, IReadOnlyList<string>> groupsOf,
+        IReadOnlyDictionary<string, NodeView> nodes)
     {
         var unitById = units.ToDictionary(u => u.Id, StringComparer.Ordinal);
         var memo = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
@@ -335,8 +336,18 @@ public sealed class PlanBuilder(
                     AddRange(Resolve(dep));
             }
 
-            if (placement.TryGetValue(unitId, out var node) && groupsOf.TryGetValue(node, out var localGroups))
-                AddRange(localGroups);
+            if (placement.TryGetValue(unitId, out var node))
+            {
+                if (nodes.TryGetValue(node, out var nodeView) && nodeView.Role == NodeRole.Runner)
+                {
+                    foreach (var other in units.Where(u => placement.GetValueOrDefault(u.Id) == node))
+                        foreach (var dep in other.DependsOn.Where(d => placement.GetValueOrDefault(d) != node))
+                            AddRange(Resolve(dep));
+                }
+
+                if (groupsOf.TryGetValue(node, out var localGroups))
+                    AddRange(localGroups);
+            }
 
             visiting.Remove(unitId);
             var result = acc.ToArray();

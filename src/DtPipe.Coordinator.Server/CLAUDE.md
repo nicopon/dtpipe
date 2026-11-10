@@ -545,8 +545,10 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   pass of `IPlanRegistry` (`PlanFlow`) and in the same sentence, a plan made under an earlier matrix included. A
   node in several groups sends only if every one of its groups may send to every group of the
   receiver, on both sides, and an edge carries the groups of both ends: a PlannedEdge's ProducerGroups
-  accumulates the groups of every upstream unit (DependsOn) transitively alongside the producer's own groups,
-  so an intermediate runner hop requires authorization from each upstream source group to the consumer groups. Never add a second matrix. The matrix changes whole
+  accumulates the groups of every upstream unit (DependsOn) and any inbound origin entering the same runner fragment
+  transitively alongside the producer's own groups, so an intermediate runner hop requires authorization from each
+  upstream source group to the consumer groups. `*` in the matrix stands for any group on either side (such as `*` → `runner`
+  and `runner` → `*`), while `*` → `*` and `*` as an identity group are refused. Never add a second matrix. The matrix changes whole
   (`PUT /api/rights/matrix`) or by edges added beside it, which revoke nothing, so two administrators who add at once keep both:
   `POST /api/rights/matrix/edges` (the page sends the pairs of groups a plan's refused edges lack), and `exchangeWithRunners` on a
   node added or accepted, in the same change as the identity, both ways between its groups and those the rights give every runner the

@@ -248,4 +248,126 @@ public sealed class PlanRightsTests : IDisposable
         Assert.Null(allowedPlan.FlowRejection);
         Assert.All(allowedPlan.Edges, e => Assert.True(e.Allowed));
     }
+
+    [Fact]
+    public async Task Wildcard_Runner_Rights_Cannot_Bypass_Transitive_Origin_Checks_Across_Single_Or_Multiple_Runners()
+    {
+        Announce("src", "crm", NodeRole.Data, [], [NodeAnnouncement.RawFragments]);
+        Announce("r1", "run1", NodeRole.Runner, [], []);
+        Announce("r2", "run2", NodeRole.Runner, [], []);
+        Announce("dst", "warehouse", NodeRole.Data, [], [NodeAnnouncement.RawFragments]);
+
+        var rights = Rights(
+            ("src", ["crm"], true),
+            ("r1", ["run1"], true),
+            ("r2", ["run2"], true),
+            ("dst", ["warehouse"], true));
+
+        // Every group may send to the runners, and the runners may send to every group.
+        Allow(rights, "*", "run1");
+        Allow(rights, "run1", "*");
+        Allow(rights, "*", "run2");
+        Allow(rights, "run2", "*");
+
+        const string job = "a:\n  input: generate:10\nb:\n  from: a\n  passthrough: true\nc:\n  from: b\n  passthrough: true\nd:\n  from: c\n  output: csv:out.csv\n";
+        var placement = new Dictionary<string, string> { ["a"] = "src", ["b"] = "r1", ["c"] = "r2", ["d"] = "dst" };
+
+        var plan = PlanJob(rights, job, placement);
+
+        // Both runner hops pass via '* -> run1' and '* -> run2', but the edge into 'dst' is refused until 'crm -> warehouse' is allowed.
+        Assert.False(plan.Deployable);
+        Assert.NotNull(plan.FlowRejection);
+        Assert.Contains("p@r2.c -> p@dst.c (crm+run1+run2 -> warehouse)", plan.FlowRejection);
+
+        var hop1 = Assert.Single(plan.Edges, e => e.ProducerFragment == "p@src" && e.ConsumerFragment == "p@r1");
+        Assert.True(hop1.Allowed);
+        var hop2 = Assert.Single(plan.Edges, e => e.ProducerFragment == "p@r1" && e.ConsumerFragment == "p@r2");
+        Assert.True(hop2.Allowed);
+        var hop3 = Assert.Single(plan.Edges, e => e.ProducerFragment == "p@r2" && e.ConsumerFragment == "p@dst");
+        Assert.False(hop3.Allowed);
+
+        Allow(rights, "crm", "warehouse");
+
+        var allowedPlan = PlanJob(rights, job, placement);
+
+        Assert.True(allowedPlan.Deployable);
+        Assert.Null(allowedPlan.FlowRejection);
+        Assert.All(allowedPlan.Edges, e => Assert.True(e.Allowed));
+    }
+
+    [Fact]
+    public async Task Wildcard_Runner_Rights_Cannot_Bypass_Missing_Group_In_Join_MultiGroup_Node_Or_FanOut()
+    {
+        Announce("n1", "crm", NodeRole.Data, [], [NodeAnnouncement.RawFragments]);
+        Announce("n2", "finance", NodeRole.Data, [], [NodeAnnouncement.RawFragments]);
+        Announce("dst1", "warehouse", NodeRole.Data, [], [NodeAnnouncement.RawFragments]);
+        Announce("dst2", "public", NodeRole.Data, [], [NodeAnnouncement.RawFragments]);
+
+        var rights = Rights(
+            ("n1", ["crm", "pii"], true),
+            ("n2", ["finance"], true),
+            ("r", ["run"], true),
+            ("dst1", ["warehouse", "audit"], true),
+            ("dst2", ["public"], true));
+
+        Allow(rights, "*", "run");
+        Allow(rights, "run", "*");
+        Allow(rights, "crm", "warehouse");
+        Allow(rights, "crm", "audit");
+        Allow(rights, "finance", "warehouse");
+        Allow(rights, "finance", "audit");
+
+        const string job = "s1:\n  input: generate:10\ns2:\n  input: generate:10\nj:\n  from: s1\n  ref: s2\n  sql: \"SELECT * FROM s1, s2\"\nout1:\n  from: j\n  output: csv:out1.csv\nout2:\n  from: j\n  output: csv:out2.csv\n";
+        var placement = new Dictionary<string, string> { ["s1"] = "n1", ["s2"] = "n2", ["j"] = "r", ["out1"] = "dst1", ["out2"] = "dst2" };
+
+        // Refused: 'pii' of n1 is not allowed to reach 'warehouse' or 'audit' on dst1, and none of the source groups may reach 'public' on dst2.
+        var plan = PlanJob(rights, job, placement);
+        Assert.False(plan.Deployable);
+        Assert.False(Assert.Single(plan.Edges, e => e.ConsumerFragment == "p@dst1").Allowed);
+        Assert.False(Assert.Single(plan.Edges, e => e.ConsumerFragment == "p@dst2").Allowed);
+
+        // Allowing pii -> warehouse+audit makes dst1 allowed, while dst2 remains refused.
+        Allow(rights, "pii", "warehouse");
+        Allow(rights, "pii", "audit");
+
+        var partialPlan = PlanJob(rights, job, placement);
+        Assert.False(partialPlan.Deployable);
+        Assert.True(Assert.Single(partialPlan.Edges, e => e.ConsumerFragment == "p@dst1").Allowed);
+        Assert.False(Assert.Single(partialPlan.Edges, e => e.ConsumerFragment == "p@dst2").Allowed);
+    }
+
+    [Fact]
+    public async Task Disconnected_Branches_On_The_Same_Runner_Cannot_Bypass_Transitive_Origin_Groups()
+    {
+        Announce("src", "crm", NodeRole.Data, [], [NodeAnnouncement.RawFragments]);
+        Announce("dst", "warehouse", NodeRole.Data, [], [NodeAnnouncement.RawFragments]);
+
+        var rights = Rights(
+            ("src", ["crm"], true),
+            ("r", ["run"], true),
+            ("dst", ["warehouse"], true));
+
+        Allow(rights, "*", "run");
+        Allow(rights, "run", "*");
+
+        // Branch 'leak_in' receives from 'src' (crm) onto runner 'r'; branch 'leak_out' on the same runner 'r' declares no 'from: leak_in'
+        // and feeds 'dst' (warehouse). Because both run in the same runner fragment process p@r, 'leak_out' inherits 'crm' as an origin.
+        const string job = "s:\n  input: generate:10\nleak_in:\n  from: s\n  output: csv:tmp.csv\nleak_out:\n  input: csv:tmp.csv\nd:\n  from: leak_out\n  output: csv:out.csv\n";
+        var placement = new Dictionary<string, string> { ["s"] = "src", ["leak_in"] = "r", ["leak_out"] = "r", ["d"] = "dst" };
+
+        var plan = PlanJob(rights, job, placement);
+
+        Assert.False(plan.Deployable);
+        Assert.NotNull(plan.FlowRejection);
+        var outEdge = Assert.Single(plan.Edges, e => e.ProducerFragment == "p@r" && e.ConsumerFragment == "p@dst");
+        Assert.False(outEdge.Allowed);
+        Assert.Equal(["crm", "run"], outEdge.ProducerGroups);
+        Assert.Equal(["warehouse"], outEdge.ConsumerGroups);
+
+        Allow(rights, "crm", "warehouse");
+
+        var allowedPlan = PlanJob(rights, job, placement);
+        Assert.True(allowedPlan.Deployable);
+        Assert.Null(allowedPlan.FlowRejection);
+    }
 }
