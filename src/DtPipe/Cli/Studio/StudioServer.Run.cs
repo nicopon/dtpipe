@@ -7,6 +7,7 @@ using DtPipe.Cli.Split;
 using DtPipe.Configuration;
 using DtPipe.Core.Security;
 using DtPipe.Jobs;
+using DtPipe.Jobs.Coordinator;
 using DtPipe.Sessions;
 using Microsoft.AspNetCore.Http;
 using YamlDotNet.RepresentationModel;
@@ -69,7 +70,7 @@ public sealed partial class StudioServer
 
     /// <summary>
     /// What a run of the saved job would do, or the refusal that says why it cannot: the job as saved
-    /// (its hash is the page's), no source brick (its rows would recreate a real target), every variable
+    /// (its hash is the page's), source bricks bound to rows from their node, every variable
     /// resolved. The digest binds the confirmation to this text and these values, by name.
     /// </summary>
     private RunPlan PlanRun(RunRequest asked)
@@ -79,10 +80,8 @@ public sealed partial class StudioServer
         if (asked.Hash is null || asked.Hash != job.Hash)
             throw new StudioRefusal(409, $"{path} is not the job saved last: save it, then run.");
         var sampling = BrickSampling.Of(job.Text, asked.Bricks, _tools.Coordinator?.Catalog);
-        if (sampling.Sources.Count > 0)
-            throw new StudioRefusal(409, "A run is refused here for a job that reads a brick: "
-                + string.Join(", ", sampling.Sources.Select(s => $"'{s.Alias}' ({s.Brick.Key})"))
-                + ". Its rows would recreate a real target on this machine. Sample it, or run it on its node.");
+        if (sampling.Sources.Count > 0 && _tools.Coordinator?.Status().State != CoordinatorLink.SignedIn)
+            throw new StudioRefusal(409, "This job reads a node's brick: sign in to the coordinator to run it.");
         RefuseReferences(sampling.Yaml);
         var launch = _variables.LaunchEnvironment(path, sampling.Yaml);
         var staged = asked.Debug == true || asked.Review == true;
@@ -108,6 +107,7 @@ public sealed partial class StudioServer
 
         var material = new StringBuilder(job.Text).Append('\0');
         foreach (var (name, value) in launch.OrderBy(p => p.Key, StringComparer.Ordinal)) material.Append(name).Append('=').Append(value).Append('\0');
+        foreach (var (alias, brick) in sampling.Sources.OrderBy(s => s.Alias, StringComparer.Ordinal)) material.Append("source-brick:").Append(alias).Append('=').Append(brick.Key).Append('\0');
         foreach (var alias in sampling.Sinks.Order(StringComparer.Ordinal)) material.Append("throwaway:").Append(alias).Append('\0');
         if (stagedRun is not null) material.Append("staged:").Append(stagedRun.Signature).Append('\0');
         var digest = Convert.ToHexStringLower(HMACSHA256.HashData(_token, Encoding.UTF8.GetBytes(material.ToString())));
@@ -222,7 +222,18 @@ public sealed partial class StudioServer
                 plan = PlanRun(asked);
                 if (asked.Digest != plan.Digest) throw new StudioRefusal(409, Changed);
             }
-            // A sink brick is written to a throwaway file here, never to its node, as a sample does.
+            // A source brick reads its rows from its node through the coordinator; a sink brick is written to a throwaway file here, never to its node.
+            var inputs = new List<string>();
+            foreach (var (alias, brick) in plan.Sampling.Sources)
+            {
+                if (plan.Staged?.Cut.Dropped.Contains(alias) == true) continue;
+                if (plan.Staged?.Cut.Unread.Contains(alias) == true) continue;
+                byte[] arrow;
+                try { arrow = await _tools.Coordinator!.SampleAsync(brick.Node, brick.Id, CoordinatorApi.MaxSampleRows, context.RequestAborted); }
+                catch (CoordinatorLinkException ex) { throw new StudioRefusal(502, $"'{alias}': {ex.Message}"); }
+                files.Add(_local.SampleFile(arrow));
+                inputs.Add($"{alias}={Bindable(files[^1])}");
+            }
             var outputs = new List<string>();
             foreach (var alias in plan.Sampling.Sinks)
             {
@@ -230,7 +241,7 @@ public sealed partial class StudioServer
                 files.Add(_local.SampleFile(null));
                 outputs.Add($"{alias}={Bindable(files[^1])}");
             }
-            var bindings = new StudioBindings(null, outputs.Count > 0 ? string.Join(',', outputs) : null);
+            var bindings = new StudioBindings(inputs.Count > 0 ? string.Join(',', inputs) : null, outputs.Count > 0 ? string.Join(',', outputs) : null);
             if (plan.Staged is { } staged)
             {
                 // The session keeps what the cut relies on, and nothing else: a run of every row is not a sample's.

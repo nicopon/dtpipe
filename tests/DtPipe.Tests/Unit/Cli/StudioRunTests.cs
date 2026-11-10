@@ -262,17 +262,25 @@ public sealed class StudioRunTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task A_job_that_reads_a_brick_is_refused_by_name_before_anything_runs()
+    public async Task A_job_that_reads_a_brick_runs_with_the_coordinator_sample()
     {
         await StartAsync(coordinator: true);
-        var hash = await SaveAsync("orders:\n  input: \"brick:n1/orders\"\nmain:\n  from: orders\n  output: \"null:\"\n");
+        var target = Path.Combine(_dir, "target.csv");
+        var hash = await SaveAsync($"orders:\n  input: \"brick:n1/orders\"\nmain:\n  from: orders\n  output: \"{target.Replace('\\', '/')}\"\n");
+        var bricks = new[] { new { branch = "orders", key = StudioFakes.SourceKey } };
 
-        var (status, body) = await CallAsync(HttpMethod.Post, "/api/run/prepare",
-            new { path = "job.yaml", hash, bricks = new[] { new { branch = "orders", key = StudioFakes.SourceKey } } });
+        var (status, prepared) = await CallAsync(HttpMethod.Post, "/api/run/prepare",
+            new { path = "job.yaml", hash, bricks });
 
-        Assert.Equal(HttpStatusCode.Conflict, status);
-        Assert.Contains("'orders'", body.GetProperty("error").GetString());
-        Assert.Contains(StudioFakes.SourceKey, body.GetProperty("error").GetString());
+        Assert.Equal(HttpStatusCode.OK, status);
+        var digest = prepared.GetProperty("digest").GetString()!;
+        Assert.Equal(HttpStatusCode.Accepted, (await CallAsync(HttpMethod.Post, "/api/run", new { path = "job.yaml", hash, bricks, digest })).Status);
+        var done = await UntilAsync(s => s.GetProperty("started").GetBoolean() && !s.GetProperty("running").GetBoolean());
+
+        Assert.Equal(0, done.GetProperty("code").GetInt32());
+        Assert.True(File.Exists(target));
+        Assert.Equal(4, File.ReadAllLines(target).Length);
+        Assert.Empty(Directory.GetFiles(Path.Combine(_dir, ".dtpipe", "studio", "samples")));
     }
 
     [Fact]
