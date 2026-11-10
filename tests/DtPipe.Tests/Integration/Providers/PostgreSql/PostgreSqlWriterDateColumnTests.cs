@@ -1,11 +1,12 @@
 using DtPipe.Adapters.PostgreSQL;
 using DtPipe.Core.Models;
+using DtPipe.Tests.Fixtures;
 using DtPipe.Tests.Helpers;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using Xunit;
 
-namespace DtPipe.Tests;
+namespace DtPipe.Tests.Integration;
 
 /// <summary>
 /// The PostgreSQL writer appending to a <c>date</c> column writes a date source and refuses a source
@@ -14,7 +15,7 @@ namespace DtPipe.Tests;
 /// </summary>
 [Trait("Category", "Integration")]
 [Collection("Docker Integration Tests")]
-public class PostgreSqlWriterDateColumnTests(DtPipe.Tests.Fixtures.GlobalDatabaseFixture fixture)
+public class PostgreSqlWriterDateColumnTests(GlobalDatabaseFixture fixture)
 {
     private const string Table = "writer_date_column_test";
 

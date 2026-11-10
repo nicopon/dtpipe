@@ -1,11 +1,12 @@
 using DtPipe.Adapters.PostgreSQL;
 using DtPipe.Core.Models;
+using DtPipe.Tests.Fixtures;
 using DtPipe.Tests.Helpers;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using Xunit;
 
-namespace DtPipe.Tests;
+namespace DtPipe.Tests.Integration;
 
 /// <summary>
 /// The PostgreSQL writer appending to a <c>bytea</c> column writes a binary source and refuses a
@@ -14,7 +15,7 @@ namespace DtPipe.Tests;
 /// </summary>
 [Trait("Category", "Integration")]
 [Collection("Docker Integration Tests")]
-public class PostgreSqlWriterByteaColumnTests(DtPipe.Tests.Fixtures.GlobalDatabaseFixture fixture)
+public class PostgreSqlWriterByteaColumnTests(GlobalDatabaseFixture fixture)
 {
     private const string Table = "writer_bytea_column_test";
 

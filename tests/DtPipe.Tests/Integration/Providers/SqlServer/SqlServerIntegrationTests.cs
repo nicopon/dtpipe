@@ -1,11 +1,12 @@
 using DtPipe.Adapters.Parquet;
 using DtPipe.Adapters.SqlServer;
+using DtPipe.Tests.Fixtures;
 using DtPipe.Tests.Helpers;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
-namespace DtPipe.Tests;
+namespace DtPipe.Tests.Integration;
 
 /// <summary>
 /// Integration tests using SQL Server Testcontainers.
@@ -14,10 +15,10 @@ namespace DtPipe.Tests;
 [Collection("Docker Integration Tests")]
 public class SqlServerIntegrationTests : IAsyncLifetime
 {
-    private readonly DtPipe.Tests.Fixtures.GlobalDatabaseFixture _fixture;
+    private readonly GlobalDatabaseFixture _fixture;
     private string? _connectionString;
 
-    public SqlServerIntegrationTests(DtPipe.Tests.Fixtures.GlobalDatabaseFixture fixture)
+    public SqlServerIntegrationTests(GlobalDatabaseFixture fixture)
     {
         _fixture = fixture;
     }

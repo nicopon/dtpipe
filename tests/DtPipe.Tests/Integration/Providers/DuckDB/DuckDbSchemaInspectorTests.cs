@@ -6,7 +6,7 @@ using DuckDB.NET.Data;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
-namespace DtPipe.Tests;
+namespace DtPipe.Tests.Integration;
 
 public class DuckDbSchemaInspectorTests : IDisposable
 {

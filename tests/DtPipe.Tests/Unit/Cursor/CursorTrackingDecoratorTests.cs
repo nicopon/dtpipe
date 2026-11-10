@@ -54,6 +54,7 @@ public class FakeRowDataWriter : IRowDataWriter
     }
 }
 
+[Collection("console-serial")]
 public class CursorTrackingDecoratorTests
 {
     [Fact]

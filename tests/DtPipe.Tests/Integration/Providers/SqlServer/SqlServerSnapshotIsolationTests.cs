@@ -4,7 +4,7 @@ using AwesomeAssertions;
 using Microsoft.Data.SqlClient;
 using Xunit;
 
-namespace DtPipe.Tests.Integration.Providers.SqlServer;
+namespace DtPipe.Tests.Integration;
 
 /// <summary>
 /// The reader asks for Snapshot isolation, which a database only grants once

@@ -43,7 +43,7 @@ DOCS=()
 while IFS= read -r doc; do DOCS+=("$doc"); done \
     < <(git ls-files --full-name -- '*.md' \
         | grep -E '^([^/]+\.md|docs/.+\.md)$' \
-        | grep -v '^CLAUDE.md$')
+        | grep -vE '^(CLAUDE|AGENTS)\.md$')
 if [ ${#DOCS[@]} -eq 0 ]; then fail "no documentation file found at the repository root"; fi
 
 echo "  Checking ${DOCS[*]} at $WIDTH columns..."

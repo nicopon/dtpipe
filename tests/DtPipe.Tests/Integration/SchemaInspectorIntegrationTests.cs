@@ -2,21 +2,22 @@ using DtPipe.Adapters.PostgreSQL;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using DtPipe.Core.Validation;
+using DtPipe.Tests.Fixtures;
 using DtPipe.Tests.Helpers;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using Xunit;
 
-namespace DtPipe.Tests;
+namespace DtPipe.Tests.Integration;
 
 [Trait("Category", "Integration")]
 [Collection("Docker Integration Tests")]
 public class SchemaInspectorIntegrationTests : IAsyncLifetime
 {
-    private readonly DtPipe.Tests.Fixtures.GlobalDatabaseFixture _fixture;
+    private readonly GlobalDatabaseFixture _fixture;
     private string? _connectionString;
 
-    public SchemaInspectorIntegrationTests(DtPipe.Tests.Fixtures.GlobalDatabaseFixture fixture)
+    public SchemaInspectorIntegrationTests(GlobalDatabaseFixture fixture)
     {
         _fixture = fixture;
     }

@@ -11,7 +11,7 @@ using DtPipe.Tests;
 using DtPipe.Tests.Helpers;
 using Xunit;
 
-namespace DtPipe.Tests;
+namespace DtPipe.Tests.Integration;
 
 public class DuckDbWriterTests : IAsyncLifetime
 {

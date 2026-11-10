@@ -18,7 +18,7 @@ using Moq;
 using Xunit;
 using DtPipe.Engine;
 
-namespace DtPipe.Tests;
+namespace DtPipe.Tests.Integration.E2E;
 
 public class E2EIntegrationTests : IAsyncLifetime
 {

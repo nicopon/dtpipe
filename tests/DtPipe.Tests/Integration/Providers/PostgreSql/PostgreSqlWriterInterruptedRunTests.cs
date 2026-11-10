@@ -1,11 +1,12 @@
 using DtPipe.Adapters.PostgreSQL;
 using DtPipe.Core.Models;
+using DtPipe.Tests.Fixtures;
 using DtPipe.Tests.Helpers;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using Xunit;
 
-namespace DtPipe.Tests;
+namespace DtPipe.Tests.Integration;
 
 /// <summary>
 /// The PostgreSQL writer commits each batch on its own and wraps the run in no transaction: a
@@ -15,7 +16,7 @@ namespace DtPipe.Tests;
 /// </summary>
 [Trait("Category", "Integration")]
 [Collection("Docker Integration Tests")]
-public class PostgreSqlWriterInterruptedRunTests(DtPipe.Tests.Fixtures.GlobalDatabaseFixture fixture)
+public class PostgreSqlWriterInterruptedRunTests(GlobalDatabaseFixture fixture)
 {
     private const string Table = "writer_interrupted_run_test";
 

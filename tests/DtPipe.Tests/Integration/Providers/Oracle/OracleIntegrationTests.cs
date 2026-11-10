@@ -3,11 +3,12 @@ using DtPipe.Adapters.DuckDB;
 using DtPipe.Adapters.Oracle;
 using DtPipe.Adapters.Parquet;
 using DtPipe.Core.Models;
+using DtPipe.Tests.Fixtures;
 using DtPipe.Tests.Helpers;
 using Oracle.ManagedDataAccess.Client;
 using Xunit;
 
-namespace DtPipe.Tests;
+namespace DtPipe.Tests.Integration;
 
 /// <summary>
 /// Integration tests using Oracle Testcontainers.
@@ -17,10 +18,10 @@ namespace DtPipe.Tests;
 [Collection("Docker Integration Tests")]
 public class OracleIntegrationTests : IAsyncLifetime
 {
-    private readonly DtPipe.Tests.Fixtures.GlobalDatabaseFixture _fixture;
+    private readonly GlobalDatabaseFixture _fixture;
     private string? _connectionString;
 
-    public OracleIntegrationTests(DtPipe.Tests.Fixtures.GlobalDatabaseFixture fixture)
+    public OracleIntegrationTests(GlobalDatabaseFixture fixture)
     {
         _fixture = fixture;
     }

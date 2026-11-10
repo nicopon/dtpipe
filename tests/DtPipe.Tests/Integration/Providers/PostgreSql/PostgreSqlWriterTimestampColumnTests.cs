@@ -1,11 +1,12 @@
 using DtPipe.Adapters.PostgreSQL;
 using DtPipe.Core.Models;
+using DtPipe.Tests.Fixtures;
 using DtPipe.Tests.Helpers;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using Xunit;
 
-namespace DtPipe.Tests;
+namespace DtPipe.Tests.Integration;
 
 /// <summary>
 /// The PostgreSQL writer appending to a <c>timestamp</c> or <c>timestamptz</c> column writes a
@@ -15,7 +16,7 @@ namespace DtPipe.Tests;
 /// </summary>
 [Trait("Category", "Integration")]
 [Collection("Docker Integration Tests")]
-public class PostgreSqlWriterTimestampColumnTests(DtPipe.Tests.Fixtures.GlobalDatabaseFixture fixture)
+public class PostgreSqlWriterTimestampColumnTests(GlobalDatabaseFixture fixture)
 {
     private const string Table = "writer_timestamp_column_test";
 

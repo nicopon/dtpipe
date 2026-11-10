@@ -1,19 +1,20 @@
 using DtPipe.Adapters.PostgreSQL;
+using DtPipe.Tests.Fixtures;
 using DtPipe.Tests.Helpers;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using Xunit;
 
-namespace DtPipe.Tests;
+namespace DtPipe.Tests.Integration;
 
 [Trait("Category", "Integration")]
 [Collection("Docker Integration Tests")]
 public class PostgreSqlIntegrationTests : IAsyncLifetime
 {
-    private readonly DtPipe.Tests.Fixtures.GlobalDatabaseFixture _fixture;
+    private readonly GlobalDatabaseFixture _fixture;
     private string? _connectionString;
 
-    public PostgreSqlIntegrationTests(DtPipe.Tests.Fixtures.GlobalDatabaseFixture fixture)
+    public PostgreSqlIntegrationTests(GlobalDatabaseFixture fixture)
     {
         _fixture = fixture;
     }

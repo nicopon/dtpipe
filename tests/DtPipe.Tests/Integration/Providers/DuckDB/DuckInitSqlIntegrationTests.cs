@@ -6,7 +6,7 @@ using AwesomeAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
-namespace DtPipe.Tests;
+namespace DtPipe.Tests.Integration;
 
 /// <summary>
 /// Integration tests for the --duck-init feature across DuckDataSourceReader and DuckDbDataWriter.

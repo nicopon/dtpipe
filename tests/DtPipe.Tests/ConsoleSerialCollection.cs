@@ -19,6 +19,11 @@ public sealed class ConsoleSerialCollection;
 public static class ConsoleSerialLock
 {
     private static readonly SemaphoreSlim Semaphore = new(1, 1);
+    private static readonly System.Text.RegularExpressions.Regex AnsiRegex =
+        new(@"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    /// <summary>Strips ANSI escape sequences from console output for deterministic string assertions.</summary>
+    public static string StripAnsi(string text) => AnsiRegex.Replace(text, string.Empty);
 
     /// <summary>
     /// Executes <paramref name="action"/> while capturing <see cref="Console.Out"/> and
@@ -35,7 +40,7 @@ public static class ConsoleSerialLock
         try
         {
             var exit = await action();
-            return (exit, captured.ToString());
+            return (exit, StripAnsi(captured.ToString()));
         }
         finally
         {
