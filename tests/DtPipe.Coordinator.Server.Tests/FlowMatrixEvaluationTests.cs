@@ -1,4 +1,5 @@
 using DtPipe.Coordinator.Contracts;
+using DtPipe.Coordinator.Server.Access;
 using DtPipe.Coordinator.Server.Deployments;
 using DtPipe.Coordinator.Server.Library;
 using DtPipe.Coordinator.Server.Nodes;
@@ -46,9 +47,11 @@ public sealed class FlowMatrixEvaluationTests : IDisposable
 
     private const string Fan = "a:\n  input: generate:1\nb:\n  from: a\n  output: csv:b.csv\nc:\n  from: a\n  output: csv:c.csv\n";
     private const string Pair = "a:\n  input: generate:1\nb:\n  from: a\n  output: csv:b.csv\n";
+    private const string Chain = "a:\n  input: generate:1\nb:\n  from: a\nc:\n  from: b\n  output: csv:c.csv\n";
 
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "matrix-" + Guid.NewGuid().ToString("N"));
     private readonly FlowControlOptions _matrix = new();
+    private readonly RightsStore _rights;
     private readonly CountingFlow _flow;
     private readonly ReplicaRegistry _registry = new();
     private readonly NodeInventory _inventory;
@@ -64,12 +67,12 @@ public sealed class FlowMatrixEvaluationTests : IDisposable
         {
             StateDir = Path.Combine(_dir, "state"), Authority = "http://idp", Audience = "test", UiClientId = "ui", UiClientSecret = "secret", RightsSeed = seed,
         };
-        var rights = MemoryRightsStore.Rights(options);
-        _flow = new CountingFlow(new DefaultFlowControlService(_matrix));
+        _rights = MemoryRightsStore.Rights(options);
+        _flow = new CountingFlow(new RightsFlowControl(_rights));
         _inventory = new NodeInventory(_registry);
-        _planner = new PlanBuilder(_inventory, new BrickCatalog(_inventory), new PlanRegistry(_flow), rights);
+        _planner = new PlanBuilder(_inventory, new BrickCatalog(_inventory), new PlanRegistry(_flow), _rights);
         _deployments = TestDeployments.Create(
-            _inventory, new NoLink(), new NoRuns(), new ReplicaAdmission(_registry, new InMemoryStateStore()), _flow, rights, new EventBus(),
+            _inventory, new NoLink(), new NoRuns(), new ReplicaAdmission(_registry, new InMemoryStateStore()), _flow, _rights, new EventBus(),
             MemoryRunStore.Journal(options), options);
 
         Runner("r1", "crm");
@@ -86,7 +89,13 @@ public sealed class FlowMatrixEvaluationTests : IDisposable
         _inventory.Announced(name, "node-" + name, announcement, [group]);
     }
 
-    private void Allow(string from, params string[] to) => _matrix.Groups[from] = new GroupAccess { CanSendTo = [.. to] };
+    private void Allow(string from, params string[] to)
+    {
+        _matrix.Groups[from] = new GroupAccess { CanSendTo = [.. to] };
+        var snapshot = _rights.Snapshot().Matrix;
+        snapshot[from] = [.. to];
+        _rights.SetMatrix(snapshot);
+    }
 
     private DistributionPlan Plan(string yaml, params (string Unit, string Node)[] placement) =>
         _planner.Build(new PlanRequest("p", yaml, placement.ToDictionary(p => p.Unit, p => p.Node)), PlanMode.Library);
@@ -145,5 +154,29 @@ public sealed class FlowMatrixEvaluationTests : IDisposable
 
         Assert.Equal("Plan rejected, edge(s) not permitted by the flow control matrix: p@r1.a -> p@r2.a (crm -> audit)", refused.Message);
         Assert.Equal(1, _flow.Evaluations - before);
+    }
+
+    [Fact]
+    public async Task Every_Edge_Is_Checked_Against_The_Flow_Matrix_And_Only_Fully_Allowed_Plans_Run()
+    {
+        Allow("crm", "audit");
+        Allow("audit", "ops");
+
+        var plan = Plan(Chain, ("a", "r1"), ("b", "r2"), ("c", "r3"));
+
+        Assert.Equal("Plan rejected, edge(s) not permitted by the flow control matrix: p@r2.b -> p@r3.b (crm+audit -> ops)", plan.FlowRejection);
+        Assert.False(plan.Deployable);
+        Assert.Equal([true, false], plan.Edges.Select(e => e.Allowed));
+
+        var refused = await Assert.ThrowsAsync<ConflictException>(() => _deployments.DeployAsync(plan, "test", CancellationToken.None));
+        Assert.Equal("This plan cannot be deployed: Plan rejected, edge(s) not permitted by the flow control matrix: p@r2.b -> p@r3.b (crm+audit -> ops)", refused.Message);
+
+        Allow("crm", "audit", "ops");
+
+        var allowedPlan = Plan(Chain, ("a", "r1"), ("b", "r2"), ("c", "r3"));
+
+        Assert.Null(allowedPlan.FlowRejection);
+        Assert.True(allowedPlan.Deployable);
+        Assert.All(allowedPlan.Edges, e => Assert.True(e.Allowed));
     }
 }

@@ -63,6 +63,13 @@ public sealed class PlanRightsTests : IDisposable
         Planner(rights).Build(
             new PlanRequest("p", Pair, new Dictionary<string, string> { ["a"] = "d", ["b"] = "r" }), PlanMode.Manual);
 
+    private static void Allow(RightsStore rights, string from, string to) =>
+        rights.AllowEdges([new GroupEdge(from, to)]);
+
+    private DistributionPlan PlanJob(RightsStore rights, string yaml, IReadOnlyDictionary<string, string> placement) =>
+        new PlanBuilder(_inventory, new BrickCatalog(_inventory), new PlanRegistry(new RightsFlowControl(rights)), rights)
+            .Build(new PlanRequest("p", yaml, placement), PlanMode.Manual);
+
     [Fact]
     public async Task A_Plan_Carries_The_Groups_The_Rights_Give_A_Node_Now_Not_Those_Of_Its_Last_Announcement()
     {
@@ -111,5 +118,134 @@ public sealed class PlanRightsTests : IDisposable
 
         Assert.Equal(["'b' cannot be placed: Node 'r' is disabled: its identity may not connect, so no run is placed on it."], plan.Errors);
         Assert.False(plan.Deployable);
+    }
+
+    [Fact]
+    public async Task Transitive_Flow_Through_A_Runner_Requires_The_Source_Group_To_Reach_The_Sink_Group()
+    {
+        Announce("src", "crm", NodeRole.Data, [], [NodeAnnouncement.RawFragments]);
+        Announce("dst", "warehouse", NodeRole.Data, [], [NodeAnnouncement.RawFragments]);
+
+        var rights = Rights(
+            ("src", ["crm"], true),
+            ("r", ["run"], true),
+            ("dst", ["warehouse"], true));
+
+        Allow(rights, "crm", "run");
+        Allow(rights, "run", "warehouse");
+
+        const string job = "a:\n  input: generate:10\nb:\n  from: a\n  passthrough: true\nc:\n  from: b\n  output: csv:out.csv\n";
+        var placement = new Dictionary<string, string> { ["a"] = "src", ["b"] = "r", ["c"] = "dst" };
+
+        var plan = PlanJob(rights, job, placement);
+
+        Assert.False(plan.Deployable);
+        Assert.NotNull(plan.FlowRejection);
+        Assert.Equal(2, plan.Edges.Count);
+
+        var firstEdge = Assert.Single(plan.Edges, e => e.ProducerFragment == "p@src" && e.ConsumerFragment == "p@r");
+        Assert.True(firstEdge.Allowed);
+        Assert.Equal(["crm"], firstEdge.ProducerGroups);
+        Assert.Equal(["run"], firstEdge.ConsumerGroups);
+
+        var secondEdge = Assert.Single(plan.Edges, e => e.ProducerFragment == "p@r" && e.ConsumerFragment == "p@dst");
+        Assert.False(secondEdge.Allowed);
+        Assert.Equal(["crm", "run"], secondEdge.ProducerGroups);
+        Assert.Equal(["warehouse"], secondEdge.ConsumerGroups);
+
+        Allow(rights, "crm", "warehouse");
+
+        var allowedPlan = PlanJob(rights, job, placement);
+
+        Assert.True(allowedPlan.Deployable);
+        Assert.Null(allowedPlan.FlowRejection);
+        Assert.All(allowedPlan.Edges, e => Assert.True(e.Allowed));
+    }
+
+    [Fact]
+    public async Task Join_On_A_Runner_Requires_Every_Upstream_Source_Group_To_Reach_The_Sink_Group()
+    {
+        Announce("n1", "crm", NodeRole.Data, [], [NodeAnnouncement.RawFragments]);
+        Announce("n2", "finance", NodeRole.Data, [], [NodeAnnouncement.RawFragments]);
+        Announce("dst", "warehouse", NodeRole.Data, [], [NodeAnnouncement.RawFragments]);
+
+        var rights = Rights(
+            ("n1", ["crm"], true),
+            ("n2", ["finance"], true),
+            ("r", ["run"], true),
+            ("dst", ["warehouse"], true));
+
+        Allow(rights, "crm", "run");
+        Allow(rights, "finance", "run");
+        Allow(rights, "run", "warehouse");
+        Allow(rights, "crm", "warehouse");
+
+        const string job = "s1:\n  input: generate:10\ns2:\n  input: generate:10\nj:\n  from: s1\n  ref: s2\n  sql: \"SELECT * FROM s1, s2\"\nout:\n  from: j\n  output: csv:out.csv\n";
+        var placement = new Dictionary<string, string> { ["s1"] = "n1", ["s2"] = "n2", ["j"] = "r", ["out"] = "dst" };
+
+        var plan = PlanJob(rights, job, placement);
+
+        Assert.False(plan.Deployable);
+        Assert.NotNull(plan.FlowRejection);
+
+        var outEdge = Assert.Single(plan.Edges, e => e.ProducerFragment == "p@r" && e.ConsumerFragment == "p@dst");
+        Assert.False(outEdge.Allowed);
+        Assert.Equal(["crm", "finance", "run"], outEdge.ProducerGroups);
+        Assert.Equal(["warehouse"], outEdge.ConsumerGroups);
+
+        Allow(rights, "finance", "warehouse");
+
+        var allowedPlan = PlanJob(rights, job, placement);
+
+        Assert.True(allowedPlan.Deployable);
+        Assert.Null(allowedPlan.FlowRejection);
+        Assert.All(allowedPlan.Edges, e => Assert.True(e.Allowed));
+    }
+
+    [Fact]
+    public async Task Multi_Hop_Runner_Chain_Propagates_Source_Groups_Across_All_Hops()
+    {
+        Announce("src", "crm", NodeRole.Data, [], [NodeAnnouncement.RawFragments]);
+        Announce("r1", "run1", NodeRole.Runner, [], []);
+        Announce("r2", "run2", NodeRole.Runner, [], []);
+        Announce("dst", "warehouse", NodeRole.Data, [], [NodeAnnouncement.RawFragments]);
+
+        var rights = Rights(
+            ("src", ["crm"], true),
+            ("r1", ["run1"], true),
+            ("r2", ["run2"], true),
+            ("dst", ["warehouse"], true));
+
+        Allow(rights, "crm", "run1");
+        Allow(rights, "crm", "run2");
+        Allow(rights, "run1", "run2");
+        Allow(rights, "run1", "warehouse");
+        Allow(rights, "run2", "warehouse");
+
+        const string job = "a:\n  input: generate:10\nb:\n  from: a\n  passthrough: true\nc:\n  from: b\n  passthrough: true\nd:\n  from: c\n  output: csv:out.csv\n";
+        var placement = new Dictionary<string, string> { ["a"] = "src", ["b"] = "r1", ["c"] = "r2", ["d"] = "dst" };
+
+        var plan = PlanJob(rights, job, placement);
+
+        Assert.False(plan.Deployable);
+        Assert.NotNull(plan.FlowRejection);
+
+        var hop2 = Assert.Single(plan.Edges, e => e.ProducerFragment == "p@r1" && e.ConsumerFragment == "p@r2");
+        Assert.True(hop2.Allowed);
+        Assert.Equal(["crm", "run1"], hop2.ProducerGroups);
+        Assert.Equal(["run2"], hop2.ConsumerGroups);
+
+        var hop3 = Assert.Single(plan.Edges, e => e.ProducerFragment == "p@r2" && e.ConsumerFragment == "p@dst");
+        Assert.False(hop3.Allowed);
+        Assert.Equal(["crm", "run1", "run2"], hop3.ProducerGroups);
+        Assert.Equal(["warehouse"], hop3.ConsumerGroups);
+
+        Allow(rights, "crm", "warehouse");
+
+        var allowedPlan = PlanJob(rights, job, placement);
+
+        Assert.True(allowedPlan.Deployable);
+        Assert.Null(allowedPlan.FlowRejection);
+        Assert.All(allowedPlan.Edges, e => Assert.True(e.Allowed));
     }
 }

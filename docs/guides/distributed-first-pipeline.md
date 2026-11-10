@@ -193,10 +193,11 @@ A host verified by a key is declared before it starts: its key is what opens it.
 press **Add an identity**, type `shop` as the client id, leave the kind `node` and the key, type
 `data` as its group, keep **exchange with the runners both ways** ticked, and press **Create**.
 
-A **group** is a label; the **flow matrix** says which group may send rows to which. The case you
-kept ticked added `data` → `runner` and `runner` → `data` to the matrix, in the same change as the
-identity: the node sends orders to the runner, and the runner sends the counts back. A change
-applies to the next run with no restart.
+A **group** is a label; the **flow matrix** says which group may send rows to which. When rows
+cross an intermediate runner, the matrix requires authorization from each source group all the way
+to the target groups. The case you kept ticked added `data` → `runner` and `runner` → `data` to the
+matrix, in the same change as the identity: the node sends orders to the runner, and the runner
+sends the counts back. A change applies to the next run with no restart.
 
 A window shows the node's key, once, with **Copy** and the way to use it; closing it forgets the
 key. Read it into the variable the window names, in the terminal where the node will run (paste,

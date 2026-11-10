@@ -165,12 +165,12 @@ public sealed class PlanBuilder(
             draft.Units.Add(unit.Id);
         }
 
-        var runEdges = new List<(FragmentDraft Producer, string ProducerAlias, FragmentDraft Consumer, string ConsumerAlias)>();
-        void Connect(FragmentDraft producer, string producerAlias, FragmentDraft consumer, string consumerAlias)
+        var runEdges = new List<(FragmentDraft Producer, string ProducerAlias, string SourceUnitId, FragmentDraft Consumer, string ConsumerAlias)>();
+        void Connect(FragmentDraft producer, string producerAlias, string sourceUnitId, FragmentDraft consumer, string consumerAlias)
         {
             producer.Edges.Add(new FragmentEdge(producerAlias, FragmentEdgeDirection.Outbound));
             consumer.Edges.Add(new FragmentEdge(consumerAlias, FragmentEdgeDirection.Inbound));
-            runEdges.Add((producer, producerAlias, consumer, consumerAlias));
+            runEdges.Add((producer, producerAlias, sourceUnitId, consumer, consumerAlias));
         }
 
         // 2a. A from/ref dependency that crosses nodes becomes an arrow edge.
@@ -223,7 +223,7 @@ public sealed class PlanBuilder(
                     producerAlias = $"{alias}__to__{Sanitize(consumerNode)}";
                     producer.Relays.Add((producerAlias, new YamlMappingNode { { JobKeys.From, alias }, { JobKeys.Output, ArrowEndpoint } }));
                 }
-                Connect(producer, producerAlias, consumer, alias);
+                Connect(producer, producerAlias, producerOf[alias].Id, consumer, alias);
             }
         }
 
@@ -286,13 +286,68 @@ public sealed class PlanBuilder(
 
         // An edge joins two fragments of the plan: a fragment refused above is not in it, and an edge to it would point at nothing for
         // every reader of the plan. Allowed starts false: the matrix decides it, once, for the whole plan.
+        var originGroups = ComputeOriginGroups(units, placement, groupsOf);
         var planned = fragments.Select(f => f.Name).ToHashSet(StringComparer.Ordinal);
         var asked = runEdges.Where(e => planned.Contains(e.Producer.Name) && planned.Contains(e.Consumer.Name)).Select(e => new PlannedEdge(
-            e.Producer.Name, e.ProducerAlias, e.Consumer.Name, e.ConsumerAlias, e.Producer.Groups, e.Consumer.Groups, Allowed: false))
+            e.Producer.Name, e.ProducerAlias, e.Consumer.Name, e.ConsumerAlias, originGroups.GetValueOrDefault(e.SourceUnitId, e.Producer.Groups), e.Consumer.Groups, Allowed: false))
             .ToList();
         var (plannedEdges, flowRejection) = PlanFlow.Judge(planRegistry, planId, asked);
 
         return Result(unitViews, fragments, plannedEdges, flowRejection);
+    }
+
+    /// <summary>
+    /// Computes the transitive origin groups of each unit by walking upstream dependencies in topological order,
+    /// accumulating upstream groups and the local groups of the node hosting the unit.
+    /// </summary>
+    private static Dictionary<string, IReadOnlyList<string>> ComputeOriginGroups(
+        IReadOnlyList<Unit> units,
+        IReadOnlyDictionary<string, string> placement,
+        IReadOnlyDictionary<string, IReadOnlyList<string>> groupsOf)
+    {
+        var unitById = units.ToDictionary(u => u.Id, StringComparer.Ordinal);
+        var memo = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+        var visiting = new HashSet<string>(StringComparer.Ordinal);
+
+        IReadOnlyList<string> Resolve(string unitId)
+        {
+            if (memo.TryGetValue(unitId, out var cached))
+                return cached;
+
+            if (!visiting.Add(unitId))
+                return [];
+
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            var acc = new List<string>();
+
+            void AddRange(IEnumerable<string> groups)
+            {
+                foreach (var g in groups)
+                {
+                    if (seen.Add(g))
+                        acc.Add(g);
+                }
+            }
+
+            if (unitById.TryGetValue(unitId, out var unit))
+            {
+                foreach (var dep in unit.DependsOn)
+                    AddRange(Resolve(dep));
+            }
+
+            if (placement.TryGetValue(unitId, out var node) && groupsOf.TryGetValue(node, out var localGroups))
+                AddRange(localGroups);
+
+            visiting.Remove(unitId);
+            var result = acc.ToArray();
+            memo[unitId] = result;
+            return result;
+        }
+
+        foreach (var u in units)
+            Resolve(u.Id);
+
+        return memo;
     }
 
     /// <summary>The pieces of a data node's fragment in the closed vocabulary of ids, or <c>null</c> when a branch is no brick of that node.</summary>

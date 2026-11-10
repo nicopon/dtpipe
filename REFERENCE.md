@@ -1698,10 +1698,14 @@ API is 9.
 
 The identity provider says who a caller is; the coordinator's **rights** say what it may do. Each
 identity (the `client_id` of a client-credentials client) has a name and belongs to groups, and a
-**matrix** lists which group may send rows to which. An identity has a kind: `node` (the default,
-hosts fragments), `monitor` (reads `/health/pipelines` and nothing else) or `launcher` (starts the
-runs of the pipelines it lists on `/service`, and reads them). A host whose identity the rights do
-not know waits in the **Access** view until an administrator accepts it.
+**matrix** lists which group may send rows to which. An edge checks that every group of the sender
+may send to every group of the receiver. When a pipeline flows through intermediate nodes or
+runners, origin groups propagate transitively along dependencies: an edge leaving a runner
+requires authorization from each upstream source group to the destination groups, so an intermediate
+hop cannot mask upstream origins. An identity has a kind: `node` (the default, hosts fragments),
+`monitor` (reads `/health/pipelines` and nothing else) or `launcher` (starts the runs of the
+pipelines it lists on `/service`, and reads them). A host whose identity the rights do not know
+waits in the **Access** view until an administrator accepts it.
 
 ### Routes for services
 
