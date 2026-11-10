@@ -40,6 +40,29 @@ public sealed class NodeCommandTests
     }
 
     [Fact]
+    public async Task Node_Help_Exposes_Job_Option()
+    {
+        var services = new ServiceCollection();
+        Program.ConfigureServices(services);
+        var jobService = services.BuildServiceProvider().GetRequiredService<JobService>();
+        var sw = new StringWriter();
+        var stdout = Console.Out;
+        Console.SetOut(sw);
+        try
+        {
+            var code = await jobService.BuildSubcommands().Parse(["node", "--help"]).InvokeAsync();
+            Assert.Equal(0, code);
+            var help = sw.ToString();
+            Assert.Contains("--job", help);
+            Assert.Contains("-j", help);
+        }
+        finally
+        {
+            Console.SetOut(stdout);
+        }
+    }
+
+    [Fact]
     public void A_Source_And_A_Sink_Are_Bricks_Named_By_Their_Alias()
     {
         var (bricks, refusal) = NodeBricks.Read("numbers:\n  input: generate:5\ntotals:\n  output: csv:/state/totals.csv\n");

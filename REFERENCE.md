@@ -1621,6 +1621,7 @@ beside it (`-i`, `-o`, `--alias`, `--job`).
 | Option | Description |
 |---|---|
 | `--runner` | Host no data and run any fragment the coordinator sends. Takes no value and no brick; with no `--description`, the node describes itself as a runner |
+| `--job FILE`, `-j FILE` | YAML job file declaring the bricks (sources and sinks) offered by this node |
 | `--name` / `--coordinator` / `--description` | `DtPipeNode__Name`, `__CoordinatorUrl` and `__Description` |
 | `--client-secret REF` | `DtPipeNode__Oidc__ClientSecret`, as a reference: `keyring://alias`, `${{NAME}}` or `@file`. A value is refused; the environment variable takes a reference too |
 

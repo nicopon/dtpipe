@@ -19,9 +19,21 @@ public sealed class NodeCommand : Command
     private const string EnvironmentPrefix = "DtPipeNode";
 
     public NodeCommand(IServiceProvider serviceProvider)
-        : base("node", "Run as a node of a distributed pipeline: each branch given is a brick it offers (--job <file.yaml> carries several, sources and sinks together), or --runner hosts no data")
+        : base("node", """
+            Run as a node of a distributed pipeline.
+
+            Modes:
+              --runner                    Host no data; run any coordinator fragment
+              --job <file.yaml>           Host bricks (sources/sinks) from a job file
+              -i/-o <target> --alias <id> Host an ad-hoc brick from the command line
+            """)
     {
         var runner = new Option<bool>("--runner") { Description = "Host no data and run any fragment the coordinator sends; takes no brick" };
+        var job = new Option<string?>("--job")
+        {
+            Description = "YAML job file declaring the bricks (sources and sinks) offered by this node",
+        };
+        job.Aliases.Add("-j");
         var name = new Option<string?>("--name") { Description = "The node's name (default: DtPipeNode__Name)" };
         var coordinator = new Option<string?>("--coordinator") { Description = "The coordinator's address (default: DtPipeNode__CoordinatorUrl)" };
         var description = new Option<string?>("--description") { Description = "What the node is, shown beside its name" };
@@ -30,6 +42,7 @@ public sealed class NodeCommand : Command
             Description = "The node's secret at the identity provider, as a reference: keyring://alias, ${{NAME}} or @file (default: DtPipeNode__Oidc__ClientSecret)",
         };
         Options.Add(runner);
+        Options.Add(job);
         Options.Add(name);
         Options.Add(coordinator);
         Options.Add(description);
@@ -69,16 +82,21 @@ public sealed class NodeCommand : Command
 
             var isRunner = parseResult.GetValue(runner);
             IReadOnlyList<DeclaredBrick> bricks = [];
+            var jobFile = parseResult.GetValue(job);
             if (isRunner)
             {
-                if (tokens.FirstOrDefault() is { } given)
+                var declared = jobFile is not null ? "--job" : tokens.FirstOrDefault();
+                if (declared is not null)
                 {
-                    Console.Error.WriteLine($"[ERROR] --runner hosts no data, so it takes no brick, and '{given}' declares one: remove --runner to host it, or remove '{given}' to run as a runner.");
+                    Console.Error.WriteLine($"[ERROR] --runner hosts no data, so it takes no brick, and '{declared}' declares one: remove --runner to host it, or remove '{declared}' to run as a runner.");
                     return 1;
                 }
             }
             else
             {
+                if (jobFile is not null)
+                    tokens.InsertRange(0, ["--job", jobFile]);
+
                 string yaml;
                 try { yaml = CommandLineJob.Export(serviceProvider, tokens); }
                 catch (Exception ex) when (ex is not OperationCanceledException)
