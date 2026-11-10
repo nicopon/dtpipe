@@ -28,7 +28,6 @@ public class SqlServerDataWriter : BaseSqlDataWriter, IColumnarDataWriter, IColu
 
     private readonly SqlServerWriterOptions _options;
     private SqlBulkCopy? _bulkCopy;
-    private DataTable? _bufferTable;
     private bool _isDbCaseSensitive = false;
     private readonly ILogger<SqlServerDataWriter> _logger;
 
@@ -111,7 +110,6 @@ public class SqlServerDataWriter : BaseSqlDataWriter, IColumnarDataWriter, IColu
         if (_bulkCopy != null) return;
 
         var targetInfo = await InspectTargetAsync(ct);
-        _bufferTable = new DataTable();
 
         bool useTargetCols = targetInfo != null && targetInfo.Columns.Count > 0;
         int colCount = useTargetCols ? targetInfo!.Columns.Count : _columns!.Count;
@@ -142,7 +140,7 @@ public class SqlServerDataWriter : BaseSqlDataWriter, IColumnarDataWriter, IColu
             }
         }
 
-        // Pre-compute source index mapping, buffer columns and per-column converters
+        // Pre-compute source index mapping and per-column converters
         _sourceIndices = new int[colCount];
         _converters = new Func<object?, object?>[colCount];
         for (int i = 0; i < colCount; i++)
@@ -161,7 +159,7 @@ public class SqlServerDataWriter : BaseSqlDataWriter, IColumnarDataWriter, IColu
             }
             _sourceIndices[i] = srcIdx;
             var (bufferType, convert) = BufferColumn(nativeTypes[i], _targetTypes[i], srcClrType, colName);
-            _bufferTable.Columns.Add(colName, bufferType);
+            _targetTypes[i] = bufferType;
             _converters[i] = convert;
         }
 
@@ -174,13 +172,14 @@ public class SqlServerDataWriter : BaseSqlDataWriter, IColumnarDataWriter, IColu
         {
             DestinationTableName = _quotedTargetTableName,
             BatchSize = 0,
-            BulkCopyTimeout = 0
+            BulkCopyTimeout = 0,
+            EnableStreaming = true
         };
 
         // Map columns by name
-        foreach (DataColumn dc in _bufferTable.Columns)
+        foreach (var col in _targetColumnNames)
         {
-            _bulkCopy.ColumnMappings.Add(dc.ColumnName, dc.ColumnName);
+            _bulkCopy.ColumnMappings.Add(col, col);
         }
     }
 
@@ -290,7 +289,6 @@ public class SqlServerDataWriter : BaseSqlDataWriter, IColumnarDataWriter, IColu
     protected override ValueTask DisposeResourcesAsync()
     {
         if (_bulkCopy is IDisposable d) d.Dispose();
-        _bufferTable?.Dispose();
         return ValueTask.CompletedTask;
     }
 
@@ -345,7 +343,8 @@ public class SqlServerDataWriter : BaseSqlDataWriter, IColumnarDataWriter, IColu
             {
                 DestinationTableName = stageTable,
                 BatchSize = 0,
-                BulkCopyTimeout = 0
+                BulkCopyTimeout = 0,
+                EnableStreaming = true
             };
 
             foreach (var col in _targetColumnNames!)
@@ -366,74 +365,15 @@ public class SqlServerDataWriter : BaseSqlDataWriter, IColumnarDataWriter, IColu
 
         await EnsureBulkCopyInitializedAsync(ct);
 
-        _bufferTable!.Rows.Clear();
+        using var reader = new ObjectListDataReader(rows, _targetColumnNames!, _targetTypes!, _sourceIndices!, _converters!);
 
         if (_options.Strategy == SqlServerWriteStrategy.Upsert || _options.Strategy == SqlServerWriteStrategy.Ignore)
         {
-            await ExecuteMergeAsync(rows, ct);
+            await ExecuteMergeFromReaderAsync(reader, ct);
             return;
         }
 
-        await ExecuteBulkInsertAsync(rows, ct);
-    }
-
-    private async Task ExecuteBulkInsertAsync(IEnumerable<object?[]> rows, CancellationToken ct)
-    {
-        FillBufferRows(rows);
-        await _bulkCopy!.WriteToServerAsync(_bufferTable, ct);
-    }
-
-    // The one implementation of the row→staging-buffer mapping, shared by bulk insert and
-    // merge staging.
-    private void FillBufferRows(IEnumerable<object?[]> rows)
-    {
-        _bufferTable!.Clear();
-        foreach (var row in rows)
-        {
-            var dataRow = _bufferTable.NewRow();
-            for (int i = 0; i < _converters!.Length; i++)
-            {
-                int srcIdx = _sourceIndices![i];
-                dataRow[i] = srcIdx >= 0 ? _converters[i](row[srcIdx]) : DBNull.Value;
-            }
-            _bufferTable.Rows.Add(dataRow);
-        }
-    }
-
-    private async Task ExecuteMergeAsync(IReadOnlyList<object?[]> rows, CancellationToken ct)
-    {
-        // 1. Create Staging Table for Merge
-        // utilizing a local temporary table (#Stage_...) ensuring isolation
-        var stageTable = $"#Stage_{Guid.NewGuid():N}";
-
-        // Select into strict syntax to create empty staging table structure
-        await ExecuteNonQueryAsync($"SELECT TOP 0 * INTO [{stageTable}] FROM {_quotedTargetTableName}", ct);
-
-        try
-        {
-            // 2. Bulk Copy to Stage
-            using var stageBulk = new SqlBulkCopy((SqlConnection)_connection!, SqlBulkCopyOptions.TableLock | SqlBulkCopyOptions.UseInternalTransaction, null)
-            {
-                DestinationTableName = stageTable,
-                BatchSize = 0,
-                BulkCopyTimeout = 0
-            };
-
-            foreach (DataColumn dc in _bufferTable!.Columns)
-            {
-                stageBulk.ColumnMappings.Add(dc.ColumnName, dc.ColumnName);
-            }
-
-            FillBufferRows(rows);
-            await stageBulk.WriteToServerAsync(_bufferTable, ct);
-
-            // 3. Perform Merge
-            await MergeFromStagingAsync(stageTable, ct);
-        }
-        finally
-        {
-            await ExecuteNonQueryAsync($"DROP TABLE IF EXISTS [{stageTable}]", ct);
-        }
+        await _bulkCopy!.WriteToServerAsync(reader, ct);
     }
 
     private async Task MergeFromStagingAsync(string stagingTable, CancellationToken ct)

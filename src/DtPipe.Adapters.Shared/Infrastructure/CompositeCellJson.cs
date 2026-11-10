@@ -27,7 +27,7 @@ public static class CompositeCellJson
     /// every text cell into an array of characters and every BLOB into an array of numbers.
     /// </summary>
     public static bool IsComposite(object? value)
-        => value is IDictionary || (value is IEnumerable && value is not string && value is not byte[]);
+        => value is not null and not string and not byte[] && (value is IDictionary or IEnumerable);
 
     /// <summary>
     /// JSON for one composite value, serialized against its runtime type — against the static

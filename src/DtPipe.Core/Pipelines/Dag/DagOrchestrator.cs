@@ -28,7 +28,7 @@ public class DagOrchestrator : IDagOrchestrator
     private static readonly Schema _emptySchema = new Schema(System.Array.Empty<Field>(), null);
 
     // Constants for DAG execution
-    private const int DefaultArrowChannelCapacity = 8;
+    private const int DefaultArrowChannelCapacity = 3;
 
     public Action<DagLogEvent>? OnLogEvent { get; set; }
 
@@ -62,6 +62,39 @@ public class DagOrchestrator : IDagOrchestrator
 
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var effectiveCt = linkedCts.Token;
+
+        // Fast-path: single standalone linear branch with no memory channels or fan-out
+        if (dag.Branches.Count == 1 &&
+            dag.Branches[0] is { StreamingAliases.Count: 0, RefAliases.Count: 0, HasStreamTransformer: false } singleBranch &&
+            !string.IsNullOrEmpty(singleBranch.Output))
+        {
+            _logger.LogInformation("Orchestrating single linear branch '{Alias}' via direct fast-path.", singleBranch.Alias);
+            await Task.Yield();
+            try
+            {
+                int exitCode = await branchExecutor(singleBranch, new BranchChannelContext(), effectiveCt);
+                if (exitCode != 0)
+                {
+                    _logger.LogError("Branch '{Alias}' failed with exit code {ExitCode}.", singleBranch.Alias, exitCode);
+                    OnLogEvent?.Invoke(new DagLogEvent(DagLogSeverity.Error, $"Branch '{singleBranch.Alias}' failed with exit code {exitCode}.", singleBranch.Alias));
+                }
+                return exitCode;
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogWarning("Linear branch '{Alias}' was canceled.", singleBranch.Alias);
+                OnLogEvent?.Invoke(new DagLogEvent(DagLogSeverity.Warning, $"Linear branch '{singleBranch.Alias}' was canceled.", singleBranch.Alias));
+                return 1;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Branch '{Alias}' failed.\n{Chain}", singleBranch.Alias,
+                    Infrastructure.Diagnostics.ExceptionChainFlattener.Format(ex));
+                var innerMsg = ex.GetBaseException().Message;
+                OnLogEvent?.Invoke(new DagLogEvent(DagLogSeverity.Error, innerMsg, singleBranch.Alias));
+                return 1;
+            }
+        }
 
         // ──────────────────────────────────────────────────────────────────
         // 1. Dependency Analysis & Lifecycle Tracking

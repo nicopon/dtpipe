@@ -254,13 +254,13 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter, IColumnarD
     /// </summary>
     public async ValueTask WriteRecordBatchAsync(RecordBatch batch, CancellationToken ct = default)
     {
-        if (batch.Length == 0) return;
-
-        await EnsureConnectionOpenAsync(ct);
-        await EnsureMetaDataInitializedAsync(ct);
-
         using (batch)
         {
+            if (batch.Length == 0) return;
+
+            await EnsureConnectionOpenAsync(ct);
+            await EnsureMetaDataInitializedAsync(ct);
+
             // COPY BINARY has no composite form a text column can accept, so a struct or a list
             // column becomes JSON before the column writers see it. Same reference back when the
             // batch holds none, which is the ordinary case.
@@ -312,10 +312,8 @@ public sealed partial class PostgreSqlDataWriter : BaseSqlDataWriter, IColumnarD
 
     public override async ValueTask CompleteAsync(CancellationToken ct = default)
     {
-        await ValueTask.CompletedTask;
+        await base.CompleteAsync(ct);
     }
-
-
 
     public override async ValueTask ExecuteCommandAsync(string command, CancellationToken ct = default)
     {

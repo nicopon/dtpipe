@@ -619,6 +619,22 @@ public sealed class PipelineExecutor
         ISampleTap? tap,
         CancellationToken ct)
     {
+        if (limit <= 0 && (samplingRate <= 0 || samplingRate >= 1.0) && tap is null)
+        {
+            await foreach (var batch in reader.ReadBatchesAsync(batchSize, ct))
+            {
+                if (batch.Length == 0) continue;
+                var rows = System.Runtime.InteropServices.MemoryMarshal.TryGetArray(batch, out var segment)
+                    && segment.Offset == 0 && segment.Count == segment.Array!.Length
+                    ? (IReadOnlyList<object?[]>)segment.Array
+                    : batch.ToArray();
+                progress.ReportRead(rows.Count);
+                await writer.WriteBatchAsync(rows, ct);
+                progress.ReportWrite(rows.Count);
+            }
+            return;
+        }
+
         async IAsyncEnumerable<object?[]> FlattenBatches([EnumeratorCancellation] CancellationToken innerCt = default)
         {
             await foreach (var batch in reader.ReadBatchesAsync(batchSize, innerCt))

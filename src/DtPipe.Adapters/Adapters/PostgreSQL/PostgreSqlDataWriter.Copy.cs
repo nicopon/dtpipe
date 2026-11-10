@@ -20,20 +20,20 @@ public sealed partial class PostgreSqlDataWriter
         var copySql = BuildCopySql(_quotedTargetTableName);
         _logger.LogDebug("Executing PostgreSQL Binary Import: {Sql}", copySql);
         await using var writer = await ((NpgsqlConnection)_connection!).BeginBinaryImportAsync(copySql, ct);
-
-        await WriteRowsToCopyAsync(writer, rows, ct);
+        WriteRowsToCopy(writer, rows, ct);
         await writer.CompleteAsync(ct);
     }
 
     private async Task WriteRecordBatchDirectAsync(RecordBatch batch, CancellationToken ct)
     {
         var copySql = BuildCopySql(_quotedTargetTableName);
+        _logger.LogDebug("Executing PostgreSQL Columnar Binary Import ({Rows} rows): {Sql}", batch.Length, copySql);
         await using var writer = await ((NpgsqlConnection)_connection!).BeginBinaryImportAsync(copySql, ct);
-        await WriteColumnarToCopyAsync(writer, batch, ct);
+        WriteColumnarToCopy(writer, batch, ct);
         await writer.CompleteAsync(ct);
     }
 
-    private async Task WriteColumnarToCopyAsync(NpgsqlBinaryImporter writer, RecordBatch batch, CancellationToken ct)
+    private void WriteColumnarToCopy(NpgsqlBinaryImporter writer, RecordBatch batch, CancellationToken ct = default)
     {
         // A vendor's opaque column is stored as bytes but declared as the value its codec decodes:
         // it is read through its field, never by its storage type.
@@ -47,7 +47,8 @@ public sealed partial class PostgreSqlDataWriter
 
         for (int row = 0; row < batch.Length; row++)
         {
-            await writer.StartRowAsync(ct);
+            ct.ThrowIfCancellationRequested();
+            writer.StartRow();
             for (int j = 0; j < _targetToSourceMap.Length; j++)
             {
                 var array = batch.Column(_targetToSourceMap[j]);
@@ -61,11 +62,12 @@ public sealed partial class PostgreSqlDataWriter
         }
     }
 
-    private async Task WriteRowsToCopyAsync(NpgsqlBinaryImporter writer, IReadOnlyList<object?[]> rows, CancellationToken ct)
+    private void WriteRowsToCopy(NpgsqlBinaryImporter writer, IReadOnlyList<object?[]> rows, CancellationToken ct = default)
     {
         foreach (var row in rows)
         {
-            await writer.StartRowAsync(ct);
+            ct.ThrowIfCancellationRequested();
+            writer.StartRow();
             for (int j = 0; j < _targetToSourceMap!.Length; j++)
             {
                 int sourceIdx = _targetToSourceMap[j];
@@ -73,7 +75,7 @@ public sealed partial class PostgreSqlDataWriter
 
                 if (val is null || val == DBNull.Value)
                 {
-                    await writer.WriteNullAsync(ct);
+                    writer.WriteNull();
                     continue;
                 }
 
@@ -86,7 +88,7 @@ public sealed partial class PostgreSqlDataWriter
                         val = DateTime.SpecifyKind(dt, DateTimeKind.Utc);
                 }
 
-                await writer.WriteAsync(val, _columnTypes![j], ct);
+                writer.Write(val, _columnTypes![j]);
             }
         }
     }

@@ -24,7 +24,7 @@ public sealed partial class PostgreSqlDataWriter
             var copySql = BuildCopySql(stagingTable);
             await using (var writer = await ((NpgsqlConnection)_connection!).BeginBinaryImportAsync(copySql, ct))
             {
-                await WriteRowsToCopyAsync(writer, rows, ct);
+                WriteRowsToCopy(writer, rows);
                 await writer.CompleteAsync(ct);
             }
 
@@ -53,7 +53,7 @@ public sealed partial class PostgreSqlDataWriter
             var copySql = BuildCopySql(stagingTable);
             await using (var writer = await ((NpgsqlConnection)_connection!).BeginBinaryImportAsync(copySql, ct))
             {
-                await WriteColumnarToCopyAsync(writer, batch, ct);
+                WriteColumnarToCopy(writer, batch);
                 await writer.CompleteAsync(ct);
             }
 

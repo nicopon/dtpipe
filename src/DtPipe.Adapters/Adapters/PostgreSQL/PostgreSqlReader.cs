@@ -214,7 +214,9 @@ public sealed partial class PostgreSqlReader : IColumnarStreamReader, IBatchSize
             bool streamEnded = false;
             while (rowsInBuffer < targetBatchSize)
             {
-                if (await exporter.StartRowAsync(ct) == -1)
+                var startRowVt = exporter.StartRowAsync(ct);
+                int startRowResult = startRowVt.IsCompletedSuccessfully ? startRowVt.Result : await startRowVt;
+                if (startRowResult == -1)
                 {
                     streamEnded = true;
                     break;

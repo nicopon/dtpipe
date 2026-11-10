@@ -95,8 +95,8 @@ public class CsvStreamReader : IStreamReader, IColumnTypeInferenceCapable
             if (_logger.IsEnabled(LogLevel.Debug))
                 _logger.LogDebug("Opening CSV file: {FilePath}", _filePath);
 
-            _fileStream = new FileStream(_filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, FileOptions.Asynchronous);
-            _streamReader = new StreamReader(_fileStream, encoding, detectEncodingFromByteOrderMarks: true, leaveOpen: true);
+            _fileStream = new FileStream(_filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, FileOptions.Asynchronous | FileOptions.SequentialScan);
+            _streamReader = new StreamReader(_fileStream, encoding, detectEncodingFromByteOrderMarks: true, bufferSize: 65536, leaveOpen: true);
         }
 
         var config = new CsvConfiguration(CultureInfo.InvariantCulture)
@@ -168,7 +168,6 @@ public class CsvStreamReader : IStreamReader, IColumnTypeInferenceCapable
     public IReadOnlyDictionary<string, string>? AutoAppliedTypes => _autoAppliedTypes;
     public int MaxSample => _options.MaxSample;
 
-    private readonly SemaphoreSlim _lock = new(1, 1);
     private bool _isDisposed;
 
     public async IAsyncEnumerable<ReadOnlyMemory<object?[]>> ReadBatchesAsync(
@@ -181,55 +180,33 @@ public class CsvStreamReader : IStreamReader, IColumnTypeInferenceCapable
         var batch = new object?[batchSize][];
         var index = 0;
 
-        try
+        // For no-header mode, first row is already read in OpenAsync
+        if (!_options.HasHeader && _csvReader.Parser.Row == 1)
         {
-            // For no-header mode, first row is already read in OpenAsync
-            if (!_options.HasHeader && _csvReader.Parser.Row == 1)
-            {
-                var row = ParseRow(_headers.Length, _columnParsers);
-                batch[index++] = row;
-            }
+            var row = ParseRow(_headers.Length, _columnParsers);
+            batch[index++] = row;
+        }
 
-            while (true)
-            {
-                object?[] row;
-                bool hasMore;
+        while (!_isDisposed)
+        {
+            ct.ThrowIfCancellationRequested();
 
-                await _lock.WaitAsync(ct);
-                try
-                {
-                    if (_isDisposed) break;
-                    ct.ThrowIfCancellationRequested();
+            if (!await _csvReader.ReadAsync()) break;
 
-                    hasMore = await _csvReader.ReadAsync();
-                    if (!hasMore) break;
+            var row = ParseRow(_headers.Length, _columnParsers);
+            batch[index++] = row;
 
-                    // CRITICAL: GetField() must be called INSIDE the lock
-                    // to prevent buffer corruption during concurrent access
-                    row = ParseRow(_headers.Length, _columnParsers);
-                }
-                finally
-                {
-                    _lock.Release();
-                }
-
-                batch[index++] = row;
-
-                if (index >= batchSize)
-                {
-                    yield return new ReadOnlyMemory<object?[]>(batch, 0, index);
-                    batch = new object?[batchSize][];
-                    index = 0;
-                }
-            }
-
-            if (index > 0)
+            if (index >= batchSize)
             {
                 yield return new ReadOnlyMemory<object?[]>(batch, 0, index);
+                batch = new object?[batchSize][];
+                index = 0;
             }
         }
-        finally
+
+        if (index > 0)
         {
+            yield return new ReadOnlyMemory<object?[]>(batch, 0, index);
         }
     }
 
@@ -293,34 +270,25 @@ public class CsvStreamReader : IStreamReader, IColumnTypeInferenceCapable
 
     public async ValueTask DisposeAsync()
     {
-        await _lock.WaitAsync();
-        try
+        if (_isDisposed) return;
+        _isDisposed = true;
+
+        if (_csvReader != null)
         {
-            if (_isDisposed) return;
-            _isDisposed = true;
-
-            if (_csvReader != null)
-            {
-                _csvReader.Dispose();
-                _csvReader = null;
-            }
-
-            if (_streamReader != null)
-            {
-                _streamReader.Dispose();
-                _streamReader = null;
-            }
-
-            if (_fileStream != null)
-            {
-                await _fileStream.DisposeAsync();
-                _fileStream = null;
-            }
+            _csvReader.Dispose();
+            _csvReader = null;
         }
-        finally
+
+        if (_streamReader != null)
         {
-            _lock.Release();
-            _lock.Dispose();
+            _streamReader.Dispose();
+            _streamReader = null;
+        }
+
+        if (_fileStream != null)
+        {
+            await _fileStream.DisposeAsync();
+            _fileStream = null;
         }
     }
 
