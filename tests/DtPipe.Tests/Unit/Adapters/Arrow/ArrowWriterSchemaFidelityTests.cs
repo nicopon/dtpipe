@@ -51,7 +51,7 @@ public class ArrowWriterSchemaFidelityTests : IDisposable
 
     private async Task WriteAsync(string path, params RecordBatch[] batches)
     {
-        await using var writer = new ArrowAdapterDataWriter(path);
+        await using var writer = new ArrowAdapterDataWriter(path, new ArrowWriterOptions { Compression = "uncompressed" });
         await writer.InitializeAsync(Columns);
         foreach (var batch in batches) await writer.WriteRecordBatchAsync(batch);
         await writer.CompleteAsync();
@@ -60,13 +60,14 @@ public class ArrowWriterSchemaFidelityTests : IDisposable
     private static async Task<Schema> ReadSchemaAsync(string path, bool file)
     {
         await using var fs = File.OpenRead(path);
+        var factory = new Apache.Arrow.Compression.CompressionCodecFactory();
         if (file)
         {
-            using var reader = new ArrowFileReader(fs);
+            using var reader = new ArrowFileReader(fs, factory);
             await reader.ReadNextRecordBatchAsync();
             return reader.Schema;
         }
-        using var streamReader = new ArrowStreamReader(fs);
+        using var streamReader = new ArrowStreamReader(fs, factory);
         await streamReader.ReadNextRecordBatchAsync();
         return streamReader.Schema;
     }

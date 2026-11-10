@@ -156,18 +156,8 @@ public sealed class DuckDbWriterValueOverflowTests : IDisposable
     }
 
     private static async Task<(int Code, string Output)> AppendAsync(string target, string query)
-    {
-        var (stdout, stderr) = (Console.Out, Console.Error);
-        var captured = new StringWriter();
-        Console.SetOut(captured);
-        Console.SetError(captured);
-        try
-        {
-            var code = await Program.Main(["-i", "duck::memory:", "-q", query, "-o", $"duck:{target}", "-t", "t", "-s", "Append", "--no-stats"]);
-            return (code, captured.ToString());
-        }
-        finally { Console.SetOut(stdout); Console.SetError(stderr); }
-    }
+        => await ConsoleSerialLock.CaptureAsync(() =>
+            Program.Main(["-i", "duck::memory:", "-q", query, "-o", $"duck:{target}", "-t", "t", "-s", "Append", "--no-stats"]));
 
     private static List<string> ReadBack(string target, string column)
     {

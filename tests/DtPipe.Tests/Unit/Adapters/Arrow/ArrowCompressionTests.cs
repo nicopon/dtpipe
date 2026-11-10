@@ -4,10 +4,12 @@ using Apache.Arrow.Types;
 using AwesomeAssertions;
 using DtPipe.Adapters.Arrow;
 using DtPipe.Core.Models;
+using DtPipe.Tests.Helpers;
 using Xunit;
 
 namespace DtPipe.Tests.Unit.Adapters.Arrow;
 
+[Collection(SessionStateCollection.Name)]
 public class ArrowCompressionTests : IDisposable
 {
     private readonly string _tempDir;

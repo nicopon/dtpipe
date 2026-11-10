@@ -39,15 +39,8 @@ public sealed class ContractCheckTargetTests : IDisposable
 
     private static async Task<string> CheckAsync(string job, string contract)
     {
-        var (stdout, stderr) = (Console.Out, Console.Error);
-        var captured = new StringWriter();
-        Console.SetOut(captured);
-        Console.SetError(captured);
-        try
-        {
-            var code = await Program.Main(["contract", "check", "--job", job, "--contract", contract]);
-            return $"exit {code}\n{captured}";
-        }
-        finally { Console.SetOut(stdout); Console.SetError(stderr); }
+        var (code, captured) = await ConsoleSerialLock.CaptureAsync(() =>
+            Program.Main(["contract", "check", "--job", job, "--contract", contract]));
+        return $"exit {code}\n{captured}";
     }
 }

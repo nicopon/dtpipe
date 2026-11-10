@@ -13,6 +13,7 @@ using DuckDB.NET.Data;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
+using DtPipe.Tests;
 
 namespace DtPipe.Tests.Unit.Conformance;
 
@@ -272,19 +273,11 @@ public sealed class WriteConformanceTests : IDisposable
         var source = Path.Combine(_dir, Guid.NewGuid().ToString("N") + ".csv");
         File.WriteAllText(source, $"id,v\n1,1\n2,{value}\n");
 
-        var (stdout, stderr) = (Console.Out, Console.Error);
-        var captured = new StringWriter();
-        Console.SetOut(captured);
-        Console.SetError(captured);
-        int exit;
-        try
-        {
-            exit = await Program.Main(["-i", source, "--column-types", "id:int32,v:decimal", .. extra,
-                "-o", $"duck:{target}", "--table", "t", "--strategy", "Append", "--no-stats"]);
-        }
-        finally { Console.SetOut(stdout); Console.SetError(stderr); }
+        var (exit, captured) = await ConsoleSerialLock.CaptureAsync(() =>
+            Program.Main(["-i", source, "--column-types", "id:int32,v:decimal", .. extra,
+                "-o", $"duck:{target}", "--table", "t", "--strategy", "Append", "--no-stats"]));
 
-        return (exit, Regex.Replace(captured.ToString(), @"\s+", " "), target);
+        return (exit, Regex.Replace(captured, @"\s+", " "), target);
     }
 
     private static string[] ReadBackDecimals(string target)
@@ -350,11 +343,8 @@ public sealed class WriteConformanceTests : IDisposable
         async Task<string> Of(string expression)
         {
             var source = Path.Combine(_dir, Guid.NewGuid().ToString("N") + ".arrow");
-            var (stdout, stderr) = (Console.Out, Console.Error);
-            Console.SetOut(new StringWriter());
-            Console.SetError(new StringWriter());
-            try { Assert.Equal(0, await Program.Main(["-i", "duck::memory:", "-q", $"SELECT {expression} AS v", "-o", $"arrow:{source}", "--no-stats"])); }
-            finally { Console.SetOut(stdout); Console.SetError(stderr); }
+            var exit = await ConsoleSerialLock.RunAsync(() => Program.Main(["-i", "duck::memory:", "-q", $"SELECT {expression} AS v", "-o", $"arrow:{source}", "--no-stats"]));
+            Assert.Equal(0, exit);
             return await ChecksumAsync(source, []);
         }
 
@@ -364,15 +354,8 @@ public sealed class WriteConformanceTests : IDisposable
     private async Task<string> ChecksumAsync(string source, string[] steps)
     {
         var target = Path.Combine(_dir, Guid.NewGuid().ToString("N") + ".sum");
-        var (stdout, stderr) = (Console.Out, Console.Error);
-        Console.SetOut(new StringWriter());
-        Console.SetError(new StringWriter());
-        try
-        {
-            var exit = await Program.Main(["-i", source, .. steps, "-o", $"checksum:{target}", "--no-stats"]);
-            Assert.Equal(0, exit);
-        }
-        finally { Console.SetOut(stdout); Console.SetError(stderr); }
+        var exit = await ConsoleSerialLock.RunAsync(() => Program.Main(["-i", source, .. steps, "-o", $"checksum:{target}", "--no-stats"]));
+        Assert.Equal(0, exit);
         return File.ReadAllText(target);
     }
 
@@ -387,15 +370,10 @@ public sealed class WriteConformanceTests : IDisposable
         File.WriteAllText(source, "id,v\n1,4.29\n2,0.0000000000000000000001\n");
         var target = Path.Combine(_dir, Guid.NewGuid().ToString("N") + "." + writer);
 
-        var (stdout, stderr) = (Console.Out, Console.Error);
-        var captured = new StringWriter();
-        Console.SetOut(captured);
-        Console.SetError(captured);
-        int exit;
-        try { exit = await Program.Main(["-i", source, "--column-types", "id:int32,v:decimal", "-o", $"{writer}:{target}", "--no-stats"]); }
-        finally { Console.SetOut(stdout); Console.SetError(stderr); }
+        var (exit, captured) = await ConsoleSerialLock.CaptureAsync(() =>
+            Program.Main(["-i", source, "--column-types", "id:int32,v:decimal", "-o", $"{writer}:{target}", "--no-stats"]));
 
-        var text = Regex.Replace(captured.ToString(), @"\s+", " ");
+        var text = Regex.Replace(captured, @"\s+", " ");
         Assert.Equal(1, exit);
         Assert.Contains("CSV line 3: column 'v'", text);
         Assert.Contains("declare the column 'string'", text);
@@ -407,8 +385,8 @@ public sealed class WriteConformanceTests : IDisposable
     {
         var target = Path.Combine(_dir, "out.duckdb");
 
-        Assert.Equal(0, await Program.Main(["-i", "duck::memory:", "-q", "select 170141183460469231731687303715884105727::HUGEINT as v, 1 as id",
-            "--compute", "id2:row.id", "-o", $"duck:{target}", "-t", "t", "--no-stats"]));
+        Assert.Equal(0, await ConsoleSerialLock.RunAsync(() => Program.Main(["-i", "duck::memory:", "-q", "select 170141183460469231731687303715884105727::HUGEINT as v, 1 as id",
+            "--compute", "id2:row.id", "-o", $"duck:{target}", "-t", "t", "--no-stats"])));
 
         Assert.Equal("HUGEINT | 170141183460469231731687303715884105727", WriteOutcome.ReadBack("duck", target));
     }
@@ -458,8 +436,8 @@ public sealed class WriteConformanceTests : IDisposable
     {
         var target = Path.Combine(_dir, Guid.NewGuid().ToString("N") + "." + writer);
 
-        Assert.Equal(0, await Program.Main(["-i", "duck::memory:", "-q", "select (case when i % 2 = 0 then 'a' else 'b' end)::ENUM('a','b') as e, i from range(5000) t(i)",
-            flag, value, "-o", $"{writer}:{target}", "--no-stats"]));
+        Assert.Equal(0, await ConsoleSerialLock.RunAsync(() => Program.Main(["-i", "duck::memory:", "-q", "select (case when i % 2 = 0 then 'a' else 'b' end)::ENUM('a','b') as e, i from range(5000) t(i)",
+            flag, value, "-o", $"{writer}:{target}", "--no-stats"])));
 
         Assert.True(new FileInfo(target).Length > 0);
     }
@@ -480,7 +458,7 @@ public sealed class WriteConformanceTests : IDisposable
             create.ExecuteNonQuery();
         }
 
-        Assert.Equal(0, await Program.Main(["-i", source, "--column-types", "v:decimal", "-o", $"sqlite:{target}", "-t", "t", "--strategy", "Append", "--no-stats"]));
+        Assert.Equal(0, await ConsoleSerialLock.RunAsync(() => Program.Main(["-i", source, "--column-types", "v:decimal", "-o", $"sqlite:{target}", "-t", "t", "--strategy", "Append", "--no-stats"])));
 
         Assert.StartsWith($"text | {number}", WriteOutcome.ReadBack("sqlite", target));
     }
@@ -505,15 +483,10 @@ public sealed class WriteConformanceTests : IDisposable
             create.ExecuteNonQuery();
         }
 
-        var (stdout, stderr) = (Console.Out, Console.Error);
-        var captured = new StringWriter();
-        Console.SetOut(captured);
-        Console.SetError(captured);
-        int exit;
-        try { exit = await Program.Main(["-i", "duck::memory:", "-q", $"select {value} as v", "-o", $"duck:{target}", "-t", "t", "--strategy", "Append", "--no-stats"]); }
-        finally { Console.SetOut(stdout); Console.SetError(stderr); }
+        var (exit, captured) = await ConsoleSerialLock.CaptureAsync(() =>
+            Program.Main(["-i", "duck::memory:", "-q", $"select {value} as v", "-o", $"duck:{target}", "-t", "t", "--strategy", "Append", "--no-stats"]));
 
-        var text = Regex.Replace(captured.ToString(), @"\s+", " ");
+        var text = Regex.Replace(captured, @"\s+", " ");
         var actual = exit == 0 ? WriteOutcome.ReadBack("duck", target)
             : text.Contains("ColumnTypeRefusedException") ? "refused"
             : text.Contains("'v'") ? "named"
@@ -583,17 +556,12 @@ internal static class WriteOutcome
         var target = Path.Combine(dir, name + (writer == "duck" ? ".duckdb" : "." + writer));
         string[] output = writer is "duck" or "sqlite" ? ["-o", $"{writer}:{target}", "-t", "t"] : ["-o", $"{writer}:{target}"];
 
-        var (stdout, stderr) = (Console.Out, Console.Error);
-        var captured = new StringWriter();
-        Console.SetOut(captured);
-        Console.SetError(captured);
-        int exit;
-        try { exit = await Program.Main(["-i", $"arrow:{source}", .. output, "--no-stats"]); }
-        finally { Console.SetOut(stdout); Console.SetError(stderr); }
+        var (exit, captured) = await ConsoleSerialLock.CaptureAsync(() =>
+            Program.Main(["-i", $"arrow:{source}", .. output, "--no-stats"]));
 
         if (exit == 0) return ReadBack(writer, target);
 
-        var text = Regex.Replace(captured.ToString(), @"\s+", " ");
+        var text = Regex.Replace(captured, @"\s+", " ");
         if (text.Contains("ColumnTypeRefusedException") && text.Contains("'v'") && !File.Exists(target))
         {
             var accepted = Regex.Match(text, @"accepted instead: (.+?)\.");
