@@ -31,7 +31,7 @@ public sealed class ServerConformanceTests : IDisposable
         ("pg", "(-5000000000)::bigint", "-5000000000", null),
         ("pg", "1.5::double precision", "1.5", null),
         ("pg", "4.2::numeric(10,2)", "4.20", null),
-        ("pg", "4.29::numeric", "4.29", "L4"),
+        ("pg", "4.29::numeric", "4.29", null),
         ("pg", "4.50::numeric", "4.5", null),
         ("pg", "1.5000000000000000000000::numeric", "1.5", null),
         ("pg", "0.0000000000000000000001::numeric", "named", null),
@@ -67,7 +67,7 @@ public sealed class ServerConformanceTests : IDisposable
         ("mssql", "CAST(1 AS BIT)", "true", null),
         ("mssql", "CAST(-70000 AS INT)", "-70000", null),
         ("mssql", "CAST(4.2 AS DECIMAL(10,2))", "4.20", null),
-        ("mssql", "CAST(12.5 AS MONEY)", "12.5000", "L4"),
+        ("mssql", "CAST(12.5 AS MONEY)", "12.5000", null),
         ("mssql", "'x'", "x", null),
         ("mssql", "CAST('2024-01-02' AS DATE)", "2024-01-02", null),
         ("mssql", "CAST('10:11:12.123456' AS TIME(6))", "10:11:12.123456", null),
@@ -88,7 +88,7 @@ public sealed class ServerConformanceTests : IDisposable
         ("pg", "int64", "-5000000000", null),
         ("pg", "double", "1.5", null),
         ("pg", "decimal128(10,2)", "4.29", null),
-        ("pg", "decimal-undeclared-fraction", "1.23456", "L4"),
+        ("pg", "decimal-undeclared-fraction", "1.23456", null),
         ("pg", "date32", "2024-01-02", null),
         ("pg", "time64(us)", "10:11:12.123456", null),
         ("pg", "timestamp(us)", "2024-01-02T03:04:05.1234560", null),
@@ -148,22 +148,33 @@ public sealed class ServerConformanceTests : IDisposable
         Judge(expected, knownFalse, columnar, rows);
     }
 
+    private static readonly SemaphoreSlim TableLock = new(1, 1);
+
     [Theory]
     [MemberData(nameof(WriteCells))]
     public async Task A_Server_Writer_Gives_Back_What_It_Was_Handed(string server, string name)
     {
-        var endpoint = Endpoint(server);
-        var (_, _, expected, knownFalse) = Writes.Single(w => w.Server == server && w.Case == name);
-        var source = Path.Combine(_dir, Guid.NewGuid().ToString("N") + ".arrow");
-        ArrowTypeCases.Named(name).WriteIpc(source);
-        const string table = "type_conformance_cell";
+        await TableLock.WaitAsync();
+        try
+        {
+            var endpoint = Endpoint(server);
+            var (_, _, expected, knownFalse) = Writes.Single(w => w.Server == server && w.Case == name);
+            var source = Path.Combine(_dir, Guid.NewGuid().ToString("N") + ".arrow");
+            ArrowTypeCases.Named(name).WriteIpc(source);
+            var table = "tcc_" + name.Replace('(', '_').Replace(')', '_').Replace(',', '_').Replace('-', '_');
+            string[] preExec = server == "pg" ? ["--pre-exec", $"DROP TABLE IF EXISTS {table} CASCADE"] : [];
 
-        var written = await RunAsync(["-i", $"arrow:{source}", "-o", endpoint, "-t", table, "--strategy", "Recreate", "--no-stats"]);
-        var actual = written.Exit == 0
-            ? await ReadAsync(endpoint, server == "ora" ? $"SELECT \"v\" FROM {table} WHERE \"v\" IS NOT NULL" : $"SELECT v FROM {table} WHERE v IS NOT NULL", row: false)
-            : written.Named ? "named" : $"raw: exit {written.Exit}";
+            var written = await RunAsync(["-i", $"arrow:{source}", "-o", endpoint, "-t", table, "--strategy", "Recreate", .. preExec, "--no-stats"]);
+            var actual = written.Exit == 0
+                ? await ReadAsync(endpoint, server == "ora" ? $"SELECT v AS \"v\" FROM {table} WHERE v IS NOT NULL" : $"SELECT v FROM {table} WHERE v IS NOT NULL", row: false)
+                : written.Named ? "named" : $"raw: exit {written.Exit}";
 
-        Judge(expected, knownFalse, actual, actual);
+            Judge(expected, knownFalse, actual, actual);
+        }
+        finally
+        {
+            TableLock.Release();
+        }
     }
 
     /// <summary>A decimal finer than the column already there is refused, where each engine would round it.</summary>
@@ -174,18 +185,26 @@ public sealed class ServerConformanceTests : IDisposable
     [InlineData("ora")]
     public async Task A_Server_Column_Does_Not_Round_A_Finer_Decimal(string server)
     {
-        var endpoint = Endpoint(server);
-        const string table = "type_conformance_finer";
-        var narrow = Path.Combine(_dir, Guid.NewGuid().ToString("N") + ".arrow");
-        var fine = Path.Combine(_dir, Guid.NewGuid().ToString("N") + ".arrow");
-        ArrowTypeCases.Named("decimal128(10,2)").WriteIpc(narrow);
-        ArrowTypeCases.Named("decimal-undeclared-fraction").WriteIpc(fine);
+        await TableLock.WaitAsync();
+        try
+        {
+            var endpoint = Endpoint(server);
+            const string table = "type_conformance_finer";
+            var narrow = Path.Combine(_dir, Guid.NewGuid().ToString("N") + ".arrow");
+            var fine = Path.Combine(_dir, Guid.NewGuid().ToString("N") + ".arrow");
+            ArrowTypeCases.Named("decimal128(10,2)").WriteIpc(narrow);
+            ArrowTypeCases.Named("decimal-undeclared-fraction").WriteIpc(fine);
 
-        Assert.Equal(0, (await RunAsync(["-i", $"arrow:{narrow}", "-o", endpoint, "-t", table, "--strategy", "Recreate", "--no-stats"])).Exit);
-        var appended = await RunAsync(["-i", $"arrow:{fine}", "-o", endpoint, "-t", table, "--strategy", "Append", "--no-stats"]);
+            Assert.Equal(0, (await RunAsync(["-i", $"arrow:{narrow}", "-o", endpoint, "-t", table, "--strategy", "Recreate", "--no-stats"])).Exit);
+            var appended = await RunAsync(["-i", $"arrow:{fine}", "-o", endpoint, "-t", table, "--strategy", "Append", "--no-stats"]);
 
-        Assert.Equal(1, appended.Exit);
-        Assert.True(appended.Named);
+            Assert.Equal(1, appended.Exit);
+            Assert.True(appended.Named);
+        }
+        finally
+        {
+            TableLock.Release();
+        }
     }
 
     private static string Endpoint(string server)
@@ -209,16 +228,8 @@ public sealed class ServerConformanceTests : IDisposable
 
     private static async Task<(int Exit, bool Named)> RunAsync(string[] args)
     {
-        var (stdout, stderr) = (Console.Out, Console.Error);
-        var captured = new StringWriter();
-        Console.SetOut(captured);
-        Console.SetError(captured);
-        try
-        {
-            var exit = await Program.Main(args);
-            return (exit, captured.ToString().Contains("'v'"));
-        }
-        finally { Console.SetOut(stdout); Console.SetError(stderr); }
+        var (exit, captured) = await ConsoleSerialLock.CaptureAsync(() => Program.Main(args));
+        return (exit, captured.Contains("'v'"));
     }
 
     private static void Judge(string expected, string? knownFalse, string columnar, string rows)
