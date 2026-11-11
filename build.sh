@@ -179,20 +179,7 @@ smoke_coordinator "$COORDINATOR_DIR" "$COORDINATOR_EXE"
 # ============================================================
 # Run Tests
 # ============================================================
-echo ""
-echo -e "${YELLOW}Running Tests...${NC}"
-dotnet test tests/DtPipe.Tests/DtPipe.Tests.csproj -c Release --filter "FullyQualifiedName~.Unit."
-
-# The standalone Arrow libraries carry their own suites, and they must block this build while they
-# live in the solution. Discovered rather than listed: a named list is exactly how
-# Apache.Arrow.Serialization.Tests stayed outside both the solution and the build, with two
-# failures in it, until someone ran it by hand.
-for proj in tests/*/*.Tests.csproj; do
-    [ "$proj" = "tests/DtPipe.Tests/DtPipe.Tests.csproj" ] && continue
-    echo ""
-    echo -e "${YELLOW}Running $(basename "$(dirname "$proj")")...${NC}"
-    dotnet test "$proj" -c Release
-done
+tests/scripts/run_unit_tests.sh
 
 echo ""
 echo -e "${YELLOW}Performing a clean full rebuild...${NC}"

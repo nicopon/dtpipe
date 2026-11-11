@@ -21,7 +21,6 @@ on:
 jobs:
   test:
     name: Run Tests
-    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -32,11 +31,8 @@ jobs:
         with:
           dotnet-version: '10.0.403'
 
-      - name: Restore dependencies
-        run: dotnet restore
-
       - name: Run Tests (Unit only)
-        run: dotnet test --no-restore --verbosity normal --filter "FullyQualifiedName!~Integration"
+        run: bash tests/scripts/run_unit_tests.sh
 
   build:
     name: Build ${{ matrix.platform }}
@@ -232,6 +228,7 @@ jobs:
   # tag below; run by hand otherwise, they are only built, with the commit the run is on as their revision.
   images:
     name: Image ${{ matrix.image }} ${{ matrix.arch }}
+    needs: test
     runs-on: ${{ matrix.runner }}
     env:
       PUBLISH: ${{ github.event_name == 'push' || inputs.publish }}

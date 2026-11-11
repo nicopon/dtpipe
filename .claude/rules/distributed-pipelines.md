@@ -89,7 +89,7 @@ the control plane, over each replica's node channel; TransportR carries the data
   is scanned like `src/`. **The server listens in plain HTTP and reads no forwarded header**: a TLS proxy in front is
   told to it by `Coordinator:PublicUrl`, the address people reach it at, so it does not turn into `http://` return addresses.
   `[CI: validate_distributed_boundary.sh — deploy/ names no lab]` `[CI: PublicUrlTests] [local: the lab's smoke.py bricks - versions; the lab's tools/linux_replay.sh uid, a named volume of another uid]`
-  `[unchecked: the release's push to GHCR, until a tag runs it; a Linux Docker host, where tools/linux_replay.sh is the replay; a real TLS proxy; a bind mount of another uid; deploy/README.md is in no documentation check, so keep its lines to 100 columns]`
+  `[CI: release.yml — its test job runs run_unit_tests.sh and images needs it]` `[unchecked: the release's push to GHCR, until a tag runs it; a Linux Docker host, where tools/linux_replay.sh is the replay; a real TLS proxy; a bind mount of another uid; deploy/README.md is in no documentation check, so keep its lines to 100 columns]`
 - **The runner's image starts as root, its `dtpipe` never does.** `deploy/runner-entrypoint.sh` installs the rules of
   `DTPIPE_EGRESS_ALLOW` (CIDR masks, comma-separated: out, the masks and the loopback; in, nothing but replies), reads them
   back, then starts `dtpipe node --runner` through `setpriv` as `1654:1654` with no capability, an empty bounding set and

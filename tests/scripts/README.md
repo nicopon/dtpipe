@@ -56,6 +56,7 @@ DtPipe uses a centralized Docker infrastructure for all integration tests.
 ### 🧪 Feature Validation (no Docker)
 | Script | Validates |
 |:---|:---|
+| **`run_unit_tests.sh`** | Every suite that needs no infrastructure: the `.Unit.` tests of DtPipe.Tests plus each other `tests/*/*.Tests.csproj`, discovered. Run by `build.sh` and by the release's `test` job, which gates the binaries, the NuGet packages and the images. |
 | **`validate_transformers.sh`** | All 13 row transformers: Overwrite, Null, Mask, Fake, Format, Compute, Drop, Project, Rename, Filter, Expand, Window, ordering. |
 | **`validate_schema.sh`** | Strict-schema rejection, `--no-schema-validation` bypass, `--auto-migrate` for SQLite and Postgres. |
 | **`validate_options.sh`** | Provider option scoping (global/writer/YAML), sampling rate + seed + determinism, YAML `provider-options`, `--metrics-path`. |
