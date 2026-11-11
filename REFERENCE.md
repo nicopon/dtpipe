@@ -430,16 +430,9 @@ reserved for what actually needs it: a reserved word, or a character the parser 
 | PostgreSQL | `stock_moves` | `stockmoves` |
 | MySQL, SQL Server, SQLite, DuckDB | `stock_moves` | `StockMoves` |
 
-The rule is one rule; the outcomes differ because the engines do. Oracle folds up, PostgreSQL
-folds down, the rest store what they are given and compare case-insensitively.
-
 **To keep an exact spelling, quote the value yourself** — `--table '"StockMoves"'` creates
 `StockMoves` on every engine, and it is then addressable only in quotes, from dtpipe and from
 anything else.
-
-> Quoting a name to preserve the case as typed is what dtpipe used to do for the table, and only
-> the table — columns already folded. On Oracle it produced `"stock_moves"`, which
-> `SELECT * FROM stock_moves` cannot reach (`ORA-00942`): a table dtpipe alone could address.
 
 ### Types a writer cannot write
 
@@ -542,9 +535,7 @@ and the scalar is that field's value: it is read, not refused.
 ### Schema modes
 
 Before writing to a database target, dtpipe compares the source schema with the target's and acts
-on the difference. Three independent flags decide how, and they describe **four regimes plus an
-off switch** — there is no `--schema-evolution` flag, and these are the names for what the
-combinations already do.
+on the difference. Three flags describe four modes and an off switch.
 
 | Flags | Regime | A column the target does not have | A type mismatch |
 |:---|:---|:---|:---|
@@ -554,19 +545,14 @@ combinations already do.
 | `--auto-migrate --strict-schema` | **evolve, with a net** | added, then the target is re-inspected | aborts, unless migrating resolved it |
 | `--no-schema-validation` | **off** | the target is never inspected — neither question is asked | |
 
-`--no-schema-validation` **cannot be combined** with either of the other two: it returns before the
-inspection both of them need, so the run would silently do the opposite of what half the line asked
-for. The combination is refused with an error naming the two flags.
+`--no-schema-validation` cannot be combined with either of the other two, since both need the
+inspection it skips; the combination is refused.
 
 Each run states the regime it validated under, in one line, whatever the outcome:
 
 ```
 Schema mode: freeze (--strict-schema) - any incompatibility aborts the run.
 ```
-
-That line is not decoration. On a target that happens to be compatible, **discard** and **freeze**
-produce exactly the same output while offering opposite guarantees, and only the regime tells them
-apart.
 
 **The regime applies only where the target is inspected.** A file or object target is replaced
 wholesale, and `--strategy Recreate` drops and rebuilds the table from the source schema, so there
@@ -747,8 +733,7 @@ working directory.
 
 #### Implicit branch-split rules
 
-Branches are separated implicitly while walking the arguments. One pure function
-(`BranchSplitDecision`) decides; the triggers are:
+Branches are separated while the arguments are read. A new branch starts at:
 
 | Token | Splits when |
 |:---|:---|
@@ -759,7 +744,6 @@ Branches are separated implicitly while walking the arguments. One pure function
 Neither `--sql` nor boolean processor flags (e.g. `--merge`) trigger a split, and neither does
 `--job`: it is given once per command line, `-j` being the same flag, and a second one is refused
 with both files named. A job file holds as many branches as it declares.
-> Pre-filter large lookup tables upstream before using them as `--ref`.
 
 #### Duplicate flags are an error
 
@@ -799,24 +783,12 @@ an option may repeat inside it (`--fake A --fake-seed-row --fake B --fake-seed-r
 every occurrence carries the same value. Different values are refused — see
 [Data Transformations](#data-transformations).
 
-> **SQL engine**: The `--sql` processor uses DuckDB internally — the same engine available as a
-> read/write provider (`duck:`). This means all DuckDB SQL extensions and functions are available in
-> `--sql` branches. Use `--duck-init` to load extensions before query execution. See
-> [Provider-Specific Options](#provider-specific-options) for details.
+`--sql` runs on DuckDB, with all its functions; `--duck-init` loads extensions (see
+[DuckDB](#duckdb)).
 
 ### Canonical topologies
 
-| Topology | Pattern |
-|:---|:---|
-| **Linear** | `-i {src} -o {dst}` |
-| **Two independent sources** | `-i {src1} -o {dst1}  -i {src2} -o {dst2}` |
-| **SQL (single source)** | `-i {src} --alias a  --from a --sql "SELECT * FROM a" -o {dst}` |
-| **SQL JOIN (main + ref)** | `-i {main} --alias m  -i {ref} --alias r  --from m --ref r --sql "SELECT * FROM m JOIN r ON ..."` |
-| **Merge (UNION ALL)** | `-i {srcA} --alias a  -i {srcB} --alias b  --from a,b --merge -o {dst}` |
-| **Fan-out (tee)** | `-i {src} --alias s  --from s -o {dstA}  --from s -o {dstB}` |
-| **Fan-out + SQL** | `-i {src} --alias s  --from s -o {dstA}  --from s --sql "SELECT ..."` |
-| **Diamond** | `-i {src} --alias s  --from s --filter '...' --alias hi  --from s --filter '...' --alias lo  --from hi --ref lo --sql "..."` |
-| **Join → fan-out** | `... --from m --ref r --sql "..." --alias j  --from j -o {dstA}  --from j -o {dstB}` |
+The shapes that work, with their patterns: [DAG pipelines](./docs/guides/dag.md#shapes-that-work).
 
 ---
 
