@@ -353,6 +353,15 @@ public class PipelineLexer
     private static bool IsMultiInstanceOption(FlagDef def)
         => def.Stage == FlagStage.Pipeline && !def.ProcessorTrigger;
 
+    /// <summary>
+    /// A blank file name is no file: an empty one would read as "no export" and run the pipeline for real,
+    /// and a whitespace one would name a file nobody meant.
+    /// </summary>
+    private static string? NamedFile(string flag, string? value)
+        => value is not null && string.IsNullOrWhiteSpace(value)
+            ? throw new InvalidOperationException($"Flag '{flag}' needs a file name, and its value is blank.")
+            : value;
+
     private GlobalOptions MapGlobals(Dictionary<string, object?> dict)
     {
         return new GlobalOptions
@@ -363,7 +372,7 @@ public class PipelineLexer
             LogPath = dict.TryGetValue("--log", out var logVal) ? logVal?.ToString() : null,
             JobFile = dict.TryGetValue("--job", out var jobVal) ? jobVal?.ToString()
                           : dict.TryGetValue("-j", out var jVal) ? jVal?.ToString() : null,
-            ExportJobFile = dict.TryGetValue("--export-job", out var ejVal) ? ejVal?.ToString() : null,
+            ExportJobFile = dict.TryGetValue("--export-job", out var ejVal) ? NamedFile("--export-job", ejVal?.ToString()) : null,
             Session = dict.TryGetValue("--session", out var sessVal) ? sessVal?.ToString() : null,
             BindInput = dict.TryGetValue("--bind-input", out var biVal) ? biVal?.ToString() : null,
             BindOutput = dict.TryGetValue("--bind-output", out var boVal) ? boVal?.ToString() : null,

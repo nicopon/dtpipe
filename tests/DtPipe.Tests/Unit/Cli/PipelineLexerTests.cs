@@ -592,6 +592,17 @@ public class PipelineLexerTests
         Assert.Contains("nothing follows it", ex.Message, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Export_Job_With_A_Blank_File_Name_Is_Refused(string blank)
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            _lexer.Parse(new[] { "-i", "in.csv", "-o", "out.csv", "--export-job", blank }));
+
+        Assert.Contains("'--export-job' needs a file name", ex.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Every_Value_Taking_Flag_Of_The_Registry_Is_Refused_Without_A_Value()
     {
