@@ -18,6 +18,7 @@ internal sealed class NullExportProgress : IExportProgress
     public void ReportTransform(int stage, int count) { }
     public void ReportWrite(int count) => Interlocked.Add(ref _writeCount, count);
     public void Complete() { }
+    public void Abandon() { }
 
     public ExportMetrics GetMetrics()
     {

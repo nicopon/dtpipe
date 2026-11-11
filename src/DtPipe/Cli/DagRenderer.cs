@@ -48,7 +48,8 @@ internal static class DagRenderer
         List<DtPipe.Feedback.BranchSummary> results,
         JobDagDefinition dagDefinition,
         bool isDag,
-        IAnsiConsole console)
+        IAnsiConsole console,
+        int exitCode = 0)
     {
         if (results.Count == 0) return;
 
@@ -125,9 +126,12 @@ internal static class DagRenderer
         console.Write(table);
 
         double totalElapsed = maxEnd > minStart ? (maxEnd - minStart).TotalSeconds : 0;
-        string completionLine = isDag && results.Count > 1
-            ? $"[green]✓[/] [grey]Total[/]  [white]{totalRows:N0} rows[/] [grey]·  {totalElapsed:F1}s  ·  peak {peakMemory:F0} MB[/]"
-            : $"[green]✓[/] [white]{totalRows:N0} rows[/] [grey]·  {totalElapsed:F1}s  ·  peak {peakMemory:F0} MB[/]";
+        // A summary of the branches that completed says nothing of a run that did not: its verdict leads.
+        string completionLine = exitCode != 0
+            ? $"[red]✖[/] [white]{(exitCode == 130 ? "Canceled" : "Failed")}[/] [grey]·  exit code {exitCode}  ·  {totalRows:N0} rows from the branches that completed[/]"
+            : isDag && results.Count > 1
+                ? $"[green]✓[/] [grey]Total[/]  [white]{totalRows:N0} rows[/] [grey]·  {totalElapsed:F1}s  ·  peak {peakMemory:F0} MB[/]"
+                : $"[green]✓[/] [white]{totalRows:N0} rows[/] [grey]·  {totalElapsed:F1}s  ·  peak {peakMemory:F0} MB[/]";
         console.MarkupLine(completionLine);
     }
 

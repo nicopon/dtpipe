@@ -56,6 +56,7 @@ public class SampledBatcherTests
         public void ReportWrite(int count) => WritesReported += count;
         public void ReportTransform(int stage, int count) { }
         public void Complete() { }
+        public void Abandon() { }
         public DtPipe.Core.Models.ExportMetrics GetMetrics() =>
             new(DateTime.UtcNow, DateTime.UtcNow, ReadsReported, WritesReported, 0, 0, new Dictionary<string, long>());
         public void Dispose() { }

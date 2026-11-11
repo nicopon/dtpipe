@@ -28,7 +28,11 @@ public interface IRunHost
     /// <summary>Runs <paramref name="run"/>, the whole DAG, under whatever display the host gives it.</summary>
     Task<int> RunDagAsync(JobDagDefinition dag, GlobalOptions globals, Func<Task<int>> run, CancellationToken ct);
 
-    void ShowResults(IReadOnlyList<BranchSummary> results, JobDagDefinition dag);
+    /// <summary>
+    /// The branches that completed, shown once the DAG has ended. <paramref name="exitCode"/> is the DAG's verdict: a
+    /// host shows a non-zero one as such, never as a success summary.
+    /// </summary>
+    void ShowResults(IReadOnlyList<BranchSummary> results, JobDagDefinition dag, int exitCode);
 
     /// <summary>The run was refused before any branch started, one plain-text reason per error.</summary>
     void ShowRefusal(RunRefusal refusal, IEnumerable<string> errors);

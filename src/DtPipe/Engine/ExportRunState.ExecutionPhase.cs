@@ -379,7 +379,7 @@ internal sealed partial class ExportRunState
             // discriminate user-initiated shutdown (exit code 130) from internal
             // cancellation. Orphaned producers stay a normal event: they are absorbed
             // by DagOrchestrator.ExecuteBranchAsync's documented orphaned-producer path.
-            Progress.Complete();
+            Progress.Abandon();
             throw;
         }
         catch (Exception ex)

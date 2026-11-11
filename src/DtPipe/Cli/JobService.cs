@@ -159,10 +159,10 @@ public class JobService : IRunHost
         return run();
     }
 
-    void IRunHost.ShowResults(IReadOnlyList<DtPipe.Feedback.BranchSummary> results, JobDagDefinition dag)
+    void IRunHost.ShowResults(IReadOnlyList<DtPipe.Feedback.BranchSummary> results, JobDagDefinition dag, int exitCode)
     {
         _console.WriteLine();
-        DagRenderer.PrintUnifiedResultsTable(results.ToList(), dag, isDag: true, _console);
+        DagRenderer.PrintUnifiedResultsTable(results.ToList(), dag, isDag: true, _console, exitCode);
     }
 
     void IRunHost.ShowRefusal(RunRefusal refusal, IEnumerable<string> errors)

@@ -128,7 +128,7 @@ public class JobExecutor
             var exitCode = await host.RunDagAsync(dag, globals, () => orchestrator.ExecuteAsync(dag, branchExecutor, ct), ct);
 
             if (!globals.Quiet)
-                host.ShowResults(resultsCollector.ToList(), dag);
+                host.ShowResults(resultsCollector.ToList(), dag, exitCode);
             return exitCode;
         }
         else

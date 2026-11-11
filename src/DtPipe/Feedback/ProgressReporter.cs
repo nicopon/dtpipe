@@ -178,7 +178,9 @@ public sealed class ProgressReporter : IExportProgress
         };
     }
 
-    public void Complete()
+    public void Abandon() => StopDisplay();
+
+    private void StopDisplay()
     {
         _stopwatch.Stop();
         _disposed = true;
@@ -187,6 +189,11 @@ public sealed class ProgressReporter : IExportProgress
         {
             try { _uiTask.Wait(1000); } catch { /* ignore UI task failures/timeouts */ }
         }
+    }
+
+    public void Complete()
+    {
+        StopDisplay();
 
         // When a unified results table is printed externally, suppress per-branch output
         if (_suppressCompletionOutput) return;

@@ -375,6 +375,7 @@ internal sealed class StubExportProgress : IExportProgress
     public void ReportTransform(int stage, int count) { }
     public void ReportWrite(int count) { }
     public void Complete() { }
+    public void Abandon() { }
     public ExportMetrics GetMetrics() => new ExportMetrics(DateTime.UtcNow, DateTime.UtcNow, 0, 0, 0, 0,
         new System.Collections.Generic.Dictionary<string, long>());
     public void Dispose() { }
