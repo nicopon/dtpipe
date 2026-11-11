@@ -57,7 +57,8 @@ def click_text(browser, selector, label):
     point = browser.js(f"(() => {{ const e = [...document.querySelectorAll({json.dumps(selector)})].find(b => b.textContent.trim() === {json.dumps(label)});"
                        " if (!e) return null; e.scrollIntoView({block: 'nearest'}); const r = e.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()")
     if not point:
-        raise RuntimeError(f"no {selector} reads {label!r}")
+        seen = browser.js(f"[...document.querySelectorAll({json.dumps(selector)})].map(b => b.textContent.trim())")
+        raise RuntimeError(f"no {selector} reads {label!r}; they read {seen}")
     browser.mouse("mouseMoved", *point)
     browser.mouse("mousePressed", *point)
     browser.mouse("mouseReleased", *point)
@@ -184,6 +185,27 @@ def main():
         verdict = json.loads(studio_api(browser, token, "GET", "/api/run")["body"])
         report(confirm_shown and running and stopped and verdict["code"] == 130 and quit_answer["status"] == 409,
                "run, quit refused, stop", f"code {verdict['code']}, quit HTTP {quit_answer['status']}", shot(browser, "run-stopped"))
+
+        # 5b. A run of a job that reads a source brick is a sample: a real output is refused (409) and the page says so
+        real = open(os.path.join(LAB, "library-seed", "customers-anonymized.yaml")).read().replace(
+            "output: brick:node-4/dim-customers", "output: csv:sample-refused.csv")
+        with open(os.path.join(folder, "sample-refused.yaml"), "w") as f:
+            f.write(real)
+        browser.js("location.reload()")  # the address alone only changes the hash: the list of jobs is read again on a load
+        time.sleep(2)
+        stub_dialogs(browser)
+        browser.wait_for("[...document.querySelectorAll('#jobs button.job')].some(b => b.textContent.includes('sample-refused.yaml'))", 20)
+        click_text(browser, "#jobs button.job", "sample-refused.yaml")
+        browser.wait_for("document.querySelectorAll('.dcard').length > 0", 20)
+        browser.js("(() => { window.__prepare = null; const f = window.fetch; window.fetch = async (...a) => { const r = await f(...a);"
+                   " if (String(a[0]).includes('/api/run/prepare')) window.__prepare = r.status; return r; }; })()")
+        browser.js("document.getElementById('status').textContent = ''")
+        click(browser, "#d-run")
+        said = browser.wait_for("(document.getElementById('status')?.textContent || '').includes('it is a sample')", 30)
+        prepare = browser.js("window.__prepare")
+        no_confirm = not browser.js("!!document.getElementById('d-run-confirm')")
+        report(said and prepare == 409 and no_confirm and not os.path.exists(os.path.join(folder, "sample-refused.csv")),
+               "a source brick with a real output is refused", f"HTTP {prepare}; {text(browser, '#status').strip()[:90]}", shot(browser, "sample-refused"))
 
         # 6. Publish: accepted, then refused with its report
         bad = open(os.path.join(LAB, "library-seed", "revenue-by-country.yaml")).read().replace(
