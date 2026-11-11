@@ -1333,14 +1333,15 @@ of the folder and its own files. Quitting from the page exits 0; Ctrl+C exits 13
 > [docs/guides/distributed-first-pipeline.md](./docs/guides/distributed-first-pipeline.md); running
 > the two hosts for real is [deploy/README.md](./deploy/README.md).
 
-A **coordinator** cuts a pipeline into fragments and runs each on a **node**, a host that carries
-data; a **runner** is a node with no data that runs every step between the bricks. The coordinator
-and the runner are published as container images, `ghcr.io/nicopon/dtpipe-coordinator` and
-`ghcr.io/nicopon/dtpipe-runner`, by each release. A node that serves real data is `dtpipe node`, or
-your own .NET host that calls `AddDtPipeNode`, and declares its **bricks**. Every setting below is
-read from the environment first (`Coordinator__PublicUrl`), then from command-line arguments
-(`--Coordinator:PublicUrl`); a secret belongs in the environment only, or in a file named by
-`@path` where a setting says so.
+A **coordinator** cuts a pipeline into parts and runs each on a **node**, a host next to its
+data; a **runner** is a node with no data that runs the steps between the bricks. Each release
+publishes the coordinator and the runner as the images `ghcr.io/nicopon/dtpipe-coordinator` and
+`ghcr.io/nicopon/dtpipe-runner`. A data node is `dtpipe node`, or a .NET host that calls
+`AddDtPipeNode`.
+
+Every setting is read from the environment (`Coordinator__PublicUrl`), then from the command line
+(`--Coordinator:PublicUrl`). A secret goes in the environment, or in a file named by `@path` where
+a setting allows it.
 
 ### Coordinator settings (`Coordinator__*`)
 
@@ -1371,18 +1372,15 @@ read from the environment first (`Coordinator__PublicUrl`), then from command-li
 | `Identity__LabelClaims` | Claims shown beside a host waiting for approval; a label only |
 | `Health__MaxAge` | The longest a health read is kept. Default: five minutes |
 
-The state directory is the coordinator's whole state when the store is SQLite: back it up stopped,
-as described in [deploy/README.md](./deploy/README.md#backing-up-a-sqlite-coordinator). With
-PostgreSQL or SQL Server the state is in the database, [one database for each
-coordinator](./deploy/README.md#keeping-the-state-in-a-database).
-`GET /healthz` answers 200, anonymously, once the server serves.
-
-An identity in **Access** is verified by the provider or by a key the coordinator makes,
-`dtp_<id>_<43 characters>`: shown once when it is made, then kept only as its hash. A node presents
-its key as its client secret at the coordinator's `/connect/token`; a person types it into the
-sign-in form, or hands it to `dtpipe studio --key`. Two keys may be live at once, for a rotation,
-and revoking one ends what it opened at the next request. The server never makes a key on its
-own: a deployment gives the first ones through `Bootstrap__*`.
+- With SQLite, the state directory is the whole state: back it up stopped
+  ([deploy/README.md](./deploy/README.md#backing-up-a-sqlite-coordinator)). With PostgreSQL or SQL
+  Server, the state is in the database, [one per
+  coordinator](./deploy/README.md#keeping-the-state-in-a-database).
+- `GET /healthz` answers 200, anonymously, once the server serves.
+- A key the coordinator makes is `dtp_<id>_<43 characters>`, shown once, then kept as a hash. A
+  node presents it as its client secret at `/connect/token`; a person types it into the sign-in
+  form or gives it to `dtpipe studio --key`. Two keys may be live at once, for a rotation, and
+  revoking one ends what it opened at its next request. The first keys come from `Bootstrap__*`.
 
 ### Node host settings (`DtPipeNode__*`)
 
@@ -1412,18 +1410,12 @@ pinned runs the check and writes the pin.
 
 #### A node from the CLI (`dtpipe node`)
 
-`dtpipe node` is a data node whose bricks are the branches of the [pipeline grammar](#dag-syntax): a
+`dtpipe node` is a data node whose bricks are branches of the [pipeline grammar](#dag-syntax): a
 branch that only reads (`-i`) is a source, one that only writes (`-o`) is a sink, and its `--alias`
-is the brick's id. `--job FILE` gives the same branches in a job file instead of on the line (a flag
-of a branch beside `--job` is refused), which is how a sink sits beside sources: a command line
-holds as many sources as it likes, or one sink. A branch that reads another (`--from`), transforms,
-or both reads and writes is refused by name, since everything between a read and a write belongs on
-a runner. A `--job` file is read as written, like a command line: a `${{NAME}}`, a `keyring://`
-alias and a `${{cursor://|default}}` stay in the brick's text, in its version and in the job of the
-fragment, and are resolved only when the child runs. The node's settings are the `DtPipeNode__*` of
-the table above, from the environment; four options override them. `dtpipe node --runner` is a
-runner instead: it hosts no data, runs any fragment the coordinator sends, and refuses a brick given
-beside it (`-i`, `-o`, `--alias`, `--job`).
+is the brick's id. A command line holds any number of sources, or one sink; `--job FILE` holds
+both. A branch that reads another, transforms, or reads and writes is refused: that work belongs on
+a runner. `${{NAME}}`, `keyring://` and `${{cursor://|default}}` stay in the brick's text and are
+resolved only when the fragment runs. `dtpipe node --runner` hosts no data and runs any fragment.
 
 | Option | Description |
 |---|---|
@@ -1438,26 +1430,19 @@ DtPipeNode__Oidc__ClientSecret=keyring://node-secret \
     -i 'pg:Host=db;Database=crm;Password=${{CRM_PASSWORD}}' --alias customers
 ```
 
-A brick carries no title or description: the studio shows its id. A brick's version is the hash of
-its text, so a credential written into it would let anyone who sees the version test guesses
-offline: the node refuses a brick that holds one (a `${{NAME}}` or `keyring://` reference passes).
-That check reads the keys it knows as credentials, in a connection string and in a query alike: a
-secret under another key is not seen, and a harmless `WHERE token_count = 5` is refused as one. A
-file a brick reads by `@file` (a query) stays a reference in its text: give an absolute path, since
-fragments run in the node's own directory, and know that the file's content is not part of the
-brick's version. The `dtpipe` every fragment runs is the binary that started the node.
+- A brick's title is its id, and its version is the hash of its text.
+- A brick that holds a credential is refused; a `${{NAME}}` or `keyring://` reference passes. The
+  check knows common credential keys only, so it can miss a secret under another key and refuse a
+  harmless `WHERE token_count = 5`.
+- A file a brick reads with `@file` needs an absolute path, and its content is not part of the
+  version.
 
 #### A key from the CLI (`dtpipe keygen`)
 
-`dtpipe keygen ID` prints a new key for the identity `ID`, in the shape a coordinator reads:
-`dtp_<id>_<43 characters of base64url>`, the secret 256 random bits. `ID` is the identity's client
-id: lowercase letters, digits and `-`, a letter or digit first. The coordinator finds the identity
-by the id the key names and judges the key by its hash alone, so a text of another shape is
-refused, and it never checks how random the secret is: make keys with this command.
-
-The command reaches no coordinator and keeps nothing; the key is the only output. Give it to the
-coordinator (`Coordinator__Bootstrap__AdminKey`, `Coordinator__Bootstrap__Identities__<n>__Key`,
-each as `@file`) and to the host it opens (`--client-secret @file`).
+`dtpipe keygen ID` prints a new key for the identity `ID` (lowercase letters, digits and `-`):
+`dtp_<id>_<43 characters>`, 256 random bits. It contacts nothing and keeps nothing. Give the key to
+the coordinator (`Coordinator__Bootstrap__AdminKey`, `Coordinator__Bootstrap__Identities__<n>__Key`,
+as `@file`) and to the host it opens (`--client-secret @file`).
 
 | Option | Description |
 |---|---|
@@ -1514,26 +1499,22 @@ only the new orders on each run.
 | `PUT /api/library/{id}/cursors/{alias}` | the right to launch (designer) | Sets a value, `{"value": "…", "type": "integer"}`; the type may be left out for a cursor that exists and must be its own: another type is refused until a reset. Refused while a run of the pipeline is in flight |
 | `DELETE /api/library/{id}/cursors/{alias}` | the right to launch (designer) | Resets: the next run starts from the token's default |
 
-`/service` has no cursor route, and a launcher's token never opens `/api`. `--cursor-from` is not
-served: it is a launch value for one run of a command line. The contract number of `dtpipe studio`'s
-API is 9.
+`/service` has no cursor route. `--cursor-from` does not apply to a distributed run.
 
 ### Rights and identities
 
-The identity provider says who a caller is; the coordinator's **rights** say what it may do. Each
-identity (the `client_id` of a client-credentials client) has a name and belongs to groups, and a
-**matrix** lists which group may send rows to which (`*` stands for any group, such as `*` →
-`runner` and `runner` → `*`, while `*` → `*` is refused). An edge checks that every group of the
-sender may send to every group of the receiver. When a pipeline flows through intermediate nodes or
-runners, origin groups propagate transitively along dependencies: an edge leaving a runner requires
-authorization from each upstream source group to the destination groups, so an intermediate hop
-cannot mask upstream origins. A branch carries the origins of the branches it reads (`from`, `ref`)
-and no other: a runner's step reads and writes its edges only, so two flows that cross one runner
-need no grant between their groups. Branches that read each other in a cycle are refused. An
-identity has a kind: `node` (the default, hosts fragments), `monitor` (reads `/health/pipelines` and
-nothing else) or `launcher` (starts the runs of the pipelines it lists on `/service`, and reads
-them). A host whose identity the rights do not know waits in the **Access** view until an
-administrator accepts it.
+The identity provider (or a key) says who a caller is; the coordinator's **rights** say what it
+may do.
+
+- Each identity has a name and groups. The **flow matrix** lists which group may send rows to which;
+  `*` stands for any group (`*` → `runner`, `runner` → `*`), and `*` → `*` is refused.
+- An edge needs every group of the sender to be allowed to send to every group of the receiver.
+  Through a runner, the origin groups carry over: an edge leaving a runner needs each upstream
+  source group to be allowed to reach the destination. A branch carries the origins of the branches
+  it reads, and no others. Branches that read each other in a cycle are refused.
+- An identity's kind is `node` (the default), `monitor` (reads `/health/pipelines` only) or
+  `launcher` (starts and reads the runs of the pipelines it lists, on `/service`).
+- A host the rights do not know waits in **Access** until an administrator accepts it.
 
 ### Routes for services
 
