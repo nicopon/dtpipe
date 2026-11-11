@@ -34,7 +34,8 @@ sentences**; a one-line lead-in may come before it.
 - **Pitfalls go last**, as a list, one line each.
 - **The experimental family lives in `docs/experimentation.md` and its walkthrough.** Any other
   page gives it one link at most.
-- **A guide stays under about 800 words, a sentence under about 25.**
+- **A guide stays under about 800 words, a sentence under about 25.** A walkthrough that runs a
+  whole setup from nothing may be longer.
 
 `[unchecked]`
 

@@ -875,13 +875,13 @@ branch-name:
 | `filter` | `mappings: {expression: ~}` | JS boolean expression, carried by the key |
 | `expand` | `mappings: {expression: ~}` | Carried by the key; must return an array of objects |
 | `window` | `options: {count: N, script: "..."}` | Mapping values are taken as script lines when no `script` option is set |
-| `project` | `options: {project: "a,b", drop: "c", rename: "Old:New"}` | One transformer covers all three; `--export-job` emits this shape and its round-trip is tested |
+| `project` | `options: {project: "a,b", drop: "c", rename: "Old:New"}` | One transformer covers all three; `--export-job` emits this shape |
 
 An `options:` key is the **property name**, which is not always the command-line flag: the compute
 output type is `--compute-types` on the command line and `compute-types` in YAML, but DuckDB's init
-SQL is `--duck-init` and `init-sql`. A key that matches no property is refused by name, and names
-the one that would have worked. `--export-job` emits the binding form and its round-trip is tested,
-so it is the authority on any shape this table leaves open.
+SQL is `--duck-init` and `init-sql`. A key that matches no property gets a warning that lists the
+valid keys, and the run goes on. `--export-job` is the authority on any shape this table leaves
+open.
 
 ### Environment variable and secret interpolation
 
@@ -1257,11 +1257,11 @@ dtpipe studio ./jobs --coordinator https://coordinator.example  # signed in to a
 | Action | What it does |
 |:---|:---|
 | **▶ Preview** | Runs the job as `--dry-run` does, over the rows you ask for (up to 100 000 per source; a card shows up to 1 000). Each card then shows its rows, columns and types, and a badge with its state |
-| **Save** | Writes the job composed from the cards. A job written by hand loses its inner comments and key order, and the page says so. Refuses a file changed on disk since it was opened, and never overwrites another file |
+| **Save** | Writes the job composed from the cards. A job written by hand loses its inner comments and key order, and the page says so. Refuses a file changed on disk since it was opened, never creates a folder, and never overwrites another file |
 | **Variables** | Lists every `${{…}}` the job reads. For a preview, give each a keyring alias or a value; a preview with an unresolved variable is refused |
 | **Import** | Turns a dtpipe command line into a new job, as `--export-job` would. `--bind-input` and `--bind-output` are refused |
 | **Write targets…** | Runs the saved job for real, as `dtpipe --job`, after you confirm each target. **Stop** ends it with code 130 |
-| **Review before writing** | An option of **Write targets…**: the run stops before every writing branch and holds the rows; **Write** writes them all, **Abandon** forgets them |
+| **Review before writing** | An option of **Write targets…**: the run stops before every writing branch and holds the rows; **Write** writes them all, **Abandon** forgets them. A run stopped or failed before every target held its rows can only be abandoned |
 | **▶** on a card | Runs the job up to that card |
 | **📌** on a card | Keeps the card's rows as a checkpoint, so later runs start from there. **Forget pins** clears them all |
 
@@ -1288,7 +1288,9 @@ the studio's memory. The coordinator's administrator must list you, and
 
 A preview with bricks reads at most 100 rows of each source brick through the coordinator; a sink
 brick receives nothing, its rows going to a throwaway file under `.dtpipe/studio/samples/`. A run
-with a source brick is refused unless every output is a sink brick.
+with a source brick is refused unless every output is a sink brick. **Write targets…** also writes a
+sink brick to a throwaway file, never to its node. A brick's variables belong to its node and do
+not appear in the Variables tab.
 
 The page listens on 127.0.0.1 only, answers only the address it printed (which carries a session
 token), refuses requests from other sites, and reads and writes only the `.yaml` and `.yml` files
