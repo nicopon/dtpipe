@@ -1,7 +1,9 @@
 """The campaign's security cells: what a client that is not the coordinator can and cannot do.
 
-Standard library only. A minimal SignalR client over the long-polling transport (JSON protocol) lets a
-script call the hub the way a compromised peer would; nothing here needs a WebSocket library.
+Standard library only. Two small clients let a script reach the coordinator the way a compromised peer
+would: a SignalR client over the long-polling transport (JSON protocol) for the node channel, and a
+registration over TransportR's HTTP control plane (a server-sent events stream); nothing here needs a
+WebSocket library.
 """
 import base64
 import json
@@ -10,6 +12,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from http.client import HTTPConnection
 
 RECORD_SEPARATOR = "\x1e"
 COMMAND_HUB = "/hub/command"
@@ -55,6 +58,41 @@ def bogus_jwt():
 def negotiate_status(base, hub_path, token):
     headers = {"Authorization": f"Bearer {token}"} if token else {}
     return http(f"{base}{hub_path}/negotiate?negotiateVersion=1", "POST", headers)[0]
+
+
+class ClientRegistration:
+    """A data plane client registered through TransportR's control plane, the way a node's client registers.
+
+    Opening it asks for the client's server-sent events stream with the presence heartbeat the hub requires;
+    the registration holds while the connection does.
+    """
+
+    def __init__(self, base, token, client_id):
+        self.client_id = client_id
+        parts = urllib.parse.urlparse(base)
+        self._connection = HTTPConnection(parts.hostname, parts.port, timeout=10)
+        self._connection.request("GET", events_path(client_id), headers={"Authorization": f"Bearer {token}", "Accept": "text/event-stream"})
+        self._response = self._connection.getresponse()
+        self.status = self._response.status
+
+    def registered(self):
+        """True once the stream says `registered`."""
+        return self.status == 200 and b"event: registered" in self._response.read1(512)
+
+    def close(self):
+        self._connection.close()
+
+
+def events_path(client_id):
+    """The control plane's registration route for a client; the heartbeat is what a refusal must not be mistaken for."""
+    return f"/api/client/{client_id}/events?heartbeatMs=60000"
+
+
+def events_status(base, token, client_id):
+    """The status of a registration attempt with `token`; the stream, when it opens, is not read."""
+    registration = ClientRegistration(base, token, client_id)
+    registration.close()
+    return registration.status
 
 
 def stream_status(base, token):

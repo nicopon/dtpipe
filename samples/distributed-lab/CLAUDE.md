@@ -115,8 +115,9 @@ project's `CLAUDE.md`); the nodes are `src/DtPipe.PipelineNode.Hosting` hosts
   running lab and judges every trial on the same invariants: it ends, the verdict is right, nothing
   is left running, the lab still runs a reference pipeline. It needs the lab seeded with
   `LAB_SCALE=60` (shorter runs end before a timed fault reaches them), strict nodes, and the
-  toxiproxy binaries (`TOXIPROXY_DIR`) for the network cells. Its security cells call the hub as a
-  peer would (`campaign_security.py`, a SignalR client over long polling); S3 and S5 restart the IdP
+  toxiproxy binaries (`TOXIPROXY_DIR`) for the network cells. Its security cells call the coordinator as a
+  peer would (`campaign_security.py`: a SignalR client over long polling for the node channel, a client registration over
+  TransportR's HTTP control plane); S3 and S5 restart the IdP
   with shorter tokens through `lab.sh idp`, check the lifetime it now issues, and restart the hosts
   themselves (`lab.sh nodes` leaves hosts already in their mode, and their tokens, alone). Every
   wait for the hosts names the ones still offline, so a reference check that reads the warehouse

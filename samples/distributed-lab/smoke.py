@@ -504,12 +504,11 @@ def rights_pass():
         status, thief = sec.token_for(rights["idp"]["issuer"], node1["clientId"], node1["secret"])
         if not thief:
             raise RuntimeError(f"no token for node-1 (HTTP {status})")
-        owner = sec.LongPollingHub(URL, sec.COMMAND_HUB, access).open()
+        owner = sec.ClientRegistration(URL, access, client)
         claimant = None
         try:
-            answer = owner.invoke("Connect", client, None)
-            if "error" in answer:
-                raise RuntimeError(f"node-2's client was not registered, so the check proves nothing: {answer['error']}")
+            if not owner.registered():
+                raise RuntimeError(f"node-2's client registered nothing (HTTP {owner.status}), so the check proves nothing")
             claimant = sec.LongPollingHub(URL, sec.LAB_HUB, thief).open()
             try:
                 claimant.invoke("Announce", {"name": "node-1", "description": "", "datasets": [], "role": 0, "bricks": [],
@@ -525,20 +524,6 @@ def rights_pass():
                 claimant.close()
             owner.close()
         return "node-1's token announcing a client registered under node-2's subject: refused, no replica of node-1"
-
-    def data_hub_takes_no_run_message():
-        # The data hub serves the data plane and nothing about a run: a fragment's registration and its report are
-        # not methods of it.
-        access = stranger_token()
-        hub = sec.LongPollingHub(URL, sec.COMMAND_HUB, access).open()
-        try:
-            for method, arguments in (("Register", ("smoke-fragment", "v")), ("Exited", ("run-1", 1, "Local", None, {}))):
-                answer = hub.invoke(method, *arguments)
-                if "does not exist" not in answer.get("error", ""):
-                    raise RuntimeError(f"{method} on the data hub was answered {json.dumps(answer)[:160]}")
-        finally:
-            hub.close()
-        return "Register and Exited on the data hub: the methods do not exist"
 
     def several_groups():
         # A node in several groups sends to another only if every group of the sender may send to every group of
@@ -732,7 +717,7 @@ def rights_pass():
             "admin POST without CSRF header": (raw_session("/api/runs/cancel", b"{}"), 403),
             # A person's session never reaches the data plane: only a service's token opens it.
             "admin session on the node channel": (raw_session("/node-channel/negotiate?negotiateVersion=1", b""), 401),
-            "admin session on TransportR's hub": (raw_session("/hub/command/negotiate?negotiateVersion=1", b""), 401),
+            "admin session on TransportR's control plane": (raw_session(sec.events_path(uuid.uuid4()), None, "GET", {"Accept": "text/event-stream"}), 401),
             "admin session on a stream": (raw_session(f"/api/stream/{STREAM}/send", b""), 401),
             "anonymous stream": (raw(f"/api/stream/{STREAM}/send", data=b"", method="POST"), 401),
         }
@@ -747,8 +732,8 @@ def rights_pass():
         form = urllib.parse.urlencode({"grant_type": "client_credentials", "client_id": "node-1", "client_secret": "node-1-lab-secret"}).encode()
         return json.loads(urllib.request.urlopen(urllib.request.Request(rights["idp"]["issuer"] + "/connect/token", form), timeout=20).read())["access_token"]
 
-    def raw_session(path, data):
-        req = urllib.request.Request(URL + path, data, {"Content-Type": "application/json"}, method="POST")
+    def raw_session(path, data, method="POST", headers=None):
+        req = urllib.request.Request(URL + path, data, {"Content-Type": "application/json", **(headers or {})}, method=method)
         try:
             return SESSION._opener.open(req, timeout=20).status
         except urllib.error.HTTPError as e:
@@ -769,7 +754,7 @@ def rights_pass():
             "designer bearer PUT without CSRF": (bearer(designer, "/api/library/smoke-refused", save, "PUT", csrf=False)[0], 403),
             "service token GET /api/me": (bearer(service_token(), "/api/me")[0], 401),
             "designer bearer on the node channel": (bearer(designer, "/node-channel/negotiate?negotiateVersion=1", {}, "POST")[0], 401),
-            "designer bearer on TransportR's hub": (bearer(designer, "/hub/command/negotiate?negotiateVersion=1", {}, "POST")[0], 401),
+            "designer bearer on TransportR's control plane": (sec.events_status(URL, designer, uuid.uuid4()), 401),
         }
         wrong = {k: v for k, v in expected.items() if v[0] != v[1]}
         if wrong:
@@ -804,7 +789,6 @@ def rights_pass():
     check("a foreign replica", foreign_replica)
     check("a foreign report", foreign_report)
     check("a stolen data plane client", stolen_data_plane_client)
-    check("no run message on the data hub", data_hub_takes_no_run_message)
     check("flow matrix, several groups", several_groups)
     return failures
 
