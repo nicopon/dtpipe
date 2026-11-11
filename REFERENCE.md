@@ -1726,12 +1726,15 @@ identity (the `client_id` of a client-credentials client) has a name and belongs
 **matrix** lists which group may send rows to which (`*` stands for any group, such as `*` →
 `runner` and `runner` → `*`, while `*` → `*` is refused). An edge checks that every group of the
 sender may send to every group of the receiver. When a pipeline flows through intermediate nodes or
-runners, origin groups propagate transitively along dependencies: an edge leaving a runner
-requires authorization from each upstream source group to the destination groups, so an intermediate
-hop cannot mask upstream origins. An identity has a kind: `node` (the default, hosts fragments),
-`monitor` (reads `/health/pipelines` and nothing else) or `launcher` (starts the runs of the
-pipelines it lists on `/service`, and reads them). A host whose identity the rights do not know
-waits in the **Access** view until an administrator accepts it.
+runners, origin groups propagate transitively along dependencies: an edge leaving a runner requires
+authorization from each upstream source group to the destination groups, so an intermediate hop
+cannot mask upstream origins. A branch carries the origins of the branches it reads (`from`, `ref`)
+and no other: a runner's step reads and writes its edges only, so two flows that cross one runner
+need no grant between their groups. Branches that read each other in a cycle are refused. An
+identity has a kind: `node` (the default, hosts fragments), `monitor` (reads `/health/pipelines` and
+nothing else) or `launcher` (starts the runs of the pipelines it lists on `/service`, and reads
+them). A host whose identity the rights do not know waits in the **Access** view until an
+administrator accepts it.
 
 ### Routes for services
 

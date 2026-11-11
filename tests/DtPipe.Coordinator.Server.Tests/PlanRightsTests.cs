@@ -361,4 +361,60 @@ public sealed class PlanRightsTests : IDisposable
         Assert.Contains("p@r: 'leak_out' reads 'csv:tmp.csv': a runner's fragment reads and writes its arrow: edges and nothing else.", plan.Errors);
         Assert.DoesNotContain(plan.Fragments, f => f.Node == "r");
     }
+
+    [Fact]
+    public async Task Two_Independent_Branches_Through_One_Runner_Need_No_Grant_Between_Their_Groups()
+    {
+        Announce("n1", "crm", NodeRole.Data, [], [NodeAnnouncement.RawFragments]);
+        Announce("n2", "finance", NodeRole.Data, [], [NodeAnnouncement.RawFragments]);
+        Announce("d1", "crm", NodeRole.Data, [], [NodeAnnouncement.RawFragments]);
+        Announce("d2", "finance", NodeRole.Data, [], [NodeAnnouncement.RawFragments]);
+
+        var rights = Rights(
+            ("n1", ["crm"], true), ("d1", ["crm"], true),
+            ("n2", ["finance"], true), ("d2", ["finance"], true),
+            ("r", ["run"], true));
+        foreach (var group in new[] { "crm", "finance" })
+        {
+            Allow(rights, group, "run");
+            Allow(rights, "run", group);
+            Allow(rights, group, group);
+        }
+
+        // Each flow crosses the same runner fragment; neither reads the other, so crm never reaches finance, nor the reverse.
+        const string job = "s1:\n  input: generate:10\ns2:\n  input: generate:10\nx:\n  from: s1\n  provider-options:\n    sql:\n      query: SELECT * FROM s1\ny:\n  from: s2\n  provider-options:\n    sql:\n      query: SELECT * FROM s2\no1:\n  from: x\n  output: csv:o1.csv\no2:\n  from: y\n  output: csv:o2.csv\n";
+        var placement = new Dictionary<string, string> { ["s1"] = "n1", ["s2"] = "n2", ["x"] = "r", ["y"] = "r", ["o1"] = "d1", ["o2"] = "d2" };
+
+        var plan = PlanJob(rights, job, placement);
+
+        Assert.Empty(plan.Errors);
+        Assert.Null(plan.FlowRejection);
+        Assert.True(plan.Deployable);
+        Assert.Equal(["crm", "run"], Assert.Single(plan.Edges, e => e.ConsumerFragment == "p@d1").ProducerGroups);
+        Assert.Equal(["finance", "run"], Assert.Single(plan.Edges, e => e.ConsumerFragment == "p@d2").ProducerGroups);
+    }
+
+    [Fact]
+    public async Task Two_Runners_That_Read_Each_Other_In_A_Cycle_Are_Refused_Naming_Its_Branches()
+    {
+        Announce("r1", "run1", NodeRole.Runner, [], []);
+        Announce("r2", "run2", NodeRole.Runner, [], []);
+        Announce("dst", "warehouse", NodeRole.Data, [], [NodeAnnouncement.RawFragments]);
+
+        var rights = Rights(("r1", ["run1"], true), ("r2", ["run2"], true), ("dst", ["warehouse"], true));
+        Allow(rights, "*", "run1");
+        Allow(rights, "run1", "*");
+        Allow(rights, "*", "run2");
+        Allow(rights, "run2", "*");
+
+        const string job = "x:\n  from: y\ny:\n  from: x\nd:\n  from: x\n  output: csv:out.csv\n";
+        var placement = new Dictionary<string, string> { ["x"] = "r1", ["y"] = "r2", ["d"] = "dst" };
+
+        var plan = PlanJob(rights, job, placement);
+
+        Assert.False(plan.Deployable);
+        Assert.Equal(["The branches x -> y -> x read each other in a cycle: no branch of it can start, and its rows have no origin."], plan.Errors);
+        Assert.Empty(plan.Fragments);
+        Assert.Empty(plan.Edges);
+    }
 }

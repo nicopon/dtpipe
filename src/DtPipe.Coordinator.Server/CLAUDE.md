@@ -544,10 +544,12 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   it is now on every transfer, and the planner and a deployment check every edge against it, each by one
   pass of `IPlanRegistry` (`PlanFlow`) and in the same sentence, a plan made under an earlier matrix included. A
   node in several groups sends only if every one of its groups may send to every group of the
-  receiver, on both sides, and an edge carries the groups of both ends: a PlannedEdge's ProducerGroups
-  accumulates the groups of every upstream unit (DependsOn) and any inbound origin entering the same runner fragment
-  transitively alongside the producer's own groups, so an intermediate runner hop requires authorization from each
-  upstream source group to the consumer groups. `*` in the matrix stands for any group on either side (such as `*` → `runner`
+  receiver, on both sides, and an edge carries the groups of both ends: a `PlannedEdge`'s `ProducerGroups` are the
+  producer's node's groups and, transitively, those of every unit it reads (`from`, `ref`), so a runner hop requires
+  authorization from each upstream source group to the consumer groups. The closure is exact, never widened to every unit a
+  runner holds: a branch reads no alias it does not declare (`DuckDBSqlProcessorEdgesOnlyTests`), and a runner's fragment
+  reaches no file or database (`RunnerEndpoints`), so two flows through one runner need no grant between their groups. A
+  cycle among the units refuses the plan, naming them. `[CI: PlanRightsTests]` `*` in the matrix stands for any group on either side (such as `*` → `runner`
   and `runner` → `*`), while `*` → `*` and `*` as an identity group are refused. Never add a second matrix. The matrix changes whole
   (`PUT /api/rights/matrix`) or by edges added beside it, which revoke nothing, so two administrators who add at once keep both:
   `POST /api/rights/matrix/edges` (the page sends the pairs of groups a plan's refused edges lack), and `exchangeWithRunners` on a

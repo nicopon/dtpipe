@@ -152,6 +152,13 @@ public sealed class PlanBuilder(
         }
         if (errors.Count > 0) return Result(unitViews);
 
+        // A branch that reads itself through others has no first branch to run, and no origin to give its rows.
+        if (CycleOf(units) is { } cycle)
+        {
+            errors.Add($"The branches {string.Join(" -> ", cycle)} read each other in a cycle: no branch of it can start, and its rows have no origin.");
+            return Result(unitViews);
+        }
+
         // 2. One fragment per node, whole units copied in.
         var drafts = new Dictionary<string, FragmentDraft>(StringComparer.Ordinal);
         FragmentDraft DraftOf(string node) => drafts.TryGetValue(node, out var d)
@@ -291,7 +298,7 @@ public sealed class PlanBuilder(
 
         // An edge joins two fragments of the plan: a fragment refused above is not in it, and an edge to it would point at nothing for
         // every reader of the plan. Allowed starts false: the matrix decides it, once, for the whole plan.
-        var originGroups = ComputeOriginGroups(units, placement, groupsOf, nodes);
+        var originGroups = ComputeOriginGroups(units, placement, groupsOf);
         var planned = fragments.Select(f => f.Name).ToHashSet(StringComparer.Ordinal);
         var asked = runEdges.Where(e => planned.Contains(e.Producer.Name) && planned.Contains(e.Consumer.Name)).Select(e => new PlannedEdge(
             e.Producer.Name, e.ProducerAlias, e.Consumer.Name, e.ConsumerAlias, originGroups.GetValueOrDefault(e.SourceUnitId, e.Producer.Groups), e.Consumer.Groups, Allowed: false))
@@ -302,68 +309,58 @@ public sealed class PlanBuilder(
     }
 
     /// <summary>
-    /// Computes the transitive origin groups of each unit by walking upstream dependencies in topological order,
-    /// accumulating upstream groups, any inbound origin entering the same runner fragment, and the local groups of the node hosting the unit.
+    /// The groups each unit's rows come from: its node's, and those of every unit it reads through <c>from</c> or <c>ref</c>,
+    /// transitively. The closure is exact: a branch reads no alias it does not declare, and a runner's fragment reaches no file
+    /// or database its other branches could have written (<see cref="RunnerEndpoints"/>), so two branches that share a runner
+    /// share none of their rows. The units hold no cycle by now (<see cref="CycleOf"/>).
     /// </summary>
     private static Dictionary<string, IReadOnlyList<string>> ComputeOriginGroups(
         IReadOnlyList<Unit> units,
         IReadOnlyDictionary<string, string> placement,
-        IReadOnlyDictionary<string, IReadOnlyList<string>> groupsOf,
-        IReadOnlyDictionary<string, NodeView> nodes)
+        IReadOnlyDictionary<string, IReadOnlyList<string>> groupsOf)
     {
         var unitById = units.ToDictionary(u => u.Id, StringComparer.Ordinal);
         var memo = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
-        var visiting = new HashSet<string>(StringComparer.Ordinal);
 
         IReadOnlyList<string> Resolve(string unitId)
         {
-            if (memo.TryGetValue(unitId, out var cached))
-                return cached;
-
-            if (!visiting.Add(unitId))
-                return [];
-
-            var seen = new HashSet<string>(StringComparer.Ordinal);
-            var acc = new List<string>();
-
-            void AddRange(IEnumerable<string> groups)
+            if (memo.TryGetValue(unitId, out var cached)) return cached;
+            var groups = new List<string>();
+            void Add(IEnumerable<string> more)
             {
-                foreach (var g in groups)
-                {
-                    if (seen.Add(g))
-                        acc.Add(g);
-                }
+                foreach (var g in more)
+                    if (!groups.Contains(g, StringComparer.Ordinal)) groups.Add(g);
             }
+            foreach (var dep in unitById[unitId].DependsOn.Where(unitById.ContainsKey)) Add(Resolve(dep));
+            if (placement.TryGetValue(unitId, out var node) && groupsOf.TryGetValue(node, out var own)) Add(own);
+            return memo[unitId] = groups;
+        }
 
-            if (unitById.TryGetValue(unitId, out var unit))
-            {
-                foreach (var dep in unit.DependsOn)
-                    AddRange(Resolve(dep));
-            }
+        foreach (var u in units) Resolve(u.Id);
+        return memo;
+    }
 
-            if (placement.TryGetValue(unitId, out var node))
-            {
-                if (nodes.TryGetValue(node, out var nodeView) && nodeView.Role == NodeRole.Runner)
-                {
-                    foreach (var other in units.Where(u => placement.GetValueOrDefault(u.Id) == node))
-                        foreach (var dep in other.DependsOn.Where(d => placement.GetValueOrDefault(d) != node))
-                            AddRange(Resolve(dep));
-                }
+    /// <summary>The units of the first cycle among the <c>from</c>/<c>ref</c> dependencies, the first one repeated at the end, or <c>null</c>.</summary>
+    private static List<string>? CycleOf(IReadOnlyList<Unit> units)
+    {
+        var unitById = units.ToDictionary(u => u.Id, StringComparer.Ordinal);
+        var done = new HashSet<string>(StringComparer.Ordinal);
+        var path = new List<string>();
 
-                if (groupsOf.TryGetValue(node, out var localGroups))
-                    AddRange(localGroups);
-            }
-
-            visiting.Remove(unitId);
-            var result = acc.ToArray();
-            memo[unitId] = result;
-            return result;
+        List<string>? Visit(string id)
+        {
+            if (path.IndexOf(id) is >= 0 and var at) return [.. path.Skip(at), id];
+            if (!done.Add(id)) return null;
+            path.Add(id);
+            foreach (var dep in unitById[id].DependsOn.Where(unitById.ContainsKey))
+                if (Visit(dep) is { } cycle) return cycle;
+            path.RemoveAt(path.Count - 1);
+            return null;
         }
 
         foreach (var u in units)
-            Resolve(u.Id);
-
-        return memo;
+            if (Visit(u.Id) is { } cycle) return cycle;
+        return null;
     }
 
     /// <summary>The pieces of a data node's fragment in the closed vocabulary of ids, or <c>null</c> when a branch is no brick of that node.</summary>
