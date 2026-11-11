@@ -880,8 +880,8 @@ branch-name:
 An `options:` key is the **property name**, which is not always the command-line flag: the compute
 output type is `--compute-types` on the command line and `compute-types` in YAML, but DuckDB's init
 SQL is `--duck-init` and `init-sql`. A key that matches no property gets a warning that lists the
-valid keys, and fails the run under `--strict-bindings`. `--export-job` is the authority on any shape this table leaves
-open.
+valid keys, and fails the run under `--strict-bindings`. `--export-job` is the authority on any
+shape this table leaves open.
 
 ### Environment variable and secret interpolation
 
