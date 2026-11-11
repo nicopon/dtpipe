@@ -49,6 +49,14 @@ zone, nullability, field metadata) is refused with the column named, never writt
 does not match. No conversion, per the core rule. `[CI: ArrowWriterSchemaFidelityTests,
 validate_arrow_roundtrip.sh]`
 
+## The PostgreSQL writer's COPY writes are synchronous
+
+`NpgsqlBinaryImporter` writes each value synchronously, which saves the per-value async cost. A write
+that fills Npgsql's buffer flushes to the socket and blocks its thread. That is accepted because a
+process runs one pipeline at a time. The token is checked between rows (`ct.ThrowIfCancellationRequested`)
+and passed to the COPY's start and completion, on the direct and the upsert path alike.
+`[unchecked]`
+
 ## Writing adapter help (`[Description]` / `[ComponentHelp]`)
 
 `get-adapter-help` is the only view a model gets of an adapter, so these attributes are a contract.
