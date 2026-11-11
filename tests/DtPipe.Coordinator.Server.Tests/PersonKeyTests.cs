@@ -279,6 +279,20 @@ public sealed partial class PersonKeyTests : IDisposable
     }
 
     [Fact]
+    public async Task The_Sign_In_Page_Names_No_Version_And_A_Signed_In_Person_Reads_It()
+    {
+        var version = CoordinatorServer.Version.Split('+')[0];
+        using var browser = Browser(_app);
+
+        var page = await browser.GetStringAsync(AccountPages.LoginPath, Ct);
+        Assert.DoesNotContain(version, page);
+
+        using var admin = Admin(_app);
+        var info = await admin.GetFromJsonAsync<JsonElement>("/api/info", Web, Ct);
+        Assert.Equal(CoordinatorServer.Version, info.GetProperty("version").GetString());
+    }
+
+    [Fact]
     public async Task The_Form_Signs_A_Person_In_With_Its_Key_Into_A_Session_That_Holds_Its_Id_And_Never_The_Key()
     {
         var key = await PersonAsync(_app, "alice", CoordinatorRoles.Designer);

@@ -107,7 +107,8 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   and at the provider and lands on `/account/denied`: keeping the provider's session would sign
   the same person in again on the next try. A person who lacks only the admin role gets a 403 page
   linking back to `/` and to `/account/logout`. A person of a key signs out here alone, the provider never having signed them in.
-  `AccountPages` writes both and the sign-in form; a message it shows is HTML-encoded first.
+  `AccountPages` writes both and the sign-in form; a message it shows is HTML-encoded first. None of them names the server's
+  version, which would tell a stranger what to attack: `/api/info` and the main page, behind a sign-in, do.
   `[CI: PersonKeyTests] [local: the lab's smoke.py rights — roles and sessions]`
 - **A request that changes something carries `X-Dtpipe-Csrf`** (`RequireCsrfHeader`, on every
   `/api` group), a bearer's too: another site cannot set it without a CORS preflight this server
