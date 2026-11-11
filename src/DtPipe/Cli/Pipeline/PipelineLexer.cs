@@ -376,6 +376,8 @@ public class PipelineLexer
             Session = dict.TryGetValue("--session", out var sessVal) ? sessVal?.ToString() : null,
             BindInput = dict.TryGetValue("--bind-input", out var biVal) ? biVal?.ToString() : null,
             BindOutput = dict.TryGetValue("--bind-output", out var boVal) ? boVal?.ToString() : null,
+            BindCompression = dict.TryGetValue("--bind-compression", out var bcVal) ? bcVal?.ToString() : null,
+            BindCompressionLevel = dict.TryGetValue("--bind-compression-level", out var bclVal) ? bclVal?.ToString() : null,
             IgnoreNulls = dict.ContainsKey("--ignore-nulls"),
             CursorFrom = dict.TryGetValue("--cursor-from", out var cfVal) ? cfVal?.ToString() : null,
             AllFlags = dict

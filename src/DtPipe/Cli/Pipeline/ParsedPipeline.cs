@@ -24,6 +24,12 @@ public record GlobalOptions
     /// <summary>--bind-output alias=location[,alias=location...], raw. See AliasBindingApplier.</summary>
     public string? BindOutput { get; init; }
 
+    /// <summary>--bind-compression &lt;none|lz4|zstd&gt;, raw. Applied by <see cref="AliasBindingApplier"/> to the outputs --bind-output binds.</summary>
+    public string? BindCompression { get; init; }
+
+    /// <summary>--bind-compression-level &lt;n&gt;, raw. See <see cref="BindCompression"/>.</summary>
+    public string? BindCompressionLevel { get; init; }
+
     /// <summary>F17: when true, binding failures (unrecognized flags, unparsable values) exit non-zero instead of being skipped.</summary>
     public bool StrictBindings { get; init; }
 

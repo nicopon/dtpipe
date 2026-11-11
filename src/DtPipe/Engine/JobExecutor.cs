@@ -72,7 +72,8 @@ public class JobExecutor
         // Alias binding: substitute --bind-input/--bind-output onto the job dictionary before
         // validation, so a bound fragment is checked under exactly the same rules as a
         // complete job (indexed by alias, whether it came from --job or the command line).
-        var bindingErrors = AliasBindingApplier.Apply(jobs, globals.BindInput, globals.BindOutput);
+        var bindingErrors = AliasBindingApplier.Apply(jobs, globals.BindInput, globals.BindOutput,
+            globals.BindCompression, globals.BindCompressionLevel);
         if (bindingErrors.Count > 0)
         {
             if (!globals.Quiet)

@@ -173,14 +173,21 @@ public sealed class FragmentRun : IAsyncDisposable
         };
         foreach (var (name, value) in options.ChildEnvironment ?? new Dictionary<string, string>())
             psi.Environment[name] = value;
-        if (!string.IsNullOrEmpty(options.ArrowCompression) && !psi.Environment.ContainsKey("DTPIPE_ARROW_COMPRESSION"))
-            psi.Environment["DTPIPE_ARROW_COMPRESSION"] = options.ArrowCompression;
-        if (options.ArrowCompressionLevel.HasValue && !psi.Environment.ContainsKey("DTPIPE_ARROW_COMPRESSION_LEVEL"))
-            psi.Environment["DTPIPE_ARROW_COMPRESSION_LEVEL"] = options.ArrowCompressionLevel.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
         psi.ArgumentList.Add("--job");
         psi.ArgumentList.Add(options.FragmentJobPath);
         if (bindInputPairs.Count > 0) { psi.ArgumentList.Add("--bind-input"); psi.ArgumentList.Add(string.Join(",", bindInputPairs)); }
         if (bindOutputPairs.Count > 0) { psi.ArgumentList.Add("--bind-output"); psi.ArgumentList.Add(string.Join(",", bindOutputPairs)); }
+        // The codec applies to the fragment's 'arrow:-' boundaries: the ones bound above and the first
+        // outbound edge, which rides stdout.
+        if (!string.IsNullOrEmpty(options.ArrowCompression))
+        {
+            psi.ArgumentList.Add("--bind-compression"); psi.ArgumentList.Add(options.ArrowCompression);
+            if (options.ArrowCompressionLevel is { } level)
+            {
+                psi.ArgumentList.Add("--bind-compression-level");
+                psi.ArgumentList.Add(level.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            }
+        }
 
         // The fragment's own primary 'arrow:-' already means the child's own stdin/stdout, piped
         // to this node rather than inherited (AliasBindingApplier); no binding flag is needed for

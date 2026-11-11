@@ -34,7 +34,9 @@ stdin/stdout and TransportR. It speaks to no coordinator itself.
   the child's stdin/stdout; `LaunchChild` gives every further edge its own `NamedPipeServerStream`
   (`System.IO.Pipes`, never a POSIX FIFO — the mechanism has to reach Windows too), created before
   the child starts and wired into it via `--bind-input`/`--bind-output alias=arrow:pipe://<name>`
-  (`AliasBindingApplier` does the substitution). `ConnectPipeAsync` races the pipe's own
+  (`AliasBindingApplier` does the substitution). The edge codec rides the child's command line
+  (`--bind-compression`, `--bind-compression-level`), never its environment; the applier gives it to every
+  `arrow:-` output. `[CI: ChildCompressionArgvTests]` `ConnectPipeAsync` races the pipe's own
   `WaitForConnectionAsync()` against the child's exit, so a child that dies before ever dialing in
   cannot block the node forever. `WireAsync` and the pipe dictionary both key on `EdgeBinding.Alias`
   alone, regardless of direction — `ValidateEdges` refuses a duplicate up front.

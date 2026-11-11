@@ -341,6 +341,12 @@ issuer is the first one the coordinator names unless `DtPipeNode__Oidc__Authorit
 provider, a node verified by a key sets it to the coordinator's address. Its rights are the
 coordinator's, never its own.
 
+A node gives each fragment's `dtpipe` child its edge compression on the command line
+(`--bind-compression`, `--bind-compression-level`; `DtPipeNode__ArrowCompression`, `lz4` by
+default, and `DtPipeNode__ArrowCompressionLevel`), never through the environment. A `dtpipe` older
+than 1.16 does not know the flags and refuses to start, loudly, so a node and the `dtpipe` it runs
+are upgraded together. A 1.16 child reads a compressed edge whichever way it was written.
+
 ## HTTPS in front
 
 The coordinator listens in plain HTTP and never terminates TLS: a proxy or ingress does. Tell the

@@ -67,5 +67,33 @@ public class TransportRBufferOptionTests
         Assert.Contains("DtPipeNode: MaxInFlightBatches must be positive.", error.Failures);
         Assert.Contains("DtPipeNode: ReadChunkBytes must be positive.", error.Failures);
     }
-}
 
+    [Fact]
+    public void Compression_defaults_to_lz4_and_binds_from_configuration()
+    {
+        Assert.Equal("lz4", BoundFrom().ArrowCompression);
+
+        var options = BoundFrom(("ArrowCompression", "zstd"), ("ArrowCompressionLevel", "5"));
+        Assert.Equal("zstd", options.ArrowCompression);
+        Assert.Equal(5, options.ArrowCompressionLevel);
+    }
+
+    [Theory]
+    [InlineData("gzip")]
+    [InlineData("")]
+    public async Task An_unknown_compression_fails_validation_at_start(string codec)
+    {
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.AddDtPipeNode(o =>
+        {
+            o.Name = "node-1";
+            o.CoordinatorUrl = "http://coordinator";
+            o.Oidc.ClientSecret = "secret";
+            o.ArrowCompression = codec;
+        });
+        using var host = builder.Build();
+
+        var error = await Assert.ThrowsAsync<OptionsValidationException>(() => host.StartAsync(TestContext.Current.CancellationToken));
+        Assert.Contains(error.Failures, f => f.Contains("none, lz4, zstd", StringComparison.Ordinal));
+    }
+}

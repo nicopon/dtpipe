@@ -10,7 +10,7 @@ public sealed class FragmentLaunch
     public required string FragmentJobPath { get; init; }
     public required IReadOnlyList<EdgeBinding> Edges { get; init; }
 
-    /// <summary>Arrow IPC buffer compression codec used by the fragment child process ('lz4', 'zstd', 'none'). Defaults to 'lz4'.</summary>
+    /// <summary>Arrow IPC buffer compression codec used by the fragment child process ('none', 'lz4' or 'zstd'), passed as <c>--bind-compression</c>. Defaults to 'lz4'.</summary>
     public string ArrowCompression { get; init; } = "lz4";
 
     /// <summary>Arrow IPC buffer compression level used by the fragment child process, or null for codec default.</summary>

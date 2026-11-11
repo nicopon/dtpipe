@@ -150,4 +150,54 @@ public class AliasBindingApplierTests
         Assert.Equal("arrow:/run/42/in", jobs["good"].Input);
         Assert.Equal("pg:Host=h", jobs["bad"].Input);
     }
+
+    [Fact]
+    public void BindCompression_ReachesTheStreamBoundariesOnly()
+    {
+        var jobs = Jobs(("a", "arrow:-", "arrow:-"), ("b", "arrow:-", "out.csv"));
+
+        var errors = AliasBindingApplier.Apply(jobs, null, "a=/run/out", "zstd", "5");
+
+        Assert.Empty(errors);
+        Assert.Equal("arrow:/run/out", jobs["a"].Output);
+        var block = jobs["a"].ProviderOptions!["arrow-writer"];
+        Assert.Equal("zstd", block["compression"]);
+        Assert.Equal(5, block["compression-level"]);
+        Assert.Null(jobs["b"].ProviderOptions);
+    }
+
+    [Fact]
+    public void BindCompression_FollowsTheStdoutBoundaryToo()
+    {
+        var jobs = Jobs(("a", "arrow:-", "arrow:-"));
+
+        Assert.Empty(AliasBindingApplier.Apply(jobs, null, null, "lz4", null));
+
+        Assert.Equal("lz4", jobs["a"].ProviderOptions!["arrow-writer"]["compression"]);
+    }
+
+    [Fact]
+    public void ABranchsOwnCompression_Wins()
+    {
+        var jobs = Jobs(("a", "arrow:-", "arrow:-"));
+        jobs["a"] = jobs["a"] with { ProviderOptions = new() { ["arrow"] = new() { ["compression"] = "none" } } };
+
+        var errors = AliasBindingApplier.Apply(jobs, null, "a=-", "lz4", null);
+
+        Assert.Empty(errors);
+        Assert.False(jobs["a"].ProviderOptions!.ContainsKey("arrow-writer"));
+    }
+
+    [Theory]
+    [InlineData("gzip", null, "--bind-compression")]
+    [InlineData("lz4", "x", "not an integer")]
+    [InlineData(null, "3", "needs --bind-compression")]
+    public void ABadCompression_IsRefusedByName(string? codec, string? level, string expected)
+    {
+        var jobs = Jobs(("a", "arrow:-", "arrow:-"));
+
+        var errors = AliasBindingApplier.Apply(jobs, null, "a=-", codec, level);
+
+        Assert.Contains(errors, e => e.Contains(expected, System.StringComparison.Ordinal));
+    }
 }

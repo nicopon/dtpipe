@@ -673,10 +673,11 @@ DuckDB extensions (`excel`, `httpfs`, `azure`, `ducklake`…) are reached throug
 or a provider option is refused, naming the flag, since the file holds the branches and the flag
 would change nothing. The flags that apply to every branch of the loaded job are `--limit`,
 `--batch-size`, `--max-batch-bytes`, `--sampling-rate`, `--sampling-seed`, `--prefix`, `--cursor`,
-`--state`, `--metrics-path`, `--dry-run` and `--session`; `--checkpoint`, `--from-checkpoint`,
-`--contract-save` and `--from-contract` are keys of the file, not overrides. The flags of the whole
-command line (`--no-stats`, `--log`, `--strict-bindings`, `--export-job`, `--cursor-from`,
-`--bind-input`, `--bind-output`) are given beside it as anywhere.
+`--state`, `--metrics-path`, `--dry-run`, `--session`, `--bind-compression` and
+`--bind-compression-level`; `--checkpoint`, `--from-checkpoint`, `--contract-save` and
+`--from-contract` are keys of the file, not overrides. The flags of the whole command line
+(`--no-stats`, `--log`, `--strict-bindings`, `--export-job`, `--cursor-from`, `--bind-input`,
+`--bind-output`) are given beside it as anywhere.
 
 ---
 
@@ -717,6 +718,8 @@ command line (`--no-stats`, `--log`, `--strict-bindings`, `--export-job`, `--cur
 |:---|:---|
 | `--bind-input ALIAS=LOCATION[,ALIAS=LOCATION...]` | Wire a real location into a branch's `arrow:-` input |
 | `--bind-output ALIAS=LOCATION[,ALIAS=LOCATION...]` | Wire a real location into a branch's `arrow:-` output |
+| `--bind-compression none\|lz4\|zstd` | Compress the Arrow IPC stream of every `arrow:-` output |
+| `--bind-compression-level N` | Level of that codec; needs `--bind-compression`. Default: the codec's own |
 
 A fragment written by `dtpipe split` keeps the boundary its text names — a branch whose input or
 output is exactly `arrow:-` — and a single shell pipe wires a two-process chain without either
@@ -736,6 +739,13 @@ writer would read that extension as a request for file format instead. Binding a
 or output is not exactly `arrow:-`, an unknown alias, or the same `(branch, direction)` pair twice
 are refused by name; combining either flag with `--export-job` is refused, since a binding names a
 location specific to this run.
+
+`--bind-compression` and `--bind-compression-level` apply to the outputs written `arrow:-`, whether
+`--bind-output` binds them or they stay on stdout, and to no other output; a branch's own
+`compression` option, when its text sets one, wins. A reader detects compression by itself, so
+nothing is given on the reading side. The two flags never enter a job's text. An unknown codec or
+a level that is not an integer is refused before the run starts. The `arrow` writer's `compression`
+option takes the same three values and is refused at build time when it holds anything else.
 
 #### Implicit branch-split rules
 
@@ -1592,8 +1602,8 @@ own: a deployment gives the first ones through `Bootstrap__*`.
 | `Policy` | `Bricks` (default: a data node runs only its own bricks) or `AnyFragment` (a runner) |
 | `UnwiredRunTimeout` | How long a launched run may wait for its edges to be wired. Default: five minutes |
 | `FaultInjection` | `true` lets the host end a run's child when the coordinator asks, for a test bench. Default: off |
-| `ArrowCompression` | Arrow IPC buffer compression codec (`lz4`, `zstd`, `none`). Default: `lz4` |
-| `ArrowCompressionLevel` | Optional compression level for the selected codec |
+| `ArrowCompression` | Arrow IPC buffer compression codec (`none`, `lz4` or `zstd`; refused at start otherwise), passed to each fragment as `--bind-compression`. Default: `lz4` |
+| `ArrowCompressionLevel` | Optional compression level for the selected codec, passed as `--bind-compression-level` |
 | `BatchBytes` | TransportR batch size in bytes for the data plane client. Default: `262144` (256 KB). For high-throughput WAN, 256 KB–512 KB is recommended |
 | `MaxInFlightBatches` | Maximum in-flight TransportR batches before sender pause. Default: `16` (4 MB window). On high-latency WAN links, `32` (8 MB window) is recommended |
 | `ReadChunkBytes` | Buffer size in bytes for reading/writing child fragment stdio pipes. Default: `262144` (256 KB) |

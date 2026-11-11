@@ -541,6 +541,7 @@ public class PipelineLexerTests
     [InlineData(new[] { "--job", "ja.yaml", "--checkpoint", "stage1" }, "--checkpoint")]
     [InlineData(new[] { "--job", "ja.yaml", "--limit", "2", "-b", "10", "--prefix", "p_", "--sample-rate", "0.5", "--sampling-seed", "-5", "--dry-run", "1", "--no-stats" }, null)]
     [InlineData(new[] { "--job", "ja.yaml", "-p", "p_", "--cursor", "Id", "--state", "s.json", "--max-batch-bytes", "1", "--session", "s", "--metrics-path", "m.json" }, null)]
+    [InlineData(new[] { "--job", "ja.yaml", "--bind-output", "a=-", "--bind-compression", "zstd", "--bind-compression-level", "3" }, null)]
     public void A_Branch_Flag_Beside_A_Job_File_Is_Refused_Naming_The_Flag(string[] args, string? refused)
     {
         if (refused is null)
@@ -552,6 +553,25 @@ public class PipelineLexerTests
         var ex = Assert.Throws<InvalidOperationException>(() => _lexer.Parse(args));
         Assert.Contains($"Flag '{refused}' cannot be combined with --job", ex.Message, StringComparison.Ordinal);
         Assert.Contains("'ja.yaml' is the source of the branches", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_Bind_Compression_Flags_Reach_The_Globals_Beside_A_Job_File()
+    {
+        var globals = _lexer.Parse(new[] { "--job", "ja.yaml", "--bind-compression", "lz4", "--bind-compression-level", "4" }).Globals;
+
+        Assert.Equal("lz4", globals.BindCompression);
+        Assert.Equal("4", globals.BindCompressionLevel);
+    }
+
+    [Theory]
+    [InlineData("--bind-compression", "lz4", "zstd")]
+    [InlineData("--bind-compression-level", "1", "2")]
+    public void A_Repeated_Bind_Compression_Flag_Is_Refused(string flag, string first, string second)
+    {
+        var args = new[] { "-i", "generate:2", "-o", "x.csv", flag, first, flag, second };
+
+        Assert.Throws<InvalidOperationException>(() => _lexer.Parse(args));
     }
 
     [Fact]

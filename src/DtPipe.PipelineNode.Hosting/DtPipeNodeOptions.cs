@@ -69,7 +69,7 @@ public sealed class DtPipeNodeOptions
     /// </summary>
     public bool FaultInjection { get; set; }
 
-    /// <summary>Arrow IPC buffer compression codec used by fragment child processes ('lz4', 'zstd', 'none'). Defaults to 'lz4'.</summary>
+    /// <summary>Arrow IPC buffer compression codec used by fragment child processes ('none', 'lz4' or 'zstd'), passed as <c>--bind-compression</c>. Defaults to 'lz4'.</summary>
     public string ArrowCompression { get; set; } = "lz4";
 
     /// <summary>Arrow IPC buffer compression level used by fragment child processes, or null for codec default.</summary>
@@ -93,6 +93,8 @@ public sealed class DtPipeNodeOptions
     internal string ProcessDirectory(Guid instanceId) =>
         Path.Combine(Path.GetFullPath(StateDirectory ?? Path.Combine(Path.GetTempPath(), "dtpipe-node", Name)), instanceId.ToString("N"));
 
+    private static readonly string[] ArrowCompressionValues = ["none", "lz4", "zstd"];
+
     internal IEnumerable<string> Validate()
     {
         if (string.IsNullOrWhiteSpace(Name)) yield return "Name is required.";
@@ -100,6 +102,8 @@ public sealed class DtPipeNodeOptions
         if (!string.IsNullOrWhiteSpace(Oidc.Authority) && !Uri.TryCreate(Oidc.Authority, UriKind.Absolute, out _)) yield return "Oidc:Authority must be an absolute URL.";
         if (string.IsNullOrEmpty(Oidc.ClientSecret)) yield return "Oidc:ClientSecret is required.";
         if (string.IsNullOrWhiteSpace(DtPipe)) yield return "DtPipe is required.";
+        if (!ArrowCompressionValues.Contains(ArrowCompression?.Trim().ToLowerInvariant() ?? ""))
+            yield return $"ArrowCompression '{ArrowCompression}' is unknown. Expected one of: {string.Join(", ", ArrowCompressionValues)}.";
         if (UnwiredRunTimeout <= TimeSpan.Zero) yield return "UnwiredRunTimeout must be positive.";
         if (BatchBytes <= 0) yield return "BatchBytes must be positive.";
         if (MaxInFlightBatches <= 0) yield return "MaxInFlightBatches must be positive.";

@@ -46,6 +46,10 @@ public static class CoreFlagRegistry
         registry.Register(new FlagDef("--bind-input", new string[] { }, FlagArity.Scalar, FlagScope.Global, "Bind a branch's 'arrow:-' input to a location (alias=location[,alias=location...])", FlagStage.All));
         registry.Register(new FlagDef("--bind-output", new string[] { }, FlagArity.Scalar, FlagScope.Global, "Bind a branch's 'arrow:-' output to a location (alias=location[,alias=location...])", FlagStage.All));
 
+        // Compression of the outputs --bind-output binds (a pipeline node gives these to its child).
+        registry.Register(new FlagDef("--bind-compression", new string[] { }, FlagArity.Scalar, FlagScope.Global, "Arrow compression (none, lz4 or zstd) of the outputs --bind-output binds", FlagStage.All));
+        registry.Register(new FlagDef("--bind-compression-level", new string[] { }, FlagArity.Scalar, FlagScope.Global, "Compression level of the outputs --bind-output binds", FlagStage.All));
+
         // Materialisation. Per-branch, and neither splits a branch: only -i and --from do.
         registry.Register(new FlagDef("--checkpoint", new string[] { }, FlagArity.Scalar, FlagScope.PerBranch, "Materialise this branch's output in the session store", FlagStage.All));
         registry.Register(new FlagDef("--contract-save", new string[] { }, FlagArity.Scalar, FlagScope.PerBranch, "Write the schema this branch produces to a contract file", FlagStage.All));
