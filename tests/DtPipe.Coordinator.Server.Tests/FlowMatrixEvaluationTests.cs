@@ -45,9 +45,9 @@ public sealed class FlowMatrixEvaluationTests : IDisposable
         public Task<ExitedAck> OnExitedAsync(ReplicaKey replica, FragmentExit exit) => throw new NotSupportedException();
     }
 
-    private const string Fan = "a:\n  input: generate:1\nb:\n  from: a\n  output: csv:b.csv\nc:\n  from: a\n  output: csv:c.csv\n";
-    private const string Pair = "a:\n  input: generate:1\nb:\n  from: a\n  output: csv:b.csv\n";
-    private const string Chain = "a:\n  input: generate:1\nb:\n  from: a\nc:\n  from: b\n  output: csv:c.csv\n";
+    private const string Fan = "a:\n  limit: 1\nb:\n  from: a\nc:\n  from: a\n";
+    private const string Pair = "a:\n  limit: 1\nb:\n  from: a\n";
+    private const string Chain = "a:\n  limit: 1\nb:\n  from: a\nc:\n  from: b\n";
 
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "matrix-" + Guid.NewGuid().ToString("N"));
     private readonly FlowControlOptions _matrix = new();

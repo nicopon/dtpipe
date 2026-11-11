@@ -15,7 +15,7 @@ namespace DtPipe.Coordinator.Server.Tests;
 /// </summary>
 public sealed class PlanModeTests : IDisposable
 {
-    private const string Pair = "a:\n  input: sqlite:${{LAB_DB}}\nb:\n  from: a\n  output: csv:out.csv\n";
+    private const string Pair = "a:\n  input: sqlite:${{LAB_DB}}\nb:\n  from: a\n";
 
     private readonly FlowControlOptions _matrix = new();
     private readonly ReplicaRegistry _registry = new();
@@ -101,7 +101,7 @@ public sealed class PlanModeTests : IDisposable
     public void A_Brick_Reference_Reaches_No_Fragment_Written_As_A_Job_And_No_Runner()
     {
         DataNode("d", acceptsRaw: true);
-        var job = "a:\n  input: brick:d/src\nb:\n  from: a\n  output: csv:out.csv\n";
+        var job = "a:\n  input: brick:d/src\nb:\n  from: a\n";
 
         foreach (var (node, other) in new[] { ("d", "r"), ("r", "r") })
         {
@@ -118,7 +118,7 @@ public sealed class PlanModeTests : IDisposable
     public void A_Refused_Plan_Keeps_No_Edge_Whose_Fragment_Is_Not_In_It()
     {
         DataNode("d", acceptsRaw: true);
-        var job = "a:\n  input: brick:d/src\nb:\n  from: a\n  output: csv:out.csv\n";
+        var job = "a:\n  input: brick:d/src\nb:\n  from: a\n";
 
         var plan = _planner.Build(
             new PlanRequest("p", job, new Dictionary<string, string> { ["a"] = "d", ["b"] = "r" }), PlanMode.Manual);
@@ -159,7 +159,7 @@ public sealed class PlanModeTests : IDisposable
     public void A_Fragment_Naming_A_Variable_That_Is_No_Identifier_Is_Refused_On_A_Node_That_Does_Not_Host_It()
     {
         DataNode("d", acceptsRaw: true);
-        var job = "a:\n  input: sqlite:${{MY-VAR}}\nb:\n  from: a\n  output: csv:out.csv\n";
+        var job = "a:\n  input: sqlite:${{MY-VAR}}\nb:\n  from: a\n";
 
         var plan = _planner.Build(
             new PlanRequest("p", job, new Dictionary<string, string> { ["a"] = "d", ["b"] = "r" }), PlanMode.Manual);

@@ -68,6 +68,12 @@ the control plane, over each replica's node channel; TransportR carries the data
   result names the replica of each fragment. The coordinator knows a message's sender by its connection
   alone, so an `Exited` from any other replica, of another identity or of the same, is not heard.
 - **Cancel by stream rupture, never by signal**: the node must run on Windows.
+- **A runner hosts no data: a runner's fragment reads and writes its `arrow:` edges and nothing else.** The fragments of every
+  run share the runner's host, so a file, a database, a checkpoint or a cursor file it reached would carry rows between two
+  flows the coordinator never judged together. `RunnerEndpoints` (`DtPipe.Coordinator.Contracts`) is the one rule: every input
+  and output is `arrow:-` on an edge of its alias and direction, no branch names a place on disk, no `duck-init`; processors and
+  transformers stay. The planner refuses a fragment that breaks it, naming the branch and the endpoint, and the runner refuses
+  it again before it launches one (`FragmentIntake`). `[CI: Server.Tests PlanRightsTests; Hosting.Tests FragmentIntakeTests]`
 - **A node host decides what it runs**: its `FragmentPolicy` comes from its own configuration, never
   from a message the coordinator sends. So does whether it ends a run's child (`FaultInjection`): a host
   that did not enable it answers the coordinator's `Kill` with `0` and logs why.

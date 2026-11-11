@@ -13,7 +13,8 @@ none. One node per process, which is one replica of its node's identity; a secon
   version of the job they compose to; the node builds the job with `FragmentJob.ComposeFor` from the
   bricks its owner declared, compares the version, and refuses by name when a brick changed since the
   plan. It never runs text the coordinator sent: a job as written is refused unless the host
-  registered a `FragmentGate` or runs any fragment (`AnyFragment`). What a brick runs stays the
+  registered a `FragmentGate` or runs any fragment (`AnyFragment`), and a runner takes it only when every input and output
+  is one of its `arrow:` edges (`RunnerEndpoints`, the rule the planner applies). What a brick runs stays the
   owner's, so naming one by id does not turn matching back into trusting a name. `FragmentPolicy`
   comes from configuration or `RunAnyFragment`, never from a field of a message. `FragmentIntake`
   decides it all before anything is spawned, for `Launch` and for `Check` alike, and the coordinator asks

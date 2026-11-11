@@ -17,7 +17,7 @@ namespace DtPipe.Coordinator.Server.Tests;
 /// </summary>
 public sealed class PlanRightsTests : IDisposable
 {
-    private const string Pair = "a:\n  input: sqlite:${{LAB_DB}}\nb:\n  from: a\n  output: csv:out.csv\n";
+    private const string Pair = "a:\n  input: sqlite:${{LAB_DB}}\nb:\n  from: a\n";
 
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "plan-rights-" + Guid.NewGuid().ToString("N"));
     private readonly FlowControlOptions _matrix = new();
@@ -337,7 +337,7 @@ public sealed class PlanRightsTests : IDisposable
     }
 
     [Fact]
-    public async Task Disconnected_Branches_On_The_Same_Runner_Cannot_Bypass_Transitive_Origin_Groups()
+    public async Task Disconnected_Branches_On_The_Same_Runner_Are_Refused_For_Exchanging_Through_Its_Disk()
     {
         Announce("src", "crm", NodeRole.Data, [], [NodeAnnouncement.RawFragments]);
         Announce("dst", "warehouse", NodeRole.Data, [], [NodeAnnouncement.RawFragments]);
@@ -350,24 +350,15 @@ public sealed class PlanRightsTests : IDisposable
         Allow(rights, "*", "run");
         Allow(rights, "run", "*");
 
-        // Branch 'leak_in' receives from 'src' (crm) onto runner 'r'; branch 'leak_out' on the same runner 'r' declares no 'from: leak_in'
-        // and feeds 'dst' (warehouse). Because both run in the same runner fragment process p@r, 'leak_out' inherits 'crm' as an origin.
+        // 'leak_in' writes rows from 'src' into a file of the runner's host, and 'leak_out' reads them back toward 'dst'.
         const string job = "s:\n  input: generate:10\nleak_in:\n  from: s\n  output: csv:tmp.csv\nleak_out:\n  input: csv:tmp.csv\nd:\n  from: leak_out\n  output: csv:out.csv\n";
         var placement = new Dictionary<string, string> { ["s"] = "src", ["leak_in"] = "r", ["leak_out"] = "r", ["d"] = "dst" };
 
         var plan = PlanJob(rights, job, placement);
 
         Assert.False(plan.Deployable);
-        Assert.NotNull(plan.FlowRejection);
-        var outEdge = Assert.Single(plan.Edges, e => e.ProducerFragment == "p@r" && e.ConsumerFragment == "p@dst");
-        Assert.False(outEdge.Allowed);
-        Assert.Equal(["crm", "run"], outEdge.ProducerGroups);
-        Assert.Equal(["warehouse"], outEdge.ConsumerGroups);
-
-        Allow(rights, "crm", "warehouse");
-
-        var allowedPlan = PlanJob(rights, job, placement);
-        Assert.True(allowedPlan.Deployable);
-        Assert.Null(allowedPlan.FlowRejection);
+        Assert.Contains("p@r: 'leak_in' writes 'csv:tmp.csv': a runner's fragment reads and writes its arrow: edges and nothing else.", plan.Errors);
+        Assert.Contains("p@r: 'leak_out' reads 'csv:tmp.csv': a runner's fragment reads and writes its arrow: edges and nothing else.", plan.Errors);
+        Assert.DoesNotContain(plan.Fragments, f => f.Node == "r");
     }
 }

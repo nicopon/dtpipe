@@ -6,7 +6,7 @@ public enum FragmentPolicy
     /// <summary>A data node: each branch only reads or writes, and is one of the node's bricks or a bare edge, unless the host registered a <see cref="FragmentGate"/>.</summary>
     Bricks,
 
-    /// <summary>A runner: it hosts no data, and runs any fragment; network isolation is what contains it.</summary>
+    /// <summary>A runner: it hosts no data, and runs any fragment whose every input and output is one of its arrow: edges (<c>RunnerEndpoints</c>), under <c>--edges-only</c>.</summary>
     AnyFragment,
 }
 

@@ -240,6 +240,11 @@ public sealed class PlanBuilder(
             var form = FragmentForm.Job;
             IReadOnlyList<FragmentUnit>? composition = null;
             var node = nodes[draft.Node];
+            if (node.Role == NodeRole.Runner && RunnerEndpoints.Refusals(yaml, draft.Edges) is { Count: > 0 } endpoints)
+            {
+                foreach (var refusal in endpoints) errors.Add($"{draft.Name}: {refusal}");
+                continue;
+            }
             if (node.Role != NodeRole.Runner)
             {
                 if (UnitsOf(draft, request.Bricks) is { } pieces && FragmentJob.Compose(pieces, (id, kind) => BranchOf(draft.Node, id, kind)) is { Yaml: { } composed })

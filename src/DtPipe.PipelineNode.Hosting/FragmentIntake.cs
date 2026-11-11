@@ -16,7 +16,8 @@ internal static class FragmentIntake
         if (spec.Units is not null)
             return policy == FragmentPolicy.AnyFragment ? (null, "a runner has no brick to compose a job from.") : FragmentJob.ComposeFor(spec, brickBranch, brickVersion);
         if (spec.Yaml is null) return (null, $"{spec.Fragment} carries neither bricks nor a job.");
-        if (policy == FragmentPolicy.AnyFragment) return (spec.Yaml, null);
+        if (policy == FragmentPolicy.AnyFragment)
+            return RunnerEndpoints.FragmentRefusal(spec.Yaml, spec.Edges) is { } endpoint ? (null, endpoint) : (spec.Yaml, null);
         var refusal = gate is null ? "this node runs the bricks its owner declared, by id, and takes no job as written." : gate(spec, forms);
         return refusal is null ? (spec.Yaml, null) : (null, refusal);
     }

@@ -23,7 +23,7 @@ namespace DtPipe.Coordinator.Server.Tests;
 public sealed partial class ArmedDeploymentTests : IDisposable
 {
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(10);
-    private const string Job = "src:\n  input: brick:n/src\nout:\n  from: src\n  output: csv:out.csv\n";
+    private const string Job = "src:\n  input: brick:n/src\nout:\n  from: src\n";
     private const string Commit = "0123456789abcdef";
 
     private sealed class Replicas : INodeLink

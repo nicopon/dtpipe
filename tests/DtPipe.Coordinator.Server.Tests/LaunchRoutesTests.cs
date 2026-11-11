@@ -18,7 +18,7 @@ namespace DtPipe.Coordinator.Server.Tests;
 /// </summary>
 public sealed class LaunchRoutesTests : IDisposable
 {
-    private const string Job = "a:\n  input: brick:node-a/customers\nb:\n  from: a\n  output: csv:out.csv\n";
+    private const string Job = "a:\n  input: brick:node-a/customers\nb:\n  from: a\n";
     private const string Text = """{"input":"sqlite:${{LAB_DB}}"}""";
 
     /// <summary>What a check pinned for the reference to the brick: the version the node announces for it.</summary>

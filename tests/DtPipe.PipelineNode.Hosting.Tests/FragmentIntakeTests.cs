@@ -74,12 +74,30 @@ public class FragmentIntakeTests
     }
 
     [Fact]
-    public void A_runner_runs_a_job_as_written()
+    public void A_runner_runs_a_job_as_written_whose_every_endpoint_is_one_of_its_edges()
     {
-        var (yaml, reason) = Resolve(new FragmentSpec("p@runner-1", "v", [], Yaml: "a:\n  input: generate:5\n"), FragmentPolicy.AnyFragment);
+        const string job = "a:\n  input: arrow:-\nj:\n  from: a\n  provider-options:\n    sql:\n      query: SELECT * FROM a\nj__to__n:\n  from: j\n  output: arrow:-\n";
+        var edges = new[] { new FragmentEdge("a", FragmentEdgeDirection.Inbound), new FragmentEdge("j__to__n", FragmentEdgeDirection.Outbound) };
+
+        var (yaml, reason) = Resolve(new FragmentSpec("p@runner-1", "v", edges, Yaml: job), FragmentPolicy.AnyFragment);
 
         Assert.Null(reason);
-        Assert.Contains("generate:5", yaml);
+        Assert.Equal(job, yaml);
+    }
+
+    [Theory]
+    [InlineData("a:\n  input: generate:5\n", "'a' reads 'generate:5'")]
+    [InlineData("a:\n  input: arrow:-\nb:\n  from: a\n  output: csv:tmp.csv\n", "'b' writes 'csv:tmp.csv'")]
+    [InlineData("a:\n  input: arrow:-\nb:\n  from: a\n  output: arrow:-\n", "'b' writes 'arrow:-'")]
+    [InlineData("a:\n  input: arrow:-\n  checkpoint: c\n", "'a' sets checkpoint")]
+    [InlineData("a:\n  input: arrow:-\nb:\n  from: a\n  provider-options:\n    sql:\n      query: SELECT 1\n      duck-init: ATTACH 'x.db'\n", "'b' runs a duck-init script")]
+    public void A_runner_refuses_an_endpoint_that_is_no_edge_naming_the_branch_and_the_endpoint(string job, string expected)
+    {
+        var (yaml, reason) = Resolve(
+            new FragmentSpec("p@runner-1", "v", [new FragmentEdge("a", FragmentEdgeDirection.Inbound)], Yaml: job), FragmentPolicy.AnyFragment);
+
+        Assert.Null(yaml);
+        Assert.StartsWith(expected, reason);
     }
 
     [Fact]
