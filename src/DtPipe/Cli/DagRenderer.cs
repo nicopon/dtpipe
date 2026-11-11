@@ -64,7 +64,7 @@ internal static class DagRenderer
         }
 
         bool hasMode = results.Any(r => r.TransformerModes.Count > 0 || r.ReaderIsColumnar);
-        bool hasBranch = isDag && results.Count > 1;
+        bool hasBranch = isDag && (results.Count > 1 || exitCode != 0);
 
         var table = new Table().Border(TableBorder.Rounded);
         table.Title = new TableTitle("[yellow] Results [/]");

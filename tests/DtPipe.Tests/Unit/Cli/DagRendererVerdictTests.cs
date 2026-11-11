@@ -51,6 +51,7 @@ public class DagRendererVerdictTests
         Assert.Contains("✖", text);
         Assert.Contains(word, text);
         Assert.Contains($"exit code {exitCode}", text);
+        Assert.Contains("[g]", text);   // the rows are attributed to the branch that completed
     }
 
     [Theory]
