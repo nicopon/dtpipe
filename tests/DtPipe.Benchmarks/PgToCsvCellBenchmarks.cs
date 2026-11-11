@@ -107,9 +107,10 @@ public class PgToCsvCellBenchmarks
 
         // Rows exactly as the executor hands them to the writer.
         _rows = new object?[RowCount][];
+        var readers = ArrowTypeMapper.CompileValueReaders(_batch);
         for (int i = 0; i < RowCount; i++)
         {
-            var view = new ArrowRowView(_batch, i, NameIndex);
+            var view = new ArrowRowView(readers, i, NameIndex);
             _rows[i] = view.ToArray();
         }
 
@@ -184,15 +185,16 @@ public class PgToCsvCellBenchmarks
 
     /// <summary>
     /// The same materialization without the async bridge: ArrowRowView.ToArray over a
-    /// plain loop, extracting exactly the same values.
+    /// plain loop, with the batch's readers compiled once as the bridge compiles them.
     /// </summary>
     [Benchmark(Description = "B2 Bridge — 5 columns, via ArrowRowView.ToArray")]
     public int B2_Bridge_ViaViewToArray()
     {
         int n = 0;
+        var readers = ArrowTypeMapper.CompileValueReaders(_batch);
         for (int i = 0; i < RowCount; i++)
         {
-            var view = new ArrowRowView(_batch, i, NameIndex);
+            var view = new ArrowRowView(readers, i, NameIndex);
             n += view.ToArray().Length;
         }
         return n;

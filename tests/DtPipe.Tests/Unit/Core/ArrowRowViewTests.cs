@@ -25,7 +25,7 @@ public class ArrowRowViewTests
     public void ToArray_ThroughTheInterface_MaterializesTheSameValues()
     {
         using var batch = Batch();
-        IReadOnlyList<object?> row = new ArrowRowView(batch, 0, new Dictionary<string, int> { ["Id"] = 0, ["Name"] = 1 });
+        IReadOnlyList<object?> row = new ArrowRowView(ArrowTypeMapper.CompileValueReaders(batch), 0, new Dictionary<string, int> { ["Id"] = 0, ["Name"] = 1 });
 
         // The shape the pipeline uses everywhere: the cast never matches a struct, so this is
         // Enumerable.ToArray over the view.
@@ -38,7 +38,7 @@ public class ArrowRowViewTests
     public void View_IsACollection_SoEnumerableToArrayCanPreSize()
     {
         using var batch = Batch();
-        IReadOnlyList<object?> row = new ArrowRowView(batch, 1, new Dictionary<string, int> { ["Id"] = 0, ["Name"] = 1 });
+        IReadOnlyList<object?> row = new ArrowRowView(ArrowTypeMapper.CompileValueReaders(batch), 1, new Dictionary<string, int> { ["Id"] = 0, ["Name"] = 1 });
 
         row.Should().BeAssignableTo<ICollection<object?>>();
         ((ICollection<object?>)row).Count.Should().Be(2);
@@ -52,7 +52,7 @@ public class ArrowRowViewTests
     public void Mutators_AreRefused()
     {
         using var batch = Batch();
-        ICollection<object?> row = new ArrowRowView(batch, 0, new Dictionary<string, int> { ["Id"] = 0, ["Name"] = 1 });
+        ICollection<object?> row = new ArrowRowView(ArrowTypeMapper.CompileValueReaders(batch), 0, new Dictionary<string, int> { ["Id"] = 0, ["Name"] = 1 });
 
         row.IsReadOnly.Should().BeTrue();
         ((Action)(() => row.Add(1))).Should().Throw<NotSupportedException>();

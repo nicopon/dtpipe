@@ -93,7 +93,9 @@ through its `ISchemaInspector`, which must report the target's scale. `[CI: Writ
 `[local: validate_type_conformance.sh]`
 
 **A reader that walks a column reads it through `ArrowTypeMap.CompileValueReader`**, never a switch of
-its own, so it reads each cell as `GetValue` does: `RecordBatchDataReader` compiles one per column.
+its own, so it reads each cell as `GetValue` does: `RecordBatchDataReader` compiles one per column, the
+columnar→row bridge and `ArrowRowConverter.FlattenBatch` one per column of each batch
+(`ArrowTypeMapper.CompileValueReaders`).
 `[CI: CompileValueReaderTests]`
 
 **A `DbDataReader` handed to a bulk loader serves every accessor**, since the driver picks the one it

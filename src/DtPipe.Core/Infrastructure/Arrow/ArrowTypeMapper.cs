@@ -90,6 +90,19 @@ public static class ArrowTypeMapper
         => ArrowTypeMap.GetValue(array, index, field);
 
     /// <summary>
+    /// One reader per column of <paramref name="batch"/>, each returning what
+    /// <see cref="GetValueForField"/> returns for a row: a caller that walks the batch row by row
+    /// compiles once and pays no type dispatch per cell.
+    /// </summary>
+    public static Func<int, object?>[] CompileValueReaders(RecordBatch batch)
+    {
+        var readers = new Func<int, object?>[batch.ColumnCount];
+        for (var i = 0; i < readers.Length; i++)
+            readers[i] = ArrowTypeMap.CompileValueReader(batch.Column(i), batch.Schema.GetFieldByIndex(i));
+        return readers;
+    }
+
+    /// <summary>
     /// Maps a CLR type to its Arrow type. Collections become a <see cref="ListType"/>; everything
     /// else stays <see cref="ArrowTypeMap"/>'s business, which still throws for a type dtpipe
     /// cannot represent.

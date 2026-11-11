@@ -1,5 +1,4 @@
 using System.Collections;
-using Apache.Arrow;
 
 namespace DtPipe.Core.Infrastructure.Arrow;
 
@@ -17,13 +16,19 @@ namespace DtPipe.Core.Infrastructure.Arrow;
 /// </remarks>
 public readonly struct ArrowRowView : IReadOnlyList<object?>, ICollection<object?>
 {
-    private readonly RecordBatch _batch;
+    private readonly Func<int, object?>[] _readers;
     private readonly int _rowIndex;
     private readonly IReadOnlyDictionary<string, int> _nameToIndex;
 
-    public ArrowRowView(RecordBatch batch, int rowIndex, IReadOnlyDictionary<string, int> nameToIndex)
+    /// <param name="readers">
+    /// The batch's readers, from <see cref="ArrowTypeMapper.CompileValueReaders"/>, compiled once for
+    /// every row of the batch rather than per view.
+    /// </param>
+    /// <param name="rowIndex">The row this view reads.</param>
+    /// <param name="nameToIndex">Column positions by name, case-insensitive.</param>
+    public ArrowRowView(Func<int, object?>[] readers, int rowIndex, IReadOnlyDictionary<string, int> nameToIndex)
     {
-        _batch = batch ?? throw new ArgumentNullException(nameof(batch));
+        _readers = readers ?? throw new ArgumentNullException(nameof(readers));
         _rowIndex = rowIndex;
         _nameToIndex = nameToIndex ?? throw new ArgumentNullException(nameof(nameToIndex));
     }
@@ -35,11 +40,8 @@ public readonly struct ArrowRowView : IReadOnlyList<object?>, ICollection<object
     {
         get
         {
-            if (_batch == null) throw new ObjectDisposedException(nameof(ArrowRowView));
-            return ArrowTypeMapper.GetValueForField(
-                _batch.Column(index),
-                _batch.Schema.GetFieldByIndex(index),
-                _rowIndex);
+            if (_readers == null) throw new ObjectDisposedException(nameof(ArrowRowView));
+            return _readers[index](_rowIndex);
         }
     }
 
@@ -48,7 +50,7 @@ public readonly struct ArrowRowView : IReadOnlyList<object?>, ICollection<object
     /// </summary>
     public object? this[string name] => this[_nameToIndex[name]];
 
-    public int Count => _batch?.ColumnCount ?? 0;
+    public int Count => _readers?.Length ?? 0;
 
     public IEnumerator<object?> GetEnumerator()
     {

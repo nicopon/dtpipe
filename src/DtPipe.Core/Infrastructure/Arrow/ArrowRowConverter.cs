@@ -72,18 +72,30 @@ public static class ArrowRowConverter
         return row;
     }
 
+    private static object?[] ToRow(Func<int, object?>[] readers, int index)
+    {
+        var row = new object?[readers.Length];
+        for (int i = 0; i < row.Length; i++)
+        {
+            row[i] = readers[i](index);
+        }
+        return row;
+    }
+
     /// <summary>
     /// Flattens a RecordBatch into chunks of ReadOnlyMemory row arrays of a requested size.
     /// </summary>
     public static System.Collections.Generic.IEnumerable<System.ReadOnlyMemory<object?[]>> FlattenBatch(RecordBatch batch, int requestedBatchSize)
     {
         var rowCount = batch.Length;
+        // Compiled once for the batch: every row reads through the same readers.
+        var readers = ArrowTypeMapper.CompileValueReaders(batch);
         var flatBatch = new object?[requestedBatchSize][];
         var currentIndex = 0;
 
         for (int rowIdx = 0; rowIdx < rowCount; rowIdx++)
         {
-            flatBatch[currentIndex++] = ToRow(batch, rowIdx);
+            flatBatch[currentIndex++] = ToRow(readers, rowIdx);
 
             if (currentIndex >= requestedBatchSize)
             {

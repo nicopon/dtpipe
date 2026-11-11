@@ -21,11 +21,13 @@ public class ArrowColumnarToRowBridge : IColumnarToRowBridge
         }
 
         int rowCount = batch.Length;
+        // Compiled once for the batch, so a row's cells pay no type dispatch.
+        var readers = ArrowTypeMapper.CompileValueReaders(batch);
 
         for (int i = 0; i < rowCount; i++)
         {
             if (ct.IsCancellationRequested) break;
-            yield return new ArrowRowView(batch, i, _nameToIndex!);
+            yield return new ArrowRowView(readers, i, _nameToIndex!);
         }
     }
 #pragma warning restore CS1998
