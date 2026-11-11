@@ -282,26 +282,30 @@ public sealed partial class PostgreSqlReader : IColumnarStreamReader, IBatchSize
         int batchSize,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
+        batchSize = Math.Max(1, batchSize);
+        // The record batch is as large as the reader's BatchSize; the contract bounds a batch by batchSize, one array each.
         await foreach (var recordBatch in ReadRecordBatchesAsync(ct))
         {
             using (recordBatch)
             {
-                var rowCount = recordBatch.Length;
                 var colCount = recordBatch.Schema.FieldsList.Count;
-                var rows = new object?[rowCount][];
-
-                for (int i = 0; i < rowCount; i++)
+                for (var start = 0; start < recordBatch.Length; start += batchSize)
                 {
-                    var row = new object?[colCount];
-                    for (int j = 0; j < colCount; j++)
+                    var rowCount = Math.Min(batchSize, recordBatch.Length - start);
+                    var rows = new object?[rowCount][];
+                    for (int i = 0; i < rowCount; i++)
                     {
-                        var array = recordBatch.Column(j);
-                        row[j] = ArrowTypeMapper.GetValueForField(array, recordBatch.Schema.FieldsList[j], i);
+                        var row = new object?[colCount];
+                        for (int j = 0; j < colCount; j++)
+                        {
+                            var array = recordBatch.Column(j);
+                            row[j] = ArrowTypeMapper.GetValueForField(array, recordBatch.Schema.FieldsList[j], start + i);
+                        }
+                        rows[i] = row;
                     }
-                    rows[i] = row;
-                }
 
-                yield return new ReadOnlyMemory<object?[]>(rows);
+                    yield return new ReadOnlyMemory<object?[]>(rows);
+                }
             }
         }
     }

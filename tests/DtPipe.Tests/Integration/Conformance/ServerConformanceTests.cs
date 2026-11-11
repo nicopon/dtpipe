@@ -300,6 +300,36 @@ public sealed class ServerConformanceTests : IDisposable
         }
     }
 
+    private static readonly string Rows = BatchContract.Rows.ToString();
+
+    /// <summary>A server's reader keeps the batch contract of <c>ReadBatchesAsync</c> over a cursor that spans several batches.</summary>
+    [Theory]
+    [InlineData("pg")]
+    [InlineData("mysql")]
+    [InlineData("mssql")]
+    [InlineData("ora")]
+    public async Task A_Server_Reader_Yields_Distinct_Arrays_Of_At_Most_BatchSize_Rows(string server)
+    {
+        var endpoint = Endpoint(server);
+        var connection = endpoint[(endpoint.IndexOf(':') + 1)..];
+        const string digits = "(SELECT 0 AS d UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9)";
+        await using IStreamReader reader = server switch
+        {
+            "pg" => new DtPipe.Adapters.PostgreSQL.PostgreSqlReader(connection,
+                $"SELECT i AS id, 'row ' || i AS v FROM generate_series(0, {Rows} - 1) AS t(i)"),
+            "mysql" => new DtPipe.Adapters.MySql.MySqlReader(connection,
+                $"SELECT n AS id, CONCAT('row ', n) AS v FROM (SELECT a.d + 10 * b.d + 100 * c.d + 1000 * e.d AS n FROM {digits} a, {digits} b, {digits} c, {digits} e) t WHERE n < {Rows} ORDER BY n"),
+            "mssql" => new SqlServerReader(connection,
+                $"SELECT n AS id, CONCAT('row ', n) AS v FROM (SELECT a.d + 10 * b.d + 100 * c.d + 1000 * e.d AS n FROM {digits} a, {digits} b, {digits} c, {digits} e) t WHERE n < {Rows} ORDER BY n",
+                new SqlServerReaderOptions()),
+            _ => new DtPipe.Adapters.Oracle.OracleReader(connection,
+                $"SELECT LEVEL - 1 AS id, 'row ' || (LEVEL - 1) AS v FROM dual CONNECT BY LEVEL <= {Rows}",
+                new DtPipe.Adapters.Oracle.OracleReaderOptions()),
+        };
+
+        await BatchContract.AssertAsync(reader);
+    }
+
     private static string Endpoint(string server)
     {
         var endpoint = Environment.GetEnvironmentVariable("DTPIPE_CONFORMANCE_" + server.ToUpperInvariant());

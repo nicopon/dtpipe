@@ -88,6 +88,46 @@ internal static class ReadOutcome
 }
 
 /// <summary>
+/// The contract of <c>IStreamReader.ReadBatchesAsync</c>, which the row fast-path leans on: the array of a
+/// yielded batch belongs to the consumer and is never written again, and a batch holds at most
+/// <c>batchSize</c> rows. Played over a reader that yields <see cref="Rows"/> rows.
+/// </summary>
+internal static class BatchContract
+{
+    public const int Rows = 2500;
+    public const int BatchSize = 100;
+
+    public static async Task AssertAsync(IStreamReader reader)
+    {
+        await reader.OpenAsync();
+
+        var seen = new List<(object?[][] Array, string[] Snapshot)>();
+        var total = 0;
+        await foreach (var batch in reader.ReadBatchesAsync(BatchSize))
+        {
+            Assert.True(batch.Length <= BatchSize, $"A batch of {batch.Length} rows exceeds the batch size {BatchSize}.");
+            Assert.True(System.Runtime.InteropServices.MemoryMarshal.TryGetArray(batch, out var segment) && segment.Array is not null,
+                "A batch must be backed by an array.");
+            var array = segment.Array!;
+            foreach (var (other, _) in seen)
+                Assert.False(ReferenceEquals(other, array), "Two batches share one array.");
+
+            var rows = batch.ToArray();
+            total += rows.Length;
+            seen.Add((array, rows.Select(Spell).ToArray()));
+        }
+
+        Assert.Equal(Rows, total);
+        Assert.True(seen.Count > 1, "The cell must span several batches.");
+        // A reader that rewrote an earlier batch's array while reading later ones shows here.
+        foreach (var (array, snapshot) in seen)
+            Assert.Equal(snapshot, array.Take(snapshot.Length).Select(Spell));
+    }
+
+    private static string Spell(object?[] row) => string.Join("|", row.Select(ConformanceValue.Of));
+}
+
+/// <summary>
 /// The read face of the conformance table: reader x mode x type. Both paths of a reader read a cell into
 /// the same value, or refuse it naming the column. A cell marked with a lot is known false and is
 /// corrected by that lot: it must still be false, so a correction cannot land without entering the gate.
@@ -672,11 +712,10 @@ public sealed class ReadConformanceTests : IDisposable
         Assert.Equal("raw: InvalidOperationException", await ReadOutcome.RowsAsync(Open));
     }
 
-    private const int ContractRows = 2500;
-    private const int ContractBatchSize = 100;
+    private const int ContractRows = BatchContract.Rows;
 
     public static TheoryData<string> BatchContractReaders() =>
-        ["csv", "jsonl", "xml", "sqlite", "duck", "parquet", "arrow", "generate"];
+        ["csv", "jsonl", "xml", "sqlite", "duck", "parquet", "arrow", "generate", "memory-channel"];
 
     private Func<IStreamReader> OpenManyRows(string reader)
     {
@@ -724,6 +763,20 @@ public sealed class ReadConformanceTests : IDisposable
                     writer.WriteEnd();
                 }
                 return () => new ArrowAdapterStreamReader(path, new ArrowReaderOptions());
+            case "memory-channel":
+                var channel = System.Threading.Channels.Channel.CreateUnbounded<RecordBatch>();
+                var channelSchema = new Schema([new Field("id", Int64Type.Default, false)], null);
+                for (var half = 0; half < 2; half++)
+                {
+                    var halfIds = new Int64Array.Builder();
+                    for (var i = 0; i < ContractRows / 2; i++) halfIds.Append(half * (ContractRows / 2) + i);
+                    channel.Writer.TryWrite(new RecordBatch(channelSchema, [halfIds.Build()], ContractRows / 2));
+                }
+                channel.Writer.Complete();
+                var registry = new DtPipe.Core.Pipelines.Dag.MemoryChannelRegistry();
+                registry.RegisterArrowChannel("src", channel, channelSchema);
+                registry.UpdateArrowChannelSchema("src", channelSchema);
+                return () => new DtPipe.Adapters.MemoryChannel.ArrowMemoryChannelStreamReader(channel.Reader, registry, "src");
             case "generate":
                 return () => new GenerateReader($"count={ContractRows}", "", new GenerateReaderOptions());
             default:
@@ -740,33 +793,7 @@ public sealed class ReadConformanceTests : IDisposable
     public async Task A_Row_Reader_Yields_Distinct_Arrays_Of_At_Most_BatchSize_Rows(string readerName)
     {
         await using var reader = OpenManyRows(readerName)();
-        await reader.OpenAsync();
-
-        var arrays = new List<object?[][]>();
-        var snapshots = new List<string[]>();
-        var total = 0;
-        await foreach (var batch in reader.ReadBatchesAsync(ContractBatchSize))
-        {
-            Assert.True(batch.Length <= ContractBatchSize, $"A batch of {batch.Length} rows exceeds the batch size {ContractBatchSize}.");
-            var rows = batch.ToArray();
-            total += rows.Length;
-            snapshots.Add(rows.Select(r => string.Join("|", r.Select(ConformanceValue.Of))).ToArray());
-            if (System.Runtime.InteropServices.MemoryMarshal.TryGetArray(batch, out var segment) && segment.Array is { } array)
-            {
-                foreach (var seen in arrays)
-                    Assert.False(ReferenceEquals(seen, array), "Two batches share one array.");
-                arrays.Add(array);
-            }
-        }
-
-        Assert.Equal(ContractRows, total);
-        Assert.True(snapshots.Count > 1, "The cell must span several batches.");
-        // A reader that rewrote an earlier batch's array while reading later ones shows here.
-        for (var i = 0; i < arrays.Count && i < snapshots.Count; i++)
-        {
-            var now = arrays[i].Take(snapshots[i].Length).Select(r => string.Join("|", r.Select(ConformanceValue.Of)));
-            Assert.Equal(snapshots[i], now);
-        }
+        await BatchContract.AssertAsync(reader);
     }
 
     private Func<IStreamReader> Open(Row row)
