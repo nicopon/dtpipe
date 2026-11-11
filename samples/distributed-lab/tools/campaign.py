@@ -18,7 +18,7 @@ identity. The campaign refuses to start otherwise. CAMPAIGN_PREFLIGHT=report run
 checks, prints what they find and plays on (the harness pass); CAMPAIGN_SKIP_PREFLIGHT=1 skips them. Standard library
 only.
 """
-import errno, json, os, shutil, signal, subprocess, sys, tempfile, time, urllib.error
+import errno, json, os, shutil, signal, subprocess, sys, tempfile, time, urllib.error, uuid
 
 _ARGS = list(sys.argv)
 sys.argv = sys.argv[:5]  # smoke.py reads argv[1:4]; the campaign id at argv[4] is not a pass name
@@ -1110,8 +1110,8 @@ def check_S2():
     bogus = sec.bogus_jwt()
     seen = []
     for what, status in (
-            ("command hub negotiate, no token", sec.negotiate_status(base, sec.COMMAND_HUB, None)),
-            ("command hub negotiate, unsigned token", sec.negotiate_status(base, sec.COMMAND_HUB, bogus)),
+            ("control plane registration, no token", sec.events_status(base, None, uuid.uuid4())),
+            ("control plane registration, unsigned token", sec.events_status(base, bogus, uuid.uuid4())),
             ("node channel negotiate, no token", sec.negotiate_status(base, sec.LAB_HUB, None)),
             ("node channel negotiate, unsigned token", sec.negotiate_status(base, sec.LAB_HUB, bogus)),
             ("data plane, no token", sec.stream_status(base, None)),
@@ -1125,27 +1125,6 @@ def check_S2():
             raise Violation(f"token endpoint, {label}: HTTP {status}, token issued={token is not None}")
         issued.append(status)
     return f"six entry points refused (HTTP {seen}) and two credential failures (HTTP {issued})"
-
-
-def check_S4():
-    node = json.load(open(os.path.join(LAB, "nodes", "node-1.json")))
-    status, token = sec.token_for(IDP_URL, node["clientId"], node["secret"])
-    if not token:
-        raise RuntimeError(f"no token for node-1 (HTTP {status})")
-    hub = sec.LongPollingHub(URL, sec.COMMAND_HUB, token).open()
-    try:
-        answers = {
-            "GetReceivers": hub.invoke("GetReceivers"),
-            "InitTransfer": hub.invoke("InitTransfer", "00000000-0000-0000-0000-000000000001", 8, 1000),
-        }
-    finally:
-        hub.close()
-    for method, answer in answers.items():
-        if "error" not in answer:
-            raise Violation(f"{method} from a peer was accepted: {json.dumps(answer)[:200]}")
-        if "reserved to the coordinator" not in answer["error"]:
-            raise Violation(f"{method} from a peer failed for another reason: {answer['error'][:200]}")
-    return "GetReceivers and InitTransfer from a peer refused by the coordinator's filter"
 
 
 def check_S1():
@@ -1178,8 +1157,6 @@ def cell_S():
         security_trial("S1 unknown host announcement", rep, check_S1)
     for rep in range(REPS):
         security_trial("S2 unauthenticated entry points", rep, check_S2)
-    for rep in range(REPS):
-        security_trial("S4 peer-initiated transfer", rep, check_S4)
     for rep in range(REPS):
         security_trial("S6 report from a replica not placed on the run", rep, check_S6)
     for rep in range(REPS):

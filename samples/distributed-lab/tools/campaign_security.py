@@ -15,7 +15,6 @@ import urllib.request
 from http.client import HTTPConnection
 
 RECORD_SEPARATOR = "\x1e"
-COMMAND_HUB = "/hub/command"
 LAB_HUB = "/node-channel"
 
 
@@ -71,7 +70,8 @@ class ClientRegistration:
         self.client_id = client_id
         parts = urllib.parse.urlparse(base)
         self._connection = HTTPConnection(parts.hostname, parts.port, timeout=10)
-        self._connection.request("GET", events_path(client_id), headers={"Authorization": f"Bearer {token}", "Accept": "text/event-stream"})
+        headers = {"Accept": "text/event-stream", **({"Authorization": f"Bearer {token}"} if token else {})}
+        self._connection.request("GET", events_path(client_id), headers=headers)
         self._response = self._connection.getresponse()
         self.status = self._response.status
 
