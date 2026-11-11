@@ -7,8 +7,10 @@ You will start a coordinator and a runner, declare a small database as a **node*
 to flow, and run a pipeline that reads the database, counts on the runner, and writes the result
 back through the node. Then you will start the same run from a script.
 
-You need the `dtpipe` binary and either the coordinator (a folder published with each release,
-which needs `git` on the `PATH`), or Docker with Compose and a checkout of this repository.
+You need the `dtpipe` binary and either the coordinator, or Docker with Compose and a checkout of
+this repository. The coordinator is the folder `coordinator/` of the release archive
+`dtpipe-coordinator-<platform>`, or `dist/release/coordinator/` after `./build.sh`; it needs `git`
+on the `PATH` ([deploy/README.md](../../deploy/README.md)).
 
 Everything here listens on your machine's loopback in plain HTTP, so keys cross it in clear: do not
 expose it. The commands are for a POSIX shell.
@@ -264,7 +266,7 @@ until it is `succeeded` or `failed`.
 | The node says its client secret names a variable that is not set | Run `read -rs DTPIPE_NODE_KEY && export DTPIPE_NODE_KEY` in the node's terminal |
 | The node does not connect | Its identity must exist in **Access**, with the `--name` as client id, and the key must be its own |
 | `--client-secret` is refused | Give a reference, never the value: `'${{NAME}}'`, `keyring://alias` or `@file` |
-| **Deploy** or **Run** is refused | Read the message: node offline, flow missing from the matrix, brick changed |
+| **Deploy** or **Run** is refused | Read the message: node offline, flow missing from the matrix, brick changed. The coordinator's log says more (`docker compose -f deploy/compose.yaml logs -f coordinator`, or `coordinator.log`) |
 
 ## Stop it
 

@@ -86,7 +86,7 @@ Two runs, two files, and the join still holds.
 | `--skip-null` | — | Leaving a NULL as NULL |
 
 With `--fake-seed` alone, adding or reordering a `--fake` changes the other columns' values. With
-`--fake-seed-column` or `--fake-seed-row`, it does not.
+`--fake-seed-column` or `--fake-seed-row`, it does not. Those two cannot be combined.
 
 ## Generate data from nothing
 

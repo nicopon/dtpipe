@@ -37,7 +37,7 @@ This page lists symptoms whose cause is not obvious from the message, or that ha
 DEBUG=1 dtpipe …                 # verbose logging, per branch, to stderr
 dtpipe … --dry-run 5             # the real pipeline on 5 rows, nothing written
 dtpipe … --log run.log           # keep the log
-dtpipe … --strict-bindings       # an unknown flag or job-file key fails the run
+dtpipe … --strict-bindings       # an undeclared flag or unknown provider option fails the run
 dtpipe inspect -i "<source>"     # what the source really looks like
 dtpipe providers                 # what this binary supports
 ```

@@ -2,8 +2,9 @@
 
 [← Documentation](README.md)
 
-DtPipe is one file. The .NET runtime, DuckDB and the drivers for PostgreSQL, MySQL, SQL Server,
-Oracle and SQLite are inside it.
+DtPipe is one file of about 250 MB. The .NET runtime, DuckDB and the drivers for PostgreSQL,
+MySQL, SQL Server, Oracle and SQLite are inside it. It collects no telemetry and connects only to
+the sources and targets you name.
 
 ## As a .NET tool
 
@@ -55,7 +56,7 @@ dtpipe completion --uninstall
 
 ```bash
 dtpipe --version
-dtpipe providers        # what this binary can read and write
+dtpipe providers        # what this binary can read and write (--format json for a script)
 ```
 
 ---

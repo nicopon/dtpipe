@@ -53,8 +53,8 @@ Steps run in the order written, and every run prints the chain it built:
 →  fake → mask
 ```
 
-Repeating `-i` or `--from` opens a **new branch**. Every other flag is given once per branch, so a
-list is comma-separated:
+Repeating `-i` or `--from` opens a **new branch**. Any other flag is given once in its stage, and a
+branch flag such as `--alias` once in its branch, so a list is comma-separated:
 
 ```bash
 --ref a,b        # ✓ one branch reading two lookups

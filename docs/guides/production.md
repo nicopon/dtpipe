@@ -44,8 +44,8 @@ stream1:
 | `cursor`, `state` | [Incremental loading](incremental.md) |
 | `batch-size`, `limit`, `sampling-rate`, `metrics-path`, `prefix` | Engine controls |
 
-An unknown key is refused, and the error names the key that would have worked. Values can come
-from the environment or the keychain, so no credential is committed: see [Secrets](secrets.md).
+An unknown option key gets a warning that lists the valid keys. Values can come from the
+environment or the keychain, so no credential is committed: see [Secrets](secrets.md).
 
 ## Override a job from the command line
 
@@ -75,7 +75,7 @@ echo "exit=$?"     # 0 success · 1 failure · 130 cancelled
 | [Exit code](../concepts.md#exit-codes) | `0`, `1` or `130`. A cancelled run never reports success |
 | `--metrics-path run.json` | Rows read and written, throughput, peak memory, duration |
 | `--log run.log` | The run's log in a file |
-| `--strict-bindings` | Fails the run on an unknown flag or an unknown job-file key, instead of a warning nobody reads |
+| `--strict-bindings` | Fails the run on an undeclared flag or an unknown `provider-options` key, instead of a warning nobody reads |
 
 ```json
 {
