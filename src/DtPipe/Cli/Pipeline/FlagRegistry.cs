@@ -50,7 +50,8 @@ public record FlagDef(
     /// <summary>
     /// F8 single source of value-token semantics: a flag consumes the token that follows it
     /// unless it is boolean. The lexer, the option binders and shell completion all share
-    /// this rule (arity-driven consumption — no shape sniffing on the token itself).
+    /// this rule (arity-driven consumption — no shape sniffing on the token itself). The lexer
+    /// then refuses a consumed value that is itself a registered flag: the value was left out.
     /// </summary>
     public bool ConsumesNextToken => Arity != FlagArity.Boolean;
 }

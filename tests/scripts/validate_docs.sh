@@ -142,7 +142,7 @@ run_test "Quick start (DuckDB to CSV)" \
     "$DTPIPE" -i "duck::memory:" --query "SELECT 1 AS id" -o "$TMP_DIR/out.csv" --no-stats
 
 run_test "Dry-run with sampling" \
-    "$DTPIPE" -i "duck::memory:" --query "SELECT 1 AS id" -o "$TMP_DIR/out.csv" --sampling-rate 0.5 --dry-run --no-stats
+    "$DTPIPE" -i "duck::memory:" --query "SELECT 1 AS id" -o "$TMP_DIR/out.csv" --sampling-rate 0.5 --dry-run 1 --no-stats
 
 run_test "Export with YAML job file" \
     "$DTPIPE" -i "duck::memory:" --query "SELECT 1 AS id" \
@@ -181,7 +181,7 @@ main:
 EOF
 
 run_test "YAML job file execution (dry-run)" \
-    "$DTPIPE" --job "$TMP_DIR/readme_job.yaml" --dry-run
+    "$DTPIPE" --job "$TMP_DIR/readme_job.yaml" --dry-run 1
 
 # ----------------------------------------
 # 3. MCP tool table matches the server

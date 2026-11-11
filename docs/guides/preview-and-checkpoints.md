@@ -81,7 +81,7 @@ morning. `--checkpoint` materialises a branch's output on its way to the writer;
 ```bash
 # Once: read, mask, keep the result
 dtpipe -i "ora:Data Source=prod:1521/ORCL;User Id=app;Password=…" \
-  --query "SELECT * FROM big_table" --mask "email:###****" --checkpoint -o null:
+  --query "SELECT * FROM big_table" --mask "email:###****" --checkpoint stage1 -o null:
 
 # Then iterate — no round trip to Oracle
 dtpipe --from-checkpoint <key> --compute "total:row.price*row.qty" -o csv:out.csv

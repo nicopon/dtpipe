@@ -310,14 +310,38 @@ public class PipelineLexerTests
     [Fact]
     public void Parse_DryRun_HandledCorrectly()
     {
-        var pipeline1 = _lexer.Parse(new[] { "--dry-run", "-i", "gen:5" });
-        Assert.Equal(1, pipeline1.Globals.DryRunCount);
-
         var pipeline2 = _lexer.Parse(new[] { "--dry-run", "5", "-i", "gen:5" });
         Assert.Equal(5, pipeline2.Globals.DryRunCount);
 
         var pipeline3 = _lexer.Parse(new[] { "-dr", "10", "-i", "gen:5" });
         Assert.Equal(10, pipeline3.Globals.DryRunCount);
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("-3")]
+    [InlineData("ten")]
+    [InlineData("1.5")]
+    public void DryRun_Refuses_A_Value_That_Is_Not_A_Row_Count(string value)
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            _lexer.Parse(new[] { "-i", "gen:5", "-o", "null:", "--dry-run", value }));
+
+        Assert.Contains("number of source rows", ex.Message, StringComparison.Ordinal);
+        Assert.Contains($"'{value}'", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("--dry-run", "--no-stats")]
+    [InlineData("--dry-run", "-i")]
+    [InlineData("--checkpoint", "-o")]
+    public void A_Value_Flag_Followed_By_A_Flag_Is_Refused_Rather_Than_Swallowing_It(string flag, string next)
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            _lexer.Parse(new[] { "-i", "gen:5", flag, next, "null:" }));
+
+        Assert.Contains($"'{flag}' takes a value, and the flag '{next}' follows it", ex.Message,
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -620,6 +644,22 @@ public class PipelineLexerTests
             var ex = Assert.Throws<InvalidOperationException>(() => lexer.Parse(new[] { def.Name }));
             Assert.Contains("nothing follows it", ex.Message, StringComparison.Ordinal);
         }
+    }
+
+    [Fact]
+    public void Every_Value_Taking_Flag_Of_The_Registry_Refuses_A_Flag_As_Its_Value()
+    {
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        Program.ConfigureServices(services);
+        var registry = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
+            .GetRequiredService<FlagRegistry>(
+                Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(services));
+        var flags = registry.GetAll().Where(d => d.ConsumesNextToken).ToList();
+        Assert.NotEmpty(flags);
+
+        var lexer = new PipelineLexer(registry);
+        foreach (var def in flags)
+            Assert.Throws<InvalidOperationException>(() => lexer.Parse(new[] { def.Name, "--no-stats" }));
     }
 
     [Fact]

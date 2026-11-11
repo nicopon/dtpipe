@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using DtPipe.Core.Pipelines;
 
@@ -91,6 +92,13 @@ public class PipelineLexer
                     else if (!def.BooleanValued)
                         throw new InvalidOperationException(
                             $"Flag '{token}' takes a value, and nothing follows it.");
+
+                    // The token is still consumed by arity; a value that is itself a registered
+                    // flag means the value was left out, and taking it would swallow that flag.
+                    if (!def.BooleanValued && _registry.Lookup(value!) != null)
+                        throw new InvalidOperationException(
+                            $"Flag '{token}' takes a value, and the flag '{value}' follows it. "
+                            + $"Write the value of '{token}' before the next flag.");
 
                     if (def.BooleanValued && !bool.TryParse(value, out _))
                         throw new InvalidOperationException(value is null
@@ -385,17 +393,18 @@ public class PipelineLexer
         };
     }
 
-    private int GetDryRun(Dictionary<string, object?> dict)
+    // A row count of 1 or more: a value that is not one is refused rather than read as 1, which
+    // would hide a typo and run a sample of a size nobody asked for.
+    private static int GetDryRun(Dictionary<string, object?> dict)
     {
-        if (dict.TryGetValue("--dry-run", out var val))
+        foreach (var name in new[] { "--dry-run", "-dr" })
         {
-            if (val is string s && int.TryParse(s, out var i)) return i;
-            return 1;
-        }
-        if (dict.TryGetValue("-dr", out val))
-        {
-            if (val is string s && int.TryParse(s, out var i)) return i;
-            return 1;
+            if (!dict.TryGetValue(name, out var val)) continue;
+            if (val is string s && int.TryParse(s, NumberStyles.None, CultureInfo.InvariantCulture, out var rows)
+                && rows > 0)
+                return rows;
+            throw new InvalidOperationException(
+                $"Flag '{name}' takes a number of source rows, 1 or more, not '{val}'.");
         }
         return 0;
     }
