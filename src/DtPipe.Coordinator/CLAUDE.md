@@ -55,9 +55,9 @@ bytes between nodes.
 - **Check a plan before anything opens.** `PlanRegistry.Register` refuses a plan with any edge the
   flow-control matrix forbids, and names every forbidden edge. The same matrix governs runtime
   transfers. `[CI: PlanRegistryTests]`
-- **The data hub takes no message about a run.** `Register`, `Unregister`, `Ready` and `Exited` are not
-  methods of the hub TransportR serves: a call to one is an error, not a no-op.
-  `[CI: ReplicaAdmissionSubjectTests] [local: the lab's smoke.py rights - no run message on the data hub]`
+- **The data hub takes no message about a run.** TransportR's hub serves the data plane over HTTP (client registration and
+  streams) and has no route for `Register`, `Unregister`, `Ready` or `Exited`: a run is told over the node channel only.
+  `[CI: ReplicaAdmissionSubjectTests] [unchecked: no test calls the data hub for a run message]`
 
 ## The barrier
 

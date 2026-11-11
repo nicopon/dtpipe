@@ -27,7 +27,7 @@ declares). The file is the source of the branches: `PipelineToJobConverter.Conve
 reads the branches of the line, so the lexer refuses, naming it as typed, every flag of a branch given
 beside `--job` that `EngineOverrideFlags.All` does not list. That list is what the conversion applies
 to the loaded job; a control joins it only when the conversion reads it, never the other way round.
-`--export-job <file>` serialises the CLI pipeline through `JobFileWriter` and exits without running.
+`--export-job <file>` serialises the CLI pipeline through `JobFileWriter` and exits without running; a blank file name is refused.
 `[CI: PipelineLexerTests]`
 
 `--edges-only` (a global flag, accepted beside `--job`, never a key of the file) is what a node gives a runner's child:

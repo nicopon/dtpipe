@@ -171,7 +171,9 @@ composer.
 ### Exit codes
 
 `0` success · `1` fault · `130` user cancellation. Cancellation never masks as success (F16): a
-branch reporting 130 cancels the DAG, which returns 130. `[local: validate_cancellation.sh]`
+branch reporting 130 cancels the DAG, which returns 130. A non-zero verdict never ends on a success
+summary: the results lead with it and a cancelled branch prints none. `[local: validate_cancellation.sh]`
+`[CI: DagRendererVerdictTests]`
 Detail: `src/DtPipe.Core/CLAUDE.md`.
 
 ## MCP server and agent
