@@ -113,6 +113,11 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   **A stop asked while the run was unfinished ends in 130**, whether the engine threw (a linear
   job) or answered 1 or 0 (a DAG); a run finished before the stop keeps its code and a later stop
   is a 409. `[CI: StudioRunTests]` `[local: studio_check.py]`
+- **A run that reads a source brick is a sample.** It reads at most `CoordinatorApi.MaxSampleRows` rows, so
+  `PlanRun` refuses (409) such a job when any output is not a sink brick's throwaway file, naming the source bricks,
+  the bound and the refused outputs; the prepare result carries `sample` and `sampleRows`, and the page says nothing
+  real is written. A staged run of it keys its levels as a sample's (the bound and `SampleSalt`), never as `real`, and
+  its digest still binds the source bricks. A review binds no sink: the cut has no writer left. `[CI: StudioRunTests]`
 - **A preview is the real sample of the job, cut only at the pinned cards, never the job's run.** A
   watcher (the page's pin) sits at a card's read (level 0) or at the end of its branch. `DebugCutter` cuts a branch
   there into mini-branches joined by `from:` (`__level` is reserved), each with a checkpoint in the

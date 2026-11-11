@@ -262,25 +262,71 @@ public sealed class StudioRunTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task A_job_that_reads_a_brick_runs_with_the_coordinator_sample()
+    public async Task A_job_that_reads_a_source_brick_is_refused_when_it_has_a_real_output()
     {
         await StartAsync(coordinator: true);
         var target = Path.Combine(_dir, "target.csv");
         var hash = await SaveAsync($"orders:\n  input: \"brick:n1/orders\"\nmain:\n  from: orders\n  output: \"{target.Replace('\\', '/')}\"\n");
         var bricks = new[] { new { branch = "orders", key = StudioFakes.SourceKey } };
 
+        var (status, body) = await CallAsync(HttpMethod.Post, "/api/run/prepare", new { path = "job.yaml", hash, bricks });
+
+        Assert.Equal(HttpStatusCode.Conflict, status);
+        var error = body.GetProperty("error").GetString()!;
+        Assert.Contains("'orders' (n1/orders)", error);
+        Assert.Contains("100 rows", error);
+        Assert.Contains("'main'", error);
+        Assert.Contains("target.csv", error);
+        var (started, _) = await CallAsync(HttpMethod.Post, "/api/run", new { path = "job.yaml", hash, bricks, digest = "x" });
+        Assert.Equal(HttpStatusCode.Conflict, started);
+        Assert.False(File.Exists(target));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_job_that_reads_a_source_brick_and_writes_sink_bricks_only_runs_as_a_sample(bool review)
+    {
+        await StartAsync(coordinator: true);
+        var hash = await SaveAsync("orders:\n  input: \"brick:n1/orders\"\narchive:\n  from: orders\n  output: \"brick:n1/archive\"\n");
+        var bricks = new[] { new { branch = "orders", key = StudioFakes.SourceKey }, new { branch = "archive", key = StudioFakes.SinkKey } };
+
         var (status, prepared) = await CallAsync(HttpMethod.Post, "/api/run/prepare",
-            new { path = "job.yaml", hash, bricks });
+            new { path = "job.yaml", hash, bricks, debug = review ? (bool?)true : null, review = review ? (bool?)true : null });
 
         Assert.Equal(HttpStatusCode.OK, status);
+        Assert.True(prepared.GetProperty("sample").GetBoolean());
+        Assert.Equal(100, prepared.GetProperty("sampleRows").GetInt32());
+        Assert.True(Assert.Single(prepared.GetProperty("writes").EnumerateArray()).GetProperty("throwaway").GetBoolean());
         var digest = prepared.GetProperty("digest").GetString()!;
-        Assert.Equal(HttpStatusCode.Accepted, (await CallAsync(HttpMethod.Post, "/api/run", new { path = "job.yaml", hash, bricks, digest })).Status);
+        Assert.Equal(HttpStatusCode.Accepted, (await CallAsync(HttpMethod.Post, "/api/run",
+            new { path = "job.yaml", hash, bricks, digest, debug = review ? (bool?)true : null, review = review ? (bool?)true : null })).Status);
         var done = await UntilAsync(s => s.GetProperty("started").GetBoolean() && !s.GetProperty("running").GetBoolean());
 
-        Assert.Equal(0, done.GetProperty("code").GetInt32());
-        Assert.True(File.Exists(target));
-        Assert.Equal(4, File.ReadAllLines(target).Length);
+        Assert.True(0 == done.GetProperty("code").GetInt32(), done.ToString());
         Assert.Empty(Directory.GetFiles(Path.Combine(_dir, ".dtpipe", "studio", "samples")));
+        if (review)
+        {
+            foreach (var file in Directory.GetFiles(Path.Combine(_dir, ".dtpipe", "studio"), "*-debug.json"))
+                Assert.DoesNotContain("\"real\": true", File.ReadAllText(file));
+        }
+    }
+
+    [Fact]
+    public async Task The_digest_of_a_sample_binds_its_mode_and_its_source_bricks()
+    {
+        await StartAsync(coordinator: true);
+        var hash = await SaveAsync("orders:\n  input: \"brick:n1/orders\"\narchive:\n  from: orders\n  output: \"brick:n1/archive\"\n");
+        var bricks = new[] { new { branch = "orders", key = StudioFakes.SourceKey }, new { branch = "archive", key = StudioFakes.SinkKey } };
+
+        var (_, plain) = await CallAsync(HttpMethod.Post, "/api/run/prepare", new { path = "job.yaml", hash, bricks });
+        var (_, again) = await CallAsync(HttpMethod.Post, "/api/run/prepare", new { path = "job.yaml", hash, bricks });
+        var (_, reviewed) = await CallAsync(HttpMethod.Post, "/api/run/prepare", new { path = "job.yaml", hash, bricks, debug = true, review = true });
+
+        Assert.Equal(plain.GetProperty("digest").GetString(), again.GetProperty("digest").GetString());
+        Assert.NotEqual(plain.GetProperty("digest").GetString(), reviewed.GetProperty("digest").GetString());
+        Assert.Equal(HttpStatusCode.Conflict, (await CallAsync(HttpMethod.Post, "/api/run",
+            new { path = "job.yaml", hash, bricks, digest = reviewed.GetProperty("digest").GetString() })).Status);
     }
 
     [Fact]

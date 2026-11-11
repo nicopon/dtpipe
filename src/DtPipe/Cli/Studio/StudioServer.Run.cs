@@ -51,7 +51,7 @@ public sealed partial class StudioServer
 
     private sealed record RunPlan(
         string Path, BrickSampling Sampling, IReadOnlyDictionary<string, string> Launch, IReadOnlyList<RunWrite> Writes, string Digest,
-        StagedRun? Staged = null);
+        bool Sample, StagedRun? Staged = null);
 
     /// <summary>
     /// A real run cut at the cards the person watches: the job to run, the levels it may read back, and what it
@@ -61,7 +61,7 @@ public sealed partial class StudioServer
     /// </summary>
     private sealed record StagedRun(
         DebugPlan Plan, DebugState State, bool Review, List<DebugWatch> Holds, List<DebugWatch> Watch, List<HeldLevel> Keep, HashSet<string> Drop,
-        DebugCut Cut, object Stages, object Held, int Discards, string Signature);
+        DebugCut Cut, object Stages, object Held, int Discards, string Signature, bool Sample);
 
     private bool RunInProgress
     {
@@ -71,7 +71,9 @@ public sealed partial class StudioServer
     /// <summary>
     /// What a run of the saved job would do, or the refusal that says why it cannot: the job as saved
     /// (its hash is the page's), source bricks bound to rows from their node, every variable
-    /// resolved. The digest binds the confirmation to this text and these values, by name.
+    /// resolved. The digest binds the confirmation to this text and these values, by name. A job with a
+    /// source brick reads <see cref="CoordinatorApi.MaxSampleRows"/> rows of it, so it is a sample: it is
+    /// refused when any output is not a sink brick's throwaway file.
     /// </summary>
     private RunPlan PlanRun(RunRequest asked)
     {
@@ -103,7 +105,15 @@ public sealed partial class StudioServer
             writes.Add(new RunWrite(alias, false, ConnectionStringSanitizer.Redact(output), ConnectionStringSanitizer.Sanitize(JobYaml.Serialize(block))));
         }
 
-        var stagedRun = staged ? Stage(asked, path, job.Text, sampling, launch) : null;
+        var sample = sampling.Sources.Count > 0;
+        if (sample && writes.Where(w => !w.Throwaway).ToList() is { Count: > 0 } refused)
+            throw new StudioRefusal(409,
+                $"This job reads {string.Join(", ", sampling.Sources.Select(s => $"'{s.Alias}' ({s.Brick.Node}/{s.Brick.Id})"))}, "
+                + $"a source brick: a run takes at most {CoordinatorApi.MaxSampleRows} rows of it, so it is a sample and writes nothing real. "
+                + $"Refused outputs: {string.Join(", ", refused.Select(w => $"'{w.Alias}' → {w.Output}"))}. "
+                + "Write them from a job that reads a source of its own, or make them sink bricks.");
+
+        var stagedRun = staged ? Stage(asked, path, job.Text, sampling, launch, sample) : null;
 
         var material = new StringBuilder(job.Text).Append('\0');
         foreach (var (name, value) in launch.OrderBy(p => p.Key, StringComparer.Ordinal)) material.Append(name).Append('=').Append(value).Append('\0');
@@ -111,7 +121,7 @@ public sealed partial class StudioServer
         foreach (var alias in sampling.Sinks.Order(StringComparer.Ordinal)) material.Append("throwaway:").Append(alias).Append('\0');
         if (stagedRun is not null) material.Append("staged:").Append(stagedRun.Signature).Append('\0');
         var digest = Convert.ToHexStringLower(HMACSHA256.HashData(_token, Encoding.UTF8.GetBytes(material.ToString())));
-        return new RunPlan(path, sampling, launch, writes, digest, stagedRun);
+        return new RunPlan(path, sampling, launch, writes, digest, sample, stagedRun);
     }
 
     /// <summary>
@@ -119,13 +129,15 @@ public sealed partial class StudioServer
     /// run with, and the stages that would run, told before anything does. Pure: nothing leaves the session until
     /// the run starts. The levels of a real run are keyed to every row, never to a sample's bound.
     /// </summary>
-    private StagedRun Stage(RunRequest asked, string path, string text, BrickSampling sampling, IReadOnlyDictionary<string, string> launch)
+    private StagedRun Stage(RunRequest asked, string path, string text, BrickSampling sampling, IReadOnlyDictionary<string, string> launch, bool sample)
     {
         var cutter = _tools.Engine.Cutter;
         var key = DebugKey(path, null);
         _local.CheckDebug(key);
         var review = asked.Review == true;
-        var plan = PlanOf(cutter, text, 0, RealSalt(text, launch));
+        var plan = sample
+            ? PlanOf(cutter, text, CoordinatorApi.MaxSampleRows, SampleSalt(path, text))
+            : PlanOf(cutter, text, 0, RealSalt(text, launch));
         var state = LoadDebug(key);
         if (state.Real && review)
             throw new StudioRefusal(409, "A real run is suspended before its targets are written: write it or abandon it before reviewing another.");
@@ -165,7 +177,7 @@ public sealed partial class StudioServer
         var signature = string.Join('|', new[] { $"review={(review ? 1 : 0)}" }
             .Concat(watch.Select(w => $"w:{w.Branch}/{AtName(w.At)}").Order(StringComparer.Ordinal))
             .Concat(keep.Select(h => $"h:{h.Branch}/{h.Level}/{h.Key}").Order(StringComparer.Ordinal)));
-        return new StagedRun(plan, state, review, holds, watch, keep, drop, cut, stages, held, state.Levels.Count - keep.Count, signature);
+        return new StagedRun(plan, state, review, holds, watch, keep, drop, cut, stages, held, state.Levels.Count - keep.Count, signature, sample);
     }
 
     /// <summary>What a held level was read with, hashed under the session's token: the launch values and the state files a cursor reads.</summary>
@@ -193,6 +205,8 @@ public sealed partial class StudioServer
         {
             digest = plan.Digest,
             writes = plan.Writes,
+            sample = plan.Sample,
+            sampleRows = plan.Sample ? CoordinatorApi.MaxSampleRows : (int?)null,
             staged = plan.Staged is not { } staged ? null : new
             {
                 stages = staged.Stages,
@@ -238,6 +252,8 @@ public sealed partial class StudioServer
             foreach (var alias in plan.Sampling.Sinks)
             {
                 if (plan.Staged?.Cut.Dropped.Contains(alias) == true) continue;
+                // A review ends every branch before its writer: the sink's output is gone from the cut, so nothing is left to bind.
+                if (plan.Staged?.Review == true) continue;
                 files.Add(_local.SampleFile(null));
                 outputs.Add($"{alias}={Bindable(files[^1])}");
             }
@@ -249,7 +265,7 @@ public sealed partial class StudioServer
                 foreach (var gone in staged.Drop) ForgetCheckpoint(store, gone);
                 staged.State.Watch = staged.Watch;
                 staged.State.Levels = staged.Keep;
-                staged.State.Real = staged.Keep.Count > 0;
+                staged.State.Real = !plan.Sample && staged.Keep.Count > 0;
                 SaveDebug(DebugKey(plan.Path, null), staged.State);
             }
             var state = new RunState(plan.Path, new CancellationTokenSource());
@@ -328,13 +344,13 @@ public sealed partial class StudioServer
         state.Watch = pins.Concat(staged.Holds.Where(h => !pins.Any(p => Same(p.Branch, h.Branch) && p.At == h.At))).ToList();
         Keep(key, state, staged.Plan, staged.Cut, keys);
         state.Watch = pins;
-        if (code == 0 && !staged.Review)
+        if (code == 0 && !staged.Review && !staged.Sample)
         {
             var store = DebugStore();
             foreach (var held in state.Levels) ForgetCheckpoint(store, held.Key);
             state.Levels.Clear();
         }
-        state.Real = state.Levels.Count > 0;
+        state.Real = !staged.Sample && state.Levels.Count > 0;
         if (staged.Review)
         {
             // Nothing on disk says how many rows a level holds, and the page tells the person how many wait: counted once, here.

@@ -95,10 +95,10 @@ async function stopRun() {
 }
 
 // What a staged run will do, stage by stage, and what it holds on disk meanwhile.
-function stagedView(staged) {
+function stagedView(staged, sample) {
   const size = (bytes) => bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} kB`;
   return [
-    staged.writesNow
+    sample ? null : staged.writesNow
       ? el("p", { class: "warn" }, "This run is real and reaches the end of the job: its last stage writes the targets. A sink brick is written to a throwaway file here, never to its node.")
       : el("p", { class: "warn" }, "This run is real but stops before every writer, so nothing is written. It holds every row it read, encrypted in this studio's session, "
         + "until you write them or abandon them from the sink cards. The rows of a sample are not used."),
@@ -127,9 +127,11 @@ export function runView() {
     }
     const writes = run.prepared.writes;
     const staged = run.prepared.staged;
+    const sample = run.prepared.sample;
     return [
       review,
-      staged ? stagedView(staged) : el("p", { class: "warn" }, "This run is real: its writers write their targets. A sink brick is written to a throwaway file here, never to its node."),
+      sample ? el("p", { class: "warn" }, `This run is a sample: its source bricks are read at ${run.prepared.sampleRows} rows through the coordinator, and nothing real is written. A sink brick is written to a throwaway file here, never to its node.`) : null,
+      staged ? stagedView(staged, !!sample) : sample ? null : el("p", { class: "warn" }, "This run is real: its writers write their targets. A sink brick is written to a throwaway file here, never to its node."),
       writes.length ? writes.map((w) => el("div", { class: "run-write" },
         el("p", {}, el("b", {}, w.alias), w.throwaway ? " → a throwaway file (the brick's node is not reached)" : [" → ", el("code", {}, w.output)]),
         w.block ? el("pre", {}, w.block) : null)) : el("p", { class: "hint" }, "No branch of this job writes anywhere."),

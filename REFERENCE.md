@@ -1437,7 +1437,10 @@ shown, never refused. When you open a job, the coordinator says which of its bra
 which then open as brick cards; signed out, they open as plain cards and save unchanged. A preview
 of a job with bricks runs here: a source brick's rows (at most 100) come from its node through the
 coordinator, and a sink brick receives nothing, its rows ending in a throwaway file under
-`.dtpipe/studio/samples/`. A brick's variables belong to its node and leave the Variables tab.
+`.dtpipe/studio/samples/`. A run of a job with a source brick is a sample too, since it reads
+at most those 100 rows: it is refused (409, naming the source bricks, the bound and the outputs)
+when any output is not a sink brick, and a job whose outputs are all sink bricks runs and says so.
+A brick's variables belong to its node and leave the Variables tab.
 
 **Publish** sends the job as saved in the folder to the coordinator's library, under an id you
 choose: an unsaved change is refused, and its layout and launch values stay on this machine. The
