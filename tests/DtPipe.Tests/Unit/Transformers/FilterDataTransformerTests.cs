@@ -155,4 +155,38 @@ public class FilterDataTransformerTests : IDisposable
         transformer.Transform(new object?[] { null }).Should().BeNull();
         transformer.Transform(new object?[] { "Grace" }).Should().NotBeNull();
     }
+
+    // ── Row mode, JavaScript conditions ────────────────────────────────────────
+
+    [Fact]
+    public async Task Transform_ShouldKeepRow_WhenConditionIsTrue()
+    {
+        var transformer = Build("return row.Age > 18;");
+        await transformer.InitializeAsync(new List<PipeColumnInfo> { new("Name", typeof(string), true), new("Age", typeof(int), false) });
+
+        var row = new object?[] { "John", 25 };
+
+        transformer.Transform(row).Should().BeEquivalentTo(row);
+    }
+
+    [Fact]
+    public async Task Transform_ShouldDropRow_WhenConditionIsFalse()
+    {
+        var transformer = Build("return row.Age > 18;");
+        await transformer.InitializeAsync(new List<PipeColumnInfo> { new("Name", typeof(string), true), new("Age", typeof(int), false) });
+
+        transformer.Transform(new object?[] { "Kid", 10 }).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Transform_ShouldApplyMultipleFilters()
+    {
+        var options = new FilterOptions { Filters = new[] { "row.A > 0", "row.B < 100" } };
+        var transformer = new FilterDataTransformer(options, _jsEngineProvider);
+        await transformer.InitializeAsync(new List<PipeColumnInfo> { new("A", typeof(int), false), new("B", typeof(int), false) });
+
+        transformer.Transform(new object?[] { 10, 50 }).Should().NotBeNull();
+        transformer.Transform(new object?[] { -1, 50 }).Should().BeNull();
+        transformer.Transform(new object?[] { 10, 200 }).Should().BeNull();
+    }
 }

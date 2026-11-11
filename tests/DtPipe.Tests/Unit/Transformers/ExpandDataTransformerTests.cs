@@ -4,7 +4,7 @@ using DtPipe.Transformers.Row.Expand;
 using Moq;
 using Xunit;
 
-namespace DtPipe.Tests.Transformers;
+namespace DtPipe.Tests.Unit.Transformers;
 
 public class ExpandDataTransformerTests
 {
