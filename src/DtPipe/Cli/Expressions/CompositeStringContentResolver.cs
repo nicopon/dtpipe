@@ -43,6 +43,7 @@ public sealed class CompositeStringContentResolver : IStringContentResolver
         // 1. File Indirection
         if (s.StartsWith('@'))
         {
+            if (EdgesOnlyScope.IsArmed) throw new InvalidOperationException(EdgesOnlyScope.FileRefusal);
             s = await File.ReadAllTextAsync(s[1..], ct);
         }
         else
@@ -89,5 +90,33 @@ public sealed class CompositeStringContentResolver : IStringContentResolver
 
         sb.Append(s, lastIndex, s.Length - lastIndex);
         return sb.ToString();
+    }
+}
+
+/// <summary>
+/// A run under <c>--edges-only</c>, ambient like <see cref="LaunchValues"/>: inside the scope an <c>@file</c> value is
+/// refused, so a transformer's option (<c>--compute</c>, <c>--filter</c>, <c>--expand</c>) reads no file of the host. The
+/// command line arms it before the conversion, which resolves a <c>--job</c> file's values, and <c>JobExecutor</c> for the
+/// run itself. No other call sees the scope, whatever runs beside it.
+/// </summary>
+public static class EdgesOnlyScope
+{
+    private static readonly AsyncLocal<bool> Armed = new();
+
+    public const string FileRefusal = "An @file value is refused under --edges-only: the run reads its arrow:- edges and nothing else.";
+
+    internal static bool IsArmed => Armed.Value;
+
+    /// <summary>Refuses every <c>@file</c> resolved inside the returned scope.</summary>
+    public static IDisposable Arm()
+    {
+        var previous = Armed.Value;
+        Armed.Value = true;
+        return new Restorer(previous);
+    }
+
+    private sealed class Restorer(bool previous) : IDisposable
+    {
+        public void Dispose() => Armed.Value = previous;
     }
 }

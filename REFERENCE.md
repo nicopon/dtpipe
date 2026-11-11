@@ -753,11 +753,12 @@ run share. The job's text may name `arrow:-` as an input or an output and nothin
 bound by `--bind-input` or `--bind-output` must be `-`, `pipe://<name>` or a file of the working
 directory named bare, which may also hold a branch's `contract-save`. A branch that sets
 `checkpoint`, `from-checkpoint`, `from-contract`, `metrics-path`, `cursor` or `state` is refused
-too, each by its branch, before any row moves. Transformers and processors stay:
-`--sql` reads the branches it names in `--from` and `--ref` and nothing else, with DuckDB's
-`enable_external_access` off and its configuration locked, so a file, `ATTACH`, an extension or a
-`SET` is refused, and `--duck-init` is refused outright. DuckDB still spills to its temporary
-directory under the working directory.
+too, each by its branch, before any row moves. Transformers and processors stay: `--sql` reads the
+branches it names in `--from` and `--ref` and nothing else, with DuckDB's `enable_external_access`
+off and its configuration locked, so a file, `ATTACH`, an extension or a `SET` is refused, and
+`--duck-init` is refused outright. An `@file` value (a `--compute`, `--filter` or `--expand` script
+read from a file) is refused as well. DuckDB still spills to its temporary directory under the
+working directory.
 
 #### Implicit branch-split rules
 

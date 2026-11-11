@@ -35,7 +35,9 @@ to the loaded job; a control joins it only when the conversion reads it, never t
 branch names (`EdgesOnlyRule`), and after binding every location that is not a named pipe; a file named bare is one of the
 working directory, the child's own, and may be bound or hold a `contract-save` (a runner's dry run); the flag reaches the SQL
 processor as `BranchChannelContext.EdgesOnly`, which turns DuckDB's external access off, locks its configuration and
-refuses `--duck-init`. `[CI: EdgesOnlyRuleTests, DuckDBSqlProcessorEdgesOnlyTests, PipelineLexerTests]`
+refuses `--duck-init`. An `@file` value is refused too (`EdgesOnlyScope`, armed by `Program` before the conversion resolves a
+`--job` file and by `JobExecutor`), so a transformer's option reads no file of the host. `[CI: EdgesOnlyRuleTests,
+DuckDBSqlProcessorEdgesOnlyTests, PipelineLexerTests, CompositeStringContentResolverTests]`
 
 ## The engine and its host
 

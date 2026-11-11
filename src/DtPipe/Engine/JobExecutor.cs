@@ -66,6 +66,7 @@ public class JobExecutor
         // so the process can report exit code 130 instead of masking cancellation as success.
         using var userCts = new CancellationTokenSource();
         using var hosted = host.BeginRun(globals, userCts);
+        using var edgesOnly = globals.EdgesOnly ? DtPipe.Cli.Expressions.EdgesOnlyScope.Arm() : null;
 
         var resultsCollector = new System.Collections.Concurrent.ConcurrentQueue<DtPipe.Feedback.BranchSummary>();
 

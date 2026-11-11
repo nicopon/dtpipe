@@ -289,4 +289,25 @@ public class CompositeStringContentResolverTests : IAsyncLifetime
             if (File.Exists(path)) File.Delete(path);
         }
     }
+
+    [Fact]
+    public async Task An_At_File_Is_Refused_Inside_An_Edges_Only_Run_And_Read_Outside_It()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "edges_only_" + Guid.NewGuid().ToString("N") + ".txt");
+        await File.WriteAllTextAsync(path, "secret", TestContext.Current.CancellationToken);
+        try
+        {
+            using (DtPipe.Cli.Expressions.EdgesOnlyScope.Arm())
+            {
+                var refusal = await Assert.ThrowsAsync<InvalidOperationException>(() => _resolver.ResolveAsync("@" + path));
+                Assert.Equal(DtPipe.Cli.Expressions.EdgesOnlyScope.FileRefusal, refusal.Message);
+            }
+
+            Assert.Equal("secret", await _resolver.ResolveAsync("@" + path));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }
