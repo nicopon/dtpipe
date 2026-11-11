@@ -1,11 +1,14 @@
+using System.Data.Common;
 using System.Text.RegularExpressions;
 using Apache.Arrow;
+using Apache.Arrow.Ado;
 using Apache.Arrow.Ipc;
 using Apache.Arrow.Serialization.Mapping;
 using Apache.Arrow.Types;
 using DtPipe.Adapters.MySql;
 using DtPipe.Adapters.Oracle;
 using DtPipe.Adapters.PostgreSQL;
+using DtPipe.Adapters.Shared.Infrastructure;
 using DtPipe.Adapters.SqlServer;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Infrastructure.Arrow;
@@ -209,6 +212,84 @@ public sealed class WriteConformanceTests : IDisposable
         var cell = row?.For(writer) ?? "accepted";
 
         Judge(cell, WriteOutcome.GateVerdict(writer, ArrowTypeCases.Named(name).Field));
+    }
+
+    /// <summary>
+    /// What each road of the SQL Server writer hands its bulk copy for a MAX column, read through
+    /// <c>GetValue</c> and through the bounded copy (<c>GetBytes</c>, <c>GetChars</c>) a driver may take
+    /// instead. A column the writer creates is the one its dialect spells for the type. What the server
+    /// gives back is the server half, in <c>Integration/Conformance</c>.
+    /// </summary>
+    private static readonly (string Case, bool Created, string Column, string Row, string Columnar)[] SqlServerMaxColumns =
+    [
+        ("binary", true, "VARBINARY(MAX)", "Bytes:616263", "Bytes:616263"),
+        ("binary", false, "VARBINARY(MAX)", "Bytes:616263", "Bytes:616263"),
+        ("string", true, "NVARCHAR(MAX)", "String:héllo", "String:héllo"),
+        ("int32", false, "NVARCHAR(MAX)", "String:-70000", "Int32:-70000"),
+    ];
+
+    public static TheoryData<string, bool, string> SqlServerMaxColumnCells()
+    {
+        var cells = new TheoryData<string, bool, string>();
+        foreach (var (name, created, _, _, _) in SqlServerMaxColumns)
+            foreach (var road in new[] { "row", "columnar" })
+                cells.Add(name, created, road);
+        return cells;
+    }
+
+    [Theory]
+    [MemberData(nameof(SqlServerMaxColumnCells))]
+    public void A_Sql_Server_Road_Hands_Its_Bulk_Copy_A_Max_Column_Value(string name, bool created, string road)
+    {
+        var (_, _, column, row, columnar) = SqlServerMaxColumns.Single(c => c.Case == name && c.Created == created);
+        var @case = ArrowTypeCases.Named(name);
+        var source = ArrowTypeMap.GetClrTypeFromField(@case.Field);
+        if (created) Assert.Equal(column, SqlServerTypeConverter.Instance.MapToProviderType(source));
+
+        var array = @case.Build();
+        using var batch = new RecordBatch(new Schema([@case.Field], null), [array], array.Length);
+        using DbDataReader reader = road == "row" ? SqlServerRowRoad(batch, column, source) : new RecordBatchDataReader(batch);
+
+        Assert.Equal(road == "row" ? row : columnar, BulkCopyReads(reader));
+    }
+
+    // The row road as the SQL Server writer builds it from the target it inspects, whose DATA_TYPE is
+    // the bare name of the column's type.
+    private static ObjectListDataReader SqlServerRowRoad(RecordBatch batch, string column, Type source)
+    {
+        var dataType = column.Split('(')[0].ToLowerInvariant();
+        var (bufferType, convert) = SqlServerDataWriter.BufferColumn(dataType, SqlServerTypeConverter.Instance.MapFromProviderType(dataType), source, "v");
+        var field = batch.Schema.GetFieldByIndex(0);
+        var rows = Enumerable.Range(0, batch.Length).Select(i => new[] { ArrowTypeMapper.GetValueForField(batch.Column(0), field, i) }).ToList();
+        return new ObjectListDataReader(rows, ["v"], [bufferType], [0], [convert]);
+    }
+
+    // The first row's value, and the bounded copy of bytes or text: asked for its length, then read in
+    // chunks narrower than the value, so an offset inside it and one past its end are both read.
+    private static string BulkCopyReads(DbDataReader reader)
+    {
+        Assert.True(reader.Read());
+        var value = reader.GetValue(0);
+        object copied = value switch
+        {
+            byte[] => CopyOut<byte>((offset, buffer, at, length) => reader.GetBytes(0, offset, buffer, at, length)),
+            string => new string(CopyOut<char>((offset, buffer, at, length) => reader.GetChars(0, offset, buffer, at, length))),
+            _ => value
+        };
+
+        var handed = ConformanceValue.Of(value);
+        var copy = ConformanceValue.Of(copied);
+        return copy == handed ? handed : $"{handed}, copied as {copy}";
+    }
+
+    private static T[] CopyOut<T>(Func<long, T[]?, int, int, long> read)
+    {
+        var whole = new T[read(0, null, 0, 0)];
+        var chunk = new T[2];
+        long offset = 0;
+        for (long n; (n = read(offset, chunk, 0, chunk.Length)) > 0; offset += n)
+            System.Array.Copy(chunk, 0, whole, offset, n);
+        return whole;
     }
 
     /// <summary>

@@ -92,6 +92,10 @@ stands in front of the writer, armed from the compatibility report, so a new dat
 through its `ISchemaInspector`, which must report the target's scale. `[CI: WriteConformanceTests]`
 `[local: validate_type_conformance.sh]`
 
+**A `DbDataReader` handed to a bulk loader serves every accessor**, since the driver picks the one it
+calls: `GetBytes` and `GetChars` are bounded copies of what `GetValue` gives, never
+`NotSupportedException`. `[CI: WriteConformanceTests]` `[local: validate_type_conformance.sh]`
+
 ## A value a type cannot hold
 
 **A value a reader or a writer cannot carry stops the run with `ColumnValueRefusedException`: where it

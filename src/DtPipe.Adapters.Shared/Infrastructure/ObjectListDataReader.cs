@@ -7,8 +7,10 @@ using System.Data.Common;
 namespace DtPipe.Adapters.Shared.Infrastructure;
 
 /// <summary>
-/// A zero-allocation <see cref="DbDataReader"/> backed by an in-memory row list (<see cref="IReadOnlyList{T}"/>).
-/// Streams directly into <c>SqlBulkCopy</c> without materialising intermediate <see cref="DataTable"/> or <see cref="DataRow"/> objects.
+/// A <see cref="DbDataReader"/> over a list of rows, which <c>SqlBulkCopy</c> reads without a
+/// <see cref="DataTable"/> in between. <see cref="Read"/> maps each written column to its source
+/// cell and converts it through the column's converter into one array the reader reuses; a
+/// converter returns <see cref="object"/>, so a value type is boxed once per cell.
 /// </summary>
 public sealed class ObjectListDataReader : DbDataReader
 {
@@ -111,8 +113,35 @@ public sealed class ObjectListDataReader : DbDataReader
     public override Guid GetGuid(int ordinal) => (Guid)GetValue(ordinal);
 
     public override char GetChar(int ordinal) => throw new NotSupportedException();
-    public override long GetBytes(int ordinal, long dataOffset, byte[]? buffer, int bufferOffset, int length) => throw new NotSupportedException();
-    public override long GetChars(int ordinal, long dataOffset, char[]? buffer, int bufferOffset, int length) => throw new NotSupportedException();
+
+    // A caller that reads a long value in pieces (DbDataReader.GetStream, a bulk loader streaming a
+    // column) copies it through these, per the DbDataReader contract: the value's length when the
+    // buffer is null, else at most `length` items from `dataOffset`, and 0 from its end on. GetBytes
+    // of a value that is not bytes, or GetChars of one that is not text, is an InvalidCastException,
+    // as a cast of GetValue would be.
+    public override long GetBytes(int ordinal, long dataOffset, byte[]? buffer, int bufferOffset, int length)
+        => CopyOut(_currentRow[ordinal] as byte[] ?? throw NotA(ordinal, "bytes"), dataOffset, buffer, bufferOffset, length);
+
+    public override long GetChars(int ordinal, long dataOffset, char[]? buffer, int bufferOffset, int length)
+        => CopyOut((_currentRow[ordinal] as string ?? throw NotA(ordinal, "text")).AsSpan(), dataOffset, buffer, bufferOffset, length);
+
+    private static long CopyOut<T>(ReadOnlySpan<T> value, long dataOffset, T[]? buffer, int bufferOffset, int length)
+    {
+        if (buffer is null) return value.Length;
+        ArgumentOutOfRangeException.ThrowIfNegative(dataOffset);
+        ArgumentOutOfRangeException.ThrowIfNegative(length);
+        if ((uint)bufferOffset > (uint)buffer.Length) throw new ArgumentOutOfRangeException(nameof(bufferOffset));
+        if (length > buffer.Length - bufferOffset) throw new ArgumentOutOfRangeException(nameof(length));
+        if (dataOffset >= value.Length) return 0;
+
+        var count = (int)Math.Min(length, value.Length - dataOffset);
+        value.Slice((int)dataOffset, count).CopyTo(buffer.AsSpan(bufferOffset));
+        return count;
+    }
+
+    private InvalidCastException NotA(int ordinal, string kind)
+        => new($"Column '{_columnNames[ordinal]}' holds {(IsDBNull(ordinal) ? "a null" : _currentRow[ordinal].GetType().Name)} at this row, not {kind}.");
+
     public override DataTable? GetSchemaTable() => null;
     public override IEnumerator GetEnumerator() => new DbEnumerator(this, closeReader: false);
 }

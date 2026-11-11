@@ -29,6 +29,7 @@ public sealed class RecordBatchDataReader : DbDataReader
     private readonly Field[] _fields;
     private readonly Type[] _fieldTypes;
     private readonly Func<int, object>[] _getters;
+    private readonly BinaryArray?[] _bytes;
     private readonly int _fieldCount;
     private int _row = -1;
     private bool _closed;
@@ -43,6 +44,7 @@ public sealed class RecordBatchDataReader : DbDataReader
         _fields = new Field[_fieldCount];
         _fieldTypes = new Type[_fieldCount];
         _getters = new Func<int, object>[_fieldCount];
+        _bytes = new BinaryArray?[_fieldCount];
 
         for (int i = 0; i < _fieldCount; i++)
         {
@@ -52,12 +54,17 @@ public sealed class RecordBatchDataReader : DbDataReader
             _fields[i] = field;
             _fieldTypes[i] = ArrowTypeMap.GetClrTypeFromField(field);
             _getters[i] = BuildGetter(col, field);
+            // The column whose getter copies a BinaryArray's bytes out: GetBytes reads them in place.
+            _bytes[i] = !IsExtension(field) && col is BinaryArray b and not StringArray ? b : null;
         }
     }
 
+    private static bool IsExtension(Field field)
+        => field.HasMetadata && (field.Metadata.ContainsKey("ARROW:extension:name") || field.Metadata.ContainsKey("arrow.uuid"));
+
     private static Func<int, object> BuildGetter(IArrowArray array, Field field)
     {
-        if (field.HasMetadata && (field.Metadata.ContainsKey("ARROW:extension:name") || field.Metadata.ContainsKey("arrow.uuid")))
+        if (IsExtension(field))
         {
             return row => ArrowTypeMap.GetValue(array, row, field) ?? DBNull.Value;
         }
@@ -185,12 +192,39 @@ public sealed class RecordBatchDataReader : DbDataReader
         };
     public override Guid GetGuid(int ordinal) => (Guid)GetValue(ordinal);
 
-    // These are rarely needed by SqlBulkCopy but required by the abstract contract:
     public override char GetChar(int ordinal) => throw new NotSupportedException();
+
+    // ── Bounded copies ───────────────────────────────────────────────────────
+    // A caller that reads a long value in pieces (DbDataReader.GetStream, a bulk loader streaming a
+    // column) copies it through these, per the DbDataReader contract: the value's length when the
+    // buffer is null, else at most `length` items from `dataOffset`, and 0 from its end on. GetBytes
+    // of a value that is not bytes, or GetChars of one that is not text, is an InvalidCastException,
+    // as a cast of GetValue would be.
+
     public override long GetBytes(int ordinal, long dataOffset, byte[]? buffer, int bufferOffset, int length)
-        => throw new NotSupportedException("Use GetValue() to retrieve binary data as byte[].");
+        => _bytes[ordinal] is { } array && !array.IsNull(_row)
+            ? CopyOut(array.GetBytes(_row), dataOffset, buffer, bufferOffset, length)
+            : CopyOut(GetValue(ordinal) as byte[] ?? throw NotA(ordinal, "bytes"), dataOffset, buffer, bufferOffset, length);
+
     public override long GetChars(int ordinal, long dataOffset, char[]? buffer, int bufferOffset, int length)
-        => throw new NotSupportedException();
+        => CopyOut((GetValue(ordinal) as string ?? throw NotA(ordinal, "text")).AsSpan(), dataOffset, buffer, bufferOffset, length);
+
+    private static long CopyOut<T>(ReadOnlySpan<T> value, long dataOffset, T[]? buffer, int bufferOffset, int length)
+    {
+        if (buffer is null) return value.Length;
+        ArgumentOutOfRangeException.ThrowIfNegative(dataOffset);
+        ArgumentOutOfRangeException.ThrowIfNegative(length);
+        if ((uint)bufferOffset > (uint)buffer.Length) throw new ArgumentOutOfRangeException(nameof(bufferOffset));
+        if (length > buffer.Length - bufferOffset) throw new ArgumentOutOfRangeException(nameof(length));
+        if (dataOffset >= value.Length) return 0;
+
+        var count = (int)Math.Min(length, value.Length - dataOffset);
+        value.Slice((int)dataOffset, count).CopyTo(buffer.AsSpan(bufferOffset));
+        return count;
+    }
+
+    private InvalidCastException NotA(int ordinal, string kind)
+        => new($"Column '{_fields[ordinal].Name}' holds {(IsDBNull(ordinal) ? "a null" : _fieldTypes[ordinal].Name)} at this row, not {kind}.");
 
     // ── Schema table (not needed for SqlBulkCopy) ────────────────────────────
 
