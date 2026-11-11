@@ -469,12 +469,12 @@ def rights_pass():
         access = stranger_token()
         with open(os.path.join(LAB_DIR, "library-seed", "sensor-stream.yaml")) as f:
             yaml = expand(f.read())
-        placement = {"readings": "runner-1", "enrich": "runner-1", "customers": "node-1", "load": "node-4"}
+        placement = {"readings": "node-1", "enrich": "runner-1", "customers": "node-1", "load": "node-4"}
         pipeline = "smoke-foreign-report"
         hub = None
         try:
             call("/api/deploy", {"pipelineId": pipeline, "yaml": yaml, "placement": placement,
-                                   "bricks": {"customers": "customer-countries", "load": "sensor-readings"}})
+                                   "bricks": {"readings": "sensor-feed", "customers": "customer-countries", "load": "sensor-readings"}})
             fragment = f"{pipeline}@node-4"
             hub = announce_as_a_replica_of_node_2(access, "smoke:foreign-report")
             run = call("/api/runs", {"pipelineId": pipeline})
@@ -1459,16 +1459,22 @@ def sandbox_pass():
         return refused("sandbox-probe", job, {"a": "node-2", "b": "node-2", "c": "node-4"}, "b", "node-2", "sql processor")
 
     def disjoint_together():
-        # Three raw pipelines, a slow source each, queued together: P1 and P2 share only the runner, which
-        # never counts, so they are in flight together; P3 reads node-1 like P1, so it starts once P1 is over.
-        # Nothing is written anywhere: every sink is null.
+        # Three raw pipelines, a slow source each, queued together, each through runner-1 to a sink on a data node (a
+        # runner reads and writes its edges only): P1 and P2 share only the runner, which never counts, so they are in
+        # flight together; P3 reads node-1 like P1, so it starts once P1 is over. Nothing is written anywhere: every sink
+        # is null. runner -> catalog is granted for the scenario, P1's sink being node-3's, and the matrix put back after.
         job = lambda: ("gen:\n  input: generate:15000\n  provider-options:\n    generate:\n      rows-per-second: 1000\n"
-                       "sink:\n  from: gen\n  output: \"null:\"\n")
-        shapes = {"smoke-par-1": ("node-1", "runner-1"), "smoke-par-2": ("node-2", "runner-1"), "smoke-par-3": ("node-1", "node-3")}
+                       "mid:\n  from: gen\n"
+                       "sink:\n  from: mid\n  output: \"null:\"\n")
+        shapes = {"smoke-par-1": ("node-1", "node-3"), "smoke-par-2": ("node-2", "node-4"), "smoke-par-3": ("node-1", "node-3")}
+        matrix = call("/api/rights")["matrix"]
+        widened = {g: list(t) for g, t in matrix.items()}
+        widened["runner"] = sorted(set(widened.get("runner", [])) | {"catalog"})
         runs = {}
         try:
+            call("/api/rights/matrix", {"matrix": widened}, "PUT")
             for pid, (source, sink) in shapes.items():
-                call("/api/deploy", {"pipelineId": pid, "yaml": job(), "placement": {"gen": source, "sink": sink}})
+                call("/api/deploy", {"pipelineId": pid, "yaml": job(), "placement": {"gen": source, "mid": "runner-1", "sink": sink}})
             for pid in shapes:
                 runs[pid] = call("/api/runs", {"pipelineId": pid})["runId"]
             finals = {pid: until(lambda: _finished(rid), RUN_TIMEOUT, f"{rid} to finish") for pid, rid in runs.items()}
@@ -1490,6 +1496,7 @@ def sandbox_pass():
                 until(lambda: _finished(rid), RUN_TIMEOUT, f"{rid} to end")
             for pid in shapes:
                 undeploy(pid)
+            call("/api/rights/matrix", {"matrix": matrix}, "PUT")
             try:
                 until(lambda: not left_behind("smoke-par-"), 10, "the undeploy")
             except RuntimeError:
@@ -1504,15 +1511,15 @@ def sandbox_pass():
 
 
 def faults_pass():
-    """The seed of sensor-stream, deployed on its own: the runner's child joins a slow source it
-    generates itself and writes nothing until that source ends. Read from library-seed/, not from the
+    """The seed of sensor-stream, deployed on its own: the runner's child joins a slow source node-1
+    generates and writes nothing until that source ends. Read from library-seed/, not from the
     library, whose copy anyone may have edited."""
     started = time.time()
     try:
         with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "library-seed", "sensor-stream.yaml")) as f:
             yaml = expand(f.read())
-        placement = {"readings": "runner-1", "enrich": "runner-1", "customers": "node-1", "load": "node-4"}
-        bricks = {"customers": "customer-countries", "load": "sensor-readings"}
+        placement = {"readings": "node-1", "enrich": "runner-1", "customers": "node-1", "load": "node-4"}
+        bricks = {"readings": "sensor-feed", "customers": "customer-countries", "load": "sensor-readings"}
         plan = call("/api/deploy", {"pipelineId": "smoke-faults", "yaml": yaml, "placement": placement, "bricks": bricks})
         run = call("/api/runs", {"pipelineId": plan["pipelineId"]})
         until(lambda: any(r["runId"] == run["runId"] and r["state"] == "running" for r in call("/api/runs/queue")), 60, "the run to start")

@@ -1,4 +1,7 @@
 {
+  "readings": {
+    "mode": "strict"
+  },
   "customers": {
     "mode": "strict"
   },

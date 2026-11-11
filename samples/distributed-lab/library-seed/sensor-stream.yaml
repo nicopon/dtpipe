@@ -1,12 +1,9 @@
 # Slow sensor stream
-# 300,000 readings generated on the runner at 10,000 rows/s (about 30 s), enriched with the
-# customers' country, loaded into the warehouse. Long enough to watch a run, or to cancel it.
+# 300,000 readings generated on node-1 at 10,000 rows/s (about 30 s), enriched with the customers'
+# country on the runner, loaded into the warehouse. Long enough to watch a run, or to cancel it.
 # lab-check: SELECT count(*) AS n, sum(reading_id) AS ids, round(sum(value), 1) AS total FROM sensor_readings
 readings:
-  input: generate:300000
-  provider-options:
-    generate:
-      rows-per-second: 10000
+  input: brick:node-1/sensor-feed
 customers:
   input: brick:node-1/customer-countries
 enrich:

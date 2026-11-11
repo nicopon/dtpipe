@@ -38,6 +38,20 @@
           }
         }
       }
+    },
+    {
+      "id": "sensor-feed",
+      "kind": "source",
+      "title": "Sensor readings, generated",
+      "description": "300,000 readings at 10,000 rows/s (about 30 s): no data of the CRM.",
+      "branch": {
+        "input": "generate:300000",
+        "provider-options": {
+          "generate": {
+            "rows-per-second": 10000
+          }
+        }
+      }
     }
   ]
 }
