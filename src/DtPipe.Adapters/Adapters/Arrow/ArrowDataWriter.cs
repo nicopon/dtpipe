@@ -24,6 +24,7 @@ public sealed class ArrowAdapterDataWriter : IColumnarDataWriter, IRequiresOptio
     private ArrowStreamWriter? _arrowStreamWriter;
     private ArrowFileWriter? _arrowFileWriter;
     private bool _isIpcFile;
+    private CompressionCodecType? _codec;
     private Schema? _schema;
     private IReadOnlyList<PipeColumnInfo>? _columns;
 
@@ -35,6 +36,9 @@ public sealed class ArrowAdapterDataWriter : IColumnarDataWriter, IRequiresOptio
     {
         _path = path;
         _options = options;
+        // A dry run replaces the writer's lifecycle with a sink and never initializes it, so the
+        // typo is refused here as well, where the writer is built.
+        _codec = ParseCompression(options.Compression);
     }
 
     public async ValueTask WriteRecordBatchAsync(RecordBatch batch, CancellationToken ct = default)
@@ -133,6 +137,8 @@ public sealed class ArrowAdapterDataWriter : IColumnarDataWriter, IRequiresOptio
 
     public async ValueTask InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
     {
+        // Validated before the target opens, so a typo fails a dry run and never leaves a file behind.
+        _codec = ParseCompression(_options.Compression);
         if (_path == "-")
         {
             _outputStream = Console.OpenStandardOutput();
@@ -191,39 +197,25 @@ public sealed class ArrowAdapterDataWriter : IColumnarDataWriter, IRequiresOptio
     private static InvalidOperationException Drift(string detail)
         => new($"Arrow writer: a batch differs from the stream's schema, which the first batch fixed: {detail}.");
 
-    // Sequential IPC streams (pipes, stdout, sequential files) inherit transport compression from
-    // the environment when no option was supplied. File-format targets (.arrow) default to uncompressed
-    // unless explicitly requested through options, so persistent storage is never silently altered.
-    private CompressionCodecType? ResolveCodec()
-    {
-        var compression = _options.Compression;
-        if (string.IsNullOrWhiteSpace(compression) && !_isIpcFile)
-            compression = Environment.GetEnvironmentVariable("DTPIPE_ARROW_COMPRESSION");
+    /// <summary>The codecs the writer's <c>Compression</c> option accepts.</summary>
+    public static readonly IReadOnlyList<string> CompressionValues = ["none", "lz4", "zstd"];
 
+    /// <summary>
+    /// Resolves the <c>Compression</c> option: <c>null</c> or blank is uncompressed, anything else must be
+    /// one of <see cref="CompressionValues"/>. Called by <see cref="InitializeAsync"/> before the target opens.
+    /// </summary>
+    public static CompressionCodecType? ParseCompression(string? compression)
+    {
         if (string.IsNullOrWhiteSpace(compression)) return null;
         return compression.Trim().ToLowerInvariant() switch
         {
-            "lz4" or "lz4_frame" => CompressionCodecType.Lz4Frame,
+            "lz4" => CompressionCodecType.Lz4Frame,
             "zstd" => CompressionCodecType.Zstd,
-            "none" or "uncompressed" => null,
-            _ => throw new ArgumentException($"Unknown Arrow compression codec '{compression}'. Supported codecs are 'lz4' and 'zstd'.", nameof(compression))
+            "none" => null,
+            _ => throw new ArgumentException(
+                $"Unknown Arrow compression '{compression}'. Expected one of: {string.Join(", ", CompressionValues)}.",
+                nameof(compression))
         };
-    }
-
-    private int? ResolveCompressionLevel()
-    {
-        if (_options.CompressionLevel.HasValue) return _options.CompressionLevel.Value;
-        if (!_isIpcFile)
-        {
-            var env = Environment.GetEnvironmentVariable("DTPIPE_ARROW_COMPRESSION_LEVEL");
-            if (!string.IsNullOrWhiteSpace(env))
-            {
-                if (int.TryParse(env.Trim(), out var parsed))
-                    return parsed;
-                throw new ArgumentException($"Invalid Arrow compression level '{env}'. Expected an integer.", "DTPIPE_ARROW_COMPRESSION_LEVEL");
-            }
-        }
-        return null;
     }
 
     private void OpenIpcWriter(Schema schema)
@@ -231,8 +223,8 @@ public sealed class ArrowAdapterDataWriter : IColumnarDataWriter, IRequiresOptio
         if (_arrowStreamWriter != null || _arrowFileWriter != null) return;
 
         _schema = schema;
-        var codec = ResolveCodec();
-        var level = ResolveCompressionLevel();
+        var codec = _codec;
+        var level = _options.CompressionLevel;
         var ipcOptions = codec.HasValue
             ? new IpcOptions
             {

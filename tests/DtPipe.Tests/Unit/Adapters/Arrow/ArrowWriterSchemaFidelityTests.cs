@@ -51,7 +51,7 @@ public class ArrowWriterSchemaFidelityTests : IDisposable
 
     private async Task WriteAsync(string path, params RecordBatch[] batches)
     {
-        await using var writer = new ArrowAdapterDataWriter(path, new ArrowWriterOptions { Compression = "uncompressed" });
+        await using var writer = new ArrowAdapterDataWriter(path, new ArrowWriterOptions { Compression = "none" });
         await writer.InitializeAsync(Columns);
         foreach (var batch in batches) await writer.WriteRecordBatchAsync(batch);
         await writer.CompleteAsync();

@@ -18,9 +18,9 @@ public class ArrowWriterOptions : IOptionSet
     [Description("Internal buffer size for column batching")]
     public int BatchSize { get; set; } = 10000;
 
-    [Description("Buffer compression codec ('lz4', 'zstd', or 'uncompressed'). Defaults to uncompressed, or DTPIPE_ARROW_COMPRESSION for sequential streams.")]
+    [Description("Buffer compression codec: 'none', 'lz4' or 'zstd'. Defaults to none.")]
     public string? Compression { get; set; }
 
-    [Description("Buffer compression level (or DTPIPE_ARROW_COMPRESSION_LEVEL for sequential streams). Defaults to codec default.")]
+    [Description("Buffer compression level. Defaults to the codec's default.")]
     public int? CompressionLevel { get; set; }
 }
