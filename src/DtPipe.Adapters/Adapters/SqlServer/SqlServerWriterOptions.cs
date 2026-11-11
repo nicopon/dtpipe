@@ -19,10 +19,10 @@ public class SqlServerWriterOptions : DbWriterOptions, IProviderOptions, ITableA
     [ComponentOption("--table", Aliases = new[] { "-t" }, Description = "Target table name", Required = true)]
     public string Table { get; set; } = string.Empty;
 
-    [ComponentOption("--strategy", Aliases = new[] { "-s" }, Description = "Data write strategy", Hidden = true)]
+    [ComponentOption("--strategy", Aliases = new[] { "-s" }, Description = "Data write strategy")]
     public SqlServerWriteStrategy? Strategy { get; set; }
 
-    [ComponentOption("--insert-mode", Description = "Data insert mode", Hidden = true)]
+    [ComponentOption("--insert-mode", Description = "Data insert mode")]
     public SqlServerInsertMode? InsertMode { get; set; }
 }
 

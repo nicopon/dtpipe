@@ -19,7 +19,7 @@ public class SqliteWriterOptions : DbWriterOptions, IOptionSet, ITableAwareOptio
     [ComponentOption("--table", Aliases = new[] { "-t" }, Description = "Target table name", Required = true)]
     public string Table { get; set; } = string.Empty;
 
-    [ComponentOption("--strategy", Aliases = new[] { "-s" }, Description = "Data write strategy", Hidden = true)]
+    [ComponentOption("--strategy", Aliases = new[] { "-s" }, Description = "Data write strategy")]
     public SqliteWriteStrategy? Strategy { get; set; }
 }
 

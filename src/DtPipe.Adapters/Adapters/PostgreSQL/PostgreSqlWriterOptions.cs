@@ -19,10 +19,10 @@ public class PostgreSqlWriterOptions : DbWriterOptions, IWriterOptions, ITableAw
     [ComponentOption("--table", Aliases = new[] { "-t" }, Description = "Target table name", Required = true)]
     public string Table { get; set; } = string.Empty;
 
-    [ComponentOption("--strategy", Aliases = new[] { "-s" }, Description = "Write strategy", Hidden = true)]
+    [ComponentOption("--strategy", Aliases = new[] { "-s" }, Description = "Write strategy")]
     public PostgreSqlWriteStrategy? Strategy { get; set; }
 
-    [ComponentOption("--insert-mode", Description = "Data insert mode", Hidden = true)]
+    [ComponentOption("--insert-mode", Description = "Data insert mode")]
     public PostgreSqlInsertMode? InsertMode { get; set; }
 }
 
