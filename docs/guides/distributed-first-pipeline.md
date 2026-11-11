@@ -1,50 +1,23 @@
 # Your first distributed pipeline
 
-> **Experimental.** The coordinator, the pipeline nodes, the runner and `dtpipe studio` may change
-> or disappear without notice, and nothing here is meant for production. Read
-> [Experimentation](../experimentation.md) for the limits first.
+> **Experimental.** May change or disappear without notice, and not meant for production. What the
+> pieces are and their limits: [Experimentation](../experimentation.md).
 
-This page takes you from nothing to a first run that crosses two hosts. You need the `dtpipe`
-binary, [installed](../install.md) or built by `./build.sh` in a checkout, and the coordinator,
-which `./build.sh` and the releases publish as a folder; or Docker with Compose and a checkout of
-this repository, for `deploy/compose.yaml`. You write no .NET project and no rights file.
+You will start a coordinator and a runner, declare a small database as a **node**, allow the rows
+to flow, and run a pipeline that reads the database, counts on the runner, and writes the result
+back through the node. Then you will start the same run from a script.
 
-You will start a coordinator and a runner, seed a small database on your machine, declare
-that database as a **node** with `dtpipe node`, say in the coordinator who may send rows to whom,
-and run a pipeline that reads the database, counts on the runner and writes the answer back through
-the node. It ends with a scheduler that starts the same run from a script, and the studio, which
-designs the job as cards.
+You need the `dtpipe` binary and either the coordinator (a folder published with each release,
+which needs `git` on the `PATH`), or Docker with Compose and a checkout of this repository.
 
-## What the pieces are for
+Everything here listens on your machine's loopback in plain HTTP, so keys cross it in clear: do not
+expose it. The commands are for a POSIX shell.
 
-| Piece | What it does |
-|:---|:---|
-| **Coordinator** | The control plane. It knows the connected nodes, keeps the pipelines in a git-backed **library**, decides which fragment runs where, starts a run and gives it one verdict. Its pages show the library, the runs and the rights. |
-| **Node** | A host that carries data. It offers **bricks**: reads and writes its owner declared on its own database, so the coordinator never holds a connection string. |
-| **Runner** | A node with no data. It runs every step between bricks: a join, a SQL query, an anonymization. |
-| **Studio** | `dtpipe studio`, a local page where you design a job as cards and sample it on the real engine. Given a coordinator, it also offers the nodes' bricks and publishes the job to the library. |
-
-Who may do what is the coordinator's own configuration: its **rights** list the nodes, the group
-each belongs to and which group may send rows to which. There is no identity provider here: every
-identity is verified by a key the coordinator issues tokens for.
-
-## Start the coordinator and the runner
-
-Everything here listens on the loopback of your machine, in plain HTTP, so a key crosses the
-network in clear and a red banner says so on every page: do not expose it. Start the two hosts
-as programs, or as containers; the rest of the page is the same for both.
+## 1. Start the coordinator and the runner
 
 ### With the programs
 
-You need `git` on the `PATH` (the coordinator keeps its library as a git repository), `dtpipe`, and
-the coordinator: a folder whose `dtpipe-coordinator` runs from where it is unpacked, with `wwwroot`
-and the SQLite library beside it. Both are on the
-[Releases](https://github.com/nicopon/dtpipe/releases) page, one archive per platform; in a
-checkout, `./build.sh` writes them to `dist/release`. The commands below are for a POSIX shell; in
-PowerShell, set a variable with `$env:NAME = 'value'`.
-
-Work in a folder of its own. Every identity is verified by a **key**, and `dtpipe keygen` makes
-one. The coordinator keeps only the hash of the keys it is given, so each file is yours to keep:
+Work in a folder of your own. Every identity is verified by a key, made with `dtpipe keygen`:
 
 ```bash
 mkdir dtpipe-lab && cd dtpipe-lab
@@ -52,9 +25,8 @@ dtpipe keygen admin --out admin.key
 dtpipe keygen runner-1 --out runner-1.key
 ```
 
-The coordinator starts with a library of its own, which it takes from a folder on its first start.
-Write the one pipeline this page runs; it reads a brick named `orders` on a node named `shop`, that
-does not exist yet, and writes a brick named `report` on the same node:
+The coordinator takes its first library from a folder. Write the pipeline this page runs: it
+reads the brick `orders` of a node `shop`, and writes its brick `report`.
 
 ```bash
 mkdir library
@@ -85,10 +57,9 @@ cat > library/shop-orders-by-country.bindings.json <<'EOF'
 EOF
 ```
 
-Start the coordinator in the background, giving the path of its folder. Its settings are
-environment variables: it begins on an empty store, is reached at `http://127.0.0.1:8080`, accepts
-a key over plain HTTP, lets `dtpipe studio` sign in with a key, and adds the administrator and the
-runner from the files above, the runner in the group `runner`:
+Start the coordinator in the background. Its settings are environment variables: an empty store,
+the address `http://127.0.0.1:8080`, keys accepted over HTTP, `dtpipe studio` allowed to sign in,
+and the two identities from the files above:
 
 ```bash
 export COORDINATOR_URL=http://127.0.0.1:8080
@@ -108,69 +79,49 @@ ASPNETCORE_URLS=$COORDINATOR_URL \
 echo $! > coordinator.pid
 ```
 
-Then the runner, a node with no data. It reads its key from the file, never from the command line:
+Then the runner, which reads its key from the file:
 
 ```bash
 dtpipe node --runner --name runner-1 --coordinator "$COORDINATOR_URL" \
   --client-secret "@$PWD/runner-1.key" > runner.log 2>&1 &
 echo $! > runner.pid
+cat admin.key        # the administrator's key, to sign in
 ```
 
-The runner runs whatever step a pipeline holds, SQL and JavaScript included, with your rights on
-your machine and no limit on the network. That is fine for a trial where you are the only
-administrator; to confine it, run it in a container, as below.
+The runner runs any step of a pipeline, JavaScript included, with your rights. To confine it, run
+it in a container, as below.
 
-Print the administrator's key:
+### Or with Docker
 
-```bash
-cat admin.key
-```
+Port 8080 must be free. The addresses use `localtest.me`, a public name for `127.0.0.1`; without a
+network that resolves it, add `coordinator.localtest.me` to `/etc/hosts`.
 
-### Or in Docker
-
-You need Docker with Compose and a checkout of this repository, for `deploy/compose.yaml`. Port
-8080 of the host must be free. The addresses use `localtest.me`, a public name that resolves to
-`127.0.0.1`; without a network that resolves it, add `coordinator.localtest.me` to `/etc/hosts`.
-
-Compose pulls the coordinator and runner images of the latest release. With a checkout newer than
-that release, build both from it with the two `docker build` commands of
-[deploy/README.md](../../deploy/README.md#the-images), tagged as they are there, and point Compose
-at them with the first line below. The variables live in this terminal, so run the Compose commands
-of this page from it:
+Compose pulls the images of the latest release. With a checkout newer than that release, build
+both images with the two `docker build` commands of
+[deploy/README.md](../../deploy/README.md#the-images), and point Compose at them with the first
+line below. Run every Compose command of this page from this terminal:
 
 ```bash
 # Only with images built from the checkout:
 export DTPIPE_COORDINATOR_IMAGE=dtpipe-coordinator DTPIPE_RUNNER_IMAGE=dtpipe-runner
 export COORDINATOR_URL=http://coordinator.localtest.me:8080
 docker compose -f deploy/compose.yaml up -d --wait
-```
-
-On the first `up`, a one-off service writes a random key for the first administrator and one for
-the runner into the coordinator's volume; the coordinator adds both identities from them, and the
-runner reads its own. Its library already holds the pipeline of this page. The runner starts as
-root only long enough to install network rules (`DTPIPE_EGRESS_ALLOW`) that limit it to Docker's
-local address pools and let nothing in, then runs with no capability;
-[The runner's network](../../deploy/README.md#the-runners-network) says what they allow. Print the
-administrator's key:
-
-```bash
 docker compose -f deploy/compose.yaml exec coordinator cat /secrets/admin.key
 ```
 
+The first `up` makes the keys of the administrator and of the runner, and seeds the library with
+this page's pipeline. The runner can only reach Docker's local networks:
+[The runner's network](../../deploy/README.md#the-runners-network).
+
 ### Sign in
 
-Open the address in `COORDINATOR_URL` and paste the administrator's key into the sign-in form. The
-key is the only way in as `admin`. **Access** lists `admin` and `runner-1`, in the group `runner`,
-and the flow matrix is empty: nobody may send anything to anybody. The library holds one pipeline,
-`shop-orders-by-country`, which reads a brick named `orders` on a node named `shop` and writes a
-brick named `report` on the same node. No such node exists yet.
+Open `COORDINATOR_URL` and paste the administrator's key. **Access** lists `admin` and `runner-1`,
+and the flow matrix is empty: nobody may send rows to anybody yet. In every other terminal of this
+page, export `COORDINATOR_URL` again.
 
-In every other terminal of this page, export `COORDINATOR_URL` again.
+## 2. Seed a database
 
-## Seed a database
-
-`generate` makes rows and `--fake` fills columns with believable values. A seed makes them the same
-on every run. This writes a SQLite database of a thousand orders into a folder of its own:
+A thousand orders in SQLite, the same on every run thanks to the seed:
 
 ```bash
 mkdir shop && cd shop
@@ -189,32 +140,24 @@ OrderId,Country,Product
 
 Stay in this folder for the rest of the page.
 
-## Say who may do what
+## 3. Allow the node and the flows
 
-A host verified by a key is declared before it starts: its key is what opens it. In **Access**,
-press **Add an identity**, type `shop` as the client id, leave the kind `node` and the key, type
-`data` as its group, and press **Create**.
-
-A **group** is a label; the **flow matrix** says which group may send rows to which, and `*` stands
-for any group. In the matrix below, tick `*` → `runner`, `runner` → `*`, and `data` → `data`, then
-press **Apply**: any group may use the runner, and `data` may send rows that return to `data`. When
-rows cross an intermediate runner, the matrix requires authorization from each source group all the
-way to the target groups. A change applies to the next run with no restart.
-
-A window shows the node's key, once, with **Copy** and the way to use it; closing it forgets the
-key. Read it into the variable the window names, in the terminal where the node will run (paste,
-then Enter):
+In **Access**, press **Add an identity**: client id `shop`, kind `node`, group `data`, then
+**Create**. A window shows the node's key once. Read it into a variable in the terminal where the
+node will run (paste, then Enter):
 
 ```bash
 read -rs DTPIPE_NODE_KEY && export DTPIPE_NODE_KEY
 ```
 
-## Declare a node on the database
+In the **flow matrix**, tick `*` → `runner`, `runner` → `*` and `data` → `data`, then **Apply**.
+Each group may then use the runner, and rows from `data` may return to `data`. A change applies to
+the next run.
 
-A node's **bricks** are the reads and writes you offer; the coordinator never holds a connection
-string. `dtpipe node` takes them from a job file: a branch that only reads is a source, one that
-only writes is a sink, and the branch's name is the brick's id. Write the file with absolute paths,
-since a fragment runs in a working directory of the node's own, not in yours:
+## 4. Declare the node
+
+A node offers **bricks**: a branch that only reads is a source, one that only writes is a sink.
+Use absolute paths, since a brick runs in a folder of the node's own:
 
 ```bash
 cat > bricks.yaml <<EOF
@@ -226,24 +169,17 @@ orders:
 report:
   output: csv:$PWD/report.csv
 EOF
-```
 
-Start the node. It names itself `shop`, finds the coordinator at its public address, and reads its
-key from the environment, since a secret is never an argument:
-
-```bash
 dtpipe node --name shop --coordinator "$COORDINATOR_URL" \
   --client-secret '${{DTPIPE_NODE_KEY}}' --job bricks.yaml
 ```
 
-The node stays in the foreground and logs that it connected, with two bricks. **Access** shows
-`shop` as connected, and **Nodes** lists `orders` and `report` under it; **preview** on a brick
-reads a few rows through the node.
+The node stays in the foreground. **Nodes** lists `orders` and `report` under `shop`, and
+**preview** on a brick reads a few rows through it.
 
-## Open the studio
+## 5. Open the studio (optional)
 
-In a second terminal, in the same folder, read the administrator's key the same way, and start
-the studio with a reference to it:
+In another terminal, in the same folder:
 
 ```bash
 read -rs DTPIPE_KEY && export DTPIPE_KEY
@@ -251,19 +187,14 @@ mkdir jobs
 dtpipe studio ./jobs --coordinator "$COORDINATOR_URL" --key '${{DTPIPE_KEY}}'
 ```
 
-The studio signs in as `admin` with the key as it starts, and says so in the terminal. It now offers
-the bricks of the nodes. **Open from library** writes `shop-orders-by-country` into `./jobs`, where
-you can edit it; **Publish** saves it back to the library. The full behaviour is in
-[REFERENCE.md](../../REFERENCE.md#studio-dtpipe-studio).
+The studio offers the nodes' bricks. **Open from library** writes `shop-orders-by-country` into
+`./jobs` to edit; **Publish** saves it back.
 
-## Arm it, run it, read the result
+## 6. Arm it, run it
 
-On the coordinator's pages open `shop-orders-by-country` in the library and press **Deploy**, which
-arms it: the coordinator checks that `shop` offers both bricks, samples `orders` and keeps the
-version it saw, checks that the matrix allows every edge, and keeps that version ready to launch.
-Press **Run**. The run's report in **Runs** names the two fragments, the node each ran on and the
-rows that crossed each edge: a thousand orders from `shop` to the runner, five counts back. Then
-read what the sink wrote:
+In the library, open `shop-orders-by-country` and press **Deploy**: the coordinator checks the
+bricks and the flows, and arms that version. Press **Run**. **Runs** shows each part, the host it
+ran on and the rows that crossed. Then:
 
 ```bash
 cat report.csv
@@ -278,7 +209,7 @@ IQ,10
 BO,9
 ```
 
-The same count on one machine, with no coordinator, gives the same file:
+The same query on one machine gives the same file:
 
 ```bash
 dtpipe -i sqlite:shop.db \
@@ -287,20 +218,17 @@ dtpipe -i sqlite:shop.db \
 diff witness.csv report.csv && echo identical
 ```
 
-## Start the run from a scheduler
+## 7. Start the run from a script
 
-A **launcher** is a service identity that may start the runs of the pipelines it lists, and
-nothing else. In **Access**, press **Add an identity**, type `launcher-1` as the client id, choose
-the kind `launcher`, type `shop-orders-by-country` as the pipeline it may launch, and press
-**Create**. Read the key the window shows, once, into a variable (paste, then Enter):
+A **launcher** may start the pipelines it lists, and nothing else. In **Access**, add an identity:
+client id `launcher-1`, kind `launcher`, pipeline `shop-orders-by-country`. Read its key:
 
 ```bash
 read -rs LAUNCHER_KEY
 ```
 
-The launcher exchanges its key for a token at the coordinator and posts the run to
-`/service/runs`; the pipeline must be armed first, as above, or the coordinator answers 409. This
-needs `curl` and `jq`:
+Exchange the key for a token, then post the run (needs `curl` and `jq`; the pipeline must be
+armed):
 
 ```bash
 TOKEN=$(curl -s "$COORDINATOR_URL/connect/token" \
@@ -311,80 +239,48 @@ curl -s -X POST "$COORDINATOR_URL/service/runs" \
   -d '{"pipelineId": "shop-orders-by-country"}'
 ```
 
-The answer carries a `runId`. Read the run's `state` with `GET /service/runs/<runId>` and the
-same header until it is `succeeded` or `failed`.
+The answer holds a `runId`. `GET /service/runs/<runId>`, with the same header, returns its `state`
+until it is `succeeded` or `failed`.
 
-## What to know before you build on it
+## Good to know
 
-- **A sink is judged the same before and after it has served.** A file the sink overwrites is not
-  read by the designer's check, so publishing the same pipeline again after the first run is
-  accepted, with `report.csv` in place.
-- **A brick's title is its id.** A command line has no place for a title or a description, so the
-  studio shows `orders` and `report` as they are.
-- **A command line carries sources, or one sink.** A job file with `--job` carries the mix, as here.
-  A branch that reads another, transforms, or reads and writes at once is refused: everything
-  between a read and a write belongs on the runner.
-- **The step is on the runner.** The count ran there, not on the node. The node only reads and
-  writes, so a join across two nodes needs no more of it.
-- **A brick's version is the hash of its text.** Change `bricks.yaml`, restart the node, and the
-  next run of the pipeline you armed is refused with `brick-changed` until you save it again, which
-  pins the new version.
-- **The check for a secret in a brick is best effort.** It reads the keys it knows as credentials
-  and nothing more; keep a password out of the file with a `${{NAME}}` or `keyring://` reference.
-- **A cursor is the coordinator's too.** An incremental load keeps its position there, not in a
-  file on the node; [Incremental loading](incremental.md#in-a-distributed-pipeline) says what is
-  served and what is not.
-- **The rights you declared are the coordinator's.** They are kept in its state directory, or in
-  its volume with Docker, and survive a restart. Delete `coordinator-state` (or `down -v`) to begin
-  again, with new keys.
-- **A key is shown once.** Lost, it is not read back: in **Access**, **Keys**, then **Rotate: make
-  a second key** gives the identity another, and revoking the first ends what it opened at its
-  next request.
-- **WAN and network buffer tuning.** By default, node hosts exchange data over TransportR using
-  256 KB batches with up to 16 batches in-flight (a 4 MB window), compressed with Arrow IPC LZ4.
-  Over high-latency or cross-region WAN links (e.g. cloud runners with RTT > 30 ms), setting
-  `DtPipeNode__MaxInFlightBatches=32` (an 8 MB in-flight window) and optionally
-  `DtPipeNode__BatchBytes=524288` (512 KB) prevents network stalls and maximizes throughput.
+- **The step ran on the runner**, not on the node: a node only reads and writes its own data.
+- **A brick's version is the hash of its text.** Change `bricks.yaml` and restart the node, and the
+  armed pipeline is refused with `brick-changed` until you deploy it again.
+- **A key is shown once.** If you lose it, **Access** → **Keys** → **Rotate** makes another.
+- **The rights survive a restart.** Delete `coordinator-state` (or `docker compose … down -v`) to
+  start again with new keys.
+- **Keep passwords out of `bricks.yaml`** with `${{NAME}}` or `keyring://`.
+- **An incremental load keeps its cursor on the coordinator:** see
+  [REFERENCE.md](../../REFERENCE.md#incremental-loading-in-a-distributed-pipeline).
 
 ## If something sticks
 
 | Symptom | What to do |
 |:---|:---|
-| A command has no address, or the page does not open | `COORDINATOR_URL` lives in the terminal that exported it: export it again. |
-| The coordinator stops at start with "is not a key of this coordinator" | A key file holds something `dtpipe keygen` did not make, or an extra line: make it again with `dtpipe keygen <id> --out <file>`, the id being the identity's. |
-| `docker compose` starts the published images, or finds nothing, in a new terminal | The two image variables live in the terminal that exported them: export them again. |
-| The node says its client secret names a variable that is not set | The variable is empty in the node's terminal: run `read -rs DTPIPE_NODE_KEY && export DTPIPE_NODE_KEY` there. |
-| The node does not connect | Its identity must exist in **Access** first, with the name given to `--name` as client id, and the key must be that identity's. A lost key is replaced in **Keys**, **Rotate**. |
-| `--client-secret` is refused | A plain value is: give a reference, `'${{NAME}}'` in quotes, `keyring://alias` or `@file`. |
-| **Deploy** or **Run** is refused | Read the message: node offline, an edge missing from the matrix, a brick changed. `docker compose -f deploy/compose.yaml logs -f coordinator` says the rest. |
+| A command has no address, or the page does not open | Export `COORDINATOR_URL` again in this terminal |
+| The coordinator stops with "is not a key of this coordinator" | Make the key file again with `dtpipe keygen <id> --out <file>` |
+| `docker compose` starts the wrong images in a new terminal | Export the two image variables again |
+| The node says its client secret names a variable that is not set | Run `read -rs DTPIPE_NODE_KEY && export DTPIPE_NODE_KEY` in the node's terminal |
+| The node does not connect | Its identity must exist in **Access**, with the `--name` as client id, and the key must be its own |
+| `--client-secret` is refused | Give a reference, never the value: `'${{NAME}}'`, `keyring://alias` or `@file` |
+| **Deploy** or **Run** is refused | Read the message: node offline, flow missing from the matrix, brick changed |
 
 ## Stop it
 
-Press Ctrl+C in the node's terminal. With the programs, stop the two in the background, and delete
-`coordinator-state` to begin again from an empty coordinator, with new keys if you make them again:
+Ctrl+C in the node's terminal, then:
 
 ```bash
-kill $(cat coordinator.pid runner.pid)
+kill $(cat coordinator.pid runner.pid)              # with the programs
+docker compose -f deploy/compose.yaml down -v       # with Docker
 ```
 
-With Docker:
+## Next
 
-```bash
-docker compose -f deploy/compose.yaml down -v
-```
-
-## Where to go next
-
-| I want to… | Read |
+| | |
 |:---|:---|
-| See every setting of the coordinator and of a node host | [REFERENCE.md](../../REFERENCE.md#distributed-pipeline-experimental) |
-| Make my own .NET service a node that offers bricks | [`AddDtPipeNode`](../../src/DtPipe.PipelineNode.Hosting/CLAUDE.md) |
-| Watch four data nodes, a join across them, rights and faults | [The distributed lab](../../samples/distributed-lab/README.md) |
+| Every setting of the coordinator and the nodes | [REFERENCE.md](../../REFERENCE.md#distributed-pipeline-experimental) |
 | Declare bricks on a real database | [`dtpipe node`](../../REFERENCE.md#a-node-from-the-cli-dtpipe-node) |
-| Run the coordinator and the runner for real: volumes, databases, TLS, secrets, backup | [deploy/README.md](../../deploy/README.md) |
-| Cut a job in two at the point a pipeline could be split | [`dtpipe split`](../../REFERENCE.md#offering-the-points-a-job-could-be-cut-at) |
-
----
-See also: [Experimentation](../experimentation.md) · [DAG pipelines](dag.md) ·
-[Anonymization](anonymization.md) ·
-[REFERENCE.md](../../REFERENCE.md#distributed-pipeline-experimental)
+| Make your own .NET service a node | [`AddDtPipeNode`](../../src/DtPipe.PipelineNode.Hosting/CLAUDE.md) |
+| Four data nodes, joins across them, rights and faults | [The distributed lab](../../samples/distributed-lab/README.md) |
+| Run it for real: volumes, databases, TLS, backup | [deploy/README.md](../../deploy/README.md) |
