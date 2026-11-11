@@ -33,9 +33,9 @@ there.
 
 The **distributed family** is every
 project named `DtPipe.Coordinator*` or `DtPipe.PipelineNode*`: it references TransportR as NuGet
-packages and stays outside `DtPipe.sln`, so `build.yml` builds only what `src/DtPipe` reaches through
-`DtPipe.PipelineNode.Launcher` and tests none of it; `build.sh` discovers its test projects, so
-`agentic-ci.yml` does. `build.sh` also publishes the coordinator self-contained as the folder
+packages and stays outside `DtPipe.sln`, so the solution builds only what `src/DtPipe` reaches through
+`DtPipe.PipelineNode.Launcher`; `run_unit_tests.sh` discovers the family's test projects, so `build.sh`
+(`agentic-ci.yml` runs it) and the test job of `build.yml` and of `release.yml` run them. `build.sh` also publishes the coordinator self-contained as the folder
 `dist/release/coordinator/` (executable `dtpipe-coordinator`, set by the Host's `AssemblyName`, never by a
 command-line `-p:AssemblyName`) and starts it once, on a throwaway state, until `/livez` answers. It is a
 folder, never a single file: `wwwroot` and the native SQLite library sit beside the executable. Its
@@ -99,7 +99,7 @@ the control plane, over each replica's node channel; TransportR carries the data
   is scanned like `src/`. **The server listens in plain HTTP and reads no forwarded header**: a TLS proxy in front is
   told to it by `Coordinator:PublicUrl`, the address people reach it at, so it does not turn into `http://` return addresses.
   `[CI: validate_distributed_boundary.sh — deploy/ names no lab]` `[CI: PublicUrlTests] [local: the lab's smoke.py bricks - versions; the lab's tools/linux_replay.sh uid, a named volume of another uid]`
-  `[CI: release.yml — its test job runs run_unit_tests.sh and images needs it]` `[unchecked: the release's push to GHCR, until a tag runs it; a Linux Docker host, where tools/linux_replay.sh is the replay; a real TLS proxy; a bind mount of another uid; deploy/README.md is in no documentation check, so keep its lines to 100 columns]`
+  `[CI: build.yml and release.yml — their test job runs run_unit_tests.sh; images needs the release's]` `[unchecked: the release's push to GHCR, until a tag runs it; a Linux Docker host, where tools/linux_replay.sh is the replay; a real TLS proxy; a bind mount of another uid; deploy/README.md is in no documentation check, so keep its lines to 100 columns]`
 - **The runner's image starts as root, its `dtpipe` never does.** `deploy/runner-entrypoint.sh` installs the rules of
   `DTPIPE_EGRESS_ALLOW` (CIDR masks, comma-separated: out, the masks and the loopback; in, nothing but replies), reads them
   back, then starts `dtpipe node --runner` through `setpriv` as `1654:1654` with no capability, an empty bounding set and

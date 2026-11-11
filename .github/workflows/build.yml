@@ -25,11 +25,8 @@ jobs:
       - name: Check C# formatting
         run: bash tests/scripts/format_csharp.sh --verify
 
-      - name: Restore dependencies
-        run: dotnet restore
-
       - name: Run Tests (Unit only)
-        run: dotnet test --no-restore --verbosity normal --filter "FullyQualifiedName!~Integration"
+        run: bash tests/scripts/run_unit_tests.sh
 
   validators:
     name: Validators (no infrastructure)
