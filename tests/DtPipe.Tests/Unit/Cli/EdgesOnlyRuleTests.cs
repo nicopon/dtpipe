@@ -48,7 +48,6 @@ public class EdgesOnlyRuleTests
     [Theory]
     [InlineData("checkpoint")]
     [InlineData("from-checkpoint")]
-    [InlineData("contract-save")]
     [InlineData("from-contract")]
     [InlineData("metrics-path")]
     [InlineData("cursor")]
@@ -59,7 +58,6 @@ public class EdgesOnlyRuleTests
         {
             "checkpoint" => new JobDefinition { Checkpoint = "x" },
             "from-checkpoint" => new JobDefinition { FromCheckpoint = "x" },
-            "contract-save" => new JobDefinition { ContractSave = "x" },
             "from-contract" => new JobDefinition { FromContract = "x" },
             "metrics-path" => new JobDefinition { MetricsPath = "x" },
             "cursor" => new JobDefinition { Cursor = "x" },
@@ -77,5 +75,19 @@ public class EdgesOnlyRuleTests
             ("b", new JobDefinition { Input = "arrow:/var/data/in" }));
 
         Assert.StartsWith("'b' reads 'arrow:/var/data/in' once bound", Assert.Single(EdgesOnlyRule.BoundRefusals(jobs)));
+    }
+
+    [Fact]
+    public void A_File_Of_The_Working_Directory_May_Be_Bound_Or_Hold_A_Contract_And_No_Other()
+    {
+        var jobs = Jobs(
+            ("src", new JobDefinition { Input = "arrow:src.arrows" }),
+            ("dst", new JobDefinition { From = "src", Output = "arrow:dst.sink", ContractSave = "dst.contract.json" }));
+        var elsewhere = Jobs(("dst", new JobDefinition { From = "src", ContractSave = "/tmp/dst.contract.json" }));
+
+        Assert.Empty(EdgesOnlyRule.BoundRefusals(jobs));
+        Assert.Empty(EdgesOnlyRule.TextRefusals(Jobs(("dst", jobs["dst"] with { Output = "arrow:-" }))));
+        Assert.StartsWith("'dst' sets contract-save '/tmp/dst.contract.json'", Assert.Single(EdgesOnlyRule.TextRefusals(elsewhere)));
+        Assert.Single(EdgesOnlyRule.BoundRefusals(Jobs(("x", new JobDefinition { Input = "arrow:../x" }))));
     }
 }

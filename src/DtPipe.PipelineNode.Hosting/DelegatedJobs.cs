@@ -1,13 +1,17 @@
 using System.Text;
 using System.Text.RegularExpressions;
 using DtPipe.Coordinator.Contracts;
+using DtPipe.Jobs;
+using YamlDotNet.RepresentationModel;
 
 namespace DtPipe.PipelineNode.Hosting;
 
 /// <summary>
 /// The dtpipe run the coordinator asks of a runner because it runs none itself: a library save's job
 /// dry-run over one-row samples. Only a host that runs any fragment answers; any other says so. Each
-/// request works in a directory of its own, removed after.
+/// request works in a directory of its own, removed after. A dry run reads real rows, so the job is held to a
+/// runner's fragment's rule first (<see cref="RunnerEndpoints"/>: each sample is an inbound edge, each sink an
+/// outbound one whose only place on disk is its contract), and the child runs under <c>--edges-only</c>.
 /// </summary>
 internal sealed partial class DelegatedJobs(string node, bool enabled, DtPipeCommand dtpipe)
 {
@@ -25,6 +29,8 @@ internal sealed partial class DelegatedJobs(string node, bool enabled, DtPipeCom
         var odd = check.Samples.Keys.Concat(check.Sinks).FirstOrDefault(a => !Alias().IsMatch(a));
         if (odd is not null) return new JobCheckResult(false, $"'{odd}' is not an alias: a letter first, then letters, digits, '_' or '-'.", new Dictionary<string, string>());
 
+        if (EndpointRefusal(check) is { } endpoint) return new JobCheckResult(false, endpoint, new Dictionary<string, string>());
+
         var dir = Path.Combine(dtpipe.WorkingDirectory, "validate", Guid.NewGuid().ToString("N"));
         try
         {
@@ -34,7 +40,7 @@ internal sealed partial class DelegatedJobs(string node, bool enabled, DtPipeCom
             // Every sink is bound to a file of its own: the writer is neutralised, so none is written.
             string[] args =
             [
-                "--job", "job.yaml", "--dry-run", "1", "--no-stats",
+                "--job", "job.yaml", "--dry-run", "1", "--no-stats", "--edges-only",
                 .. check.Samples.Count > 0 ? ["--bind-input", string.Join(',', check.Samples.Keys.Select(a => $"{a}={JobCheck.SampleFile(a)}"))] : Array.Empty<string>(),
                 .. check.Sinks.Count > 0 ? ["--bind-output", string.Join(',', check.Sinks.Select(a => $"{a}={a}.sink"))] : Array.Empty<string>(),
             ];
@@ -57,4 +63,28 @@ internal sealed partial class DelegatedJobs(string node, bool enabled, DtPipeCom
             try { Directory.Delete(dir, recursive: true); } catch (IOException) { }
         }
     }
+
+    // A sink's contract is saved under the one name the coordinator reads back, and is the only place on disk the job names.
+    private static string? EndpointRefusal(JobCheck check)
+    {
+        YamlMappingNode job;
+        try { job = JobYaml.Parse(check.Job); }
+        catch (Exception ex) { return $"the job is not readable: {ex.Message}"; }
+
+        foreach (var alias in check.Sinks)
+        {
+            if (JobYaml.Branches(job).FirstOrDefault(b => b.Alias == alias).Branch is not { } sink) continue;
+            if (JobYaml.Scalar(sink, ContractSave) != JobCheck.ContractFile(alias))
+                return $"'{alias}' saves its contract elsewhere than {JobCheck.ContractFile(alias)}.";
+            sink.Children.Remove(new YamlScalarNode(ContractSave));
+        }
+        FragmentEdge[] edges =
+        [
+            .. check.Samples.Keys.Select(a => new FragmentEdge(a, FragmentEdgeDirection.Inbound)),
+            .. check.Sinks.Select(a => new FragmentEdge(a, FragmentEdgeDirection.Outbound)),
+        ];
+        return RunnerEndpoints.FragmentRefusal(JobYaml.Serialize(job), edges);
+    }
+
+    private const string ContractSave = "contract-save";
 }

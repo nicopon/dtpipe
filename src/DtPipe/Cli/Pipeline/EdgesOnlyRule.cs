@@ -10,7 +10,10 @@ namespace DtPipe.Cli.Pipeline;
 /// a runner's child, whose host the fragments of every run share, so a file, a database, a checkpoint or a cursor file
 /// would carry rows between two flows the coordinator never judged together. The text of the job names only
 /// <c>arrow:-</c>; a named pipe is a location the node binds on the command line (<see cref="AliasBindingApplier"/>), so
-/// <see cref="TextRefusals"/> reads the job before the binding and <see cref="BoundRefusals"/> after it.
+/// <see cref="TextRefusals"/> reads the job before the binding and <see cref="BoundRefusals"/> after it. A file named
+/// bare, with no directory, is one of the working directory, which the node gives the child as its own: a bound location
+/// may be one (a runner's dry run binds its samples there), and so may a <c>contract-save</c>, which writes a schema and
+/// no row.
 /// </summary>
 public static class EdgesOnlyRule
 {
@@ -30,6 +33,8 @@ public static class EdgesOnlyRule
                 errors.Add($"'{alias}' writes '{ConnectionStringSanitizer.Redact(job.Output)}': {Why}.");
             foreach (var (key, value) in Places(job))
                 if (!string.IsNullOrEmpty(value)) errors.Add($"'{alias}' sets {key} '{value}': {Why}.");
+            if (!string.IsNullOrEmpty(job.ContractSave) && !IsBareFile(job.ContractSave))
+                errors.Add($"'{alias}' sets contract-save '{job.ContractSave}': {Why}, and a contract saved in the working directory.");
         }
         return errors;
     }
@@ -43,17 +48,20 @@ public static class EdgesOnlyRule
             foreach (var (side, endpoint) in new[] { ("reads", job.Input), ("writes", job.Output) })
             {
                 if (string.IsNullOrEmpty(endpoint) || endpoint == Edge
-                    || endpoint.StartsWith(BoundPipe, StringComparison.Ordinal) && endpoint.Length > BoundPipe.Length) continue;
-                errors.Add($"'{alias}' {side} '{ConnectionStringSanitizer.Redact(endpoint)}' once bound: {Why}, bound to a named pipe.");
+                    || endpoint.StartsWith(BoundPipe, StringComparison.Ordinal) && endpoint.Length > BoundPipe.Length
+                    || endpoint.StartsWith("arrow:", StringComparison.Ordinal) && IsBareFile(endpoint["arrow:".Length..])) continue;
+                errors.Add($"'{alias}' {side} '{ConnectionStringSanitizer.Redact(endpoint)}' once bound: {Why}, bound to a named pipe or a file of the working directory.");
             }
         }
         return errors;
     }
 
+    private static bool IsBareFile(string name) =>
+        name.Length > 0 && name is not "." and not ".." && name.IndexOfAny(['/', '\\', ':']) < 0;
+
     // What a branch keeps on the host's disk beside its reader and writer.
     private static (string Key, string? Value)[] Places(JobDefinition job) =>
     [
-        ("checkpoint", job.Checkpoint), ("from-checkpoint", job.FromCheckpoint), ("contract-save", job.ContractSave),
-        ("from-contract", job.FromContract), ("metrics-path", job.MetricsPath), ("cursor", job.Cursor), ("state", job.State),
+        ("checkpoint", job.Checkpoint), ("from-checkpoint", job.FromCheckpoint), ("from-contract", job.FromContract), ("metrics-path", job.MetricsPath), ("cursor", job.Cursor), ("state", job.State),
     ];
 }

@@ -27,7 +27,10 @@ none. One node per process, which is one replica of its node's identity; a secon
 - **A runner runs dtpipe for the coordinator, a data node never does.** `DelegatedJobs` answers
   `ValidateJob` (a library save's job dry-run over one-row samples, writers neutralised) only on a
   host that runs any fragment; any other host says it is no runner. An alias names a file in the request's own directory, so it is a plain word.
-  `[CI: Hosting.Tests DelegatedJobsTests] [local: the lab's smoke.py bricks, ui_check.py]`
+  A dry run reads real rows, so the job is held to `RunnerEndpoints` first (each sample an inbound edge, each sink an outbound one
+  whose contract is saved under `JobCheck.ContractFile` and nowhere else), and the child runs under `--edges-only`, which admits a
+  file of its working directory as a bound location or a `contract-save`.
+  `[CI: Hosting.Tests DelegatedJobsTests; DtPipe.Tests EdgesOnlyRuleTests] [local: the lab's smoke.py bricks, ui_check.py]`
 - **Ending a run's child is the host's own word.** `DtPipeNodeOptions.FaultInjection` is off by default
   (`DtPipeNode__FaultInjection` for a host configured by its environment); the coordinator's `Kill` ends
   the child of a run only on a host that enabled it. Any other host answers `0` and logs a warning that

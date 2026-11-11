@@ -32,7 +32,8 @@ to the loaded job; a control joins it only when the conversion reads it, never t
 
 `--edges-only` (a global flag, accepted beside `--job`, never a key of the file) is what a node gives a runner's child:
 `JobExecutor` refuses, before binding, every input or output of the job that is not `arrow:-` and every place on disk a
-branch names (`EdgesOnlyRule`), and after binding every location that is not a named pipe; the flag reaches the SQL
+branch names (`EdgesOnlyRule`), and after binding every location that is not a named pipe; a file named bare is one of the
+working directory, the child's own, and may be bound or hold a `contract-save` (a runner's dry run); the flag reaches the SQL
 processor as `BranchChannelContext.EdgesOnly`, which turns DuckDB's external access off, locks its configuration and
 refuses `--duck-init`. `[CI: EdgesOnlyRuleTests, DuckDBSqlProcessorEdgesOnlyTests, PipelineLexerTests]`
 

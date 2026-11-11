@@ -750,9 +750,10 @@ option takes the same three values and is refused at build time when it holds an
 
 `--edges-only` is what a pipeline node gives a runner's fragment, whose host the fragments of every
 run share. The job's text may name `arrow:-` as an input or an output and nothing else; a location
-bound by `--bind-input` or `--bind-output` must be `-` or `pipe://<name>`. A branch that sets
-`checkpoint`, `from-checkpoint`, `contract-save`, `from-contract`, `metrics-path`, `cursor` or
-`state` is refused too, each by its branch, before any row moves. Transformers and processors stay:
+bound by `--bind-input` or `--bind-output` must be `-`, `pipe://<name>` or a file of the working
+directory named bare, which may also hold a branch's `contract-save`. A branch that sets
+`checkpoint`, `from-checkpoint`, `from-contract`, `metrics-path`, `cursor` or `state` is refused
+too, each by its branch, before any row moves. Transformers and processors stay:
 `--sql` reads the branches it names in `--from` and `--ref` and nothing else, with DuckDB's
 `enable_external_access` off and its configuration locked, so a file, `ATTACH`, an extension or a
 `SET` is refused, and `--duck-init` is refused outright. DuckDB still spills to its temporary
