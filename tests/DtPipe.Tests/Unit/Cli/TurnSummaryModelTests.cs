@@ -17,6 +17,7 @@ namespace DtPipe.Tests.Unit.Cli;
 /// succeeded nor failed (E7). This suite pins the words for all three.
 /// </para>
 /// </summary>
+[Collection("console-serial")]
 public class TurnSummaryModelTests
 {
     private static readonly Dictionary<string, int> TwoTools =
@@ -64,7 +65,7 @@ public class TurnSummaryModelTests
         Assert.Contains("🟢 COMPLETED", text);
         Assert.Contains("delivered a response", text);
         Assert.Contains(summary.DurationText, text);
-        Assert.Equal($"{12.3456:F2} seconds", summary.DurationText);   // the run's own culture, as today
+        Assert.Equal($"{12.3456:F2} seconds", summary.DurationText);
         Assert.Contains("inspect: 2, validate-yaml-job: 1", text);
     }
 

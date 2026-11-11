@@ -77,7 +77,7 @@ public sealed record TurnSummaryModel(
 
     public string Reason => Describe(Outcome);
 
-    public string DurationText { get; init; } = $"{Duration.TotalSeconds:F2} seconds";
+    public string DurationText => $"{Duration.TotalSeconds:F2} seconds";
 
     /// <summary>How many tool calls the turn made, across every tool.</summary>
     public int TotalToolCalls => ToolCounts.Values.Sum();
