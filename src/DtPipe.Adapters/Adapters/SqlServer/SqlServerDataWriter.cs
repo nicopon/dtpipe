@@ -36,7 +36,8 @@ public class SqlServerDataWriter : BaseSqlDataWriter, IColumnarDataWriter, IColu
     public override ISqlDialect Dialect => _dialect;
 
     public override bool RequiresTargetInspection => _options.Strategy != SqlServerWriteStrategy.Recreate;
-    private Type[]? _targetTypes;
+    private Type[]? _targetTypes;        // the type each written column holds: the target's, or the source's with no target
+    private Type[]? _bufferTypes;        // the type the row road hands the bulk copy (BufferColumn)
     private string[]? _targetColumnNames;
     private int[]? _sourceIndices;       // pre-computed target-col → source-col index mapping
     private Func<object?, object?>[]? _converters; // per-column delegates
@@ -142,6 +143,7 @@ public class SqlServerDataWriter : BaseSqlDataWriter, IColumnarDataWriter, IColu
 
         // Pre-compute source index mapping and per-column converters
         _sourceIndices = new int[colCount];
+        _bufferTypes = new Type[colCount];
         _converters = new Func<object?, object?>[colCount];
         for (int i = 0; i < colCount; i++)
         {
@@ -158,9 +160,7 @@ public class SqlServerDataWriter : BaseSqlDataWriter, IColumnarDataWriter, IColu
                 }
             }
             _sourceIndices[i] = srcIdx;
-            var (bufferType, convert) = BufferColumn(nativeTypes[i], _targetTypes[i], srcClrType, colName);
-            _targetTypes[i] = bufferType;
-            _converters[i] = convert;
+            (_bufferTypes[i], _converters[i]) = BufferColumn(nativeTypes[i], _targetTypes[i], srcClrType, colName);
         }
 
         // Without CheckConstraints a bulk load skips the target's CHECK and FOREIGN KEY constraints,
@@ -365,7 +365,7 @@ public class SqlServerDataWriter : BaseSqlDataWriter, IColumnarDataWriter, IColu
 
         await EnsureBulkCopyInitializedAsync(ct);
 
-        using var reader = new ObjectListDataReader(rows, _targetColumnNames!, _targetTypes!, _sourceIndices!, _converters!);
+        using var reader = new ObjectListDataReader(rows, _targetColumnNames!, _bufferTypes!, _sourceIndices!, _converters!);
 
         if (_options.Strategy == SqlServerWriteStrategy.Upsert || _options.Strategy == SqlServerWriteStrategy.Ignore)
         {
