@@ -116,6 +116,33 @@ public class DagOrchestratorTests
         Assert.Equal(1, code);
     }
 
+    [Fact]
+    public async Task Execute_SingleBranchThrowsACancellationNobodyIssued_ReturnsOneAndLogsAnError()
+    {
+        var (code, events) = await RunSingleBranchAsync((_, _, _) => throw new TaskCanceledException("timeout"));
+
+        Assert.Equal(1, code);
+        Assert.Contains(events, e => e.Severity == DagLogSeverity.Error);
+    }
+
+    [Fact]
+    public async Task Execute_TerminalBranchOfATwoBranchDagThrowsACancellationNobodyIssued_ReturnsOneAndLogsAnError()
+    {
+        var orchestrator = BuildOrchestrator();
+        var events = new ConcurrentBag<DagLogEvent>();
+        orchestrator.OnLogEvent = events.Add;
+
+        var code = await orchestrator.ExecuteAsync(GoldenDagDefinitions.Dag_TwoInputs_OneOutput, async (b, _, ct) =>
+        {
+            if (b.Alias == "output1") throw new TaskCanceledException("timeout");
+            await WaitUntilCanceledThenZeroAsync(ct);
+            return 0;
+        });
+
+        Assert.Equal(1, code);
+        Assert.Contains(events, e => e.Severity == DagLogSeverity.Error);
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Case 2: DAG with two independent branches
     // ─────────────────────────────────────────────────────────────────────────

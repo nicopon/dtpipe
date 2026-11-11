@@ -393,11 +393,20 @@ public class DagOrchestrator : IDagOrchestrator
                 _logger.LogInformation("Branch '{Alias}' completed.", branch.Alias);
                 return 0;
             }
-            catch (OperationCanceledException)
+            // Only a cancellation this orchestrator issued is swallowed: ct is the branch's own token, cancelled
+            // by the orphaned-producer logic or by the run ending.
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 _channelRegistry.GetArrowChannel(branch.Alias)?.Channel.Writer.TryComplete();
                 _logger.LogInformation("Branch '{Alias}' terminated due to cancellation (orphaned producer).", branch.Alias);
                 return 0;
+            }
+            // Any other cancellation (a timeout inside an adapter) is a fault. It becomes an ordinary exception
+            // because a task that ends in an OperationCanceledException reads as cancelled, not faulted, and the
+            // monitor loop skips a cancelled task.
+            catch (OperationCanceledException ex)
+            {
+                throw new InvalidOperationException($"Branch '{branch.Alias}' was cancelled without the run asking for it: {ex.Message}", ex);
             }
         }
         catch (Exception ex)

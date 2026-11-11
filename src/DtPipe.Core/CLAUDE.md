@@ -23,7 +23,10 @@ exception that arrives after the verdict without changing the verdict.
   it returns 130 on user shutdown and lets internal cancellation propagate.
 - A DAG branch reporting 130 makes `DagOrchestrator` cancel the rest and return 130.
 - The only site allowed to swallow cancellation is `DagOrchestrator.ExecuteBranchAsync`'s
-  orphaned-producer path: returning 0 there is normal fan-out once the consumers complete.
+  orphaned-producer path, and it swallows only a cancellation the orchestrator itself issued (the
+  branch's own token is cancelled): returning 0 there is normal fan-out once the consumers complete.
+  Any other `OperationCanceledException` out of a branch, a timeout included, is a fault: the DAG
+  returns 1 with an Error event.
 
 `[local: validate_cancellation.sh — drives real interrupts]`
 
