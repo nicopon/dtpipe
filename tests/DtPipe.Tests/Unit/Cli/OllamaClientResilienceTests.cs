@@ -25,6 +25,10 @@ public class OllamaClientResilienceTests
             => _handler(request, cancellationToken);
     }
 
+    // Both bounds are timers armed together, the deadline at three times the ceiling. A loaded machine can run a
+    // timer's callback late, so the gap between them (twice the ceiling) is what keeps the idle one first.
+    private static readonly TimeSpan IdleCeiling = TimeSpan.FromMilliseconds(300);
+
     private static readonly List<ChatMessage> Msgs = new() { new ChatMessage("user", "hi") };
     private static readonly List<ToolDefinition> NoTools = new();
 
@@ -42,7 +46,7 @@ public class OllamaClientResilienceTests
             await Task.Delay(TimeSpan.FromSeconds(30), ct); // outlives the client's timeout
             return new HttpResponseMessage(HttpStatusCode.OK);
         });
-        var client = new OllamaClient(handler, TimeSpan.FromMilliseconds(100));
+        var client = new OllamaClient(handler, IdleCeiling);
 
         var resp = await client.ChatAsync("http://localhost:11434", "m", Msgs, NoTools);
 
@@ -53,8 +57,8 @@ public class OllamaClientResilienceTests
 
 
     /// <summary>
-    /// Both bounds have elapsed by the time the exception is observed — the idle ceiling at 50 ms,
-    /// the call deadline at 150 ms, and the stub answers at neither. Reading the verdict off
+    /// Both bounds have elapsed by the time the exception is observed — the idle ceiling at 300 ms,
+    /// the call deadline at 900 ms, and the stub answers at neither. Reading the verdict off
     /// <c>deadlineCts.IsCancellationRequested</c> made this the deadline's message, which claims
     /// the model "was producing output the whole time" about an endpoint that sent nothing at all.
     /// The same race made the test above fail roughly one run in five on a loaded machine.
@@ -70,15 +74,15 @@ public class OllamaClientResilienceTests
             }
             catch (OperationCanceledException)
             {
-                // Stall the observation past the call deadline (3 × 50 ms), so both bounds have
+                // Stall the observation past the call deadline (3 × the ceiling), so both bounds have
                 // elapsed when the client's catch runs. On a loaded machine that happens on its
                 // own, which is why the verdict could not be read off a timer flag.
-                await Task.Delay(250, CancellationToken.None);
+                await Task.Delay(IdleCeiling * 3, CancellationToken.None);
                 throw;
             }
             return new HttpResponseMessage(HttpStatusCode.OK);
         });
-        var client = new OllamaClient(handler, TimeSpan.FromMilliseconds(50));
+        var client = new OllamaClient(handler, IdleCeiling);
 
         var resp = await client.ChatAsync("http://localhost:11434", "m", Msgs, NoTools);
 

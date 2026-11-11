@@ -45,9 +45,12 @@ public class TuiNavigationTests
         return t;
     }
 
+    private const int RetryTicks = 50;   // two seconds of ticks
+
     /// <summary>
     /// Opens the surface over <paramref name="trajectory"/> and runs <paramref name="steps"/> on the
-    /// UI thread, one per timer tick. A step that throws stops the run and the exception surfaces.
+    /// UI thread, one per timer tick. A step that throws stops the run and the exception surfaces; a failed
+    /// assertion is retried on the next ticks first.
     /// </summary>
     private static async Task Drive(AgentTrajectory trajectory, params Action<IApplication, TuiScreen>[] steps)
     {
@@ -81,12 +84,21 @@ public class TuiNavigationTests
             {
                 int i = 0;
                 int settleTicks = 3;   // let the first paint lay the panels out
+                int retries = 0;
                 live.AddTimeout(TimeSpan.FromMilliseconds(40), () =>
                 {
                     if (settleTicks-- > 0) return true;
                     try
                     {
-                        if (i < steps.Length) { steps[i++](live, screen!); return true; }
+                        if (i < steps.Length)
+                        {
+                            // An injected key is queued for the input loop, not handled where it is injected: a loaded
+                            // machine reaches the next tick before the key's effect. A failed assertion is read again
+                            // for a while before it counts.
+                            try { steps[i](live, screen!); i++; retries = 0; }
+                            catch (Xunit.Sdk.XunitException) when (++retries <= RetryTicks) { }
+                            return true;
+                        }
                     }
                     catch (Exception ex)
                     {
