@@ -34,4 +34,10 @@ public record BranchChannelContext
     /// branch then fingerprints itself, which is exact for a branch with no upstream.
     /// </summary>
     public string? DefinitionFingerprint { get; init; }
+
+    /// <summary>
+    /// The run's <c>--edges-only</c>: a stream processor reaches nothing beyond the channels it reads, so a SQL
+    /// engine runs without access to files, databases or extensions, and takes no init script.
+    /// </summary>
+    public bool EdgesOnly { get; init; }
 }

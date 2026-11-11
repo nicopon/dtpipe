@@ -31,6 +31,7 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
     private readonly string[] _refAliases;
     private readonly string[] _refChannelAliases;
     private readonly ILogger<DuckDBSqlProcessor> _logger;
+    private readonly bool _edgesOnly;
 
     // Input-side: CArrowArrayStream structs allocated on the unmanaged heap for DuckDB to hold.
     private readonly List<IArrowArrayStream> _activeStreams = new();
@@ -54,7 +55,8 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
         string[] refChannelAliases,
         ILogger<DuckDBSqlProcessor> logger,
         string? initSql = null,
-        IStringContentResolver? resolver = null)
+        IStringContentResolver? resolver = null,
+        bool edgesOnly = false)
     {
         _registry = registry;
         _query = query;
@@ -65,6 +67,7 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
         _refAliases = refAliases;
         _refChannelAliases = refChannelAliases;
         _logger = logger;
+        _edgesOnly = edgesOnly;
     }
 
     public async Task OpenAsync(CancellationToken ct = default)
@@ -72,6 +75,10 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
         _logger.LogDebug("DuckDBSqlProcessor: OpenAsync — query={Query}", _query);
         try
         {
+            if (_edgesOnly && !string.IsNullOrWhiteSpace(_initSql))
+                throw new InvalidOperationException(
+                    "--duck-init is refused under --edges-only: the SQL processor reads the channels its branch declares and nothing else.");
+
             _conn = new DuckDBConnection("DataSource=:memory:");
             await _conn.OpenAsync(ct);
 
@@ -89,6 +96,17 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
                 // Export Arrow extension types faithfully (UUID -> FixedSizeBinary(16)+arrow.uuid)
                 cmd.CommandText = "SET arrow_lossless_conversion = true";
                 await cmd.ExecuteNonQueryAsync(ct);
+
+                if (_edgesOnly)
+                {
+                    // No file, database, extension or ATTACH: the query reads the scans registered below, and DuckDB
+                    // still spills to its temporary directory. The configuration is locked, so the query cannot turn
+                    // a setting back.
+                    cmd.CommandText = "SET enable_external_access = false";
+                    await cmd.ExecuteNonQueryAsync(ct);
+                    cmd.CommandText = "SET lock_configuration = true";
+                    await cmd.ExecuteNonQueryAsync(ct);
+                }
             }
 
             await DuckInitSqlRunner.RunAsync(_conn, _initSql, _resolver, ct);

@@ -72,8 +72,14 @@ public class JobExecutor
         // Alias binding: substitute --bind-input/--bind-output onto the job dictionary before
         // validation, so a bound fragment is checked under exactly the same rules as a
         // complete job (indexed by alias, whether it came from --job or the command line).
-        var bindingErrors = AliasBindingApplier.Apply(jobs, globals.BindInput, globals.BindOutput,
-            globals.BindCompression, globals.BindCompressionLevel);
+        // --edges-only: the job's text names its arrow:- edges and nothing else, and the binding gives
+        // them named pipes alone.
+        var bindingErrors = globals.EdgesOnly ? EdgesOnlyRule.TextRefusals(jobs) : new List<string>();
+        if (bindingErrors.Count == 0)
+            bindingErrors = AliasBindingApplier.Apply(jobs, globals.BindInput, globals.BindOutput,
+                globals.BindCompression, globals.BindCompressionLevel);
+        if (bindingErrors.Count == 0 && globals.EdgesOnly)
+            bindingErrors = EdgesOnlyRule.BoundRefusals(jobs);
         if (bindingErrors.Count > 0)
         {
             if (!globals.Quiet)
@@ -109,7 +115,7 @@ public class JobExecutor
             {
                 var job = jobs[branch.Alias];
                 contexts.TryGetValue(branch.Alias, out var branchCtx);
-                var fingerprinted = ctx with { DefinitionFingerprint = fingerprints.GetValueOrDefault(branch.Alias) };
+                var fingerprinted = ctx with { DefinitionFingerprint = fingerprints.GetValueOrDefault(branch.Alias), EdgesOnly = globals.EdgesOnly };
                 var run = new BranchRun(job)
                 {
                     Context = branchCtx, Alias = branch.Alias, IsDag = true, Channels = fingerprinted,
@@ -148,7 +154,7 @@ public class JobExecutor
                     (_, branchCtx, token) => RunSingleJobAsync(
                         new BranchRun(mainJob)
                         {
-                            Context = mainContext, Alias = "main", Channels = branchCtx,
+                            Context = mainContext, Alias = "main", Channels = branchCtx with { EdgesOnly = globals.EdgesOnly },
                             Globals = globals, UserCancellation = userCts.Token
                         },
                         host, token, branchFailures);

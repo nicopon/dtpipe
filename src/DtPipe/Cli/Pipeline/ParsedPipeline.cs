@@ -30,6 +30,9 @@ public record GlobalOptions
     /// <summary>--bind-compression-level &lt;n&gt;, raw. See <see cref="BindCompression"/>.</summary>
     public string? BindCompressionLevel { get; init; }
 
+    /// <summary>--edges-only: every reader and writer is an <c>arrow:-</c> edge or a location --bind-input/--bind-output gave one. See <see cref="EdgesOnlyRule"/>.</summary>
+    public bool EdgesOnly { get; init; }
+
     /// <summary>F17: when true, binding failures (unrecognized flags, unparsable values) exit non-zero instead of being skipped.</summary>
     public bool StrictBindings { get; init; }
 

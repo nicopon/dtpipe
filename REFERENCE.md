@@ -673,11 +673,11 @@ DuckDB extensions (`excel`, `httpfs`, `azure`, `ducklake`…) are reached throug
 or a provider option is refused, naming the flag, since the file holds the branches and the flag
 would change nothing. The flags that apply to every branch of the loaded job are `--limit`,
 `--batch-size`, `--max-batch-bytes`, `--sampling-rate`, `--sampling-seed`, `--prefix`, `--cursor`,
-`--state`, `--metrics-path`, `--dry-run`, `--session`, `--bind-compression` and
-`--bind-compression-level`; `--checkpoint`, `--from-checkpoint`, `--contract-save` and
-`--from-contract` are keys of the file, not overrides. The flags of the whole command line
-(`--no-stats`, `--log`, `--strict-bindings`, `--export-job`, `--cursor-from`, `--bind-input`,
-`--bind-output`) are given beside it as anywhere.
+`--state`, `--metrics-path`, `--dry-run`, `--session`, `--bind-compression`,
+`--bind-compression-level` and `--edges-only`; `--checkpoint`, `--from-checkpoint`,
+`--contract-save` and `--from-contract` are keys of the file, not overrides. The flags of the whole
+command line (`--no-stats`, `--log`, `--strict-bindings`, `--export-job`, `--cursor-from`,
+`--bind-input`, `--bind-output`) are given beside it as anywhere.
 
 ---
 
@@ -720,6 +720,7 @@ would change nothing. The flags that apply to every branch of the loaded job are
 | `--bind-output ALIAS=LOCATION[,ALIAS=LOCATION...]` | Wire a real location into a branch's `arrow:-` output |
 | `--bind-compression none\|lz4\|zstd` | Compress the Arrow IPC stream of every `arrow:-` output |
 | `--bind-compression-level N` | Level of that codec; needs `--bind-compression`. Default: the codec's own |
+| `--edges-only` | Refuse every reader and writer that is not an `arrow:-` edge, and run `--sql` without external access |
 
 A fragment written by `dtpipe split` keeps the boundary its text names — a branch whose input or
 output is exactly `arrow:-` — and a single shell pipe wires a two-process chain without either
@@ -746,6 +747,16 @@ location specific to this run.
 nothing is given on the reading side. The two flags never enter a job's text. An unknown codec or
 a level that is not an integer is refused before the run starts. The `arrow` writer's `compression`
 option takes the same three values and is refused at build time when it holds anything else.
+
+`--edges-only` is what a pipeline node gives a runner's fragment, whose host the fragments of every
+run share. The job's text may name `arrow:-` as an input or an output and nothing else; a location
+bound by `--bind-input` or `--bind-output` must be `-` or `pipe://<name>`. A branch that sets
+`checkpoint`, `from-checkpoint`, `contract-save`, `from-contract`, `metrics-path`, `cursor` or
+`state` is refused too, each by its branch, before any row moves. Transformers and processors stay:
+`--sql` reads the branches it names in `--from` and `--ref` and nothing else, with DuckDB's
+`enable_external_access` off and its configuration locked, so a file, `ATTACH`, an extension or a
+`SET` is refused, and `--duck-init` is refused outright. DuckDB still spills to its temporary
+directory under the working directory.
 
 #### Implicit branch-split rules
 

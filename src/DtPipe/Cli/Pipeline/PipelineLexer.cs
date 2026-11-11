@@ -378,6 +378,7 @@ public class PipelineLexer
             BindOutput = dict.TryGetValue("--bind-output", out var boVal) ? boVal?.ToString() : null,
             BindCompression = dict.TryGetValue("--bind-compression", out var bcVal) ? bcVal?.ToString() : null,
             BindCompressionLevel = dict.TryGetValue("--bind-compression-level", out var bclVal) ? bclVal?.ToString() : null,
+            EdgesOnly = dict.ContainsKey("--edges-only"),
             IgnoreNulls = dict.ContainsKey("--ignore-nulls"),
             CursorFrom = dict.TryGetValue("--cursor-from", out var cfVal) ? cfVal?.ToString() : null,
             AllFlags = dict

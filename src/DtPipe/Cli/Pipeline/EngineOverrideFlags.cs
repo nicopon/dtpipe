@@ -5,8 +5,8 @@ namespace DtPipe.Cli.Pipeline;
 /// <c>PipelineToJobConverter</c> applies to every branch of the loaded job. The lexer refuses any other
 /// flag of a branch there, since a job file is the source of the branches and a flag the conversion
 /// does not read would be dropped in silence. A flag is listed only when the conversion reads it.
-/// <c>--metrics-path</c>, <c>--dry-run</c>, <c>--session</c>, <c>--bind-compression</c> and
-/// <c>--bind-compression-level</c> are flags of the whole command line,
+/// <c>--metrics-path</c>, <c>--dry-run</c>, <c>--session</c>, <c>--bind-compression</c>,
+/// <c>--bind-compression-level</c> and <c>--edges-only</c> are flags of the whole command line,
 /// which no branch ever holds; the others are flags of a branch.
 /// </summary>
 public static class EngineOverrideFlags
@@ -16,5 +16,6 @@ public static class EngineOverrideFlags
         "--limit", "--batch-size", "-b", "--max-batch-bytes", "--metrics-path",
         "--cursor", "--state", "--sampling-rate", "--sampling-seed",
         "--prefix", "--dry-run", "--session", "--bind-compression", "--bind-compression-level",
+        "--edges-only",
     ];
 }

@@ -106,7 +106,8 @@ public class DuckDBSqlTransformerFactory : IStreamTransformerFactory
             refChannelAliases: refChannelAliases,
             logger: loggerFactory.CreateLogger<DuckDBSqlProcessor>(),
             initSql: initSql,
-            resolver: resolver);
+            resolver: resolver,
+            edgesOnly: ctx.EdgesOnly);
 
         return new Sql.SqlStreamTransformer(processor);
     }

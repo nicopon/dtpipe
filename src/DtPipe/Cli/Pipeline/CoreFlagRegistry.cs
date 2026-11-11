@@ -50,6 +50,9 @@ public static class CoreFlagRegistry
         registry.Register(new FlagDef("--bind-compression", new string[] { }, FlagArity.Scalar, FlagScope.Global, "Arrow compression (none, lz4 or zstd) of the outputs --bind-output binds", FlagStage.All));
         registry.Register(new FlagDef("--bind-compression-level", new string[] { }, FlagArity.Scalar, FlagScope.Global, "Compression level of the outputs --bind-output binds", FlagStage.All));
 
+        // What a pipeline node gives a runner's child: it reads and writes its edges and nothing else.
+        registry.Register(new FlagDef("--edges-only", new string[] { }, FlagArity.Boolean, FlagScope.Global, "Refuse every reader and writer that is not an 'arrow:-' edge, and run the SQL processor without external access", FlagStage.All));
+
         // Materialisation. Per-branch, and neither splits a branch: only -i and --from do.
         registry.Register(new FlagDef("--checkpoint", new string[] { }, FlagArity.Scalar, FlagScope.PerBranch, "Materialise this branch's output in the session store", FlagStage.All));
         registry.Register(new FlagDef("--contract-save", new string[] { }, FlagArity.Scalar, FlagScope.PerBranch, "Write the schema this branch produces to a contract file", FlagStage.All));
