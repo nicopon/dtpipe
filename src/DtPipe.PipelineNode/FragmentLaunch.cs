@@ -34,7 +34,7 @@ public sealed class FragmentLaunch
     /// </summary>
     public bool EdgesOnly { get; init; }
 
-    /// <summary>The size of the chunks read from the child's stdout onto a transfer: the node host's setting, so both default to one value.</summary>
+    /// <summary>The size of the chunks relayed between the child's pipes and a transfer: the node host's setting, so both default to one value.</summary>
     public int ReadChunkBytes { get; init; } = NodeClientOptions.DefaultReadChunkBytes;
 }
 
