@@ -167,13 +167,16 @@ public class SqlServerDataWriter : BaseSqlDataWriter, IColumnarDataWriter, IColu
         // writes the rows they refuse with exit 0 and leaves each constraint untrusted. The staging
         // copies of Upsert and Ignore need no option: the staging table holds no constraint, and
         // the MERGE into the target is an ordinary statement the constraints check.
+        // EnableStreaming stays off, here and on the staging copy. With it, SqlBulkCopy reads a MAX
+        // column through GetStream or GetTextReader instead of GetValue: each value the reader holds
+        // is copied once more, and a value that is not text reaches GetString, which cannot cast it,
+        // where GetValue lets the bulk copy convert it to the column's type.
         _bulkCopy = new SqlBulkCopy((SqlConnection)_connection!,
             SqlBulkCopyOptions.TableLock | SqlBulkCopyOptions.UseInternalTransaction | SqlBulkCopyOptions.CheckConstraints, null)
         {
             DestinationTableName = _quotedTargetTableName,
             BatchSize = 0,
-            BulkCopyTimeout = 0,
-            EnableStreaming = true
+            BulkCopyTimeout = 0
         };
 
         // Map columns by name
@@ -303,10 +306,10 @@ public class SqlServerDataWriter : BaseSqlDataWriter, IColumnarDataWriter, IColu
     }
 
     /// <summary>
-    /// Columnar write path: receives an Arrow RecordBatch, extracts values via
-    /// <c>ArrowTypeMapper.GetValueForField</c> (resolving arrow.uuid extension metadata
-    /// to Guid), applies <c>_converters[]</c> for target type coercion, and feeds the DataTable
-    /// into SqlBulkCopy. This ensures DtPipe type conventions are applied correctly.
+    /// Columnar write path: SqlBulkCopy reads the batch through <see cref="RecordBatchDataReader"/>,
+    /// which hands each cell over as its Arrow reading (an <c>arrow.uuid</c> column as a
+    /// <see cref="Guid"/>). No row converter applies: the bulk copy converts a value to the type of
+    /// the column it goes to.
     /// </summary>
     public async ValueTask WriteRecordBatchAsync(RecordBatch batch, CancellationToken ct = default)
     {
@@ -343,8 +346,7 @@ public class SqlServerDataWriter : BaseSqlDataWriter, IColumnarDataWriter, IColu
             {
                 DestinationTableName = stageTable,
                 BatchSize = 0,
-                BulkCopyTimeout = 0,
-                EnableStreaming = true
+                BulkCopyTimeout = 0
             };
 
             foreach (var col in _targetColumnNames!)

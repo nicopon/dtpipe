@@ -94,7 +94,9 @@ through its `ISchemaInspector`, which must report the target's scale. `[CI: Writ
 
 **A `DbDataReader` handed to a bulk loader serves every accessor**, since the driver picks the one it
 calls: `GetBytes` and `GetChars` are bounded copies of what `GetValue` gives, never
-`NotSupportedException`. `[CI: WriteConformanceTests]` `[local: validate_type_conformance.sh]`
+`NotSupportedException`. The SQL Server writer leaves `SqlBulkCopy` streaming off, which would read a
+MAX column through `GetStream` and `GetTextReader` and cast a value that is not text to a string.
+`[CI: WriteConformanceTests]` `[local: validate_type_conformance.sh]`
 
 ## A value a type cannot hold
 

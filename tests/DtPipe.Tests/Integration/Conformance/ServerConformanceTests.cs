@@ -1,5 +1,13 @@
 using System.Text.Json;
+using Apache.Arrow;
+using Apache.Arrow.Serialization.Mapping;
+using DtPipe.Adapters.SqlServer;
+using DtPipe.Core.Abstractions;
+using DtPipe.Core.Infrastructure.Arrow;
+using DtPipe.Core.Models;
 using DtPipe.Tests.Unit.Conformance;
+using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace DtPipe.Tests.Integration.Conformance;
@@ -120,6 +128,31 @@ public sealed class ServerConformanceTests : IDisposable
         ("ora", "timestamp(us,UTC)", "2024-01-02T03:04:05.1234560+00:00", null),
     ];
 
+    /// <summary>
+    /// What SQL Server gives back of a MAX column written on each road of its writer, into a table the
+    /// writer creates or one already there. The engine reaches the row road only from a text reader with
+    /// no step, which carries no bytes, so the cell drives the writer's two entries itself. What each
+    /// road hands the bulk copy is the unit half, in <c>WriteConformanceTests</c>.
+    /// </summary>
+    private static readonly (string Case, bool Created, string Column, string Expected, string? KnownFalse)[] SqlServerMaxColumns =
+    [
+        ("binary", true, "VARBINARY(MAX)", "YWJj", null),
+        ("binary", false, "VARBINARY(MAX)", "YWJj", null),
+        ("string", true, "NVARCHAR(MAX)", "h\u00e9llo", null),
+        ("int32", false, "NVARCHAR(MAX)", "-70000", null),
+    ];
+
+    private static readonly string[] Roads = ["row", "columnar"];
+
+    public static TheoryData<string, bool, string> SqlServerMaxColumnCells()
+    {
+        var cells = new TheoryData<string, bool, string>();
+        foreach (var (name, created, _, _, _) in SqlServerMaxColumns)
+            foreach (var road in Roads)
+                cells.Add(name, created, road);
+        return cells;
+    }
+
     public static TheoryData<string, string> ReadCells()
     {
         var cells = new TheoryData<string, string>();
@@ -204,6 +237,66 @@ public sealed class ServerConformanceTests : IDisposable
         finally
         {
             TableLock.Release();
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(SqlServerMaxColumnCells))]
+    public async Task A_Sql_Server_Max_Column_Gives_Back_What_Either_Road_Wrote(string name, bool created, string road)
+    {
+        await TableLock.WaitAsync();
+        try
+        {
+            var endpoint = Endpoint("mssql");
+            var (_, _, column, expected, knownFalse) = SqlServerMaxColumns.Single(c => c.Case == name && c.Created == created);
+            var connection = ComponentSelector.Select(endpoint, "mssql").Cleaned;
+            var table = $"tcc_max_{name}_{(created ? "created" : "existing")}_{road}";
+            await using (var sql = new SqlConnection(connection))
+            {
+                await sql.OpenAsync();
+                await using var command = sql.CreateCommand();
+                command.CommandText = created ? $"DROP TABLE IF EXISTS {table}" : $"DROP TABLE IF EXISTS {table}; CREATE TABLE {table} (v {column})";
+                await command.ExecuteNonQueryAsync();
+            }
+
+            var failure = await WriteSqlServerAsync(connection, table, ArrowTypeCases.Named(name), created, rows: road == "row");
+            var actual = failure ?? await ReadAsync(endpoint, $"SELECT v FROM {table} WHERE v IS NOT NULL", row: false);
+
+            Judge(expected, knownFalse, actual, actual);
+        }
+        finally
+        {
+            TableLock.Release();
+        }
+    }
+
+    // The writer as the engine drives it: initialised with the case's column, handed its values on one
+    // road, completed. A failure reads `named` when it names the column, and `raw` with its type otherwise.
+    private static async Task<string?> WriteSqlServerAsync(string connection, string table, ArrowTypeCase @case, bool created, bool rows)
+    {
+        var options = new SqlServerWriterOptions { Table = table, Strategy = created ? SqlServerWriteStrategy.Recreate : SqlServerWriteStrategy.Append };
+        await using var writer = new SqlServerDataWriter(connection, options, NullLogger<SqlServerDataWriter>.Instance, SqlServerTypeConverter.Instance);
+        var field = @case.Field;
+        var array = @case.Build();
+        try
+        {
+            await writer.InitializeAsync([new PipeColumnInfo(field.Name, ArrowTypeMap.GetClrTypeFromField(field), field.IsNullable)]);
+            if (rows)
+            {
+                var values = Enumerable.Range(0, array.Length).Select(i => new[] { ArrowTypeMapper.GetValueForField(array, field, i) }).ToList();
+                array.Dispose();
+                await writer.WriteBatchAsync(values);
+            }
+            else
+            {
+                await writer.WriteRecordBatchAsync(new RecordBatch(new Schema([field], null), [array], array.Length));
+            }
+            await writer.CompleteAsync();
+            return null;
+        }
+        catch (Exception ex)
+        {
+            return ex is ColumnValueRefusedException || ex.Message.Contains("'v'") ? "named" : $"raw: {ex.GetType().Name}";
         }
     }
 
