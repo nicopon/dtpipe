@@ -25,4 +25,10 @@
     <ProjectReference Include="..\..\src\Apache.Arrow.Serialization\Apache.Arrow.Serialization.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The conformance table's catalogue, one case per Arrow type: CompileValueReaderTests reads it
+         rather than a copy that would miss the next type added there. -->
+    <Compile Include="..\DtPipe.Tests\Unit\Conformance\ArrowTypeCases.cs" Link="ArrowTypeCases.cs" />
+  </ItemGroup>
+
 </Project>

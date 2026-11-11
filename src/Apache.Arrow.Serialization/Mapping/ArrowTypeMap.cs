@@ -245,6 +245,9 @@ public static class ArrowTypeMap
     /// Extracts the CLR value from an Arrow array at the specified index, respecting logical type
     /// metadata (e.g. UUID) if a <see cref="Field"/> is provided.
     /// </summary>
+    /// <remarks>
+    /// <see cref="CompileValueReader"/> reads a whole column the same way: change the two together.
+    /// </remarks>
     public static object? GetValue(IArrowArray array, int index, Field? field = null)
     {
         if (array.IsNull(index)) return null;
@@ -349,6 +352,91 @@ public static class ArrowTypeMap
             or ArrowTypeId.Date32 or ArrowTypeId.Date64 or ArrowTypeId.Time32 or ArrowTypeId.Time64
             or ArrowTypeId.Timestamp or ArrowTypeId.Duration
     };
+
+    /// <summary>
+    /// <see cref="GetValue"/> for one column, resolved once. The reader returns what
+    /// <c>GetValue(array, i, field)</c> returns for every <c>i</c>: null for a null cell, the same value
+    /// otherwise, and the same exception where it throws. A caller that walks a column compiles it once
+    /// and pays no type test, extension lookup or field read per cell.
+    /// </summary>
+    /// <remarks>
+    /// Its switch is <see cref="GetValue"/>'s, read once instead of per cell: change the two together.
+    /// A nested, dictionary-encoded or unread type reads through <see cref="GetValue"/> itself.
+    /// </remarks>
+    public static Func<int, object?> CompileValueReader(IArrowArray array, Field field)
+    {
+        ArgumentNullException.ThrowIfNull(array);
+        ArgumentNullException.ThrowIfNull(field);
+
+        if (field.HasMetadata &&
+            array is FixedSizeBinaryArray or BinaryArray or Int8Array &&
+            ArrowExtensionInfo.TryRead(field, out var ext))
+        {
+            if (ext.Is("arrow.uuid") && array is FixedSizeBinaryArray uuidArray)
+                return i => uuidArray.IsNull(i) ? null : FromArrowUuidBytes(uuidArray.GetBytes(i));
+
+            if (ext.Is("arrow.bool8") && array is Int8Array boolArray)
+                return i => boolArray.IsNull(i) ? null : boolArray.GetValue(i) != 0;
+
+            if (ext.Is("arrow.opaque"))
+                return CompileOpaqueReader(array, ext.VendorName, ext.TypeName, CompileStorageReader(array, field));
+        }
+
+        return CompileStorageReader(array, field);
+    }
+
+    /// <summary>A payload the codec does not decode reads as its storage, as it does in <see cref="GetValue"/>.</summary>
+    private static Func<int, object?> CompileOpaqueReader(IArrowArray array, string vendor, string type, Func<int, object?> storage) => array switch
+    {
+        FixedSizeBinaryArray a => i => a.IsNull(i) ? null : ArrowOpaqueCodec.TryDecode(vendor, type, a.GetBytes(i)) ?? storage(i),
+        BinaryArray a => i => a.IsNull(i) ? null : ArrowOpaqueCodec.TryDecode(vendor, type, a.GetBytes(i)) ?? storage(i),
+        _ => i => array.IsNull(i) ? null : ArrowOpaqueCodec.TryDecode(vendor, type, ReadOnlySpan<byte>.Empty) ?? storage(i)
+    };
+
+    private static Func<int, object?> CompileStorageReader(IArrowArray array, Field field)
+    {
+        var undeclared = IsUndeclaredDecimal(field);
+        var wallClock = field.DataType is TimestampType ts && string.IsNullOrEmpty(ts.Timezone);
+
+        return array switch
+        {
+            BooleanArray a => i => a.GetValue(i) is { } v ? v : null,
+            Int8Array a => Primitive(a),
+            Int16Array a => Primitive(a),
+            Int32Array a => Primitive(a),
+            Int64Array a => Primitive(a),
+            UInt8Array a => Primitive(a),
+            UInt16Array a => Primitive(a),
+            UInt32Array a => Primitive(a),
+            UInt64Array a => Primitive(a),
+            FloatArray a => Primitive(a),
+            DoubleArray a => Primitive(a),
+            StringArray a => i => a.IsNull(i) ? null : a.GetString(i),
+            BinaryArray a => i => a.IsNull(i) ? null : a.GetBytes(i).ToArray(),
+            Decimal128Array a => undeclared
+                ? i => a.GetValue(i) is { } d ? DecimalWidth.Bare(d) : null
+                : i => a.GetValue(i) is { } d ? d : null,
+            Decimal256Array a => undeclared
+                ? i => a.GetValue(i) is { } d ? DecimalWidth.Bare(d) : null
+                : i => a.GetValue(i) is { } d ? d : null,
+            // The two narrow decimals derive from FixedSizeBinaryArray, so they come before it.
+            Decimal32Array a => i => a.GetValue(i) is { } d ? d : null,
+            Decimal64Array a => i => a.GetValue(i) is { } d ? d : null,
+            FixedSizeBinaryArray a => i => a.IsNull(i) ? null : a.GetBytes(i).ToArray(),
+            Date32Array a => i => a.GetDateOnly(i) is { } d ? d : null,
+            Date64Array a => i => a.GetDateTime(i) is { } d ? d : null,
+            TimestampArray a => wallClock
+                ? i => a.GetTimestamp(i) is { } t ? TemporalNormalization.ToWallClock(t) : null
+                : i => a.GetTimestamp(i) is { } t ? t : null,
+            DurationArray a => i => a.GetTimeSpan(i) is { } d ? d : null,
+            Time32Array a => i => a.GetTime(i) is { } t ? t : null,
+            Time64Array a => i => a.GetTime(i) is { } t ? t : null,
+            _ => i => GetValue(array, i, field)
+        };
+    }
+
+    private static Func<int, object?> Primitive<T>(PrimitiveArray<T> array) where T : struct, IEquatable<T>
+        => i => array.GetValue(i) is { } v ? v : null;
 
     /// <summary>
     /// A decimal cell. A column that declared no width reads bare: the 18 decimals it stores at are the

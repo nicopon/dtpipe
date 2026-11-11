@@ -26,6 +26,10 @@ internal sealed record ArrowTypeCase(string Name, Field Field, Func<IArrowArray>
     }
 }
 
+/// <summary>
+/// One case per Arrow type. Apache.Arrow.Serialization.Tests compiles this file too, to read every case
+/// through the compiled value reader, so it names nothing of DtPipe.
+/// </summary>
 internal static class ArrowTypeCases
 {
     private const string Column = "v";

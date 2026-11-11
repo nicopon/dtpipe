@@ -55,6 +55,12 @@ RFC 4122 big-endian.
 `GetValueForField(array, field, i)`, and `GetField(name, clrType, nullable)` instead of
 `new Field(...)`. `[unchecked]`
 
+**A cell reads alike cell by cell and column by column.** `ArrowTypeMap.CompileValueReader(array,
+field)` is `GetValue`'s switch resolved once per column, for a caller that walks a column; it returns
+what `GetValue` returns for every index, null and exceptions included. Change the two together, and
+never write a third reading: a per-type copy in a consumer drifted from the map unseen.
+`[CI: CompileValueReaderTests — every case of the conformance catalogue, whole and sliced]`
+
 Representation rules live under their own names in `Apache.Arrow.Serialization/Mapping/`:
 `Rfc4122Guid` (byte order) and `TemporalNormalization` (zone-less `DateTime`). **Change both
 directions of `TemporalNormalization` together**; never call `new DateTimeOffset(dt)`, which resolves

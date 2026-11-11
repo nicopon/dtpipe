@@ -92,6 +92,10 @@ stands in front of the writer, armed from the compatibility report, so a new dat
 through its `ISchemaInspector`, which must report the target's scale. `[CI: WriteConformanceTests]`
 `[local: validate_type_conformance.sh]`
 
+**A reader that walks a column reads it through `ArrowTypeMap.CompileValueReader`**, never a switch of
+its own, so it reads each cell as `GetValue` does: `RecordBatchDataReader` compiles one per column.
+`[CI: CompileValueReaderTests]`
+
 **A `DbDataReader` handed to a bulk loader serves every accessor**, since the driver picks the one it
 calls: `GetBytes` and `GetChars` are bounded copies of what `GetValue` gives, never
 `NotSupportedException`. The SQL Server writer leaves `SqlBulkCopy` streaming off, which would read a

@@ -13,6 +13,11 @@ off the field (`GetClrTypeFromField`, `GetLogicalType`), never through a second 
 accessors and the XML reader each kept one, and the two disagreed with the map on a decimal, a zone and
 a UUID. `[CI: LogicalTypeRoundTripTests]`
 
+`CompileValueReader` is `GetValue` resolved once per column: the same switch, read once instead of per
+cell, returning what `GetValue` returns for every index. Change the two together; a caller that walks a
+column compiles, a caller that reads one cell calls `GetValue`.
+`[CI: CompileValueReaderTests — the conformance catalogue, linked from DtPipe.Tests, whole and sliced]`
+
 `FixedSizeBinaryArrayBuilder` exists only in `Reflection/FixedSizeBinaryArrayBuilder.cs`; Core
 consumes it by project reference. `ArrowSerializer` / `ArrowDeserializer` usage: `EXTENDING.md`.
 

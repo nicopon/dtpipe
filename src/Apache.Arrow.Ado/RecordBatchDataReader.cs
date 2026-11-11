@@ -4,9 +4,7 @@ using System.Data;
 using System.Data.Common;
 using Apache.Arrow;
 using Apache.Arrow.Arrays;
-using Apache.Arrow.Types;
 using Apache.Arrow.Serialization.Mapping;
-using System.Linq;
 
 namespace Apache.Arrow.Ado;
 
@@ -20,6 +18,10 @@ namespace Apache.Arrow.Ado;
 /// <c>OracleBulkCopy</c>, NPGSQL COPY, etc.).
 ///
 /// Symmetric counterpart to <see cref="AdoToArrow"/> (which converts in the opposite direction).
+///
+/// A cell reads as <see cref="ArrowTypeMap.GetValue"/> reads it, through the reader
+/// <see cref="ArrowTypeMap.CompileValueReader"/> compiles once per column, and a null as
+/// <see cref="DBNull.Value"/>.
 /// </summary>
 public sealed class RecordBatchDataReader : DbDataReader
 {
@@ -28,7 +30,7 @@ public sealed class RecordBatchDataReader : DbDataReader
     private readonly IArrowArray[] _columns;
     private readonly Field[] _fields;
     private readonly Type[] _fieldTypes;
-    private readonly Func<int, object>[] _getters;
+    private readonly Func<int, object?>[] _readers;
     private readonly BinaryArray?[] _bytes;
     private readonly int _fieldCount;
     private int _row = -1;
@@ -43,7 +45,7 @@ public sealed class RecordBatchDataReader : DbDataReader
         _columns = new IArrowArray[_fieldCount];
         _fields = new Field[_fieldCount];
         _fieldTypes = new Type[_fieldCount];
-        _getters = new Func<int, object>[_fieldCount];
+        _readers = new Func<int, object?>[_fieldCount];
         _bytes = new BinaryArray?[_fieldCount];
 
         for (int i = 0; i < _fieldCount; i++)
@@ -53,50 +55,11 @@ public sealed class RecordBatchDataReader : DbDataReader
             _columns[i] = col;
             _fields[i] = field;
             _fieldTypes[i] = ArrowTypeMap.GetClrTypeFromField(field);
-            _getters[i] = BuildGetter(col, field);
-            // The column whose getter copies a BinaryArray's bytes out: GetBytes reads them in place.
-            _bytes[i] = !IsExtension(field) && col is BinaryArray b and not StringArray ? b : null;
+            _readers[i] = ArrowTypeMap.CompileValueReader(col, field);
+            // A column whose reader copies a BinaryArray's bytes out: GetBytes reads them in place. An
+            // extension may read its bytes as something else, so its GetBytes goes through the reader.
+            _bytes[i] = col is BinaryArray b and not StringArray && !ArrowExtensionInfo.TryRead(field, out _) ? b : null;
         }
-    }
-
-    private static bool IsExtension(Field field)
-        => field.HasMetadata && (field.Metadata.ContainsKey("ARROW:extension:name") || field.Metadata.ContainsKey("arrow.uuid"));
-
-    private static Func<int, object> BuildGetter(IArrowArray array, Field field)
-    {
-        if (IsExtension(field))
-        {
-            return row => ArrowTypeMap.GetValue(array, row, field) ?? DBNull.Value;
-        }
-
-        return array switch
-        {
-            Int32Array a => row => a.IsNull(row) ? DBNull.Value : (object)a.GetValue(row)!.Value,
-            Int64Array a => row => a.IsNull(row) ? DBNull.Value : (object)a.GetValue(row)!.Value,
-            Int16Array a => row => a.IsNull(row) ? DBNull.Value : (object)a.GetValue(row)!.Value,
-            Int8Array a => row => a.IsNull(row) ? DBNull.Value : (object)a.GetValue(row)!.Value,
-            UInt8Array a => row => a.IsNull(row) ? DBNull.Value : (object)a.GetValue(row)!.Value,
-            UInt16Array a => row => a.IsNull(row) ? DBNull.Value : (object)a.GetValue(row)!.Value,
-            UInt32Array a => row => a.IsNull(row) ? DBNull.Value : (object)a.GetValue(row)!.Value,
-            UInt64Array a => row => a.IsNull(row) ? DBNull.Value : (object)a.GetValue(row)!.Value,
-            BooleanArray a => row => a.IsNull(row) ? DBNull.Value : (object)a.GetValue(row)!.Value,
-            FloatArray a => row => a.IsNull(row) ? DBNull.Value : (object)a.GetValue(row)!.Value,
-            DoubleArray a => row => a.IsNull(row) ? DBNull.Value : (object)a.GetValue(row)!.Value,
-            StringArray a => row => a.IsNull(row) ? DBNull.Value : (object)a.GetString(row),
-            BinaryArray a => row => a.IsNull(row) ? DBNull.Value : (object)a.GetBytes(row).ToArray(),
-            Decimal128Array a => ArrowTypeMap.IsUndeclaredDecimal(field)
-                ? row => a.GetValue(row) is { } d ? (object)DecimalWidth.Bare(d) : DBNull.Value
-                : row => a.GetValue(row) is { } d ? (object)d : DBNull.Value,
-            Decimal256Array a => ArrowTypeMap.IsUndeclaredDecimal(field)
-                ? row => a.GetValue(row) is { } d ? (object)DecimalWidth.Bare(d) : DBNull.Value
-                : row => a.GetValue(row) is { } d ? (object)d : DBNull.Value,
-            Date32Array a => row => a.IsNull(row) ? DBNull.Value : (a.GetDateOnly(row) is { } d32 ? (object)d32 : DBNull.Value),
-            Date64Array a => row => a.IsNull(row) ? DBNull.Value : (a.GetDateTime(row) is { } d64 ? (object)d64 : DBNull.Value),
-            TimestampArray a => field.DataType is TimestampType ts && string.IsNullOrEmpty(ts.Timezone)
-                ? row => a.GetTimestamp(row) is { } dto ? (object)TemporalNormalization.ToWallClock(dto) : DBNull.Value
-                : row => a.GetTimestamp(row) is { } dto ? (object)dto : DBNull.Value,
-            _ => row => ArrowTypeMap.GetValue(array, row, field) ?? DBNull.Value
-        };
     }
 
     // ── Core navigation ──────────────────────────────────────────────────────
@@ -149,13 +112,13 @@ public sealed class RecordBatchDataReader : DbDataReader
     public override object this[string name] => GetValue(GetOrdinal(name));
 
     public override object GetValue(int ordinal)
-        => _getters[ordinal](_row);
+        => _readers[ordinal](_row) ?? DBNull.Value;
 
     public override int GetValues(object[] values)
     {
         int count = Math.Min(values.Length, _fieldCount);
         for (int i = 0; i < count; i++)
-            values[i] = _getters[i](_row);
+            values[i] = _readers[i](_row) ?? DBNull.Value;
         return count;
     }
 
