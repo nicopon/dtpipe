@@ -208,7 +208,9 @@ public class DryRunRenderer
                     var sb = new StringBuilder();
                     sb.Append($"[dim]{Markup.Escape(typeName)}[/]");
 
-                    if (targetSchema != null)
+                    // A target that does not exist yet has no column to compare against: every
+                    // column would read as missing from a table the run is about to create.
+                    if (targetSchema is { Exists: true })
                     {
                         var targetCol = targetSchema.Columns.FirstOrDefault(c => c.Name.Equals(colName, StringComparison.OrdinalIgnoreCase));
                         if (targetCol != null)
