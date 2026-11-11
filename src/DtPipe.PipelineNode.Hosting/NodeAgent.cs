@@ -243,7 +243,6 @@ internal sealed class NodeAgent : BackgroundService
                 AccessTokenProvider = () => _tokens.GetAsync(fresh: true),
                 BatchBytes = _options.BatchBytes,
                 MaxInFlightBatches = _options.MaxInFlightBatches,
-                ReadChunkBytes = _options.ReadChunkBytes,
             }, _forwarder.For(_hostLoggers, _options.Name, fragment: null), ct);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)

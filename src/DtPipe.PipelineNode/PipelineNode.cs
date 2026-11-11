@@ -38,7 +38,7 @@ public sealed class NodeClientOptions
     /// <summary>The tuned in-flight batch bound, shared with the node host's options.</summary>
     public const int DefaultMaxInFlightBatches = 16;
 
-    /// <summary>The tuned stdio read chunk, shared with the node host's options.</summary>
+    /// <summary>The tuned stdio read chunk, the default of the node host's options and of <c>FragmentLaunch</c>.</summary>
     public const int DefaultReadChunkBytes = 262144;
 
     /// <summary>Both bounds default to a non-null value. The client library leaves them null, and a
@@ -46,7 +46,6 @@ public sealed class NodeClientOptions
     /// piles up a receiver-side backlog against a fast source.</summary>
     public int? MaxInFlightBatches { get; init; } = DefaultMaxInFlightBatches;
     public long? ReceiveMaxBytes { get; init; }
-    public int ReadChunkBytes { get; init; } = DefaultReadChunkBytes;
 
     /// <summary>
     /// How long a transfer handle waits for the run that claims it (its <c>Wire</c>), and a <c>Wire</c> for the handle
