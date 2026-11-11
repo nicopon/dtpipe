@@ -1,20 +1,7 @@
 # DtPipe
 
-A self-contained CLI for streaming, transforming, and anonymizing data across databases and file
-formats.
-
-DtPipe reads from a source, applies row and columnar transformations in batches, and writes to a
-destination with no intermediate staging. It is designed for automation and CI/CD workflows where
-repeatable, observable data pipelines matter.
-
----
-
-### 📚 [Start with the documentation → docs/](./docs/README.md)
-
-Install, a first pipeline, the concepts, and a guide per task — anonymization, joins and fan-out,
-incremental loading, YAML jobs, secrets, and running in a .NET estate.
-
----
+A command-line tool that moves data between databases, files and object storage, and transforms or
+anonymizes it on the way. One self-contained binary; nothing is staged in between.
 
 ## Install
 
@@ -23,13 +10,12 @@ dotnet tool install -g dtpipe        # or download a binary from the releases pa
 dtpipe --help
 ```
 
-Six platforms per release — Linux, macOS and Windows, x64 and arm64 — each a single executable with
-the .NET runtime, the DuckDB engine and every database driver inside it. Nothing else to install.
-Full instructions, including building from source: [docs/install.md](./docs/install.md).
+Linux, macOS and Windows, x64 and arm64. The .NET runtime, DuckDB and every database driver are
+inside the binary. Details: [docs/install.md](./docs/install.md).
 
-## One example
+## Example
 
-Anonymize a table on the way out, without ever writing the clear values to disk:
+Anonymize a table on the way out, so the clear values never reach the disk:
 
 ```bash
 dtpipe \
@@ -42,64 +28,31 @@ dtpipe \
   -o anonymized_users.parquet
 ```
 
-More, from a first pipeline to a DAG: [docs/quickstart.md](./docs/quickstart.md).
-
-## Studio
-
-`dtpipe studio ./jobs` opens a local page over the YAML jobs of a folder: each job as cards you
-edit and sample on the real engine, with the target never written. It is part of the CLI and needs
-no coordinator; `--coordinator` only adds the bricks and the pipeline library of a
-[distributed setup](#distributed-pipelines-experimental). Details in
-[REFERENCE.md](./REFERENCE.md#studio-dtpipe-studio).
-
-> **Not everything in this release is stable.** The distributed pipeline (coordinator, pipeline
-> nodes, runner) and `dtpipe studio` are new: they may change or disappear without notice, and the
-> distributed projects ship in no package. Do not build a workload on them yet. What was there
-> before, reading, transforming and writing through the CLI, a job file or the MCP server, is
-> versioned as it always was. The distributed family has not been run on Windows; see
-> [docs/experimentation.md](./docs/experimentation.md).
-
-## Distributed pipelines (experimental)
-
-A **coordinator** cuts a pipeline into fragments and runs each next to its data, on **nodes** that
-offer **bricks** (reads and writes their owner declared on their own database); a **runner** is a
-node with no data that runs the steps between the bricks. The coordinator keeps the pipelines in a
-git-backed library, decides who may send rows to whom, and gives each run one verdict. The
-coordinator and the runner are published as container images, and
-`docker compose -f deploy/compose.yaml up -d` starts a trial of both on your machine. Start with
-[Your first distributed pipeline](./docs/guides/distributed-first-pipeline.md); to run them for
-real, see [deploy/README.md](./deploy/README.md); every setting is in
-[REFERENCE.md](./REFERENCE.md#distributed-pipeline-experimental).
+A first pipeline in six steps, with no database to set up:
+[docs/quickstart.md](./docs/quickstart.md).
 
 ## What it connects to
 
-| Family | Examples | Prefix |
-|:---|:---|:---|
-| **Databases** | PostgreSQL, MySQL, SQLite, DuckDB, SQL Server, Oracle | `pg:`, `mysql:`, `sqlite:`, `duck:`, `mssql:`, `ora:` |
-| **Files** | CSV, JsonL, Parquet, Arrow, XML | `csv:`, `jsonl:`, `parquet:`, `arrow:`, `xml:` |
-| **Object storage** | S3-compatible, Azure Blob | `s3://bucket/key.parquet`, `azure://container/blob.csv` |
-| **Special** | Data generator (source), null / checksum (sink) | `generate:N`, `null:`, `checksum:` |
+| Family | Prefix |
+|:---|:---|
+| Databases | `pg:`, `mysql:`, `sqlite:`, `duck:`, `mssql:`, `ora:` |
+| Files | `csv:`, `jsonl:`, `parquet:`, `arrow:`, `xml:`, or just the file extension |
+| Object storage | `s3://bucket/key.parquet`, `azure://container/blob.csv` |
+| Test endpoints | `generate:N` (a source), `null:` and `checksum:` (sinks) |
 
-`dtpipe providers` lists what your binary actually carries. The connection catalog, with the string
-format and the rules that apply to every provider, is at
-[docs/connections/](./docs/connections/README.md).
-
-> **Is DuckDB alone enough?** Often, yes — and then use it directly. DtPipe embeds it as its SQL
-> engine and adds what a transfer needs around it: anonymization in transit, concurrent fan-out,
-> write strategies (upsert, auto-migrate, bulk), Oracle / SQL Server / XML sources, and repeatable
-> YAML jobs with secret management.
+`dtpipe providers` lists what your binary carries.
 
 ## Documentation
 
-| Where | What it holds |
+| | |
 |:---|:---|
-| [**docs/**](./docs/README.md) | **Start here.** Install, quickstart, concepts, a guide per task, a page per connection |
+| [**docs/**](./docs/README.md) | **Start here**: install, quickstart, concepts, a guide per task, a page per connection |
 | [REFERENCE.md](./REFERENCE.md) | The flags in common use, the YAML job schema, provider options, the MCP tools. `dtpipe --help` lists every flag |
 | [EXTENDING.md](./EXTENDING.md) | Writing a new adapter or transformer |
 
-## Contributing
-
-See [EXTENDING.md](./EXTENDING.md) for the adapter and transformer patterns.
+Running one pipeline across several hosts, and `dtpipe studio`, are experimental and outside the
+versioning promise: see [docs/experimentation.md](./docs/experimentation.md).
 
 ## License
+
 MIT

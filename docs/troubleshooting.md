@@ -2,66 +2,47 @@
 
 [← Documentation](README.md)
 
-## Read the error first
-
-dtpipe refuses rather than approximates, and a refusal names the rewrite to apply. `Binder Error:
-No function matches sum(VARCHAR)` and `No writer factory resolved` are both telling you exactly
-what is wrong.
-
-This page is an index by **symptom**, for when the cause is not obvious from the message — or when
-there is no message at all, which is the harder case. Each row says what is happening in one line
-and sends you to the page that explains it properly.
+Read the error first: dtpipe refuses rather than guesses, and the message usually names the fix.
+This page lists symptoms whose cause is not obvious from the message, or that have no message.
 
 ## Something failed
 
-| Symptom | What it means | Explained in |
+| Symptom | Cause | See |
 |:---|:---|:---|
-| `No function matches sum(VARCHAR)` | A text source has no types; every column is a string | [Files](connections/files.md) |
-| `No writer factory resolved` | The `-o` value matches no provider — often a prefix typo, or an extension outside the supported set | [Connection catalog](connections/README.md) |
-| `--strategy` refused | The target is a file or an object: it is replaced wholesale, there is nothing to append to | [Write strategies](guides/write-strategies.md) |
-| `ORA-01821` / `ORA-01858` / `ORA-01830` on an incremental run | The cursor literal is parsed with `NLS_TIMESTAMP_FORMAT` | [Incremental loading](guides/incremental.md#things-that-bite) |
-| A second identical flag is refused | Repetition means "new branch" for `-i`/`--from`, and is an error for every other scalar flag: anywhere in the command line for `--job` (a command line runs one job file; the error names both), anywhere in the branch for a flag of the branch (`--alias`, `--limit`), in the same stage for one the reader and the writer both take | [Concepts](concepts.md#order-matters-and-repetition-means-something) |
-| A branch cannot be read by another | It declares an `-o` of its own, so it publishes nothing | [DAG pipelines](guides/dag.md#the-rules-that-catch-people-out) |
-| The run exits `130` | Cancelled — Ctrl-C, or a branch that reported a cancellation. Not an error | [Concepts](concepts.md#exit-codes) |
+| `No function matches sum(VARCHAR)` | A text file has no types: every column is a string | [Files](connections/files.md#text-columns-are-text-until-you-say-otherwise) |
+| `No writer factory resolved` | The `-o` value matches no provider: a prefix typo, or an unknown extension | [Connection catalog](connections/README.md) |
+| `--strategy` refused | The target is a file or an object, which is always replaced whole | [Writing to a database](guides/write-strategies.md) |
+| `takes a value, and the flag … follows it` | A flag's value was left out, so the next flag would have been taken as its value | [REFERENCE.md](../REFERENCE.md#core-options) |
+| A second identical flag is refused | Repeating `-i` or `--from` opens a branch; any other flag is given once | [Concepts](concepts.md#order-matters-and-repetition-means-something) |
+| A branch cannot be read by another | It has an `-o` of its own, so it publishes nothing | [DAG pipelines](guides/dag.md#the-rules-that-catch-people-out) |
+| `ORA-01821`, `ORA-01858`, `ORA-01830` on an incremental run | The cursor literal needs a format mask | [Oracle](connections/oracle.md#incremental-loading-needs-a-format-mask) |
+| The run exits `130` | It was cancelled. Not an error | [Concepts](concepts.md#exit-codes) |
 
 ## Nothing failed, and the result is wrong
 
-These have no error message to search for, which is why they are collected here.
-
-| Symptom | What it means | Explained in |
+| Symptom | Cause | See |
 |:---|:---|:---|
-| A database source reads the whole table although you passed a filter | A file reader ignores `--query`; a database reader needs one | [Connection catalog](connections/README.md) |
-| Upsert inserts duplicates instead of updating | No unique index covers exactly the key columns | [Write strategies](guides/write-strategies.md) |
-| A column is missing from the target and nothing failed | Schema regime **discard**, the default — `--auto-migrate` adds it, `--strict-schema` aborts | [Write strategies](guides/write-strategies.md) |
-| A flag seems to be ignored | It landed in the wrong stage or branch: reader options go before the alias, writer options after `-o` | [DAG pipelines](guides/dag.md#the-rules-that-catch-people-out) |
-| An incremental run re-reads everything each time | The `${{cursor://…}}` resolver is missing from the query — the flags track the mark, the resolver is what filters. The run warns | [Incremental loading](guides/incremental.md#two-flags-that-track-one-resolver-that-filters) |
-| `--cursor` never advances on Oracle | The column name is not spelled as the reader returns it — upper case for an unquoted identifier | [Incremental loading](guides/incremental.md#things-that-bite) |
-| Anonymized values do not match between two tables | A global `--fake-seed` is one sequence shared by every column, so the whole `--fake` set matters; `--fake-seed-column` does not have that limit | [Anonymization](guides/anonymization.md#joins-have-to-survive--seed-the-generator-by-value) |
-| A table dtpipe created is not reachable as you typed it | Identifier casing: Oracle folds up, PostgreSQL folds down | [dtpipe and .NET](dotnet.md#oracle-and-sql-server) |
-| MySQL bulk load warns and slows down | `local_infile` is OFF on the server (default since MySQL 8) | [MySQL](connections/mysql.md) |
+| A column is missing from the target | The default schema mode skips it; `--auto-migrate` adds it, `--strict-schema` aborts | [Writing to a database](guides/write-strategies.md#when-the-schemas-differ) |
+| Upsert inserts duplicates | No unique index covers exactly the key columns | [Writing to a database](guides/write-strategies.md) |
+| A flag seems ignored | It sits in the wrong stage: reader options before the alias, writer options after `-o` | [DAG pipelines](guides/dag.md#the-rules-that-catch-people-out) |
+| An incremental run reads everything every time | The query has no `${{cursor://…}}` filter. The run warns | [Incremental loading](guides/incremental.md#how-it-works) |
+| `--cursor` never advances on Oracle | The column must be spelled as the reader returns it: upper case | [Incremental loading](guides/incremental.md#pitfalls) |
+| Anonymized values do not match across two tables | Seed with `--fake-seed-column` on the shared key | [Anonymization](guides/anonymization.md#keep-joins-working) |
+| A table dtpipe created cannot be found under the name you typed | Oracle folds unquoted names up, PostgreSQL folds them down | [Writing to a database](guides/write-strategies.md#table-and-column-names) |
+| A MySQL load warns and slows down | The server's `local_infile` is off | [MySQL](connections/mysql.md) |
 
-## Make the failure show itself
+## Make it show itself
 
 ```bash
-DEBUG=1 dtpipe …                 # verbose, branch-level logging to stderr
-dtpipe … --dry-run 5             # the real pipeline, nothing written
+DEBUG=1 dtpipe …                 # verbose logging, per branch, to stderr
+dtpipe … --dry-run 5             # the real pipeline on 5 rows, nothing written
 dtpipe … --log run.log           # keep the log
-dtpipe … --strict-bindings       # an undeclared flag or job-file key exits non-zero
-dtpipe inspect -i "<source>"     # what does the source actually look like?
-dtpipe providers                 # what does this binary actually support?
+dtpipe … --strict-bindings       # an unknown flag or job-file key fails the run
+dtpipe inspect -i "<source>"     # what the source really looks like
+dtpipe providers                 # what this binary supports
 ```
-
-`--dry-run` is the single most useful of these: it runs the real pipeline over a handful of rows
-with the writer neutralised, and prints the execution plan, the target compatibility report and a
-per-column trace of what each step does to a row. See
-[Preview and checkpoints](guides/preview-and-checkpoints.md).
-
-## Still stuck
-
-- [REFERENCE.md](../REFERENCE.md) — the flags in common use; the answer is often a flag you have
-  not met yet
-- `dtpipe --help`, `dtpipe <subcommand> --help` — every flag, generated from the binary
 
 ---
 
-[← Documentation](README.md)
+The common flags: [REFERENCE.md](../REFERENCE.md). Every flag: `dtpipe --help` and
+`dtpipe <subcommand> --help`.

@@ -118,7 +118,7 @@ main:
       table: people
 ```
 
-Commit the file and run it from CI: see [YAML jobs](guides/yaml-jobs.md).
+Commit the file and run it from CI: see [Jobs and production](guides/production.md).
 
 ---
 

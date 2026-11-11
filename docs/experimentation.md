@@ -1,87 +1,46 @@
 # Experimentation
 
-> **Experimental.** Everything on this page may change or disappear without notice. It carries no
-> stability promise, ships in no package (the coordinator and the runner alone are published, as
-> container images), and is not meant for production.
+[← Documentation](README.md)
 
-DtPipe runs a pipeline in one process. The experimental part cuts one pipeline into **fragments**
-and runs each on a different host, with the Arrow data streaming between them.
+> **Experimental.** Everything on this page may change or disappear without notice. It is not
+> covered by versioning and is not meant for production. It has not been run on Windows.
 
-## What is there
+## Distributed pipelines
 
-| | What it is | Where |
-|:---|:---|:---|
-| **`DtPipe.Coordinator`** | The control plane of a distributed pipeline: it checks a plan, knows which nodes are present, starts every fragment and every transfer between them, and gives the run one verdict | `src/DtPipe.Coordinator/` |
-| **`DtPipe.Coordinator.Server`** | The coordinator as a server: an API and pages, the placement of a pipeline's fragments on nodes, a git-backed library of pipelines, a queue of runs, and the rights that say which nodes exist and which group may send to which | `src/DtPipe.Coordinator.Server/` |
-| **`DtPipe.Coordinator.Host`** | The coordinator as the product's image runs it, or as the folder `build.sh` publishes (it needs `git` on the `PATH`): the server and nothing else | `src/DtPipe.Coordinator.Host/` |
-| **`DtPipe.PipelineNode`** | Runs one fragment on its host as a `dtpipe` child process and relays its Arrow streams to the peers | `src/DtPipe.PipelineNode/` |
-| **`DtPipe.PipelineNode.Hosting`** | `AddDtPipeNode`: makes any .NET host a node, offering the **bricks** its owner declares, each a read or a write on the host's own data | `src/DtPipe.PipelineNode.Hosting/` |
-| **`DtPipe.PipelineNode.Launcher`** | The assembly of `dtpipe node`: a node whose bricks are the branches of the command line, or, with `--runner`, a runner that hosts no data and runs any fragment | `src/DtPipe.PipelineNode.Launcher/` |
-| **The lab** | A demonstrator that hosts these libraries: a coordinator, four data nodes with their own databases and a runner, as local processes or a compose stack, with a page to assemble, place and run a pipeline | `samples/distributed-lab/` |
+A distributed pipeline runs one pipeline across several hosts, with the rows streaming between
+them.
 
-The distributed projects move the data over [TransportR](https://github.com/nicopon/TransportR), a
-separate transport library; nothing else in dtpipe depends on it, and the CLI hosts neither a node
-nor a hub. These projects sit outside `DtPipe.sln`, so `build.yml` does not build them; the lab,
-with its test nodes and their data, sits outside the solution and the build.
+| Piece | What it does |
+|:---|:---|
+| **Coordinator** | Holds a library of pipelines, decides which part runs where, starts each run and gives it one verdict. It says which host may send rows to which |
+| **Node** | A host next to its own data. It offers **bricks**: reads and writes its owner declared on that data, so the coordinator never holds a connection string |
+| **Runner** | A node with no data. It runs the steps between the bricks: a join, a SQL query, an anonymization |
 
-The lab exists to try the idea and to find where it breaks, not to serve a workload. None of this
-has been run on Windows. To see it run, follow its
-[README](../samples/distributed-lab/README.md). The rules the server holds to (rights, library,
-placement, runs) are in its [CLAUDE.md](../src/DtPipe.Coordinator.Server/CLAUDE.md).
+A node is `dtpipe node`, or any .NET host that calls `AddDtPipeNode`. The coordinator and the runner
+are published as container images.
 
-## Try it
-
-A release publishes the coordinator and the runner as container images, and `deploy/compose.yaml`
-runs them from one command, every identity verified by a key the coordinator issues tokens for.
-The walkthrough is
-[Your first distributed pipeline](guides/distributed-first-pipeline.md); running the two hosts for
-real is [deploy/README.md](../deploy/README.md); every setting is in
-[REFERENCE.md](../REFERENCE.md#distributed-pipeline-experimental).
-
-## Nodes and replicas
-
-A node is an identity: a name, the groups it belongs to, and the token it connects with. One or
-more hosts, its **replicas**, can carry that identity. A run is placed on one connected replica of
-the node whose bricks match the plan, and a replica that is lost ends the runs placed on it. The
-replicas of a node are expected to be interchangeable (the same database, the same variables, the
-same bricks outside a rolling update); nothing checks it. The lab starts several replicas with
-`LAB_REPLICAS`, described in its README.
+To try it: [Your first distributed pipeline](guides/distributed-first-pipeline.md). To run it for
+real: [deploy/README.md](../deploy/README.md). Every setting:
+[REFERENCE.md](../REFERENCE.md#distributed-pipeline-experimental). A demonstrator with four data
+nodes, joins across them and injected faults: [the lab](../samples/distributed-lab/README.md).
 
 ## The studio
 
-`dtpipe studio` belongs to the CLI, not to the distributed projects. It opens a local page over the
-YAML jobs of a folder, to design, debug and run them, with no coordinator at all. Given
-`--coordinator`, it also offers the bricks the nodes declare, opens pipelines from the coordinator's
-library and publishes a job there. The coordinator's own pages design nothing: what a person writes
-reaches its library from a studio. The command is in the
-[reference](../REFERENCE.md#studio-dtpipe-studio).
+`dtpipe studio ./jobs` opens a local page over the YAML jobs of a folder. Each job shows as cards
+that you edit and preview on the real engine, without writing to the target. It needs no
+coordinator; with `--coordinator`, it also offers the nodes' bricks and publishes jobs to the
+coordinator's library. Details: [REFERENCE.md](../REFERENCE.md#studio-dtpipe-studio).
 
-## Limits to know first
+## Limits
 
-- **The coordinator is one active process, not a highly available service.** The history of its
-  runs, its armed deployments, its rights and its session keys are in a SQLite file in its state
-  directory (`Coordinator:Sqlite:Directory` moves it), or in a PostgreSQL or SQL Server database
-  (`Coordinator:Store` and `Coordinator:ConnectionString`). A first start on an empty store needs
-  `Coordinator:Initialize` set to true. Its library is a git repository in its state directory; with
-  a git remote configured (`Coordinator:Library:Remote:Url`, and the token in
-  `Coordinator__Library__Remote__Token`) every save is pushed before it is accepted, a save the
-  remote refuses is undone, and a state directory that is lost is read back from the remote. Without
-  one, that directory holds the only copy of the library. All of it survives a restart. A run in
-  flight does not: it is ended as an error, keeps its id, and the nodes that carried it are asked to
-  abandon its fragments. On PostgreSQL or SQL Server a second instance can wait as a passive standby
-  (`Coordinator:Standby`) and take over when the first dies, as a restart does: it saves the time to
-  start a new one, never a run in flight.
-- **One machine; Windows untried.** The lab has been exercised on a single macOS machine, as local
-  processes and as a compose stack of Linux containers. A node is designed to run on Windows, which
-  has not been tried.
-- **No contract.** The libraries' interfaces, the messages between coordinator and nodes, and the
-  lab may all change.
-
-On the command line, `dtpipe split` offers the points where a job can be cut in two; how a
-fragment's boundary is bound to a run is in the reference.
+- **The coordinator is one process.** Its state survives a restart; a run in flight does not, and
+  ends as an error. On PostgreSQL or SQL Server a second instance can wait as a standby and take
+  over. Storage and backup: [deploy/README.md](../deploy/README.md).
+- **Tried on one machine.** As local processes and as Linux containers, on macOS.
+- **No contract.** The libraries, the messages between coordinator and nodes, and the lab may all
+  change.
 
 ---
 
-See also: [DAG pipelines](guides/dag.md) · [Concepts](concepts.md) ·
-[REFERENCE.md](../REFERENCE.md#binding-a-fragments-boundary) ·
-[Studio](../REFERENCE.md#studio-dtpipe-studio)
+`dtpipe split` offers the points where a job can be cut in two:
+[REFERENCE.md](../REFERENCE.md#offering-the-points-a-job-could-be-cut-at).

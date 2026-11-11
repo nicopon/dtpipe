@@ -1,61 +1,38 @@
 # DtPipe documentation
 
-DtPipe is a single self-contained binary that reads from a source, transforms rows in flight, and
-writes to a destination with no intermediate staging. It moves data between databases, files and
-object storage — and, on the way, it anonymizes, joins, filters and reshapes.
+DtPipe reads from a source, transforms rows in flight, and writes to a target. It moves data between
+databases, files and object storage, and can anonymize, join, filter and reshape it on the way.
 
-These pages are plain Markdown: they render as you browse the repository, there is nothing to
-build and nothing to publish. Every link below is a relative link inside this folder.
+**Start:** [Install](install.md) · [Quickstart](quickstart.md) · [Concepts](concepts.md)
 
-## Start here
+## I want to…
 
 | | |
 |:---|:---|
-| [**Install**](install.md) | A binary for your platform, or `dotnet tool install -g dtpipe` |
-| [**Quickstart**](quickstart.md) | A working pipeline in five commands, no database required |
-| [**Concepts**](concepts.md) | The model: source → transformers → target, branches, batches |
-
-## By task
-
-| I want to… | Page |
-|:---|:---|
-| Copy a table from one database to another | [Write strategies](guides/write-strategies.md) |
-| Give a developer realistic data without giving them real data | [Anonymization](guides/anonymization.md) |
-| Join two sources, fan one source out to several targets | [DAG pipelines](guides/dag.md) |
+| Copy a table into a database | [Writing to a database](guides/write-strategies.md) |
+| Hand out realistic data that is not real | [Anonymization](guides/anonymization.md) |
+| Join two sources, merge them, or fan one out | [DAG pipelines](guides/dag.md) |
 | Reshape rows with SQL or JavaScript | [SQL and JavaScript](guides/sql-and-javascript.md) |
-| Transfer only what changed since the last run | [Incremental loading](guides/incremental.md) |
+| Transfer only what changed | [Incremental loading](guides/incremental.md) |
 | See what a pipeline will do before it does it | [Preview and checkpoints](guides/preview-and-checkpoints.md) |
-| Save a pipeline and run it from CI | [YAML jobs](guides/yaml-jobs.md) |
-| Run it every night, unattended, against production | [Running in production](guides/production.md) |
+| Save a pipeline and run it from CI or every night | [Jobs and production](guides/production.md) |
 | Keep credentials out of the command line | [Secrets](guides/secrets.md) |
-| Run it in a .NET estate, or call it from .NET code | [dtpipe and .NET](dotnet.md) |
-| Understand an error message | [Troubleshooting](troubleshooting.md) |
-| Run a first distributed pipeline over a database of my own (experimental) | [Your first distributed pipeline](guides/distributed-first-pipeline.md) |
-| Design a job as cards in a local page (experimental) | [Your first distributed pipeline](guides/distributed-first-pipeline.md#open-the-studio) |
+| Let an AI assistant design a pipeline | [The agent](guides/agent.md) |
+| Use dtpipe's libraries from .NET code | [dtpipe and .NET](dotnet.md) |
+| Understand an error | [Troubleshooting](troubleshooting.md) |
 
 ## Connections
 
-Start at the [**connection catalog**](connections/README.md) for the full list, the connection
-string format and the rules that apply to every provider.
+[Catalog](connections/README.md) · [SQL Server](connections/sql-server.md) ·
+[Oracle](connections/oracle.md) · [PostgreSQL](connections/postgresql.md) ·
+[MySQL / MariaDB](connections/mysql.md) · [DuckDB](connections/duckdb.md) ·
+[Files](connections/files.md) · [Object storage](connections/object-storage.md)
 
-| Databases | Files & storage |
-|:---|:---|
-| [SQL Server](connections/sql-server.md) · [Oracle](connections/oracle.md) · [PostgreSQL](connections/postgresql.md) · [MySQL / MariaDB](connections/mysql.md) · [DuckDB](connections/duckdb.md) | [Files](connections/files.md) (CSV, JSONL, Parquet, Arrow, XML) · [Object storage](connections/object-storage.md) (S3, Azure Blob) |
+## Experimental
 
-## Experimentation
+[Experimentation](experimentation.md): one pipeline across several hosts, and `dtpipe studio`.
 
-Running one pipeline cut into fragments on several hosts is **experimental**: the libraries behind
-it and the lab that demonstrates them may change or go away, as may `dtpipe studio`, the local
-page that designs jobs as cards. Read [**Experimentation**](experimentation.md) for the limits,
-then [**Your first distributed pipeline**](guides/distributed-first-pipeline.md) to run one over a
-database of your own.
+---
 
-## Reference
-
-These pages explain and show. For the lists — flags, options, YAML keys — go to the reference
-documents at the root of the repository. `dtpipe --help` lists every flag the binary carries.
-
-| Document | What it holds |
-|:---|:---|
-| [REFERENCE.md](../REFERENCE.md) | The flags in common use, the YAML job schema, provider-specific options, the MCP tool table |
-| [EXTENDING.md](../EXTENDING.md) | Writing a new adapter or transformer |
+The common flags, the YAML schema and provider options: [REFERENCE.md](../REFERENCE.md). Every
+flag: `dtpipe --help`. Writing an adapter or a transformer: [EXTENDING.md](../EXTENDING.md).

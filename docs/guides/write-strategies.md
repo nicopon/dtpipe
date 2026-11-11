@@ -2,98 +2,64 @@
 
 [← Documentation](../README.md)
 
-Three independent questions, three sets of flags: **how rows land** (`--strategy`), **what happens
-when the schemas differ** (the schema regime), and **what SQL runs around the transfer** (hooks).
-
-## How rows land
-
-| `--strategy` | Behaviour | Typical use |
-|:---|:---|:---|
-| `Append` *(default)* | Insert into the existing table | Daily increments, log shipping |
-| `Truncate` | `TRUNCATE` then insert | Full refresh, keeping schema and indexes |
-| `DeleteThenInsert` | `DELETE` then insert | When `TRUNCATE` is not available to you |
-| `Recreate` | Drop, create from the source schema, insert | Full refresh including schema changes |
-| `Upsert` | Update matching rows by key, insert the rest | Syncing from a source of truth |
-| `Ignore` | Insert only the rows that are missing | Loading only what is new |
-
 ```bash
 dtpipe -i orders_update.csv \
   -o "mssql:Server=.;Database=app;Integrated Security=true" \
   --table Orders --strategy Upsert --key OrderId
 ```
 
-`--key` is read from the target's primary key when you omit it. Pass it explicitly when the table
-does not exist yet, or when several unique indexes could match.
+## How rows land
 
-> [!WARNING]
-> An upsert needs a unique index covering exactly the key columns. On MySQL, without one, the
-> generated clause degenerates into a plain `INSERT` — dtpipe detects that and falls back to a
-> correct, slower path. See [MySQL](../connections/mysql.md).
+| `--strategy` | What it does | For |
+|:---|:---|:---|
+| `Append` (default) | Inserts into the existing table | Daily increments |
+| `Truncate` | Empties the table, then inserts | A full refresh that keeps the schema and indexes |
+| `DeleteThenInsert` | Deletes all rows, then inserts | When `TRUNCATE` is not allowed |
+| `Recreate` | Drops the table, recreates it from the source schema, inserts | A full refresh with schema changes |
+| `Upsert` | Updates rows with a matching key, inserts the others | Syncing from a source of truth |
+| `Ignore` | Inserts only the rows whose key is missing | Loading only what is new |
 
-**An interrupted `Append` leaves the batches already written.** The PostgreSQL, SQL Server, Oracle,
-MySQL and SQLite writers commit each batch on its own and wrap the run in no transaction. A run
-that stops midway — a refused type, a violated constraint, any error — exits `1` with every earlier
-batch in the table, values intact, and the batch that failed writes nothing. The batch is the unit
-`--batch-size` sets, so a smaller one leaves more of the run behind. The DuckDB writer buffers its
-rows and flushes them on its own schedule, so what it leaves is not a count of batches.
+`--key` defaults to the target's primary key. Give it when the table does not exist yet, or when
+several unique indexes could match.
 
-A second run starts from the top, so a plain `Append` writes those rows again, or stops on the key
-they already hold. Rerun with `Upsert` instead, or with `DeleteThenInsert` or `Truncate` when the
-table may be emptied: each ends with one row per key on a partly loaded table. A cursor alone does
-not help, since its mark moves only when a run succeeds and the rerun reads the same window again;
-when the query reads in cursor order, `--cursor-from` set to the highest value the target now holds
-resumes after the written batches. See [Incremental loading](incremental.md).
+A file or object storage target has no strategy: it is always replaced whole.
 
-**A file or object target has no strategies.** It is replaced wholesale, so `--strategy` is refused
-rather than accepted and quietly ignored.
+## When a run stops halfway
 
-**dtpipe writes rows, not domain objects.** Where a target table belongs to a service whose rules
-live in application code — validation, audit columns, domain events, a soft-delete marker —
-those rules do not run: the rows arrive through SQL, below that layer. Whether that is acceptable
-is a property of the target, not of the transfer, so it is the team owning the target database
-that weighs it. `Recreate` is worth a second look in that conversation: it drops the table, and
-with it whatever indexes, constraints and triggers that team put on it. It builds the new table from
-the source schema, with the primary key `--key` names, and warns when the table it replaces had
-columns the source lacks or a primary key of its own.
+Each batch is committed on its own. A run that fails leaves the batches already written, and exits
+`1`. Running it again with `Append` writes them a second time; with `Upsert`, `DeleteThenInsert`
+or `Truncate` the table ends with one row per key. See also
+[Jobs and production](production.md#when-a-run-fails).
 
-## What happens when the schemas differ
+## When the schemas differ
 
-Before writing to a database, dtpipe compares the source schema to the target's. Three flags
-describe four regimes plus an off switch:
+dtpipe compares the source with the target before writing:
 
-| Flags | Regime | A column the target lacks | A type mismatch |
+| Flags | Mode | A column the target lacks | A type mismatch |
 |:---|:---|:---|:---|
-| *(none)* | **discard** | reported, skipped, the run continues | reported, the run continues |
-| `--strict-schema` | **freeze** | aborts | aborts |
-| `--auto-migrate` | **evolve** | `ALTER TABLE ADD COLUMN`, then written | reported, the run continues |
-| `--auto-migrate --strict-schema` | **evolve, with a net** | added, then re-inspected | aborts unless migrating resolved it |
-| `--no-schema-validation` | **off** | the target is never inspected | — |
+| (none) | **discard** | Reported, not written | Reported, the run goes on |
+| `--strict-schema` | **freeze** | The run aborts | The run aborts |
+| `--auto-migrate` | **evolve** | Added with `ALTER TABLE`, then written | Reported, the run goes on |
+| `--auto-migrate --strict-schema` | **evolve, strictly** | Added | The run aborts |
+| `--no-schema-validation` | **off** | Not checked | Not checked |
 
-Every run states the regime it validated under, whatever the outcome:
+Every run prints the mode it used:
 
 ```
 Schema mode: discard - incompatibilities are reported and the run continues;
 columns missing from the target are not written.
 ```
 
-That line matters more than it looks: on a target that happens to be compatible, **discard** and
-**freeze** produce exactly the same output while offering opposite guarantees. Only the line tells
-them apart.
-
-`--no-schema-validation` cannot be combined with the other two — it returns before the inspection
-they need — and the combination is refused by name.
-
 ## SQL around the transfer
 
-| Hook | Runs |
+| Hook | Runs on the target |
 |:---|:---|
-| `--pre-exec` | On the target, before the pipeline starts |
-| `--post-exec` | On the target, after a successful transfer |
-| `--on-error-exec` | On the target, on failure |
-| `--finally-exec` | On the target, whatever happened |
+| `--pre-exec` | Before the transfer |
+| `--post-exec` | After a successful transfer |
+| `--on-error-exec` | After a failure |
+| `--finally-exec` | Always, at the end |
 
-Each accepts inline SQL or a file (`@scripts/pre.sql`). They are the place for an index drop and
-rebuild around a bulk load, a `MERGE` into a final table, or an audit row.
+Each takes inline SQL or a file (`@scripts/pre.sql`):
 
 ```bash
 dtpipe -i daily.parquet -o "pg:…" --table stg_daily --strategy Truncate \
@@ -102,14 +68,11 @@ dtpipe -i daily.parquet -o "pg:…" --table stg_daily --strategy Truncate \
   --on-error-exec "INSERT INTO etl_errors(job, at) VALUES ('daily', now())"
 ```
 
-> [!NOTE]
-> None of the four runs under `--dry-run`: they are SQL on the target, and a preview does not touch
-> the target. See [Preview and checkpoints](preview-and-checkpoints.md).
+Hooks do not run under `--dry-run`.
 
 ## Table and column names
 
-An identifier is handed to the engine the way *that engine* reads it unquoted, so the name it
-stores is the name any other tool can type:
+A name is stored the way the engine stores it unquoted, so any tool can type it:
 
 | Engine | `--table stock_moves` | `--table StockMoves` |
 |:---|:---|:---|
@@ -117,14 +80,19 @@ stores is the name any other tool can type:
 | PostgreSQL | `stock_moves` | `stockmoves` |
 | MySQL, SQL Server, SQLite, DuckDB | `stock_moves` | `StockMoves` |
 
-To keep an exact spelling, quote the value yourself — `--table '"StockMoves"'` — and remember it is
-then addressable only in quotes, from every tool.
+To keep an exact spelling, quote it yourself: `--table '"StockMoves"'`. It must then be quoted
+everywhere. `--prefix staging_` prefixes every table name in the run.
 
-`--prefix staging_` prefixes the table name on every database writer in the run, which is the
-cheap way to point a whole job at a scratch area.
+## Pitfalls
+
+- **Upsert needs a unique index on exactly the key columns.** MySQL without one falls back to a
+  slower path, and warns: see [MySQL](../connections/mysql.md).
+- **Rows bypass the application.** Validation, audit columns or events that a service enforces in
+  its own code do not run. Check with the team that owns the target.
+- **`Recreate` drops the table** with its indexes, constraints and triggers, and warns when the old
+  table had columns or a primary key the new one lacks.
 
 ---
 
-See also: [Incremental loading](incremental.md) · [SQL Server](../connections/sql-server.md) ·
-[Oracle](../connections/oracle.md) ·
+See also: [Incremental loading](incremental.md) ·
 [REFERENCE.md](../../REFERENCE.md#target-writer-options)

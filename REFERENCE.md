@@ -1675,8 +1675,22 @@ dtpipe keygen runner-1 --out runner-1.key
 #### Incremental loading in a distributed pipeline
 
 The coordinator keeps the cursor of each branch that writes, since replicas share no disk and a run
-succeeds by the coordinator's verdict, not a fragment's. Guide:
-[Incremental loading](docs/guides/incremental.md#in-a-distributed-pipeline).
+succeeds by the coordinator's verdict, not a fragment's. Two bricks make it: a source that filters
+with a token naming no file, and a sink that names the column to follow, each declared on the node
+that owns its database, with absolute paths:
+
+```bash
+dtpipe node --name shop --coordinator http://coordinator.localtest.me:8080 \
+  --client-secret '${{SHOP_KEY}}' --alias orders-new \
+  -i sqlite:/srv/shop/shop.db \
+  --query 'SELECT * FROM orders WHERE OrderId > ${{cursor://|-1}} ORDER BY OrderId'
+dtpipe node --name warehouse --coordinator http://coordinator.localtest.me:8080 \
+  --client-secret '${{WAREHOUSE_KEY}}' --alias orders-copy \
+  -o sqlite:/srv/warehouse/warehouse.db --table orders_copy --cursor OrderId
+```
+
+A pipeline that reads `brick:shop/orders-new` and writes `brick:warehouse/orders-copy` then loads
+only the new orders on each run.
 
 - **Key**: the library pipeline and the alias of the branch that writes. The column is the sink
   brick's `cursor`; a brick never sets `state` (the node gives the child a file of its own and reads
@@ -1686,6 +1700,8 @@ succeeds by the coordinator's verdict, not a fragment's. Guide:
 - **At launch** the coordinator hands the kept value to the fragment that holds the one source brick
   upstream of the sink, as `DTPIPE_CURSOR_OVERRIDE` in the child's environment. A cursor that does
   not exist yet is no error: the token's default is used.
+- **Not served**: a `cursor` on a source brick. A sink fed by no source brick (an input written on
+  the runner) has no cursor to start from: the run succeeds and keeps none, and its page says so.
 - **At the verdict** of a run that succeeded as a whole, it keeps the value each sink reported. A
   failed or cancelled run, or one that lost a replica, advances nothing; so does a value out of the
   rule below or a store that refuses the write, which the run's page says by name.

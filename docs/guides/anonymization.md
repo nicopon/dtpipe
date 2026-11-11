@@ -2,25 +2,9 @@
 
 [← Documentation](../README.md)
 
-Give a developer, a vendor or a test environment data that **behaves** like production without
-**being** production. The transformation happens in transit: the source is only read, and no
-intermediate file holds the clear values.
-
-## The six operations
-
-| Flag | What it does | Example |
-|:---|:---|:---|
-| `--fake` | Replaces a value with a generated one that looks like it | `--fake "email:internet.email"` |
-| `--mask` | Keeps part of a value, replaces the rest — `#` keeps, anything else replaces | `--mask "phone:######****"` |
-| `--null` | Forces a column to NULL | `--null salary` |
-| `--overwrite` | Sets one static value for every row | `--overwrite "status:redacted"` |
-| `--format` | Rebuilds a value from other columns | `--format "display:{first} {last}"` |
-| `--compute` | Anything the five above cannot express, in JavaScript | `--compute "age:Math.floor(row.age/10)*10"` |
-
-`--fake` draws from [Bogus](https://github.com/bchavez/Bogus): `name.fullName`, `internet.email`,
-`address.city`, `company.companyName`, `random.uuid`, `commerce.productName`… A value that is not
-a known faker path is refused, naming what the dataset does have — `email:internet` is an error,
-`email:internet.email` is the path.
+Give a developer, a vendor or a test environment data that behaves like production without being
+production. The data is transformed on its way through: the source is only read, and no file holds
+the clear values.
 
 ## A run, end to end
 
@@ -48,20 +32,26 @@ id,name,email,phone,iban,salary
 2,Krista Simonis,Roxane_Konopelski@yahoo.com,079876****,FR76********************190,
 ```
 
-The mask pattern is positional: `######****` keeps the first six characters and replaces the last
-four, which leaves an operator enough to recognise a number without being able to dial it.
+| Flag | What it does | Example |
+|:---|:---|:---|
+| `--fake` | Replaces a value with a realistic generated one | `--fake "email:internet.email"` |
+| `--mask` | Keeps some characters: `#` keeps, any other character replaces | `--mask "phone:######****"` |
+| `--null` | Sets a column to NULL | `--null salary` |
+| `--overwrite` | Sets the same value on every row | `--overwrite "status:redacted"` |
+| `--format` | Rebuilds a value from other columns | `--format "display:{first} {last}"` |
+| `--compute` | Anything else, in JavaScript | `--compute "age:Math.floor(row.age/10)*10"` |
 
-## Joins have to survive — seed the generator by value
+`--fake` uses [Bogus](https://github.com/bchavez/Bogus): `name.fullName`, `internet.email`,
+`address.city`, `company.companyName`, `random.uuid`… An unknown path is refused, and the message
+lists the valid ones. `--fake-locale fr` generates French names and addresses.
 
-Replacing `alice@corp.com` with a random address in two tables destroys the join between them.
-`--fake-seed-column` makes the generated value a function of an input value, so the **same input
-always produces the same output**.
+## Keep joins working
 
-Seed on the **stable key**, not on the column being replaced. A `customer_id` does not change; an
-email address does, and seeding on it means a customer who changes address becomes a different
-person in the anonymized extract.
+A random email in two tables breaks the join between them. `--fake-seed-column` makes the fake
+value depend on another column, so the same input always gives the same output. Seed on a stable
+key, such as a customer id, not on the column you replace.
 
-`customers.csv` and `orders.csv` — the key is `customer_id`, present in both:
+`customers.csv` and `orders.csv` share `customer_id`:
 
 ```
 customer_id,email,name                order_id,customer_id,customer_email,amount
@@ -85,38 +75,22 @@ C2,Erica41@yahoo.com,Bob Durand               11,C2,Erica41@yahoo.com,80
                                               12,C1,Laron.Rice85@gmail.com,45
 ```
 
-Two separate runs, two separate files, and the foreign key still points where it pointed. The
-column names differ — `email` here, `customer_email` there — and that is fine: the name plays no
-part, only the seed value does.
+Two runs, two files, and the join still holds.
 
-> [!NOTE]
-> **With `--fake-seed-column` or `--fake-seed-row`, each column depends only on its own mapping.**
-> Adding a second `--fake`, or reordering two of them, leaves the first column's values alone.
-> A global `--fake-seed` is the exception: it feeds one sequence shared by every column, so
-> adding or reordering a mapping changes what the others produce.
-
-| Mode | What it is a function of | Use it for |
+| Option | Same output for | Use it for |
 |:---|:---|:---|
-| `--fake-seed-column "customer_id"` | The value of one column | Referential integrity across tables |
-| `--fake-seed-column "region,branch"` | Several columns, composite | A key that is only unique in combination |
-| `--fake-seed-row` | The row index | Reproducible files when no stable key exists |
-| `--fake-seed 12345` | A global offset | Reproducing a whole run exactly |
-| `--skip-null` | — | Leave NULL as NULL instead of inventing a value |
+| `--fake-seed-column "customer_id"` | The same value in that column | Joins across tables |
+| `--fake-seed-column "region,branch"` | The same combination | A key made of several columns |
+| `--fake-seed-row` | The same row number | Reproducible files with no stable key |
+| `--fake-seed 12345` | The same whole run | Reproducing a run exactly |
+| `--skip-null` | — | Leaving a NULL as NULL |
 
-`--fake-seed-row` and `--fake-seed-column` are mutually exclusive, and using both is refused.
+With `--fake-seed` alone, adding or reordering a `--fake` changes the other columns' values. With
+`--fake-seed-column` or `--fake-seed-row`, it does not.
 
-## Locale
+## Generate data from nothing
 
-```bash
-dtpipe -i emp.csv --fake "name:name.fullName" --fake-locale fr -o emp_anon.csv
-# Éloïse Martinez, Ascelin Morel
-```
-
-## Generating a column that does not exist
-
-`--fake` maps a column that is not in the incoming rows by **creating** it. The same flag therefore
-anonymizes what is there and synthesizes what is not, which is how a realistic dataset is built
-from nothing:
+On a column that does not exist, `--fake` creates it:
 
 ```bash
 dtpipe -i generate:10000 \
@@ -128,14 +102,11 @@ dtpipe -i generate:10000 \
   -o customers.parquet
 ```
 
-That is also the trap behind the warning above: a mapping whose column is absent does not fail, it
-adds a column — so "declare the same mappings on both sides" cannot be done by copying a flag list
-between two tables that do not have the same columns.
+So a mapping on a misspelled column adds a column instead of failing: check the result.
 
-## Prove it before you hand it over
+## Check before you hand it over
 
-`--dry-run N` runs the real pipeline over N rows with the writer switched off, and shows each
-column at each step:
+`--dry-run N` shows each column after each step, and writes nothing:
 
 ```bash
 dtpipe -i emp.csv --fake "email:internet.email" --mask "phone:######****" \
@@ -147,71 +118,44 @@ dtpipe -i emp.csv --fake "email:internet.email" --mask "phone:######****" \
 ╭──────────┬────────────────┬────────────────┬────────────────┬────────────────╮
 │ Column   │ Input          │ Fake (Step 1)  │ Mask (Step 2)  │ Output         │
 ├──────────┼────────────────┼────────────────┼────────────────┼────────────────┤
-│ name     │ Alice Martin   │ Alice Martin   │ Alice Martin   │ String ->      │
-│          │ (String)       │ (String)       │ (String)       │ STRING         │
-│ email    │ alice@corp.com │ Kurt_Gerhold26 │ Kurt_Gerhold26 │ String ->      │
-│          │ (String)       │ @hotmail.com   │ @hotmail.com   │ STRING         │
+│ id       │ 1 (String)     │ 1 (String)     │ 1 (String)     │ String         │
+│ name     │ Alice Martin   │ Alice Martin   │ Alice Martin   │ String         │
+│          │ (String)       │ (String)       │ (String)       │                │
+│ email    │ alice@corp.com │ Desmond_West@y │ Desmond_West@y │ String         │
+│          │ (String)       │ ahoo.com       │ ahoo.com       │                │
 │          │                │ (String)       │ (String)       │                │
-│ phone    │ 0612345678     │ 0612345678     │ 061234****     │ String ->      │
-│          │ (String)       │ (String)       │ (String)       │ STRING         │
+│ phone    │ 0612345678     │ 0612345678     │ 061234****     │ String         │
+│          │ (String)       │ (String)       │ (String)       │                │
+│ iban     │ FR763000600001 │ FR763000600001 │ FR763000600001 │ String         │
+│          │ 1234567890189  │ 1234567890189  │ 1234567890189  │                │
+│          │ (String)       │ (String)       │ (String)       │                │
+│ salary   │ 52000 (String) │ 52000 (String) │ 52000 (String) │ String         │
 ╰──────────┴────────────────┴────────────────┴────────────────┴────────────────╯
 ```
 
-One column per step, so you can see *where* a value changed — `email` at step 1, `phone` at step 2
-— and confirm that a column you expected to be touched actually was. **Output** is the type
-mapping to the target, not a value; a dash or `Missing` there means the target column does not
-exist yet.
+`email` changed at step 1, `phone` at step 2, and `iban` was not touched. **Output** is the type
+written to the target.
 
-Nothing is written, so the check costs nothing. See
-[Preview and checkpoints](preview-and-checkpoints.md).
+## Make it a reviewed policy
 
-## Make it repeatable
-
-Anonymization rules are policy: they belong in a file that is reviewed, not in a shell history.
+Save the rules as a job file, review it, and run it with `--job`:
 
 ```bash
 dtpipe -i emp.csv --fake "name:name.fullName" --fake "email:internet.email" \
   --null salary -o emp_anon.csv --export-job anonymize-employees.yaml
 ```
 
-```yaml
-main:
-  input: emp.csv
-  transformers:
-  - type: fake
-    mappings:
-      name: name.fullName
-  - type: fake
-    mappings:
-      email: internet.email
-  - type: null
-    mappings:
-      salary: ''
-  output: emp_anon.csv
-  batch-size: 32768
-  sampling-rate: 1
-```
+See [Jobs and production](production.md).
 
-Edit it, commit it, run it with `dtpipe --job anonymize-employees.yaml`.
+## Limits
 
-> [!TIP]
-> One `fake` transformer can carry several mappings and one set of options, which the YAML form
-> expresses directly — `mappings:` with several columns under a single `options: {locale: fr}`.
-> That is the shape to reach for when one policy covers several columns.
-
-## What this is, and what it is not
-
-- The **source is never modified**: a pipeline reads it and writes elsewhere.
-- You choose the columns. Nothing scans for personal data on your behalf, and a free-text comment
-  column that quotes a customer's name stays as it is unless you handle it.
-- Masking and faking are not anonymity proofs. A dataset with a rare combination of quasi-
-  identifiers — postcode, birth date, job title — can still be re-identified even with names
-  replaced. Drop what you do not need (`--project`, `--drop`), and reduce precision where you can
-  (`--compute` to round a date or a salary into a band).
+- You choose the columns. Nothing scans for personal data, and a free-text column that quotes a
+  name stays as it is.
+- Masking and faking do not prove anonymity: a rare combination of postcode, birth date and job
+  title can still identify someone. Drop what you do not need (`--drop`, `--project`) and round
+  what you can (`--compute`).
 
 ---
 
-See also: [SQL and JavaScript](sql-and-javascript.md) ·
-[Preview and checkpoints](preview-and-checkpoints.md) ·
-[Troubleshooting](../troubleshooting.md) ·
+See also: [Preview and checkpoints](preview-and-checkpoints.md) ·
 [REFERENCE.md](../../REFERENCE.md#data-transformations)

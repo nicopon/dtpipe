@@ -2,13 +2,20 @@
 
 [← Documentation](README.md)
 
-DtPipe ships as **one file**. There is no runtime to install alongside it, no ODBC manager and no
-database client libraries: the drivers for PostgreSQL, MySQL, SQL Server, Oracle, SQLite and
-DuckDB are compiled in.
+DtPipe is one file. The .NET runtime, DuckDB and the drivers for PostgreSQL, MySQL, SQL Server,
+Oracle and SQLite are inside it.
 
-## A binary from the releases page
+## As a .NET tool
 
-Every tagged version publishes a self-contained archive per platform:
+```bash
+dotnet tool install -g dtpipe       # needs the .NET 10 SDK
+dotnet tool update -g dtpipe
+```
+
+## As a binary
+
+Each release publishes one archive per platform on the
+[releases page](https://github.com/nicopon/dtpipe/releases):
 
 | Platform | Archive |
 |:---|:---|
@@ -16,89 +23,41 @@ Every tagged version publishes a self-contained archive per platform:
 | macOS | `dtpipe-macos-x64.tar.gz`, `dtpipe-macos-arm64.tar.gz` |
 | Windows | `dtpipe-windows-x64.exe.zip`, `dtpipe-windows-arm64.exe.zip` |
 
-The coordinator of a [distributed pipeline](guides/distributed-first-pipeline.md) is published
-beside them, as the folder `coordinator/` in `dtpipe-coordinator-<platform>.tar.gz`
-(`linux-x64`, `linux-arm64`, `macos-x64`, `macos-arm64`) or `dtpipe-coordinator-<platform>.zip`
-(`windows-x64`, `windows-arm64`). It needs `git` on the `PATH`.
-
-**Windows (PowerShell)**
+```bash
+curl -sSL https://github.com/nicopon/dtpipe/releases/latest/download/dtpipe-linux-x64.tar.gz | tar xz
+sudo mv dtpipe /usr/local/bin/
+```
 
 ```powershell
 $url = "https://github.com/nicopon/dtpipe/releases/latest/download/dtpipe-windows-x64.exe.zip"
 Invoke-WebRequest -Uri $url -OutFile dtpipe.zip
 Expand-Archive -Path dtpipe.zip -DestinationPath $env:LOCALAPPDATA\dtpipe -Force
-& "$env:LOCALAPPDATA\dtpipe\dtpipe.exe" --version
+[Environment]::SetEnvironmentVariable("PATH", "$env:PATH;$env:LOCALAPPDATA\dtpipe", "User")
 ```
 
-To call it as `dtpipe` from any prompt, add that folder to your user `PATH` — no admin rights
-needed:
-
-```powershell
-[Environment]::SetEnvironmentVariable(
-    "PATH", "$env:PATH;$env:LOCALAPPDATA\dtpipe", "User")
-```
-
-**Linux and macOS**
-
-```bash
-curl -sSL https://github.com/nicopon/dtpipe/releases/latest/download/dtpipe-linux-x64.tar.gz | tar xz
-sudo mv dtpipe /usr/local/bin/
-dtpipe --version
-```
-
-Unpack it wherever you like — a CI cache, a mounted volume, a locked-down workstation. It needs no
-installer and writes nothing outside the directory it runs in.
-
-## As a .NET global tool
-
-```bash
-dotnet tool install -g dtpipe
-dtpipe --version
-```
-
-Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0). Update with
-`dotnet tool update -g dtpipe`, remove with `dotnet tool uninstall -g dtpipe`.
+No installer and no admin rights: unpack it anywhere.
 
 ## From source
 
 ```bash
-git clone https://github.com/nicopon/dtpipe.git
-cd dtpipe
-./build.sh
+git clone https://github.com/nicopon/dtpipe.git && cd dtpipe
+./build.sh            # .\build.ps1 on Windows; runs the unit tests, then writes dist/release/
 ```
-
-```powershell
-git clone https://github.com/nicopon/dtpipe.git
-cd dtpipe
-.\build.ps1
-```
-
-The binary lands in `dist/release/`. Both scripts run the unit tests first, so a green build is a
-tested build.
 
 ## Shell completion
 
 ```bash
-dtpipe completion --install        # bash, zsh or powershell, auto-detected
-dtpipe completion zsh              # print the script instead of installing it
-dtpipe completion --uninstall      # remove it from every profile it was added to
+dtpipe completion --install        # bash, zsh or PowerShell, detected
+dtpipe completion --uninstall
 ```
 
-On PowerShell, `--install` writes to your profile — `dtpipe completion powershell` prints the
-script if you would rather add it yourself.
-
-## Check the install
+## Check
 
 ```bash
 dtpipe --version
-dtpipe providers        # every reader, writer and stream processor the binary carries
-dtpipe --help
+dtpipe providers        # what this binary can read and write
 ```
-
-`dtpipe providers` is the authority on what this build supports — the catalog is derived from the
-registered components, so it cannot drift from the binary you are holding. A script reads the same
-inventory with `dtpipe providers --format json`.
 
 ---
 
-Next: [Quickstart](quickstart.md) · [Concepts](concepts.md)
+Next: [Quickstart](quickstart.md). The common flags: [REFERENCE.md](../REFERENCE.md).

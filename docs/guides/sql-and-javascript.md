@@ -2,41 +2,17 @@
 
 [← Documentation](../README.md)
 
-Two ways to reshape a stream, with different jobs.
-
-| | `--sql` (DuckDB engine) | `--compute` / `--filter` / `--expand` (JavaScript) |
+| | `--sql` (DuckDB) | `--compute`, `--filter`, `--expand` (JavaScript) |
 |:---|:---|:---|
-| Works on | Sets — the whole stream is a table | One row at a time |
-| Good at | Joins, aggregates, window functions, deduplication, sorting | Parsing a string, deriving a field, calling logic that has no SQL form |
-| Costs | A branch, and Arrow batches | A function call per row, and the row path |
-| Needs | An alias per source | Nothing |
+| Works on | The whole stream, as a table | One row at a time |
+| Good at | Joins, aggregates, window functions, deduplication, sorting | Parsing a string, deriving a field |
+| Speed | Fast: whole batches at once | A function call per row |
 
-Rule of thumb: **if it involves more than one row, it belongs in SQL.**
-
-## Nothing is loaded into a database
-
-`--sql` runs on a DuckDB engine embedded in the dtpipe process, on a connection that has no file
-behind it. Your data is never written to a DuckDB database and read back: each branch is
-**registered as a view over the Arrow batches already travelling through the pipeline**, and the
-query reads from there.
-
-The two ways in differ, and it is the only part worth knowing:
-
-| | What happens | Memory |
-|:---|:---|:---|
-| `--from <alias>` | the branch is scanned **as it streams**, zero-copy | bounded by the batch size |
-| `--ref <alias>` | the branch is **collected first**, then queried | the whole branch is held |
-
-That is why `--from` takes the large side of a join and `--ref` the small one: the engine needs a
-materialised side to plan against, not because either is a table on disk. Nothing survives the
-run — the engine goes away with the process, and there is no file to clean up.
-
-`duck:` is a different thing: that one *is* a DuckDB database you name, read or write like any
-other target. See [DuckDB](../connections/duckdb.md).
+If it involves more than one row, use SQL.
 
 ## SQL over any source
 
-Any source becomes a table named by its alias — a CSV, an Oracle query, a Parquet file on S3:
+Give a branch an alias, and the alias is a table in the query:
 
 ```bash
 dtpipe -i sales.csv --auto-column-types --alias s \
@@ -45,23 +21,11 @@ dtpipe -i sales.csv --auto-column-types --alias s \
        -o report.csv
 ```
 
-It is real DuckDB SQL: CTEs, window functions, `QUALIFY`, JSON functions, `list_*`, everything the
-engine has. Deduplication, for instance, needs no dedicated flag — and DuckDB spills to disk, so
-it works on volumes that would not fit in memory:
+This is full DuckDB SQL: CTEs, window functions, `QUALIFY`, JSON and list functions. Nothing is
+loaded into a database file: the query reads the rows as they stream, and nothing is left on disk
+after the run. DuckDB spills to disk when a query needs more memory than it has.
 
-```bash
-dtpipe -i dup.csv --alias src \
-  --from src --sql "SELECT * FROM src
-                    QUALIFY ROW_NUMBER() OVER (PARTITION BY id ORDER BY updated_at DESC) = 1
-                    ORDER BY id" \
-  -o dedup.csv
-```
-
-> [!NOTE]
-> The trailing `ORDER BY id` is not decoration. DuckDB evaluates in parallel and promises no row
-> order unless you ask for one — the same query without it returns the same three rows in a
-> different arrangement from one run to the next. Order the output whenever something downstream,
-> a diff or a test compares it.
+Deduplication, keeping the last version of each key:
 
 `dup.csv`
 
@@ -74,7 +38,15 @@ id,updated_at,status
 2,2026-03-01,cancelled
 ```
 
-`dedup.csv` — the last version of each key, one row per `id`:
+```bash
+dtpipe -i dup.csv --alias src \
+  --from src --sql "SELECT * FROM src
+                    QUALIFY ROW_NUMBER() OVER (PARTITION BY id ORDER BY updated_at DESC) = 1
+                    ORDER BY id" \
+  -o dedup.csv
+```
+
+`dedup.csv`
 
 ```
 id,updated_at,status
@@ -83,17 +55,18 @@ id,updated_at,status
 3,2026-01-15,new
 ```
 
-Loading an extension first — `httpfs`, `spatial`, `excel`, `iceberg` — is what `--duck-init` is
-for; see [DuckDB](../connections/duckdb.md).
+Pitfalls:
 
-> [!IMPORTANT]
-> A text file has no types: every CSV column arrives as a string, and `sum(VARCHAR)` has no
-> meaning. Add `--auto-column-types`, or declare the ones that matter with
-> `--column-types "amount:decimal"`. See [Files](../connections/files.md).
+- **Row order is not guaranteed** without an `ORDER BY`: DuckDB works in parallel.
+- **A CSV column is text.** `sum()` on it fails: add `--auto-column-types`, or declare the types
+  with `--column-types "amount:decimal"`. See [Files](../connections/files.md).
+- **A join reads its lookup with `--ref`**, which loads it in full: see [DAG pipelines](dag.md).
+- **Extensions** (`httpfs`, `spatial`, `excel`) are loaded with `--duck-init`: see
+  [DuckDB](../connections/duckdb.md).
 
-## JavaScript per row
+## JavaScript, one row at a time
 
-`emp.csv` is used for the rest of this page:
+`emp.csv`
 
 ```
 id,name,email,salary
@@ -103,7 +76,7 @@ id,name,email,salary
 4,Dan Petit,dan@corp.com,
 ```
 
-A single expression returns implicitly. `row` is the current row, by column name:
+`row` is the current row. A single expression returns its value:
 
 ```bash
 dtpipe -i emp.csv --auto-column-types \
@@ -118,19 +91,8 @@ id,name,email,salary,domain
 3,Carla Neri,carla@corp.com,74000,corp.com
 ```
 
-### When one expression is not enough
-
-As soon as you need a guard or a branch, write statements and `return` explicitly. A NULL is the
-usual reason — it arrives as `null`, and arithmetic on it silently produces nothing useful:
-
-```bash
-dtpipe -i emp.csv --auto-column-types \
-  --compute "band:const s = row.salary; if (s === null) return 'unknown'; if (s >= 70000) return 'C'; if (s >= 55000) return 'B'; return 'A';" \
-  -o banded.csv
-```
-
-That works, and it is already hard to read on one line — which is what `@file` is for. The same
-script in `scripts/band.js`:
+Past one expression, write statements with an explicit `return`, in a file. A null arrives as
+`null`, so guard against it. `scripts/band.js`:
 
 ```js
 const s = row.salary;
@@ -152,20 +114,14 @@ id,name,email,salary,band
 4,Dan Petit,dan@corp.com,,unknown
 ```
 
-Prefer the file past the first line or two: it is reviewable in a pull request, it keeps quoting
-out of the shell, and the job file that `--export-job` writes carries the reference rather than a
-wall of escaped JavaScript.
-
-### The flags
-
 | Flag | What it does |
 |:---|:---|
-| `--compute "col:expr"` | Sets or creates a column. A single expression returns implicitly; use `return` with statements |
-| `--compute-types "col:int32"` | Declares the type of a computed column — otherwise it is whatever the expression produced |
-| `--filter "expr"` | Drops rows where the expression is falsy. A column the schema does not carry is an **error**, not an empty result |
-| `--expand "expr"` | Turns one row into several. Must return an array of **row objects** |
-| `--expand-types "tag:string"` | Declares a column `--expand` creates; undeclared keys are dropped |
-| `--window-count`, `--window-script` | A sliding window of rows, for logic that needs neighbours |
+| `--compute "col:expr"` | Sets or creates a column |
+| `--compute-types "col:int32"` | Declares the type of a computed column |
+| `--filter "expr"` | Keeps the rows where the expression is true. An unknown column is an error |
+| `--expand "expr"` | Turns one row into several: returns an array of row objects |
+| `--expand-types "tag:string"` | Declares a column `--expand` creates; undeclared ones are dropped |
+| `--window-count`, `--window-key`, `--window-script` | Runs a script over a group of rows |
 
 ```bash
 # One row per tag
@@ -174,42 +130,17 @@ dtpipe -i products.jsonl \
   --drop tags -o product_tags.parquet
 ```
 
-## What a JavaScript step costs, and when to pay it
+## Which one to use
 
-A `--compute` step runs on the **row** path; a `--sql` branch runs on the **Arrow** path. A
-pipeline whose reader and writer are both columnar — Parquet to DuckDB, say — travels as Arrow
-batches from end to end, and inserting a JavaScript step pulls it out to rows and back:
+1. **`--sql`**, whenever the work can be written in SQL, even per row: `split_part(email, '@', 2)`
+   is the SQL form of the `domain` example.
+2. **A dedicated step**: `--mask`, `--format`, `--overwrite`, `--null`, `--project` are fast and
+   need no script. See [Anonymization](anonymization.md).
+3. **`--compute`**, for the rest.
 
-```
-╭─Pipeline Execution Plan──────────────────────╮
-│  Reader  csv                  ▼ row          │
-│  Step    Compute              ▼ row-only     │
-│  Sink    duck                 ▲ columnar sink│
-│                                              │
-│  Strategy: Columnar · 1 bridge               │
-╰──────────────────────────────────────────────╯
-```
-
-That is a function call per row plus the conversions, against a set operation DuckDB runs on whole
-batches. The order to try things in:
-
-1. **`--sql`**, if the work can be expressed over the set — including per-row expressions:
-   `split_part(email, '@', 2)` is the SQL form of the `domain` example above.
-2. **A dedicated transformer** — `--mask`, `--format`, `--overwrite`, `--null`, `--project` all
-   run columnar, with no JavaScript engine involved. See [Anonymization](anonymization.md).
-3. **`--compute`**, for what neither can express.
-
-Mixing paths is normal, and a `--dry-run` names every bridge so the cost is visible rather than
-guessed:
-
-```bash
-dtpipe -i "pg:…" --query "SELECT * FROM orders" --fake "email:internet.email" --alias o \
-       --from o --sql "SELECT date_trunc('month', ordered_at) AS m, count(*) FROM o GROUP BY 1" \
-       -o monthly.csv
-```
+A JavaScript step switches the pipeline to row mode, and back. `--dry-run` shows these switches as
+bridges in its plan: see [Preview and checkpoints](preview-and-checkpoints.md).
 
 ---
 
-See also: [DAG pipelines](dag.md) · [Files](../connections/files.md) ·
-[Anonymization](anonymization.md) ·
-[REFERENCE.md](../../REFERENCE.md#data-transformations)
+See also: [DAG pipelines](dag.md) · [REFERENCE.md](../../REFERENCE.md#data-transformations)
