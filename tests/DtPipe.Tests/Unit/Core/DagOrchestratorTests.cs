@@ -59,6 +59,63 @@ public class DagOrchestratorTests
         Assert.Empty(captured!.AliasMap);
     }
 
+    // A single branch goes through the general path: its verdict and its events are the DAG's.
+    private static async Task<(int Code, List<DagLogEvent> Events)> RunSingleBranchAsync(
+        Func<BranchDefinition, BranchChannelContext, CancellationToken, Task<int>> branch,
+        CancellationToken ct = default)
+    {
+        var orchestrator = BuildOrchestrator();
+        var events = new List<DagLogEvent>();
+        orchestrator.OnLogEvent = events.Add;
+        var code = await orchestrator.ExecuteAsync(GoldenDagDefinitions.Linear_SingleBranch, branch, ct);
+        return (code, events);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(42)]
+    [InlineData(130)]
+    public async Task Execute_SingleBranchReturnsACode_TheDagReturnsItAndLogsAnError(int exitCode)
+    {
+        var (code, events) = await RunSingleBranchAsync((_, _, _) => Task.FromResult(exitCode));
+
+        Assert.Equal(exitCode, code);
+        Assert.Contains(events, e => e.Severity == DagLogSeverity.Error);
+        Assert.DoesNotContain(events, e => e.Severity == DagLogSeverity.Warning);
+    }
+
+    [Fact]
+    public async Task Execute_SingleBranchSucceeds_LogsNoErrorAndNoWarning()
+    {
+        var (code, events) = await RunSingleBranchAsync((_, _, _) => Task.FromResult(0));
+
+        Assert.Equal(0, code);
+        Assert.DoesNotContain(events, e => e.Severity is DagLogSeverity.Error or DagLogSeverity.Warning);
+    }
+
+    [Fact]
+    public async Task Execute_SingleBranchThrows_ReturnsOneAndLogsTheMessageAsAnError()
+    {
+        var (code, events) = await RunSingleBranchAsync((_, _, _) => throw new InvalidOperationException("boom"));
+
+        Assert.Equal(1, code);
+        Assert.Contains(events, e => e.Severity == DagLogSeverity.Error && e.Message.Contains("boom"));
+    }
+
+    [Fact]
+    public async Task Execute_SingleBranchIsCancelledByTheCaller_ReturnsOne()
+    {
+        using var cts = new CancellationTokenSource();
+        var (code, _) = await RunSingleBranchAsync(async (_, _, ct) =>
+        {
+            await cts.CancelAsync();
+            await Task.Delay(Timeout.Infinite, ct);
+            return 0;
+        }, cts.Token);
+
+        Assert.Equal(1, code);
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Case 2: DAG with two independent branches
     // ─────────────────────────────────────────────────────────────────────────
