@@ -73,7 +73,11 @@ the control plane, over each replica's node channel; TransportR carries the data
   flows the coordinator never judged together. `RunnerEndpoints` (`DtPipe.Coordinator.Contracts`) is the one rule: every input
   and output is `arrow:-` on an edge of its alias and direction, no branch names a place on disk, no `duck-init`; processors and
   transformers stay. The planner refuses a fragment that breaks it, naming the branch and the endpoint, and the runner refuses
-  it again before it launches one (`FragmentIntake`). `[CI: Server.Tests PlanRightsTests; Hosting.Tests FragmentIntakeTests]`
+  it again before it launches one (`FragmentIntake`). The engine enforces it a third time: a runner's child runs under
+  `--edges-only` (`src/DtPipe/CLAUDE.md`), which refuses any other reader or writer and runs DuckDB without external access.
+  Every fragment's child works with a run directory of its own as its temp directory, removed once it has ended; a runner's
+  child also works in it. `[CI: Server.Tests PlanRightsTests; Hosting.Tests FragmentIntakeTests; PipelineNode.Tests
+  FragmentIsolationTests; DtPipe.Tests EdgesOnlyRuleTests, DuckDBSqlProcessorEdgesOnlyTests]` `[unchecked: Windows]`
 - **A node host decides what it runs**: its `FragmentPolicy` comes from its own configuration, never
   from a message the coordinator sends. So does whether it ends a run's child (`FaultInjection`): a host
   that did not enable it answers the coordinator's `Kill` with `0` and logs why.

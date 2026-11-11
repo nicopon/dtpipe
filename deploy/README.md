@@ -95,6 +95,17 @@ docker build -f deploy/Dockerfile --target runner \
   coordinator, `wwwroot` and the native SQLite library included: copy it as one. The library is a
   git repository, so `git` must be on the `PATH`, as the image carries it.
 
+## What a runner runs
+
+A runner hosts no data: it runs the steps between the nodes, and its host is shared by the steps of
+every run. A step on a runner reads and writes its `arrow:` edges and nothing else: a file, a
+database, a checkpoint, a cursor file or a DuckDB `duck-init` is refused when the pipeline is
+planned, again by the runner before it starts the step, and by `dtpipe` itself, which the runner
+starts with `--edges-only`: its SQL runs with DuckDB's external access off. A reader such as
+`generate:` belongs on a node, as a brick. Each step works in a directory of its own under the
+runner's state directory, its temporary directory too, where DuckDB spills; the directory is
+removed when the step ends.
+
 ## The runner's network
 
 A runner runs whatever step a pipeline holds, so its image limits what it can reach.

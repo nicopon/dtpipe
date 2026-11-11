@@ -36,10 +36,18 @@ stdin/stdout and TransportR. It speaks to no coordinator itself.
   the child starts and wired into it via `--bind-input`/`--bind-output alias=arrow:pipe://<name>`
   (`AliasBindingApplier` does the substitution). The edge codec rides the child's command line
   (`--bind-compression`, `--bind-compression-level`), never its environment; the applier gives it to every
-  `arrow:-` output. `[CI: ChildCompressionArgvTests]` `ConnectPipeAsync` races the pipe's own
+  `arrow:-` output. `[CI: ChildCompressionArgvTests]` On Unix a pipe is a socket under the node's temp directory and the
+  child is handed its whole path, since a bare name resolves under the temp directory of whoever opens it and the child's is
+  its run directory; a Windows pipe keeps a bare name. `ConnectPipeAsync` races the pipe's own
   `WaitForConnectionAsync()` against the child's exit, so a child that dies before ever dialing in
   cannot block the node forever. `WireAsync` and the pipe dictionary both key on `EdgeBinding.Alias`
   alone, regardless of direction — `ValidateEdges` refuses a duplicate up front.
+- **A child works with a run directory of its own.** `FragmentLaunch.RunDirectory` is made before the child starts and is its
+  `TMPDIR`, `TEMP` and `TMP`; `DisposeAsync` removes it once the child has gone (Windows keeps a directory a live process
+  works in). With `EdgesOnly` (a runner's fragment) it is the working directory too, where DuckDB spills, and the child runs
+  under `--edges-only`; a data node's child keeps the host's working directory, against which its bricks' relative paths
+  resolve. Where a single-file dtpipe would extract its native libraries under the temp directory (Windows, or Unix with no
+  `HOME`), `DOTNET_BUNDLE_EXTRACT_BASE_DIR` pins them to the host's. `[CI: FragmentIsolationTests]` `[unchecked: Windows]`
 - **Cancel by stream rupture, never by signal.** The first fault ruptures the child at once
   (`Rupture`: stdin and every pipe closed, a kill after the grace period), never after the relays
   finish - an outbound relay reading a child with nothing to write finishes only when the kill closes

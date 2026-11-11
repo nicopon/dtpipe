@@ -141,7 +141,9 @@ none. One node per process, which is one replica of its node's identity; a secon
   the verdict of a run in flight]`
 - **A node host works in a directory of its own process.** `DtPipeNodeOptions.StateDirectory` is a
   parent: the host makes `<parent>/<instance id>` for its fragment jobs and its dtpipe runs, so replicas
-  that share a configuration never share a directory, and removes it when it stops in order. Its
+  that share a configuration never share a directory, and removes it when it stops in order. Each run of a fragment works in
+  `<that>/fragments/<run>-<fragment>/`, its child's own (`FragmentLaunch.RunDirectory`), and a runner's child runs there under
+  `--edges-only`. Its
   databases and variables are not there. The instance id is chosen once per process and sent with every
   `Announce`, with where the process runs. `[CI: Hosting.Tests ProcessDirectoryTests — the path]`
   `[local: samples/distributed-lab smoke.py replicas — the removal at an orderly stop]`

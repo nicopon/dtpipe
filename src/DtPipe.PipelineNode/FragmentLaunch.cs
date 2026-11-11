@@ -21,6 +21,19 @@ public sealed class FragmentLaunch
     /// never changed for them.</summary>
     public IReadOnlyDictionary<string, string>? ChildEnvironment { get; init; }
 
+    /// <summary>
+    /// A directory of this run's own, made before the child starts and removed once it has ended: the child's <c>TMPDIR</c>,
+    /// <c>TEMP</c> and <c>TMP</c> and, with <see cref="EdgesOnly"/>, its working directory. Null leaves the child the host's.
+    /// </summary>
+    public string? RunDirectory { get; init; }
+
+    /// <summary>
+    /// Runs the child under <c>--edges-only</c>, in <see cref="RunDirectory"/>: it reads and writes its edges and nothing else.
+    /// A runner's fragment, whose host the fragments of every run share; a data node's child keeps the host's working
+    /// directory, against which its bricks' relative paths resolve.
+    /// </summary>
+    public bool EdgesOnly { get; init; }
+
     /// <summary>The size of the chunks read from the child's stdout onto a transfer.</summary>
     public int ReadChunkBytes { get; init; } = 65536;
 }

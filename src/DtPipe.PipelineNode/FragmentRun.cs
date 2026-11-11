@@ -130,10 +130,16 @@ public sealed class FragmentRun : IAsyncDisposable
         };
     }
 
-    /// <summary>Short and random, never a readable composed name (alias + run id): the pipe name
-    /// joins <c>$TMPDIR/CoreFxPipe_</c> on Unix, and a long <c>TMPDIR</c> (macOS routinely runs
-    /// ~60 characters) already leaves little of the 104-character <c>sun_path</c> budget spare.</summary>
-    private static string NewPipeName() => Guid.NewGuid().ToString("N")[..10];
+    /// <summary>Short and random, never a readable composed name (alias + run id): on Unix the pipe is a
+    /// socket under the host's temp directory, and a long <c>TMPDIR</c> (macOS routinely runs ~60
+    /// characters) already leaves little of the 104-character <c>sun_path</c> budget spare. The path is
+    /// given whole, since a bare name resolves under the temp directory of whoever opens it and the
+    /// child's is its run directory. A Windows pipe lives in one namespace, which no temp directory changes.</summary>
+    private static string NewPipeName()
+    {
+        var name = Guid.NewGuid().ToString("N")[..10];
+        return OperatingSystem.IsWindows() ? name : Path.Combine(Path.GetTempPath(), "dtpipe-" + name);
+    }
 
     private static (Process Child, Dictionary<string, NamedPipeServerStream> Pipes) LaunchChild(
         FragmentLaunch options, ILogger logger)
@@ -173,8 +179,21 @@ public sealed class FragmentRun : IAsyncDisposable
         };
         foreach (var (name, value) in options.ChildEnvironment ?? new Dictionary<string, string>())
             psi.Environment[name] = value;
+        if (options.RunDirectory is { } runDirectory)
+        {
+            Directory.CreateDirectory(runDirectory);
+            // A single-file dtpipe extracts its native libraries under the temp directory where nothing else says where
+            // (Windows, or Unix with no HOME): pinned to the host's, so a run directory does not extract them for each run.
+            string? Variable(string name) => psi.Environment.TryGetValue(name, out var value) ? value : null;
+            if (string.IsNullOrEmpty(Variable(BundleExtractDir))
+                && (OperatingSystem.IsWindows() || string.IsNullOrEmpty(Variable("HOME"))))
+                psi.Environment[BundleExtractDir] = Path.Combine(Path.GetTempPath(), ".net");
+            foreach (var name in new[] { "TMPDIR", "TEMP", "TMP" }) psi.Environment[name] = runDirectory;
+            if (options.EdgesOnly) psi.WorkingDirectory = runDirectory;
+        }
         psi.ArgumentList.Add("--job");
         psi.ArgumentList.Add(options.FragmentJobPath);
+        if (options.EdgesOnly) psi.ArgumentList.Add("--edges-only");
         if (bindInputPairs.Count > 0) { psi.ArgumentList.Add("--bind-input"); psi.ArgumentList.Add(string.Join(",", bindInputPairs)); }
         if (bindOutputPairs.Count > 0) { psi.ArgumentList.Add("--bind-output"); psi.ArgumentList.Add(string.Join(",", bindOutputPairs)); }
         // The codec applies to the fragment's 'arrow:-' boundaries: the ones bound above and the first
@@ -193,7 +212,16 @@ public sealed class FragmentRun : IAsyncDisposable
         // to this node rather than inherited (AliasBindingApplier); no binding flag is needed for
         // it. An excess edge's 'arrow:-' is overridden above instead.
         var process = new Process { StartInfo = psi, EnableRaisingEvents = true };
-        process.Start();
+        try
+        {
+            process.Start();
+        }
+        catch
+        {
+            foreach (var pipe in pipes.Values) pipe.Dispose();
+            RemoveRunDirectory(options);
+            throw;
+        }
         _ = DrainStderrAsync(process, logger);
 
         // An edge-less direction still has to be a live pipe (never the node's own stdio), but
@@ -488,9 +516,22 @@ public sealed class FragmentRun : IAsyncDisposable
         if (!_child.HasExited)
         {
             try { _child.Kill(entireProcessTree: true); } catch { }
+            // Windows keeps a directory a live process works in: the run directory goes once the child has gone.
+            try { _child.WaitForExit(GracePeriodMs); } catch { }
         }
         _child.Dispose();
         foreach (var pipe in _pipes.Values) { try { pipe.Dispose(); } catch { } }
+        RemoveRunDirectory(_options);
         return ValueTask.CompletedTask;
+    }
+
+    private const string BundleExtractDir = "DOTNET_BUNDLE_EXTRACT_BASE_DIR";
+
+    private static void RemoveRunDirectory(FragmentLaunch options)
+    {
+        if (options.RunDirectory is not { } runDirectory) return;
+        try { Directory.Delete(runDirectory, recursive: true); }
+        catch (DirectoryNotFoundException) { }
+        catch (Exception) { /* best-effort: a file the child left open on Windows */ }
     }
 }

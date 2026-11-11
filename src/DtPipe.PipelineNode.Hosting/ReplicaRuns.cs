@@ -49,6 +49,9 @@ internal sealed class ReplicaRuns : IAsyncDisposable
     private readonly int? _arrowCompressionLevel;
     private readonly int _readChunkBytes;
 
+    // A runner's: each child runs under --edges-only, in its run directory.
+    private readonly bool _edgesOnly;
+
     private readonly ConcurrentDictionary<(string RunId, string Fragment), Entry> _runs = new();
     private readonly List<FragmentExit> _held = [];
 
@@ -60,8 +63,10 @@ internal sealed class ReplicaRuns : IAsyncDisposable
     public ReplicaRuns(
         HubConnection channel, PipelineNode node, string name, string dtpipe, IReadOnlyDictionary<string, string> environment, string jobsDirectory,
         Func<FragmentSpec, (string? Yaml, string? Reason)> intake, Func<string, ILogger> loggerOf, ILogger logger, TimeSpan unwiredTimeout,
-        bool faultInjection = false, string arrowCompression = "lz4", int? arrowCompressionLevel = null, int readChunkBytes = 262144)
+        bool faultInjection = false, string arrowCompression = "lz4", int? arrowCompressionLevel = null, int readChunkBytes = 262144,
+        bool edgesOnly = false)
     {
+        _edgesOnly = edgesOnly;
         (_channel, _node, _name, _dtpipe, _environment, _jobsDirectory) = (channel, node, name, dtpipe, environment, jobsDirectory);
         (_intake, _loggerOf, _logger, _unwiredTimeout, _faultInjection) = (intake, loggerOf, logger, unwiredTimeout, faultInjection);
         _arrowCompression = arrowCompression;
@@ -147,6 +152,8 @@ internal sealed class ReplicaRuns : IAsyncDisposable
                 ArrowCompression = _arrowCompression,
                 ArrowCompressionLevel = _arrowCompressionLevel,
                 ReadChunkBytes = _readChunkBytes,
+                RunDirectory = Path.Combine(_jobsDirectory, stem),
+                EdgesOnly = _edgesOnly,
                 Edges = spec.Edges
                     .Select(e => new EdgeBinding(e.Alias, e.Direction == FragmentEdgeDirection.Inbound ? EdgeDirection.Inbound : EdgeDirection.Outbound))
                     .ToList(),
