@@ -142,7 +142,7 @@ public class StderrNoiseTests : IAsyncLifetime
         exitCode.Should().Be(1);
         stderr.Should().Contain("[ERROR]");
         stderr.Should().Contain("--export-job");
-        stderr.Should().Contain("mandatory");
+        stderr.Should().Contain("takes a value, and nothing follows it");
         File.Exists(trueFile).Should().BeFalse();
     }
 }
