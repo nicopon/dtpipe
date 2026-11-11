@@ -76,13 +76,13 @@ public sealed class DtPipeNodeOptions
     public int? ArrowCompressionLevel { get; set; }
 
     /// <summary>TransportR batch size in bytes for the data plane client. Defaults to 262144 (256 KB).</summary>
-    public int BatchBytes { get; set; } = 262144;
+    public int BatchBytes { get; set; } = global::DtPipe.PipelineNode.NodeClientOptions.DefaultBatchBytes;
 
     /// <summary>Maximum in-flight TransportR batches before sender pause. Defaults to 16.</summary>
-    public int MaxInFlightBatches { get; set; } = 16;
+    public int MaxInFlightBatches { get; set; } = global::DtPipe.PipelineNode.NodeClientOptions.DefaultMaxInFlightBatches;
 
     /// <summary>Buffer size in bytes for reading/writing child fragment stdio pipes. Defaults to 262144 (256 KB).</summary>
-    public int ReadChunkBytes { get; set; } = 262144;
+    public int ReadChunkBytes { get; set; } = global::DtPipe.PipelineNode.NodeClientOptions.DefaultReadChunkBytes;
 
     public NodeOidcOptions Oidc { get; set; } = new();
 

@@ -30,15 +30,23 @@ public sealed class NodeClientOptions
 
     /// <summary>TransportR batch size in bytes. Bounds sender memory together with <see cref="MaxInFlightBatches"/>:
     /// roughly this × <see cref="MaxInFlightBatches"/> bytes in flight.</summary>
-    public int BatchBytes { get; init; } = 65536;
+    public int BatchBytes { get; init; } = DefaultBatchBytes;
+
+    /// <summary>The tuned TransportR batch size, shared with the node host's options.</summary>
+    public const int DefaultBatchBytes = 262144;
+
+    /// <summary>The tuned in-flight batch bound, shared with the node host's options.</summary>
+    public const int DefaultMaxInFlightBatches = 16;
+
+    /// <summary>The tuned stdio read chunk, shared with the node host's options.</summary>
+    public const int DefaultReadChunkBytes = 262144;
 
     /// <summary>Both bounds default to a non-null value. The client library leaves them null, and a
-    /// null <see cref="MaxInFlightBatches"/> lets a sender race ahead of a slow receiver — measured
-    /// at ~1 GB of receiver-side backlog against a source that finishes in seconds. 8 matches the
-    /// engine's own in-process Arrow channel capacity.</summary>
-    public int? MaxInFlightBatches { get; init; } = 8;
+    /// null <see cref="MaxInFlightBatches"/> lets a sender race ahead of a slow receiver, which
+    /// piles up a receiver-side backlog against a fast source.</summary>
+    public int? MaxInFlightBatches { get; init; } = DefaultMaxInFlightBatches;
     public long? ReceiveMaxBytes { get; init; }
-    public int ReadChunkBytes { get; init; } = 65536;
+    public int ReadChunkBytes { get; init; } = DefaultReadChunkBytes;
 
     /// <summary>
     /// How long a transfer handle waits for the run that claims it (its <c>Wire</c>), and a <c>Wire</c> for the handle
