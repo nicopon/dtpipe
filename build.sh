@@ -196,6 +196,7 @@ done
 
 echo ""
 echo -e "${YELLOW}Performing a clean full rebuild...${NC}"
+dotnet restore DtPipe.sln
 dotnet clean DtPipe.sln -c Release
 dotnet build DtPipe.sln -c Release
 
