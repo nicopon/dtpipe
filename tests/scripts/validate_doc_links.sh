@@ -2,15 +2,12 @@
 set -e
 
 # validate_doc_links.sh
-# Every relative link in the docs/ site resolves -- to a file that exists, and to a heading that
-# exists in it.
+# Every relative link in the docs/ site and the root documents (README, REFERENCE, EXTENDING)
+# resolves -- to a file that exists, and to a heading that exists in it.
 #
-# The site is navigation: twenty-two pages that cross-link each other about a hundred times, built
-# precisely because a reader could not find things. A link to a renamed heading still renders, so
-# nothing about writing or reviewing the page reveals it -- only following it does.
-#
-# REFERENCE.md is a link target here, not a source: it is checked when a site page points into it,
-# and its own links are left to its owner.
+# A link to a renamed heading still renders, so nothing about writing or reviewing the page reveals
+# it -- only following it does. REFERENCE.md links into itself the most, which is why it is a source
+# here and not only a target.
 #
 # To fix: correct the path, or the heading spelling the anchor is derived from.
 
@@ -34,7 +31,7 @@ cd "$PROJECT_ROOT"
 # adding the file.
 PAGES=()
 while IFS= read -r page; do PAGES+=("$page"); done \
-    < <(git ls-files --full-name -- 'docs/*.md' 'docs/**/*.md')
+    < <(git ls-files --full-name -- 'docs/*.md' 'docs/**/*.md' README.md REFERENCE.md EXTENDING.md)
 
 if [ ${#PAGES[@]} -eq 0 ]; then fail "no documentation page found under docs/"; fi
 

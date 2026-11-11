@@ -43,7 +43,7 @@ dtpipe --job FILE [OVERRIDES]
 | `-i`, `--input SOURCE` | Source ADO.NET connection string or file path |
 | `-o`, `--output DEST` | Target ADO.NET connection string or file path |
 | `-q`, `--query SQL` | SQL query (required for database sources) |
-| `--dry-run [N]` | Preview N rows without writing (default: 10) |
+| `--dry-run N` | Run the pipeline over N source rows without writing |
 | `--job FILE`, `-j FILE` | Load a pipeline from a YAML job file; given once per command line. The file is the source of the branches: [only engine controls](#execution--statistics) may be given beside it |
 | `--export-job FILE` | Serialize the current CLI pipeline to YAML and exit |
 | `--alias NAME` | Name the current branch for DAG references |
@@ -269,7 +269,7 @@ sits in, wherever it falls among the step's flags.
 | `--fake-locale` | `fr` | Locale for fake data generation |
 | `--fake-seed` | `12345` | Global seed for reproducible random fakes (also acts as a base offset for deterministic row/column faking) |
 | `--fake-seed-column` | `"UserId"` or `"Region,Branch"` | Column(s) used as a deterministic seed (same input -> same output). Supports comma-separated columns for composite seeds. |
-| `--fake-seed-row` | | Row-index based deterministic mode (row N always gets the same values). Formerly `--fake-deterministic` (deprecated, throws error). |
+| `--fake-seed-row` | | Row-index based deterministic mode (row N always gets the same values) |
 | `--skip-null` | | Skip fake generation when the source value is null. Also a `--compute` option: it binds to the step it follows |
 | `--mask` | `"Phone:###-****"` | Partial masking (`#` keeps original char, any other replaces) |
 | `--null` | `"ColName"` | Force a column to NULL |
@@ -280,6 +280,9 @@ sits in, wherever it falls among the step's flags.
 | `--filter` | `"row.Val > 100"` | Drop rows where the JS expression returns falsy. Columns are read off `row`; a name the schema does not carry is an error, not an empty result |
 | `--expand` | `"row.Tags.split(',').map(t => ({ ...row, Tag: t }))"` | Expand one row into multiple. Must return an array of **row objects**: an array of plain values is refused |
 | `--expand-types` | `"Tag:string"` | Declare a column `--expand` creates. Undeclared keys are not in the output schema and are dropped |
+| `--window-count` | `5` | Accumulate N rows, then run `--window-script` over them |
+| `--window-key` | `"CustomerId"` | Run `--window-script` each time this column's value changes |
+| `--window-script` | `"rows.map(...)"` | JavaScript over the accumulated rows (`rows`); must return an array of rows |
 
 #### Type hints
 
@@ -321,9 +324,6 @@ when each value is written as one, and a `string` when not, so a number is never
 | `DateTime` | `datetime`, `date` |
 | `DateTimeOffset` | `datetimeoffset`, `timestamp`, `datetimetz` |
 | `Guid` | `guid`, `uuid` |
-| `--window-count` | `5` | Window size for stateful batch processing |
-| `--window-script` | `"rows.map(...)"` | JS logic executed over a sliding window of rows |
-| `--ignore-nulls` | | Skip transformations when the input cell is NULL |
 
 ---
 
@@ -608,44 +608,13 @@ dtpipe -i sales.csv -o azure://reports/sales.parquet --azure-connection-string "
   leaves the existing object untouched rather than replacing it with a partial one.
 - **Reads glob natively**: `s3://bucket/dt=*/part-*.parquet` reads every match. A local path globs
   too, over one directory — see [File globs](#file-globs).
-- `https://`, `gs://` and other schemes are **not** claimed by any provider, and object storage is
-  never a hub target (`duck+s3:` fails closed). Reach those through the DuckDB engine
-  (`--duck-init "INSTALL httpfs; …"` + `read_parquet(…)` / `COPY … TO …`) — see the MinIO/Azurite
-  scenarios in `tests/scripts/validate_duck_hub.sh`.
+- `https://`, `gs://` and other schemes are **not** claimed by any provider. Reach them through
+  the DuckDB engine (`--duck-init "INSTALL httpfs; …"` + `read_parquet(…)` / `COPY … TO …`).
 - Object-storage connection strings count as network access for the agent guardrails: a job using
-  one needs `--allow-network` (see [Agent Guardrails](#agent-guardrails)).
+  one needs `--allow-network` (see
+  [Agent Guardrails](#agent-guardrails-isqlsafetypolicy--iapprovalgate)).
 - The `httpfs` / `azure` extensions are installed from DuckDB's extension repository on first use,
   so the host needs access to it once (or an extension directory already holding them).
-
-### DuckDB Hub connections (`duck+{provider}:`)
-
-The hub prefix means `ATTACH`: it integrates another database as a SQL catalog inside the DuckDB
-instance already running in-process. It is relational only — a catalog, not a file transport.
-
-> **There are no supported hub providers.** The prefix is retained only so that typing one fails
-> with an actionable message instead of an obscure DuckDB parse error.
-
-The rule has always been *no hub route where a native provider exists*: `ATTACH` reaches a catalog,
-but not `COPY`, bulk load, or upsert, so the native route is strictly more capable. PostgreSQL and
-SQLite were excluded on that ground from the start. `duck+mysql:` was the last entry, kept only
-while MySQL had no native provider — since [`mysql:`](#mysql) landed, the same rule empties the
-list.
-
-| You typed | Use instead |
-|:---|:---|
-| `duck+mysql:`, `duck+mariadb:` | `mysql:` |
-| `duck+pg:`, `duck+postgres:`, `duck+postgresql:` | `pg:` |
-| `duck+sqlite:` | `sqlite:` |
-| `duck+mssql:`, `duck+sqlserver:` | `mssql:` |
-| `duck+oracle:`, `duck+ora:` | `ora:` |
-| `duck+s3:`, `duck+azure:`, `duck+gs:`, `duck+https:` | `s3://` / `azure://`, or `--duck-init` + `--query` |
-
-Any other name fails rather than forwarding an unverified provider into the `TYPE` clause. Other
-DuckDB extensions (`excel`, `httpfs`, `azure`, `ducklake`…) are reached through `--duck-init` +
-`--query` / `--post-exec`, which is unaffected by any of the above.
-
-> Extensions are `INSTALL`ed on first use, which needs network access to the DuckDB extension
-> repository unless they are already present in the local extension directory.
 
 ---
 
@@ -656,13 +625,14 @@ DuckDB extensions (`excel`, `httpfs`, `azure`, `ducklake`…) are reached throug
 | `--limit` | `1000` | Read at most N rows from the source, then stop reading. Bounds the **read**, so a filter downstream yields fewer than N rather than topping the count back up |
 | `--sampling-rate` | `0.1` | Row inclusion probability (0.0–1.0) |
 | `--sampling-seed` | `12345` | Fixed seed for deterministic, reproducible sampling |
-| `--batch-size` | `10000` | Rows per columnar batch (default: 50,000) |
+| `--batch-size` | `10000` | Rows per batch (default: 32,768) |
 | `--max-batch-bytes` | `268435456` | Soft byte cap per read batch: a batch flushes when either `--batch-size` rows **or** this many bytes accumulate, whichever comes first. `0` (default) disables the byte cap. Bounds memory when rows carry large text/blob columns. Estimate is approximate — the row that crosses the bound is kept. Applies to the wire-decode readers (PostgreSQL `COPY`, and the ADO readers: MySQL, Oracle, SQL Server, SQLite) and the row→columnar bridge. |
 | `--no-stats` | | Suppress progress bars and transfer statistics |
 | `--metrics-path` | `metrics.json` | Write structured execution results to a JSON file |
 | `--log` | `pipeline.log` | Write log output to a file. The log belongs to the process, so a job file has no key for it |
 | `--strict-bindings` | | Non-zero exit on the two binding faults that are otherwise tolerated: a flag nothing declares that consumes no value (one followed by a value is refused by the parser either way), and a job file's unrecognized `provider-options` key (a warning otherwise). A flag that exists but is not an option of the branch's component is refused with or without it |
-| `--dry-run` | `10` | Run the pipeline over N source rows with the writer neutralised — see [Sample Mode](#sample-mode--materialisation) |
+| `--dry-run` | `10` | Run the pipeline over N source rows with the writer neutralised — see [Sample Mode](#sample-mode-and-materialisation) |
+| `--ignore-nulls` | | Skip transformations when the input cell is NULL |
 | `--session` | `mission-7` | Name the session materialised artefacts belong to |
 | `--checkpoint` | `stage1` | Materialise this branch's output in the session store |
 | `--from-checkpoint` | `<key>` | Resume this branch from a stored checkpoint instead of its input |
@@ -1478,7 +1448,7 @@ later **Publish** replaces exactly that version. The coordinator checks every pi
 job it refuses is not saved, and the studio shows the check's report.
 
 **Import** turns a dtpipe command line (without the binary's name) into a job, as
-[`--export-job`](#reference-for-job-files) writes it: it opens as a new job that you save or leave.
+[`--export-job`](#yaml-job-file-schema) writes it: it opens as a new job that you save or leave.
 A `${{NAME}}` in it stays as typed, and `--bind-input` and `--bind-output` are refused.
 
 **Write targets…** executes the job saved in the folder on this machine, as `dtpipe --job` would,
@@ -1529,9 +1499,9 @@ beside the job, in `.dtpipe/studio/<job>-debug.json` (a job nobody pins leaves n
 saved yet keeps it under `drafts/`, handed to the job at its first save and forgotten when the
 studio starts. The values of the Variables tab are not part of what a preview or a checkpoint
 remembers: after changing one, press **Forget pins** and run Preview again. A preview is not the
-job's run: every cut passes through Arrow (see [checkpoints](#checkpoints)), batches differ and so
-does the concurrency; the rows reach the target in the order a plain run writes them. The cut is
-never saved or published.
+job's run: every cut passes through Arrow (see
+[checkpoints](#materialising-a-point-in-the-pipeline)), batches differ and so does the concurrency;
+the rows reach the target in the order a plain run writes them. The cut is never saved or published.
 
 The page runs dtpipe with your own access. It listens on 127.0.0.1 only and answers only the
 address it printed: the address carries a token for this session, which every request must
@@ -1774,7 +1744,7 @@ dtpipe mcp
 | `preview-data` | `input`, `limit?`, `query?` | Preview sample data rows (default: 5 rows) |
 | `validate-yaml-job` | `yamlContent` | Validate a YAML job without running it: syntax, topology, provider-option keys, and every transformer built as the engine builds it |
 | `execute-yaml-job` | `yamlContent`, `apply?`, `allowDestructive?`, `allowNetwork?` | Execute a YAML job in-memory. **Dry-run by default** (no write); `apply=true` performs a write, gated by the approval gate and the SQL safety policy |
-| `dry-run` | `yamlContent`, `rows?` | Run the pipeline over a small sample through the real execution path with the writer neutralised, and return the rows leaving each stage, plus any column one transformer produced and a later one wrote over. See [Sample Mode](#sample-mode--materialisation) |
+| `dry-run` | `yamlContent`, `rows?` | Run the pipeline over a small sample through the real execution path with the writer neutralised, and return the rows leaving each stage, plus any column one transformer produced and a later one wrote over. See [Sample Mode](#sample-mode-and-materialisation) |
 | `get-dag-topology` | `yamlContent` | Structured branch topology: alias, input, output, the ordered `transformers[]` applied between them, stream processor, and the `from[]` / `ref[]` upstream aliases per branch. Read-only — parses, runs nothing |
 | `list-cursors` | *(none)* | List the incremental cursors stored in the current workspace: column, last value, last run time, status and row count |
 | `list-checkpoints` | `session?` | List the materialised checkpoints of a session, each named by the hash of what produces it |

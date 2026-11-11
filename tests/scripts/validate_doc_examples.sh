@@ -295,7 +295,8 @@ fi
 [ -s people.parquet ] && pass "convert a file by extension" || bad "convert a file by extension"
 
 # A dry run against a file target creates nothing at all; against DuckDB the driver creates the
-# database file on connect, but the run must leave it without the table. The page says both.
+# database file on connect, but the run must leave it without the table. Preview and checkpoints
+# says both.
 "$DTPIPE" -i people.csv -o preview.csv --dry-run 3 > /dev/null 2>&1
 [ ! -f preview.csv ] && pass "a dry run to a file target writes nothing" \
                      || bad "a dry run to a file target writes nothing"

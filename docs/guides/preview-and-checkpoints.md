@@ -39,7 +39,7 @@ It answers three questions at once:
 
 | | |
 |:---|:---|
-| The writer | Neutralised. Not initialised, never written to, never completed — a file is not created and a table is not migrated. The target is *inspected* for the compatibility report, never modified |
+| The writer | Neutralised. Not initialised, never written to, never completed — a file is not created and a table is not migrated. The target is *inspected* for the compatibility report, never modified. A DuckDB or SQLite database that does not exist yet is still created, empty, when the preview connects |
 | Column types | Asked of the writer as the run asks: a column it refuses fails the preview, with the cast that fixes it ([types a writer cannot write](../../REFERENCE.md#types-a-writer-cannot-write)) |
 | Hooks | None of the four (`--pre-exec`, `--post-exec`, `--on-error-exec`, `--finally-exec`) runs |
 | Cursor, metrics | Not advanced, not written |
@@ -131,7 +131,7 @@ execution path.
   "hash": "5617094d2289c89cca008e515e168b8baf19c559db93ff7e9d0032a0e4127140",
   "schemaSource": "batch",
   "enforcement": "VerbScanOnly",
-  "producer": "1.8.2+e994ee51…",
+  "producer": "1.15.2+8673ec32…",
   "schema": {
     "fields": [
       { "name": "name",   "nullable": true, "type": "utf8" },

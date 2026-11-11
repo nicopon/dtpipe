@@ -202,7 +202,8 @@ for the caller of `Compute`, BranchFingerprintTests]`
 ## MCP server and agent
 
 `dtpipe mcp` (STDIO) exposes schema discovery, validation and execution (`execute-yaml-job` is
-dry-run by default). Tool table: `REFERENCE.md#mcp-server`; options: `REFERENCE.md#agent-guardrails`.
+dry-run by default). Tool table: `REFERENCE.md#model-context-protocol-mcp-server`; options:
+`REFERENCE.md#agent-guardrails-isqlsafetypolicy--iapprovalgate`.
 `dtpipe agent` runs an interactive loop against Ollama/OpenAI (`AgentExecutor`, `AgentTui`,
 `OllamaClient`). Agent classes live under `Cli/Agent/`.
 

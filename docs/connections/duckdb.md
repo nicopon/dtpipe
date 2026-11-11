@@ -98,12 +98,6 @@ dtpipe -i orders.csv --auto-column-types --alias o \
        -o revenue.csv
 ```
 
-## Hub prefixes (`duck+provider:`) are retired
-
-`duck+mysql:` and friends parse, and then fail with a message naming the native provider to use
-instead. The rule was always *no hub route where a native provider exists*: `ATTACH` reaches a
-catalog but not `COPY`, bulk load or upsert, so the native route is strictly more capable.
-
 ---
 
 See also: [SQL and JavaScript](../guides/sql-and-javascript.md) ·

@@ -87,7 +87,7 @@ dtpipe -i data.parquet \
        --duck-init "@/secret/azure_init.sql"
 ```
 
-`--duck-init` accepts inline SQL or a file path prefixed with `@`. See [REFERENCE.md](../../REFERENCE.md#duckdb-options) for details.
+`--duck-init` accepts inline SQL or a file path prefixed with `@`. See [REFERENCE.md](../../REFERENCE.md#duckdb) for details.
 
 ---
 

@@ -2,14 +2,9 @@
 
 [← Documentation](README.md)
 
-Six commands, no database to set up. Everything below runs against a generated dataset and two
-local files, and every output shown was produced by running it.
+Six steps, no database to set up. Every output below was produced by running them.
 
 ## 1. Make a dataset
-
-`generate:N` is a source that produces N rows out of nothing. `--fake` fills a column with
-realistic values — and **creates the column when the incoming rows do not have one**, which is
-what makes a generator useful on its own.
 
 ```bash
 dtpipe -i generate:1000 \
@@ -20,40 +15,36 @@ dtpipe -i generate:1000 \
   -o people.csv
 ```
 
+`generate:1000` produces 1 000 rows, and each `--fake` adds a column of realistic values:
+
+```
+name,email,city
+Blanca Towne,Destini.Langosh82@yahoo.com,Bonniemouth
+Elenor Aufderhar,Jamey.Friesen54@yahoo.com,Macejkovicbury
+Mustafa Roberts,Adrian62@yahoo.com,East Ignacio
+```
+
+On a column that already exists, `--fake` replaces its values: that is
+[anonymization](guides/anonymization.md).
+
+Every run starts by printing its pipeline: the source, the steps, the target.
+
 ```
 ╭─ Pipeline ──────────────────╮
 │   ◉  generate:1000  ◈ Arrow │
-│      → fake                 │
-│      → fake                 │
 │      → fake                 │
 │      → project              │
 │      ──▶  people.csv        │
 ╰─────────────────────────────╯
 ```
 
-```
-name,email,city
-Rory Hane,Audie.Schaden@yahoo.com,Stantonton
-Andreane Wyman,Brielle_McClure@hotmail.com,Samanthaton
-Denis Koch,Blanca2@gmail.com,Ryanborough
-```
-
-Every run prints that panel: the source, each transformation in order, the target, and whether the
-stream travelled row by row (`● row`) or as Arrow batches (`◈ Arrow`).
-
-The same flag anonymizes an existing column instead of inventing one, and can keep a join working
-across two anonymized tables — see [Anonymization](guides/anonymization.md).
-
-## 2. Look at what you have
+## 2. Look at it
 
 ```bash
 dtpipe inspect -i people.csv
 ```
 
 ```
-📋 Schema for people.csv
-3 columns
-
 ┌───┬────────┬────────┬──────────┐
 │ # │ Column │ Type   │ Nullable │
 ├───┼────────┼────────┼──────────┤
@@ -63,95 +54,51 @@ dtpipe inspect -i people.csv
 └───┴────────┴────────┴──────────┘
 ```
 
-`inspect` works on any source, including a database — with `--query` to describe the shape of a
-query rather than a table.
+`inspect` works on any source, databases included.
 
-## 3. Convert a file
-
-The format comes from the extension or the prefix; nothing else changes.
+## 3. Convert it
 
 ```bash
 dtpipe -i people.csv -o people.parquet
 ```
 
-## 4. Preview a load before running it
+The format comes from the file extension, or from a prefix such as `csv:` or `pg:`.
 
-`--dry-run N` runs the **real** pipeline over N source rows with the writer switched off. It is not
-a separate analyser: it asks the writer the same questions the run asks, so a column the target
-cannot hold fails the preview with the same message, and the same fix.
+## 4. Preview a load
+
+`--dry-run N` runs the pipeline on N rows and writes nothing.
 
 ```bash
 dtpipe -i people.csv -o duck:analytics.duckdb --table people --dry-run 3
 ```
 
-It answers two questions before anything is written — how the pipeline will execute, and what the
-target will have to accept:
-
 ```
-╭─Pipeline Execution Plan──────────────────────╮
-│  Reader  csv                  ▼ row          │
-│  Sink    duck                 ▲ columnar sink│
-│                                              │
-│  Strategy: Columnar · 1 bridge               │
-╰──────────────────────────────────────────────╯
-
 ╭─Target Schema Info──────────────────╮
 │ Target: Will be created (new table) │
 │ Status: ✅ Schema is compatible     │
 ╰─────────────────────────────────────╯
 ```
 
-```
-╭────────┬─────────────┬─────────────┬────────────────────╮
-│ Column │ Source Type │ Target Type │ Status             │
-├────────┼─────────────┼─────────────┼────────────────────┤
-│ name   │ String      │ —           │ ✅ Will be created │
-│ email  │ String      │ —           │ ✅ Will be created │
-│ city   │ String      │ —           │ ✅ Will be created │
-╰────────┴─────────────┴─────────────┴────────────────────╯
-```
+A column the target cannot hold fails the preview, as it would fail the real run. See
+[Preview and checkpoints](guides/preview-and-checkpoints.md).
 
-A dash in **Target Type** is not a problem: the table does not exist yet, so there is no type to
-compare against. Against an existing target the same column reads `String -> VARCHAR`.
-
-A dry run also prints, per column, what a row becomes at each step — most useful when the pipeline
-actually changes something, which is where
-[Anonymization](guides/anonymization.md#prove-it-before-you-hand-it-over) shows it. No rows are
-written, no table is created or migrated, and no `--pre-exec` hook runs. One caveat worth knowing:
-against a file-backed database that does not exist yet — DuckDB or SQLite — connecting creates the
-database file, empty and without your table. A file target such as CSV or Parquet is not created
-at all. See [Preview and checkpoints](guides/preview-and-checkpoints.md) for exactly what a dry run
-guarantees.
-
-## 5. Run it, then query the result
+## 5. Load it, then query it
 
 ```bash
 dtpipe -i people.csv -o duck:analytics.duckdb --table people
-```
 
-```
-Schema mode: discard - incompatibilities are reported and the run continues;
-columns missing from the target are not written.
-Verifying target schema compatibility...
-Target schema compatible.
-```
-
-Read it back — `jsonl:-` writes to standard output, so a pipeline composes with the rest of your
-shell:
-
-```bash
 dtpipe -i duck:analytics.duckdb \
   --query "SELECT count(*) AS people, count(DISTINCT city) AS cities FROM people" \
   -o jsonl:- --no-stats
 ```
 
 ```json
-{"people":1000,"cities":995}
+{"people":1000,"cities":994}
 ```
 
-## 6. Keep the pipeline
+`jsonl:-` writes to standard output, so dtpipe fits in a shell pipe.
 
-Any command line can be serialised to a YAML job and replayed:
+## 6. Save it as a job
 
 ```bash
 dtpipe -i people.csv -o duck:analytics.duckdb --table people \
@@ -171,32 +118,15 @@ main:
       table: people
 ```
 
-`--export-job` is the authority on the YAML form: whatever it writes is what the loader reads.
-
-## Beyond copying: reshaping the data
-
-Nothing above changes a row's shape. Two mechanisms do, and they are the subject of their own
-guide — [SQL and JavaScript](guides/sql-and-javascript.md):
-
-- **`--sql`** runs DuckDB SQL over the stream: joins, aggregates, window functions,
-  deduplication, sorting. It works on **sets**, stays on the Arrow path, and is the right answer
-  whenever more than one row is involved.
-- **`--compute` / `--filter` / `--expand`** run JavaScript on **one row at a time** — for parsing
-  a string or deriving a field, where no SQL form exists.
-
-> [!NOTE]
-> Reach for SQL first. A JavaScript step is a function call per row and pins that part of the
-> pipeline to the row path, so a columnar run pays a conversion to leave Arrow and another to come
-> back. A `--dry-run` names those bridges, and the guide shows how to read them.
+Commit the file and run it from CI: see [YAML jobs](guides/yaml-jobs.md).
 
 ---
 
-## Where to go next
-
-| | |
+| Next | |
 |:---|:---|
-| How the pieces fit together | [Concepts](concepts.md) |
-| Connecting to a real database | [Connection catalog](connections/README.md) |
-| Anonymizing while you copy | [Anonymization](guides/anonymization.md) |
-| Joining two sources | [DAG pipelines](guides/dag.md) |
-| Reshaping rows with SQL or JavaScript | [SQL and JavaScript](guides/sql-and-javascript.md) |
+| How the pieces fit | [Concepts](concepts.md) |
+| A real database | [Connection catalog](connections/README.md) |
+| Anonymize while you copy | [Anonymization](guides/anonymization.md) |
+| Join, filter, reshape | [DAG pipelines](guides/dag.md) · [SQL and JavaScript](guides/sql-and-javascript.md) |
+
+Every flag: `dtpipe --help`, or [REFERENCE.md](../REFERENCE.md).

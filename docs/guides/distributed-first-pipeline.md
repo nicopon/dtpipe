@@ -132,12 +132,14 @@ You need Docker with Compose and a checkout of this repository, for `deploy/comp
 8080 of the host must be free. The addresses use `localtest.me`, a public name that resolves to
 `127.0.0.1`; without a network that resolves it, add `coordinator.localtest.me` to `/etc/hosts`.
 
-Until a release publishes the authentication by key, the images on GHCR lack it: build the
-coordinator and the runner from the checkout, with the two `docker build` commands of
-[deploy/README.md](../../deploy/README.md#the-images), tagged as they are there, then point Compose
-at them. The variables live in this terminal, so run the Compose commands of this page from it:
+Compose pulls the coordinator and runner images of the latest release. With a checkout newer than
+that release, build both from it with the two `docker build` commands of
+[deploy/README.md](../../deploy/README.md#the-images), tagged as they are there, and point Compose
+at them with the first line below. The variables live in this terminal, so run the Compose commands
+of this page from it:
 
 ```bash
+# Only with images built from the checkout:
 export DTPIPE_COORDINATOR_IMAGE=dtpipe-coordinator DTPIPE_RUNNER_IMAGE=dtpipe-runner
 export COORDINATOR_URL=http://coordinator.localtest.me:8080
 docker compose -f deploy/compose.yaml up -d --wait

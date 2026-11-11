@@ -64,12 +64,12 @@ Two edges, two costs:
 
 ## Order matters, and repetition means something
 
-Transformers run in the order written — each flag adds one step, and every run prints the chain it
-built:
+Transformers run in the order written. Consecutive flags of the same kind form one step, and every
+run prints the chain it built:
 
 ```
 --fake "name:name.fullName" --fake "email:internet.email" --mask "phone:######****"
-→  fake → fake → mask
+→  fake → mask
 ```
 
 Repeating `-i` or `--from` does **not** add a value — it opens a new branch. That is the
