@@ -73,7 +73,9 @@ public class ConcurrentRunsTests
         await Settle();
 
         Assert.Equal(RunOutcome.Cancelled, cancelled.Outcome);
-        Assert.True(a.Cancelled.Task.IsCompleted);
+        // Waited for rather than read: on a loaded runner the node's handler can still be on its
+        // way when the verdict is out. A Cancel that never arrives still fails here.
+        await a.Cancelled.Task.WaitAsync(Wait);
         Assert.False(second.IsCompleted);
         Assert.False(b.Cancelled.Task.IsCompleted);
 

@@ -426,6 +426,9 @@ public class TuiNavigationTests
 
         await Drive(FourSteps(),
             (_, s) => s.ShowTurn(summary, hasPlan: false),
+            // ShowTurn reaches the panel at the next repaint: a key sent before it lands on an
+            // exchange that holds no choice yet, and Enter then fills nothing.
+            (_, s) => Assert.Contains("order_id", s.StatusText),
             (_, s) => s.FocusExchange(),
             (app, _) => app.InjectKey(Key.CursorDown),   // off the question, onto the first choice
             (app, _) => app.InjectKey(Key.Enter),
