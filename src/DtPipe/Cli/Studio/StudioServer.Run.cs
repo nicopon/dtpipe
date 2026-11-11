@@ -110,7 +110,7 @@ public sealed partial class StudioServer
             throw new StudioRefusal(409,
                 $"This job reads {string.Join(", ", sampling.Sources.Select(s => $"'{s.Alias}' ({s.Brick.Node}/{s.Brick.Id})"))}, "
                 + $"a source brick: a run takes at most {CoordinatorApi.MaxSampleRows} rows of it, so it is a sample and writes nothing real. "
-                + $"Refused outputs: {string.Join(", ", refused.Select(w => $"'{w.Alias}' → {w.Output}"))}. "
+                + $"Refused outputs: {string.Join(", ", refused.Select(w => $"'{w.Alias}' → {ConnectionStringSanitizer.Redact(w.Output)}"))}. "
                 + "Write them from a job that reads a source of its own, or make them sink bricks.");
 
         var stagedRun = staged ? Stage(asked, path, job.Text, sampling, launch, sample) : null;
