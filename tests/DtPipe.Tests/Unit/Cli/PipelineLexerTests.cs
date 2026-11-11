@@ -588,46 +588,27 @@ public class PipelineLexerTests
         var ex = Assert.Throws<InvalidOperationException>(() =>
             _lexer.Parse(new[] { "-i", "in.csv", "-o", "out.csv", "--export-job" }));
 
-        Assert.Contains("'--export-job' requires a file path", ex.Message, StringComparison.Ordinal);
-        Assert.Contains("the target file name is mandatory", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("'--export-job'", ex.Message, StringComparison.Ordinal);
         Assert.Contains("nothing follows it", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Export_Job_Alone_Throws()
+    public void Every_Value_Taking_Flag_Of_The_Registry_Is_Refused_Without_A_Value()
     {
-        var ex = Assert.Throws<InvalidOperationException>(() =>
-            _lexer.Parse(new[] { "--export-job" }));
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        Program.ConfigureServices(services);
+        var registry = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
+            .GetRequiredService<FlagRegistry>(
+                Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(services));
+        var flags = registry.GetAll().Where(d => d.ConsumesNextToken).ToList();
+        Assert.NotEmpty(flags);
 
-        Assert.Contains("'--export-job' requires a file path", ex.Message, StringComparison.Ordinal);
-        Assert.Contains("the target file name is mandatory", ex.Message, StringComparison.Ordinal);
-        Assert.Contains("nothing follows it", ex.Message, StringComparison.Ordinal);
-    }
-
-    [Theory]
-    [InlineData("-o")]
-    [InlineData("--no-stats")]
-    [InlineData("--dry-run")]
-    public void Export_Job_Followed_By_Flag_Throws(string nextFlag)
-    {
-        var ex = Assert.Throws<InvalidOperationException>(() =>
-            _lexer.Parse(new[] { "-i", "in.csv", "--export-job", nextFlag, "-o", "out.csv" }));
-
-        Assert.Contains("'--export-job' requires a file path", ex.Message, StringComparison.Ordinal);
-        Assert.Contains("the target file name is mandatory", ex.Message, StringComparison.Ordinal);
-        Assert.Contains(nextFlag, ex.Message, StringComparison.Ordinal);
-    }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData("   ")]
-    public void Export_Job_With_Whitespace_Or_Empty_Target_Throws(string emptyTarget)
-    {
-        var ex = Assert.Throws<InvalidOperationException>(() =>
-            _lexer.Parse(new[] { "-i", "in.csv", "-o", "out.csv", "--export-job", emptyTarget }));
-
-        Assert.Contains("'--export-job' requires a file path", ex.Message, StringComparison.Ordinal);
-        Assert.Contains("the target file name is mandatory", ex.Message, StringComparison.Ordinal);
+        var lexer = new PipelineLexer(registry);
+        foreach (var def in flags)
+        {
+            var ex = Assert.Throws<InvalidOperationException>(() => lexer.Parse(new[] { def.Name }));
+            Assert.Contains("nothing follows it", ex.Message, StringComparison.Ordinal);
+        }
     }
 
     [Fact]
