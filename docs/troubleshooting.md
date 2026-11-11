@@ -58,9 +58,9 @@ per-column trace of what each step does to a row. See
 
 ## Still stuck
 
-- [REFERENCE.md](../REFERENCE.md) — the exhaustive flag list; the answer is often a flag you have
+- [REFERENCE.md](../REFERENCE.md) — the flags in common use; the answer is often a flag you have
   not met yet
-- `dtpipe --help`, `dtpipe <subcommand> --help` — generated from the binary, so never out of date
+- `dtpipe --help`, `dtpipe <subcommand> --help` — every flag, generated from the binary
 
 ---
 

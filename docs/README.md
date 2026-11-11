@@ -52,10 +52,10 @@ database of your own.
 
 ## Reference
 
-These pages explain and show. When you need the exhaustive list — every flag, every option, every
-YAML key — go to the reference documents at the root of the repository:
+These pages explain and show. For the lists — flags, options, YAML keys — go to the reference
+documents at the root of the repository. `dtpipe --help` lists every flag the binary carries.
 
 | Document | What it holds |
 |:---|:---|
-| [REFERENCE.md](../REFERENCE.md) | Every CLI flag, the YAML job schema, provider-specific options, the MCP tool table |
+| [REFERENCE.md](../REFERENCE.md) | The flags in common use, the YAML job schema, provider-specific options, the MCP tool table |
 | [EXTENDING.md](../EXTENDING.md) | Writing a new adapter or transformer |

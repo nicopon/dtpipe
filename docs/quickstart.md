@@ -129,4 +129,4 @@ Commit the file and run it from CI: see [YAML jobs](guides/yaml-jobs.md).
 | Anonymize while you copy | [Anonymization](guides/anonymization.md) |
 | Join, filter, reshape | [DAG pipelines](guides/dag.md) · [SQL and JavaScript](guides/sql-and-javascript.md) |
 
-Every flag: `dtpipe --help`, or [REFERENCE.md](../REFERENCE.md).
+The common flags: [REFERENCE.md](../REFERENCE.md). Every flag: `dtpipe --help`.

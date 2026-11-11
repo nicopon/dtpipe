@@ -10,7 +10,8 @@ paths:
 
 A task-oriented layer **over** the root documents. **The site explains and shows; `REFERENCE.md`
 enumerates**: flag tables go there, walkthroughs in `docs/guides/`. End every page with a pointer
-into `REFERENCE.md`.
+into `REFERENCE.md`. `REFERENCE.md` lists the flags in common use and says so; `dtpipe --help`,
+generated from the binary, is the complete list, and no page calls `REFERENCE.md` exhaustive.
 
 `[CI: validate_docs.sh (every --flag named exists in --help), validate_doc_links.sh (links and
 anchors, of the site and the root documents), validate_doc_width.sh (prose ≤ 100 columns),

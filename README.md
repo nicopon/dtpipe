@@ -94,7 +94,7 @@ format and the rules that apply to every provider, is at
 | Where | What it holds |
 |:---|:---|
 | [**docs/**](./docs/README.md) | **Start here.** Install, quickstart, concepts, a guide per task, a page per connection |
-| [REFERENCE.md](./REFERENCE.md) | The exhaustive lists: every CLI flag, the YAML job schema, provider options, the MCP tools |
+| [REFERENCE.md](./REFERENCE.md) | The flags in common use, the YAML job schema, provider options, the MCP tools. `dtpipe --help` lists every flag |
 | [EXTENDING.md](./EXTENDING.md) | Writing a new adapter or transformer |
 
 ## Contributing

@@ -34,6 +34,9 @@ dtpipe -i SOURCE [OPTIONS] -o DESTINATION
 dtpipe --job FILE [OVERRIDES]
 ```
 
+This page lists the flags in common use. `dtpipe --help` lists every flag the binary carries,
+grouped by provider and transformer; `dtpipe providers` lists the providers.
+
 ---
 
 ## Core Options
@@ -234,7 +237,12 @@ strings:
 | `--column-types` | `"Id:uuid,Qty:int32"` | Explicit column type declarations for text readers. A hint naming no type is refused — see [Type hints](#type-hints) |
 | `--auto-column-types` | | Infer column types from a sample of rows (size is `--max-sample`, default varies by reader) |
 | `--max-sample` | `500` | Rows sampled to infer schema or column types for a text reader (CSV, JSONL, XML); `0` disables inference. Default: 100 for CSV, 1000 for JSONL and XML |
+| `--schema-save` | `people.dtschema` | Save the schema a text reader discovered, to reuse it with `--schema-load` |
+| `--schema-load` | `people.dtschema` | Take the column types from a saved schema instead of inferring them |
 | `--path` | `"//Product"` | XPath / JSON path for record selection (XML, JsonL) |
+| `--xml-namespaces` | `"p=urn:orders"` | **(XML only)** Namespace prefixes used in `--path`, as `prefix=uri`, comma-separated |
+| `--ora-fetch-size` | `1048576` | **(Oracle only)** Fetch size in bytes |
+| `--throttle` | `100` | **(`generate:` only)** Rows per second, to stand in for a slow source |
 | `--query` / `-q` | `"SELECT ..."` | SQL query executed by database readers (or a path to a `.sql` file) |
 | `--table` / `-t` | `"users"` | Source table name — auto-builds `SELECT * FROM <table>` when no `--query` is given (database readers). A qualified name is split on the dot and each part quoted the way the source engine spells it: `eshop.customers` reads `"eshop"."customers"` on PostgreSQL, `` `eshop`.`customers` `` on MySQL, `[eshop].[customers]` on SQL Server. Spell the value yourself — `'"an.awkward.name"'` — to keep a dot inside a single identifier |
 | `--duck-init` | `"LOAD httpfs"` | **(DuckDB only)** SQL executed after connection open. See [Value Resolution](#value-resolution) |
@@ -271,6 +279,8 @@ sits in, wherever it falls among the step's flags.
 | `--fake-seed-column` | `"UserId"` or `"Region,Branch"` | Column(s) used as a deterministic seed (same input -> same output). Supports comma-separated columns for composite seeds. |
 | `--fake-seed-row` | | Row-index based deterministic mode (row N always gets the same values) |
 | `--skip-null` | | Skip fake generation when the source value is null. Also a `--compute` option: it binds to the step it follows |
+| `--mask-skip-null`, `--overwrite-skip-null` | | Leave a null value null instead of masking or overwriting it |
+| `--format-skip-null` | | Write null instead of the template when every column it reads is null |
 | `--mask` | `"Phone:###-****"` | Partial masking (`#` keeps original char, any other replaces) |
 | `--null` | `"ColName"` | Force a column to NULL |
 | `--overwrite` | `"Status:Active"` | Set a static value for every row in a column. The value is text and the column becomes a string; for a typed constant use `--compute "Col:12345" --compute-types "Col:int32"` |
@@ -387,6 +397,11 @@ DuckDB.
 | `--strategy` | `Append` | Write strategy. One of: `Append`, `Truncate`, `DeleteThenInsert`, `Recreate`, `Upsert`, `Ignore`. **Database targets only** — a file or object writer replaces its target and refuses the flag rather than accepting one it cannot honour |
 | `--table` | `"users"` | Override target table name (default: `export`) |
 | `--csv-header` | `false` | **(CSV only)** Whether to write the header row (default: `true`). Takes `true` or `false`: see [Boolean flags](#boolean-flags) |
+| `--csv-quote` | `"'"` | **(CSV only)** Quote character (default: `"`) |
+| `--csv-null-value` | `"NULL"` | **(CSV only)** Text written for a null value (default: empty) |
+| `--csv-date-format` | `"dd/MM/yyyy"` | **(CSV only)** Format of a date (default: `yyyy-MM-dd`) |
+| `--csv-timestamp-format` | `"yyyy-MM-dd HH:mm:ss"` | **(CSV only)** Format of a timestamp (default: `yyyy-MM-dd HH:mm:ss.ffffff`) |
+| `--arrow-compression` | `zstd` | **(Arrow only)** Buffer compression: `none` (default), `lz4` or `zstd` |
 | `--key` | `"Id,Code"` | Primary key column(s) for `Upsert`/`Ignore`. Auto-detected from DB if omitted |
 | `--insert-mode` | `Bulk` | `Standard` or `Bulk` (high-speed batch insert for PG, Oracle, MSSQL) |
 | `--auto-migrate` | | `ALTER TABLE` to add missing columns automatically. See [Schema modes](#schema-modes) |
@@ -623,8 +638,8 @@ dtpipe -i sales.csv -o azure://reports/sales.parquet --azure-connection-string "
 | Flag | Syntax | Description |
 |:---|:---|:---|
 | `--limit` | `1000` | Read at most N rows from the source, then stop reading. Bounds the **read**, so a filter downstream yields fewer than N rather than topping the count back up |
-| `--sampling-rate` | `0.1` | Row inclusion probability (0.0–1.0) |
-| `--sampling-seed` | `12345` | Fixed seed for deterministic, reproducible sampling |
+| `--sampling-rate`, `--sample-rate` | `0.1` | Row inclusion probability (0.0–1.0) |
+| `--sampling-seed`, `--sample-seed` | `12345` | Fixed seed for deterministic, reproducible sampling |
 | `--batch-size` | `10000` | Rows per batch (default: 32,768) |
 | `--max-batch-bytes` | `268435456` | Soft byte cap per read batch: a batch flushes when either `--batch-size` rows **or** this many bytes accumulate, whichever comes first. `0` (default) disables the byte cap. Bounds memory when rows carry large text/blob columns. Estimate is approximate — the row that crosses the bound is kept. Applies to the wire-decode readers (PostgreSQL `COPY`, and the ADO readers: MySQL, Oracle, SQL Server, SQLite) and the row→columnar bridge. |
 | `--no-stats` | | Suppress progress bars and transfer statistics |
@@ -1113,7 +1128,7 @@ trace says so (`10 → 3 rows`) rather than leaving a blank cell that would read
 change a transformer, and pick up again without reading the source a second time.
 
 ```bash
-dtpipe -i oracle:"…" --query "SELECT * FROM big_table" --mask email --checkpoint -o null:
+dtpipe -i oracle:"…" --query "SELECT * FROM big_table" --mask email --checkpoint stage1 -o null:
 dtpipe --from-checkpoint <key> --compute "total=price*qty" -o csv:out.csv
 ```
 
