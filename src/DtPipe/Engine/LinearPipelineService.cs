@@ -299,7 +299,7 @@ public class LinearPipelineService
         }
         else if (job.Transformers != null && job.Transformers.Count > 0)
         {
-            pipeline = BuildPipelineFromYaml(job, tFactories);
+            pipeline = BuildPipelineFromYaml(job, tFactories, strict: run.Globals?.StrictBindings == true);
         }
         else
         {
@@ -391,7 +391,7 @@ public class LinearPipelineService
         => _serviceProvider.GetRequiredService<InternalChannelTransports>().Writer(kind);
 
 
-    private List<IDataTransformer> BuildPipelineFromYaml(JobDefinition job, List<IDataTransformerFactory> factories)
+    private List<IDataTransformer> BuildPipelineFromYaml(JobDefinition job, List<IDataTransformerFactory> factories, bool strict)
     {
         var pipeline = new List<IDataTransformer>();
         var configs = job.Transformers ?? new List<TransformerConfig>();
@@ -399,7 +399,7 @@ public class LinearPipelineService
         {
             var factory = factories.FirstOrDefault(f => f.ComponentName.Equals(config.Type, StringComparison.OrdinalIgnoreCase));
             if (factory == null) throw new InvalidOperationException($"Transformer factory '{config.Type}' not found.");
-            var transformer = YamlTransformerBuilder.Build(factory, config);
+            var transformer = YamlTransformerBuilder.Build(factory, config, strict);
             if (transformer != null) pipeline.Add(transformer);
         }
 

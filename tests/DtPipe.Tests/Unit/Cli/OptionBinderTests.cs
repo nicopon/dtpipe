@@ -154,7 +154,7 @@ public class OptionBinderTests
             OptionBinder.BindYaml(instance, new Dictionary<string, object?> { ["totally-unknown"] = "v" }));
 
         Assert.Equal("", instance.Known); // untouched
-        Assert.Contains("Unrecognized provider option 'totally-unknown' for 'ProbeOptions'", stderr, StringComparison.Ordinal);
+        Assert.Contains("Unrecognized option 'totally-unknown' for 'ProbeOptions'", stderr, StringComparison.Ordinal);
     }
 
     [Fact]

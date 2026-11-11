@@ -631,7 +631,7 @@ dtpipe -i sales.csv -o azure://reports/sales.parquet --azure-connection-string "
 | `--no-stats` | | Suppress progress bars and transfer statistics |
 | `--metrics-path` | `metrics.json` | Write structured execution results to a JSON file |
 | `--log` | `pipeline.log` | Write log output to a file. The log belongs to the process, so a job file has no key for it |
-| `--strict-bindings` | | Non-zero exit on the two binding faults that are otherwise tolerated: a flag nothing declares that consumes no value (one followed by a value is refused by the parser either way), and a job file's unrecognized `provider-options` key (a warning otherwise). A flag that exists but is not an option of the branch's component is refused with or without it |
+| `--strict-bindings` | | Non-zero exit on the two binding faults that are otherwise tolerated: a flag nothing declares that consumes no value (one followed by a value is refused by the parser either way), and a job file's unrecognized `provider-options` or transformer `options` key (a warning otherwise). A flag that exists but is not an option of the branch's component is refused with or without it |
 | `--dry-run` | `10` | Run the pipeline over N source rows with the writer neutralised — see [Sample Mode](#sample-mode-and-materialisation) |
 | `--ignore-nulls` | | Skip transformations when the input cell is NULL |
 | `--session` | `mission-7` | Name the session materialised artefacts belong to |
@@ -880,7 +880,7 @@ branch-name:
 An `options:` key is the **property name**, which is not always the command-line flag: the compute
 output type is `--compute-types` on the command line and `compute-types` in YAML, but DuckDB's init
 SQL is `--duck-init` and `init-sql`. A key that matches no property gets a warning that lists the
-valid keys, and the run goes on. `--export-job` is the authority on any shape this table leaves
+valid keys, and fails the run under `--strict-bindings`. `--export-job` is the authority on any shape this table leaves
 open.
 
 ### Environment variable and secret interpolation

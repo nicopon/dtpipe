@@ -262,7 +262,7 @@ public static class OptionBinder
             && NormalizeKey(flag.TrimStart('-')) == normalized);
 
         if (byFlag is not null)
-            return $"Unrecognized provider option '{key}' for '{optionsType.Name}'. "
+            return $"Unrecognized option '{key}' for '{optionsType.Name}'. "
                  + $"'{key}' is the command-line flag; in YAML the key is '{ToYamlKey(byFlag.Name)}'.";
 
         var closest = properties
@@ -276,7 +276,7 @@ public static class OptionBinder
             ? $" Did you mean '{closest}'?"
             : $" Valid keys: {string.Join(", ", properties.Select(p => ToYamlKey(p.Name)).OrderBy(k => k, StringComparer.Ordinal))}.";
 
-        return $"Unrecognized provider option '{key}' for '{optionsType.Name}'.{suffix}";
+        return $"Unrecognized option '{key}' for '{optionsType.Name}'.{suffix}";
     }
 
     /// <summary>A property name as the YAML key it binds from — PascalCase to kebab-case.</summary>

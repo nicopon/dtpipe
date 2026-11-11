@@ -75,7 +75,7 @@ echo "exit=$?"     # 0 success · 1 failure · 130 cancelled
 | [Exit code](../concepts.md#exit-codes) | `0`, `1` or `130`. A cancelled run never reports success |
 | `--metrics-path run.json` | Rows read and written, throughput, peak memory, duration |
 | `--log run.log` | The run's log in a file |
-| `--strict-bindings` | Fails the run on an undeclared flag or an unknown `provider-options` key, instead of a warning nobody reads |
+| `--strict-bindings` | Fails the run on an undeclared flag or an unknown option key, instead of a warning nobody reads |
 
 ```json
 {
