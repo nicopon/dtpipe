@@ -14,29 +14,9 @@ jobs:
   gate-smoke:
     name: F7 gate smoke (no LLM)
     runs-on: ubuntu-latest
-    # The coordinator's stores are tested against a real PostgreSQL (DtPipe.Coordinator.Server.Tests);
-    # SQL Server is the manual job of coordinator-sqlserver.yml.
-    services:
-      postgres:
-        image: postgres:18-alpine
-        env:
-          POSTGRES_PASSWORD: password
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 5
-    env:
-      DTPIPE_TEST_POSTGRES: Host=localhost;Port=5432;Username=postgres;Password=password;Database=postgres
     steps:
        - name: Checkout
          uses: actions/checkout@v4
-
-       - name: Setup .NET
-         uses: actions/setup-dotnet@v4
-         with:
-           dotnet-version: '10.0.403'
-
-       - name: Build + unit tests
-         run: ./build.sh
 
        - name: Install jq
          run: sudo apt-get install -y jq

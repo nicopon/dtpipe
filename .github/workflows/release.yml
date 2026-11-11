@@ -31,6 +31,15 @@ jobs:
         with:
           dotnet-version: '10.0.403'
 
+      - name: Build the binary under test
+        run: |
+          dotnet publish src/DtPipe/DtPipe.csproj -c Release \
+            -r linux-x64 --self-contained true \
+            -p:PublishSingleFile=true -p:DebugType=none -p:DebugSymbols=false \
+            -o dist/release
+          mv dist/release/DtPipe dist/release/dtpipe
+          chmod +x dist/release/dtpipe
+
       - name: Run Tests (Unit only)
         run: bash tests/scripts/run_unit_tests.sh
 

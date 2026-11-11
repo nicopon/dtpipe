@@ -109,5 +109,5 @@ stdin/stdout and TransportR. It speaks to no coordinator itself.
 TransportR hub (`NodeTestHost`, where `HandWiredNode` wires a run by hand) or a real `DtPipe.Coordinator` hub (`CoordinatorTestHost`, from
 `DtPipe.Coordinator.Tests` - referenced as a project, not duplicated), whose replicas are `TestNode`s that
 answer the node channel with the host's own run protocol; build the binary first. Both
-projects are outside `DtPipe.sln`, so `build.yml` never runs their tests; `build.sh` discovers
-them, so `agentic-ci.yml` runs them on Linux.
+projects are outside `DtPipe.sln`; `run_unit_tests.sh` discovers them, so the test job of `build.yml` runs them on
+Linux, after it publishes the binary.

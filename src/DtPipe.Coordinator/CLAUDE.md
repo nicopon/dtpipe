@@ -244,5 +244,5 @@ while any replica is connected.
   expiry. A node that cannot renew has its transfers ended and its connection closed by the hub
   within its access sweep. `[local: tools/campaign.py S3, S5]`
 
-`tests/DtPipe.Coordinator.Tests` is outside `DtPipe.sln`, so `build.yml` never runs it; `build.sh`
-discovers it, so `agentic-ci.yml` runs it on Linux.
+`tests/DtPipe.Coordinator.Tests` is outside `DtPipe.sln`; `run_unit_tests.sh` discovers it, so the test job of
+`build.yml` runs it on Linux.

@@ -35,12 +35,12 @@ The **distributed family** is every
 project named `DtPipe.Coordinator*` or `DtPipe.PipelineNode*`: it references TransportR as NuGet
 packages and stays outside `DtPipe.sln`, so the solution builds only what `src/DtPipe` reaches through
 `DtPipe.PipelineNode.Launcher`; `run_unit_tests.sh` discovers the family's test projects, so `build.sh`
-(`agentic-ci.yml` runs it) and the test job of `build.yml` and of `release.yml` run them. `build.sh` also publishes the coordinator self-contained as the folder
+and the test job of `build.yml` and of `release.yml` run them. `build.sh` also publishes the coordinator self-contained as the folder
 `dist/release/coordinator/` (executable `dtpipe-coordinator`, set by the Host's `AssemblyName`, never by a
 command-line `-p:AssemblyName`) and starts it once, on a throwaway state, until `/livez` answers. It is a
 folder, never a single file: `wwwroot` and the native SQLite library sit beside the executable. Its
 library is a git repository, so the machine it runs on needs `git` on the `PATH`. `release.yml` attaches the same folder to each release as `dtpipe-coordinator-<platform>`
-(`.tar.gz`, `.zip` on Windows) `[unchecked: until a tag runs it]`.
+(`.tar.gz`, `.zip` on Windows) `[unchecked: until a tag runs it]` `[local: build.sh — the coordinator's publish and its /livez answer]`.
 `DtPipe.Coordinator` and `DtPipe.PipelineNode` are libraries; a host owns `Program`, authentication
 and the address, and an executable of the family is such a host. Nothing else in `src/` names
 TransportR; only the family, its tests and the lab do. The family references `DtPipe.Jobs` and no

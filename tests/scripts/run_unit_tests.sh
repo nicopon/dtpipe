@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Runs every suite that needs no infrastructure: the `.Unit.` tests of DtPipe.Tests, then every other
 # tests/*/*.Tests.csproj, discovered rather than listed so a new suite cannot stay outside the gate.
-# Called by build.sh and by the release's `test` job; any failing suite fails the script.
+# The node's tests spawn the real binary, so dist/release/dtpipe is built first (build.sh and the CI test jobs do).
+# Called by build.sh, by the test job of build.yml and by the release's; any failing suite fails the script.
 
 set -euo pipefail
 

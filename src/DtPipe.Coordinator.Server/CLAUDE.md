@@ -194,7 +194,7 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   the host included: they name the provider, the setting and the driver's code. `Coordinator:Initialize` has one meaning for every
   store: a document or counter that is absent begins only when it is true. A new store takes its contract from `IRunStore`,
   `IRightsStore`, `IDeploymentStore`, `ICursorStore`, `IIgnoredHostStore` and `IXmlRepository`, and its own tests, as `SqlStoreTests`
-  (per provider). `[CI: SqlStoreTests on SQLite and PostgreSQL (agentic-ci.yml)]` `[local: SqlStoreTests on SQL
+  (per provider). `[CI: SqlStoreTests on SQLite and PostgreSQL (build.yml)]` `[local: SqlStoreTests on SQL
   Server (DTPIPE_TEST_REUSE_INFRA, or coordinator-sqlserver.yml by hand); lab.sh stack restart-check with LAB_STACK_STORE=sqlite,
   restored from a copy as deploy/README.md's backup]` `[unchecked: the file on a network volume; a power cut between a write and its
   sync; a key longer than SQL Server's columns]`
@@ -206,7 +206,7 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   taken again, or another standby would take it between. Nothing answers between the responder stopping and the host's server
   listening, the time of the start. A stop signal during the wait ends the process, nothing taken; `ApplicationStopping` ends
   the wait for a host that stops it. The image's health check reads `/livez`; `/healthz` stays readiness.
-  `[CI: PassiveCoordinatorTests on PostgreSQL (agentic-ci.yml), SqlStoreTests — the refusals]` `[local: PassiveCoordinatorTests on
+  `[CI: PassiveCoordinatorTests on PostgreSQL (build.yml), SqlStoreTests — the refusals]` `[local: PassiveCoordinatorTests on
   SQL Server; lab.sh stack failover-check]` `[unchecked: a node's real reconnection, which the tests stand for by its token and
   its negotiation]`
 - **The session cookie's keys are in the store, and a start that cannot read them stops.** `TrustedIdp.AddSessionKeys` points
