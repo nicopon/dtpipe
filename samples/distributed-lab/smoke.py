@@ -1302,7 +1302,7 @@ def cursor_pass():
         out = subprocess.run(
             [DTPIPE, "-i", f"generate:{count}", "--alias", "g", "--from", "g", "--sql",
              f"SELECT {first} + GenerateIndex AS order_id, 1 AS customer_id, 1 AS product_id, 1 AS quantity, "
-             f"DATE '2025-01-01' AS order_date, 'paid' AS status FROM g",
+             f"TIMESTAMP '2025-01-01 00:00:00' AS order_date, 'paid' AS status FROM g",
              "-o", f"duck:{sales}", "--table", "orders", "--no-stats"], capture_output=True, text=True)
         if out.returncode != 0:
             raise RuntimeError(f"could not add orders: {out.stderr.strip().splitlines()[-1:]}")
