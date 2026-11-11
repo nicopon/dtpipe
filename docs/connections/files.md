@@ -2,92 +2,68 @@
 
 [← Connections](README.md) · [Documentation](../README.md)
 
-The format comes from the extension, or from an explicit prefix when you want to be sure:
-
 ```bash
 dtpipe -i sales.csv      -o sales.parquet
-dtpipe -i csv:sales.data -o parquet:sales.out      # explicit, when the extension lies
+dtpipe -i csv:sales.data -o parquet:sales.out      # a prefix, when the extension does not say
 ```
 
-| Format | Read | Write | Notes |
+| Format | Read | Write | Options |
 |:---|:---:|:---:|:---|
-| CSV | ✅ | ✅ | `--csv-separator`, `--csv-has-header false` (reader), `--csv-header false` (writer), `--encoding` |
-| JSONL / NDJSON | ✅ | ✅ | one JSON object per line; `--path` selects a sub-document |
-| Parquet | ✅ | ✅ | columnar end to end, native `LIST` columns |
-| Arrow IPC | ✅ | ✅ | the in-memory format, written as-is |
-| XML | ✅ | — | streaming reader, `--path "//Product"` selects the record node |
+| CSV | ✅ | ✅ | `--csv-separator`, `--csv-has-header` (reader), `--csv-header` (writer), `--encoding` |
+| JSONL | ✅ | ✅ | One JSON object per line; `--path` selects a sub-document |
+| Parquet | ✅ | ✅ | Columnar, with list columns |
+| Arrow IPC | ✅ | ✅ | `--arrow-compression` |
+| XML | ✅ | — | `--path "//Product"` selects the record element |
 
 ## Standard input and output
 
-Use `-` as the location, and dtpipe composes with the rest of your shell:
+Use `-` as the path:
 
 ```bash
 cat export.csv | dtpipe -i csv:- -o jsonl:- --mask "email:###****" | jq .
 dtpipe -i "pg:…" --query "SELECT * FROM users" -o jsonl:- --no-stats > users.jsonl
 ```
 
-`--no-stats` keeps the progress panel out of a piped stream.
+## Several files at once
 
-## Globs
-
-A local input whose **file name** carries `*` or `?` is read as one stream over every match, in
-ordinal path order:
+A `*` or `?` in the file name reads every match as one stream, in path order:
 
 ```bash
-dtpipe -i "daily/*.csv"        -o events.parquet
-dtpipe -i "exports/part-?.jsonl" -o "pg:…" --table events
+dtpipe -i "daily/*.csv" -o events.parquet
 ```
 
-- **The schema is the first file's.** A later file with different columns stops the run and names
-  it, rather than dropping or misaligning columns.
-- **Matching nothing is an error**, not an empty read.
-- The wildcard stays in the file name — a pattern spanning directories is not supported locally.
-  Object storage does glob across prefixes; see [Object storage](object-storage.md).
+The first file sets the schema; a file with other columns stops the run. Matching nothing is an
+error. Locally, the wildcard must be in the file name, not in a folder name; object storage allows
+both (see [Object storage](object-storage.md)).
 
 ## Text columns are text until you say otherwise
 
-A CSV has no types. Every column arrives as a string, which is correct and occasionally
-surprising: a `--sql` branch summing such a column fails, because `sum(VARCHAR)` has no meaning.
+A CSV has no types: every column is a string. Summing one fails.
 
 ```bash
 # ✗ Binder Error: No function matches sum(VARCHAR)
 dtpipe -i orders.csv --alias o --from o --sql "SELECT sum(amount) FROM o" -o total.csv
 
-# ✓ infer the types from the first 100 rows
+# ✓ infer the types from a sample of rows
 dtpipe -i orders.csv --auto-column-types --alias o --from o --sql "SELECT sum(amount) FROM o" -o total.csv
 
-# ✓ or declare exactly the ones that matter
+# ✓ or declare the ones that matter
 dtpipe -i orders.csv --column-types "amount:decimal,order_id:int32" --alias o …
 ```
 
-`--column-types` and `--auto-column-types` apply to the text readers (CSV, JSONL, XML). A hint
-that names no known type is refused rather than silently ignored — the vocabulary is in
-[REFERENCE.md](../../REFERENCE.md#type-hints). `--max-sample` sets how many rows feed inference
-(`0` disables it); each reader's default is its own — see
-[REFERENCE.md](../../REFERENCE.md#source-reader-options).
+This applies to CSV, JSONL and XML. `--max-sample` sets how many rows inference reads.
 
-A typed number takes `.` as its decimal point and no group separator: `1,5` is refused, never read
-as 15. A cell that does not read under its type stops the run naming its line and its column; a
-`string` column keeps the text. See
-[Values a type cannot hold](../../REFERENCE.md#values-a-type-cannot-hold).
+- A number uses `.` as its decimal point and no thousands separator: `1,5` is refused.
+- A value that does not fit its type stops the run, naming the line and the column.
+- Inference never rounds: a number that a `double` cannot hold exactly stays a `decimal` or text.
+  Declare `decimal` for exact arithmetic, since `4.29` is inferred as a `double`.
 
-`decimal` declares no width, so its value reads with no trailing zeros, `10.50` as `10.5`, and holds
-18 decimals: a value with more is refused. A `datetimeoffset` reads in UTC, `+02:00` becoming the
-same instant at `+00:00`.
+The type names and the rules: [REFERENCE.md](../../REFERENCE.md#type-hints).
 
-Inference never rounds a number to fit: a column is a `double` only when a `double` writes each
-value back with the same digits. `4.29` is therefore a `double`, so declare `decimal` for exact
-arithmetic. See [Type hints](../../REFERENCE.md#type-hints).
+## Nested values
 
-## Nested and repeated values
-
-A list or a nested object keeps its shape wherever the target has one — a Parquet `LIST`, an Arrow
-`ListType`, a PostgreSQL array — and is rendered as JSON text wherever it does not (`[10,20,30]`,
-`{"severity":"info"}`). The declared schema decides; the rendering never changes it. A struct or a
-map read from Arrow or DuckDB is refused by `parquet:`, which has a form for them that dtpipe does
-not write, with the step that casts it to text.
-
-To land a nested field as its own typed column, name it in the pipeline:
+A list or a nested object keeps its shape where the target has one (a Parquet list, a PostgreSQL
+array), and is written as JSON text elsewhere. To turn a nested field into its own column:
 
 ```bash
 dtpipe -i events.jsonl \
@@ -98,4 +74,4 @@ dtpipe -i events.jsonl \
 ---
 
 See also: [SQL and JavaScript](../guides/sql-and-javascript.md) ·
-[Object storage](object-storage.md) · [REFERENCE.md](../../REFERENCE.md#source-reader-options)
+[REFERENCE.md](../../REFERENCE.md#source-reader-options)

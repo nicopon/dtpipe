@@ -2,57 +2,44 @@
 
 [← Connections](README.md) · [Documentation](../README.md)
 
-Read and write. Prefix `mysql:` — **required**, and never inferred: `Server=host;Database=db` is
-character for character what a SQL Server connection string looks like, so no content heuristic
-could tell them apart. Driver: [MySqlConnector](https://mysqlconnector.net/connection-options/).
-
-## Connection string
+Read and write, prefix `mysql:`, always required. Driver:
+[MySqlConnector](https://mysqlconnector.net/connection-options/).
 
 ```
 mysql:Server=localhost;Port=3306;Database=app;User ID=root;Password=…
 ```
 
-## The one server-side prerequisite
+## Bulk loading needs `local_infile`
 
-`--insert-mode Bulk` (the default) uses `MySqlBulkCopy`, which is built on
-`LOAD DATA LOCAL INFILE`. That needs **two** switches: the client flag, which dtpipe sets for you,
-and the server's `local_infile` — **OFF by default since MySQL 8**, and `SUPER` is required to
-change it.
+The default bulk load uses `LOAD DATA LOCAL INFILE`, which the server must allow. It is off by
+default since MySQL 8:
 
 ```sql
-SET GLOBAL local_infile = 1;   -- or local_infile=ON in my.cnf, to survive a restart
+SET GLOBAL local_infile = 1;   -- or local_infile=ON in my.cnf
 ```
 
-dtpipe probes `@@GLOBAL.local_infile` once per run. When it is off, it warns and falls back to
-batched `INSERT` rather than failing mid-stream — correct, slower.
+When it is off, dtpipe warns and uses batched `INSERT` instead: correct, slower.
 
 ## Upsert needs a unique index
 
-`--strategy Upsert` generates `INSERT … ON DUPLICATE KEY UPDATE`, which MySQL fires on the table's
-own PRIMARY KEY or UNIQUE indexes. There is no `ON CONFLICT (…)` to name a target.
+`--strategy Upsert` uses `INSERT … ON DUPLICATE KEY UPDATE`, which only works with a primary key or
+unique index on exactly the key columns. Without one, dtpipe warns and uses `DELETE` then `INSERT`.
+A row that conflicts on another unique column is also updated: that is how MySQL works.
 
-> [!WARNING]
-> **No matching index, no upsert.** Without a unique index covering exactly the key columns the
-> clause degenerates into a plain `INSERT` and duplicates accumulate. dtpipe checks for the index
-> and, when it is missing, warns and falls back to an explicit `DELETE`+`INSERT` — correct, slower.
-> A row conflicting on an *unrelated* `UNIQUE` column is also updated: that is MySQL's semantics,
-> and it has no equivalent in the other providers.
+## Types
 
-## Type mapping worth knowing
-
-| Source | MySQL | Note |
+| Source | Written as | Note |
 |:---|:---|:---|
-| `Guid` | `CHAR(36)` | MySQL has no UUID type |
-| `bool` | `TINYINT(1)` | a bare `TINYINT` would come back as a number |
-| `decimal` | `DECIMAL(p,s)` as the source declares it, else `DECIMAL(38,18)` | |
-| `DateTimeOffset` | `DATETIME(6)` | **the offset is not preserved** — MySQL has no offset-carrying type |
-| `string` | `LONGTEXT`, or `VARCHAR(255)` in a key | `LONGTEXT` cannot be indexed without a prefix length |
+| UUID | `CHAR(36)` | MySQL has no UUID type |
+| Boolean | `TINYINT(1)` | |
+| Decimal | `DECIMAL(p,s)` as declared, else `DECIMAL(38,18)` | |
+| Timestamp with offset | `DATETIME(6)` | The offset is lost |
+| Text | `LONGTEXT`, or `VARCHAR(255)` in a key | |
 
-A `TIME` column is read as a time of day, to the microsecond. MySQL lets a `TIME` run to 838 hours
-or below zero; that is an elapsed time, not a time of day, and the read stops naming the column.
-Cast it to text in the query to read it.
+A `TIME` beyond 24 hours or below zero is a duration, not a time of day: reading it stops the run.
+Cast it to text in the query.
 
 ---
 
-See also: [Write strategies](../guides/write-strategies.md) ·
+See also: [Writing to a database](../guides/write-strategies.md) ·
 [REFERENCE.md](../../REFERENCE.md#mysql)

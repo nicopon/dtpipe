@@ -2,28 +2,22 @@
 
 [← Connections](README.md) · [Documentation](../README.md)
 
-Read and write. Prefix `mssql:`. Driver:
+Read and write, prefix `mssql:`. The driver,
 [Microsoft.Data.SqlClient](https://learn.microsoft.com/en-us/sql/connect/ado-net/connection-string-syntax),
-compiled into the binary — there is nothing to install on the host, no ODBC manager and no driver
-package to match against the server version.
-
-## Connection string
+is inside the binary: no ODBC and nothing to install.
 
 ```
 mssql:Server=host,1433;Database=app;User Id=sa;Password=…;TrustServerCertificate=True
 ```
 
-The keys are the driver's, not dtpipe's, so anything Microsoft.Data.SqlClient accepts works here:
-
 | Key | For |
 |:---|:---|
-| `Integrated Security=true` | Windows authentication — the process's own identity, no password in the string |
-| `Encrypt=true`, `TrustServerCertificate=True` | TLS, and whether an untrusted certificate is accepted |
-| `ApplicationIntent=ReadOnly` | Route to a readable secondary in an availability group |
-| `Application Name=dtpipe-nightly` | What your DBA sees in `sys.dm_exec_sessions` — worth setting |
-| `Connect Timeout`, `Max Pool Size`, `MultiSubnetFailover` | The usual driver knobs |
+| `Integrated Security=true` | Windows authentication, as the account running dtpipe |
+| `Encrypt=true`, `TrustServerCertificate=True` | TLS, and accepting an untrusted certificate |
+| `ApplicationIntent=ReadOnly` | Reading from a secondary of an availability group |
+| `Application Name=dtpipe-nightly` | Naming the session your DBA sees |
 
-## Reading
+## Read
 
 ```bash
 dtpipe -i "mssql:Server=prod;Database=sales;Integrated Security=true" \
@@ -31,19 +25,9 @@ dtpipe -i "mssql:Server=prod;Database=sales;Integrated Security=true" \
   -o invoices.parquet
 ```
 
-`--table dbo.Invoices` is the shorthand for `SELECT * FROM [dbo].[Invoices]` — each part of a
-qualified name is quoted the way SQL Server spells it.
+A stored procedure or any statement other than `SELECT` needs `--unsafe-query`.
 
-SQL Server reads a bare date literal in your query under the session's language: against a
-`datetime` column, `'2026-01-02'` means 1 February under French, British or German. Write
-`'2026-01-02T00:00:00'`, or use a `datetime2` column, and the language no longer matters.
-
-A `time` column is read as a time of day, to the microsecond (`23:59:59.123456`).
-
-A stored procedure or any non-`SELECT` statement needs `--unsafe-query`, which says out loud that
-dtpipe can no longer tell whether the source is read-only.
-
-## Writing
+## Write
 
 ```bash
 dtpipe -i orders.parquet \
@@ -51,47 +35,20 @@ dtpipe -i orders.parquet \
   --table stg_orders --strategy Truncate
 ```
 
-| Option | Effect |
-|:---|:---|
-| `--table` | Target table (default: `export`) |
-| `--strategy` | `Append`, `Truncate`, `DeleteThenInsert`, `Recreate`, `Upsert`, `Ignore` |
-| `--key "Id"` | Key columns for `Upsert`/`Ignore`; read from the target's primary key when omitted |
-| `--auto-migrate` | `ALTER TABLE ADD COLUMN` for columns the target does not have yet |
+Rows are loaded in bulk with `SqlBulkCopy`. `CHECK` and `FOREIGN KEY` constraints are enforced: a
+row that breaks one fails the run, naming the constraint. Strategies and schema modes:
+[Writing to a database](../guides/write-strategies.md).
 
-Rows are loaded with `SqlBulkCopy`, under a table lock and its own transaction — the same path a
-.NET application would use for a bulk load. The load checks the target's `CHECK` and `FOREIGN KEY`
-constraints: a row one of them refuses fails the run with exit `1`, the error names the constraint,
-and the constraint stays trusted. What the earlier batches leave is in
-[Write strategies](../guides/write-strategies.md).
-
-Identifiers are stored as given: `--table StockMoves` creates `StockMoves`, addressable unquoted,
-because SQL Server compares case-insensitively. See
-[Write strategies](../guides/write-strategies.md) for the full matrix, and for the four schema
-regimes (`discard`, `freeze`, `evolve`, `off`) that every run states in one line.
-
-## Preview, and the one caveat that is SQL Server's
-
-`--dry-run N` neutralises the writer everywhere. On the **source** side it also classifies the
-query and, where the engine supports it, sets the session read-only so the server itself refuses a
-write.
-
-> [!IMPORTANT]
-> SQL Server has no read-only session. `ApplicationIntent=ReadOnly` routes to a replica; it does
-> not make a session read-only. So on `mssql:` the guarantee is the verb scan alone — and the run
-> says which of the two guarantees it had, rather than presenting the weaker one as the stronger.
-
-## Common pitfalls
+## Pitfalls
 
 | Symptom | Cause |
 |:---|:---|
-| `A connection was successfully established … certificate chain` | Add `TrustServerCertificate=True`, or install the server certificate |
-| `Login failed for user ''` | `Integrated Security=true` uses the *process* identity — check which account the scheduler or service runs as |
-| Upsert inserts duplicates | The key columns are not covered by a unique index on the target |
-| A `datetimeoffset` reads at `+00:00` | dtpipe reads it in UTC, the same instant. To keep the offset as written, select it as text: `CAST(col AS varchar(34))` |
+| `'2026-01-02'` reads as 1 February | A bare date follows the session language. Write `'2026-01-02T00:00:00'` |
+| `… certificate chain` at connection | Add `TrustServerCertificate=True`, or install the server certificate |
+| `Login failed for user ''` | `Integrated Security` uses the account running dtpipe: check the scheduler's account |
+| A `datetimeoffset` reads at `+00:00` | dtpipe reads it in UTC, the same instant. To keep the offset, select it as text |
+| A preview does not protect the source | SQL Server has no read-only session: a preview only checks the query's verbs |
 
 ---
 
-See also: [dtpipe and .NET](../dotnet.md) ·
-[Write strategies](../guides/write-strategies.md) ·
-[Incremental loading](../guides/incremental.md) ·
-[REFERENCE.md](../../REFERENCE.md#providers)
+See also: [REFERENCE.md](../../REFERENCE.md#providers)

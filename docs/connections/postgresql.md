@@ -2,22 +2,18 @@
 
 [← Connections](README.md) · [Documentation](../README.md)
 
-Read and write. Prefix `pg:`. Driver:
+Read and write, prefix `pg:`. Driver:
 [Npgsql](https://www.npgsql.org/doc/connection-string-parameters.html).
-
-## Connection string
 
 ```
 pg:Host=localhost;Port=5432;Database=app;Username=app;Password=…
 ```
 
-Common additions: `SSL Mode=Require`, `Include Error Detail=true`, `Timeout`, `Command Timeout`,
-`Pooling`, `Application Name=dtpipe`.
+Common additions: `SSL Mode=Require`, `Command Timeout`, `Application Name=dtpipe`. The URI form
+`postgresql://…` is not accepted: see the
+[conversion table](../../REFERENCE.md#conversion-reference-table).
 
-Coming from `postgresql://user:pass@host:port/db`? That URI form is not accepted — the translation
-is in [REFERENCE.md](../../REFERENCE.md#conversion-reference-table).
-
-## Reading and writing
+## Read and write
 
 ```bash
 dtpipe -i "pg:Host=prod;Database=app;Username=app;Password=…" \
@@ -29,20 +25,20 @@ dtpipe -i users.parquet \
   --table users --strategy Upsert --key id
 ```
 
-Reads stream through `COPY`, and writes use `COPY BINARY`, so a bulk load does not go through
-row-by-row `INSERT`.
+Reads and writes use `COPY`. A preview sets the source session read-only. Names fold to lower case:
+`--table StockMoves` creates `stockmoves`.
 
-## What survives the trip
+## Types
 
-| Source type | Behaviour |
+| Source | Behaviour |
 |:---|:---|
-| `int[]`, `text[]` and other arrays | A real collection column. A NULL array, an empty array and a NULL element stay distinct end to end |
-| `jsonb` / `json` | Carried as text; address a field with `--compute "sev:row.payload.severity"` to land it in its own typed column |
-| `uuid` | A first-class `Guid`, written as a native UUID wherever the target has one |
-| A type the reader does not read (`inet`, `interval`, `timetz`, `money`, `point`) | Refused when the reader opens, every such column at once, with the cast that reads it |
+| Arrays (`int[]`, `text[]`…) | Kept as list columns |
+| `json`, `jsonb` | Text. `--compute "sev:row.payload.severity"` extracts a field |
+| `uuid` | A UUID, written as one wherever the target has the type |
+| `inet`, `interval`, `timetz`, `money`, `point` | Refused when the reader opens, with the cast to use |
+| `'infinity'` timestamps, `'NaN'` numerics | Refused at that row, with the cast that reads them as text |
 
-Reading, nothing is guessed: a column whose type the reader does not know is refused before the
-first row, with the expression to select instead:
+A refusal names each column and the expression to write instead:
 
 ```
 The pg reader cannot read this column, and nothing was read:
@@ -50,37 +46,12 @@ The pg reader cannot read this column, and nothing was read:
 Write each expression in the query where the column is selected.
 ```
 
-[Types a reader cannot read](../../REFERENCE.md#types-a-reader-cannot-read) has the full list.
-
-A value can be refused where its type is not. `'infinity'::timestamp` has no date that means it, and
-`'NaN'::numeric` no decimal, so the run stops at that record, naming the column and the expression
-that reads it as text. A real `0001-01-01` still reads as that date. The rule and the other cases
-are in [Values a type cannot hold](../../REFERENCE.md#values-a-type-cannot-hold).
-
-Writing, a column PostgreSQL has no type for is refused before the table is touched: an 8-bit or
-an unsigned integer (from DuckDB, Parquet or MySQL) is never widened behind your back. The refusal
-names each column and the cast that brings it to a type PostgreSQL holds:
-
-```unknown
-The pg writer cannot write this column as it arrives, and nothing was written:
-  'qty': uint16; accepted instead: int32.
-Cast each column to an accepted type in a SQL step before the writer: give this branch --alias src, and write to the target from the step:
-  --from src --sql "SELECT * REPLACE (CAST(qty AS INTEGER) AS qty) FROM src" -o <target>
-```
-
-[Types a writer cannot write](../../REFERENCE.md#types-a-writer-cannot-write) has the rule for
-every writer.
-
-Identifiers fold **down**: `--table StockMoves` creates `stockmoves`. Quote the value yourself
-(`--table '"StockMoves"'`) to keep the spelling, and remember it is then addressable only in
-quotes.
-
-## Preview
-
-`--dry-run N` neutralises the writer and sets the source session `READ ONLY`, so the server refuses
-a write even if the query tried one.
+Writing, a type PostgreSQL has no equivalent for (an unsigned or 8-bit integer from DuckDB,
+Parquet or MySQL) is refused before the table is touched, with the cast to apply. The full lists:
+[Types a reader cannot read](../../REFERENCE.md#types-a-reader-cannot-read) ·
+[Types a writer cannot write](../../REFERENCE.md#types-a-writer-cannot-write).
 
 ---
 
-See also: [Write strategies](../guides/write-strategies.md) ·
-[Incremental loading](../guides/incremental.md) · [REFERENCE.md](../../REFERENCE.md#providers)
+See also: [Writing to a database](../guides/write-strategies.md) ·
+[REFERENCE.md](../../REFERENCE.md#providers)

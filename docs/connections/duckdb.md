@@ -2,63 +2,39 @@
 
 [← Connections](README.md) · [Documentation](../README.md)
 
-DuckDB has two roles in dtpipe, and it is worth keeping them apart.
+DuckDB plays two roles in dtpipe:
 
-| Role | How you reach it |
-|:---|:---|
-| **A provider** — read from and write to a `.duckdb` file, or an in-memory database | `-i duck:analytics.duckdb`, `-o duck:analytics.duckdb` |
-| **The SQL engine** behind `--sql` branches — joins, unions, CTEs, window functions | `--from a --ref b --sql "SELECT …"` |
-
-Both run in the same process. Nothing is installed, and nothing is downloaded, until you ask for
-an extension.
+- **a provider**: read from or write to a `.duckdb` file, or an in-memory database, with `duck:`;
+- **the SQL engine** behind `--sql`: see [SQL and JavaScript](../guides/sql-and-javascript.md).
 
 ## As a provider
 
 ```bash
 dtpipe -i duck:analytics.duckdb --query "SELECT * FROM sales WHERE year = 2026" -o sales.parquet
 dtpipe -i sales.parquet -o duck:analytics.duckdb --table sales
-dtpipe -i "duck::memory:" --query "SELECT 1 AS id" -o out.csv
+dtpipe -i "duck::memory:" --query "SELECT 1 AS id" -o out.csv      # in memory, no file
 ```
-
-`duck::memory:` is the prefix `duck:` followed by DuckDB's own `:memory:` — a database that never
-touches disk, useful for a one-line query or a test.
-
-Reads go through the Arrow C Data interface, so a batch crosses from DuckDB into the pipeline
-without being copied or re-encoded.
 
 ## Writing into an existing table
 
-A value its column cannot hold stops the run with exit code 1 and the column named: a decimal
-with more digits than the column, such as `123456.78` written into a `DECIMAL(5,2)`, one with more
-decimals, such as `1.23456` written into a `DECIMAL(18,3)`, which the column would round, or an
-integer or floating-point number out of its range, such as `3000000000` written into an
-`INTEGER`. The refusal is the value's, not the type's: a `DECIMAL(10,2)` or `BIGINT` source is
-written into that column as long as its values fit.
+A value its column cannot hold stops the run with exit `1`, naming the column: a number out of
+range, or a decimal with more digits than the column. Rows already flushed to the table stay;
+rows the writer still buffers are dropped.
 
-A value of a type the writer does not convert to its column's type stops the run the same way,
-even when it fits: a `HUGEINT`, which is what `sum()` returns, written into a `BIGINT`, a `DATE`
-into a `TIMESTAMP`, an `INTEGER` into a `HUGEINT`. The message names the column, its type and the
-type the source sends; cast the column to its target's type in the query, such as
-`CAST(total AS BIGINT)`. A `TIMESTAMP` written into a `DATE` keeps its date, and a `VARCHAR`
-written into a `BLOB` keeps its bytes.
+| Source | What happens |
+|:---|:---|
+| A type the writer does not convert (`HUGEINT` into `BIGINT`, `DATE` into `TIMESTAMP`) | Refused: cast it in the query, as in `CAST(total AS BIGINT)` |
+| `UHUGEINT`, `STRUCT`, `MAP`, `UNION`, `INTERVAL`, a list of these | Refused before the table is touched: cast to `VARCHAR` in a SQL step |
+| A list or an array of scalars | Written as a list |
+| `ENUM` | Written as text |
+| A decimal with no declared width | Creates a `DECIMAL(38,18)` |
 
-The rows the writer still holds when it stops are dropped, but a large load is written in blocks
-as it goes, and the blocks written before the failing value stay in the table.
+The full rules: [Types a writer cannot write](../../REFERENCE.md#types-a-writer-cannot-write).
 
-A 128-bit integer (`HUGEINT`) is written as one, over its whole range, `-2^127` to `2^127-1`. The
-unsigned one (`UHUGEINT`) is refused before the table is touched, with the cast that writes it as
-text: see [Types a writer cannot write](../../REFERENCE.md#types-a-writer-cannot-write).
+## Extensions: `--duck-init`
 
-A `LIST` or an `ARRAY` of scalars is written as one, into a column of its own type or an existing
-one of another element type its values fit. A `STRUCT`, a `MAP`, a `UNION`, an `INTERVAL` and a list
-of any of them are refused before the table is touched, since the driver cannot append them: cast
-them to `VARCHAR` in a SQL step. An `ENUM` read from DuckDB is text from the reader on, so a table
-recreated from one has a `VARCHAR`. A decimal with no declared width creates a `DECIMAL(38,18)`.
-
-## `--duck-init`: extensions and credentials
-
-`--duck-init` runs SQL on the DuckDB connection right after it opens — before any read, write or
-query. It is how an extension gets loaded:
+`--duck-init` runs SQL on the DuckDB connection right after it opens. It loads extensions, which
+reach what dtpipe has no provider for: HTTP, Iceberg, spatial formats, Excel.
 
 ```bash
 dtpipe -i duck::memory: \
@@ -67,38 +43,11 @@ dtpipe -i duck::memory: \
   -o report.csv
 ```
 
-This is the escape hatch for anything dtpipe has no provider for — Iceberg, spatial formats, an
-HTTP endpoint, Excel — because DuckDB's extension ecosystem becomes reachable without a new
-adapter.
-
-> [!NOTE]
-> `--duck-init` applies per connection, and a DAG gives each branch its own. Pass it on every
-> branch that needs it. It also accepts `keyring://alias`, `${{ENV}}` and `@file`, so credentials
-> in an extension's `SET` statement never have to appear on the command line — see
-> [Secrets](../guides/secrets.md).
-
-> [!IMPORTANT]
-> `--duck-init` is not `--pre-exec`. `--duck-init` runs on the DuckDB connection before reading;
-> `--pre-exec` runs on the **target** database before the pipeline starts.
-
-Extensions are installed from DuckDB's repository on first use, so the host needs access to it
-once — or an extension directory that already holds them. That is the one thing to check before
-running on an air-gapped machine.
-
-## As the SQL engine
-
-See [SQL and JavaScript](../guides/sql-and-javascript.md) and [DAG pipelines](../guides/dag.md).
-The short version: any source becomes a table you can query, whatever it was on disk.
-
-```bash
-dtpipe -i orders.csv --auto-column-types --alias o \
-       -i customers.csv --alias c \
-       --from o --ref c \
-       --sql "SELECT c.name, sum(o.amount) AS total FROM o JOIN c ON o.customer_email = c.email GROUP BY c.name" \
-       -o revenue.csv
-```
+- Each branch of a DAG has its own connection: give `--duck-init` to every branch that needs it.
+- It accepts `keyring://`, `${{ENV}}` and `@file`, so credentials stay out of the command line.
+- It is not `--pre-exec`, which runs on the target database.
+- Extensions are downloaded on first use: an air-gapped host needs them installed beforehand.
 
 ---
 
-See also: [SQL and JavaScript](../guides/sql-and-javascript.md) ·
-[Object storage](object-storage.md) · [REFERENCE.md](../../REFERENCE.md#duckdb)
+See also: [Object storage](object-storage.md) · [REFERENCE.md](../../REFERENCE.md#duckdb)
