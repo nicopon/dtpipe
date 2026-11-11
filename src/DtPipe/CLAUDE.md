@@ -207,6 +207,13 @@ dry-run by default). Tool table: `REFERENCE.md#model-context-protocol-mcp-server
 `dtpipe agent` runs an interactive loop against Ollama/OpenAI (`AgentExecutor`, `AgentTui`,
 `OllamaClient`). Agent classes live under `Cli/Agent/`.
 
+The agentic CI (`.github/workflows/agentic-ci.yml`, `tests/agentic/run-all.sh --gate`, which calls
+`analyze-traces.sh --gate`) fails on an unhandled MCP error or a failed mission; its variance
+criterion applies only when `variance_results.jsonl` holds replication data, which the shipped
+missions do not produce. It is an integration check driven by a real model, not a regression gate:
+a red run does not tell a regression from a bad sample. The unit suite is the authoritative signal
+for F1–F7.
+
 Hardening invariants — fail-closed, non-negotiable:
 - **F1 Planner/Executor split** — `--mode plan` (default) hides every tool marked `[WritesToTarget]`.
   The set is reflected off the attribute, never listed. `dry-run` stays unmarked: it runs the real

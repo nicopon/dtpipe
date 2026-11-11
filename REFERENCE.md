@@ -1552,11 +1552,8 @@ reaches `/service`, and a service's never reaches `/api`.
 
 ## Model Context Protocol (MCP) Server
 
-`dtpipe mcp` starts a native Model Context Protocol (MCP) server over STDIO. This allows AI coding
-agents and assistants (Cursor, Claude Desktop, Antigravity, VS Code MCP) to interact with `dtpipe`
-directly.
-
-### Usage
+`dtpipe mcp` starts an MCP server over STDIO, so an AI assistant (Cursor, Claude Desktop, VS Code…)
+can use dtpipe's tools.
 
 ```bash
 dtpipe mcp
@@ -1570,9 +1567,9 @@ dtpipe mcp
 | `inspect` | `input`, `query?` | Inspect data source schema or auto-discover database tables if query is omitted |
 | `preview-data` | `input`, `limit?`, `query?` | Preview sample data rows (default: 5 rows) |
 | `validate-yaml-job` | `yamlContent` | Validate a YAML job without running it: syntax, topology, provider-option keys, and every transformer built as the engine builds it |
-| `execute-yaml-job` | `yamlContent`, `apply?`, `allowDestructive?`, `allowNetwork?` | Execute a YAML job in-memory. **Dry-run by default** (no write); `apply=true` performs a write, gated by the approval gate and the SQL safety policy |
-| `dry-run` | `yamlContent`, `rows?` | Run the pipeline over a small sample through the real execution path with the writer neutralised, and return the rows leaving each stage, plus any column one transformer produced and a later one wrote over. See [Sample Mode](#sample-mode-and-materialisation) |
-| `get-dag-topology` | `yamlContent` | Structured branch topology: alias, input, output, the ordered `transformers[]` applied between them, stream processor, and the `from[]` / `ref[]` upstream aliases per branch. Read-only — parses, runs nothing |
+| `execute-yaml-job` | `yamlContent`, `apply?`, `allowDestructive?`, `allowNetwork?` | Execute a YAML job in-memory. **Dry-run by default** (no write); `apply=true` performs a write, subject to the guardrails below |
+| `dry-run` | `yamlContent`, `rows?` | Run the pipeline over a small sample with the writer neutralised, and return the rows leaving each stage, plus any column one transformer produced and a later one wrote over. See [Sample Mode](#sample-mode-and-materialisation) |
+| `get-dag-topology` | `yamlContent` | Structured branch topology: alias, input, output, the ordered `transformers[]`, stream processor, and the `from[]` / `ref[]` aliases per branch. Runs nothing |
 | `list-cursors` | *(none)* | List the incremental cursors stored in the current workspace: column, last value, last run time, status and row count |
 | `list-checkpoints` | `session?` | List the materialised checkpoints of a session, each named by the hash of what produces it |
 | `read-checkpoint` | `checkpointKey`, `rows?`, `session?` | Read rows back from a materialised checkpoint without touching the original source |
@@ -1585,185 +1582,89 @@ dtpipe mcp
 
 ### AI Agent Subcommand (`dtpipe agent`)
 
-Launches an interactive or automated ReAct AI agent loop for data integration tasks. The agent runs
-against a local Ollama install or the OpenAI API (`--provider`), auto-discovers local Ollama models,
-renders Spectre.Console DAG topology boxes, and offers 1-click YAML file exports.
-
-**On a real interactive terminal, the whole session runs inside a full-screen surface** — a steps
-list, its detail, the plan/DAG under construction and a running transcript, with an input line open
-between turns. `Enter` on the input line starts the next turn; a line starting with `/` is a command
-instead — `/exec` runs the validated plan through `execute-yaml-job` (dry-run unless `--apply`,
-which adds one more confirmation before the real write), `/mode` cycles the operating mode,
-`/save [path]` writes the plan YAML to disk, `/note <text>` records what you made of what just
-happened into the session trace, `/review` moves focus to the steps list, `/quit` leaves. **Esc
-during a turn is a soft cancel**: it stops the model call in flight (never a tool call already
-running) and keeps the session open — the trajectory so far is kept, and the turn is reported as
-interrupted, not as an error. Only Ctrl-C ends the session, exiting `130`. `--no-tui` opts out and
-keeps the scrollback output described below; `--no-stream`, a pipe, a redirect or a non-ANSI
-terminal already fall back to it regardless of the flag.
-
-**Scrollback output** (the default without a real interactive terminal, or with `--no-tui`): each
-turn opens with the model, endpoint and mode (and what the mode does). On an ANSI terminal the
-model's reasoning and answer **stream token-by-token** into a live, height-bounded region that is
-then replaced by a trace line carrying the step's wall-clock time, token count and tokens/s (and
-prompt-eval time when it is significant), followed — for a step that calls a tool — by the model's
-stated intent. `--detail peek` adds a chain-of-thought preview under each step and `--detail full`
-(alias `--show-thinking`, implied by `DEBUG=1`) keeps the whole chain of thought on screen; it is
-always available in the trajectory inspector regardless. Piped / non-ANSI output falls back to one
-blocking call per step (still with token stats); it reads the same streamed response, so the timeout
-means the same thing there. The turn ends on a session summary whose **Reason** row names why it
-stopped — a delivered response, the iteration cap, a failed LLM call, an empty response, or a user
-interrupt — and a turn that did not succeed prints its last step and a suggested next action. A slow
-or unreachable endpoint ends the turn with a stated error rather than a silent exit: the endpoint is
-considered stalled only after `--llm-timeout` seconds *with no token*, on both the streaming and the
-blocking path, so a model that keeps producing output is never cut off as silent. What bounds such a
-model instead is `--max-output-tokens`, and a total per-call deadline of three times `--llm-timeout`
-behind it; each ends the turn naming which bound it was, never "the model was silent". A model
-caught regenerating the same text (a decoding loop, most often with `--temperature 0` on a weaker or
-heavily quantized model) is stopped as soon as the repeat is detected rather than left to run out
-the clock. After the turn, the post-mission menu offers a full-screen keyboard session review
-(scroll the steps, expand one, jump between errors; falls back to an inline list on a piped console)
-and **Execute this plan now** whenever a validated YAML was produced — the reviewed YAML runs
-straight through `execute-yaml-job` deterministically, never back through the model, under that
-tool's own F2 guardrails.
-
-MCP tool calls the agent's LLM makes (`dry-run` in particular) never block waiting for a keypress,
-even on a real interactive terminal — the tool call and the agent's own surface share that terminal,
-so a capability check alone cannot tell "a human is at the CLI" from "the LLM invoked a tool"; only
-the caller can, hence an explicit no-prompts scope around every tool call.
-
 ```bash
 dtpipe agent [<prompt>] [options]
 ```
+
+A loop in which a model (local Ollama, or OpenAI with `--provider`) uses the tools above to design
+and validate a pipeline. Guide: [The agent](./docs/guides/agent.md).
+
+On an interactive terminal the session runs full screen: the steps, the plan under construction
+and a transcript, with an input line between turns. `Esc` during a turn cancels the model call and
+keeps the session; `Ctrl-C` ends it with code 130. Elsewhere, or with `--no-tui`, the output
+scrolls, streaming the model's answer token by token on an ANSI terminal.
+
+| Command | Effect |
+|:---|:---|
+| `/exec` | Runs the validated plan through `execute-yaml-job` (a preview unless `--apply`, which asks once more) |
+| `/mode` | Cycles the operating mode |
+| `/save [path]` | Writes the plan's YAML |
+| `/note <text>` | Adds a note to the session trace |
+| `/review` | Moves to the steps list |
+| `/quit` | Leaves |
+
+After a turn, a menu offers a review of the session and, when a validated YAML exists, **Execute
+this plan now**, which runs it without the model. A turn that ends says why: an answer, the
+iteration cap, a failed or silent call, an empty answer, or an interruption.
 
 | Option | Alias | Description | Default |
 |:---|:---|:---|:---|
 | `<prompt>` | `-p`, `--prompt` | Task description for the AI agent | *(Interactive prompt if omitted)* |
 | `--provider` | | LLM provider: `ollama` (local) or `openai` | `ollama` |
-| `--api-key` | | API key for the `openai` provider. Falls back to the `DTPIPE_LLM_API_KEY` environment variable | *(unset)* |
-| `--model` | `-m` | Model name, provider-dependent (e.g. `gemma4:12b-mlx`, `qwen2.5-coder:7b` for Ollama; `gpt-4o` for OpenAI) | *(Auto-discovered from Ollama)* |
+| `--api-key` | | API key for the `openai` provider. Falls back to `DTPIPE_LLM_API_KEY` | *(unset)* |
+| `--model` | `-m` | Model name (e.g. `qwen2.5-coder:7b` for Ollama, `gpt-4o` for OpenAI) | *(Auto-discovered from Ollama)* |
 | `--url` | `-u` | API endpoint URL | `http://localhost:11434` (ollama) · `https://api.openai.com` (openai) |
-| `--max-iterations` | | Maximum ReAct loop iterations per turn | `25` |
-| `--llm-timeout` | | Max silence between tokens before the turn ends with a stated error — a technical ceiling on the LLM, not a budget for the turn: a model that keeps producing output is never cut off as silent. Identical on both paths, the blocking one reading the same stream with nobody watching it. One call may still not run forever: it is also given a total deadline of three times this value | `300` |
-| `--max-output-tokens` | | Tokens a single model response may generate before it is cut (Ollama `num_predict`, OpenAI `max_output_tokens`). A truncated response carrying no tool call ends the turn with its own stated reason rather than being read as the answer | `4096` |
-| `--no-stream` | | Disable token streaming and its live view; one blocking call per step | `false` |
-| `--no-tui` | | Opt out of the full-screen surface on a real interactive terminal and keep the scrollback output | `false` |
-| `--detail` | | Scrollback kept per step: `compact` (trace line + the model's stated intent), `peek` (+ a chain-of-thought preview), `full` (+ the whole chain of thought) | `compact` |
+| `--max-iterations` | | Maximum loop iterations per turn | `25` |
+| `--llm-timeout` | | Seconds with no token before the turn ends with an error. One call also stops after three times this value | `300` |
+| `--max-output-tokens` | | Tokens one response may generate before it is cut | `4096` |
+| `--no-stream` | | One blocking call per step, no streaming | `false` |
+| `--no-tui` | | Scrolling output instead of the full-screen surface | `false` |
+| `--detail` | | What scrolls per step: `compact`, `peek` (+ a preview of the reasoning), `full` (+ all of it) | `compact` |
 | `--show-thinking` | | Alias for `--detail full` (implied by `DEBUG=1`) | `false` |
-| `--num-ctx` | | Model context window to request from the provider (Ollama `num_ctx`) | `16384` |
+| `--num-ctx` | | Context window to request (Ollama `num_ctx`) | `16384` |
 | `--interactive` | `-i` | Force interactive model selection and prompt entry | `false` |
-| `--mode` | | Operating mode: `plan` designs/validates only (no execution); `execute`/`autonomous` may run through the guardrails | `plan` |
-| `--temperature` | | Sampling temperature; `0` is greedy decoding, which weaker quantized models degenerate on. `--seed` fixes the sampling either way | `1` |
+| `--mode` | | `plan` designs and validates only; `execute` and `autonomous` may run, through the guardrails | `plan` |
+| `--temperature` | | Sampling temperature. `0` is greedy, and weaker models loop on it | `1` |
 | `--seed` | | Fixed seed for reproducible sampling | `0` |
-| `--repeat` | | Replicate the validated plan N times and report determinism variance | `1` |
-| `--sequential` | | Execute tool calls one at a time instead of running independent calls in parallel | `false` |
-| `--trace` | | Write a diagnostic record of the session as JSON lines (a directory gets a timestamped file inside it). Defaults to `$DTPIPE_AGENT_TRACE` | off |
-| `--mcp-server` | | Drive an external MCP server instead of dtpipe's own tools: the command that starts it over stdio (e.g. `"sometool mcp"`, `"npx -y some-server"`). See below | *(unset)* |
-| `--apply` | | Perform a real write (a write also requires an approving gate and a clean SQL safety check) | `false` (dry-run) |
-| `--allow-destructive` | | Allow destructive SQL verbs (`DROP`/`DELETE`/`TRUNCATE`/`UPDATE`/`ALTER`/`INSERT`/`ATTACH`) | `false` |
-| `--allow-network` | | Allow network access in SQL (`LOAD httpfs`/`azure`, remote `read_parquet`/`read_csv`) | `false` |
+| `--repeat` | | Replicate the validated plan N times and report the variance | `1` |
+| `--sequential` | | One tool call at a time instead of independent calls in parallel | `false` |
+| `--trace` | | Record the session as JSON lines (a directory gets a timestamped file). Defaults to `$DTPIPE_AGENT_TRACE` | off |
+| `--mcp-server` | | Drive another MCP server's tools instead of dtpipe's: the command that starts it over stdio | *(unset)* |
+| `--apply` | | Perform a real write | `false` (dry-run) |
+| `--allow-destructive` | | Allow destructive SQL verbs | `false` |
+| `--allow-network` | | Allow network access in SQL | `false` |
 
 #### Driving another MCP server (`--mcp-server`)
-
-`--mcp-server "<command>"` starts that command as a child process, completes the MCP handshake and
-offers **its** tools to the model instead of dtpipe's. The command is split on spaces, so
-`--mcp-server "sometool mcp"` and `--mcp-server "npx -y some-server"` both work; quote a path that
-contains a space in your shell.
-
-The point is measurement. `--trace` already records the system message and the tool catalogue as the
-model was offered them, so this turns dtpipe's instrumented loop on a surface it did not design:
 
 ```bash
 dtpipe agent -p "list the configured connections" \
   --mcp-server "sometool mcp" --trace ./traces/ --no-tui
 ```
 
-What changes when the flag is set:
-
-- **The system message comes from that server**, not from dtpipe. Hosts use a server's handshake
-  `instructions` as the system message, and this does the same; a server that sends none gets a
-  neutral frame. A dtpipe role prompt is never sent, because it names dtpipe tools a foreign
-  catalogue does not carry.
-- **No dtpipe pipeline can run.** `/exec` and the post-mission "Execute this plan" refuse: there is
-  no dtpipe engine behind a foreign catalogue, and a foreign tool that happens to be named
-  `execute-yaml-job` is a coincidence of naming, not the engine.
-- **`--mode` does not filter the catalogue.** Plan mode hides a tool by the name dtpipe gave it;
-  applied to someone else's catalogue that is either a no-op or hides an unrelated tool.
-- **dtpipe vouches for nothing that server does.** Its tools run under its own guardrails. dtpipe's
-  `--apply`, `--allow-destructive` and `--allow-network` govern `execute-yaml-job`, which is not in
-  play here.
-
-
-> **Hardening (fail-closed defaults).** With no flags, `dtpipe agent` is the safest behavior: mode
-> `plan`, dry-run only, destructive SQL and network access denied. Sampling is **not** part of that
-> list: the default temperature is `1`, because `0` is greedy decoding and weaker quantized models
-> degenerate on it. A run stays replayable through `--seed`, and `--temperature 0` remains available
-> for the determinism report. A real write requires `--apply` **and** approval **and** a compliant
-> SQL safety check. The planner never sees the `execute-yaml-job` tool; execution is a deterministic
-> engine step. The `yamlContent` tool argument is the sole source of the plan YAML. Inspected
-> schemas/ samples/errors survive conversation compaction (non-destructive context). See the **Agent
-> Guardrails** section for the SQL safety policy detail.
+The command is split on spaces and started as a child process; its tools are offered to the model
+in place of dtpipe's, and its handshake instructions become the system message. No dtpipe pipeline
+can run (`/exec` refuses), `--mode` does not filter that catalogue, and dtpipe's `--apply` and
+`--allow-*` flags do not apply to its tools. Use it to compare a server's surface under the same
+loop and trace.
 
 ---
 
 ### Agent Guardrails (`ISqlSafetyPolicy` / `IApprovalGate`)
 
-The agent and `execute-yaml-job` are **fail-closed**: when in doubt, the behavior *rejects* rather
-than executes. Every unlock flag is documented so nothing is implicit.
+With no flags, the agent can write nothing: mode `plan`, previews only, destructive SQL and network
+access refused.
 
-- **Dry-run by default.** `execute-yaml-job` writes **nothing** unless `apply=true`. Even then a
-   write requires (a) the `--apply` operator consent, (b) an approving `IApprovalGate`, and
-   (c) a clean SQL safety check. Non-interactive contexts (MCP/agent) default to **deny** for
-   writes — a human `--apply` is the consent that unblocks.
-- **SQL safety policy** (`DefaultSqlSafetyPolicy`). Fails closed on:
-   - Destructive verbs: `DROP`, `DELETE`, `TRUNCATE`, `UPDATE`, `ALTER`, `INSERT`, `ATTACH`
-      → unblock with `--allow-destructive`.
-   - Network access: `LOAD httpfs` / `LOAD azure`, and `read_parquet`/`read_csv`/`read_json`
-     over `http(s)://`, `s3://`, `ftp://` or `gs://` → unblock with `--allow-network`.
-   - Pure `SELECT`-style reads always pass.
-   - The check reads the SQL the job carries (a reader's query, a writer's hooks, a SQL processor's
-     text, `@file` contents included) and each endpoint's connection string for network access.
-     A key, a comment or a transformer option (`drop:` of `project`) is never read as SQL.
-- **Approval gate** (`DefaultApprovalGate`). A real write is approved only when `apply` is set
-   **and** either the context is interactive or an override predicate grants it. Non-interactive
-   ⇒ write denied (read-only).
-- **Session trace.** `--trace <path>` (or `$DTPIPE_AGENT_TRACE`) records the run as JSON lines: how
-  it was launched, the role prompt the mode selected, **the tool catalogue as the model was offered
-  it**, every step with its tool call and result, each turn's verdict, and any `/note` you leave.
-  The catalogue and the prompt are what make a failure attributable — without them a wrong tool call
-  cannot be told apart from a tool that was never offered, or one whose description sent the model
-  elsewhere. Every line is flushed, so a run that dies mid-turn still leaves its last step. It is a
-  diagnostic, not a gate: nothing reads its verdict. Arguments and results are recorded as the model
-  saw them, past a pass of the connection-string sanitiser — it blanks the credential shapes it
-  recognises (`password=`, credentials in a URI) and nothing else, so treat a trace as sensitive.
-
-- **Determinism.** `--temperature 0 --seed N --repeat 3` replicates a validated plan and reports
-   variance (distinct-YAML count − 1); `0` ⇒ byte-for-byte reproducible.
-- **Non-destructive context.** Inspected schemas, sample rows and recent errors are cached in an
-   `AgentContextStore` and reloaded into the compacted window instead of the lossy one-line
-   summary; the full journal is always kept in the trajectory. KISS — no mandatory second LLM
-   call.
-- **Planner/executor split.** In `--mode plan` the `execute-yaml-job` tool is *removed from the
-   tool list* the model sees; the LLM cannot drive execution. Execution is a deterministic
-   engine step (`JobService.ExecutePipelineAsync` on the validated plan).
-- **Parallel tools.** Every tool call the model emits in a turn is executed (independent ones in
-   parallel via `Task.WhenAll`); `--sequential` forces one-at-a-time. Each call yields one
-   `tool` message correlated by call id.
-- **CI gate.** `tests/agentic/analyze-traces.sh --gate` fails when (a) unhandled MCP errors or
-   (b) a mission failed. A third criterion — determinism variance above `--threshold` — applies
-   only when `variance_results.jsonl` holds replication data; absent data is not a failure.
-   The shipped missions do not produce it: they drive their own ReAct loop against `dtpipe mcp`
-   rather than invoking `dtpipe agent --repeat`, so the variance criterion is currently inert
-   for them. `tests/agentic/run-all.sh --gate` propagates the result.
-   See `.github/workflows/agentic-ci.yml`.
-
-> **What a green agent gate does and does not prove.** It is an end-to-end integration check of
-> the MCP tool surface driven by a real model: a green run means the tools answered without
-> unhandled errors and the missions' data assertions held. It is **not** a deterministic
-> regression gate — a red run does not distinguish a DtPipe regression from a bad model
-> sampling. The guardrail behaviors themselves (F1–F7) are covered deterministically by the
-> unit suite (`AgentExecutorModeTests`, `AgentParallelToolsTests`, `AgentContextStoreTests`,
-> `AgentDeterminismTests`, `AgentYamlExtractionTests`, `McpToolsTests`, …), which is the
-> authoritative signal.
-
+- **A write** needs `apply=true` (`--apply`), an approval, and a clean SQL check. A context with
+  nobody to approve, such as the MCP server, denies writes.
+- **The SQL check** refuses `DROP`, `DELETE`, `TRUNCATE`, `UPDATE`, `ALTER`, `INSERT` and `ATTACH`
+  unless `--allow-destructive`, and `LOAD httpfs` / `LOAD azure` or `read_parquet` / `read_csv` /
+  `read_json` over `http(s)://`, `s3://`, `ftp://` or `gs://` unless `--allow-network`. It reads
+  every query, hook and SQL step of the job (`@file` contents included) and each connection
+  string; it never reads a key, a comment or a transformer option as SQL.
+- **In plan mode** the tool that writes is not offered to the model at all.
+- **The trace** (`--trace`) records the launch, the role prompt, the tool catalogue as offered,
+  every step, each verdict and your notes, flushed line by line. Connection-string credentials are
+  blanked, but treat a trace as sensitive. It is a diagnostic, never a gate.
+- **Determinism**: `--temperature 0 --seed N --repeat 3` reports the number of distinct plans
+  minus one; `0` means reproducible.
 
