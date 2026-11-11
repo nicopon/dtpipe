@@ -1090,12 +1090,11 @@ pipeline execution will fail immediately.
 
 ### `--dry-run N` runs the pipeline
 
-A dry-run is **the real execution over N source rows with the writer neutralised** — the same
-reader, the same transformers, the same segmentation and row/columnar bridges. It is not a
-separate analyser. Before either touches the target, both ask the writer the same question —
-whether its format carries each column's type — so a column the writer refuses fails the preview
-where it fails the run, with the same message. What a preview cannot see is what only writing
-finds: a constraint, a value too wide for its column, a row beyond the first N.
+`--dry-run N` runs the real pipeline over the first N **source** rows with the writer neutralised:
+same reader, same steps, same row/Arrow bridges. A step that expands or aggregates shows a
+different row count from its neighbour (`10 → 3 rows`). A column type the writer refuses fails the
+preview with the same message as the run; what only writing finds (a constraint, a value too wide,
+a row past N) is not seen.
 
 ```bash
 dtpipe -i pg:"Host=db;Database=app" --query "SELECT * FROM orders" \
@@ -1103,91 +1102,59 @@ dtpipe -i pg:"Host=db;Database=app" --query "SELECT * FROM orders" \
        -o parquet:out.parquet --dry-run 10
 ```
 
-`N` bounds the **source**, not the display: every stage shows what those N rows produced. A step
-that expands or aggregates therefore shows a different row count from its neighbour, and the
-trace says so (`10 → 3 rows`) rather than leaving a blank cell that would read as "dropped".
-
-**What a sample run guarantees, precisely:**
-
-| | |
+| | During a sample run |
 |:---|:---|
-| The writer | Neutralised. `InitializeAsync`, the write methods and `CompleteAsync` are never called on it — so a file target is not created and a table is not migrated. The target is *inspected* for the compatibility report, never mutated. |
-| Hooks | None of the four (`--pre-exec`, `--post-exec`, `--on-error-exec`, `--finally-exec`) runs. They are SQL on the target connection. |
-| Column types | Asked of the writer on the schema it would receive, as the run asks. A refused column fails the preview, names every column the writer refuses and the SQL step that casts each one to a type it accepts. |
-| Cursor, metrics | Not advanced, not written. |
-| The **source** | Classified before the run: a query carrying `DELETE`, `UPDATE`, `DROP`, `TRUNCATE`, `ALTER`, `INSERT` or `ATTACH` is refused. Where the engine supports it, the session is also set read-only so the **server** refuses a write: PostgreSQL, Oracle, MySQL (`SET TRANSACTION READ ONLY`) and SQLite (`PRAGMA query_only`). **SQL Server has no equivalent** — `ApplicationIntent=ReadOnly` routes to a replica and does not make a session read-only — so there the guarantee is the verb scan alone, and the run says so. |
+| The writer | Never initialised, written to or completed: no file is created, no table created or migrated. The target is inspected for the compatibility report |
+| Hooks | None of `--pre-exec`, `--post-exec`, `--on-error-exec`, `--finally-exec` runs |
+| Column types | Asked of the writer as the run asks; a refusal names every column and the cast that fixes it |
+| Cursor, metrics | Not advanced, not written |
+| The source | A query carrying `DELETE`, `UPDATE`, `DROP`, `TRUNCATE`, `ALTER`, `INSERT` or `ATTACH` is refused. PostgreSQL, Oracle, MySQL (`SET TRANSACTION READ ONLY`) and SQLite (`PRAGMA query_only`) also get a read-only session. SQL Server has none, so there the verb scan is the only guarantee |
 
-> A verb scan cannot *prove* a query is read-only: `SELECT my_function()` passes it. The report
-> states which of the two guarantees the run actually had, because a guarantee that is sometimes
-> absent must never be presented as though it were always there.
+The run states which of the two guarantees it had: a verb scan cannot prove a query read-only
+(`SELECT my_function()` passes it).
 
 ### Materialising a point in the pipeline
 
-`--checkpoint` writes a branch's output to a local store on its way to the writer;
-`--from-checkpoint` replaces the reader with it. Together they let you run up to a point, look,
-change a transformer, and pick up again without reading the source a second time.
+| Flag | |
+|:---|:---|
+| `--checkpoint <name>` | Store this branch's output, after its last step, in the session store |
+| `--from-checkpoint <key>` | Read a stored checkpoint in place of the branch's source |
 
 ```bash
 dtpipe -i oracle:"…" --query "SELECT * FROM big_table" --mask email --checkpoint stage1 -o null:
 dtpipe --from-checkpoint <key> --compute "total=price*qty" -o csv:out.csv
 ```
 
-The materialisation point sits at the **end** of the transformer chain, so a checkpoint holds
-what the writer would have received.
-
-A checkpoint is Arrow, so a pipeline with no columnar side — CSV to CSV, say — is bridged to
-Arrow at the writer boundary and back when you ask for one. That bridge exists **only** when
-`--checkpoint` is passed; an ordinary run is untouched. It is not a distortion introduced to make
-materialising possible: resuming from a checkpoint reads Arrow whatever happens, so the
-conversion is inherent to checkpointing rather than to where the tee sits. What it does mean is
-that a row-mode pipeline's values pass through the Arrow type map on the way in, which can
-normalise a type the row path would have carried loosely.
-
-**Checkpoints are addressed by content.** The key is a hash of what produces the rows — the source
-and its connection (credentials stripped), the query, every transformer with its configuration and
-in order, a processor's options, the effective row limit, the sampling parameters and, for a branch
-that reads another (`from:`), the definition of that branch — not of the alias. Two different
-pipelines run in the same directory therefore cannot collide, a sample (`--dry-run N`) never shares
-a key with the full run, and an unchanged prefix is reused. Renaming an alias changes nothing. A
-change to the file a transformer reads with `@file` changes the key; the writer's options and the
-checkpoint's label (`--checkpoint <label>`) are not part of it, but a writer option that shares its
-key with the reader's is: it can only cost a miss, never a collision.
+- The key is a hash of what produces the rows: the source and its connection (credentials
+  stripped), the query, every step and its configuration in order, a processor's options, the row
+  limit, the sampling parameters, the definition of a branch it reads, and the content of a file a
+  step reads with `@file`. The alias, the checkpoint name and the writer's options are not part of
+  it. A sample never shares a key with the full run.
+- A checkpoint is Arrow: a row-mode pipeline is bridged to Arrow when it is stored, which can
+  normalise a type the row path carried loosely.
+- A checkpoint is a snapshot: nothing detects that its source changed.
 
 ### The schema a pipeline produces is a contract
 
-`--contract-save <path>` writes the schema a branch produces at its writer boundary, with a hash
-that identifies it. Unlike a schema you declare in a file, this one is **captured on the real
-execution path** — transformers, DuckDB SQL and the row/columnar bridges included — by the engine
-that will run the job.
+`--contract-save <path>` writes the schema a branch delivers to its writer, after every step, with
+a hash. A sample run and a real run produce the same contract.
 
 ```bash
-# The producer, in its CI: capture without writing anything.
 dtpipe -i pg:"Host=db;Database=app" --query "SELECT id, email, total FROM orders" \
        --mask email -o parquet:orders.parquet \
        --dry-run 100 --contract-save contracts/orders.json
 ```
 
-`--dry-run` and a real run produce the **same** contract, which is what makes the line above a
-legitimate CI gate: nothing is written to the target, and the schema is still the one the nightly
-run will produce.
-
-The file is meant to be committed next to the pipeline that produces it — an explicit path, never
-under `.dtpipe/`, which is a session with a limited lifetime.
-
-| Field | What it says |
+| Field | Meaning |
 |:---|:---|
-| `hash` | SHA-256 of the canonical schema. Two runs of an unchanged pipeline give the same hash; metadata order cannot change it |
-| `schemaSource` | `batch` when the schema came off a real record batch, `columns` when the run produced none and it was derived from the column list. The second is **flat** — a struct or a list the reader publishes is not in it |
-| `enforcement` | What the capturing run could guarantee about not writing to its *source*. A sample run records it; a real run never asked, so it carries nothing rather than the weakest value |
-| `producer`, `branchAlias` | Which build captured it, and which branch of the DAG it describes |
+| `hash` | SHA-256 of the canonical schema. An unchanged pipeline keeps it |
+| `schemaSource` | `batch` when taken from real rows; `columns` when the run produced none, in which case nested types are missing |
+| `enforcement` | What a sample run could guarantee about not writing to its source; empty for a real run |
+| `producer`, `branchAlias` | The build that captured it, and the branch it describes |
 
-Each branch of a DAG produces its own schema, so each needs its own path; two branches naming one
-file is refused before the run starts.
-
-> **A schema contract says nothing about the target's own rules.** It fixes columns and types. It
-> cannot know that the receiving service enforces invariants in its application code — a row can
-> satisfy every type here and still be wrong for that domain. "The contract is green" is not "the
-> write is safe"; see [Write strategies](./docs/guides/write-strategies.md).
+Commit the file next to the pipeline, not under `.dtpipe/`. Each branch needs its own path; two
+branches naming one file are refused. A contract fixes columns and types only, not the rules a
+receiving application enforces in its own code.
 
 #### Checking a consumer against a contract
 
@@ -1195,23 +1162,11 @@ file is refused before the run starts.
 dtpipe contract check --job consumer.yaml --contract contracts/orders.json
 ```
 
-This is a **sample run** whose source is the contract's schema and no rows: the consumer's
-transformers are built and initialised over the shape the producer promised, its target is inspected
-where a real run would read it, and nothing is written. A writer that overwrites its target (a file,
-a table it recreates) has none to inspect, so the target is judged as one that does not exist yet,
-whatever it holds. Exit `0` when the target accepts it, `1` when it does not or when the consumer
-cannot initialise at all — a projected column the contract does not carry, say.
-
-`--branch <alias>` names which branch the contract feeds when the job has more than one source.
-`dtpipe contract show <path>` prints a contract's hash and columns.
-
-**What a zero-row check cannot decide.** Anything that only fails on a row: a `--compute` reading a
-column the producer removed throws on the first row, not at initialisation. The check is a
-statement about the *shape*, and it stops there.
-
-> This is deliberately not `--strict-schema`, which lives in the migration path a sample run
-> suppresses because it can `CREATE` and `ALTER`. Making that flag fire inside a preview would
-> change what a preview means for every pipeline, to serve one command.
+A sample run whose source is the contract's schema and no rows. Exit `0` when the consumer's target
+accepts it, `1` when it does not or when the consumer cannot start (a projected column the contract
+lacks). A target the consumer overwrites is judged as one that does not exist yet. `--branch
+<alias>` names the branch the contract feeds when the job has several sources; `dtpipe contract
+show <path>` prints a contract. A step that fails only on a value is not caught.
 
 #### Comparing two versions of a contract
 
@@ -1220,29 +1175,23 @@ dtpipe contract diff contracts/orders.json contracts/orders.new.json
 dtpipe contract diff --json old.json new.json     # for a CI step
 ```
 
-It answers one question, and it is **not symmetric**: *does the new contract still satisfy a
-consumer the old one satisfied?* Exit `0` when it does, `1` when it does not.
+Exit `0` when the new contract still satisfies a consumer the old one satisfied, `1` when not.
 
-| Change | Verdict | Why |
-|:---|:---|:---|
-| Column added | compatible | a consumer ignores what it does not read |
-| Column removed | **breaks** | |
-| Column renamed | **breaks** | it is a removal plus an addition; the diff does not guess a rename |
-| Number widened (`int32` → `int64`) | compatible | |
-| Number narrowed, or family changed | **breaks** | |
-| Decimal precision or scale reduced | **breaks** | both sides are still `decimal`, so only an explicit rule catches it |
-| `nullable: false` → `true` | **breaks** | the producer may now send NULL where it never did |
-| `nullable: true` → `false` | compatible | it only narrows what the producer emits |
-| A timestamp's time zone changed or dropped | **breaks** | dropping it turns an instant into a wall clock |
-| Extension metadata dropped (`arrow.uuid` → raw binary) | **breaks** | the storage is identical and the consumer stops getting a `Guid` |
-| Column order | indifferent | a writer resolves by name |
+| Change | Verdict |
+|:---|:---|
+| Column added | compatible |
+| Column removed, or renamed | **breaks** |
+| Number widened (`int32` → `int64`) | compatible |
+| Number narrowed, or family changed | **breaks** |
+| Decimal precision or scale reduced | **breaks** |
+| `nullable: false` → `true` | **breaks** |
+| `nullable: true` → `false` | compatible |
+| A timestamp's time zone changed or dropped | **breaks** |
+| Extension metadata dropped (`arrow.uuid` → raw binary) | **breaks** |
+| Column order | indifferent |
 
-A decimal whose source declared no precision and scale (a `--fake`, a `--compute`, an Oracle
-`NUMBER` with no constraint) is written at the default `decimal128:38:18` and carries the field
-metadata `Apache.Arrow.Serialization:decimal-width = undeclared`. That is what lets a writer create
-an unbounded `NUMERIC` or `NUMBER` where the engine has one, rather than a width nobody asked for. A
-contract captured before this mark existed has no such metadata, so its hash differs from a fresh
-capture of the same pipeline; the diff above still reports no change, since it compares types.
+A decimal with no declared width is written as `decimal128:38:18` with the field metadata
+`Apache.Arrow.Serialization:decimal-width = undeclared`.
 
 #### Offering the points a job could be cut at
 
@@ -1251,112 +1200,42 @@ dtpipe split producer.yaml
 dtpipe split producer.yaml --branch orders --rows 100
 ```
 
-It lists one candidate per pipeline stage — `0` is the reader, `1..n` the transformers in order —
-with the schema that would cross and what the link would cost. **It proposes and never decides:**
-where to cut depends on who owns each side and who pays for the work, none of which is in the job
-file.
-
-The candidates come from a **sample run** of the job, so the writer is neutralised and the reader
-is the real one. That is why a column a `--compute` creates is listed from its own stage on: what a
-transformer emits is not derivable from what it is.
-
-The link is Arrow and is not a user choice, so the cost column has two values. A stage already
-columnar hands its batches over as they are (`free`); a row-mode stage is bridged into Arrow to be
-written and back out to be read (`two bridges`).
-
-A job with several branches reading a source is not cut on a guess — name one with `--branch`.
+Lists one candidate per stage (`0` is the reader, `1..n` the steps in order), with the schema that
+would cross and the cost: `free` for a columnar stage, `two bridges` for a row stage. The schemas
+come from a sample run. A job with several branches reading a source needs `--branch`.
 
 #### Making the cut
 
 ```bash
 dtpipe split producer.yaml --at 1 --out orders
 dtpipe split producer.yaml --at 1 --out orders --acknowledge
-```
-
-`--at` names a candidate from the list above and `--out` a prefix; the two go together. It writes
-`<prefix>-producer.yaml` and `<prefix>-consumer.yaml`, meeting on `arrow:-`.
-
-| Flag | |
-|:---|:---|
-| `--at <k>` | Cut after stage `k`, so the producer keeps stages `1..k` and the consumer the rest |
-| `--out <prefix>` | Where the halves go: `<prefix>-producer.yaml`, `<prefix>-consumer.yaml` |
-| `--acknowledge` | Confirm the listed placement and write the files |
-
-Each value of the job goes to the half that governs it — the source, cursor, `--limit` and sampling
-to the producer; the target, `--prefix` and `--checkpoint` to the consumer. A `provider-options`
-block follows **the component that owns it**, so a block neither end answers to stops the cut by
-name rather than being placed on a guess. `--metrics-path` reaches neither half: one
-path cannot hold two runs' reports, and the table says so instead of letting it vanish.
-
-Without `--acknowledge` it prints the placement and exits `1`. The gate is not a clean bill of
-health — it reports a scan of the keys this build knows, and **a cut does not remove a secret, it
-redistributes one**: where there was one file and one owner, there are now two of each. A value
-written out in full stops the cut, naming where it is; parameterise it (`${{ENV_VAR}}`,
-`${{keyring://alias}}`) and cut again. Blanking it would produce a file that looks like a
-deliverable and cannot run.
-
-The halves are written from the job **as its author wrote it**, with every `${{…}}` intact — not
-from the resolved copy that ran.
-
-```bash
 dtpipe --job orders-producer.yaml | dtpipe --job orders-consumer.yaml
 ```
 
+| Flag | |
+|:---|:---|
+| `--at <k>` | Cut after stage `k`: the producer keeps stages `1..k`, the consumer the rest |
+| `--out <prefix>` | Writes `<prefix>-producer.yaml` and `<prefix>-consumer.yaml`, meeting on `arrow:-` |
+| `--acknowledge` | Write the files. Without it, the placement is printed and the exit code is `1` |
+
+The source, cursor, `--limit` and sampling go to the producer; the target, `--prefix` and
+`--checkpoint` to the consumer; a `provider-options` block follows the component it configures,
+and a block neither end owns stops the cut. `--metrics-path` goes to neither. A secret written in
+full stops the cut, naming where it is: replace it with `${{ENV_VAR}}` or `${{keyring://alias}}`.
+The halves keep every `${{…}}` as written.
+
 ### Sessions
 
-Artefacts belong to a session, resolved by precedence:
-
-| | |
+| A checkpoint belongs to | |
 |:---|:---|
-| `--session <name>` | Explicit: an agent mission, CI, deliberate isolation |
-| `DTPIPE_SESSION` | Shell scope, so the flag need not be repeated |
-| nearest ancestor `.dtpipe/` | Walking up from the working directory, as git does towards `.git` |
-| a new `.dtpipe/` | Created **only** when something is materialised — an ordinary run leaves no trace |
-| user state | When the working directory cannot be written to (CI, a read-only mount) |
+| `--session <name>` | An explicit session |
+| `DTPIPE_SESSION` | The session of the shell |
+| the nearest `.dtpipe/` above the working directory | As git finds `.git` |
+| a new `.dtpipe/` | Created only when something is materialised |
+| user state | When the working directory cannot be written |
 
-`.dtpipe/.gitignore` containing `*` is written when the store is created, so it ignores itself
-whatever the project's own `.gitignore` says.
-
-Sessions expire (7 days by default, `DTPIPE_SESSION_TTL_DAYS`) and are purged silently the next
-time the store is touched. `DTPIPE_STATE_HOME` overrides the user-state root on every platform.
-
-### Encryption
-
-Checkpoints are **always** encrypted with AES-GCM. There is no opt-out, and that is deliberate:
-what encryption buys here is not confidentiality at rest — the key is on the same disk — but two
-properties of the **store as a whole**:
-
-- **An inert copy.** The project directory can be rsynced, backed up, synced to a cloud folder or
-  `git add -A`-ed; the ciphertext travels without the key and says nothing.
-- **A reliable purge.** Deleting the key makes every artefact unreadable at once, even if removing
-  the files then fails halfway.
-
-Both are properties of the store, so a single cleartext session would void them for every other
-session in it, retroactively. A flag would not weaken the guarantee for the run that used it — it
-would destroy it for all of them.
-
-The key lives apart from the ciphertext, in user state (`DTPIPE_STATE_HOME`, else
-`$XDG_STATE_HOME/dtpipe` on Linux, `~/Library/Application Support/dtpipe` on macOS,
-`%LOCALAPPDATA%\dtpipe` on Windows), mode `0600`. The OS keyring is **not** used: it is for what
-you chose to keep (`dtpipe secret`), not for what the tool makes and destroys, and making a
-checkpoint read depend on an unlocked keyring would break CI. If the key directory cannot be
-written to, materialisation is refused rather than falling back to cleartext.
-
-Measured cost on the reference machine (5.9 MB payload, 13 frames): materialising unencrypted
-1.11 ms, encrypted 2.47 ms — about 3.5–4 GB/s, so roughly **24 ms per 100 MB**. Against a source
-delivering 100 MB/s, that is about 3 % of wall time.
-
-### Reproducibility — documented, not promised
-
-`--sampling-seed` makes a sample deterministic **at constant query and constant row order**. Row
-order is not guaranteed without an `ORDER BY`, so a checkpoint replayed against a re-run source
-may differ. This is a property of the database, not something dtpipe can promise, and it is
-written here rather than implied by the product.
-
-A checkpoint is a **snapshot, not a derivation**: nothing detects that its source has changed.
-The session TTL is the housekeeping mechanism.
-
-### `dtpipe session`
+`.dtpipe/` ignores itself in git. Sessions expire after 7 days (`DTPIPE_SESSION_TTL_DAYS`) and are
+purged the next time the store is used.
 
 ```bash
 dtpipe session list              # sessions, checkpoint counts, size, time left
@@ -1364,8 +1243,15 @@ dtpipe session show <name>       # the checkpoints in one session
 dtpipe session purge [<name>]    # remove one, or every expired one
 ```
 
-Purging destroys the key **before** the files, so a deletion that fails halfway leaves inert
-bytes rather than readable data.
+### Encryption
+
+Checkpoints are always encrypted (AES-GCM). The key is kept apart, in user state, mode `0600`:
+`DTPIPE_STATE_HOME`, else `$XDG_STATE_HOME/dtpipe` on Linux, `~/Library/Application Support/dtpipe`
+on macOS, `%LOCALAPPDATA%\dtpipe` on Windows. If that folder cannot be written, materialising is
+refused. A purge destroys the key before the files.
+
+`--sampling-seed` gives the same sample only for the same query and the same row order; without an
+`ORDER BY`, the order is not guaranteed.
 
 ---
 
@@ -1383,35 +1269,8 @@ Restart your terminal (or `source ~/.zshrc`) to activate. Completion suggests pr
 ## Studio (`dtpipe studio`)
 
 `dtpipe studio [folder]` opens a local page over the YAML jobs of a folder (default: the current
-directory). A job opens as cards: one per source, step and sink, wired as the job reads them. A
-branch's own reader and writer become a source card and a sink card, each holding its endpoint and
-the keys of its side (the same split as
-[`dtpipe split`](#offering-the-points-a-job-could-be-cut-at)); when the cards still form one chain,
-the job composes back into that one branch. A branch no card can describe stays one card, as
-written. Edit the cards, or the job as YAML. **▶ Preview** in the bar shows what the job delivers
-card by card without writing a target: the job runs through the real engine, as `--dry-run` does,
-over the source rows you ask for (up to 100000 per source; a card shows at most 1000 of them), with
-the writer neutralised. Every card then shows its rows with their columns and types in the Preview
-panel when you click it, and a badge on the card says its state (no preview, running, failed, edited
-since preview) and `n rows · m col`. A preview writes no file; a job that asks for a checkpoint
-still stores it in the folder's session store, as `--dry-run` does. The sample mode's safety gate
-applies, and each branch reports which source protection it had (see
-[Sample Mode](#sample-mode-and-materialisation)).
-
-Save writes the job the studio composes from the cards, never a text the page sends: a job written
-by hand loses its inner comments and its key order, and the page says so when it opens one. A save
-refuses a file that changed on disk since it was opened, never creates a folder, and never
-overwrites an existing file with a new job. Where each card sits is kept outside the job, in
-`.dtpipe/studio/<job>-layout.json` under the folder; `.dtpipe/` ignores itself in git. How the page
-was left (the drawer's tab, the rows asked and the selected card of each job, the sizes of the
-panes) is kept in `.dtpipe/studio/view.json`, so it comes back whatever port the studio listens on.
-
-The Variables tab lists every `${{…}}` the job reads, by name, and whether something resolves it.
-The job keeps `${{NAME}}`; for a preview you may launch it with a keyring alias (see
-[Secret Management](#secret-management)) or a typed text, kept in
-`.dtpipe/studio/<job>-launch.json`. That file holds aliases and what you typed, never a value from
-the keyring, and the page is shown no value it was not given. A preview that would leave a
-variable or an alias unresolved is refused before it runs, naming each.
+directory). Each job shows as cards, one per source, step and sink, which you edit as cards or as
+YAML and preview on the real engine without writing a target.
 
 ```bash
 dtpipe studio ./jobs              # prints the address to open, then serves until stopped
@@ -1425,108 +1284,45 @@ dtpipe studio ./jobs --coordinator https://coordinator.example  # signed in to a
 | `--coordinator` | A distributed pipeline's coordinator, by its address: its bricks and its library. Default: none |
 | `--key` | Sign in to the coordinator with a key it made for you, as a reference (`${{NAME}}`, `keyring://alias`, `@file`), never the key itself. Default: through the browser |
 
+| Action | What it does |
+|:---|:---|
+| **▶ Preview** | Runs the job as `--dry-run` does, over the rows you ask for (up to 100 000 per source; a card shows up to 1 000). Each card then shows its rows, columns and types, and a badge with its state |
+| **Save** | Writes the job composed from the cards. A job written by hand loses its inner comments and key order, and the page says so. Refuses a file changed on disk since it was opened, and never overwrites another file |
+| **Variables** | Lists every `${{…}}` the job reads. For a preview, give each a keyring alias or a value; a preview with an unresolved variable is refused |
+| **Import** | Turns a dtpipe command line into a new job, as `--export-job` would. `--bind-input` and `--bind-output` are refused |
+| **Write targets…** | Runs the saved job for real, as `dtpipe --job`, after you confirm each target. **Stop** ends it with code 130 |
+| **Review before writing** | An option of **Write targets…**: the run stops before every writing branch and holds the rows; **Write** writes them all, **Abandon** forgets them |
+| **▶** on a card | Runs the job up to that card |
+| **📌** on a card | Keeps the card's rows as a checkpoint, so later runs start from there. **Forget pins** clears them all |
+
+Editing a card clears the preview and the checkpoints of every card that depends on it. A preview
+through pins is not exactly the job's run: every cut passes through Arrow and batches differ.
+
+The studio keeps its own files under `.dtpipe/studio/` in the folder: the cards' layout
+(`<job>-layout.json`), the page's state (`view.json`), the launch values (`<job>-launch.json`,
+aliases and typed values, never a keyring value), and the pins (`<job>-debug.json`). Checkpoints
+live in the session `.dtpipe/sessions/studio-debug/`.
+
 ### With a coordinator
 
-`--coordinator` names the one coordinator the studio talks to; the page never chooses another.
-**Sign in** opens your identity provider in a new tab, so the cards you have not saved stay where
-they are, and comes back to the studio on its own address. With `--key`, the studio exchanges the
-key the coordinator made for you instead, as it starts, and presents it again for each next token;
-**Sign in with the key** exchanges it again after **Sign out** or a refusal. A coordinator with no
-identity provider signs people in this way only. The studio learns everything from the coordinator's
-address: how people sign in there, the client to sign in with, and the version of the API it speaks,
-which this dtpipe must speak too, or it says so and stops there. Your tokens stay in the studio's
-memory, never on disk or in the page; quitting the studio, or **Sign out**, forgets them. A
-coordinator lets you in only if its administrator listed you (`Coordinator:Studio:ClientId` names
-the studio's client, and your roles are the coordinator's).
+`--coordinator` names the one coordinator the studio talks to. **Sign in** goes through the
+coordinator's identity provider; with `--key`, the studio exchanges the key instead. Tokens stay in
+the studio's memory. The coordinator's administrator must list you, and
+`Coordinator:Studio:ClientId` names the studio's client.
 
-Once signed in, the palette offers the bricks of the coordinator's nodes, grouped by node, a node
-offline greyed out, and lists this studio's dtpipe version beside each node's: a difference is
-shown, never refused. When you open a job, the coordinator says which of its branches are bricks,
-which then open as brick cards; signed out, they open as plain cards and save unchanged. A preview
-of a job with bricks runs here: a source brick's rows (at most 100) come from its node through the
-coordinator, and a sink brick receives nothing, its rows ending in a throwaway file under
-`.dtpipe/studio/samples/`. A run of a job with a source brick is a sample too, since it reads
-at most those 100 rows: it is refused (409, naming the source bricks, the bound and the outputs)
-when any output is not a sink brick, and a job whose outputs are all sink bricks runs and says so.
-A brick's variables belong to its node and leave the Variables tab.
+| Action | What it does |
+|:---|:---|
+| Palette | Offers the bricks of the coordinator's nodes, an offline node greyed out, with each node's dtpipe version |
+| **Publish** | Sends the saved job to the library under an id you choose. It replaces only the version you last read; if someone else saved since, it asks. A deployed pipeline keeps running its armed version until deployed again |
+| **Open from library** | Writes a library pipeline as a new `<id>.yaml` in the folder, never over a file |
 
-**Publish** sends the job as saved in the folder to the coordinator's library, under an id you
-choose: an unsaved change is refused, and its layout and launch values stay on this machine. The
-first publication of an id creates it only, a later one replaces only the version published last
-from this studio; when someone else saved the pipeline since, the studio shows the version in
-place and replaces it only if you say so. A pipeline that is deployed keeps running the version
-it was armed at until it is deployed again from the coordinator's console, and the page says so.
+A preview with bricks reads at most 100 rows of each source brick through the coordinator; a sink
+brick receives nothing, its rows going to a throwaway file under `.dtpipe/studio/samples/`. A run
+with a source brick is refused unless every output is a sink brick.
 
-**Open from library** lists the coordinator's pipelines and writes the one you pick as a new file,
-`<id>.yaml`, in the folder: it never overwrites a file, and it remembers the version it read, so a
-later **Publish** replaces exactly that version. The coordinator checks every pipeline it is sent: a
-job it refuses is not saved, and the studio shows the check's report.
-
-**Import** turns a dtpipe command line (without the binary's name) into a job, as
-[`--export-job`](#yaml-job-file-schema) writes it: it opens as a new job that you save or leave.
-A `${{NAME}}` in it stays as typed, and `--bind-input` and `--bind-output` are refused.
-
-**Write targets…** executes the job saved in the folder on this machine, as `dtpipe --job` would,
-after you confirm what it writes: each branch's target (a connection string with its secrets masked)
-and the writer's block as the file holds it. A run is real, so the page asks again if the job or the
-values it launches with changed since. A source brick reads its rows from its node through the
-coordinator; a sink brick is written to a throwaway file, never to its node. One action runs at a
-time (a preview, a change to what is pinned, or a run), the studio does not quit during a run, and
-**Stop** ends it with the verdict 130, however the engine answers the cancellation; a run that had
-finished before keeps its own code.
-
-The case **Review before writing** in the confirmation (unticked by default, and kept for the job)
-makes the run stop just before every branch that writes, whatever the cards. Nothing is written: the
-run holds every row each target would receive, and each sink card shows **⏸ n rows queued** with
-**Write** and **Abandon**; selecting the sink shows those rows. **Write** asks for a confirmation
-again and writes every target the run waits on from the rows held, which it consumes, so the next
-run reads the source again; **Abandon** forgets the rows of all of them. Either acts on the whole
-run, never on one sink. The cursor's state file (`--state`) moves only with the stage that writes.
-Those rows are every row of the level, encrypted in the studio's session and kept until the write
-or **Abandon**: about the size of the data as Arrow (300 000 rows of six columns took 19 MB). A
-review pins nothing, and `.dtpipe/studio/<job>-debug.json` keeps the count of the rows it holds
-beside their key.
-
-While a run is suspended, **Write targets…** and **Preview** are held back (the server refuses
-them too), and the bar says so. A run that was stopped or failed before every target held its rows
-cannot be written, only abandoned, so that no row is written unread. Rows held
-for a real run serve no preview, and a preview's serve no real run: the first forgets the other's.
-They are also forgotten when the job's text, a launch value or the cursor's state file changed, and
-when the studio restarts.
-
-Each card that holds rows carries **▶** and **📌**; a sink holds none. **▶** runs the job up to
-that card and stops there: nothing downstream runs, and each branch starts from the highest level
-it holds instead of rereading and recomputing what precedes it. It keeps nothing of its own, and
-it leaves the pins as they were. **📌** pins the card: it keeps the rows it delivers and a
-checkpoint of them in the studio's own session (`.dtpipe/sessions/studio-debug/`), so a later run
-reads the checkpoint back. A second click unpins it and forgets the checkpoint. **Forget pins** in
-the bar unpins every card and forgets everything they kept. A stop is a new run that reads the
-checkpoints back, not a process held open.
-
-A source is pinned at its read, any other card at the end of its branch, and only pinned cards are
-cut out of the flow: with none, the run is the job's own flow, and the more cards you pin the
-further it moves from it. A branch with a stream processor, or one that cannot be cut, runs whole
-and is pinned at its end only; the card of its read says so. A preview is true of the text that
-produced it: editing a card, or the rows asked, clears the rows of every card that depends on it,
-which then reads *edited since preview*. A checkpoint is valid or it does not exist: the same edit
-forgets, from the session too, every checkpoint that depended on it. What is pinned and held is kept
-beside the job, in `.dtpipe/studio/<job>-debug.json` (a job nobody pins leaves no file); a job not
-saved yet keeps it under `drafts/`, handed to the job at its first save and forgotten when the
-studio starts. The values of the Variables tab are not part of what a preview or a checkpoint
-remembers: after changing one, press **Forget pins** and run Preview again. A preview is not the
-job's run: every cut passes through Arrow (see
-[checkpoints](#materialising-a-point-in-the-pipeline)), batches differ and so does the concurrency;
-the rows reach the target in the order a plain run writes them. The cut is never saved or published.
-
-The page runs dtpipe with your own access. It listens on 127.0.0.1 only and answers only the
-address it printed: the address carries a token for this session, which every request must
-present, and a request from another site is refused. It reads only the `.yaml` and `.yml` files
-under the folder, and writes only those and its own files under `.dtpipe/studio/`, never a hidden
-one or one reached through a link. A job's relative paths resolve from the folder, as
-`dtpipe --job` run there would.
-
-Quit from the page ends the session (exit 0); Ctrl+C ends it with exit 130.
-
+The page listens on 127.0.0.1 only, answers only the address it printed (which carries a session
+token), refuses requests from other sites, and reads and writes only the `.yaml` and `.yml` files
+of the folder and its own files. Quitting from the page exits 0; Ctrl+C exits 130.
 
 ---
 
