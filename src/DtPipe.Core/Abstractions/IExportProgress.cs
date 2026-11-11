@@ -13,6 +13,6 @@ public interface IExportProgress : IDisposable
     /// <summary>The run finished: ends the display and may print its summary.</summary>
     void Complete();
     /// <summary>The run did not finish (cancelled): ends the display and prints no summary, which would read as a success.</summary>
-    void Abandon();
+    void Abandon() { }
     DtPipe.Core.Models.ExportMetrics GetMetrics();
 }
