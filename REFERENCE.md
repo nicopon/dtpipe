@@ -665,8 +665,8 @@ command line (`--no-stats`, `--log`, `--strict-bindings`, `--export-job`, `--cur
 | `--duck-init "SQL"` | SQL to run on the DuckDB SQL processor connection after open (e.g. `LOAD httpfs`). See [Value Resolution](#value-resolution) |
 | `--merge` | UNION ALL of all `--from` sources. Requires at least 2 streaming sources that share one schema: same columns, names and types, else the run is refused before any row moves |
 
-> **`--ref` is intentionally materialized.** Secondary sources declared via `--ref` are read fully
-> into memory so the query engine can build a cost-based plan. Only the `--from` source streams.
+> **`--ref` is read in full into memory** before the query runs; only the `--from` source streams.
+> Filter a large lookup upstream first.
 
 > **An alias list is comma-separated; repeating a flag never adds to it.** Repetition has one
 > meaning in this grammar — `-i` and `--from` open a new branch — so `--from a --from b`
@@ -949,10 +949,8 @@ enrich:
 
 ### MySQL
 
-The `mysql:` prefix is **required**. Unlike file providers, MySQL is never inferred from the
-connection string's content: `Server=host;Database=db` is character-for-character what a SQL
-Server connection string looks like, so any content heuristic would claim connections belonging
-to the other provider. Same deliberate choice as `pg:`, `mssql:`, and `ora:`.
+The `mysql:` prefix is **required**, as for every database: `Server=host;Database=db` is also a
+valid SQL Server connection string.
 
 ```bash
 dtpipe -i "pg:Host=localhost;Database=prod;Username=postgres;Password=pass" \

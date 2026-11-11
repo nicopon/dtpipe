@@ -7,7 +7,7 @@ paths:
 # MCP server and agent
 
 `dtpipe mcp` (STDIO) and `dtpipe agent`. Never enumerate tool names here; see
-`REFERENCE.md#mcp-server`. Hardening invariants, fail-closed:
+`REFERENCE.md#model-context-protocol-mcp-server`. Hardening invariants, fail-closed:
 **F1** plan mode hides every `[WritesToTarget]` tool (reflected, never listed) ·
 **F2** `ISqlSafetyPolicy` + `IApprovalGate`; a write needs `apply` + approval ·
 **F3** determinism available, not default (`--temperature 0 --seed N --repeat N`) ·
