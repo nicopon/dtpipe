@@ -1,9 +1,11 @@
 using Apache.Arrow;
+using Apache.Arrow.Ipc;
 using Apache.Arrow.Types;
 using DtPipe.Adapters.Arrow;
 using DtPipe.Adapters.Common;
 using DtPipe.Adapters.Csv;
 using DtPipe.Adapters.DuckDB;
+using DtPipe.Adapters.Generate;
 using DtPipe.Adapters.JsonL;
 using DtPipe.Adapters.Parquet;
 using DtPipe.Adapters.Sqlite;
@@ -668,6 +670,103 @@ public sealed class ReadConformanceTests : IDisposable
 
         Assert.Equal("raw: InvalidOperationException", await ReadOutcome.ColumnarAsync(Open));
         Assert.Equal("raw: InvalidOperationException", await ReadOutcome.RowsAsync(Open));
+    }
+
+    private const int ContractRows = 2500;
+    private const int ContractBatchSize = 100;
+
+    public static TheoryData<string> BatchContractReaders() =>
+        ["csv", "jsonl", "xml", "sqlite", "duck", "parquet", "arrow", "generate"];
+
+    private Func<IStreamReader> OpenManyRows(string reader)
+    {
+        var path = Path.Combine(_dir, Guid.NewGuid().ToString("N") + "." + reader);
+        var query = $"SELECT i AS id, 'row ' || i AS v FROM range({ContractRows}) t(i)";
+        switch (reader)
+        {
+            case "csv":
+                File.WriteAllLines(path, ["id,v", .. Enumerable.Range(0, ContractRows).Select(i => $"{i},row {i}")]);
+                return () => new CsvStreamReader(path, new CsvReaderOptions());
+            case "jsonl":
+                File.WriteAllLines(path, Enumerable.Range(0, ContractRows).Select(i => $"{{\"id\":{i},\"v\":\"row {i}\"}}"));
+                return () => new JsonLStreamReader(path, new JsonLReaderOptions { AutoColumnTypes = true });
+            case "xml":
+                File.WriteAllText(path, "<rows>" + string.Concat(Enumerable.Range(0, ContractRows).Select(i => $"<r><id>{i}</id><v>row {i}</v></r>")) + "</rows>");
+                return () => new XmlStreamReader(path, new XmlReaderOptions { Path = "/rows/r" });
+            case "sqlite":
+                using (var connection = new SqliteConnection($"Data Source={path};Pooling=False"))
+                using (var command = connection.CreateCommand())
+                {
+                    connection.Open();
+                    command.CommandText = $"CREATE TABLE t(id INTEGER, v TEXT); WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i < {ContractRows - 1}) INSERT INTO t SELECT i, 'row ' || i FROM n;";
+                    command.ExecuteNonQuery();
+                }
+                return () => new SqliteReader($"Data Source={path}", "SELECT id, v FROM t ORDER BY id");
+            case "duck":
+                return () => new DuckDataSourceReader("Data Source=:memory:", query, new DuckDbReaderOptions());
+            case "parquet":
+                using (var connection = new DuckDBConnection("DataSource=:memory:"))
+                using (var command = connection.CreateCommand())
+                {
+                    connection.Open();
+                    command.CommandText = $"COPY ({query}) TO '{path}' (FORMAT parquet)";
+                    command.ExecuteNonQuery();
+                }
+                return () => new ParquetStreamReader(path);
+            case "arrow":
+                var ids = new Int64Array.Builder();
+                for (var i = 0; i < ContractRows; i++) ids.Append(i);
+                using (var batch = new RecordBatch(new Schema([new Field("id", Int64Type.Default, false)], null), [ids.Build()], ContractRows))
+                using (var stream = File.Create(path))
+                using (var writer = new ArrowFileWriter(stream, batch.Schema))
+                {
+                    writer.WriteRecordBatch(batch);
+                    writer.WriteEnd();
+                }
+                return () => new ArrowAdapterStreamReader(path, new ArrowReaderOptions());
+            case "generate":
+                return () => new GenerateReader($"count={ContractRows}", "", new GenerateReaderOptions());
+            default:
+                throw new ArgumentOutOfRangeException(nameof(reader), reader, null);
+        }
+    }
+
+    /// <summary>
+    /// The contract of <c>ReadBatchesAsync</c>, which the row fast-path leans on: the array of a yielded batch
+    /// belongs to the consumer and is never written again, and a batch holds at most <c>batchSize</c> rows.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(BatchContractReaders))]
+    public async Task A_Row_Reader_Yields_Distinct_Arrays_Of_At_Most_BatchSize_Rows(string readerName)
+    {
+        await using var reader = OpenManyRows(readerName)();
+        await reader.OpenAsync();
+
+        var arrays = new List<object?[][]>();
+        var snapshots = new List<string[]>();
+        var total = 0;
+        await foreach (var batch in reader.ReadBatchesAsync(ContractBatchSize))
+        {
+            Assert.True(batch.Length <= ContractBatchSize, $"A batch of {batch.Length} rows exceeds the batch size {ContractBatchSize}.");
+            var rows = batch.ToArray();
+            total += rows.Length;
+            snapshots.Add(rows.Select(r => string.Join("|", r.Select(ConformanceValue.Of))).ToArray());
+            if (System.Runtime.InteropServices.MemoryMarshal.TryGetArray(batch, out var segment) && segment.Array is { } array)
+            {
+                foreach (var seen in arrays)
+                    Assert.False(ReferenceEquals(seen, array), "Two batches share one array.");
+                arrays.Add(array);
+            }
+        }
+
+        Assert.Equal(ContractRows, total);
+        Assert.True(snapshots.Count > 1, "The cell must span several batches.");
+        // A reader that rewrote an earlier batch's array while reading later ones shows here.
+        for (var i = 0; i < arrays.Count && i < snapshots.Count; i++)
+        {
+            var now = arrays[i].Take(snapshots[i].Length).Select(r => string.Join("|", r.Select(ConformanceValue.Of)));
+            Assert.Equal(snapshots[i], now);
+        }
     }
 
     private Func<IStreamReader> Open(Row row)

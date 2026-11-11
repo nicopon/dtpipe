@@ -19,6 +19,11 @@ public interface IStreamReader : IAsyncDisposable
 
     /// <summary>
     /// Reads rows in batches.
+    /// <para>
+    /// The array of a yielded batch belongs to the consumer from the moment it is yielded: the reader never
+    /// writes to it again, so a consumer may hold it or hand it on as it is. A batch holds at most
+    /// <paramref name="batchSize"/> rows.
+    /// </para>
     /// </summary>
     IAsyncEnumerable<ReadOnlyMemory<object?[]>> ReadBatchesAsync(int batchSize, CancellationToken ct = default);
 }

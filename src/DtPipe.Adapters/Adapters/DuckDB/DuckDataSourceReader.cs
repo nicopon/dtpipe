@@ -146,17 +146,22 @@ public sealed partial class DuckDataSourceReader : IColumnarStreamReader, IRequi
         int batchSize,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
+        batchSize = Math.Max(1, batchSize);
+        // A chunk is as large as DuckDB makes it; the contract bounds a batch by batchSize, one array each.
         await foreach (var batch in ReadRecordBatchesAsync(ct))
         {
             using (batch)
-                yield return ConvertBatchToRows(batch);
+            {
+                for (var start = 0; start < batch.Length; start += batchSize)
+                    yield return ConvertBatchToRows(batch, start, Math.Min(batchSize, batch.Length - start));
+            }
         }
     }
 
-    private static ReadOnlyMemory<object?[]> ConvertBatchToRows(RecordBatch batch)
+    private static ReadOnlyMemory<object?[]> ConvertBatchToRows(RecordBatch batch, int start, int count)
     {
-        var rows = new object?[batch.Length][];
-        for (var r = 0; r < batch.Length; r++)
+        var rows = new object?[count][];
+        for (var r = 0; r < count; r++)
         {
             rows[r] = new object?[batch.ColumnCount];
             for (var c = 0; c < batch.ColumnCount; c++)
@@ -164,7 +169,7 @@ public sealed partial class DuckDataSourceReader : IColumnarStreamReader, IRequi
                 var column = batch.Column(c);
                 rows[r][c] = column is null
                     ? null
-                    : ArrowTypeMapper.GetValueForField(column, batch.Schema.GetFieldByIndex(c), r);
+                    : ArrowTypeMapper.GetValueForField(column, batch.Schema.GetFieldByIndex(c), start + r);
             }
         }
         return rows;
