@@ -92,7 +92,10 @@ public sealed class DtPipeNodeOptions
 
     public NodeOidcOptions Oidc { get; set; } = new();
 
-    /// <summary>Variables every dtpipe child sees, which a fragment resolves through <c>${{NAME}}</c>. Their values never leave the node.</summary>
+    /// <summary>
+    /// Variables a data node's dtpipe children see, which a fragment resolves through <c>${{NAME}}</c>; a runner's children, under
+    /// <c>--edges-only</c>, get none. Their values never leave the node.
+    /// </summary>
     public Dictionary<string, string> Variables { get; set; } = new(StringComparer.Ordinal);
 
     /// <summary>The directory of the process whose instance id is <paramref name="instanceId"/>: one per process, whatever the configuration.</summary>
