@@ -49,16 +49,14 @@ internal static class AccountPages
     /// <summary>
     /// A key for a session, mapped only where <see cref="CoordinatorServerOptions.SignsPeopleInByKey"/>, so over HTTPS or where HTTP is
     /// allowed. Every refusal of the key reads the same, whether it names no identity, is wrong, revoked or expired, opens a disabled
-    /// identity or one that is no person; the form is checked as the issuer's token endpoint is (limited per source and per identity,
-    /// bounded in size) and carries its antiforgery token. The session holds the identity's id and the key's
+    /// identity or one that is no person; the form is checked as the issuer's token endpoint is (its refusals counted per source and per
+    /// identity, bounded in size) and carries its antiforgery token. The session holds the identity's id and the key's
     /// (<see cref="TrustedIdp.KeyPersonSession"/>), never the key, and no log carries the key or a part of it.
     /// </summary>
     public static async Task<IResult> SignInAsync(
         HttpContext http, CoordinatorServerOptions server, RightsStore rights, KeyExchangeLimits limits, IAntiforgery antiforgery, ILogger<KeyExchangeLimits> logger)
     {
         var source = http.Connection.RemoteIpAddress?.ToString() ?? "";
-        using (var lease = limits.FromSource(source))
-            if (!lease.IsAcquired) return TooMany(http, server);
         if (!http.Request.HasFormContentType || http.Request.ContentLength is not (> 0 and <= MaxForm))
             return LoginForm(http, server, "/", "The sign-in form cannot be read: sign in again.", StatusCodes.Status400BadRequest);
         IFormCollection form;
@@ -74,10 +72,9 @@ internal static class AccountPages
         var returnUrl = LocalPath(form["returnUrl"]);
         var presented = form["key"].ToString();
         var named = ClearKey.ClientIdOf(presented);
-        using (var lease = limits.ForIdentity(named ?? ""))
-            if (!lease.IsAcquired) return TooMany(http, server);
         if (rights.KeyOf(presented, DateTimeOffset.UtcNow) is not ({ IsPerson: true } person, { } key))
         {
+            if (!limits.Refused(source, named ?? "")) return TooMany(http, server);
             logger.LogWarning("A sign-in with a key for {ClientId} from {Source} was refused", named ?? "a text that is no key", source);
             return LoginForm(http, server, returnUrl, "This key signs nobody in here.", StatusCodes.Status400BadRequest);
         }

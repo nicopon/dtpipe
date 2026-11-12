@@ -146,9 +146,10 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   is what tells the two apart. It maps `GET /.well-known/openid-configuration`, `GET /.well-known/jwks.json` and `POST
   /connect/token`, client credentials only, the key as the form's `client_secret`; the client id must be the one the key names, and
   `KeyHolder` judges. Every refusal of the client is the same `invalid_client` (400) and every answer is `no-store`; a refusal logs
-  the client id only when it has an id's shape, so a key sent in its place reaches no log. `KeyExchangeLimits` counts per source and
-  per client id, known or not, in windows of a minute (the server reads no forwarded header, so behind a proxy the source is the
-  proxy). The record's kind decides the token's shape. A service's: `sub == client_id ==` the identity's id, `aud` the audience, lasting
+  the client id only when it has an id's shape, so a key sent in its place reaches no log. `KeyExchangeLimits` counts the refusals
+  alone, per source and per client id, known or not, in windows of a minute; a spent window answers 429 and logs no more. A key
+  that opens its identity is never counted nor told to wait, so no failure under its name or from its address keeps it out,
+  behind a proxy too (the server reads no forwarded header, so there the source is the proxy). The record's kind decides the token's shape. A service's: `sub == client_id ==` the identity's id, `aud` the audience, lasting
   `Coordinator:Auth:ServiceTokenLifetime` (10 minutes, 5 at least). A person's: `client_id` is `Coordinator:Studio:ClientId`,
   `sub` the identity's id, `dtpipe_key` the id of the key it was exchanged with (never the key, never its hash), lasting
   `Coordinator:Auth:PersonTokenLifetime` (an hour, 5 minutes at least); without a studio's client, or with

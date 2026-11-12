@@ -304,6 +304,23 @@ public sealed class KeyIssuerTests : IDisposable
     }
 
     [Fact]
+    public async Task A_Key_That_Opens_Its_Identity_Is_Never_Told_To_Wait_By_The_Refusals_Under_Its_Name()
+    {
+        var key = await KeyedAsync(_app, "runner-9");
+        for (var i = 0; i < KeyExchangeLimits.PerIdentity; i++)
+        {
+            using var refused = await ExchangeAsync(_app, "runner-9", ClearKey.New("runner-9").Reveal());
+            Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        }
+
+        using var limited = await ExchangeAsync(_app, "runner-9", ClearKey.New("runner-9").Reveal());
+        using var opened = await ExchangeAsync(_app, "runner-9", key);
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, limited.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, opened.StatusCode);
+    }
+
+    [Fact]
     public async Task Without_An_Issuer_No_Identity_Is_Verified_By_A_Key()
     {
         using var host = new CoordinatorHost();

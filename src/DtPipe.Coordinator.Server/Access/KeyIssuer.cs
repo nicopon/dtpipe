@@ -83,8 +83,6 @@ public static class KeyIssuer
             return Error(StatusCodes.Status400BadRequest, "invalid_request",
                 "This coordinator exchanges a key over HTTPS only: Coordinator:PublicUrl is http, and Coordinator:Auth:AllowHttpKeys is not set.");
         var source = http.Connection.RemoteIpAddress?.ToString() ?? "";
-        using (var lease = limits.FromSource(source))
-            if (!lease.IsAcquired) return TooMany(http);
         if (!http.Request.HasFormContentType || http.Request.ContentLength is not (> 0 and <= MaxForm))
             return Error(StatusCodes.Status400BadRequest, "invalid_request", "A token request is a form of grant_type, client_id and client_secret.");
         IFormCollection form;
@@ -94,12 +92,11 @@ public static class KeyIssuer
             return Error(StatusCodes.Status400BadRequest, "unsupported_grant_type", "This issuer grants client_credentials only.");
         var clientId = form["client_id"].ToString();
         var named = PipelineLibrary.IsValidId(clientId) ? clientId : null;
-        using (var lease = limits.ForIdentity(named ?? ""))
-            if (!lease.IsAcquired) return TooMany(http);
         var now = DateTimeOffset.UtcNow;
         if (named is null || rights.KeyOf(form["client_secret"].ToString(), now) is not ({ } identity, { } key) || identity.ClientId != named
             || identity.IsPerson && (!server.PersonKeys || server.StudioClientId is null))
         {
+            if (!limits.Refused(source, named ?? "")) return TooMany(http);
             logger.LogWarning("A key exchange for {ClientId} from {Source} was refused", named ?? "an invalid client id", source);
             return Error(StatusCodes.Status400BadRequest, "invalid_client", "The client is not known, or its key does not open it.");
         }
@@ -141,9 +138,11 @@ public static class KeyIssuer
 }
 
 /// <summary>
-/// How often a key may be presented: per source address and per client id, in fixed windows of a minute, whether or not the client id
-/// is an identity's, so a refusal says nothing of which exist. The server reads no forwarded header, so behind a proxy every caller is
-/// one source and its limit is the fleet's: a node asks once per token, a few minutes apart.
+/// The refused keys, counted per source and per client id in windows of a minute, whether or not the client id is an identity's,
+/// so a refusal says nothing of which exist. A key that opens its identity is
+/// never counted and never told to wait, so no number of failures under its name or from its address (behind a proxy, every
+/// caller's) keeps it out. A key is 256 random bits, so the windows bound what a flood of refusals costs, the log above all,
+/// never a guess.
 /// </summary>
 public sealed class KeyExchangeLimits : IDisposable
 {
@@ -156,10 +155,18 @@ public sealed class KeyExchangeLimits : IDisposable
     private static PartitionedRateLimiter<string> Limiter(int permits) => PartitionedRateLimiter.Create<string, string>(key =>
         RateLimitPartition.GetFixedWindowLimiter(key, _ => new FixedWindowRateLimiterOptions { PermitLimit = permits, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
 
-    public RateLimitLease FromSource(string source) => _bySource.AttemptAcquire(source);
-
-    /// <summary>A client id that is no identity's shape shares one window, so no text a caller sends is kept as a key of its own.</summary>
-    public RateLimitLease ForIdentity(string clientId) => _byIdentity.AttemptAcquire(clientId);
+    /// <summary>
+    /// Counts one refusal: true while both windows have room, false once either is spent, when the refusal is answered with a
+    /// wait and logged no more. A client id no identity's shape shares one window, so no text a caller sends is kept as a key
+    /// of its own.
+    /// </summary>
+    public bool Refused(string source, string clientId)
+    {
+        using var bySource = _bySource.AttemptAcquire(source);
+        if (!bySource.IsAcquired) return false;
+        using var byIdentity = _byIdentity.AttemptAcquire(clientId);
+        return byIdentity.IsAcquired;
+    }
 
     public void Dispose()
     {
