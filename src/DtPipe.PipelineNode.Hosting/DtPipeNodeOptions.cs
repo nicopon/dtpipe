@@ -42,8 +42,12 @@ public sealed class DtPipeNodeOptions
     /// <summary>The coordinator's base URL: its node channel and its TransportR hub.</summary>
     public string CoordinatorUrl { get; set; } = "";
 
-    /// <summary>The dtpipe binary every fragment runs as a child of this process; a bare name is looked up on the PATH.</summary>
-    public string DtPipe { get; set; } = "dtpipe";
+    /// <summary>
+    /// The dtpipe every fragment runs as a child of this process: an executable, or the <c>DtPipe.dll</c> of the tool package,
+    /// which runs through the dotnet host. A bare name is looked up on the PATH. Left at its default, the host uses the tool package
+    /// its build downloaded (<c>PackageDownload</c> of <c>dtpipe</c>) when there is one, else <c>dtpipe</c> on the PATH.
+    /// </summary>
+    public string DtPipe { get; set; } = DtPipeLocation.Default;
 
     /// <summary>
     /// The parent of the directory this process writes fragment jobs in and runs dtpipe from; a directory per node

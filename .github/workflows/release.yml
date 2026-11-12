@@ -232,6 +232,17 @@ jobs:
             -iname "dtpipe*" \
             -exec dotnet nuget push {} --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate \;
 
+      - name: Pack and push the node host
+        # DtPipe.PipelineNode.Hosting is outside DtPipe.sln, so the pack above never reaches it. It goes out as a beta of the
+        # tag's version (the tag's own suffix when it has one), in a step after the others so a failure here stops none of them.
+        # The script packs outside the workspace, which the find above searches, and reads the package before it is pushed.
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          [[ "$version" == *-* ]] || version="$version-beta.1"
+          tests/scripts/validate_node_host_package.sh --version "$version" --out "$RUNNER_TEMP/node-host"
+          dotnet nuget push "$RUNNER_TEMP/node-host/DtPipe.PipelineNode.Hosting.$version.nupkg" \
+            --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+
   # The product's two images (deploy/Dockerfile): built natively on each architecture, because the Dockerfile runs the
   # dtpipe binary it builds. At a tag, or by hand with publish, they are pushed by digest and joined into one multi-arch
   # tag below; run by hand otherwise, they are only built, with the commit the run is on as their revision.

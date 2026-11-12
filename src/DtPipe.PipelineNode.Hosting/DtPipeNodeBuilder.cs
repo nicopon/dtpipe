@@ -47,6 +47,8 @@ public sealed class DtPipeNodeBuilder
     /// <summary>A variable every dtpipe child sees, described to the coordinator.</summary>
     public DtPipeNodeBuilder WithVariable(string name, string value, string? description = null)
     {
+        if (_definition.Variables.Any(v => v.Name == name))
+            throw new InvalidOperationException($"The variable '{name}' is already declared: a second value would silently replace the first.");
         _definition.Variables.Add(new NodeVariable(name, value, description));
         return this;
     }

@@ -171,12 +171,12 @@ public sealed class FragmentRun : IAsyncDisposable
 
         var psi = new ProcessStartInfo
         {
-            FileName = options.DtPipeExecutable,
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
         };
+        DtPipeProgram.Apply(psi, options.DtPipeExecutable);
         if (options.EdgesOnly) EdgesOnlyEnvironment.Restrict(psi.Environment);
         foreach (var (name, value) in options.ChildEnvironment ?? new Dictionary<string, string>())
             psi.Environment[name] = value;

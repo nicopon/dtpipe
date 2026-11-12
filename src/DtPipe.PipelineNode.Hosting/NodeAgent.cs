@@ -22,6 +22,8 @@ internal sealed class NodeAgent : BackgroundService
     private readonly Guid _instanceId = Guid.NewGuid();
     private readonly string _stateDir;
     private readonly string _fragmentsDir;
+    /// <summary>The dtpipe this host runs, resolved once: the command and every run start the same one.</summary>
+    private readonly string _dtpipePath;
     private readonly IReadOnlyList<DatasetInfo> _datasets;
     private readonly IReadOnlyDictionary<string, string> _environment;
     private readonly BrickHost _bricks;
@@ -74,7 +76,8 @@ internal sealed class NodeAgent : BackgroundService
 
         _hostLoggers = loggers;
         _logger = _forwarder.For(loggers, _options.Name, fragment: null).CreateLogger(typeof(NodeAgent).FullName!);
-        var dtpipe = new DtPipeCommand(_options.DtPipe, _stateDir, _environment);
+        _dtpipePath = DtPipeLocation.Resolve(_options.DtPipe);
+        var dtpipe = new DtPipeCommand(_dtpipePath, _stateDir, _environment);
         _bricks = new BrickHost(_options.Name, definition.Bricks, dtpipe, _logger);
         _gate = definition.Gate;
         _command = dtpipe;
@@ -119,7 +122,8 @@ internal sealed class NodeAgent : BackgroundService
         // brick without the columns its node could read.
         await _bricks.InspectAsync(ct);
         _dtpipeVersion = await _command.VersionAsync(ct);
-        if (_dtpipeVersion is null) _logger.LogWarning("{DtPipe} did not say its version: the node announces none", _options.DtPipe);
+        if (_dtpipeVersion is null) _logger.LogWarning("{DtPipe} did not say its version: the node announces none", _dtpipePath);
+        else _logger.LogInformation("Node {Name} runs dtpipe {Version} from {DtPipe}", _options.Name, _dtpipeVersion, _dtpipePath);
 
         await ConnectAsync(hub, ct);
         _logger.LogInformation("Node {Name} ({Role}, {Bricks} brick(s), {Policy}) connected to {Url} as {ClientId}",
@@ -257,7 +261,7 @@ internal sealed class NodeAgent : BackgroundService
         if (_runs is null)
         {
             var runs = new ReplicaRuns(
-                _hub!, node, _options.Name, _options.DtPipe, _environment, _fragmentsDir,
+                _hub!, node, _options.Name, _dtpipePath, _environment, _fragmentsDir,
                 spec => FragmentIntake.JobOf(spec, _policy, _gate, _bricks.DeclaredBranch, _bricks.DeclaredVersion, _bricks.Forms),
                 fragment => _forwarder.For(_hostLoggers, _options.Name, fragment).CreateLogger(typeof(FragmentRun).FullName!),
                 _logger, _options.UnwiredRunTimeout, _options.FaultInjection, _options.ArrowCompression, _options.ArrowCompressionLevel,

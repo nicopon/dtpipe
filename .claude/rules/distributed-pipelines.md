@@ -6,6 +6,7 @@ paths:
   - "tests/DtPipe.PipelineNode*/**"
   - "deploy/**"
   - "samples/distributed-lab/**"
+  - "samples/arrow-socket-source/**"
   - "src/DtPipe.Jobs/Coordinator/**"
   - "src/DtPipe/Cli/Node/**"
   - "tests/scripts/validate_distributed_boundary.sh"
@@ -27,7 +28,7 @@ there.
 | `src/DtPipe.Coordinator.Server` | The coordinator's server, a library a host adds (`AddCoordinatorServer`): API, pages, planner, library, rights |
 | `src/DtPipe.Coordinator.Host` | The product's coordinator: a `Program` that adds the server and nothing else, the image's entry point, and `dtpipe-coordinator`, the executable `build.sh` publishes |
 | `src/DtPipe.Coordinator.Contracts` | Node channel messages, `BrickRules`: what coordinator and nodes share |
-| `src/DtPipe.PipelineNode.Hosting` | `AddDtPipeNode`: makes any .NET host a node (bricks, fragments, tokens) |
+| `src/DtPipe.PipelineNode.Hosting` | `AddDtPipeNode`: makes any .NET host a node (bricks, fragments, tokens), `AddArrowSource`: a source of the host's own. The family's one package |
 | `src/DtPipe.PipelineNode.Launcher` | The assembly of `dtpipe node` (a data node, or the runner with `--runner`): the CLI's only reach into the family, loaded when a node starts and by no other command |
 | `deploy` | The Dockerfile of the coordinator's and the runner's images, the runner's entry point (`runner-entrypoint.sh`: its network rules), and `deploy/README.md`: what a deployment provides |
 
@@ -45,7 +46,8 @@ library is a git repository, so the machine it runs on needs `git` on the `PATH`
 and the address, and an executable of the family is such a host. Nothing else in `src/` names
 TransportR; only the family, its tests and the lab do. The family references `DtPipe.Jobs` and no
 other project of the solution, so none of its hosts runs the engine in its own process: every fragment runs as a `dtpipe` child. The lab under
-`samples/distributed-lab` is a host, and it and its sample data are named nowhere else; its bench (the Lab view, planning
+`samples/distributed-lab` is a host, and it and its sample data are named nowhere else (`samples/arrow-socket-source`
+is a second one: a service that serves a source of its own to the node it hosts); its bench (the Lab view, planning
 by hand, fault injection) is its own coordinator's, `Lab.Coordinator`, and nothing of it is under `src/`.
 `[CI: validate_distributed_boundary.sh — names, references and project shape, not behaviour]`
 
@@ -158,6 +160,13 @@ the control plane, over each replica's node channel; TransportR carries the data
   PersonKeyTests, KeyOnlyCoordinatorTests; Hosting.Tests KeyTokenTests]` `[unchecked: a real
   TLS proxy; two instances that bootstrap at the same first start; deploy/compose.yaml, until a Docker host runs it]` Detail:
   `src/DtPipe.Coordinator.Server/CLAUDE.md`.
+- **`DtPipe.PipelineNode.Hosting` is the only package of the family, and it bundles its three projects.** A consumer gets the host
+  library, `DtPipe.PipelineNode`, `DtPipe.Coordinator.Contracts` and `DtPipe.Jobs` from one package, and a dependency on the packages
+  they use (TransportR among them), never on a `DtPipe.*` package. The other projects of the family are not packable. A pack is a
+  step of its own (`tests/scripts/validate_node_host_package.sh`): the family stays outside `DtPipe.sln`, so the solution's pack never
+  reaches it, and `release.yml` packs and pushes it in a step after the solution's, as a beta of the tag's version.
+  `[CI: validate_distributed_boundary.sh — one packable project, its references private]`
+  `[local: validate_node_host_package.sh — the package's content]` `[unchecked: the release's step, until a tag runs it]`
 - **The CLI hosts a node only through one assembly, and never a hub.** `dtpipe` is the child a node drives, reached through
   `arrow:`; `dtpipe node` is a node whose bricks are the branches of the pipeline grammar (`src/DtPipe/CLAUDE.md`). The
   ordinary CLI references no TransportR assembly: only `DtPipe.PipelineNode.Launcher` carries it, and `Cli/Node/NodeHostEntry.cs`

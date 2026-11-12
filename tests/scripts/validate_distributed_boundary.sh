@@ -27,8 +27,9 @@ fail() { echo -e "  ${RED}FAIL: $1${NC}"; exit 1; }
 # Tracked files plus new ones not yet added, so the guard sees a change before it is committed.
 FILES=$(git ls-files --cached --others --exclude-standard)
 
-# Files that are not part of the distributed family, its tests or the lab.
-OUTSIDE=$(echo "$FILES" | grep -vE '^((src|tests)/DtPipe\.(Coordinator|PipelineNode)(\.[A-Za-z]+)*/|samples/distributed-lab/)' || true)
+# Files that are not part of the distributed family, its tests, the lab or the node-host sample (a service that adds a node to
+# itself, as the lab's nodes do, so it may reference the Hosting library).
+OUTSIDE=$(echo "$FILES" | grep -vE '^((src|tests)/DtPipe\.(Coordinator|PipelineNode)(\.[A-Za-z]+)*/|samples/(distributed-lab|arrow-socket-source)/)' || true)
 
 echo "========================================"
 echo "  DtPipe Distributed Boundary Validation"
@@ -166,6 +167,25 @@ if [ -n "$HITS" ]; then
     fail "the CLI maps or uses a SignalR hub"
 fi
 pass "the CLI hosts no SignalR hub"
+
+# 8. The node host is the family's only package. Every other project of the family says it is not packable, and the host's
+#    references to the family's projects are private, so its nuspec depends on no DtPipe.* package (they ship inside it).
+HOST=src/DtPipe.PipelineNode.Hosting/DtPipe.PipelineNode.Hosting.csproj
+HITS=""
+for f in $(echo "$FILES" | grep -E '^src/DtPipe\.(Coordinator|PipelineNode)[^/]*/[^/]*\.csproj$' || true); do
+    [ -f "$f" ] || continue
+    [ "$f" = "$HOST" ] && continue
+    grep -qE '<IsPackable>[[:space:]]*false' "$f" || HITS="$HITS\n  $f"
+done
+if [ -n "$HITS" ]; then
+    echo -e "$HITS"
+    fail "a project of the family other than the node host is not marked <IsPackable>false"
+fi
+grep -qE '<IsPackable>[[:space:]]*true' "$HOST" || fail "the node host is not packable"
+if grep -E 'ProjectReference Include="[^"]*"' "$HOST" | grep -vq 'PrivateAssets="all"'; then
+    fail "the node host references a project of the family without PrivateAssets=\"all\": its package would depend on a package that does not exist"
+fi
+pass "the node host is the family's only package, and its project references are private"
 
 echo ""
 echo -e "${GREEN}Distributed boundary checks passed.${NC}"

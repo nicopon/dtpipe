@@ -1,0 +1,28 @@
+<Project>
+  <!--
+    Tells a host where its build put the dtpipe tool package. The host adds the package with
+    <PackageDownload Include="dtpipe" Version="[x.y.z]" /> (a tool package cannot be a PackageReference), and this file
+    writes the folder of its DtPipe.dll into the host's runtimeconfig.json as DtPipe.ToolDirectory, which
+    DtPipeNodeOptions.DtPipe reads when the host names no dtpipe of its own. Without that package, nothing is written.
+    The path is the NuGet cache of the machine that built the host: a deployment copies the package beside the host
+    (a dtpipe/ folder), which the host looks for as well.
+  -->
+  <Target Name="DtPipeResolveTool" BeforeTargets="GenerateBuildRuntimeConfigurationFiles">
+    <ItemGroup>
+      <_DtPipeDownload Include="@(PackageDownload)" Condition="'%(Identity)' == 'dtpipe'" />
+    </ItemGroup>
+    <PropertyGroup>
+      <_DtPipeVersion>@(_DtPipeDownload->'%(Version)')</_DtPipeVersion>
+      <_DtPipeVersion>$(_DtPipeVersion.Trim('[').Trim(']'))</_DtPipeVersion>
+      <_DtPipeToolsRoot>$([MSBuild]::EnsureTrailingSlash('$(NuGetPackageRoot)'))dtpipe/$(_DtPipeVersion)/tools/</_DtPipeToolsRoot>
+    </PropertyGroup>
+    <ItemGroup Condition="'$(_DtPipeVersion)' != ''">
+      <_DtPipeEntry Include="$(_DtPipeToolsRoot)*/any/DtPipe.dll" />
+    </ItemGroup>
+    <ItemGroup Condition="'@(_DtPipeEntry)' != ''">
+      <RuntimeHostConfigurationOption Include="DtPipe.ToolDirectory" Value="%(_DtPipeEntry.RootDir)%(_DtPipeEntry.Directory)" />
+    </ItemGroup>
+    <Warning Condition="'$(_DtPipeVersion)' != '' And '@(_DtPipeEntry)' == ''"
+             Text="The dtpipe $(_DtPipeVersion) tool package is not in the NuGet cache ($(_DtPipeToolsRoot)): restore the project." />
+  </Target>
+</Project>

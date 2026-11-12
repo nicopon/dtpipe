@@ -55,6 +55,38 @@ none. One node per process, which is one replica of its node's identity; a secon
   (`DtPipeCommand.VersionAsync`), or none when the binary does not answer: a version is shown beside
   a studio's, never a reason to stop the host. `[CI: Hosting.Tests DtPipeVersionTests] [local: the lab's
   smoke.py bricks — versions]`
+- **A host runs the dtpipe it names, else the tool package its build placed, else the PATH's.** A path in `DtPipeNodeOptions.DtPipe`
+  wins. Left at `dtpipe`, `DtPipeLocation` takes the `DtPipe.dll` of the `dtpipe` package that `build/DtPipe.PipelineNode.Hosting.targets`
+  found for the host's `PackageDownload` (a tool package cannot be a `PackageReference`), written to the host's runtimeconfig as
+  `DtPipe.ToolDirectory`, else a `dtpipe/` folder beside the host. A `.dll` has no executable, so `DtPipeProgram.Apply`
+  (`DtPipe.PipelineNode`) starts it through the dotnet host of the running runtime, with the dll as the first argument, in
+  `FragmentRun` and `DtPipeCommand` alike; `NodeAgent` resolves the path once for both. The child needs the ASP.NET Core shared
+  framework on the machine. The `PackageDownload` line stays in the host's own project: a package's props are read only after the
+  first restore, too late to add it. `[CI: Hosting.Tests DtPipeLocationTests; PipelineNode.Tests DtPipeProgramTests]`
+  `[local: samples/arrow-socket-source/spike-node.sh]` `[unchecked: Windows]`
+- **This library is the family's one package, and it carries the three projects under it.** The assemblies of `DtPipe.PipelineNode`,
+  `DtPipe.Coordinator.Contracts` and `DtPipe.Jobs` ship in its `lib/` (`PrivateAssets="all"` on the references, `BundleProjectOutputs`
+  in the project), so the packages those projects use are declared here too: a private reference carries none. The targets file ships
+  under `build/` and under `buildTransitive/`, so a host that reaches the package through a class library gets it. Apache.Arrow is
+  a `PackageReference`, never a reference to `Apache.Arrow.Serialization`. No solution packs the library, so the solution's pack never
+  reaches it; `tests/scripts/validate_node_host_package.sh` packs it, outside every pack glob, and reads the result, and `release.yml`
+  runs that script in a step of its own after the solution's push. A host built against a version not yet published takes a local one
+  (`-p:PackageVersion`), since a restore serves the cached copy of a version it has. The package is a beta (`<Version>-beta.1`, set in
+  the project; the release gives the tag's own suffix when it has one): the family is experimental.
+  `[local: validate_node_host_package.sh, spike-node.sh] [CI: validate_distributed_boundary.sh — one packable project, bundled projects private]`
+  `[unchecked: the release's step, until a tag runs it]`
+- **A source of the host's own is served on a socket the host owns.** `AddArrowSource` declares a source brick that reads
+  `arrow:pipe://${{DTPIPE_SRC_<ID>}}` and serves the rows of a callback on that socket (`ArrowSocketServer`); each connection runs the
+  callback once. The path is a variable of the node, never part of the brick: the brick's text is its version, and the path differs by
+  process. The socket listens from the server's constructor, so it exists before the node announces the brick. The schema is written
+  first, before the callback runs, and every batch is held to it by its serialized form (the writer checks nothing; an int32 written
+  as a float32 column would arrive as wrong values). The end marker is written only when the callback ends: a callback that throws,
+  its own timeout's cancellation included, ends the stream without it, so the child fails and loads no part as a whole, and the host
+  is never stopped by it. An I/O error of a write alone means the reader left (`--limit`, a sample, a failed run): leaving the loop
+  disposes the callback's enumerator. The socket lives in a folder of the process that only the current user reaches, set before the
+  socket exists. Registration refuses an id that is no word, two ids that name one variable, and a path longer than a Unix socket takes.
+  `[CI: Hosting.Tests ArrowSourceTests] [local: samples/arrow-socket-source/spike-node.sh, probe]`
+  `[unchecked: Windows; a reader that leaves while the callback waits, which the next write finds]`
 - **`BrickRules` (`DtPipe.Coordinator.Contracts`) over `JobYaml` (`DtPipe.Jobs`) is the one
   reading of a branch**, shared with the coordinator, so a studio never calls something a brick
   the node then declines. `BrickHost` does not announce a declared brick that fails the structure rule.

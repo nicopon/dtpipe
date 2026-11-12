@@ -10,6 +10,9 @@
     <!-- The one assembly of the CLI that carries a node host and, through it, TransportR: `dtpipe node` is the only
          caller, and the runtime loads this assembly when that command runs, not when dtpipe starts. -->
     <ProjectReference Include="..\DtPipe.PipelineNode.Hosting\DtPipe.PipelineNode.Hosting.csproj" />
+    <!-- The host library references these privately (they ship inside its package), so a project that uses them names them. -->
+    <ProjectReference Include="..\DtPipe.PipelineNode\DtPipe.PipelineNode.csproj" />
+    <ProjectReference Include="..\DtPipe.Coordinator.Contracts\DtPipe.Coordinator.Contracts.csproj" />
   </ItemGroup>
 
   <ItemGroup>

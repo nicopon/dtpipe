@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>ArrowSocketSource</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- The dtpipe release the node runs as a child (the tool package), and the node library's beta. -->
+    <DtPipeVersion Condition="'$(DtPipeVersion)' == ''">1.16.0</DtPipeVersion>
+    <NodeHostVersion Condition="'$(NodeHostVersion)' == ''">1.16.1-beta.1</NodeHostVersion>
+    <!-- Before the library is published, spike-node.sh packs it into this folder and builds with a NodeHostVersion of its own. -->
+    <RestoreAdditionalProjectSources Condition="Exists('$(MSBuildThisFileDirectory)..\..\dist\node-host')">$(MSBuildThisFileDirectory)..\..\dist\node-host</RestoreAdditionalProjectSources>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="DtPipe.PipelineNode.Hosting" Version="$(NodeHostVersion)" />
+    <PackageReference Include="Apache.Arrow" Version="23.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.14" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The dtpipe the node runs as a child, from the dtpipe tool package. A tool package cannot be a PackageReference, so it is
+         downloaded; the node library finds it in the NuGet cache. The line stays here: a package's own props are read only after
+         the first restore, too late to add it. -->
+    <PackageDownload Include="dtpipe" Version="[$(DtPipeVersion)]" />
+  </ItemGroup>
+</Project>

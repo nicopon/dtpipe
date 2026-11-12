@@ -12,6 +12,9 @@
     <!-- A disposable data node: a plain .NET host that adds a dtpipe node to itself, as any
          business service would. Everything a node does lives in DtPipe.PipelineNode.Hosting. -->
     <ProjectReference Include="..\..\..\src\DtPipe.PipelineNode.Hosting\DtPipe.PipelineNode.Hosting.csproj" />
+    <!-- The host library references these privately (they ship inside its package), so a project that uses them names them. -->
+    <ProjectReference Include="..\..\..\src\DtPipe.PipelineNode\DtPipe.PipelineNode.csproj" />
+    <ProjectReference Include="..\..\..\src\DtPipe.Coordinator.Contracts\DtPipe.Coordinator.Contracts.csproj" />
   </ItemGroup>
 
   <ItemGroup>

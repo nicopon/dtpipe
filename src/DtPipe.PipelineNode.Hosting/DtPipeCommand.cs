@@ -54,12 +54,12 @@ internal sealed class DtPipeCommand(string dtpipe, string workingDirectory, IRea
         var bound = timeout ?? DefaultTimeout;
         var psi = new ProcessStartInfo
         {
-            FileName = dtpipe,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
             WorkingDirectory = inDirectory ?? workingDirectory,
         };
+        DtPipeProgram.Apply(psi, dtpipe);
         var arguments = args.ToList();
         // A job checked for the coordinator is a designer's text: it gets neither the node's variables nor the host's.
         if (arguments.Contains(EdgesOnlyEnvironment.Flag)) EdgesOnlyEnvironment.Restrict(psi.Environment);
