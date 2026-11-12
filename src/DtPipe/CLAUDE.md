@@ -34,8 +34,9 @@ to the loaded job; a control joins it only when the conversion reads it, never t
 `JobExecutor` refuses, before binding, every input or output of the job that is not `arrow:-` and every place on disk a
 branch names (`EdgesOnlyRule`), and after binding every location that is not a named pipe; a file named bare is one of the
 working directory, the child's own, and may be bound or hold a `contract-save` (a runner's dry run); the flag reaches the SQL
-processor as `BranchChannelContext.EdgesOnly`, which turns DuckDB's external access off, locks its configuration and
-refuses `--duck-init`. An `@file` value and a cursor's state file are refused too (`EdgesOnlyScope`, armed by `Program` before
+processor as `BranchChannelContext.EdgesOnly`, which turns DuckDB's external access off, sets its threads and memory from
+what the runtime reports of the process's limits (`Environment.ProcessorCount`, `GCMemoryInfo`: a container's quota, which
+DuckDB's defaults do not read), locks its configuration and refuses `--duck-init`. An `@file` value and a cursor's state file are refused too (`EdgesOnlyScope`, armed by `Program` before
 the conversion resolves a `--job` file and by `JobExecutor`), so a transformer's option reads no file of the host, and no
 `IHostInterpolator` (the environment, the keyring) is asked, at a whole value or inside one: a `${{NAME}}` that is neither a
 launch value nor a cursor is refused by name, so the job learns nothing of the host's variables, not even which are set.

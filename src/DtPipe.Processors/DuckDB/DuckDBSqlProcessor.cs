@@ -100,10 +100,18 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
                 if (_edgesOnly)
                 {
                     // No file, database, extension or ATTACH: the query reads the scans registered below, and DuckDB
-                    // still spills to its temporary directory. The configuration is locked, so the query cannot turn
-                    // a setting back.
+                    // still spills to its temporary directory. Its threads and memory are sized from what the runtime
+                    // reports of the process's own limits (a container's quota, not the host's), which DuckDB's
+                    // defaults do not read. The configuration is locked, so the query cannot turn a setting back.
                     cmd.CommandText = "SET enable_external_access = false";
                     await cmd.ExecuteNonQueryAsync(ct);
+                    cmd.CommandText = $"SET threads = {Environment.ProcessorCount}";
+                    await cmd.ExecuteNonQueryAsync(ct);
+                    if (GC.GetGCMemoryInfo().TotalAvailableMemoryBytes is > 0 and var available)
+                    {
+                        cmd.CommandText = $"SET memory_limit = '{available / 10 * 8 / 1_000_000}MB'";
+                        await cmd.ExecuteNonQueryAsync(ct);
+                    }
                     cmd.CommandText = "SET lock_configuration = true";
                     await cmd.ExecuteNonQueryAsync(ct);
                 }

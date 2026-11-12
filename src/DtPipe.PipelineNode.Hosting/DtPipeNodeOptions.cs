@@ -84,6 +84,12 @@ public sealed class DtPipeNodeOptions
     /// <summary>Buffer size in bytes for reading/writing child fragment stdio pipes. Defaults to 262144 (256 KB).</summary>
     public int ReadChunkBytes { get; set; } = global::DtPipe.PipelineNode.NodeClientOptions.DefaultReadChunkBytes;
 
+    /// <summary>
+    /// The most runs this host holds at once, 0 for no bound. A launch beyond it is refused by name, so on a runner, whose host
+    /// the steps of every flow share, one designer's jobs cannot crowd out the others'.
+    /// </summary>
+    public int MaxRuns { get; set; }
+
     public NodeOidcOptions Oidc { get; set; } = new();
 
     /// <summary>Variables every dtpipe child sees, which a fragment resolves through <c>${{NAME}}</c>. Their values never leave the node.</summary>
@@ -108,5 +114,6 @@ public sealed class DtPipeNodeOptions
         if (BatchBytes <= 0) yield return "BatchBytes must be positive.";
         if (MaxInFlightBatches <= 0) yield return "MaxInFlightBatches must be positive.";
         if (ReadChunkBytes <= 0) yield return "ReadChunkBytes must be positive.";
+        if (MaxRuns < 0) yield return "MaxRuns must be 0 (no bound) or positive.";
     }
 }

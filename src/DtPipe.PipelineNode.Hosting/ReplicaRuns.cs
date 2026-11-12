@@ -52,6 +52,12 @@ internal sealed class ReplicaRuns : IAsyncDisposable
     // A runner's: each child runs under --edges-only, in its run directory.
     private readonly bool _edgesOnly;
 
+    // The bound on the runs held at once (0 for none), and the runs admitted under it: taken before the child starts and given back
+    // when the launch fails or the run leaves _runs, so two launches handled at once cannot both take the last place.
+    private readonly int _maxRuns;
+    private readonly object _admission = new();
+    private int _admitted;
+
     private readonly ConcurrentDictionary<(string RunId, string Fragment), Entry> _runs = new();
     private readonly List<FragmentExit> _held = [];
 
@@ -64,9 +70,10 @@ internal sealed class ReplicaRuns : IAsyncDisposable
         HubConnection channel, PipelineNode node, string name, string dtpipe, IReadOnlyDictionary<string, string> environment, string jobsDirectory,
         Func<FragmentSpec, (string? Yaml, string? Reason)> intake, Func<string, ILogger> loggerOf, ILogger logger, TimeSpan unwiredTimeout,
         bool faultInjection = false, string arrowCompression = "lz4", int? arrowCompressionLevel = null, int readChunkBytes = 262144,
-        bool edgesOnly = false)
+        bool edgesOnly = false, int maxRuns = 0)
     {
         _edgesOnly = edgesOnly;
+        _maxRuns = maxRuns;
         (_channel, _node, _name, _dtpipe, _environment, _jobsDirectory) = (channel, node, name, dtpipe, environment, jobsDirectory);
         (_intake, _loggerOf, _logger, _unwiredTimeout, _faultInjection) = (intake, loggerOf, logger, unwiredTimeout, faultInjection);
         _arrowCompression = arrowCompression;
@@ -116,6 +123,36 @@ internal sealed class ReplicaRuns : IAsyncDisposable
     /// writes the job and spawns the child. A refusal is an answer, not a failure: the replica ran nothing.
     /// </summary>
     public async Task<LaunchResult> LaunchAsync(LaunchRequest request)
+    {
+        lock (_admission)
+        {
+            if (_maxRuns > 0 && _admitted >= _maxRuns)
+            {
+                _logger.LogWarning("Refusing {Fragment} of {RunId}: {Count} runs are held, the most MaxRuns allows", request.Spec.Fragment, request.RunId, _maxRuns);
+                return new LaunchResult(false, $"{_name} already holds {_maxRuns} runs, the most its MaxRuns setting allows.");
+            }
+            _admitted++;
+        }
+        LaunchResult result;
+        try
+        {
+            result = await LaunchAdmittedAsync(request);
+        }
+        catch
+        {
+            Release();
+            throw;
+        }
+        if (!result.Started) Release();
+        return result;
+    }
+
+    private void Release()
+    {
+        lock (_admission) _admitted--;
+    }
+
+    private async Task<LaunchResult> LaunchAdmittedAsync(LaunchRequest request)
     {
         var spec = request.Spec;
         var key = (request.RunId, spec.Fragment);
@@ -379,6 +416,7 @@ internal sealed class ReplicaRuns : IAsyncDisposable
     private async Task DiscardAsync((string RunId, string Fragment) key, Entry entry)
     {
         if (!_runs.TryRemove(key, out _)) return;
+        Release();
         entry.Unwired.Cancel();
         try { await entry.Run.DisposeAsync(); } catch (Exception) { /* best-effort */ }
         TryDelete(entry.JobPath);
@@ -392,6 +430,7 @@ internal sealed class ReplicaRuns : IAsyncDisposable
         foreach (var (key, entry) in _runs.ToArray())
         {
             if (!_runs.TryRemove(key, out _)) continue;
+            Release();
             entry.Unwired.Cancel();
             try { await entry.Run.DisposeAsync(); } catch (Exception) { /* shutting down */ }
             TryDelete(entry.JobPath);

@@ -107,6 +107,11 @@ of the runner's variables (a `${{NAME}}` is refused). A reader such as
 runner's state directory, its temporary directory too, where DuckDB spills; the directory is
 removed when the step ends.
 
+The runner holds at most eight steps at once (`DTPIPE_RUNNER_MAX_RUNS` in the recipe,
+`DtPipeNode__MaxRuns` for any node); a launch past them is refused by name. A step's SQL takes the
+threads and memory the container reports, so a memory limit on the runner's container bounds what
+its steps take together.
+
 ## The runner's network
 
 A runner runs whatever step a pipeline holds, so its image limits what it can reach.

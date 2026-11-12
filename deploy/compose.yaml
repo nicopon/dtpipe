@@ -89,6 +89,8 @@ services:
       # No Oidc__Authority: the node finds the coordinator's key issuer in the coordinator's metadata.
       DtPipeNode__CoordinatorUrl: http://coordinator:8080
       DtPipeNode__Oidc__ClientSecret: "@/secrets/runner-1.key"
+      # The steps of every flow share this runner: past this many at once, a launch is refused by name.
+      DtPipeNode__MaxRuns: ${DTPIPE_RUNNER_MAX_RUNS:-8}
     volumes:
       - runner-state:/state
       - runner-key:/secrets:ro

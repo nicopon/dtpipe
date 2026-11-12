@@ -259,7 +259,7 @@ internal sealed class NodeAgent : BackgroundService
                 spec => FragmentIntake.JobOf(spec, _policy, _gate, _bricks.DeclaredBranch, _bricks.DeclaredVersion, _bricks.Forms),
                 fragment => _forwarder.For(_hostLoggers, _options.Name, fragment).CreateLogger(typeof(FragmentRun).FullName!),
                 _logger, _options.UnwiredRunTimeout, _options.FaultInjection, _options.ArrowCompression, _options.ArrowCompressionLevel,
-                _options.ReadChunkBytes, edgesOnly: _policy == FragmentPolicy.AnyFragment);
+                _options.ReadChunkBytes, edgesOnly: _policy == FragmentPolicy.AnyFragment, maxRuns: _options.MaxRuns);
             runs.Bind();
             _runs = runs;
         }

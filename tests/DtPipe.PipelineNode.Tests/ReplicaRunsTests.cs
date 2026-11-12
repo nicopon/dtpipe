@@ -55,14 +55,14 @@ public class ReplicaRunsTests : IDisposable
 
     public void Dispose() => _dir.Delete(recursive: true);
 
-    private async Task<(CoordinatorTestHost Host, PipelineNode Node, ReplicaRuns Runs)> StartAsync(TimeSpan unwired)
+    private async Task<(CoordinatorTestHost Host, PipelineNode Node, ReplicaRuns Runs)> StartAsync(TimeSpan unwired, int maxRuns = 0)
     {
         var host = await CoordinatorTestHost.StartAsync(o => o.Groups["test"] = new TransportR.FlowControl.GroupAccess { CanSendTo = ["test"] });
         var node = await PipelineNode.ConnectAsync(new NodeClientOptions { HubUrl = host.Url });
         var runs = new ReplicaRuns(
             host.CreateNodeChannel(), node, "A", DtPipeExecutableLocator.Path, new Dictionary<string, string>(), _dir.FullName,
             spec => FragmentIntake.JobOf(spec, FragmentPolicy.Bricks, (_, _) => null, (_, _) => null, (_, _) => null, []),
-            _ => NullLogger.Instance, NullLogger.Instance, unwired);
+            _ => NullLogger.Instance, NullLogger.Instance, unwired, maxRuns: maxRuns);
         return (host, node, runs);
     }
 
@@ -101,6 +101,30 @@ public class ReplicaRunsTests : IDisposable
         Assert.Equal(1, runs.Count);
         Assert.False(runs.Cancel("run-1", "A"));
         Assert.True(runs.Cancel("run-2", "A"));
+    }
+
+    [Fact]
+    public async Task ALaunchBeyondMaxRuns_IsRefusedByName_AndAPlaceIsGivenBackWhenARunEnds()
+    {
+        var (host, node, runs) = await StartAsync(unwired: TimeSpan.FromMinutes(5), maxRuns: 2);
+        await using var _host = host;
+        await using var _node = node;
+        await using var _runs = runs;
+        Assert.True((await runs.LaunchAsync(WaitingRun("run-1"))).Started);
+        Assert.True((await runs.LaunchAsync(WaitingRun("run-2"))).Started);
+
+        var refused = await runs.LaunchAsync(WaitingRun("run-3"));
+
+        Assert.False(refused.Started);
+        Assert.Contains("MaxRuns", refused.Refusal);
+        Assert.True(runs.Cancel("run-1", "A"));
+        var deadline = DateTime.UtcNow + Bound;
+        while (runs.Count > 1)
+        {
+            if (DateTime.UtcNow > deadline) throw new TimeoutException("the cancelled run never ended");
+            await Task.Delay(50);
+        }
+        Assert.True((await runs.LaunchAsync(WaitingRun("run-4"))).Started);
     }
 
     [Fact]

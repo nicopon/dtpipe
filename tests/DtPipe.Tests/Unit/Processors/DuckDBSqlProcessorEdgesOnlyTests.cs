@@ -85,6 +85,14 @@ public class DuckDBSqlProcessorEdgesOnlyTests
     }
 
     [Fact]
+    public async Task Its_Threads_Are_The_Processors_The_Runtime_Reports()
+    {
+        var threads = await ScalarAsync(Processor(Registry(("main", 1)), "SELECT current_setting('threads')::BIGINT AS n FROM main", "main"));
+
+        Assert.Equal(Environment.ProcessorCount, threads);
+    }
+
+    [Fact]
     public async Task It_Cannot_Turn_A_Setting_Back()
     {
         var processor = Processor(Registry(("main", 1)), "SET enable_external_access = true", "main");

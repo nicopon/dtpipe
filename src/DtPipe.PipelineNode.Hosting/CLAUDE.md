@@ -110,6 +110,10 @@ none. One node per process, which is one replica of its node's identity; a secon
   run and copied into `FragmentExit`), a held one included: the coordinator admits no report
   without it.
   `[CI: PipelineNode.Tests ReplicaRunsTests, CoordinatorDrivenTests, NodeAgentDataPlaneTests]` `[unchecked: the report in flight when an announcement lands]`
+- **A host holds at most `DtPipeNodeOptions.MaxRuns` runs** (0, the default, for no bound): `ReplicaRuns` admits a launch under a
+  lock before its child starts, refuses one beyond the bound by name, and gives the place back when the launch fails or the run
+  leaves its table. `Check` never counts, since a deployment is armed long before its runs. The product's runner sets it: the steps
+  of every flow share its host. `[CI: PipelineNode.Tests ReplicaRunsTests]`
 - **A run the coordinator never wires is abandoned.** `DtPipeNodeOptions.UnwiredRunTimeout` bounds the wait
   from `Launch` to the last `Wire` asked for, so a coordinator that vanished does not leave a child until the
   host stops. `[CI: PipelineNode.Tests ReplicaRunsTests]`

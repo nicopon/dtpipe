@@ -726,7 +726,8 @@ directory named bare, which may also hold a branch's `contract-save`. A branch t
 `checkpoint`, `from-checkpoint`, `from-contract`, `metrics-path`, `cursor` or `state` is refused
 too, each by its branch, before any row moves. Transformers and processors stay: `--sql` reads the
 branches it names in `--from` and `--ref` and nothing else, with DuckDB's `enable_external_access`
-off and its configuration locked, so a file, `ATTACH`, an extension or a `SET` is refused, and
+off, its threads and memory taken from the process's limits (a container's, not the host's), and
+its configuration locked, so a file, `ATTACH`, an extension or a `SET` is refused, and
 `--duck-init` is refused outright. An `@file` value (a `--compute`, `--filter` or `--expand` script
 read from a file) and a `${{cursor://<file>}}` are refused as well, and so is a `${{NAME}}` that is
 not a value the launch gives: the step reads no file, no variable and no keyring entry of its host.
@@ -1367,6 +1368,7 @@ a setting allows it.
 | `Policy` | `Bricks` (default: a data node runs only its own bricks) or `AnyFragment` (a runner) |
 | `UnwiredRunTimeout` | How long a launched run may wait for its edges to be wired. Default: five minutes |
 | `FaultInjection` | `true` lets the host end a run's child when the coordinator asks, for a test bench. Default: off |
+| `MaxRuns` | The most runs the host holds at once; a launch beyond it is refused. Default: `0`, no bound |
 | `ArrowCompression` | Arrow IPC buffer compression codec (`none`, `lz4` or `zstd`; refused at start otherwise), passed to each fragment as `--bind-compression`. Default: `lz4` |
 | `ArrowCompressionLevel` | Optional compression level for the selected codec, passed as `--bind-compression-level` |
 | `BatchBytes` | TransportR batch size in bytes for the data plane client. Default: `262144` (256 KB). For high-throughput WAN, 256 KB–512 KB is recommended |
