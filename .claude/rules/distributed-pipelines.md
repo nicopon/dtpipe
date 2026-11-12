@@ -91,7 +91,9 @@ the control plane, over each replica's node channel; TransportR carries the data
   give it: a node announces on the node channel, a **monitor** (a supervisor) reads `/health` and nothing
   else, a **launcher** (a scheduler) starts the runs of the pipelines its identity lists and reads them, on
   `/service` and nowhere else; the last two have no group and no node, so a valid token of theirs is refused at
-  the announcement and on `/api`, and neither reaches the other's route.
+  the announcement and on `/api`, and neither reaches the other's route. A designer still reads rows: a brick's sample
+  and preview, of any brick whatever the flow matrix says of its node, through the control plane and logged by caller,
+  node and brick (`src/DtPipe.Coordinator.Server/CLAUDE.md`); the matrix judges transfers, never a person.
 - **The product's images carry the revision they were built from and run unprivileged.** `deploy/Dockerfile` takes `SOURCE_REVISION`
   (the full commit id): a value given is refused if malformed or if a `dtpipe` or host does not report it, and labels the image
   with it (`org.opencontainers.image.revision`); left out, the build warns and the label says `unknown`. `.git` is not in the

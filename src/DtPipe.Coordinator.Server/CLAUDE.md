@@ -265,7 +265,11 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   the catalog), so the studio never decides a brick itself; `/api/bricks/{node}/{id}/sample` asks the node for at most
   `MaxSampleRows` rows as Arrow IPC (`SampleBrick`, which the node host bounds in bytes before it
   sends, below the channel's message limit), and `/api/bricks/{node}/{id}/preview` for the first rows and their types, read when a
-  person looks at a brick and kept nowhere. `[CI: CoordinatorContractTests, StudioRoutesTests] [local: the lab's smoke.py bricks — the studio's routes]`
+  person looks at a brick and kept nowhere. Both are the designer's right over every brick, whatever groups the flow matrix gives
+  its node: the rows reach the person through the control plane, never a transfer, and each read is logged under
+  `NodeEndpoints.ReadsLog`, naming the caller (`CallerOf`), the node, the brick and the bound.
+  `[CI: CoordinatorContractTests, StudioRoutesTests] [local: the lab's smoke.py bricks — the studio's routes]`
+  `[unchecked: the log of a read]`
 - **Every save into the library is checked first, and a refused one writes nothing.** The handler of
   `PUT /api/library/{id}` passes the text as received to `DesignValidator`, after the rights and the
   CSRF header and before `SaveAsync`: a job it refuses answers 422 with `LibraryRefused` (its report),
