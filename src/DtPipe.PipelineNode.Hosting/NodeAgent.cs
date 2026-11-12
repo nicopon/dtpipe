@@ -86,6 +86,8 @@ internal sealed class NodeAgent : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
+        // A runner's steps are designers' jobs, run under this process's user: they must not read its environment or memory.
+        if (_policy == FragmentPolicy.AnyFragment) NotDumpable.Apply(_logger);
         var hub = _hub = new HubConnectionBuilder()
             .WithUrl(_options.CoordinatorUrl.TrimEnd('/') + NodeChannel.Path, o => o.AccessTokenProvider = async () => await _tokens.GetAsync())
             .WithAutomaticReconnect(new KeepRetrying())

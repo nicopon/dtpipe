@@ -21,8 +21,9 @@ name: dtpipe-trial
 services:
   # Writes dtp_<id>_<43 characters of base64url> (32 random bytes) for each id of DTPIPE_KEYS that has no key yet, into the
   # coordinator's volume, and copies each into the volume mounted at /keys/<id>, the one its node reads: a runner runs
-  # whatever branch a pipeline holds, so it never sees another identity's key. Root only to give the files to the images'
-  # user (1654), mode 0600; it never replaces a key, so `up` again keeps them, and `down -v` makes new ones.
+  # whatever branch a pipeline holds, so it never sees another identity's key. Root to give the coordinator's files to the
+  # images' user (1654), mode 0600, and to keep a node's copy root's, mode 0400: the runner's entry point reads it before it
+  # drops to 1654, so its steps cannot. It never replaces a key, so `up` again keeps them, and `down -v` makes new ones.
   keys:
     image: ${DTPIPE_RUNNER_IMAGE:-ghcr.io/nicopon/dtpipe-runner:${DTPIPE_VERSION:-latest}}
     user: "0:0"
@@ -36,9 +37,9 @@ services:
             printf 'dtp_%s_%s' "$$id" "$$(head -c 32 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=\n')" > "$$key.new"
             mv "$$key.new" "$$key"
           fi
-          if [ -d "/keys/$$id" ]; then cp "$$key" "/keys/$$id/$$id.key"; fi
+          if [ -d "/keys/$$id" ]; then cp "$$key" "/keys/$$id/$$id.key"; chown 0:0 "/keys/$$id/$$id.key"; chmod 0400 "/keys/$$id/$$id.key"; fi
         done
-        chown -R 1654:1654 /keys
+        chown -R 1654:1654 /keys/coordinator
     environment:
       DTPIPE_KEYS: admin runner-1
     volumes:

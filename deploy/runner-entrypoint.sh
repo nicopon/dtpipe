@@ -13,9 +13,10 @@
 # connection the runner opened, and IPv6 neighbour discovery; out, the masks; any other connection out is rejected, so it fails
 # at once rather than after a timeout, and any other ICMP dropped. Nothing comes in but those replies.
 #
-# Root is needed only here, with NET_ADMIN for the rules and SETUID, SETGID and SETPCAP to leave it: dtpipe runs with every
-# capability dropped, the bounding set emptied and no_new_privs set, so it can neither change the rules nor gain a privilege
-# back. Started as another user, the script installs nothing and starts dtpipe as it is, which a non-empty list refuses.
+# Root is needed only here, with NET_ADMIN for the rules, to read a key file that is root's alone, and with SETUID, SETGID and
+# SETPCAP to leave it: dtpipe runs with every capability dropped, the bounding set emptied and no_new_privs set, so it can
+# neither change the rules nor gain a privilege back. Started as another user, the script installs nothing and starts dtpipe as
+# it is, which a non-empty list refuses.
 set -eu
 
 worker=1654
@@ -137,6 +138,18 @@ else
         warn "DTPIPE_EGRESS_ALLOW names IPv6 masks and the kernel has no IPv6: they are not installed, and the runner has no IPv6 traffic."
     fi
 fi
+
+# A client secret given as @path is read here, before the privileges go, so its file may be root's alone: dtpipe gets the value in
+# its own environment, which its steps neither inherit nor read (a runner is not dumpable).
+case "${DtPipeNode__Oidc__ClientSecret:-}" in
+    @*)
+        secret=$(cat -- "${DtPipeNode__Oidc__ClientSecret#@}" 2>/dev/null) || error "DtPipeNode__Oidc__ClientSecret names a file that cannot be read."
+        [ -n "$secret" ] || error "DtPipeNode__Oidc__ClientSecret names an empty file."
+        DtPipeNode__Oidc__ClientSecret=$secret
+        export DtPipeNode__Oidc__ClientSecret
+        unset secret
+        ;;
+esac
 
 home=$(getent passwd "$worker" | cut -d: -f6)
 export HOME="${home:-/tmp}"

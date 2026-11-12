@@ -38,8 +38,8 @@ pipeline](../docs/guides/distributed-first-pipeline.md) shows.
 - **The keys.** On the first `up`, the one-off `keys` service (the runner's image, run once as
   root to hand the files to `1654`) writes a random key, `dtp_<id>_<43 characters>`, for each id
   of `DTPIPE_KEYS` that has none, mode `0600`, into the coordinator's volume, and copies each
-  node's into a volume of that node's alone: a runner runs whatever branch a pipeline holds, so it
-  never sees another identity's key. The coordinator reads them as `@/secrets/<id>.key`
+  node's into a volume of that node's alone, owned by root, mode `0400`: a runner runs whatever
+  branch a pipeline holds, so it never sees another identity's key, nor its own. The coordinator reads them as `@/secrets/<id>.key`
   (`Coordinator__Bootstrap__AdminKey`, `Coordinator__Bootstrap__Identities__<n>__*`), and each node
   as `DtPipeNode__Oidc__ClientSecret`; it finds the coordinator's issuer in the coordinator's
   metadata. `up` again keeps the keys, and `down -v` makes new ones. The coordinator makes no key
@@ -118,7 +118,10 @@ A runner runs whatever step a pipeline holds, so its image limits what it can re
 `DTPIPE_EGRESS_ALLOW` names the addresses it may open a connection to. The entry point installs
 the rules as root (`iptables`, `ip6tables`), reads them back, and starts `dtpipe node --runner`
 as `1654:1654` with no capability, an empty bounding set and `no_new_privs`: `dtpipe` can neither
-change the rules nor gain a privilege back.
+change the rules nor gain a privilege back. A `DtPipeNode__Oidc__ClientSecret` given as `@path` is
+read by the entry point, as root, so the file may be root's alone; the runner then makes itself
+not dumpable, so a step, which runs as the same user, reads neither its environment nor its
+memory.
 
 ```bash
 docker run -d --init --cap-add NET_ADMIN -e DTPIPE_EGRESS_ALLOW=10.20.0.0/24 \
