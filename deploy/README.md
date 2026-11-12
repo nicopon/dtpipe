@@ -101,7 +101,8 @@ A runner hosts no data: it runs the steps between the nodes, and its host is sha
 every run. A step on a runner reads and writes its `arrow:` edges and nothing else: a file, a
 database, a checkpoint, a cursor file or a DuckDB `duck-init` is refused when the pipeline is
 planned, again by the runner before it starts the step, and by `dtpipe` itself, which the runner
-starts with `--edges-only`: its SQL runs with DuckDB's external access off. A reader such as
+starts with `--edges-only`: its SQL runs with DuckDB's external access off, and the step sees none
+of the runner's variables (a `${{NAME}}` is refused). A reader such as
 `generate:` belongs on a node, as a brick. Each step works in a directory of its own under the
 runner's state directory, its temporary directory too, where DuckDB spills; the directory is
 removed when the step ends.

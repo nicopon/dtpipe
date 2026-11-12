@@ -129,12 +129,13 @@ internal sealed class ReplicaRuns : IAsyncDisposable
             return new LaunchResult(false, reason);
         }
 
-        var environment = _environment;
+        // A runner's child gets none of the node's variables: its job is a designer's text, and a runner hosts no data to name.
+        IReadOnlyDictionary<string, string> environment = _edgesOnly ? new Dictionary<string, string>() : _environment;
         if (request.Cursor is { } cursor)
         {
             if (CursorValues.Refusal(cursor.Type, cursor.Value) is { } refusal)
                 return new LaunchResult(false, $"the cursor value for {spec.Fragment} is refused: {refusal}");
-            environment = new Dictionary<string, string>(_environment, StringComparer.Ordinal) { [FragmentCursors.OverrideVariable] = cursor.Value };
+            environment = new Dictionary<string, string>(environment, StringComparer.Ordinal) { [FragmentCursors.OverrideVariable] = cursor.Value };
         }
 
         var stem = SafeFileName($"{request.RunId}-{spec.Fragment}");

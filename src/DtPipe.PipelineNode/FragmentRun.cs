@@ -177,6 +177,7 @@ public sealed class FragmentRun : IAsyncDisposable
             RedirectStandardError = true,
             UseShellExecute = false,
         };
+        if (options.EdgesOnly) EdgesOnlyEnvironment.Restrict(psi.Environment);
         foreach (var (name, value) in options.ChildEnvironment ?? new Dictionary<string, string>())
             psi.Environment[name] = value;
         if (options.RunDirectory is { } runDirectory)
@@ -193,7 +194,7 @@ public sealed class FragmentRun : IAsyncDisposable
         }
         psi.ArgumentList.Add("--job");
         psi.ArgumentList.Add(options.FragmentJobPath);
-        if (options.EdgesOnly) psi.ArgumentList.Add("--edges-only");
+        if (options.EdgesOnly) psi.ArgumentList.Add(EdgesOnlyEnvironment.Flag);
         if (bindInputPairs.Count > 0) { psi.ArgumentList.Add("--bind-input"); psi.ArgumentList.Add(string.Join(",", bindInputPairs)); }
         if (bindOutputPairs.Count > 0) { psi.ArgumentList.Add("--bind-output"); psi.ArgumentList.Add(string.Join(",", bindOutputPairs)); }
         // The codec applies to the fragment's 'arrow:-' boundaries: the ones bound above and the first

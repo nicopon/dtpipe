@@ -728,8 +728,9 @@ too, each by its branch, before any row moves. Transformers and processors stay:
 branches it names in `--from` and `--ref` and nothing else, with DuckDB's `enable_external_access`
 off and its configuration locked, so a file, `ATTACH`, an extension or a `SET` is refused, and
 `--duck-init` is refused outright. An `@file` value (a `--compute`, `--filter` or `--expand` script
-read from a file) is refused as well. DuckDB still spills to its temporary directory under the
-working directory.
+read from a file) and a `${{cursor://<file>}}` are refused as well, and so is a `${{NAME}}` that is
+not a value the launch gives: the step reads no file, no variable and no keyring entry of its host.
+DuckDB still spills to its temporary directory under the working directory.
 
 #### Implicit branch-split rules
 

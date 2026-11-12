@@ -74,7 +74,9 @@ the control plane, over each replica's node channel; TransportR carries the data
   and output is `arrow:-` on an edge of its alias and direction, no branch names a place on disk, no `duck-init`; processors and
   transformers stay. The planner refuses a fragment that breaks it, naming the branch and the endpoint, and the runner refuses
   it again before it launches one (`FragmentIntake`). The engine enforces it a third time: a runner's child runs under
-  `--edges-only` (`src/DtPipe/CLAUDE.md`), which refuses any other reader or writer and runs DuckDB without external access.
+  `--edges-only` (`src/DtPipe/CLAUDE.md`), which refuses any other reader or writer, runs DuckDB without external access and
+  reads no file and no variable of the host; the node starts it with the host's environment cut to what `EdgesOnlyEnvironment`
+  keeps, and none of the node's variables.
   Every fragment's child works with a run directory of its own as its temp directory, removed once it has ended; a runner's
   child also works in it. `[CI: Server.Tests PlanRightsTests; Hosting.Tests FragmentIntakeTests; PipelineNode.Tests
   FragmentIsolationTests; DtPipe.Tests EdgesOnlyRuleTests, DuckDBSqlProcessorEdgesOnlyTests]` `[unchecked: Windows]`

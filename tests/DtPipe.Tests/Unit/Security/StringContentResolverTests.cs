@@ -291,6 +291,33 @@ public class CompositeStringContentResolverTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_Host_Variable_Is_Never_Read_Inside_An_Edges_Only_Run()
+    {
+        const string name = "DTPIPE_TEST_EDGES_ONLY_VAR";
+        Environment.SetEnvironmentVariable(name, "host-secret");
+        _secretsManager.SetSecret("edges-only-alias", "keyring-secret");
+        try
+        {
+            using (DtPipe.Cli.Expressions.EdgesOnlyScope.Arm())
+            {
+                var refusal = await Assert.ThrowsAsync<InvalidOperationException>(() => _resolver.ResolveAsync("x=${{" + name + "}}"));
+                Assert.Equal(DtPipe.Cli.Expressions.EdgesOnlyScope.VariableRefusal(name), refusal.Message);
+                Assert.Equal(name, await _resolver.ResolveAsync(name));
+                Assert.Equal("keyring://edges-only-alias", await _resolver.ResolveAsync("keyring://edges-only-alias"));
+                Assert.Equal("7", await _resolver.ResolveAsync("${{cursor://|7}}"));
+                var file = await Assert.ThrowsAsync<InvalidOperationException>(() => _resolver.ResolveAsync("${{cursor://state.json|7}}"));
+                Assert.Equal(DtPipe.Cli.Expressions.EdgesOnlyScope.FileRefusal, file.Message);
+            }
+
+            Assert.Equal("x=host-secret", await _resolver.ResolveAsync("x=${{" + name + "}}"));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(name, null);
+        }
+    }
+
+    [Fact]
     public async Task An_At_File_Is_Refused_Inside_An_Edges_Only_Run_And_Read_Outside_It()
     {
         var path = Path.Combine(Path.GetTempPath(), "edges_only_" + Guid.NewGuid().ToString("N") + ".txt");

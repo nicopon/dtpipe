@@ -1,8 +1,8 @@
-using DtPipe.Core.Expressions;
+using DtPipe.Cli.Expressions;
 
 namespace DtPipe.Cli.Security;
 
-public sealed class KeyringInterpolator : IStringInterpolator
+public sealed class KeyringInterpolator : IHostInterpolator
 {
     private readonly ISecretsManager _secretsManager;
 

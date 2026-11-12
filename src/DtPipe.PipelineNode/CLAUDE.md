@@ -45,9 +45,10 @@ stdin/stdout and TransportR. It speaks to no coordinator itself.
 - **A child works with a run directory of its own.** `FragmentLaunch.RunDirectory` is made before the child starts and is its
   `TMPDIR`, `TEMP` and `TMP`; `DisposeAsync` removes it once the child has gone (Windows keeps a directory a live process
   works in). With `EdgesOnly` (a runner's fragment) it is the working directory too, where DuckDB spills, and the child runs
-  under `--edges-only`; a data node's child keeps the host's working directory, against which its bricks' relative paths
-  resolve. Where a single-file dtpipe would extract its native libraries under the temp directory (Windows, or Unix with no
-  `HOME`), `DOTNET_BUNDLE_EXTRACT_BASE_DIR` pins them to the host's. `[CI: FragmentIsolationTests]` `[unchecked: Windows]`
+  under `--edges-only` with the host's environment cut to what `EdgesOnlyEnvironment` keeps (`DtPipeCommand` does the same
+  for a check run under the flag); a data node's child keeps the host's working directory, against which its bricks'
+  relative paths resolve, and its whole environment. Where a single-file dtpipe would extract its native libraries under the
+  temp directory (Windows, or Unix with no `HOME`), `DOTNET_BUNDLE_EXTRACT_BASE_DIR` pins them to the host's. `[CI: FragmentIsolationTests]` `[unchecked: Windows]`
 - **Cancel by stream rupture, never by signal.** The first fault ruptures the child at once
   (`Rupture`: stdin and every pipe closed, a kill after the grace period), never after the relays
   finish - an outbound relay reading a child with nothing to write finishes only when the kill closes

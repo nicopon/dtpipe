@@ -1,3 +1,4 @@
+using DtPipe.Cli.Expressions;
 using DtPipe.Adapters.Shared.Cursor;
 using DtPipe.Core.Cursor;
 using DtPipe.Core.Expressions;
@@ -35,6 +36,8 @@ public sealed class CursorInterpolator : IStringInterpolator
 
         if (string.IsNullOrWhiteSpace(path))
             return defaultValue ?? "";
+        if (EdgesOnlyScope.IsArmed)
+            throw new InvalidOperationException(EdgesOnlyScope.FileRefusal);
 
         // 3. Read state file
         var cursorValue = CursorStateStore.Read(path);

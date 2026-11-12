@@ -20,7 +20,8 @@ internal sealed record DtPipeCommandResult(int ExitCode, byte[] Output, string S
 /// Runs the dtpipe binary for what the node reads itself rather than as a fragment (a brick's schema
 /// and preview, the coordinator's checks of a brick or a job), with the environment its fragments
 /// inherit, so a command names a database through <c>${{VARIABLE}}</c> and its value never enters
-/// an argument.
+/// an argument. A command under <c>--edges-only</c> (a runner's check of a designer's job) gets what
+/// <see cref="EdgesOnlyEnvironment"/> keeps instead.
 /// </summary>
 internal sealed class DtPipeCommand(string dtpipe, string workingDirectory, IReadOnlyDictionary<string, string> environment)
 {
@@ -59,8 +60,11 @@ internal sealed class DtPipeCommand(string dtpipe, string workingDirectory, IRea
             UseShellExecute = false,
             WorkingDirectory = inDirectory ?? workingDirectory,
         };
-        foreach (var (name, value) in environment) psi.Environment[name] = value;
-        foreach (var arg in args) psi.ArgumentList.Add(arg);
+        var arguments = args.ToList();
+        // A job checked for the coordinator is a designer's text: it gets neither the node's variables nor the host's.
+        if (arguments.Contains(EdgesOnlyEnvironment.Flag)) EdgesOnlyEnvironment.Restrict(psi.Environment);
+        else foreach (var (name, value) in environment) psi.Environment[name] = value;
+        foreach (var arg in arguments) psi.ArgumentList.Add(arg);
         psi.Environment["NO_COLOR"] = "1";
         psi.Environment["DTPIPE_NO_TUI"] = "1";
 

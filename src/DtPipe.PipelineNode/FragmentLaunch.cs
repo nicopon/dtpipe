@@ -28,9 +28,10 @@ public sealed class FragmentLaunch
     public string? RunDirectory { get; init; }
 
     /// <summary>
-    /// Runs the child under <c>--edges-only</c>, in <see cref="RunDirectory"/>: it reads and writes its edges and nothing else.
-    /// A runner's fragment, whose host the fragments of every run share; a data node's child keeps the host's working
-    /// directory, against which its bricks' relative paths resolve.
+    /// Runs the child under <c>--edges-only</c>, in <see cref="RunDirectory"/>: it reads and writes its edges and nothing else,
+    /// and of the host's environment keeps only what <see cref="EdgesOnlyEnvironment"/> does. A runner's fragment, whose host
+    /// the fragments of every run share; a data node's child keeps the host's working directory, against which its bricks'
+    /// relative paths resolve, and the host's whole environment.
     /// </summary>
     public bool EdgesOnly { get; init; }
 

@@ -40,7 +40,7 @@ internal sealed partial class DelegatedJobs(string node, bool enabled, DtPipeCom
             // Every sink is bound to a file of its own: the writer is neutralised, so none is written.
             string[] args =
             [
-                "--job", "job.yaml", "--dry-run", "1", "--no-stats", "--edges-only",
+                "--job", "job.yaml", "--dry-run", "1", "--no-stats", EdgesOnlyEnvironment.Flag,
                 .. check.Samples.Count > 0 ? ["--bind-input", string.Join(',', check.Samples.Keys.Select(a => $"{a}={JobCheck.SampleFile(a)}"))] : Array.Empty<string>(),
                 .. check.Sinks.Count > 0 ? ["--bind-output", string.Join(',', check.Sinks.Select(a => $"{a}={a}.sink"))] : Array.Empty<string>(),
             ];

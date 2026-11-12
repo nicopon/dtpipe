@@ -5,7 +5,7 @@ namespace DtPipe.PipelineNode.Tests;
 
 /// <summary>
 /// Each child works in a run directory of its own, its temp directory, removed once it has ended; a runner's child also
-/// works in it and runs under <c>--edges-only</c>. An excess edge's pipe reaches the child by its whole path, since the
+/// works in it and runs under <c>--edges-only</c>, with none of the host's variables but those it keeps. An excess edge's pipe reaches the child by its whole path, since the
 /// child's temp directory is not the node's. A recording script stands in for dtpipe.
 /// </summary>
 public class FragmentIsolationTests : IDisposable
@@ -23,9 +23,11 @@ public class FragmentIsolationTests : IDisposable
             + $"for a in \"$@\"; do echo \"ARG=$a\" >> '{record}'; done\n"
             + $"echo \"PWD=$(pwd -P)\" >> '{record}'\n"
             + $"echo \"TMPDIR=$TMPDIR\" >> '{record}'; echo \"TEMP=$TEMP\" >> '{record}'; echo \"TMP=$TMP\" >> '{record}'\n"
+            + $"echo \"HOST=$DTPIPE_ISOLATION_HOST\" >> '{record}'; echo \"GIVEN=$DTPIPE_ISOLATION_GIVEN\" >> '{record}'\n"
             + $"echo DONE= >> '{record}'\n",
             TestContext.Current.CancellationToken);
         File.SetUnixFileMode(script, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        Environment.SetEnvironmentVariable("DTPIPE_ISOLATION_HOST", "host");
 
         var launch = new FragmentLaunch
         {
@@ -34,6 +36,7 @@ public class FragmentIsolationTests : IDisposable
             Edges = [new EdgeBinding("a", EdgeDirection.Inbound), new EdgeBinding("b", EdgeDirection.Inbound)],
             RunDirectory = runDirectory,
             EdgesOnly = edgesOnly,
+            ChildEnvironment = new Dictionary<string, string> { ["DTPIPE_ISOLATION_GIVEN"] = "given" },
         };
         await using (var run = new FragmentRun(launch, NullLogger.Instance))
         {
@@ -60,6 +63,8 @@ public class FragmentIsolationTests : IDisposable
         Assert.Contains("--edges-only", seen["ARG"]);
         Assert.EndsWith(Path.GetFileName(real), Assert.Single(seen["PWD"]));
         Assert.All(new[] { "TMPDIR", "TEMP", "TMP" }, name => Assert.Equal(real, Assert.Single(seen[name])));
+        Assert.Equal("", Assert.Single(seen["HOST"]));
+        Assert.Equal("given", Assert.Single(seen["GIVEN"]));
         Assert.False(Directory.Exists(runDirectory));
     }
 
@@ -74,6 +79,7 @@ public class FragmentIsolationTests : IDisposable
         Assert.DoesNotContain("--edges-only", seen["ARG"]);
         Assert.NotEqual(new DirectoryInfo(runDirectory).FullName, Assert.Single(seen["PWD"]));
         Assert.Equal(runDirectory, Assert.Single(seen["TMPDIR"]));
+        Assert.Equal("host", Assert.Single(seen["HOST"]));
         Assert.False(Directory.Exists(runDirectory));
     }
 

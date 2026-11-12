@@ -2,7 +2,7 @@ using DtPipe.Core.Expressions;
 
 namespace DtPipe.Cli.Expressions;
 
-public sealed class EnvVarInterpolator : IStringInterpolator
+public sealed class EnvVarInterpolator : IHostInterpolator
 {
     public Task<string?> TryResolveAsync(string expression, CancellationToken ct)
     {
