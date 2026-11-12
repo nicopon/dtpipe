@@ -19,7 +19,9 @@ stdin/stdout and TransportR. It speaks to no coordinator itself.
   without its origin. `[CI: PipelineNode.Tests]`
 - **The node is a byte relay.** It references no DtPipe project and never rewrites a batch; the
   child's `arrow:` reader and writer own the format. Put engine logic in dtpipe, never here.
-  `ArrowIpcRowCounter` reads the IPC framing only to count rows.
+  `ArrowIpcRowCounter` reads the IPC framing only to count rows, and refuses a metadata length past
+  `MaxMetadataBytes` before allocating it; on an inbound edge that refusal is the peer's fault (`FaultOrigin.Remote`).
+  `[CI: ArrowIpcRowCounterTests]`
 - **A replica has one TransportR client at a time, shared by all its runs, and is the only TransportR client
   they have.** dtpipe has no TransportR adapter and reaches the node only through `arrow:`. The client bounds each
   transfer it receives (`WithReceiveCapacity`), so a replica running several carries one bound apiece. A run keeps

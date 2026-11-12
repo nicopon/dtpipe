@@ -20,6 +20,12 @@ public sealed class ArrowIpcRowCounter
     private const uint ContinuationMarker = 0xFFFFFFFFu;
     private const byte RecordBatchHeaderType = 3;
 
+    /// <summary>
+    /// The most metadata one message may announce. A schema of thousands of columns takes well under a megabyte; the bound keeps
+    /// a peer's length prefix from making the node allocate gigabytes for one edge.
+    /// </summary>
+    public const int MaxMetadataBytes = 64 * 1024 * 1024;
+
     private enum State { Continuation, MetadataLength, Metadata, Body, Done }
 
     private State _state = State.Continuation;
@@ -69,6 +75,9 @@ public sealed class ArrowIpcRowCounter
                             SawEndOfStream = true;
                             _state = State.Done;
                         }
+                        else if (metadataLength is < 0 or > MaxMetadataBytes)
+                            throw new InvalidDataException(
+                                $"Arrow IPC stream: a message announces {metadataLength} bytes of metadata, beyond the {MaxMetadataBytes} one may hold.");
                         else
                         {
                             _metadata = new byte[metadataLength];

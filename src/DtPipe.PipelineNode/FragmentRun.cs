@@ -360,11 +360,12 @@ public sealed class FragmentRun : IAsyncDisposable
             await stream.FlushAsync();
             await receive.WaitForCompletionAsync();
         }
-        catch (Exception ex) when (ex is TransferFailedException or OperationCanceledException)
+        catch (Exception ex) when (ex is TransferFailedException or OperationCanceledException or InvalidDataException)
         {
             // Thrown by receive's own ReadAsync or WaitForCompletionAsync: the child was
             // still fine, the transfer itself failed. OperationCanceledException here is never this
-            // code's own doing either, for the same reason as the outbound side.
+            // code's own doing either, for the same reason as the outbound side. InvalidDataException is
+            // the counter refusing the peer's framing.
             Fault(FaultOrigin.Remote, $"inbound edge '{alias}': {ex.Message}");
         }
         catch (Exception ex)
