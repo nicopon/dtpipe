@@ -109,6 +109,19 @@ public class ArrowStreamTruncationTests
     }
 
     [Fact]
+    public async Task A_stream_that_ends_before_its_schema_is_refused_as_truncated()
+    {
+        var path = WriteFile(CompleteStream(), dropTrailingBytes: CompleteStream().Length);
+        try
+        {
+            var (rows, error) = await ReadAll(path);
+            rows.Should().Be(0);
+            error.Should().BeOfType<EndOfStreamException>()
+                .Which.Message.Should().Contain("before its schema");
+        }
+        finally { File.Delete(path); }
+    }
+    [Fact]
     public async Task The_row_mode_reader_refuses_a_truncated_stream_too()
     {
         var path = WriteFile(CompleteStream(), dropTrailingBytes: 8);

@@ -89,7 +89,12 @@ public class ArrowAdapterStreamReader : IColumnarStreamReader
         {
             _probe = new ArrowStreamTerminationProbe(_inputStream);
             _arrowReader = new Apache.Arrow.Ipc.ArrowStreamReader(_probe, CodecFactory);
-            Schema = ArrowDictionaries.Decode(_arrowReader.Schema);
+            // The Arrow reader answers a stream that ends before its first message with no schema, not with a fault.
+            var schema = _arrowReader.Schema
+                ?? throw new EndOfStreamException(
+                    $"Arrow stream '{Source}' is truncated: it ends before its schema, so the producer " +
+                    "closed it or died before it wrote anything.");
+            Schema = ArrowDictionaries.Decode(schema);
             Columns = MapSchema(Schema);
         }
     }
