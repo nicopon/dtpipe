@@ -24,6 +24,10 @@ public partial class GenerateReader : IStreamReader, IColumnarStreamReader, IReq
         var parts = config.Split(new[] { ';', ',' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         foreach (var part in parts)
         {
+            // A bare 'generate' reaches here as the selector's "no payload" mark: no count was
+            // given, so the row count stays what the options carry ('row-count', else the default).
+            if (part == "-") continue;
+
             if (part.StartsWith("count=", StringComparison.OrdinalIgnoreCase))
             {
                 if (!TryParseWithSuffix(part["count=".Length..], out var count)) throw Reject(part);
