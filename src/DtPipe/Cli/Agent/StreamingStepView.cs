@@ -79,7 +79,7 @@ internal sealed class StreamingStepView
         : _sawThinking ? "thinking" : "waiting for first token";
 
     private string HeaderPlainLocked() =>
-        $"· Step {_step}/{_maxSteps}  {PhaseLocked()} · {_sw.Elapsed.TotalSeconds:F0}s";
+        $"· Step {(_maxSteps == AgentExecutor.Unbounded ? _step.ToString() : $"{_step}/{_maxSteps}")}  {PhaseLocked()} · {_sw.Elapsed.TotalSeconds:F0}s";
 
     /// <summary>Which step of the turn this is.</summary>
     public int Step => _step;
