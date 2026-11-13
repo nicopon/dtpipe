@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using System.Text.Json;
+using DtPipe.Cli.Mcp;
 
 namespace DtPipe.Cli.Agent;
 
@@ -19,14 +20,17 @@ internal enum PlanState
     /// <summary><c>validate-yaml-job</c> rejected the current plan.</summary>
     Invalid,
 
-    /// <summary><c>execute-yaml-job</c> ran the plan with the writer neutralised (<c>apply=false</c>).</summary>
+    /// <summary>A sample ran the plan with the writer neutralised: <c>dry-run</c>, or <c>execute-yaml-job</c> with <c>apply=false</c>.</summary>
     DryRunOk,
 
-    /// <summary><c>execute-yaml-job</c> performed a real write (<c>apply=true</c>).</summary>
+    /// <summary>A real write ran: <c>run-job</c> ended in 0, or <c>execute-yaml-job</c> with <c>apply=true</c>.</summary>
     Applied,
 
-    /// <summary><c>execute-yaml-job</c> failed on the safety gate or during execution.</summary>
+    /// <summary>A sample, a save or a run failed, on the safety gate or during execution.</summary>
     Failed,
+
+    /// <summary><c>save-job</c> wrote the plan into the folder, the person having confirmed it.</summary>
+    Saved,
 }
 
 /// <summary>
@@ -68,17 +72,38 @@ internal sealed class PlanProgress
     /// <summary>The tool whose result moves a plan to dry-run, applied or failed.</summary>
     internal const string ExecuteTool = "execute-yaml-job";
 
+    /// <summary>The sample, the save and the run of the studio's agent, whose results move the plan too.</summary>
+    internal const string DryRunTool = "dry-run";
+    internal const string SaveTool = "save-job";
+    internal const string RunTool = "run-job";
+
     /// <summary>
-    /// A tool call finished. Only <see cref="ValidateTool"/> and <see cref="ExecuteTool"/> move the
-    /// plan state; every other tool is ignored. Ignored entirely until a plan has been drafted.
+    /// A tool call finished. Only the tools named here move the plan state, whatever the spelling the model used; every
+    /// other tool is ignored. Ignored entirely until a plan has been drafted.
     /// </summary>
     public void OnToolResult(string toolName, bool isError, string? resultJson)
     {
         if (State == PlanState.None) return;
 
-        switch (toolName)
+        switch (McpToolReflector.Normalise(toolName))
         {
-            case ValidateTool:
+            case var n when n == McpToolReflector.Normalise(DryRunTool):
+                if (isError) { State = PlanState.Failed; Message = ExtractMessage(resultJson); }
+                else if (State is not (PlanState.Applied or PlanState.Saved)) { State = PlanState.DryRunOk; Message = null; }
+                break;
+
+            case var n when n == McpToolReflector.Normalise(SaveTool):
+                if (isError) { State = PlanState.Failed; Message = ExtractMessage(resultJson); }
+                else if (Has(resultJson, "saved")) { State = PlanState.Saved; Message = null; }
+                break;
+
+            case var n when n == McpToolReflector.Normalise(RunTool):
+                if (isError || !Has(resultJson, "code")) { State = PlanState.Failed; Message = ExtractMessage(resultJson); }
+                else if (Code(resultJson) == 0) { State = PlanState.Applied; Message = null; }
+                else { State = PlanState.Failed; Message = ExtractMessage(resultJson) ?? $"the run ended with code {Code(resultJson)}"; }
+                break;
+
+            case var n when n == McpToolReflector.Normalise(ValidateTool):
                 if (isError)
                 {
                     State = PlanState.Invalid;
@@ -91,7 +116,7 @@ internal sealed class PlanProgress
                 }
                 break;
 
-            case ExecuteTool:
+            case var n when n == McpToolReflector.Normalise(ExecuteTool):
                 if (isError)
                 {
                     State = PlanState.Failed;
@@ -110,6 +135,26 @@ internal sealed class PlanProgress
                 }
                 break;
         }
+    }
+
+    private static bool Has(string? resultJson, string property)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(resultJson ?? "");
+            return doc.RootElement.ValueKind == JsonValueKind.Object && doc.RootElement.TryGetProperty(property, out var v) && v.ValueKind != JsonValueKind.Null;
+        }
+        catch (JsonException) { return false; }
+    }
+
+    private static int? Code(string? resultJson)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(resultJson ?? "");
+            return doc.RootElement.TryGetProperty("code", out var c) && c.TryGetInt32(out var code) ? code : null;
+        }
+        catch (JsonException) { return null; }
     }
 
     /// <summary>Whether an <c>execute-yaml-job</c> result reports a real write (<c>applied: true</c> or <c>mode: "write"</c>).</summary>

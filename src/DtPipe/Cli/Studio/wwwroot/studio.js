@@ -13,6 +13,7 @@ import { adoptDraft, cardBadge, cardTool, cardTools, debugComposed, forgetPins, 
 import { forgetRun, prepareRun, restoreReview, runView } from "./run.js";
 import { forgetPublication, publicationView, publish } from "./publish.js";
 import { loadVariables, onLaunchChanged, unreadyCount, variablesView } from "./variables.js";
+import { mountAgent } from "./agent.js";
 
 const MAX_DEBUG_ROWS = 100000;
 const opening = sequence();
@@ -281,6 +282,30 @@ async function start() {
   await refreshCoordinator();
   await loadBricks();
   await loadLibrary();
+  await mountAgent($("agent-pane"), { applyPlan, openPlan, reopen: (path) => open(path, true) });
+}
+
+// ---------------------------------------------------------------- the agent's plans
+
+// A plan replaces the open job's cards, unsaved: the job keeps its path and the hash a save must find.
+async function applyPlan(yaml) {
+  if (!state.job || !leaveCurrent()) return;
+  if (await openJob(yaml, state.cards.model?.layout, true)) status("the agent's plan is on the cards: save it to keep it", "good");
+}
+
+// A plan opened as a new job, not saved yet, as an imported command line opens.
+async function openPlan(yaml) {
+  if (!leaveCurrent()) return;
+  const path = prompt("The new job's path in the folder (its folder must exist):", "agent-plan.yaml");
+  if (!path) return;
+  if (!/\.ya?ml$/i.test(path)) { status("A job is a .yaml or .yml file.", "bad"); return; }
+  opening.cancel();
+  state.job = { path, hash: null, rewrites: false };
+  forgetResults();
+  viewRestored(path);
+  await openJob(yaml, null, true);
+  status("the agent's plan: save it to keep it", "good");
+  await loadJobs();
 }
 
 $("quit").addEventListener("click", quit);

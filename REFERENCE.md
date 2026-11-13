@@ -1216,6 +1216,7 @@ YAML and preview on the real engine without writing a target.
 dtpipe studio ./jobs              # prints the address to open, then serves until stopped
 dtpipe studio ./jobs --port 8765  # a fixed port instead of any free one
 dtpipe studio ./jobs --coordinator https://coordinator.example  # signed in to a coordinator
+dtpipe studio ./jobs --llm-provider ollama --llm-model qwen2.5-coder:7b  # with the agent's panel
 ```
 
 | Option | Description |
@@ -1223,6 +1224,12 @@ dtpipe studio ./jobs --coordinator https://coordinator.example  # signed in to a
 | `--port` | Port on 127.0.0.1. Default: any free port |
 | `--coordinator` | A distributed pipeline's coordinator, by its address: its bricks and its library. Default: none |
 | `--key` | Sign in to the coordinator with a key it made for you, as a reference (`${{NAME}}`, `keyring://alias`, `@file`), never the key itself. Default: through the browser |
+| `--llm-provider` | Opens the agent's panel on `ollama` or `openai`. Default: no agent |
+| `--llm-url` | The provider's address. Default: `http://localhost:11434` for ollama, `https://api.openai.com` for openai |
+| `--llm-model` | The model the agent starts with; the page may pick another the provider lists. Default: none |
+| `--llm-key` | The provider's API key, as a reference (`${{NAME}}`, `keyring://alias`, `@file`), never the key itself |
+| `--llm-timeout` | Seconds with no token before a model call fails. Default: 300 |
+| `--agent-trace` | Records the agent's session as JSON lines; a directory gets a timestamped file. Default: `$DTPIPE_AGENT_TRACE`, else none |
 
 | Action | What it does |
 |:---|:---|
@@ -1242,6 +1249,28 @@ The studio keeps its own files under `.dtpipe/studio/` in the folder: the cards'
 (`<job>-layout.json`), the page's state (`view.json`), the launch values (`<job>-launch.json`,
 aliases and typed values, never a keyring value), and the pins (`<job>-debug.json`). Checkpoints
 live in the session `.dtpipe/sessions/studio-debug/`.
+
+### The agent
+
+With `--llm-provider`, a panel on the right talks to a model that uses dtpipe's tools: it inspects
+sources, validates and previews jobs (`dry-run`), reads the jobs of the folder, and proposes a plan
+you can apply to the open job's cards or open as a new job. Guide:
+[The agent](./docs/guides/agent.md).
+
+- **A write waits for you.** The agent's `save-job` and `run-job` show a card (the text the studio
+  composed, or what the run writes) and do nothing until you answer. A run is the page's run: the
+  saved file, its launch values, one action at a time, **Stop** ends it with 130. A file changed
+  since the card, or other launch values, refuse the answer. A job with a brick runs from the page.
+- **The open job goes to the model** with your message, as the studio composes it, unless you
+  untick it. When it holds a credential as a value (`Password=…`), a card names where, never the
+  value, and asks whether to send it, send the message without the job, or cancel; `read-job` asks
+  the same. The check is best-effort: a credential under an unknown key passes, and a column named
+  like one is flagged. `${{NAME}}` and `keyring://` references pass.
+- **What the tools read goes to the model's address**, schemas and rows included. The panel warns
+  when that address is not this machine. The key never reaches the page or the trace.
+- `execute-yaml-job` is never offered to the agent; a call to a tool it was not offered is refused.
+  A turn and a run of yours refuse each other; a preview of yours and the agent's `dry-run` take
+  turns.
 
 ### With a coordinator
 

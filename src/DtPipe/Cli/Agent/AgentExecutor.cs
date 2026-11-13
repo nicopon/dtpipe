@@ -43,6 +43,12 @@ public class AgentExecutor
     internal AgentTrace? Trace => _trace;
     private bool _traceOpened;
 
+    /// <summary>
+    /// What the host joins to the role prompt for the next turns, such as the job the person has open: part of the system
+    /// message, rewritten every turn and kept by compaction, so it stays unique and current. Null joins nothing.
+    /// </summary>
+    public string? Context { get; set; }
+
     public AgentExecutor(IAgentToolProvider toolProvider, ILlmClient llmClient, AgentContextStore? contextStore = null, AgentTrace? trace = null)
     {
         _toolProvider = toolProvider;
@@ -385,7 +391,9 @@ public class AgentExecutor
 
     /// <summary>The system message in force. Read from two places — Messages[0] and the trace — so
     /// they cannot drift apart.</summary>
-    private static string SystemPrompt => AgentSystemPrompt.PlannerSystemPrompt;
+    private string SystemPrompt => Context is { Length: > 0 } context
+        ? AgentSystemPrompt.Studio + "\n\n" + context
+        : AgentSystemPrompt.Studio;
 
     private async Task<ToolInvocationOutcome> InvokeToolInto(string toolName, JsonElement args, CancellationToken ct)
     {

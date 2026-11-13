@@ -60,14 +60,17 @@ public class AgentCatalogueTests
         Assert.DoesNotContain("validate-yaml-job", writing);
     }
 
+    /// <summary>A write waits for the person in the tool call: a prompt saying the model cannot execute would be false.</summary>
     [Fact]
-    public void The_Prompt_Forbids_Execution_And_Names_The_Tool_It_Withholds()
+    public void The_Prompt_Says_A_Write_Waits_For_The_Person_And_Forbids_Nothing_The_Harness_Allows()
     {
-        var prompt = AgentSystemPrompt.PlannerSystemPrompt;
+        var prompt = AgentSystemPrompt.Studio;
 
-        Assert.Contains("PLANNER", prompt);
-        Assert.Contains("execute-yaml-job", prompt);
-        Assert.Contains("FORBIDDEN", prompt);
+        Assert.Contains("'save-job'", prompt);
+        Assert.Contains("'run-job'", prompt);
+        Assert.Contains("confirm", prompt);
+        Assert.DoesNotContain("FORBIDDEN", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("execute-yaml-job", prompt);
     }
 
     /// <summary>

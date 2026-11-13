@@ -151,9 +151,9 @@ public class AgentExecutorCatalogueTests
         Assert.False(executor.Trajectory.Steps.Single(s => s.ToolName is not null).IsError);
     }
 
-    /// <summary>The system message is the role prompt, which forbids execution.</summary>
+    /// <summary>The system message is the role prompt.</summary>
     [Fact]
-    public async Task The_System_Prompt_Is_The_Planner_Prompt()
+    public async Task The_System_Prompt_Is_The_Role_Prompt()
     {
         var llm = new CapturingLlmClient();
         var executor = BuildExecutor(new PlanAndExecuteTools(), llm);
@@ -161,6 +161,6 @@ public class AgentExecutorCatalogueTests
         await executor.TurnAsync("plan", maxIterations: 3);
 
         var systemMsg = executor.Messages.First(m => m.Role == "system");
-        Assert.Equal(AgentSystemPrompt.PlannerSystemPrompt, systemMsg.Content);
+        Assert.Equal(AgentSystemPrompt.Studio, systemMsg.Content);
     }
 }

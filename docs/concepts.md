@@ -86,7 +86,7 @@ that must see every row at once, such as a sort or a deduplication, belongs in `
 |:---|:---|
 | Command line | Interactive work and shell pipes (`csv:-` reads stdin, `jsonl:-` writes stdout) |
 | YAML job (`--job`) | Anything you run again: review it, version it, run it from CI. See [Jobs and production](guides/production.md) |
-| MCP server (`dtpipe mcp`) | An AI assistant, with the write path guarded. See [REFERENCE.md](../REFERENCE.md#model-context-protocol-mcp-server) |
+| Studio agent or MCP server | An AI assistant. See [The agent](guides/agent.md) |
 
 All three run the same engine with the same behaviour.
 

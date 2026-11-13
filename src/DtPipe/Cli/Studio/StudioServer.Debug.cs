@@ -354,8 +354,7 @@ public sealed partial class StudioServer
         string? adopted = asked.Adopt is null || asked.Path is null ? null : DebugKey(null, asked.Adopt);
         if (adopted is not null) _local.CheckDebug(adopted);
 
-        if (!await _sampling.WaitAsync(0))
-            throw new StudioRefusal(409, "An action is already running: wait for it to finish.");
+        TakeSlot("A preview");
         try
         {
             if (adopted is not null) _local.AdoptDebug(adopted, key);

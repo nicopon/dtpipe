@@ -29,14 +29,15 @@ public class AgentToolNameDriftTests
 
     public static TheoryData<string, string> RolePrompts => new()
     {
-        { nameof(AgentSystemPrompt.PlannerSystemPrompt), AgentSystemPrompt.PlannerSystemPrompt },
+        { nameof(AgentSystemPrompt.Studio), AgentSystemPrompt.Studio },
     };
 
     [Theory]
     [MemberData(nameof(RolePrompts))]
     public void Every_Tool_A_Role_Prompt_Names_Exists(string which, string prompt)
     {
-        var catalogue = McpCatalogue.Names();
+        // The studio's agent is offered the studio's own tools beside dtpipe's.
+        var catalogue = McpCatalogue.Names().Concat(DtPipe.Cli.Studio.StudioAgentTools.Definitions.Select(t => t.Name)).ToList();
 
         foreach (Match m in QuotedToolName.Matches(prompt))
         {
@@ -76,5 +77,9 @@ public class AgentToolNameDriftTests
 
         Assert.Contains(PlanProgress.ValidateTool, catalogue, StringComparer.OrdinalIgnoreCase);
         Assert.Contains(PlanProgress.ExecuteTool, catalogue, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains(PlanProgress.DryRunTool, catalogue, StringComparer.OrdinalIgnoreCase);
+        var studio = DtPipe.Cli.Studio.StudioAgentTools.Definitions.Select(t => t.Name).ToList();
+        Assert.Contains(PlanProgress.SaveTool, studio);
+        Assert.Contains(PlanProgress.RunTool, studio);
     }
 }

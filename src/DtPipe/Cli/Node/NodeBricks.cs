@@ -48,39 +48,12 @@ internal static class NodeBricks
 
     /// <summary>
     /// A brick's version is the hash of its text, so a credential written into it would let anyone who sees the version test
-    /// guesses offline. Every scalar is judged with the vocabulary <c>JobCutter</c> uses on a job, as written: a
-    /// <c>${{NAME}}</c> or <c>keyring://</c> reference passes, a value does not. Best-effort by construction, in both directions: a
-    /// credential under a key the vocabulary does not know passes, and a query that compares a column named like one
-    /// (<c>token_count = 5</c>) is refused.
+    /// guesses offline. The branch is judged by <see cref="JobSecrets"/>, the one walk of the secret judge over a job as written.
     /// </summary>
-    private static string? SecretRefusal(string alias, YamlMappingNode branch)
-    {
-        foreach (var (path, value) in Scalars(branch, ""))
-        {
-            var key = path[(path.LastIndexOf('.') + 1)..];
-            if (ConnectionStringSanitizer.CarriesLiteralSecret(value) || ConnectionStringSanitizer.CarriesLiteralSecret($"{key}={value}"))
-                return $"Branch '{alias}' holds a credential as a value ({path}): a brick's version is a hash of its text. Use ${{{{NAME}}}} or keyring://alias.";
-        }
-        return null;
-    }
-
-    private static IEnumerable<(string Path, string Value)> Scalars(YamlNode node, string path)
-    {
-        switch (node)
-        {
-            case YamlScalarNode { Value: { } text }:
-                yield return (path, text);
-                break;
-            case YamlMappingNode map:
-                foreach (var (k, v) in map.Children)
-                    foreach (var scalar in Scalars(v, path.Length == 0 ? k.ToString() : $"{path}.{k}")) yield return scalar;
-                break;
-            case YamlSequenceNode seq:
-                foreach (var item in seq.Children)
-                    foreach (var scalar in Scalars(item, path)) yield return scalar;
-                break;
-        }
-    }
+    private static string? SecretRefusal(string alias, YamlMappingNode branch) =>
+        JobSecrets.InBranch(branch).FirstOrDefault() is { } path
+            ? $"Branch '{alias}' holds a credential as a value ({path}): a brick's version is a hash of its text. Use ${{{{NAME}}}} or keyring://alias."
+            : null;
 
     /// <summary>A reference to a secret rather than a value: <c>keyring://alias</c>, <c>${{NAME}}</c> or <c>@file</c>.</summary>
     public static bool IsSecretReference(string text) =>

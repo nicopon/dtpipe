@@ -37,7 +37,7 @@ public sealed record StudioComponent(string Name, string Category);
 public sealed record StudioTools(
     IStudioEngine Engine, DesignService Design, IReadOnlyList<StudioComponent> Readers, IReadOnlyList<StudioComponent> Writers,
     ISecretsManager Secrets, CoordinatorLink? Coordinator = null, Func<IBrickLookup, DesignService>? DesignWith = null,
-    StudioImporter? Import = null);
+    StudioImporter? Import = null, StudioAgentSetup? Agent = null);
 
 /// <summary>
 /// The engine as the studio asks it: a sample, a real run, and the cut a preview runs. Each call carries the
@@ -109,6 +109,7 @@ public sealed partial class StudioServer : IAsyncDisposable
         ["/run.js"] = ("studio/run.js", "text/javascript; charset=utf-8"),
         ["/publish.js"] = ("studio/publish.js", "text/javascript; charset=utf-8"),
         ["/variables.js"] = ("studio/variables.js", "text/javascript; charset=utf-8"),
+        ["/agent.js"] = ("studio/agent.js", "text/javascript; charset=utf-8"),
         ["/studio.css"] = ("studio/studio.css", "text/css; charset=utf-8"),
     };
 
@@ -134,6 +135,7 @@ public sealed partial class StudioServer : IAsyncDisposable
         PurgeDrafts();
         Token = token;
         _token = Encoding.UTF8.GetBytes(token);
+        if (tools.Agent is { } agent) _agent = new StudioAgent(agent, new StudioAgentTools(agent.Tools, this));
     }
 
     public string Token { get; }
@@ -308,6 +310,9 @@ public sealed partial class StudioServer : IAsyncDisposable
                     if (RunInProgress) throw new StudioRefusal(409, "A run is in progress: stop it, or wait for it, before quitting.");
                     context.Response.StatusCode = StatusCodes.Status202Accepted;
                     _quit.TrySetResult();
+                    break;
+                case var (method, _) when path == "/api/agent" || path.StartsWith("/api/agent/", StringComparison.Ordinal):
+                    await AgentRouteAsync(context, method, path);
                     break;
                 default:
                     throw new StudioRefusal(404, $"No {request.Method} {path}.");
@@ -526,8 +531,7 @@ public sealed partial class StudioServer : IAsyncDisposable
         // Every variable resolves before anything runs, and is named when it would not.
         var launch = _variables.LaunchEnvironment(JobPath(path), sampling.Yaml);
 
-        if (!await _sampling.WaitAsync(0))
-            throw new StudioRefusal(409, "An action is already running: wait for it to finish.");
+        TakeSlot("A sample");
         var files = new List<string>();
         try
         {
@@ -821,7 +825,10 @@ public sealed partial class StudioServer : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        // The agent's waits end first, then the run it may have started; its turn is awaited last.
+        var agent = _agent?.DisposeAsync();
         await StopRunAndWaitAsync();
+        if (agent is { } stopping) await stopping;
         await _app.StopAsync();
         await _app.DisposeAsync();
         _sampling.Dispose();

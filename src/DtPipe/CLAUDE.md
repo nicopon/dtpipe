@@ -176,8 +176,9 @@ would not read back, prints nothing else on stdout, and with `--out` creates the
   secret, and a file that cannot be read is named by its exception's type, never its path, which may be a key pasted after the
   `@`. `NodeBricks.ReadSecretAsync` is the one reading, which `dtpipe studio --key` shares.
   `[CI: PipelineNode.Tests NodeCommandTests; DtPipe.Tests StudioKeyTests]` `[unchecked: the refusals of an unset variable, an absent alias and an unreadable file]`
-- **A brick holds no credential as a value.** Its version is the hash of its text; `ConnectionStringSanitizer.CarriesLiteralSecret`
-  judges every scalar of the branch as written, with its key, and a hit stops the start by naming the branch. Best-effort by
+- **A brick holds no credential as a value.** Its version is the hash of its text; `JobSecrets` (the one walk of
+  `ConnectionStringSanitizer.CarriesLiteralSecret`, which the studio's agent shares) judges every scalar of the branch as
+  written, with its key, and a hit stops the start by naming the branch. Best-effort by
   construction, in both directions (the vocabulary is the one `Sanitize` uses): an unknown key passes, a query comparing a
   column named like a credential is refused. The rule a brick's owner keeps is the reference.
   `[CI: NodeCommandTests — a literal refused, a reference passing, a query]` `[unchecked: a credential under a key the vocabulary does not know]`
@@ -217,7 +218,8 @@ for the caller of `Compute`, BranchFingerprintTests]`
 dry-run by default). Tool table: `REFERENCE.md#model-context-protocol-mcp-server`; options:
 `REFERENCE.md#mcp-guardrails-isqlsafetypolicy--iapprovalgate`. The agent (`AgentExecutor`,
 `OllamaClient`, `OpenAiClient`) lives under `Cli/Agent/`: a loop over a model and the tools of
-`McpToolProvider`, with no command of its own. It names no console and no toolkit: a turn tells its
+`McpToolProvider`, with no command of its own; `dtpipe studio --llm-provider` hosts it
+(`src/DtPipe/Cli/Studio/CLAUDE.md`). It names no console and no toolkit: a turn tells its
 host through `ITurnView` and `TurnSummaryModel`, and the host shows them. `[CI: validate_agent_boundary.sh]`
 
 The agentic CI (`.github/workflows/agentic-ci.yml`, `tests/agentic/run-all.sh --gate`, which calls

@@ -60,11 +60,12 @@ public class McpToolProvider : IAgentToolProvider
             .Where(d => !writing.Contains(d.Name))
             .ToList();
         _offered.Add(AskUserTool);
-        _runningTools = ToolModePolicy.RunningTools(toolsType);
+        _runningTools = ToolModePolicy.RunningTools(toolsType).Select(McpToolReflector.Normalise).ToHashSet(StringComparer.Ordinal);
     }
 
     /// <inheritdoc />
-    public bool RunsPipeline(string toolName) => _runningTools.Contains(toolName);
+    /// <remarks>Compared as the dispatch compares names: <c>dry_run</c> reaches the tool, so it runs one too.</remarks>
+    public bool RunsPipeline(string toolName) => _runningTools.Contains(McpToolReflector.Normalise(toolName));
 
     public List<ToolDefinition> GetToolDefinitions() => _offered;
 

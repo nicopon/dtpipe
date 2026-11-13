@@ -87,6 +87,8 @@ export const state = {
   jobs: { folder: "", paths: [], library: { shown: false, pipelines: null, error: null } },
   /** The coordinator the command line named, or null: { url, state, reason, me, studioVersion, contract }. @type {any} */
   coordinator: null,
+  /** The agent's panel: whether the command line opened one, and the server's last answer (GET /api/agent). @type {{ enabled: boolean, status: any }} */
+  agent: { enabled: false, status: null },
 };
 
 /**

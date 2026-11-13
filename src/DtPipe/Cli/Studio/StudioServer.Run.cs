@@ -224,8 +224,8 @@ public sealed partial class StudioServer
         var plan = PlanRun(asked);
         const string Changed = "The job or the values it launches with changed since you confirmed: confirm what it writes again.";
         if (asked.Digest != plan.Digest) throw new StudioRefusal(409, Changed);
-        if (!await _sampling.WaitAsync(0))
-            throw new StudioRefusal(409, "An action is already running: wait for it to finish.");
+        if (_agent?.Busy == true) throw new StudioRefusal(409, "The agent's turn is running: stop it, or wait for it, before running.");
+        TakeSlot("A run");
 
         var files = new List<string>();
         try
