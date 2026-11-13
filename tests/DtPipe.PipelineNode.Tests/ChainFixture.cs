@@ -2,11 +2,12 @@ namespace DtPipe.PipelineNode.Tests;
 
 /// <summary>
 /// A three-fragment chain (A produces, B relays untouched, C consumes), plus the witness CSV a
-/// single unsplit run of the same source produces. <see cref="SplitFixture"/> builds only a
-/// producer/consumer pair, so the middle fragment is a plain hand-written <c>arrow:- -&gt; arrow:-</c>
-/// passthrough rather than a second cut - there is no transformer stage to cut it at either side of.
-/// A chain exercises three fragments, a middle one dying mid-flow, and the other two reported as
-/// consequences.
+/// single unsplit run of the same source produces. A and C are the producer/consumer pair
+/// <see cref="SplitFixture"/> builds; the middle fragment is a plain hand-written
+/// <c>arrow:- -&gt; arrow:-</c> passthrough between them. <c>extraArgs</c> are the stages A runs and
+/// the witness runs too; C only writes <see cref="SplitCsvPath"/>, so the two CSV files differ by
+/// path alone. A chain exercises three fragments, a middle one dying mid-flow, and the other two
+/// reported as consequences.
 /// </summary>
 internal sealed class ChainFixture : IDisposable
 {
@@ -23,18 +24,13 @@ internal sealed class ChainFixture : IDisposable
         var dir = Directory.CreateTempSubdirectory("pnode-chain-");
         var witnessCsv = Path.Combine(dir.FullName, "witness.csv");
         var splitCsv = Path.Combine(dir.FullName, "split.csv");
-        var jobPath = Path.Combine(dir.FullName, "full.yaml");
+        var fragmentAPath = Path.Combine(dir.FullName, "frag-a.yaml");
+        var fragmentCPath = Path.Combine(dir.FullName, "frag-c.yaml");
 
-        string[] readerArgs = ["--input", $"generate:{rowCount}", .. extraArgs, "--output", $"csv:{witnessCsv}"];
-        DtPipeCli.Run(readerArgs);
-        DtPipeCli.Run([.. readerArgs, "--export-job", jobPath]);
-
-        var outPrefix = Path.Combine(dir.FullName, "frag");
-        DtPipeCli.Run("split", jobPath, "--at", "0", "--out", outPrefix, "--acknowledge");
-
-        var fragmentAPath = $"{outPrefix}-producer.yaml";
-        var fragmentCPath = $"{outPrefix}-consumer.yaml";
-        File.WriteAllText(fragmentCPath, File.ReadAllText(fragmentCPath).Replace(witnessCsv, splitCsv));
+        string[] producerArgs = ["--input", $"generate:{rowCount}", .. extraArgs];
+        DtPipeCli.Run([.. producerArgs, "--output", $"csv:{witnessCsv}"]);
+        DtPipeCli.Run([.. producerArgs, "--output", "arrow:-", "--export-job", fragmentAPath]);
+        DtPipeCli.Run("--input", "arrow:-", "--output", $"csv:{splitCsv}", "--export-job", fragmentCPath);
 
         var fragmentBPath = Path.Combine(dir.FullName, "frag-b.yaml");
         File.WriteAllText(fragmentBPath, "main:\n  input: arrow:-\n  output: arrow:-\n  batch-size: 32768\n  sampling-rate: 1\n");
