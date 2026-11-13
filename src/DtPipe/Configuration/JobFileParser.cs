@@ -73,6 +73,7 @@ public static partial class JobFileParser
         // the same server, two answers.
         try
         {
+            YamlDuplicateKeyGuard.Check(content);
             var jobs = Deserialize(content, secretsManager, interpolate);
 
             // Reported here because this is the last place that still holds the job as written: the
