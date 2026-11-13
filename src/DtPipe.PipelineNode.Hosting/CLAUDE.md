@@ -92,8 +92,15 @@ none. One node per process, which is one replica of its node's identity; a secon
   reading of a branch**, shared with the coordinator, so a studio never calls something a brick
   the node then declines. `BrickHost` does not announce a declared brick that fails the structure rule.
   `[unchecked: a declared brick that fails the structure rule]`
+- **A declaration is a YAML tree, read once where the host adds it; JSON is accepted, never carried.** `AddBrick` takes the
+  branch as YAML text, a JSON object included, and reads it with `JobYaml.ParseBranch`, the one reader of a declaration;
+  configuration (`AddBricks`) and `AddArrowSource` build the tree themselves, and `dtpipe node` hands the launcher its branches as
+  YAML text. `BrickDeclaration` holds the tree and nothing writes to it: `BrickHost` gives whatever runs a brick a copy
+  (`DeclaredBranch`, the sample's and the check's own run), since a run sets its endpoints on the branch it gets and a replica
+  serves several runs at once. A scalar is matched by the text dtpipe reads, so a brick written as YAML or as JSON has one version.
+  `[CI: Server.Tests BrickFormTests; Hosting.Tests BrickPreviewTests, DtPipeNodeBuilderTests]`
 - **A brick is announced by its version.** `BrickHost` announces each brick without its text and with
-  `BrickRules.VersionOf(kind, text)`, the SHA-256 of its canonical text, so two replicas of a node that declare the same bricks announce
+  `BrickRules.VersionOf(kind, branch)`, the SHA-256 of its canonical text, so two replicas of a node that declare the same bricks announce
   the same versions. The text is the owner's: a secret written into it would let anyone who sees the version test guesses offline, so a
   brick holds `${{NAME}}` or `keyring://` references, never a value. `dtpipe node` refuses a brick that holds one; a host built on
   this library keeps the rule itself, since the library cannot read the connection-string grammar. `[CI: Hosting.Tests

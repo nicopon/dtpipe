@@ -93,7 +93,7 @@ public sealed record BrickColumn(string Name, string Type, bool IsNullable);
 /// <summary>
 /// A read or a write the node's owner preconfigured on one of its databases, as the node announces it: the id, kind, title,
 /// description and <see cref="Version"/>, the hash of the declared text taken on the node
-/// (<see cref="BrickRules.VersionOf(BrickKind, string)"/>). The text, its variables and its schema stay on the node; a job
+/// (<see cref="BrickRules.VersionOf"/>). The text, its variables and its schema stay on the node; a job
 /// references the brick as <c>brick:&lt;node&gt;/&lt;id&gt;</c> and the node composes the branch from its own declarations. A schema
 /// depends on the rows, so it is read on demand (<c>PreviewBrick</c>), never announced.
 /// </summary>

@@ -1,6 +1,5 @@
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Nodes;
 using DtPipe.Jobs;
 using YamlDotNet.RepresentationModel;
 
@@ -46,20 +45,17 @@ public static class BrickRules
     public const string CursorKey = "cursor";
     private static readonly YamlScalarNode OutputKey = new(JobKeys.Output);
 
-    /// <summary>The form a brick has as its node declares it (its branch as JSON text).</summary>
-    public static BrickForm Declared(BrickKind kind, string branchJson) =>
-        Declared(kind, (YamlMappingNode)JobYaml.FromJson(JsonNode.Parse(branchJson)));
-
+    /// <summary>The form a brick has as its node declares it.</summary>
     public static BrickForm Declared(BrickKind kind, YamlMappingNode branch) => new(kind, Canonical(branch));
 
     /// <summary>
-    /// The version of a brick declared as <paramref name="branchJson"/>: the start of the SHA-256 of its canonical text, taken once
+    /// The version of a brick declared as <paramref name="branch"/>: the start of the SHA-256 of its canonical text, taken once
     /// by the node that owns the text. Variables stay as the <c>${{Name}}</c> tokens the text holds, so no value enters the hash.
     /// A secret written in the text itself would, and the version would let anyone who sees it test guesses offline: a brick keeps
     /// its secrets in <c>${{Name}}</c> or <c>keyring://</c> references.
     /// </summary>
-    public static string VersionOf(BrickKind kind, string branchJson) =>
-        ContentHash.Of(Declared(kind, branchJson).Canonical, 12);
+    public static string VersionOf(BrickKind kind, YamlMappingNode branch) =>
+        ContentHash.Of(Declared(kind, branch).Canonical, 12);
 
     /// <summary>
     /// The form of a whole branch, with the wiring the planner adds around a brick set aside: a sink is
@@ -133,23 +129,12 @@ public static class BrickRules
     }
 
     /// <summary>
-    /// Why a node must not offer the brick <paramref name="id"/> declared as <paramref name="branchJson"/>, or
+    /// Why a node must not offer the brick <paramref name="id"/> declared as <paramref name="branch"/>, or
     /// <c>null</c> when it may: a brick is something the node itself would run, so it obeys the structure
     /// rule too, and is announced only if it does.
     /// </summary>
-    public static string? DeclaredRefusal(string id, string branchJson)
-    {
-        try
-        {
-            if (JobYaml.FromJson(JsonNode.Parse(branchJson)) is not YamlMappingNode branch)
-                return $"'{id}' is not an object.";
-            return Refusal(id, branch, new HashSet<string>(StringComparer.Ordinal) { id }, [], requireBricks: false);
-        }
-        catch (Exception ex)
-        {
-            return $"'{id}' is not readable: {ex.Message}";
-        }
-    }
+    public static string? DeclaredRefusal(string id, YamlMappingNode branch) =>
+        Refusal(id, branch, new HashSet<string>(StringComparer.Ordinal) { id }, [], requireBricks: false);
 
     /// <summary>
     /// The first branch of a fragment's job a data node may not run, described, or <c>null</c> when it may

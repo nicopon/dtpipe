@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.Json.Nodes;
 using DtPipe.Coordinator.Contracts;
 using DtPipe.Jobs;
 using DtPipe.Jobs.Coordinator;
@@ -30,9 +29,14 @@ internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> dec
     /// </summary>
     public IReadOnlyList<BrickInfo> Bricks { get; private set; } = [];
 
-    /// <summary>The branch of the brick <paramref name="id"/> as its owner declared it, or <c>null</c> when none of that kind is offered.</summary>
+    /// <summary>
+    /// A copy of the branch of the brick <paramref name="id"/> as its owner declared it, or <c>null</c> when none of that kind is
+    /// offered: the caller may change it.
+    /// </summary>
     public YamlMappingNode? DeclaredBranch(string id, BrickKind kind) =>
-        _offered.FirstOrDefault(o => o.Announced.Id == id && o.Announced.Kind == kind) is { } offered ? BranchOf(offered.Declaration) : null;
+        _offered.FirstOrDefault(o => o.Announced.Id == id && o.Announced.Kind == kind) is { } offered
+            ? JobYaml.CloneBranch(offered.Declaration.Branch)
+            : null;
 
     /// <summary>The version of the brick <paramref name="id"/> as the node declares it, the one it announces.</summary>
     public string? DeclaredVersion(string id, BrickKind kind) => FragmentJob.VersionsOver(Bricks)(id, kind);
@@ -50,17 +54,17 @@ internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> dec
         foreach (var brick in declared)
         {
             // A brick this node would refuse to run must not be offered: the designer would place it here.
-            if (BrickRules.DeclaredRefusal(brick.Id, brick.BranchJson) is { } refusal)
+            if (BrickRules.DeclaredRefusal(brick.Id, brick.Branch) is { } refusal)
             {
                 logger.LogWarning("Brick {Brick} is not offered: {Reason}", brick.Id, refusal);
                 continue;
             }
-            var version = BrickRules.VersionOf(brick.Kind, brick.BranchJson);
+            var version = BrickRules.VersionOf(brick.Kind, brick.Branch);
             offered.Add(new Offered(brick, new BrickInfo(brick.Id, brick.Kind, brick.Title, brick.Description ?? "", version)));
         }
         _offered = offered;
         Bricks = offered.Select(o => o.Announced).ToList();
-        Forms = offered.Select(o => BrickRules.Declared(o.Declaration.Kind, o.Declaration.BranchJson)).ToList();
+        Forms = offered.Select(o => BrickRules.Declared(o.Declaration.Kind, o.Declaration.Branch)).ToList();
         return Task.CompletedTask;
     }
 
@@ -72,9 +76,8 @@ internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> dec
         if (brick.Kind == BrickKind.Source) return await PreviewSourceAsync(id, rows);
         try
         {
-            var branch = Branch(brick);
-            var input = Scalar(branch, JobKeys.Output) ?? throw new InvalidOperationException("The sink names no output.");
-            var table = ProviderOption(branch, "-writer", "table") ?? throw new InvalidOperationException("The sink names no table.");
+            var input = JobYaml.Scalar(brick.Branch, JobKeys.Output) ?? throw new InvalidOperationException("The sink names no output.");
+            var table = ProviderOption(brick.Branch, "-writer", "table") ?? throw new InvalidOperationException("The sink names no table.");
             var result = await dtpipe.RunAsync(
                 ["--input", input, "--query", $"SELECT * FROM {table}", "--limit", rows.ToString(), "--output", "csv:-", "--no-stats"],
                 CancellationToken.None);
@@ -276,7 +279,7 @@ internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> dec
         Directory.CreateDirectory(dir);
         try
         {
-            var branch = BranchOf(brick) ?? throw new InvalidOperationException($"The brick '{brick.Id}' declares no branch.");
+            var branch = JobYaml.CloneBranch(brick.Branch);
             JobYaml.Set(branch, endpoint, BrickRules.ArrowEndpoint);
             // A sink's cursor needs a file to be a valid job; the check writes nothing, and the file goes with the directory.
             if (JobYaml.Has(branch, BrickRules.CursorKey)) JobYaml.Set(branch, "state", Path.Combine(dir, "cursor.json"));
@@ -294,27 +297,15 @@ internal sealed class BrickHost(string node, IReadOnlyList<BrickDeclaration> dec
         }
     }
 
-    /// <summary>The branch a declaration holds, or <c>null</c> when its text is no mapping.</summary>
-    private static YamlMappingNode? BranchOf(BrickDeclaration brick)
-    {
-        try { return JobYaml.FromJson(JsonNode.Parse(brick.BranchJson)) as YamlMappingNode; }
-        catch (Exception) { return null; }
-    }
-
-    private static JsonElement Branch(BrickDeclaration brick) => JsonDocument.Parse(brick.BranchJson).RootElement.Clone();
-
-    private static string? Scalar(JsonElement branch, string key) =>
-        branch.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
-
     /// <summary>A setting of the first provider-options component whose name ends with <paramref name="suffix"/>.</summary>
-    private static string? ProviderOption(JsonElement branch, string suffix, string key)
+    private static string? ProviderOption(YamlMappingNode branch, string suffix, string key)
     {
-        if (!branch.TryGetProperty(JobKeys.ProviderOptions, out var components) || components.ValueKind != JsonValueKind.Object) return null;
-        foreach (var component in components.EnumerateObject())
+        if (JobYaml.Mapping(branch, JobKeys.ProviderOptions) is not { } components) return null;
+        foreach (var (name, options) in components.Children)
         {
-            if (component.Name.EndsWith(suffix, StringComparison.Ordinal) && component.Value.ValueKind == JsonValueKind.Object
-                && component.Value.TryGetProperty(key, out var value))
-                return value.ToString();
+            if (name is YamlScalarNode { Value: { } component } && component.EndsWith(suffix, StringComparison.Ordinal)
+                && options is YamlMappingNode settings && JobYaml.Has(settings, key))
+                return JobYaml.Scalar(settings, key);
         }
         return null;
     }

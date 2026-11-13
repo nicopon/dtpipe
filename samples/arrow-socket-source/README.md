@@ -15,8 +15,10 @@ coordinator sees an ordinary data node with four bricks:
 ```csharp
 var node = builder.Services.AddDtPipeNode(o => { /* name, coordinator, key file */ });
 node.AddArrowSource("orders", "Orders of the shop API", OrdersTransform.Schema, (ctx, ct) => OrdersTransform.ReadAsync(api, ct));
-node.AddBrick("numbers", BrickKind.Source, "Generated numbers", """{"input":"generate:1000"}""");
+node.AddBrick("numbers", BrickKind.Source, "Generated numbers", "input: generate:1000");
 ```
+
+A brick's branch is YAML text, the branch a job file would hold; a JSON object is YAML too, and reads the same.
 
 ## The packages
 

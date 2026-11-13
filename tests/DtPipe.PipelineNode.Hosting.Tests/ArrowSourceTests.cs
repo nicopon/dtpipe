@@ -4,6 +4,7 @@ using Apache.Arrow;
 using Apache.Arrow.Ipc;
 using Apache.Arrow.Types;
 using DtPipe.Coordinator.Contracts;
+using DtPipe.Jobs;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
@@ -238,8 +239,9 @@ public sealed class ArrowSourceTests : IDisposable
         var variable = Assert.Single(definition.Variables);
         Assert.Equal("DTPIPE_SRC_ORDERS", variable.Name);
         // The brick holds the variable's name, never the path: the path differs by process and the brick's text is its version.
-        Assert.Contains("${{DTPIPE_SRC_ORDERS}}", brick.BranchJson);
-        Assert.DoesNotContain(_directory, brick.BranchJson);
+        var text = JobYaml.Serialize(brick.Branch);
+        Assert.Contains("${{DTPIPE_SRC_ORDERS}}", text);
+        Assert.DoesNotContain(_directory, text);
         Assert.StartsWith(_directory, variable.Value);
     }
 

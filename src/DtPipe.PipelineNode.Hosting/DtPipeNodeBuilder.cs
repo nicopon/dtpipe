@@ -1,14 +1,18 @@
-using System.Text.Json;
-using System.Text.Json.Nodes;
 using DtPipe.Coordinator.Contracts;
+using DtPipe.Jobs;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using YamlDotNet.Core;
+using YamlDotNet.RepresentationModel;
 
 namespace DtPipe.PipelineNode.Hosting;
 
-/// <summary>A read or a write the node's owner offers: <see cref="BranchJson"/> is its piece of a dtpipe branch, as JSON.</summary>
-public sealed record BrickDeclaration(string Id, BrickKind Kind, string Title, string? Description, string BranchJson);
+/// <summary>
+/// A read or a write the node's owner offers: <see cref="Branch"/> is its piece of a dtpipe branch, read once when it was added.
+/// Nothing writes to it: whoever runs the brick works on a copy, since a run sets its endpoints on the branch it gets.
+/// </summary>
+internal sealed record BrickDeclaration(string Id, BrickKind Kind, string Title, string? Description, YamlMappingNode Branch);
 
 /// <summary>
 /// A variable described to the coordinator by its name; its value stays on the node.
@@ -53,18 +57,31 @@ public sealed class DtPipeNodeBuilder
         return this;
     }
 
-    public DtPipeNodeBuilder AddBrick(string id, BrickKind kind, string title, string branchJson, string? description = null)
+    /// <summary>
+    /// A brick whose <paramref name="branch"/> is its piece of a dtpipe branch, as YAML text: a JSON object is YAML too, and reads
+    /// the same.
+    /// </summary>
+    public DtPipeNodeBuilder AddBrick(string id, BrickKind kind, string title, string branch, string? description = null)
     {
         // Read now, so a malformed brick fails the host's start, not the first deployment.
-        if (JsonNode.Parse(branchJson) is not JsonObject)
-            throw new ArgumentException($"Brick '{id}': the branch must be a JSON object.", nameof(branchJson));
-        _definition.Bricks.Add(new BrickDeclaration(id, kind, title, description, branchJson));
+        YamlMappingNode read;
+        try { read = JobYaml.ParseBranch(branch); }
+        catch (Exception ex) when (ex is YamlException or FormatException)
+        {
+            throw new ArgumentException($"Brick '{id}': the branch is not a YAML mapping: {ex.Message}", nameof(branch), ex);
+        }
+        return AddBrick(id, kind, title, read, description);
+    }
+
+    internal DtPipeNodeBuilder AddBrick(string id, BrickKind kind, string title, YamlMappingNode branch, string? description)
+    {
+        _definition.Bricks.Add(new BrickDeclaration(id, kind, title, description, branch));
         return this;
     }
 
     /// <summary>
     /// Bricks from configuration: each child has <c>Id</c>, <c>Kind</c> (<c>Source</c> or <c>Sink</c>),
-    /// <c>Title</c>, <c>Description</c> and a <c>Branch</c> section, read back as JSON. Configuration
+    /// <c>Title</c>, <c>Description</c> and a <c>Branch</c> section, read as a branch. Configuration
     /// holds every value as text, which a brick's match ignores: it compares scalars by their text.
     /// </summary>
     public DtPipeNodeBuilder AddBricks(IConfiguration bricks)
@@ -74,9 +91,10 @@ public sealed class DtPipeNodeBuilder
             var id = brick["Id"] ?? throw new InvalidOperationException($"Brick {brick.Path}: Id is required.");
             if (!Enum.TryParse<BrickKind>(brick["Kind"], ignoreCase: true, out var kind))
                 throw new InvalidOperationException($"Brick '{id}': Kind must be Source or Sink.");
-            var branch = ConfigurationJson.ToJson(brick.GetSection("Branch")) as JsonObject
-                ?? throw new InvalidOperationException($"Brick '{id}': Branch is required.");
-            AddBrick(id, kind, brick["Title"] ?? id, branch.ToJsonString(new JsonSerializerOptions { WriteIndented = false }), brick["Description"]);
+            var branch = ConfigurationYaml.Of(brick.GetSection("Branch")) as YamlMappingNode is { Children.Count: > 0 } mapping
+                ? mapping
+                : throw new InvalidOperationException($"Brick '{id}': Branch is required.");
+            AddBrick(id, kind, brick["Title"] ?? id, branch, brick["Description"]);
         }
         return this;
     }
@@ -146,17 +164,18 @@ public static class DtPipeNodeServiceCollectionExtensions
     }
 }
 
-/// <summary>A configuration section as JSON: children with indices become an array, values stay text.</summary>
-internal static class ConfigurationJson
+/// <summary>
+/// A configuration section as a branch's tree: children with indices become a sequence, values stay text. A section that holds
+/// nothing is an empty mapping, which is what configuration keeps of an empty object or array.
+/// </summary>
+internal static class ConfigurationYaml
 {
-    public static JsonNode? ToJson(IConfigurationSection section)
+    public static YamlNode Of(IConfigurationSection section)
     {
         var children = section.GetChildren().ToList();
-        if (children.Count == 0) return section.Value is null ? null : JsonValue.Create(section.Value);
+        if (children.Count == 0) return section.Value is { } value ? JobYaml.Text(value) : new YamlMappingNode();
         if (children.All(c => int.TryParse(c.Key, out _)))
-            return new JsonArray(children.OrderBy(c => int.Parse(c.Key)).Select(ToJson).ToArray());
-        var json = new JsonObject();
-        foreach (var child in children) json[child.Key] = ToJson(child);
-        return json;
+            return new YamlSequenceNode(children.OrderBy(c => int.Parse(c.Key)).Select(Of));
+        return new YamlMappingNode(children.Select(c => new KeyValuePair<YamlNode, YamlNode>(new YamlScalarNode(c.Key), Of(c))));
     }
 }

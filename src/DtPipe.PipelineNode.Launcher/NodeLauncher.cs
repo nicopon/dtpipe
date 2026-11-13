@@ -1,4 +1,5 @@
 using DtPipe.Coordinator.Contracts;
+using DtPipe.Jobs;
 using DtPipe.PipelineNode.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -8,8 +9,8 @@ using Microsoft.Extensions.Options;
 
 namespace DtPipe.PipelineNode.Launcher;
 
-/// <summary>A brick the command line declared: <see cref="BranchJson"/> is its branch, as JSON.</summary>
-public sealed record LaunchedBrick(string Id, bool IsSource, string BranchJson);
+/// <summary>A brick the command line declared: <see cref="Yaml"/> is its branch, as YAML text.</summary>
+public sealed record LaunchedBrick(string Id, bool IsSource, string Yaml);
 
 /// <summary>
 /// What the command line gives a node beyond its environment (<c>DtPipeNode__*</c>); a null leaves the environment's value.
@@ -31,7 +32,7 @@ public static class NodeLauncher
     {
         foreach (var brick in bricks)
         {
-            if (BrickRules.DeclaredRefusal(brick.Id, brick.BranchJson) is { } refusal)
+            if (BrickRules.DeclaredRefusal(brick.Id, JobYaml.ParseBranch(brick.Yaml)) is { } refusal)
             {
                 Console.Error.WriteLine($"[ERROR] Brick '{brick.Id}': {refusal}");
                 return 1;
@@ -61,7 +62,7 @@ public static class NodeLauncher
 
         var node = builder.Services.AddDtPipeNode(builder.Configuration.GetSection("DtPipeNode"));
         foreach (var brick in bricks)
-            node.AddBrick(brick.Id, brick.IsSource ? BrickKind.Source : BrickKind.Sink, brick.Id, brick.BranchJson);
+            node.AddBrick(brick.Id, brick.IsSource ? BrickKind.Source : BrickKind.Sink, brick.Id, brick.Yaml);
         if (settings.Runner) node.RunAnyFragment();
 
         using var host = builder.Build();

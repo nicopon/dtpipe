@@ -7,8 +7,8 @@ using YamlDotNet.RepresentationModel;
 
 namespace DtPipe.Cli.Node;
 
-/// <summary>A branch of the command line read as a brick: <see cref="BranchJson"/> is the branch a node composes its job from.</summary>
-internal sealed record DeclaredBrick(string Id, bool IsSource, string BranchJson);
+/// <summary>A branch of the command line read as a brick: <see cref="Yaml"/> is the branch a node composes its job from.</summary>
+internal sealed record DeclaredBrick(string Id, bool IsSource, string Yaml);
 
 /// <summary>
 /// The bricks a <c>dtpipe node</c> command line declares: each branch is one, named by its alias. The branches are the job file
@@ -26,7 +26,7 @@ internal static class NodeBricks
             if (Shape(alias, branch) is { } shape) return ([], shape);
             if (SecretRefusal(alias, branch) is { } secret) return ([], secret);
             var isSource = JobYaml.Has(branch, JobKeys.Input);
-            bricks.Add(new DeclaredBrick(alias, isSource, JobYaml.ToJson(branch)!.ToJsonString()));
+            bricks.Add(new DeclaredBrick(alias, isSource, JobYaml.Serialize(branch)));
         }
         return bricks.Count == 0 ? ([], "a node offers at least one brick: declare a branch (-i/-o with --alias) or give --job.") : (bricks, null);
     }

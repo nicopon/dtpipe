@@ -51,11 +51,11 @@ node.AddArrowSource("orders", OrdersTitle, OrdersTransform.Schema, (_, ct) => Or
     OrdersDescription, options["socket-dir"]);
 
 // A standard dtpipe source: a branch of the pipeline grammar, run by the dtpipe child.
-node.AddBrick("numbers", BrickKind.Source, "Generated numbers", """{"input":"generate:1000"}""",
+node.AddBrick("numbers", BrickKind.Source, "Generated numbers", "input: generate:1000",
     "A thousand rows from dtpipe's own generate source");
 
-node.AddBrick("report", BrickKind.Sink, "Orders report", $$"""{"output":"csv:{{Path.Combine(reports, "report.csv")}}"}""");
-node.AddBrick("numbers-report", BrickKind.Sink, "Numbers report", $$"""{"output":"csv:{{Path.Combine(reports, "numbers-report.csv")}}"}""");
+node.AddBrick("report", BrickKind.Sink, "Orders report", $"output: csv:{Path.Combine(reports, "report.csv")}");
+node.AddBrick("numbers-report", BrickKind.Sink, "Numbers report", $"output: csv:{Path.Combine(reports, "numbers-report.csv")}");
 
 await builder.Build().RunAsync();
 return 0;

@@ -12,8 +12,8 @@ public class FragmentJobTests
 
     private static YamlMappingNode? Declared(string id, BrickKind kind) => (id, kind) switch
     {
-        ("customers", BrickKind.Source) => (YamlMappingNode)JobYaml.FromJson(System.Text.Json.Nodes.JsonNode.Parse(CrmSource)),
-        ("dim", BrickKind.Sink) => (YamlMappingNode)JobYaml.FromJson(System.Text.Json.Nodes.JsonNode.Parse(WarehouseSink)),
+        ("customers", BrickKind.Source) => JobYaml.ParseBranch(CrmSource),
+        ("dim", BrickKind.Sink) => JobYaml.ParseBranch(WarehouseSink),
         _ => null,
     };
 
@@ -56,7 +56,7 @@ public class FragmentJobTests
         var branch = JobYaml.Branches(JobYaml.Parse(yaml!)).Single().Branch;
         Assert.Equal(BrickRules.ArrowEndpoint, JobYaml.Scalar(branch, "output"));
         var form = BrickRules.FormOf(branch);
-        Assert.Equal(BrickRules.Declared(BrickKind.Source, CrmSource), form);
+        Assert.Equal(BrickRules.Declared(BrickKind.Source, JobYaml.ParseBranch(CrmSource)), form);
     }
 
     [Fact]
@@ -70,7 +70,7 @@ public class FragmentJobTests
         var branches = JobYaml.Branches(JobYaml.Parse(yaml!)).ToDictionary(b => b.Alias, b => b.Branch);
         Assert.Equal(BrickRules.ArrowEndpoint, JobYaml.Scalar(branches["anonymize"], "input"));
         Assert.Equal("anonymize", JobYaml.Scalar(branches["load"], "from"));
-        Assert.Equal(BrickRules.Declared(BrickKind.Sink, WarehouseSink), BrickRules.FormOf(branches["load"]));
+        Assert.Equal(BrickRules.Declared(BrickKind.Sink, JobYaml.ParseBranch(WarehouseSink)), BrickRules.FormOf(branches["load"]));
     }
 
     [Fact]
@@ -94,8 +94,8 @@ public class FragmentJobTests
     {
         FragmentUnit[] units = [new("customers", FragmentUnitKind.SourceSend, "customers")];
         var before = FragmentJob.Compose(units, Declared).Yaml!;
-        var after = FragmentJob.Compose(units, (_, _) => (YamlMappingNode)JobYaml.FromJson(System.Text.Json.Nodes.JsonNode.Parse(
-            CrmSource.Replace("SELECT *", "SELECT customer_id")))).Yaml!;
+        var after = FragmentJob.Compose(units, (_, _) => JobYaml.ParseBranch(
+            CrmSource.Replace("SELECT *", "SELECT customer_id"))).Yaml!;
 
         Assert.NotEqual(FragmentJob.VersionOf(before), FragmentJob.VersionOf(after));
     }
@@ -150,7 +150,7 @@ public class FragmentJobTests
     public void A_source_that_already_writes_somewhere_cannot_also_be_sent_to_an_edge()
     {
         var (yaml, error) = FragmentJob.Compose([new FragmentUnit("customers", FragmentUnitKind.SourceSend, "customers")],
-            (_, _) => (YamlMappingNode)JobYaml.FromJson(System.Text.Json.Nodes.JsonNode.Parse("""{ "input": "a:b", "output": "csv:x" }""")));
+            (_, _) => JobYaml.ParseBranch("""{ "input": "a:b", "output": "csv:x" }"""));
 
         Assert.Null(yaml);
         Assert.Contains("already writes", error);

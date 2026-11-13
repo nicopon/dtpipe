@@ -1,5 +1,6 @@
 using System.Runtime.Versioning;
 using DtPipe.Coordinator.Contracts;
+using DtPipe.Jobs;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 using DtPipe.Tests.Shared;
@@ -51,7 +52,7 @@ public sealed class BrickPreviewTests : IDisposable
     public async Task A_source_preview_runs_the_declared_branch_and_reads_its_types_and_values_from_that_sample()
     {
         if (OperatingSystem.IsWindows()) return;
-        var host = await HostAsync(new BrickDeclaration("orders", BrickKind.Source, "Orders", null, Orders));
+        var host = await HostAsync(new BrickDeclaration("orders", BrickKind.Source, "Orders", null, JobYaml.ParseBranch(Orders)));
 
         var preview = await host.PreviewAsync("orders", 5);
 
@@ -69,6 +70,39 @@ public sealed class BrickPreviewTests : IDisposable
     }
 
     [Fact]
+    public async Task A_sink_preview_reads_the_table_its_declared_writer_names()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        const string sink = "output: sqlite:shop.db\nprovider-options:\n  sqlite-writer:\n    table: orders\n";
+        var host = await HostAsync(new BrickDeclaration("orders-out", BrickKind.Sink, "Orders", null, JobYaml.ParseBranch(sink)));
+
+        var preview = await host.PreviewAsync("orders-out", 5);
+
+        Assert.Null(preview.Error);
+        Assert.Equal("id\n1\n2\n", preview.Csv);
+        var call = Assert.Single(File.ReadAllLines(Path.Combine(_dir, "calls.log")));
+        Assert.StartsWith("--input sqlite:shop.db --query SELECT * FROM orders --limit 5", call);
+    }
+
+    [Fact]
+    public async Task A_run_of_a_brick_never_changes_its_declaration()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var declared = JobYaml.ParseBranch(Orders);
+        var host = await HostAsync(new BrickDeclaration("orders", BrickKind.Source, "Orders", null, declared));
+        var version = Assert.Single(host.Bricks).Version;
+
+        // The sample sets the branch's output and the file its contract is saved to, on the copy it runs.
+        Assert.Null((await host.SampleAsync("orders", 5)).Error);
+        var branch = host.DeclaredBranch("orders", BrickKind.Source)!;
+        JobYaml.Set(branch, "limit", "1");
+
+        Assert.Equal(BrickRules.Canonical(JobYaml.ParseBranch(Orders)), BrickRules.Canonical(declared));
+        Assert.Equal(BrickRules.Declared(BrickKind.Source, JobYaml.ParseBranch(Orders)), BrickRules.FormOf(host.DeclaredBranch("orders", BrickKind.Source)!));
+        Assert.Equal(version, BrickRules.VersionOf(BrickKind.Source, declared));
+    }
+
+    [Fact]
     public async Task A_source_preview_over_the_bytes_a_sample_may_carry_is_refused_by_name()
     {
         if (OperatingSystem.IsWindows()) return;
@@ -76,7 +110,7 @@ public sealed class BrickPreviewTests : IDisposable
         var path = Path.Combine(_dir, "dtpipe");
         File.WriteAllText(path, "#!/bin/sh\ncase \"$1\" in --job) cat \"$(dirname \"$0\")/fixture.arrows\" ;; inspect) echo '[]' ;; esac\n");
         File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        var host = new BrickHost("n1", [new BrickDeclaration("orders", BrickKind.Source, "Orders", null, Orders)],
+        var host = new BrickHost("n1", [new BrickDeclaration("orders", BrickKind.Source, "Orders", null, JobYaml.ParseBranch(Orders))],
             new DtPipeCommand(path, _dir, new Dictionary<string, string>()), NullLogger.Instance);
         await host.InspectAsync(TestContext.Current.CancellationToken);
 

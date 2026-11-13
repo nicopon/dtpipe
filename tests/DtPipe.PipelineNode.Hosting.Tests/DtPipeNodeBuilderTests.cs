@@ -1,5 +1,6 @@
 using System.Text;
 using DtPipe.Coordinator.Contracts;
+using DtPipe.Jobs;
 using DtPipe.PipelineNode.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -38,7 +39,7 @@ public class DtPipeNodeBuilderTests
 
         var brick = Assert.Single(DefinitionOf(services).Bricks);
         Assert.Equal(BrickKind.Source, brick.Kind);
-        Assert.Equal(BrickRules.Declared(BrickKind.Source, BrickBranch), BrickRules.Declared(brick.Kind, brick.BranchJson));
+        Assert.Equal(BrickRules.Declared(BrickKind.Source, JobYaml.ParseBranch(BrickBranch)), BrickRules.Declared(brick.Kind, brick.Branch));
     }
 
     [Fact]
@@ -49,8 +50,8 @@ public class DtPipeNodeBuilderTests
         services.AddDtPipeNode(_ => { }).AddBricks(file.GetSection("bricks"));
 
         var brick = Assert.Single(DefinitionOf(services).Bricks);
-        Assert.Equal(BrickRules.Declared(BrickKind.Sink, """{ "output": "csv:out.csv", "keys": ["a", "b"] }"""),
-                     BrickRules.Declared(brick.Kind, brick.BranchJson));
+        Assert.Equal(BrickRules.Declared(BrickKind.Sink, JobYaml.ParseBranch("""{ "output": "csv:out.csv", "keys": ["a", "b"] }""")),
+                     BrickRules.Declared(brick.Kind, brick.Branch));
     }
 
     [Fact]
@@ -62,11 +63,15 @@ public class DtPipeNodeBuilderTests
         Assert.Contains("'x'", error.Message);
     }
 
-    [Fact]
-    public void A_branch_that_is_not_an_object_is_refused()
+    [Theory]
+    [InlineData("[1, 2]")]
+    [InlineData("""{"input": "a",""")]
+    [InlineData("input: a\ninput: b\n")]
+    public void A_branch_that_is_not_one_mapping_is_refused_where_it_is_added(string branch)
     {
         var builder = new ServiceCollection().AddDtPipeNode(_ => { });
-        Assert.Throws<ArgumentException>(() => builder.AddBrick("x", BrickKind.Source, "x", "[1, 2]"));
+        var error = Assert.Throws<ArgumentException>(() => builder.AddBrick("x", BrickKind.Source, "x", branch));
+        Assert.Contains("'x'", error.Message);
     }
 
     [Fact]
