@@ -1,4 +1,3 @@
-using System.Text.Json.Nodes;
 using DtPipe.Coordinator.Contracts;
 using DtPipe.Coordinator.Server.Library;
 using DtPipe.Coordinator.Server.Nodes;
@@ -57,7 +56,8 @@ public sealed class BrickCatalogTests
         Assert.Equal("src", _catalog.Find("node-x/src")!.Id);
         var catalogued = Assert.Single(_catalog.Catalog(), c => c.Id == "src");
         Assert.Equal("node-x/src", catalogued.Key);
-        Assert.Equal("""{"input":"brick:node-x/src"}""", catalogued.Branch.ToJsonString());
+        Assert.Equal("source", catalogued.Kind);
+        Assert.Equal("input: brick:node-x/src\n", JobYaml.Serialize(_catalog.BranchOf(_catalog.Find("node-x/src")!)));
     }
 
     [Fact]

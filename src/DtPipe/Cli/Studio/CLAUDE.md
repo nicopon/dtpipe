@@ -66,7 +66,7 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   `[unchecked: import, debug and run without a coordinator; that a new route needing the link refuses]`
 - **The coordinator decides what a brick is; the studio reads its answer.** A card that is a brick is written as the reference to
   it (`input: brick:<node>/<id>` for a source, `output: brick:<node>/<id>` with `from` for a sink): `DesignService` writes it from the
-  catalog's `CatalogBrick.Branch`, the one composer. Before taking a job apart, the studio sends its reference branches to
+  catalog's node, id and kind through `BrickRef.Branch`, the function the coordinator's catalog uses, and is the one composer. Before taking a job apart, the studio sends its reference branches to
   `/api/bricks/recognize` and gives `DesignService` a `StudioBricks` that finds each answer again by the top-level branch's YAML, a
   key and never a matching rule (`Match` sees each top-level branch whole: `StudioBrickTests` pins it). Nobody signed
   in, or no answer: no reference is a brick, and each opens as a raw branch card, which composes back as written. `Find`/`BranchOf`

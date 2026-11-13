@@ -1154,7 +1154,7 @@ def bricks_pass():
         status, body, _ = bearer(token, "/api/catalog")
         catalog = json.loads(body)
         brick = next((b for b in catalog["bricks"] if b["key"] == "node-1/customers"), None)
-        if status != 200 or not brick or brick["kind"] != "source" or "input" not in brick["branch"]:
+        if status != 200 or not brick or brick["kind"] != "source" or "branch" in brick:
             raise RuntimeError(f"the catalog has no source node-1/customers: {status} {body[:300]!r}")
         if not any(n["name"] == "runner-1" and n["role"] == "runner" for n in catalog["nodes"]):
             raise RuntimeError(f"the catalog lists no runner: {catalog['nodes']}")

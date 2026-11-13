@@ -1,4 +1,3 @@
-using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 
 namespace DtPipe.Jobs.Coordinator;
@@ -38,14 +37,13 @@ public sealed record CatalogNode(string Name, bool Online, string Role, string? 
 public sealed record CatalogColumn(string Name, string Type, bool IsNullable);
 
 /// <summary>
-/// One brick of the catalog. <see cref="Kind"/> is <see cref="StepKinds.Source"/> or
-/// <see cref="StepKinds.Sink"/>; <see cref="Branch"/> is the reference a job makes to the brick, as JSON:
-/// <c>{input: brick:&lt;node&gt;/&lt;id&gt;}</c> for a source, <c>{output: brick:&lt;node&gt;/&lt;id&gt;}</c> for a sink, never the text its node
-/// declares. The catalog holds no schema, which depends on the rows a source reads: <see cref="CoordinatorApi.Preview"/> reads them
+/// One brick of the catalog. <see cref="Kind"/> is <see cref="StepKinds.Source"/> or <see cref="StepKinds.Sink"/>; the reference
+/// a job makes to the brick follows from its node, id and kind (<see cref="BrickRef.Branch"/>), and the catalog never holds the
+/// text its node declares, nor a schema, which depends on the rows a source reads: <see cref="CoordinatorApi.Preview"/> reads them
 /// when a person looks at the brick. <see cref="Version"/> is the coordinator's, which changes exactly when what dtpipe would run does.
 /// </summary>
 public sealed record CatalogBrick(
-    string Key, string Node, string Id, string Kind, string Title, string Description, JsonObject Branch, string Version, bool Online);
+    string Key, string Node, string Id, string Kind, string Title, string Description, string Version, bool Online);
 
 /// <summary>
 /// The first rows of a brick, read by its node when a person looks at it: <see cref="Csv"/> holds them and

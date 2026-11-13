@@ -5,6 +5,7 @@ using DtPipe.Coordinator.Server;
 using DtPipe.Coordinator.Server.Access;
 using DtPipe.Coordinator.Server.Library;
 using DtPipe.Coordinator.Server.Nodes;
+using DtPipe.Jobs;
 using DtPipe.Jobs.Coordinator;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -62,8 +63,9 @@ public sealed class StudioRoutesTests : IDisposable
         var source = catalog.Bricks.Single(b => b.Id == "orders");
         var sink = catalog.Bricks.Single(b => b.Id == "archive");
         Assert.Equal(("n1/orders", "source", "Orders"), (source.Key, source.Kind, source.Title));
-        Assert.Equal("""{"input":"brick:n1/orders"}""", source.Branch.ToJsonString());
-        Assert.Equal("""{"output":"brick:n1/archive"}""", sink.Branch.ToJsonString());
+        // The studio makes the reference from the brick's node, id and kind, the way the coordinator does.
+        Assert.Equal("input: brick:n1/orders\n", JobYaml.Serialize(BrickRef.Branch(source.Node, source.Id, source.Kind == StepKinds.Sink)));
+        Assert.Equal("output: brick:n1/archive\n", JobYaml.Serialize(BrickRef.Branch(sink.Node, sink.Id, sink.Kind == StepKinds.Sink)));
         Assert.Matches("^[0-9a-f]{12}$", source.Version);
     }
 

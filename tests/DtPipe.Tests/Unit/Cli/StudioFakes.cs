@@ -2,7 +2,6 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Nodes;
 using Apache.Arrow;
 using Apache.Arrow.Ipc;
 using Apache.Arrow.Types;
@@ -66,10 +65,8 @@ internal sealed class StudioFakes : IAsyncDisposable
     public BrickCatalogView Catalog => new(
         [new CatalogNode("n1", true, "data", "1.0.0+node")],
         [
-            new CatalogBrick(SourceKey, "n1", "orders", StepKinds.Source, "Orders", "", new JsonObject { ["input"] = BrickRef.Format("n1", "orders") },
-                "aaaaaaaaaaaa", true),
-            new CatalogBrick(SinkKey, "n1", "archive", StepKinds.Sink, "Archive", "", new JsonObject { ["output"] = BrickRef.Format("n1", "archive") },
-                "bbbbbbbbbbbb", true),
+            new CatalogBrick(SourceKey, "n1", "orders", StepKinds.Source, "Orders", "", "aaaaaaaaaaaa", true),
+            new CatalogBrick(SinkKey, "n1", "archive", StepKinds.Sink, "Archive", "", "bbbbbbbbbbbb", true),
         ]);
 
     /// <summary>Rows <c>id</c> 1..n, as an Arrow IPC stream written by Apache.Arrow.</summary>

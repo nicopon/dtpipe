@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using DtPipe.Jobs.Coordinator;
 using Xunit;
@@ -32,7 +31,7 @@ public sealed class CoordinatorContractTests
     public void Metadata_Uses_The_Rfc_Names_And_Omits_An_Absent_Client()
     {
         Assert.Equal(
-            """{"resource":"http://c.test","authorization_servers":["http://idp.test/","http://c.test"],"bearer_methods_supported":["header"],"dtpipe_contract":10,"dtpipe_studio_client_id":"studio","dtpipe_auth":["idp","key"]}""",
+            """{"resource":"http://c.test","authorization_servers":["http://idp.test/","http://c.test"],"bearer_methods_supported":["header"],"dtpipe_contract":11,"dtpipe_studio_client_id":"studio","dtpipe_auth":["idp","key"]}""",
             Write(new ResourceMetadata("http://c.test", ["http://idp.test/", "http://c.test"], ["header"], CoordinatorApi.Contract, "studio",
                 [PersonAuth.Idp, PersonAuth.Key])));
         Assert.DoesNotContain("dtpipe_studio_client_id", Write(new ResourceMetadata("http://c.test", ["http://idp.test/"], ["header"], 1)));
@@ -55,11 +54,10 @@ public sealed class CoordinatorContractTests
     [Fact]
     public void Catalog_Recognition_And_Library_Records_Keep_Their_Json()
     {
-        var branch = (JsonObject)JsonNode.Parse("""{"input":"brick:n1/b"}""")!;
         Assert.Equal(
-            """{"nodes":[{"name":"n1","online":true,"role":"data","dtpipeVersion":"1.0.0"}],"bricks":[{"key":"n1/b","node":"n1","id":"b","kind":"source","title":"B","description":"","branch":{"input":"brick:n1/b"},"version":"0123456789ab","online":true}]}""",
+            """{"nodes":[{"name":"n1","online":true,"role":"data","dtpipeVersion":"1.0.0"}],"bricks":[{"key":"n1/b","node":"n1","id":"b","kind":"source","title":"B","description":"","version":"0123456789ab","online":true}]}""",
             Write(new BrickCatalogView([new CatalogNode("n1", true, "data", "1.0.0")],
-                [new CatalogBrick("n1/b", "n1", "b", "source", "B", "", branch, "0123456789ab", true)])));
+                [new CatalogBrick("n1/b", "n1", "b", "source", "B", "", "0123456789ab", true)])));
         Assert.Equal("""{"job":"a:\n  input: x\n"}""", Write(new RecognizeRequest("a:\n  input: x\n")));
         Assert.Equal("""{"branches":{"a":{"match":"n1/b"}}}""",
             Write(new RecognizeResponse(new Dictionary<string, Recognition> { ["a"] = new("n1/b") })));

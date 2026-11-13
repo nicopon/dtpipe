@@ -1,4 +1,3 @@
-using System.Text.Json.Nodes;
 using DtPipe.Coordinator.Contracts;
 using DtPipe.Coordinator.Server.Nodes;
 using DtPipe.Jobs;
@@ -26,10 +25,9 @@ public sealed class BrickCatalog(NodeInventory inventory)
 
     public IReadOnlyList<BrickView> List() => Resolve().Select(r => r.View).ToList();
 
-    /// <summary>Every brick as <c>dtpipe studio</c> reads it: the reference a job makes to it, as JSON, and never its text.</summary>
+    /// <summary>Every brick as <c>dtpipe studio</c> reads it: what it is called and its version, never its text.</summary>
     public IReadOnlyList<CatalogBrick> Catalog() => Resolve().Select(r => new CatalogBrick(
-        r.View.Key, r.View.Node, r.View.Id, KindOf(r.View.Kind), r.View.Title, r.View.Description, (JsonObject)JsonNode.Parse(JobYaml.ToJson(r.Branch)!.ToJsonString())!,
-        r.View.Version, r.View.Online)).ToList();
+        r.View.Key, r.View.Node, r.View.Id, KindOf(r.View.Kind), r.View.Title, r.View.Description, r.View.Version, r.View.Online)).ToList();
 
     public static string KindOf(BrickKind kind) => kind == BrickKind.Sink ? StepKinds.Sink : StepKinds.Source;
 
@@ -57,7 +55,5 @@ public sealed class BrickCatalog(NodeInventory inventory)
         return resolved;
     }
 
-    // A source is read by an input reference and a sink written by an output one.
-    private static YamlMappingNode ReferenceTo(string node, BrickInfo brick) =>
-        new() { { brick.Kind == BrickKind.Sink ? JobKeys.Output : JobKeys.Input, BrickRef.Format(node, brick.Id) } };
+    private static YamlMappingNode ReferenceTo(string node, BrickInfo brick) => BrickRef.Branch(node, brick.Id, brick.Kind == BrickKind.Sink);
 }

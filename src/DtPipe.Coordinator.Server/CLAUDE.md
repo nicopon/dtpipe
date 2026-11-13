@@ -259,8 +259,8 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   records): the server maps those routes and writes those records, and the metadata document
   announces `CoordinatorApi.Contract`; a change a deployed studio would misread takes a new number.
   The library's listing and `GET /api/library/{id}` are part of it: the studio opens a pipeline from them.
-  `/api/catalog` lists nodes and bricks with each brick's reference (`CatalogBrick.Branch`: `{input: brick:<node>/<id>}` for a source,
-  `{output: …}` for a sink), never its text and never a schema, which depends on the rows; `/api/bricks/recognize`
+  `/api/catalog` lists nodes and bricks by node, id and kind, from which `BrickRef.Branch` makes the reference a job writes, on
+  either side; never a brick's text and never a schema, which depends on the rows; `/api/bricks/recognize`
   says what each top-level branch of a job is: the brick it references in the direction it references it (`BrickRef.Of` against
   the catalog), so the studio never decides a brick itself; `/api/bricks/{node}/{id}/sample` asks the node for at most
   `MaxSampleRows` rows as Arrow IPC (`SampleBrick`, which the node host bounds in bytes before it
