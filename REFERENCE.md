@@ -1260,7 +1260,8 @@ lands on the open job's cards, unsaved, or opens as a new job when none is open.
 - **A save waits for you.** The agent's `save-job` shows a card (the text the studio composed) and
   writes nothing until you answer; a file changed since the card refuses the answer. A job that
   `validate-yaml-job` refuses never reaches a card: the model gets the refusal and corrects it.
-  **No tool
+  A turn that checked a job without a dry-run ends with a notice saying the job is not yet known to
+  run. **No tool
   writes a target**: to run a job for real, save it and use **Write targets…**, which shows what
   each branch writes and asks first. A job with a brick runs from the page.
 - **A turn has no step limit**: it ends with the model's answer or with **Stop**. The panel shows

@@ -182,6 +182,7 @@ internal sealed class StudioAgent : IAsyncDisposable
                 tools = summary.ToolSummary,
                 duration = summary.DurationText,
             });
+            if (summary.Caveat is { } caveat) Log(new { kind = "notice", text = caveat });
         }
         catch (OperationCanceledException) when (stop.IsCancellationRequested || _shutdown.IsCancellationRequested)
         {

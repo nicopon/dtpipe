@@ -201,7 +201,8 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   the card was made; it waits for `POST /api/agent/answer` (`AskAsync`), with no delay: no answer, no write, and Stop, a new
   conversation or the quit ends the wait. No tool runs a job for real: that is the page's `Write targets…`, which the role
   prompt names. A tool marked `[RunsPipeline]` waits for the engine slot (`TakeSlotAsync`), and a refusal of the slot names
-  who holds it (`TakeSlot`); a turn and a person's run refuse each other. A turn has no step bound (`AgentExecutor.Unbounded`):
+  who holds it (`TakeSlot`); a turn and a person's run refuse each other. A completed turn that called `validate-yaml-job` and never `dry-run` ends with a notice (`TurnSummaryModel.Caveat`),
+  since that check reads neither a connection string nor a column. A turn has no step bound (`AgentExecutor.Unbounded`):
   the model's answer, Stop and the loop's own guards end it. `meter` of the status gives the conversation's turn, the steps of
   the turn and the prompt tokens the provider reported for the last call, against `num_ctx` where the provider takes one.
   The open job always goes with a message, with no opt-out (the agent works on what the person sees): the page sends it as

@@ -183,6 +183,19 @@ public sealed class StudioAgentTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_turn_that_validated_a_job_without_a_dry_run_tells_the_person_so()
+    {
+        var llm = new ScriptedLlm(Calls("validate-yaml-job", new { yamlContent = Job }));
+        await StartAsync(llm);
+
+        await TurnAsync("check it");
+        var status = await UntilAsync(Idle);
+
+        Assert.Contains(status.GetProperty("entries").EnumerateArray(),
+            e => e.GetProperty("kind").GetString() == "notice" && e.GetProperty("text").GetString()!.Contains("dry-run"));
+    }
+
+    [Fact]
     public async Task A_file_changed_between_the_card_and_the_answer_is_not_overwritten()
     {
         File.WriteAllText(Path.Combine(_dir, "job.yaml"), Job);

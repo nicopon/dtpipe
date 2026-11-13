@@ -31,6 +31,27 @@ public class TurnSummaryModelTests
         Assert.Equal("delivered a response", summary.Reason);
     }
 
+    [Theory]
+    [InlineData(TurnOutcome.Succeeded, "validate-yaml-job", true)]
+    [InlineData(TurnOutcome.Succeeded, "validate_yaml_job", true)]
+    [InlineData(TurnOutcome.Succeeded, "dry-run", false)]
+    [InlineData(TurnOutcome.Succeeded, "inspect", false)]
+    [InlineData(TurnOutcome.LlmError, "validate-yaml-job", false)]
+    public void A_Turn_That_Validated_A_Job_And_Never_Dry_Ran_It_Carries_A_Caveat(TurnOutcome outcome, string tool, bool expected)
+    {
+        var summary = new TurnSummaryModel(outcome, 2, TimeSpan.FromSeconds(1), new Dictionary<string, int> { [tool] = 1 });
+
+        Assert.Equal(expected, summary.Caveat is not null);
+    }
+
+    [Fact]
+    public void A_Dry_Run_In_The_Turn_Lifts_The_Caveat()
+    {
+        var both = new Dictionary<string, int> { ["validate-yaml-job"] = 2, ["dry-run"] = 1 };
+
+        Assert.Null(new TurnSummaryModel(TurnOutcome.Succeeded, 3, TimeSpan.FromSeconds(1), both).Caveat);
+    }
+
     [Fact]
     public void A_Turn_With_No_Tool_Call_Has_No_Tool_Tally()
     {

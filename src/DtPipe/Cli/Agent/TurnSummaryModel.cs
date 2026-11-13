@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using DtPipe.Cli.Mcp;
 
 namespace DtPipe.Cli.Agent;
 
@@ -76,6 +77,19 @@ public sealed record TurnSummaryModel(
     public string? ToolSummary => ToolCounts.Count == 0
         ? null
         : string.Join(", ", ToolCounts.Select(kv => $"{kv.Key}: {kv.Value}"));
+
+    /// <summary>
+    /// What a person should know of a completed turn that validated a job and never ran it over a source, or null. The
+    /// validation reads neither the form of a connection string nor a column, so a job it passed is not yet known to run;
+    /// the model's closing words may still call it valid.
+    /// </summary>
+    public string? Caveat => Status == TurnStatus.Completed && Called("validate-yaml-job") && !Called("dry-run")
+        ? "This turn checked a job with 'validate-yaml-job' and did not dry-run it. That check does not read a connection "
+          + "string or a column, so the job is not yet known to run: ask the agent for a dry-run."
+        : null;
+
+    private bool Called(string tool) =>
+        ToolCounts.Any(kv => kv.Value > 0 && McpToolReflector.Normalise(kv.Key) == McpToolReflector.Normalise(tool));
 
     /// <summary>Why the turn ended, in a clause that completes "the turn ended because it …".</summary>
     public static string Describe(TurnOutcome outcome) => outcome switch
