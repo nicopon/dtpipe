@@ -43,24 +43,17 @@ the version: `spike-node.sh` packs the library there under a version of its own 
 
 | File | What it does |
 |:---|:---|
-| `Program.cs` | The two modes: `probe` and `node` |
+| `Program.cs` | The registration above, behind the `node` command |
 | `OrdersTransform.cs`, `FakeOrdersApi.cs` | The business rules and the fixed Arrow schema; a stand-in external API |
-| `Probe.cs` | Step one: dtpipe reads the sockets directly and each case is judged on exit code and rows |
-| `spike-node.sh` | Step two: coordinator, runner, service node, previews, two pipelines, three rounds |
+| `spike-node.sh` | Coordinator, runner, service node, previews, two pipelines, three rounds |
 
 ## Run it
 
-Both steps use the `dtpipe` and the coordinator of `dist/release/` (`./build.sh`), and need `dotnet`, `curl` and `jq`.
+It uses the `dtpipe` and the coordinator of `dist/release/` (`./build.sh`), and needs `dotnet`, `curl` and `jq`.
 The first build downloads the dtpipe package (168 MB).
 
 ```bash
 samples/arrow-socket-source/spike-node.sh     # port 18080 by default
-```
-
-```bash
-tests/scripts/validate_node_host_package.sh --version 1.16.0-local.1 --out dist/node-host
-dotnet build samples/arrow-socket-source/ArrowSocketSource.csproj -p:NodeHostVersion=1.16.0-local.1
-dotnet samples/arrow-socket-source/bin/Debug/net10.0/ArrowSocketSource.dll probe --dtpipe dist/release/dtpipe
 ```
 
 `DTPIPE_DLL=src/DtPipe/bin/Debug/net10.0/DtPipe.dll` makes the node run a local build instead of the package.
@@ -68,6 +61,9 @@ The published 1.16.0 does not refuse a stream that ends before its schema in wor
 the case read `is truncated: it ends before its schema`.
 
 ## What `AddArrowSource` holds
+
+How a real `dtpipe` reads such a source, a failing producer and a reader that leaves included, is held by
+`tests/DtPipe.PipelineNode.Tests/ArrowSourceReadTests.cs`.
 
 - **A connection is a request to read.** The socket listens from the server's constructor on, and a host builds
   every hosted service before it starts any, so the node never announces the brick before the socket exists.

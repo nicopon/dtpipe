@@ -43,18 +43,6 @@ public static class OrdersTransform
         await foreach (var page in api.FetchPagesAsync(ct)) yield return ToBatch(page);
     }
 
-    /// <summary>The same orders, until the external API fails after <paramref name="pages"/> pages: what the probe makes a failing source of.</summary>
-    public static async IAsyncEnumerable<RecordBatch> ReadThenFailAsync(
-        FakeOrdersApi api, int pages, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
-    {
-        var served = 0;
-        await foreach (var page in api.FetchPagesAsync(ct))
-        {
-            if (served++ == pages) throw new HttpRequestException("the orders API answered 503");
-            yield return ToBatch(page);
-        }
-    }
-
     /// <summary>One page of the external API as one batch: personal data and internal notes dropped, the total computed.</summary>
     public static RecordBatch ToBatch(IReadOnlyList<RawOrder> page)
     {

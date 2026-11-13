@@ -85,7 +85,8 @@ none. One node per process, which is one replica of its node's identity; a secon
   is never stopped by it. An I/O error of a write alone means the reader left (`--limit`, a sample, a failed run): leaving the loop
   disposes the callback's enumerator. The socket lives in a folder of the process that only the current user reaches, set before the
   socket exists. Registration refuses an id that is no word, two ids that name one variable, and a path longer than a Unix socket takes.
-  `[CI: Hosting.Tests ArrowSourceTests] [local: samples/arrow-socket-source/spike-node.sh, probe]`
+  `[CI: Hosting.Tests ArrowSourceTests; PipelineNode.Tests ArrowSourceReadTests — the real binary reads the socket]`
+`[local: samples/arrow-socket-source/spike-node.sh]`
   `[unchecked: Windows; a reader that leaves while the callback waits, which the next write finds]`
 - **`BrickRules` (`DtPipe.Coordinator.Contracts`) over `JobYaml` (`DtPipe.Jobs`) is the one
   reading of a branch**, shared with the coordinator, so a studio never calls something a brick
