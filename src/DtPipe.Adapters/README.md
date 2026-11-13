@@ -11,15 +11,21 @@ All built-in provider adapters (readers and writers) for DtPipe. Depends only on
 | **DuckDB** | ✅ | ✅ | `duck:` |
 | **SQLite** | ✅ | ✅ | `sqlite:` |
 | **PostgreSQL** | ✅ | ✅ | `pg:` |
+| **MySQL / MariaDB** | ✅ | ✅ | `mysql:` |
 | **SQL Server** | ✅ | ✅ | `mssql:` |
 | **Oracle** | ✅ | ✅ | `ora:` |
 | **CSV** | ✅ | ✅ | `csv:` / `.csv` |
 | **JsonL** | ✅ | ✅ | `jsonl:` / `.jsonl` |
+| **XML** | ✅ | — | `xml:` / `.xml` |
 | **Apache Arrow** | ✅ | ✅ | `arrow:` / `.arrow` |
 | **Parquet** | ✅ | ✅ | `parquet:` / `.parquet` |
+| **S3 object storage** | ✅ | ✅ | `s3://` |
+| **Azure Blob** | ✅ | ✅ | `azure://` |
 | **Generate** | ✅ | — | `generate:N` |
 | **Null** | — | ✅ | `null:` |
 | **Checksum** | — | ✅ | `checksum:` |
+
+`dtpipe providers` lists what a build carries.
 
 ---
 
@@ -36,10 +42,13 @@ DtPipe.Adapters/
     ├── PostgreSQL/      PostgreSqlReaderOptions, PostgreSqlWriterOptions, PostgreSqlReader, PostgreSqlDataWriter, ...
     ├── SqlServer/       SqlServerReaderOptions, SqlServerWriterOptions, SqlServerStreamReader, SqlServerDataWriter, ...
     ├── Oracle/          OracleReaderOptions, OracleWriterOptions, OracleStreamReader, OracleDataWriter, ...
+    ├── MySql/           MySqlReaderOptions, MySqlWriterOptions, MySqlReader, MySqlDataWriter, ...
     ├── Csv/             CsvStreamReader, CsvDataWriter, ...
     ├── JsonL/           JsonLStreamReader, JsonLDataWriter, ...
+    ├── Xml/             XmlStreamReader, ...
     ├── Arrow/           ArrowStreamReader, ArrowDataWriter, ...
     ├── Parquet/         ParquetStreamReader, ParquetDataWriter, ...
+    ├── S3/, Azure/      Object-storage readers and writers
     ├── Generate/        GenerateStreamReader (synthetic data)
     ├── Null/            NullDataWriter
     ├── Checksum/        ChecksumDataWriter
@@ -50,11 +59,12 @@ DtPipe.Adapters/
 
 ## Adapter Contracts
 
-Every adapter implements `DtPipe.Core` interfaces. Descriptors (in `src/DtPipe/Adapters/`) wire them into the DI container:
+Every adapter implements `DtPipe.Core` interfaces. A descriptor, in the adapter's own folder, tells
+the CLI how to build it; the CLI finds descriptors at start, so none is registered by hand:
 
 ```
-IProviderDescriptor<IStreamReader>  →  registered in DtPipe CLI
-IProviderDescriptor<IDataWriter>    →  registered in DtPipe CLI
+IProviderDescriptor<IStreamReader>  →  found by the CLI's ComponentCatalog
+IProviderDescriptor<IDataWriter>    →  found by the CLI's ComponentCatalog
 ```
 
 ### Options Interfaces
@@ -110,12 +120,16 @@ All SQL writers support the same 6 standardized strategies via `--strategy`:
 
 1. Add a new folder under `src/DtPipe.Adapters/Adapters/MyProvider/`
 2. Create `MyProviderMetadata.cs` to hold `ComponentName`, `CanHandle`, and `SupportsStdio`.
+3. Implement `MyProviderStreamReader : IStreamReader` and/or `MyProviderDataWriter : IDataWriter`.
+4. Create `MyProviderReaderOptions : IProviderOptions, IQueryAwareOptions` (if SQL-based).
+5. Add a `MyProviderReaderDescriptor : IProviderDescriptor<IStreamReader>` in
+   `src/DtPipe.Adapters/Adapters/MyProvider/`. It is found at start; there is nothing to register.
 
 ### Standard I/O Support (`SupportsStdio`)
 
 Providers explicitly declare if they support standard input/output pipes via the `SupportsStdio` metadata property.
 
-- **Supported**: CSV, Parquet, Arrow, JsonL, Null.
+- **Supported**: CSV, Parquet, Arrow, JsonL, XML (reader), Null, Checksum.
 - **Unsupported**: PostgreSql, SqlServer, Oracle, DuckDB (DataSource), etc.
 
 To use standard I/O, you **must** use the `-` character in the connection string:
@@ -123,10 +137,6 @@ To use standard I/O, you **must** use the `-` character in the connection string
 - `csv` (Shorthand for `csv:-`)
 
 If you attempt to use `-` with an unsupported provider (e.g., `pg:-`), DtPipe will throw an error early.
-3. Implement `MyProviderStreamReader : IStreamReader` and/or `MyProviderDataWriter : IDataWriter`.
-4. Create `MyProviderReaderOptions : IProviderOptions, IQueryAwareOptions` (if SQL-based).
-5. Add a `MyProviderReaderDescriptor : IProviderDescriptor<IStreamReader>` in `src/DtPipe.Adapters/Adapters/MyProvider/`.
-6. Register in DI in `src/DtPipe/Program.cs`.
 
 > [!TIP]
 > Always prefer using the explicit `{ComponentName}:` prefix in connection strings to avoid ambiguity.

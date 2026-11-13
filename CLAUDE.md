@@ -126,8 +126,8 @@ Key interfaces: `IStreamReader` / `IColumnarStreamReader`; `IDataWriter` / `IRow
 `IColumnarDataWriter`; `IDataTransformer` / `IDataTransformerFactory`; `IStreamTransformerFactory`
 (multi-input, receives `BranchChannelContext`); `ICliContributor` / `OptionsRegistry`.
 
-Providers implement `IProviderDescriptor<TService>`, registered in `Program.cs`; options come from
-`[ComponentOption]` via reflection. Detail: `src/DtPipe/CLAUDE.md`.
+Providers implement `IProviderDescriptor<TService>`, found by `ComponentCatalog` (no registration
+list); options come from `[ComponentOption]` via reflection. Detail: `src/DtPipe/CLAUDE.md`.
 
 ### DAG grammar
 

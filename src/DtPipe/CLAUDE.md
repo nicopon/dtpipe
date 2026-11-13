@@ -60,8 +60,10 @@ one of their types reached through another assembly's signature.
 
 ## Options
 
-Provider wiring: `RegisterReader<T>()` / `RegisterWriter<T>()` / `RegisterStreamTransformer<T>()` in
-`Program.cs`. `CliProviderFactory<T>` wraps descriptors; `CliOptionBuilder.GenerateFlagDefsForType`
+Provider wiring: `ComponentCatalog.Discover` finds every descriptor and factory of the four
+component assemblies by its interface, and `Program.cs` wraps each one; a new component needs no
+registration. A name taken twice in one category stops the start (`Validate`), and a descriptor
+needs a parameterless constructor. `CliProviderFactory<T>` wraps descriptors; `CliOptionBuilder.GenerateFlagDefsForType`
 reflects on `[ComponentOption]`; `FlagBinder.Bind(options, args, registry)` binds at execution.
 Options live scoped in `OptionsRegistry`, keyed by type.
 

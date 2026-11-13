@@ -9,7 +9,7 @@ The core pipeline engine for DtPipe. Contains all abstractions, models, and pipe
 ## Package
 
 ```xml
-<PackageReference Include="DtPipe.Core" Version="1.0.0" />
+<PackageReference Include="DtPipe.Core" Version="1.*" />
 ```
 
 ---
@@ -45,7 +45,7 @@ DtPipe.Core/
 | `IRowDataWriter` | Writes `object?[]` rows to a destination |
 | `IColumnarDataWriter` | Writes Arrow `RecordBatch` directly (no row conversion) |
 | `IDataWriterFactory` | Creates `IDataWriter` instances |
-| `IDataTransformer` | Transforms a batch of rows in the pipeline |
+| `IDataTransformer` | Transforms the rows of the pipeline, one at a time |
 | `IDataTransformerFactory` | Creates `IDataTransformer` instances |
 | `IColumnarTransformer` | Columnar (Arrow-level) variant of `IDataTransformer` |
 | `IMultiRowTransformer` | Transformer that may produce multiple rows per input row |
@@ -88,10 +88,13 @@ public class MyStreamReader : IStreamReader
 // 3. Implement IProviderDescriptor<IStreamReader>
 public class MyReaderDescriptor : IProviderDescriptor<IStreamReader>
 {
-    public string ProviderName => "mydb";
+    public string ComponentName => "mydb";
+    public string Category => "Readers";
     public Type OptionsType => typeof(MyReaderOptions);
     public bool RequiresQuery => true;
-    public bool CanHandle(string cs) => cs.StartsWith("mydb:");
+    // Judge the raw string by its content (an extension, a connection-string keyword), never by
+    // your own "mydb:" prefix: the router has not stripped it here.
+    public bool CanHandle(string cs) => cs.EndsWith(".mydb", StringComparison.OrdinalIgnoreCase);
     public IStreamReader Create(string cs, object options, IServiceProvider sp)
         => new MyStreamReader(cs, ((MyReaderOptions)options).Query!);
 }
