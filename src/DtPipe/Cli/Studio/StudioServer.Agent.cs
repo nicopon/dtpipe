@@ -7,8 +7,8 @@ namespace DtPipe.Cli.Studio;
 
 /// <summary>
 /// The studio's agent: its routes, and the gestures its tools make through the studio's own paths. A save is the page's
-/// save (<c>Decompose</c>, <c>Compose</c>, <c>WriteJob</c> against the hash read when the card was made), a run is the page's
-/// run (<see cref="PlanRun"/> and its digest); each waits for the person's answer to a card. Without <c>--llm-provider</c>,
+/// save (<c>Decompose</c>, <c>Compose</c>, <c>WriteJob</c> against the hash read when the card was made), which waits for the
+/// person's answer to a card; no tool writes a target. Without <c>--llm-provider</c>,
 /// <c>GET /api/agent</c> answers <c>enabled: false</c> and every other route 404.
 /// </summary>
 public sealed partial class StudioServer
@@ -54,7 +54,7 @@ public sealed partial class StudioServer
         switch (method, path)
         {
             case ("GET", "/api/agent"):
-                await JsonAsync(context, agent.Status(int.TryParse(context.Request.Query["after"], out var after) ? after : 0));
+                await JsonAsync(context, agent.Status(int.TryParse(context.Request.Query["after"], out var after) ? after : 0, int.TryParse(context.Request.Query["rev"], out var rev) ? rev : 0));
                 break;
             case ("GET", "/api/agent/models"):
                 await JsonAsync(context, await agent.ModelsAsync(context.RequestAborted));
@@ -144,51 +144,6 @@ public sealed partial class StudioServer
     {
         var exists = File.Exists(_folder.ResolveForWrite(relative));
         return hash is null ? !exists : exists && _folder.ReadJob(relative).Hash == hash;
-    }
-
-    /// <summary>
-    /// Runs a saved job for the model, as the page runs one: <see cref="PlanRun"/> lists what it writes and its digest, the person
-    /// answers the card, the plan is played again and must give the same digest, and the run holds the engine slot. A job with a
-    /// brick runs from the page, which binds it.
-    /// </summary>
-    internal async Task<string> AgentRunJobAsync(string? path, CancellationToken ct)
-    {
-        var relative = JobPath(path) ?? throw new StudioRefusal(400, "run-job needs the saved job's 'path' in the folder.");
-        var request = new RunRequest(relative, _folder.ReadJob(relative).Hash, null, null);
-        var plan = PlanRun(request);
-        if (plan.Sampling.Sources.Count > 0 || plan.Sampling.Sinks.Count > 0)
-            throw new StudioRefusal(409, $"'{relative}' reads or writes a brick: the person runs it from the page.");
-        const string Changed = "The job or the values it launches with changed since the card was shown: nothing was run.";
-        using var linked = Linked(ct);
-        var choice = await _agent!.AskAsync("run", new { path = relative, writes = plan.Writes, sample = plan.Sample }, plan.Digest, ["run", "refuse"],
-            (chosen, digest) =>
-            {
-                if (chosen != "run") return null;
-                if (digest != plan.Digest) return Changed;
-                try { return PlanRun(request).Digest == plan.Digest ? null : Changed; }
-                catch (StudioRefusal refusal) { return refusal.Message; }
-            },
-            linked.Token);
-        if (choice == "refuse") return Answer(new { refused = "The person declined this run. Nothing was written." });
-        if (choice != "run") return Answer(new { error = Changed });
-
-        await _sampling.WaitAsync(linked.Token);
-        _slotHolder = "The agent's run";
-        var state = new RunState(relative, new CancellationTokenSource());
-        lock (_runLock) _run = state;
-        // RunAsync releases the slot. The run is the person's to stop, from the page: 130.
-        state.Task = Task.Run(() => RunAsync(plan, StudioBindings.None, state, []));
-        await state.Task;
-        lock (_runLock)
-            return Answer(new
-            {
-                path = relative,
-                code = state.Code,
-                stopped = state.Code == Stopped,
-                error = state.Error,
-                failures = state.Failures.ToDictionary(f => f.Key, f => ConnectionStringSanitizer.Sanitize(f.Value)),
-                wrote = state.Code == 0 ? plan.Writes.Select(w => w.Output).ToList() : [],
-            });
     }
 
     private static string Answer(object value) => JsonSerializer.Serialize(value, Json);

@@ -23,7 +23,7 @@ internal enum PlanState
     /// <summary>A sample ran the plan with the writer neutralised: <c>dry-run</c>, or <c>execute-yaml-job</c> with <c>apply=false</c>.</summary>
     DryRunOk,
 
-    /// <summary>A real write ran: <c>run-job</c> ended in 0, or <c>execute-yaml-job</c> with <c>apply=true</c>.</summary>
+    /// <summary>A real write ran: <c>execute-yaml-job</c> with <c>apply=true</c>.</summary>
     Applied,
 
     /// <summary>A sample, a save or a run failed, on the safety gate or during execution.</summary>
@@ -72,10 +72,9 @@ internal sealed class PlanProgress
     /// <summary>The tool whose result moves a plan to dry-run, applied or failed.</summary>
     internal const string ExecuteTool = "execute-yaml-job";
 
-    /// <summary>The sample, the save and the run of the studio's agent, whose results move the plan too.</summary>
+    /// <summary>The sample and the save of the studio's agent, whose results move the plan too.</summary>
     internal const string DryRunTool = "dry-run";
     internal const string SaveTool = "save-job";
-    internal const string RunTool = "run-job";
 
     /// <summary>
     /// A tool call finished. Only the tools named here move the plan state, whatever the spelling the model used; every
@@ -95,12 +94,6 @@ internal sealed class PlanProgress
             case var n when n == McpToolReflector.Normalise(SaveTool):
                 if (isError) { State = PlanState.Failed; Message = ExtractMessage(resultJson); }
                 else if (Has(resultJson, "saved")) { State = PlanState.Saved; Message = null; }
-                break;
-
-            case var n when n == McpToolReflector.Normalise(RunTool):
-                if (isError || !Has(resultJson, "code")) { State = PlanState.Failed; Message = ExtractMessage(resultJson); }
-                else if (Code(resultJson) == 0) { State = PlanState.Applied; Message = null; }
-                else { State = PlanState.Failed; Message = ExtractMessage(resultJson) ?? $"the run ended with code {Code(resultJson)}"; }
                 break;
 
             case var n when n == McpToolReflector.Normalise(ValidateTool):

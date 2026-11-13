@@ -102,7 +102,7 @@ public sealed class AgentTrace : IDisposable
             ["temperature"] = opts.Temperature,
             ["seed"] = opts.Seed,
             ["numCtx"] = opts.NumCtx,
-            ["maxIterations"] = maxIterations,
+            ["maxIterations"] = maxIterations == AgentExecutor.Unbounded ? null : maxIterations,
             ["warning"] = "Tool arguments and results are recorded as the model saw them; "
                         + "known credential shapes are blanked, others are not.",
         });

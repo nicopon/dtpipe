@@ -32,7 +32,8 @@ const TRANSFORMERS = {
 const KIND_LABEL = { source: "source", sink: "sink", transform: "transform", sql: "sql", merge: "merge", branch: "branch" };
 
 // The panels' sizes, kept across visits.
-const SIZE_LIMITS = { pal: [160, 420], insp: [240, 640], drawer: [100, 640] };
+const SIZE_LIMITS = { pal: [160, 420], insp: [240, 640], drawer: [100, 640], agent: [260, 720] };
+const SIZE_VARS = { pal: "--pal-w", insp: "--insp-w", drawer: "--drawer-h", agent: "--agent-w" };
 
 const cards = state.cards;
 let host = null;
@@ -379,10 +380,11 @@ function renderShell() {
   flush();
 }
 
-function applySizes() {
+/** Applies every size to the element that lays its pane out: the agent's width belongs to the page's grid, not the designer's. */
+export function applySizes() {
   for (const [name, [lo, hi]] of Object.entries(SIZE_LIMITS)) {
     state.view.sizes[name] = Math.min(hi, Math.max(lo, Math.round(+state.view.sizes[name] || lo)));
-    host.style.setProperty(name === "pal" ? "--pal-w" : name === "insp" ? "--insp-w" : "--drawer-h", `${state.view.sizes[name]}px`);
+    (name === "agent" ? document.querySelector("main") : host)?.style.setProperty(SIZE_VARS[name], `${state.view.sizes[name]}px`);
   }
 }
 
@@ -393,29 +395,37 @@ function resize(name, value, persist) {
   if (persist) invalidate("bar");
 }
 
-// A handle is dragged with the pointer, or moved with the arrow keys; the size is clamped to its limits.
+// The designer's handles; the agent's lies in its own panel, which binds it through bindSplit.
 function bindSplits() {
   const body = host.querySelector(".designer-body");
   for (const handle of host.querySelectorAll(".split")) {
     const name = handle.dataset.split;
-    const target = (e) => {
+    bindSplit(/** @type {HTMLElement} */ (handle), name, (e) => {
       if (name === "pal") return e.clientX - body.getBoundingClientRect().left - 6;
       if (name === "insp") return body.getBoundingClientRect().right - e.clientX - 6;
       return host.getBoundingClientRect().bottom - e.clientY - 12;
-    };
-    handle.addEventListener("pointerdown", (e) => { handle.setPointerCapture(e.pointerId); handle.classList.add("dragging"); e.preventDefault(); });
-    handle.addEventListener("pointermove", (e) => { if (handle.hasPointerCapture(e.pointerId)) resize(name, target(e), false); });
-    const end = (e) => { if (handle.hasPointerCapture(e.pointerId)) { handle.releasePointerCapture(e.pointerId); handle.classList.remove("dragging"); resize(name, state.view.sizes[name], true); } };
-    handle.addEventListener("pointerup", end);
-    handle.addEventListener("pointercancel", end);
-    handle.addEventListener("keydown", (e) => {
-      const grow = { pal: "ArrowRight", insp: "ArrowLeft", drawer: "ArrowUp" }[name];
-      const shrink = { pal: "ArrowLeft", insp: "ArrowRight", drawer: "ArrowDown" }[name];
-      if (e.key !== grow && e.key !== shrink) return;
-      resize(name, state.view.sizes[name] + (e.key === grow ? 16 : -16), true);
-      e.preventDefault();
     });
   }
+}
+
+const SPLIT_KEYS = { pal: ["ArrowRight", "ArrowLeft"], insp: ["ArrowLeft", "ArrowRight"], drawer: ["ArrowUp", "ArrowDown"], agent: ["ArrowLeft", "ArrowRight"] };
+
+/**
+ * A handle dragged with the pointer, or moved with the arrow keys; the size is clamped to its limits.
+ * @param {HTMLElement} handle @param {string} name @param {(e: PointerEvent) => number} target the size the pointer asks for
+ */
+export function bindSplit(handle, name, target) {
+  handle.addEventListener("pointerdown", (e) => { handle.setPointerCapture(e.pointerId); handle.classList.add("dragging"); e.preventDefault(); });
+  handle.addEventListener("pointermove", (e) => { if (handle.hasPointerCapture(e.pointerId)) resize(name, target(e), false); });
+  const end = (e) => { if (handle.hasPointerCapture(e.pointerId)) { handle.releasePointerCapture(e.pointerId); handle.classList.remove("dragging"); resize(name, state.view.sizes[name], true); } };
+  handle.addEventListener("pointerup", end);
+  handle.addEventListener("pointercancel", end);
+  handle.addEventListener("keydown", (e) => {
+    const [grow, shrink] = SPLIT_KEYS[name];
+    if (e.key !== grow && e.key !== shrink) return;
+    resize(name, state.view.sizes[name] + (e.key === grow ? 16 : -16), true);
+    e.preventDefault();
+  });
 }
 
 function renderToolbarState() {

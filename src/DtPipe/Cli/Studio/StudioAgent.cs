@@ -1,6 +1,8 @@
 using System.Security.Cryptography;
+using System.Text.Json;
 using System.Text;
 using DtPipe.Cli.Agent;
+using DtPipe.Cli.Mcp;
 using DtPipe.Cli.Security;
 using DtPipe.Core.Security;
 
@@ -24,7 +26,6 @@ internal sealed class StudioAgent : IAsyncDisposable
 {
     /// <summary>Above this, the open job is named but not joined: the model reads it with <c>read-job</c>.</summary>
     internal const int MaxJobChars = 16_000;
-    private const int MaxIterations = 25;
     private const int MaxText = 4_000;
 
     private readonly StudioAgentSetup _setup;
@@ -41,6 +42,14 @@ internal sealed class StudioAgent : IAsyncDisposable
     private CancellationTokenSource? _stop;
     private Card? _pending;
     private int _cards;
+    // The last job a tool call carried and how many differing ones came: the page applies a revision it has not seen.
+    private string? _planYaml;
+    private int _planRevision;
+    // What the panel's meter reads: the conversation's turns, the steps of the turn in flight, the prompt of the last call.
+    private int _turns;
+    private int _stepsInTurn;
+    private int _contextTokens;
+    private readonly AgentOptions _options = new();
 
     private sealed record Card(string Id, string Kind, object Body, string? Digest, string[] Choices, Func<string, string?, string?>? Check)
     {
@@ -58,8 +67,56 @@ internal sealed class StudioAgent : IAsyncDisposable
     private AgentExecutor NewExecutor()
     {
         var executor = new AgentExecutor(_tools, _setup.Client, trace: _setup.Trace);
-        executor.Trajectory.StepAdded += step => { lock (_gate) _log.Add(StepEntry(step)); };
+        executor.Trajectory.StepAdded += step => { lock (_gate) { _log.Add(StepEntry(step)); OfferPlan(step); Meter(step); } };
         return executor;
+    }
+
+    /// <summary>
+    /// A job a tool call of the model carried (<c>yamlContent</c>) becomes the plan the page puts on the open job's cards
+    /// as soon as the call returns, whatever the tool: a check, a dry-run, a preview. A save is not offered here: the page
+    /// reads the saved file back, which is the text the person approved. A text the model repeats changes nothing.
+    /// </summary>
+    private void OfferPlan(TrajectoryStep step)
+    {
+        if (step.IsError || step.ToolArgs is null || McpToolReflector.Normalise(step.ToolName ?? "") == "savejob") return;
+        string? yaml;
+        try
+        {
+            using var args = JsonDocument.Parse(step.ToolArgs);
+            yaml = args.RootElement.ValueKind == JsonValueKind.Object && args.RootElement.TryGetProperty("yamlContent", out var value) && value.ValueKind == JsonValueKind.String
+                ? value.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(yaml) || yaml == _planYaml) return;
+        _planYaml = yaml;
+        _planRevision++;
+    }
+
+    private void Meter(TrajectoryStep step)
+    {
+        _stepsInTurn++;
+        if (step.Usage is { PromptTokens: > 0 } usage) _contextTokens = usage.PromptTokens;
+    }
+
+    /// <summary>The path a step saved, when its result says the person let the write through.</summary>
+    private static string? SavedPath(TrajectoryStep step)
+    {
+        if (step.IsError || step.ToolResult is null || McpToolReflector.Normalise(step.ToolName ?? "") != "savejob") return null;
+        try
+        {
+            using var result = JsonDocument.Parse(step.ToolResult);
+            return result.RootElement.ValueKind == JsonValueKind.Object && result.RootElement.TryGetProperty("saved", out var saved) && saved.ValueKind == JsonValueKind.String
+                ? saved.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     public bool Busy
@@ -87,6 +144,8 @@ internal sealed class StudioAgent : IAsyncDisposable
             _stop?.Dispose();
             _stop = new CancellationTokenSource();
             _log.Add(new { kind = "user", text = prompt });
+            _turns++;
+            _stepsInTurn = 0;
             var stop = _stop.Token;
             var chosen = _model;
             // Nothing of the request's call chain flows into the turn: no launch value, no console guard.
@@ -99,19 +158,20 @@ internal sealed class StudioAgent : IAsyncDisposable
     {
         try
         {
-            string? context = null;
+            // The open job always goes with the message: the agent works on what the person sees.
+            var context = NoOpenJob;
             if (job is not null)
             {
-                var send = await MaySendAsync(job.Path, job.Text, ["send", "omit", "cancel"], stop);
-                if (send == "cancel")
+                var send = await MaySendAsync(job.Path, job.Text, ["send", "cancel"], stop);
+                if (send != "send")
                 {
                     Log(new { kind = "verdict", status = "cancelled", reason = "You cancelled the turn before the open job was sent." });
                     return;
                 }
-                if (send == "send") context = OpenJobBlock(job);
+                context = OpenJobBlock(job);
             }
             _executor.Context = context;
-            var summary = await _executor.RunTurnAsync(prompt, model, _setup.BaseUrl, new AgentOptions(), MaxIterations, _view, stop, _shutdown.Token);
+            var summary = await _executor.RunTurnAsync(prompt, model, _setup.BaseUrl, _options, AgentExecutor.Unbounded, _view, stop, _shutdown.Token);
             Log(new
             {
                 kind = "verdict",
@@ -147,6 +207,9 @@ internal sealed class StudioAgent : IAsyncDisposable
         if (choice == "send") lock (_gate) _cleared.Add(hash);
         return choice;
     }
+
+    /// <summary>What the model reads when the page has no job open: a plan it gives opens as a new job.</summary>
+    internal const string NoOpenJob = "The person has no job open in the designer: a job you give as 'yamlContent' opens there as a new job, not saved yet.";
 
     /// <summary>The open job as the model reads it: a block of data, or its name alone when it is too long to join.</summary>
     internal static string OpenJobBlock(OpenJob job)
@@ -219,6 +282,9 @@ internal sealed class StudioAgent : IAsyncDisposable
         _executor = NewExecutor();
         _view = new LiveTurnView();
         _log.Clear();
+        _turns = 0;
+        _stepsInTurn = 0;
+        _contextTokens = 0;
     }
 
     public void Note(string? text)
@@ -238,7 +304,7 @@ internal sealed class StudioAgent : IAsyncDisposable
     }
 
     /// <summary>The conversation from entry <paramref name="after"/> on, and what is in flight: all a page needs, as text.</summary>
-    public object Status(int after)
+    public object Status(int after, int seen = 0)
     {
         lock (_gate)
         {
@@ -258,6 +324,15 @@ internal sealed class StudioAgent : IAsyncDisposable
                 entries = _log.Skip(after).ToList(),
                 live = live is { } step ? new { step = step.Iteration, tool = step.ToolName, text = Bound(ConnectionStringSanitizer.Sanitize(step.Text)) } : null,
                 plan = new { state = plan.State.ToString(), message = plan.Message, yaml = _executor.Trajectory.LastGeneratedYaml },
+                meter = new
+                {
+                    turn = _turns,
+                    steps = _stepsInTurn,
+                    // The prompt the provider read for the last call, as it reports it; the window only where it is asked for as num_ctx.
+                    contextTokens = _contextTokens,
+                    window = _setup.Client.ProviderName == "ollama" ? _options.NumCtx : (int?)null,
+                },
+                job = new { revision = _planRevision, yaml = _planRevision > seen ? _planYaml : null },
                 question = _turn.IsCompleted && _executor.PendingQuestion is { } q ? new { text = q.Text, options = q.Options } : null,
                 pending = _pending is { } card ? new { id = card.Id, kind = card.Kind, body = card.Body, digest = card.Digest, choices = card.Choices } : null,
             };
@@ -275,6 +350,7 @@ internal sealed class StudioAgent : IAsyncDisposable
         step = step.Iteration,
         text = Bound(step.Reasoning),
         tool = step.ToolName,
+        saved = SavedPath(step),
         args = step.ToolArgs is null ? null : Bound(ConnectionStringSanitizer.Sanitize(step.ToolArgs)),
         result = step.ToolResult is null ? null : Bound(ConnectionStringSanitizer.Sanitize(step.ToolResult)),
         error = step.IsError,

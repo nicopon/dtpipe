@@ -49,6 +49,12 @@ public class AgentExecutor
     /// </summary>
     public string? Context { get; set; }
 
+    /// <summary>
+    /// The iteration bound of a host that sets none: a turn then ends by the model's answer, by the person's Stop, or by a guard
+    /// of the loop (a decoding loop, a call that took too long, an output ceiling).
+    /// </summary>
+    internal const int Unbounded = int.MaxValue;
+
     public AgentExecutor(IAgentToolProvider toolProvider, ILlmClient llmClient, AgentContextStore? contextStore = null, AgentTrace? trace = null)
     {
         _toolProvider = toolProvider;

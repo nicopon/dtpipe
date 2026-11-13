@@ -6,9 +6,10 @@ namespace DtPipe.Cli.Studio;
 
 /// <summary>
 /// The tools the studio's agent is offered: dtpipe's, as <see cref="McpToolProvider"/> offers them (no tool that writes to a
-/// target, F1), and the studio's own gestures on the folder. <c>save-job</c> and <c>run-job</c> write: each waits for the
-/// person's answer to a card, which nothing of the command line, the environment or the model skips. A tool that runs the
-/// engine waits for the studio's slot, so a page's sample and the agent's never run together.
+/// target, F1), and the studio's own gestures on the folder. <c>save-job</c> writes a job, never a target: it waits for the
+/// person's answer to a card, which nothing of the command line, the environment or the model skips. No tool runs a job for
+/// real: that is the page's <c>Write targets…</c>. A tool that runs the engine waits for the studio's slot, so a page's sample
+/// and the agent's never run together.
 /// </summary>
 internal sealed class StudioAgentTools : IAgentToolProvider
 {
@@ -32,9 +33,6 @@ internal sealed class StudioAgentTools : IAgentToolProvider
         Tool("save-job",
             "Write a job into the folder, as the studio composes it from your text. The person confirms it first; the call returns once they answered.",
             """{"type":"object","properties":{"path":{"type":"string","description":"The job's path in the folder, ending in .yaml or .yml."},"yamlContent":{"type":"string","description":"The job's YAML."}},"required":["path","yamlContent"]}"""),
-        Tool("run-job",
-            "Run a job saved in the folder for real: it writes its targets. The person confirms what it writes first; the call returns once the run ended, with its exit code (130: the person stopped it).",
-            """{"type":"object","properties":{"path":{"type":"string","description":"The saved job's path in the folder."}},"required":["path"]}"""),
     ];
 
     private static ToolDefinition Tool(string name, string description, string schema) =>
@@ -43,7 +41,7 @@ internal sealed class StudioAgentTools : IAgentToolProvider
     public List<ToolDefinition> GetToolDefinitions() => _offered;
 
     public bool RunsPipeline(string toolName) =>
-        _inner.RunsPipeline(toolName) || McpToolReflector.Normalise(toolName) is "savejob" or "runjob";
+        _inner.RunsPipeline(toolName) || McpToolReflector.Normalise(toolName) == "savejob";
 
     public async Task<ToolResult> InvokeToolAsync(string toolName, JsonElement args, CancellationToken ct)
     {
@@ -55,8 +53,6 @@ internal sealed class StudioAgentTools : IAgentToolProvider
                 return ToolResult.FromJson(await _server.AgentReadJobAsync(Arg(args, "path"), ct));
             case "savejob":
                 return ToolResult.FromJson(await _server.AgentSaveJobAsync(Arg(args, "path"), Arg(args, "yamlContent") ?? Arg(args, "yaml"), ct));
-            case "runjob":
-                return ToolResult.FromJson(await _server.AgentRunJobAsync(Arg(args, "path"), ct));
         }
         if (!_inner.RunsPipeline(toolName)) return await _inner.InvokeToolAsync(toolName, args, ct);
         using (await _server.TakeSlotAsync("The agent's dry-run", ct))

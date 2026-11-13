@@ -1252,20 +1252,24 @@ live in the session `.dtpipe/sessions/studio-debug/`.
 
 ### The agent
 
-With `--llm-provider`, a panel on the right talks to a model that uses dtpipe's tools: it inspects
-sources, validates and previews jobs (`dry-run`), reads the jobs of the folder, and proposes a plan
-you can apply to the open job's cards or open as a new job. Guide:
+With `--llm-provider`, the panel on the right talks to a model that uses dtpipe's tools: it inspects
+sources, validates and previews jobs (`dry-run`), reads the jobs of the folder, and the job it gives
+lands on the open job's cards, unsaved, or opens as a new job when none is open. Guide:
 [The agent](./docs/guides/agent.md).
 
-- **A write waits for you.** The agent's `save-job` and `run-job` show a card (the text the studio
-  composed, or what the run writes) and do nothing until you answer. A run is the page's run: the
-  saved file, its launch values, one action at a time, **Stop** ends it with 130. A file changed
-  since the card, or other launch values, refuse the answer. A job with a brick runs from the page.
-- **The open job goes to the model** with your message, as the studio composes it, unless you
-  untick it. When it holds a credential as a value (`Password=…`), a card names where, never the
-  value, and asks whether to send it, send the message without the job, or cancel; `read-job` asks
-  the same. The check is best-effort: a credential under an unknown key passes, and a column named
-  like one is flagged. `${{NAME}}` and `keyring://` references pass.
+- **A save waits for you.** The agent's `save-job` shows a card (the text the studio composed) and
+  writes nothing until you answer; a file changed since the card refuses the answer. **No tool
+  writes a target**: to run a job for real, save it and use **Write targets…**, which shows what
+  each branch writes and asks first. A job with a brick runs from the page.
+- **A turn has no step limit**: it ends with the model's answer or with **Stop**. The panel shows
+  its turn, its step and the prompt the model last read, against the window on Ollama. Its left
+  edge resizes it, as the other panes' do.
+- **The open job always goes to the model** with the message, as the studio composes it, and what
+  the agent gives lands on its cards, unsaved; a change of yours since it last read them is kept. A
+  job that holds a credential value (`Password=…`) is held behind a card that names where, never the
+  value, and asks whether to send it or cancel the turn; `read-job` asks the same. The check is
+  best-effort: a credential under an unknown key passes, and a column named like one is flagged.
+  `${{NAME}}` and `keyring://` references pass.
 - **What the tools read goes to the model's address**, schemas and rows included. The panel shows
   the provider and the address, read only, and warns when the address is not this machine. The key
   never reaches the page or the trace.

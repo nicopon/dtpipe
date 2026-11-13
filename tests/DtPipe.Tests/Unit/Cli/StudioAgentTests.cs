@@ -133,7 +133,7 @@ public sealed class StudioAgentTests : IAsyncLifetime
         await UntilAsync(Idle);
 
         Assert.Contains("save-job", llm.Tools);
-        Assert.Contains("run-job", llm.Tools);
+        Assert.DoesNotContain("run-job", llm.Tools);
         Assert.Contains("dry-run", llm.Tools);
         Assert.DoesNotContain("execute-yaml-job", llm.Tools);
     }
@@ -183,28 +183,6 @@ public sealed class StudioAgentTests : IAsyncLifetime
         Assert.Contains("nothing was written", llm.LastToolAnswer());
     }
 
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task A_run_writes_its_target_only_once_the_person_confirms_what_was_shown(bool sameDigest)
-    {
-        File.WriteAllText(Path.Combine(_dir, "job.yaml"), Job);
-        var llm = new ScriptedLlm(Calls("run-job", new { path = "job.yaml" }));
-        await StartAsync(llm);
-
-        await TurnAsync("run it");
-        var card = (await UntilAsync(Pending)).GetProperty("pending");
-        Assert.Equal("run", card.GetProperty("kind").GetString());
-        Assert.False(File.Exists(Path.Combine(_dir, "out.csv")), "the target was written before the person answered");
-
-        var digest = sameDigest ? card.GetProperty("digest").GetString() : "another";
-        Assert.Equal(sameDigest ? HttpStatusCode.NoContent : HttpStatusCode.Conflict, await AnswerAsync(card, "run", digest));
-        await UntilAsync(Idle);
-
-        Assert.Equal(sameDigest, File.Exists(Path.Combine(_dir, "out.csv")));
-        if (sameDigest) Assert.Contains("\"code\":0", llm.LastToolAnswer());
-    }
-
     [Fact]
     public async Task The_open_job_reaches_the_system_message_unless_it_holds_a_credential_the_person_keeps_here()
     {
@@ -227,9 +205,65 @@ public sealed class StudioAgentTests : IAsyncLifetime
         Assert.DoesNotContain("abc", card.GetRawText());
         Assert.Equal(calls, llm.Calls.Count);
 
-        Assert.Equal(HttpStatusCode.NoContent, await AnswerAsync(card, "omit"));
+        Assert.Equal(HttpStatusCode.NoContent, await AnswerAsync(card, "cancel"));
         await UntilAsync(Idle);
-        Assert.DoesNotContain("Password=abc", llm.Calls[^1][0].Content);
+        Assert.Equal(calls, llm.Calls.Count);
+
+        await TurnAsync("look a third time", new { path = (string?)null, unsaved = true, model = await CardsOf(secret) });
+        card = (await UntilAsync(Pending)).GetProperty("pending");
+        Assert.DoesNotContain("omit", card.GetProperty("choices").EnumerateArray().Select(c => c.GetString()));
+        Assert.Equal(HttpStatusCode.NoContent, await AnswerAsync(card, "send"));
+        await UntilAsync(Idle);
+        Assert.Contains("Password=abc", llm.Calls[^1][0].Content);
+    }
+
+    [Fact]
+    public async Task A_turn_with_no_job_open_says_so_to_the_model()
+    {
+        var llm = new ScriptedLlm();
+        await StartAsync(llm);
+        await TurnAsync("hello");
+        await UntilAsync(Idle);
+        Assert.Contains(StudioAgent.NoOpenJob, llm.Calls[^1][0].Content);
         Assert.DoesNotContain("<open-job>\n", llm.Calls[^1][0].Content);
+    }
+
+    [Fact]
+    public async Task A_job_a_call_carries_becomes_the_plan_the_page_takes_once_per_revision()
+    {
+        const string Plan = "main:\n  input: \"generate:100\"\n  output: \"csv:out.csv\"\n";
+        var llm = new ScriptedLlm(
+            Calls("validate-yaml-job", new { yamlContent = Plan }),
+            Calls("dry-run", new { yamlContent = Plan }));
+        await StartAsync(llm);
+        await TurnAsync("make it 100");
+        var status = await UntilAsync(s => Idle(s) && s.GetProperty("count").GetInt32() > 3);
+        var job = status.GetProperty("job");
+        Assert.Equal(1, job.GetProperty("revision").GetInt32());
+        Assert.Equal(Plan, job.GetProperty("yaml").GetString());
+
+        // A page that has taken this revision is not sent its text again.
+        var (_, seen) = await CallAsync(HttpMethod.Get, "/api/agent?rev=1");
+        Assert.Equal(1, seen.GetProperty("job").GetProperty("revision").GetInt32());
+        Assert.Equal(JsonValueKind.Null, seen.GetProperty("job").GetProperty("yaml").ValueKind);
+    }
+
+    [Fact]
+    public async Task A_turn_has_no_step_bound_and_the_meter_counts_turns_and_steps_and_reads_the_context()
+    {
+        // More calls than the old bound of a turn, then the model's closing text.
+        var steps = Enumerable.Range(0, 30).Select(i => Calls("list-jobs", new { n = i })).ToArray();
+        var llm = new ScriptedLlm(steps);
+        await StartAsync(llm);
+        await TurnAsync("go on");
+        var status = await UntilAsync(s => Idle(s) && s.GetProperty("count").GetInt32() > 30);
+        Assert.DoesNotContain("iteration limit", status.GetRawText());
+        var meter = status.GetProperty("meter");
+        Assert.Equal(1, meter.GetProperty("turn").GetInt32());
+        Assert.True(meter.GetProperty("steps").GetInt32() >= 31);
+
+        await TurnAsync("again");
+        meter = (await UntilAsync(Idle)).GetProperty("meter");
+        Assert.Equal(2, meter.GetProperty("turn").GetInt32());
     }
 }

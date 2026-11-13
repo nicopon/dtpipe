@@ -191,20 +191,28 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   `[CI: StudioServerTests (every module is served, every import resolves; the view's bounds)]`
   `[local: tests/studio/page_smoke.mjs - Node 22+, Chrome and a built dtpipe; types are checked by the
   editor alone (// @ts-check), no tool runs them]`
-- **The agent writes through the page's paths, after a card.** `--llm-provider` gives the studio a
-  `StudioAgent` (one conversation, in memory, a turn in the background read by polling `GET /api/agent?after=N`)
-  over `StudioAgentTools`: dtpipe's tools as `McpToolProvider` offers them (F1) and the studio's own. `save-job`
-  takes the model's text apart and composes it back (`Decompose`, `Compose`) and writes it with `WriteJob` against the
-  hash read when the card was made; `run-job` is `PlanRun` and `RunAsync`, its digest checked again at the answer. Each
-  waits for `POST /api/agent/answer` (`AskAsync`), with no delay: no answer, no write, and Stop, a new conversation or
-  the quit ends the wait. A job with a brick is refused (the page binds bricks). A tool marked `[RunsPipeline]` waits for
-  the engine slot (`TakeSlotAsync`), and a refusal of the slot names who holds it (`TakeSlot`); a turn and a person's run
-  refuse each other. The page sends the open job as cards, the server composes its text into the system message
-  (`AgentExecutor.Context`), as data, under `StudioAgent.MaxJobChars`. A text that `JobSecrets.Literals` flags reaches the
-  model, open job or `read-job`, only after a card that names `branch.path`, never the value; the answer holds for that
-  text, by hash, for the session. The key (`--llm-key`) is a reference read once at start, kept in the client; the page
-  never sets the model's address. `[CI: StudioAgentTests]` `[local: page_smoke.mjs agent — a scripted endpoint that speaks
-  Ollama's API]` `[unchecked: Quit and Ctrl+C during a turn]`
+- **The agent writes a job through the page's paths, after a card, and no target at all.** `--llm-provider` gives the
+  studio a `StudioAgent` (one conversation, in memory, a turn in the background read by polling `GET /api/agent?after=N`)
+  over `StudioAgentTools`: dtpipe's tools as `McpToolProvider` offers them (F1) and the studio's own. `save-job` takes the
+  model's text apart and composes it back (`Decompose`, `Compose`) and writes it with `WriteJob` against the hash read when
+  the card was made; it waits for `POST /api/agent/answer` (`AskAsync`), with no delay: no answer, no write, and Stop, a new
+  conversation or the quit ends the wait. No tool runs a job for real: that is the page's `Write targets…`, which the role
+  prompt names. A tool marked `[RunsPipeline]` waits for the engine slot (`TakeSlotAsync`), and a refusal of the slot names
+  who holds it (`TakeSlot`); a turn and a person's run refuse each other. A turn has no step bound (`AgentExecutor.Unbounded`):
+  the model's answer, Stop and the loop's own guards end it. `meter` of the status gives the conversation's turn, the steps of
+  the turn and the prompt tokens the provider reported for the last call, against `num_ctx` where the provider takes one.
+  The open job always goes with a message, with no opt-out (the agent works on what the person sees): the page sends it as
+  cards, the server composes its text into the system message (`AgentExecutor.Context`), as data, under
+  `StudioAgent.MaxJobChars`, or a line says none is open. A job a tool call carries as `yamlContent` is the plan:
+  `StudioAgent.OfferPlan` keeps the last differing one as a revision (a save is read back from the folder instead),
+  `GET /api/agent?rev=N` answers its text only above `N`, and the page puts it on the open job's cards unsaved
+  (`followPlan`), or opens it as a new job; a person's edit since the agent last read the cards is never overwritten, the
+  plan then waits behind its button. A text that `JobSecrets.Literals` flags reaches the model, open job or `read-job`, only
+  after a card that names `branch.path`, never the value; the answer holds for that text, by hash, for the session. The
+  key (`--llm-key`) is a reference read once at start, kept in the client; the page never sets the model's address. The
+  panel's width is the `agent` pane, resized and kept as the designer's (`bindSplit`, `applySizes`).
+  `[CI: StudioAgentTests]` `[local: page_smoke.mjs agent — a scripted endpoint that speaks Ollama's API]`
+  `[unchecked: Quit and Ctrl+C during a turn]`
 - Quit from the page exits 0, Ctrl+C 130. A quit is refused while a run goes on; Ctrl+C cancels
   the run and the studio then exits.
 

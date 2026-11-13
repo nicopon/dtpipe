@@ -14,8 +14,9 @@ enumerate tool names here; see `REFERENCE.md#model-context-protocol-mcp-server`.
 loop refuses a call to any tool it did not offer, `_` and `-` spellings alike; the refusal lives in
 the loop, not the provider `[CI: AgentCatalogueTests, AgentExecutorCatalogueTests]` ·
 **F2** `ISqlSafetyPolicy` + `IApprovalGate`; a write by `execute-yaml-job` needs `apply` + approval;
-the studio's agent writes only through `save-job` and `run-job`, each waiting in its call for the
-person's answer to a card, which nothing of the command line, the environment or the model skips
+the studio's agent writes a job only through `save-job`, waiting in its call for the person's answer
+to a card, which nothing of the command line, the environment or the model skips, and offers no tool
+that writes a target: a real run is the page's `Write targets…`
 `[CI: StudioAgentTests]` ·
 **F4** fact cache + `ConversationWindowManager.Compact` ·
 **F5** every tool call of a turn runs; those that run a pipeline (`[RunsPipeline]`, reflected, compared

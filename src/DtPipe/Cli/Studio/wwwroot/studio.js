@@ -282,7 +282,7 @@ async function start() {
   await refreshCoordinator();
   await loadBricks();
   await loadLibrary();
-  await mountAgent($("agent-pane"), { applyPlan, openPlan, reopen: (path) => open(path, true), jobsChanged: loadJobs });
+  await mountAgent($("agent-pane"), { applyPlan, openPlan, reopen: (path) => open(path, true), jobsChanged: loadJobs, followPlan });
 }
 
 // ---------------------------------------------------------------- the agent's plans
@@ -291,6 +291,22 @@ async function start() {
 async function applyPlan(yaml) {
   if (!state.job || !leaveCurrent()) return;
   if (await openJob(yaml, state.cards.model?.layout, true)) status("the agent's plan is on the cards: save it to keep it", "good");
+}
+
+// The plan the agent just gave, on the cards as the person's message left them: unsaved, with the card and the tab kept. With
+// no job open it opens as a new one under a free name. A text that does not take apart into cards is left to the button.
+async function followPlan(yaml) {
+  const probe = await api("/api/design/decompose", { yaml, layout: null });
+  if (probe.errors?.length) return false;
+  if (state.job) return openJob(yaml, state.cards.model?.layout, true, { card: state.cards.selected?.alias, tab: state.view.drawer });
+  const taken = new Set(state.jobs.paths);
+  let path = "agent-job.yaml";
+  for (let n = 2; taken.has(path); n++) path = `agent-job-${n}.yaml`;
+  opening.cancel();
+  state.job = { path, hash: null, rewrites: false };
+  forgetResults();
+  viewRestored(path);
+  return openJob(yaml, null, true);
 }
 
 // A plan opened as a new job, not saved yet, as an imported command line opens.

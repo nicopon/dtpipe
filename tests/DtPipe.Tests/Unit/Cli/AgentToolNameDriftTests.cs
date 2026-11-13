@@ -80,6 +80,5 @@ public class AgentToolNameDriftTests
         Assert.Contains(PlanProgress.DryRunTool, catalogue, StringComparer.OrdinalIgnoreCase);
         var studio = DtPipe.Cli.Studio.StudioAgentTools.Definitions.Select(t => t.Name).ToList();
         Assert.Contains(PlanProgress.SaveTool, studio);
-        Assert.Contains(PlanProgress.RunTool, studio);
     }
 }

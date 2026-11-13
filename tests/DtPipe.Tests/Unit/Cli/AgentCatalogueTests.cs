@@ -60,14 +60,22 @@ public class AgentCatalogueTests
         Assert.DoesNotContain("validate-yaml-job", writing);
     }
 
+    /// <summary>The answer follows the person's language, a fixed line: no browser setting reaches the prompt.</summary>
+    [Fact]
+    public void The_Prompt_Asks_For_The_Language_Of_The_Persons_Last_Message()
+    {
+        Assert.Contains("language of the person's last message", AgentSystemPrompt.Studio);
+    }
+
     /// <summary>A write waits for the person in the tool call: a prompt saying the model cannot execute would be false.</summary>
     [Fact]
-    public void The_Prompt_Says_A_Write_Waits_For_The_Person_And_Forbids_Nothing_The_Harness_Allows()
+    public void The_Prompt_Says_A_Save_Waits_For_The_Person_And_Sends_A_Real_Run_To_The_Page()
     {
         var prompt = AgentSystemPrompt.Studio;
 
         Assert.Contains("'save-job'", prompt);
-        Assert.Contains("'run-job'", prompt);
+        Assert.DoesNotContain("run-job", prompt);
+        Assert.Contains("Write targets", prompt);
         Assert.Contains("confirm", prompt);
         Assert.DoesNotContain("FORBIDDEN", prompt, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("execute-yaml-job", prompt);

@@ -67,7 +67,7 @@ export const state = {
   /** @type {Cards} */
   cards: { model: null, result: null, selected: null, zoom: null, dirty: false },
   /** @type {View} */
-  view: { drawer: "yaml", sizes: { pal: 220, insp: 330, drawer: 260 } },
+  view: { drawer: "yaml", sizes: { pal: 220, insp: 330, drawer: 260, agent: 360 } },
   preview: freshPreview(),
   /** @type {Run | null} */
   run: null,
@@ -87,8 +87,8 @@ export const state = {
   jobs: { folder: "", paths: [], library: { shown: false, pipelines: null, error: null } },
   /** The coordinator the command line named, or null: { url, state, reason, me, studioVersion, contract }. @type {any} */
   coordinator: null,
-  /** The agent's panel: whether the command line opened one, and the server's last answer (GET /api/agent). @type {{ enabled: boolean, status: any }} */
-  agent: { enabled: false, status: null },
+  /** The agent's panel: whether the command line opened one, and the server's last answer (GET /api/agent). @type {{ enabled: boolean, status: any, behind: boolean }} */
+  agent: { enabled: false, status: null, behind: false },
 };
 
 /**

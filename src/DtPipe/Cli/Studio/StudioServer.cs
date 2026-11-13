@@ -445,7 +445,7 @@ public sealed partial class StudioServer : IAsyncDisposable
         context.Response.StatusCode = StatusCodes.Status204NoContent;
     }
 
-    private static readonly string[] PaneNames = ["pal", "insp", "drawer"];
+    private static readonly string[] PaneNames = ["pal", "insp", "drawer", "agent"];
     private static readonly string[] ViewTabs = ["yaml", "preview", "variables"];
 
     /// <summary>

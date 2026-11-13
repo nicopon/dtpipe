@@ -15,8 +15,8 @@ Open the address it prints. The panel on the right takes a mission:
 > *sales.csv has columns id, name, amount. Write a job that keeps the rows whose amount is above 15
 > and writes them to big.csv. Check it with a dry-run, save it as big.yaml, then run it.*
 
-The agent inspects the source, writes the job, previews it on a few rows, then asks to save it and
-to run it. Once saved, the job runs without a model.
+The agent inspects the source, writes the job, previews it on a few rows, then asks to save it. Once
+saved, the job runs without a model: you run it with **Write targets…**.
 
 ## What the agent may do
 
@@ -24,22 +24,28 @@ to run it. Once saved, the job runs without a model.
 |:---|:---|
 | reads sources, adapter and transformer help, the folder's jobs | no |
 | validates a job and previews it (`dry-run`): nothing is written | no |
-| proposes a plan: **Apply to the open job** or **Open as a new job** puts it on the cards | no, nothing is saved |
+| gives a job to check or preview: it lands on the open job's cards, unsaved, as soon as the call returns | no, nothing saved |
 | saves a job into the folder | **yes**: the card shows the text the studio will write |
-| runs a saved job, writing its targets | **yes**: the card shows each target |
+| tells you to run a saved job with **Write targets…** | no: it writes no target itself |
 
-Nothing waits on a timer: without your answer, nothing is written. **Refuse** tells the agent you
-declined; it is not an error. A run started by the agent is like one of yours: **Stop** ends it
-with code 130. Publishing, the library and the coordinator stay your gestures.
+Nothing waits on a timer: without your answer, nothing is saved. **Refuse** tells the agent you
+declined; it is not an error. The agent never writes a target: when the job is ready, save it and
+run it yourself. A turn has no step limit; **Stop** ends it. The panel shows the turn, its step
+and the context the model last read. Drag its left edge to resize it. Publishing, the library and
+the coordinator stay your gestures.
 
 ## The open job
 
-Your message carries the job open in the designer, as the studio composes it, so you can ask
-"fix the filter of this job". Untick **join the open job** to send the message alone.
+The open job always goes with your message, as the studio composes it, so you can ask "fix the
+filter of this job"; the agent works on what you see, and what it gives lands on the same cards,
+unsaved, until you save. With no job open, what it gives opens as a new job (`agent-job.yaml`). If
+you change the cards while it works, your changes stay: its job waits behind **Apply to the open
+job**. A job it saves under the open job's path is read back into the cards, and a run it starts
+shows in the Run tab.
 
 When the job holds a credential written as a value, such as `Password=secret` in a connection
-string, a card names where it is, never the value, and asks what to do: send it anyway, send the
-message without the job, or cancel. Reading a job of the folder asks the same. Write credentials as
+string, a card names where it is, never the value, and asks what to do: send anyway, or cancel the
+turn. Reading a job of the folder asks the same, and you may keep it here. Write credentials as
 `${{NAME}}` or `keyring://alias` and the question never comes up: see [Secrets](secrets.md).
 
 ## Where your data goes

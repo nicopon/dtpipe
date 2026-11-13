@@ -247,7 +247,6 @@ function startFakeLlm() {
       const text = String(last.content);
       const job = /<open-job>\n/.test(messages[0]?.content ?? "") ? "job seen" : "no job seen";
       const reply = /save/.test(text) ? call("save-job", { path: "agent.yaml", yamlContent: AGENT_JOB })
-        : /run/.test(text) ? call("run-job", { path: "agent.yaml" })
         : /ask/.test(text) ? call("ask-user", { question: "Which target?", options: ["a.csv", "b.csv"] })
         : /plan/.test(text) ? call("validate-yaml-job", { yamlContent: PLAN_JOB })
         : /secret/.test(text) ? { role: "assistant", content: job }
@@ -290,6 +289,12 @@ const scenarios = {
     check("a local model raises no warning", (await p.ev(`document.querySelector("#agent-warning").hidden`)) === true);
     check("the header shows the provider and the address, read only", await p.ev(`document.querySelector("#agent-endpoint")?.textContent === "ollama · ${fakeLlm.url}" && !document.querySelector("#agent-endpoint input")`));
     await p.shot("1-panel");
+    const width = () => p.ev(`document.querySelector("#agent-pane").getBoundingClientRect().width`);
+    const before0 = await width();
+    await p.ev(`document.querySelector('.split[data-split="agent"]').focus()`);
+    await p.send("Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowLeft", code: "ArrowLeft", windowsVirtualKeyCode: 37 });
+    await p.send("Input.dispatchKeyEvent", { type: "keyUp", key: "ArrowLeft", code: "ArrowLeft", windowsVirtualKeyCode: 37 });
+    check("the agent's panel resizes like the others", await p.until(`document.querySelector("#agent-pane").getBoundingClientRect().width > ${before0 + 8}`), String(await width()));
 
     await send("please save it");
     check("a save waits on a card", await p.until(`/asks to save agent.yaml/.test(document.querySelector("#agent-now")?.textContent ?? "")`));
@@ -298,6 +303,7 @@ const scenarios = {
     await p.shot("2-save-card");
     await p.clickText("#agent-now button", "Refuse");
     check("a refused save ends the turn", await idle());
+    check("the meter counts the turn and its steps", await p.until(`/^turn 1 · \\d+ steps?/.test(document.querySelector("#agent-meter").textContent)`), await p.ev(`document.querySelector("#agent-meter").textContent`));
     check("a refused save writes nothing", !fs.existsSync(path.join(folder, "agent.yaml")));
     check("the model reads the refusal", /refused/.test(await lastText()), await lastText());
 
@@ -307,14 +313,9 @@ const scenarios = {
     check("an accepted save writes the job", fs.existsSync(path.join(folder, "agent.yaml")));
     check("the folder lists the saved job", await p.until(`[...document.querySelectorAll("#jobs button.job")].some((b) => b.textContent === "agent.yaml")`));
 
+    // The agent has no tool that writes a target: what it says of a run is text.
     await send("now run it");
-    check("a run waits on a card that names its target", await p.until(`/agent-out\.csv/.test(document.querySelector("#agent-now .agent-card")?.textContent ?? "")`));
-    check("nothing is run before the answer", !fs.existsSync(path.join(folder, "agent-out.csv")));
-    await p.shot("3-run-card");
-    await p.clickText("#agent-now button", "Run");
-    check("an accepted run ends the turn", await idle());
-    check("the run writes its target", fs.existsSync(path.join(folder, "agent-out.csv")));
-    check("the model reads the exit code", /"code":0/.test(await lastText()), await lastText());
+    check("a request to run writes no target and waits on no card", await idle() && !fs.existsSync(path.join(folder, "agent-out.csv")));
 
     await send("ask me");
     check("a question shows its choices", await p.until(`[...document.querySelectorAll("#agent-now button")].some((b) => b.textContent === "b.csv")`));
@@ -328,7 +329,6 @@ const scenarios = {
     check("the plan shows once the turn ends", await p.until(`!!document.querySelector("#agent-now .agent-plan")`, 30000));
     await p.ev(`document.querySelector("#agent-now .agent-plan").open = true`);
     await p.shot("5-plan");
-    await p.clickText("#agent-now .agent-plan button", "Apply to the open job");
     check("the plan is on the cards", await p.waitStatus(/plan is on the cards/, 15000), await p.status());
     check("the cards are the plan's", await p.until(`document.querySelectorAll(".dcard").length === 2`), JSON.stringify(await p.badges()));
     check("the job is still the one open", (await p.ev(`document.querySelector("#job-name").textContent`)).startsWith("chain.yaml"));
@@ -343,16 +343,18 @@ const scenarios = {
     await p.shot("6-secret-card");
     const calls = fakeLlm.llm.seen.length;
     check("the model is not called before the answer", fakeLlm.llm.seen.length === calls);
-    await p.clickText("#agent-now button", "Send without the job");
-    check("the turn goes on without the job", await p.until(`/^no job seen$/.test([...document.querySelectorAll("#agent-log .msg.agent")].pop()?.textContent ?? "")`), await lastText());
+    check("the card offers no way to leave the job out", !(await p.ev(`[...document.querySelectorAll("#agent-now button")].some((b) => /without/i.test(b.textContent))`)));
+    await p.clickText("#agent-now button", "Cancel the turn");
+    check("a cancelled turn calls no model", await idle() && fakeLlm.llm.seen.length === calls);
     check("the credential never reached the model", fakeLlm.llm.seen.every((m) => !/Password=abc/.test(m)));
     await send("one more secret");
-    check("sending without the job holds for that turn alone", await p.until(`/main\.input/.test(document.querySelector("#agent-now .agent-card")?.textContent ?? "")`));
+    check("the job holds every turn that carries it", await p.until(`/main\.input/.test(document.querySelector("#agent-now .agent-card")?.textContent ?? "")`));
     check("the last message stays in sight above the card", await p.ev(`(() => { const log = document.querySelector("#agent-log"); const m = [...log.querySelectorAll(".msg.user")].pop();
       return m.textContent === "one more secret" && m.getBoundingClientRect().bottom <= log.getBoundingClientRect().bottom + 1; })()`));
     await p.clickText("#agent-now button", "Cancel the turn");
-    check("a cancelled turn calls no model", await idle() && fakeLlm.llm.seen.length === calls + 1);
-    await p.click("#agent-attach");
+    check("a second cancelled turn calls no model", await idle() && fakeLlm.llm.seen.length === calls);
+    check("the panel has no way to leave the job out", await p.ev(`!document.querySelector("#agent-attach")`));
+    await p.openJob("chain.yaml");
 
     const before = await verdicts();
     await send("slow down");
