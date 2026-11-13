@@ -1,11 +1,6 @@
-# Experimentation
+# Distributed pipelines
 
 [← Documentation](README.md)
-
-> **Experimental.** Everything on this page may change or disappear without notice. It is not
-> covered by versioning and is not meant for production. It has not been run on Windows.
-
-## Distributed pipelines
 
 A distributed pipeline runs one pipeline across several hosts, with the rows streaming between
 them.
@@ -21,24 +16,24 @@ are published as container images.
 
 To try it: [Your first distributed pipeline](guides/distributed-first-pipeline.md). To run it for
 real: [deploy/README.md](../deploy/README.md). Every setting:
-[REFERENCE.md](../REFERENCE.md#distributed-pipeline-experimental). A demonstrator with four data
-nodes, joins across them and injected faults: [the lab](../samples/distributed-lab/README.md).
+[REFERENCE.md](../REFERENCE.md#distributed-pipeline). A demonstrator with four data nodes, joins
+across them and injected faults: [the lab](../samples/distributed-lab/README.md).
 
 ## The studio
 
 `dtpipe studio ./jobs` opens a local page over the YAML jobs of a folder. Each job shows as cards
 that you edit and preview on the real engine, without writing to the target. It needs no
 coordinator; with `--coordinator`, it also offers the nodes' bricks and publishes jobs to the
-coordinator's library. Details: [REFERENCE.md](../REFERENCE.md#studio-dtpipe-studio).
+coordinator's library. With `--llm-provider`, a panel lets a model design the job with you: see
+[The agent](guides/agent.md). Details: [REFERENCE.md](../REFERENCE.md#studio-dtpipe-studio).
 
 ## Limits
 
 - **The coordinator is one process.** Its state survives a restart; a run in flight does not, and
   ends as an error. On PostgreSQL or SQL Server a second instance can wait as a standby and take
   over. Storage and backup: [deploy/README.md](../deploy/README.md).
-- **Tried on one machine.** As local processes and as Linux containers, on macOS.
-- **No contract.** The libraries, the messages between coordinator and nodes, and the lab may all
-  change.
+- **Tried on one machine.** As local processes and as Linux containers, on macOS. It has not been
+  run on Windows.
 
 ---
 

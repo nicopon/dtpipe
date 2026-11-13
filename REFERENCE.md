@@ -23,6 +23,7 @@
 - [Sample Mode and Materialisation](#sample-mode-and-materialisation)
 - [Shell Completion](#shell-completion)
 - [Studio](#studio-dtpipe-studio)
+- [Distributed pipeline](#distributed-pipeline)
 - [Model Context Protocol (MCP) Server](#model-context-protocol-mcp-server)
 - [MCP Guardrails](#mcp-guardrails-isqlsafetypolicy--iapprovalgate)
 
@@ -1305,12 +1306,11 @@ of the folder and its own files. Quitting from the page exits 0; Ctrl+C exits 13
 
 ---
 
-## Distributed pipeline (experimental)
+## Distributed pipeline
 
-> **Experimental.** May change or disappear without notice; see
-> [docs/experimentation.md](./docs/experimentation.md). A walkthrough from nothing to a first run is
-> [docs/guides/distributed-first-pipeline.md](./docs/guides/distributed-first-pipeline.md); running
-> the two hosts for real is [deploy/README.md](./deploy/README.md).
+Overview: [docs/distributed.md](./docs/distributed.md). A walkthrough from nothing to a first run is
+[docs/guides/distributed-first-pipeline.md](./docs/guides/distributed-first-pipeline.md); running
+the two hosts for real is [deploy/README.md](./deploy/README.md).
 
 A **coordinator** cuts a pipeline into parts and runs each on a **node**, a host next to its
 data; a **runner** is a node with no data that runs the steps between the bricks. Each release

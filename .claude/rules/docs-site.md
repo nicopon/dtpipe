@@ -32,8 +32,6 @@ sentences**; a one-line lead-in may come before it.
   conversion path. A user sees flags, files, output, messages and exit codes. A page whose reader
   writes .NET code (`EXTENDING.md`, `docs/dotnet.md`) names the types that reader calls.
 - **Pitfalls go last**, as a list, one line each.
-- **The experimental family lives in `docs/experimentation.md` and its walkthrough.** Any other
-  page gives it one link at most.
 - **A guide stays under about 800 words, a sentence under about 25.** A walkthrough that runs a
   whole setup from nothing may be longer.
 

@@ -1,7 +1,6 @@
 # Your first distributed pipeline
 
-> **Experimental.** May change or disappear without notice, and not meant for production. What the
-> pieces are and their limits: [Experimentation](../experimentation.md).
+What the pieces are and their limits: [Distributed pipelines](../distributed.md).
 
 You will start a coordinator and a runner, declare a small database as a **node**, allow the rows
 to flow, and run a pipeline that reads the database, counts on the runner, and writes the result
@@ -281,7 +280,7 @@ docker compose -f deploy/compose.yaml down -v       # with Docker
 
 | | |
 |:---|:---|
-| Every setting of the coordinator and the nodes | [REFERENCE.md](../../REFERENCE.md#distributed-pipeline-experimental) |
+| Every setting of the coordinator and the nodes | [REFERENCE.md](../../REFERENCE.md#distributed-pipeline) |
 | Declare bricks on a real database | [`dtpipe node`](../../REFERENCE.md#a-node-from-the-cli-dtpipe-node) |
 | Make your own .NET service a node | [`AddDtPipeNode`](../../src/DtPipe.PipelineNode.Hosting/CLAUDE.md) |
 | Four data nodes, joins across them, rights and faults | [The distributed lab](../../samples/distributed-lab/README.md) |
