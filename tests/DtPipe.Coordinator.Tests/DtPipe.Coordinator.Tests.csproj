@@ -21,7 +21,7 @@
          above; only what this test project uses directly (standing in for pipeline nodes) needs
          its own PackageReference. -->
     <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.14" />
-    <PackageReference Include="TransportR.Client" Version="0.11.1" />
+    <PackageReference Include="TransportR.Client" Version="0.11.2" />
 
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.14" />
     <PackageReference Include="Microsoft.AspNetCore.TestHost" Version="10.0.14" />
