@@ -35,10 +35,9 @@ Each run of a fragment is a `dtpipe` child process. The csproj gets the program 
 A tool package cannot be a `PackageReference`, so it is downloaded; the node library writes its folder into the
 host's `runtimeconfig.json` at build, and a host that names no `DtPipe` of its own runs that package's
 `DtPipe.dll` through the dotnet host. The `PackageDownload` line stays in the service's project, since a package's
-props are read only after the first restore. The library is a pre-release (beta); the tool package is a release of
-dtpipe, named by its own version. The machine needs the .NET
-and ASP.NET Core runtimes. A published copy of the service needs the package's folder beside it, under `dtpipe/`;
-nothing here copies it.
+props are read only after the first restore. The library and the tool package are each named by their own version.
+The machine needs the .NET and ASP.NET Core runtimes. A published copy of the service needs the package's folder
+beside it, under `dtpipe/`; nothing here copies it.
 
 The csproj takes the library from `dist/node-host` as well as from nuget.org, and `-p:NodeHostVersion=…` names
 the version: `spike-node.sh` packs the library there under a version of its own before it builds.

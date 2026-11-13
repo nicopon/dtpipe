@@ -71,8 +71,8 @@ none. One node per process, which is one replica of its node's identity; a secon
   a `PackageReference`, never a reference to `Apache.Arrow.Serialization`. No solution packs the library, so the solution's pack never
   reaches it; `tests/scripts/validate_node_host_package.sh` packs it, outside every pack glob, and reads the result, and `release.yml`
   runs that script in a step of its own after the solution's push. A host built against a version not yet published takes a local one
-  (`-p:PackageVersion`), since a restore serves the cached copy of a version it has. The package is a beta (`<Version>-beta.1`, set in
-  the project; the release gives the tag's own suffix when it has one): the family is experimental.
+  (`-p:PackageVersion`), since a restore serves the cached copy of a version it has. The package takes the repository's `<Version>`
+  like the solution's, and the release packs it at the tag's version.
   `[local: validate_node_host_package.sh, spike-node.sh] [CI: validate_distributed_boundary.sh — one packable project, bundled projects private]`
   `[unchecked: the release's step, until a tag runs it]`
 - **A source of the host's own is served on a socket the host owns.** `AddArrowSource` declares a source brick that reads

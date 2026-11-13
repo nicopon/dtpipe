@@ -164,7 +164,7 @@ the control plane, over each replica's node channel; TransportR carries the data
   library, `DtPipe.PipelineNode`, `DtPipe.Coordinator.Contracts` and `DtPipe.Jobs` from one package, and a dependency on the packages
   they use (TransportR among them), never on a `DtPipe.*` package. The other projects of the family are not packable. A pack is a
   step of its own (`tests/scripts/validate_node_host_package.sh`): the family stays outside `DtPipe.sln`, so the solution's pack never
-  reaches it, and `release.yml` packs and pushes it in a step after the solution's, as a beta of the tag's version.
+  reaches it, and `release.yml` packs and pushes it in a step after the solution's, at the tag's version.
   `[CI: validate_distributed_boundary.sh — one packable project, its references private]`
   `[local: validate_node_host_package.sh — the package's content]` `[unchecked: the release's step, until a tag runs it]`
 - **The CLI hosts a node only through one assembly, and never a hub.** `dtpipe` is the child a node drives, reached through

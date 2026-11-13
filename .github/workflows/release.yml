@@ -233,12 +233,11 @@ jobs:
             -exec dotnet nuget push {} --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate \;
 
       - name: Pack and push the node host
-        # DtPipe.PipelineNode.Hosting is outside DtPipe.sln, so the pack above never reaches it. It goes out as a beta of the
-        # tag's version (the tag's own suffix when it has one), in a step after the others so a failure here stops none of them.
+        # DtPipe.PipelineNode.Hosting is outside DtPipe.sln, so the pack above never reaches it. It goes out at the tag's
+        # version, like the packages above, in a step after the others so a failure here stops none of them.
         # The script packs outside the workspace, which the find above searches, and reads the package before it is pushed.
         run: |
           version="${GITHUB_REF_NAME#v}"
-          [[ "$version" == *-* ]] || version="$version-beta.1"
           tests/scripts/validate_node_host_package.sh --version "$version" --out "$RUNNER_TEMP/node-host"
           dotnet nuget push "$RUNNER_TEMP/node-host/DtPipe.PipelineNode.Hosting.$version.nupkg" \
             --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate

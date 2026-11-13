@@ -7,8 +7,6 @@
          tests/scripts/validate_node_host_package.sh packs it, and release.yml runs that script in a step of its own. -->
     <IsPackable>true</IsPackable>
     <PackageId>DtPipe.PipelineNode.Hosting</PackageId>
-    <!-- A pre-release: the family is experimental. A pack that names its version (-p:PackageVersion) overrides this. -->
-    <PackageVersion>$(Version)-beta.1</PackageVersion>
     <Description>AddDtPipeNode: makes any .NET host a dtpipe pipeline node, and offers its own data as a source brick (AddArrowSource).</Description>
     <PackageTags>dtpipe;etl;arrow;pipeline</PackageTags>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
