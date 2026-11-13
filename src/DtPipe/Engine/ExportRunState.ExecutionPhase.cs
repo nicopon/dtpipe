@@ -188,9 +188,18 @@ internal sealed partial class ExportRunState
     /// while the server destroys them, --limit bounds what the client reads, never what was
     /// already deleted, and the reader's own init script runs when it opens. The verdict reads
     /// the SQL the options carry and needs no schema, so it waits for nothing the open produces.
+    ///
+    /// A value is judged by what it designates: an <c>@file</c>, <c>${{NAME}}</c> or <c>keyring://</c>
+    /// reference is resolved through the resolver the reader and the processor use at their open, so
+    /// the text classified is the text that would run. A reference names nothing a verb scan can read.
     /// </summary>
-    private void RefuseSourceThatCouldMutate()
+    private async Task RefuseSourceThatCouldMutateAsync(CancellationToken ct)
     {
+        var resolved = new List<string?>();
+        foreach (var value in SampleSqlValues())
+            resolved.Add(_svc.Resolver is { } resolver ? await resolver.ResolveAsync(value, ct) : value);
+        _sampleSql = resolved;
+
         SafetyVerdict = EvaluateSampleSafety(dialect: null);
 
         if (!SafetyVerdict.Allowed)
@@ -218,12 +227,15 @@ internal sealed partial class ExportRunState
     private DtPipe.Sessions.SampleSafetyVerdict EvaluateSampleSafety(ISqlDialect? dialect)
     {
         var policy = new DtPipe.Cli.Security.DefaultSqlSafetyPolicy();
-        var values = DtPipe.Sessions.SampleModeSafetyGate.CollectSqlBearingValues(
-            Registry, ReaderFactory.OptionsType);
 
         return DtPipe.Sessions.SampleModeSafetyGate.Evaluate(
-            policy, new DtPipe.Cli.Security.SqlSafetyOptions(), values, dialect);
+            policy, new DtPipe.Cli.Security.SqlSafetyOptions(), _sampleSql ?? SampleSqlValues(), dialect);
     }
+
+    /// <summary>The source's SQL as written: the reader's options, and what a stream processor runs itself.</summary>
+    private IEnumerable<string?> SampleSqlValues() =>
+        DtPipe.Sessions.SampleModeSafetyGate.CollectSqlBearingValues(Registry, ReaderFactory.OptionsType)
+            .Concat((ReaderFactory as ISqlBearing)?.SqlBearingValues ?? []);
 
     /// <summary>
     /// Names the stages the tap will be offered rows for: 0 is the reader, then the transformers

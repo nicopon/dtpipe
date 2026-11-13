@@ -1079,7 +1079,7 @@ dtpipe -i pg:"Host=db;Database=app" --query "SELECT * FROM orders" \
 | Hooks | None of `--pre-exec`, `--post-exec`, `--on-error-exec`, `--finally-exec` runs |
 | Column types | Asked of the writer as the run asks; a refusal names every column and the cast that fixes it |
 | Cursor, metrics | Not advanced, not written |
-| The source | A query carrying `DELETE`, `UPDATE`, `DROP`, `TRUNCATE`, `ALTER`, `INSERT` or `ATTACH` is refused. PostgreSQL, Oracle, MySQL (`SET TRANSACTION READ ONLY`) and SQLite (`PRAGMA query_only`) also get a read-only session. SQL Server has none, so there the verb scan is the only guarantee |
+| The source | A query or an init script carrying `DELETE`, `UPDATE`, `DROP`, `TRUNCATE`, `ALTER`, `INSERT` or `ATTACH` is refused, a SQL step's own included. An `@file`, `${{NAME}}` or `keyring://` value is read to be judged by what it holds, just before the source would read it. PostgreSQL, Oracle, MySQL (`SET TRANSACTION READ ONLY`) and SQLite (`PRAGMA query_only`) also get a read-only session. SQL Server has none, so there the verb scan is the only guarantee |
 
 The run states which of the two guarantees it had: a verb scan cannot prove a query read-only
 (`SELECT my_function()` passes it).

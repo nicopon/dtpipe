@@ -413,7 +413,7 @@ public class LinearPipelineService
     }
 }
 
-internal class StreamTransformerReaderAdapter : IStreamReaderFactory, IStreamProcessorSource
+internal class StreamTransformerReaderAdapter : IStreamReaderFactory, IStreamProcessorSource, ISqlBearing
 {
     private readonly IStreamTransformer _transformer;
 
@@ -426,6 +426,7 @@ internal class StreamTransformerReaderAdapter : IStreamReaderFactory, IStreamPro
     public string Category => "Processors";
     public bool CanHandle(string connectionString) => false;
     public Type OptionsType => typeof(PipelineOptions);
+    public IEnumerable<string?> SqlBearingValues => (_transformer as ISqlBearing)?.SqlBearingValues ?? [];
     public bool RequiresQuery => false;
     public bool YieldsColumnarOutput => true;
     public bool IsSource => false;

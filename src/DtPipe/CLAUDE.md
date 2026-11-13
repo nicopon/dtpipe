@@ -117,9 +117,12 @@ hooks** (SQL on the target connection), the cursor and the metrics file.
 
 A reader can mutate: `DELETE … RETURNING`, `… OUTPUT`, `--duck-init`, an `ATTACH` inside `--sql`.
 `--limit` bounds what the client reads, never what the server already destroyed.
-`SampleModeSafetyGate` classifies the **resolved** pipeline's source SQL (so a `@file` query is
-covered), and `ISqlDialect.ReadOnlySessionSql` lets the server refuse
-instead of a regex guessing.
+`SampleModeSafetyGate` classifies the source's SQL by what it designates: the reader's options and what
+a stream processor runs itself (`ISqlBearing`: its query and its `duck-init`), each resolved through
+`IStringContentResolver` before it is judged, since the reader and the processor resolve an `@file`,
+`${{NAME}}` or `keyring://` only at their open. The gate therefore reads a file or a secret a few
+moments before the source would; a value that names a reference it does not resolve is judged as
+written. `ISqlDialect.ReadOnlySessionSql` lets the server refuse instead of a regex guessing.
 
 Never classify writer hooks in a sample: they are already suppressed, so refusing them adds no
 safety and trains whoever unlocks the check (`allowDestructive` of `execute-yaml-job`) to do it by
@@ -128,7 +131,7 @@ reflex, which unlocks the source side too.
 SQL Server returns `null` for `ReadOnlySessionSql`: `ApplicationIntent=ReadOnly` routes to a replica
 and does not make a session read-only. The report states which guarantee the run had.
 
-`ExportRunState.RunAsync` reads the verdict (`RefuseSourceThatCouldMutate`) between `ReaderFactory.Create`
+`ExportRunState.RunAsync` reads the verdict (`RefuseSourceThatCouldMutateAsync`) between `ReaderFactory.Create`
 and `Reader.OpenAsync`: it needs the SQL of the options and no schema. `PrepareWriterAsync` records the
 run's `Enforcement` afterwards (`ReportSampleEnforcement`), since the dialect that answers it is the
 writer's and the writer is built after the open. A real run reaches neither.

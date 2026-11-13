@@ -66,6 +66,8 @@ internal sealed partial class ExportRunState
 
     /// <summary>How far this sample run could guarantee it would not write. Reported, never assumed.</summary>
     internal DtPipe.Sessions.SampleSafetyVerdict? SafetyVerdict;
+    // The source's SQL as the refusal resolved it, so the verdict recorded after the open judges the same text.
+    private IReadOnlyList<string?>? _sampleSql;
 
     /// <summary>True when this run reports rather than writes.</summary>
     internal bool IsSampleMode => Options.DryRunCount > 0;
@@ -132,7 +134,7 @@ internal sealed partial class ExportRunState
             // Opening a reader plays what the source runs on its own (--duck-init), so the verdict
             // on the SQL the options carry is given before it: a refusal after the open would
             // report a statement the source had already executed.
-            if (IsSampleMode) RefuseSourceThatCouldMutate();
+            if (IsSampleMode) await RefuseSourceThatCouldMutateAsync(ct);
 
             try
             {

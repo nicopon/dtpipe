@@ -60,36 +60,72 @@ public sealed class SampleModeRefusalOrderTests : IDisposable
         return Convert.ToInt64(command.ExecuteScalar());
     }
 
-    [Fact]
-    public async Task A_Destructive_Init_Is_Refused_Before_The_Source_Has_Run_It()
+    // A file that survives the process: an in-memory database holds nothing to destroy.
+    private const string Database = "victim.duckdb";
+
+    private static void SeedVictim()
     {
-        const string database = "victim.duckdb";
-        using (var seed = new DuckDBConnection($"Data Source={database}"))
-        {
-            seed.Open();
-            using var create = seed.CreateCommand();
-            create.CommandText = "CREATE TABLE victim AS SELECT range AS n FROM range(3)";
-            create.ExecuteNonQuery();
-        }
+        using var seed = new DuckDBConnection($"Data Source={Database}");
+        seed.Open();
+        using var create = seed.CreateCommand();
+        create.CommandText = "CREATE TABLE victim AS SELECT range AS n FROM range(3)";
+        create.ExecuteNonQuery();
+    }
 
-        // A file that survives the process: an in-memory database holds nothing to destroy.
-        const string job = """
-            main:
-              input: duck:victim.duckdb
-              provider-options:
-                duck:
-                  query: SELECT 1 AS x
-                  init-sql: DROP TABLE victim
-              output: csv:out.csv
-            """;
-
+    private static async Task ShouldRefuse(string job)
+    {
         var json = await McpTools().DryRun(job, rows: 1);
         var reply = JsonDocument.Parse(json).RootElement;
 
         reply.GetProperty("success").GetBoolean().Should().BeFalse(json);
         reply.GetProperty("error").GetString().Should().Contain("Sample mode refuses", json);
-        Scalar(database, "SELECT count(*) FROM information_schema.tables WHERE table_name = 'victim'")
+    }
+
+    private static void VictimShouldStand()
+    {
+        Scalar(Database, "SELECT count(*) FROM information_schema.tables WHERE table_name = 'victim'")
             .Should().Be(1, "the refusal came after the source dropped the table it was refusing to drop");
-        Scalar(database, "SELECT count(*) FROM victim").Should().Be(3);
+        Scalar(Database, "SELECT count(*) FROM victim").Should().Be(3);
+    }
+
+    [Theory]
+    [InlineData("DROP TABLE victim")]
+    [InlineData("'@drop.sql'")]
+    public async Task A_Destructive_Init_Is_Refused_Before_The_Source_Has_Run_It(string initSql)
+    {
+        SeedVictim();
+        // A reference is judged by the text it designates, which the reader reads only at its open.
+        File.WriteAllText("drop.sql", "DROP TABLE victim");
+
+        await ShouldRefuse($"""
+            main:
+              input: duck:{Database}
+              provider-options:
+                duck:
+                  query: SELECT 1 AS x
+                  init-sql: {initSql}
+              output: csv:out.csv
+            """);
+
+        VictimShouldStand();
+    }
+
+    [Fact]
+    public async Task A_Processors_Init_Is_Refused_Before_The_Processor_Has_Run_It()
+    {
+        // The processor's SQL lives in its own block, never in a reader's options.
+        await ShouldRefuse("""
+            a:
+              input: generate:3
+            b:
+              from: a
+              provider-options:
+                sql:
+                  query: SELECT * FROM a
+                  duck-init: ATTACH 'attached.db' AS y
+              output: csv:out.csv
+            """);
+
+        File.Exists("attached.db").Should().BeFalse("the processor attached a file the sample was refusing to attach");
     }
 }

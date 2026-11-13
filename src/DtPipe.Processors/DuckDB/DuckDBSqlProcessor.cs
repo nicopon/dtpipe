@@ -20,7 +20,7 @@ using Microsoft.Extensions.Logging;
 
 namespace DtPipe.Processors.DuckDB;
 
-public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
+public sealed class DuckDBSqlProcessor : IColumnarStreamReader, ISqlBearing, IDisposable
 {
     private readonly IMemoryChannelRegistry _registry;
     private readonly string _query;
@@ -45,6 +45,7 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
 
     public IReadOnlyList<PipeColumnInfo>? Columns => _columns;
     public Schema? Schema => _resultSchema;
+    public IEnumerable<string?> SqlBearingValues => [_query, _initSql];
 
     public DuckDBSqlProcessor(
         IMemoryChannelRegistry registry,

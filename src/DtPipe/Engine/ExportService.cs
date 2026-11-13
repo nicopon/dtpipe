@@ -35,12 +35,13 @@ public class ExportService
         SchemaValidationService schemaValidator,
         PipelineExecutor pipelineExecutor,
         IMemoryChannelRegistry? channelRegistry = null,
-        DtPipe.DryRun.SampleReportCollector? reports = null)
+        DtPipe.DryRun.SampleReportCollector? reports = null,
+        DtPipe.Core.Expressions.IStringContentResolver? resolver = null)
     {
         _logger = logger;
         _observer = observer;
         _runServices = new ExportRunServices(observer, logger, hookExecutor, metricsService, schemaValidator,
-            pipelineExecutor, channelRegistry, reports);
+            pipelineExecutor, channelRegistry, reports, resolver);
     }
 
     public async Task RunExportAsync(
