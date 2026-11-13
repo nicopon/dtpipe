@@ -79,4 +79,17 @@ public interface IStreamTransformerFactory
     /// dictionary is a valid marker for parameterless processors.
     /// </summary>
     Dictionary<string, object?>? ExportToProviderOptions(string[] branchArgs) => null;
+
+    /// <summary>
+    /// One sentence saying what this processor does, for the catalogue a caller discovers it by.
+    /// Empty when the processor says nothing of itself.
+    /// </summary>
+    string Description => string.Empty;
+
+    /// <summary>
+    /// What a caller writing this processor's YAML needs beyond the grammar every processor shares:
+    /// the options under its <c>provider-options</c> key and the rules of the engine it runs.
+    /// Plain lines, no markup; empty when there is nothing to add.
+    /// </summary>
+    string UsageNotes => string.Empty;
 }

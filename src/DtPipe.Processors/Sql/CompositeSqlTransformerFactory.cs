@@ -19,6 +19,26 @@ public class CompositeSqlTransformerFactory : IStreamTransformerFactory, IStream
     public int MinLookups => 0;
     public int MaxLookups => -1;
 
+    public string Description => "Run a DuckDB SQL query over the branches this branch reads (join, aggregate, filter).";
+
+    public string UsageNotes =>
+        """
+        The query runs in DuckDB, never in the SQL dialect of a source or target database.
+        Each alias named by 'from' and 'ref' is a table of that name in the query.
+        Example:
+          main:
+            from: orders
+            ref: [ customers ]
+            provider-options:
+              sql:
+                query: SELECT c.name, sum(o.amount) AS total FROM orders o JOIN customers c ON o.customer_id = c.id GROUP BY c.name
+                duck-init: <optional DuckDB statement run before the query>
+            output: "<adapter>:<target>"
+        Column types are those DuckDB gives the result. An untyped NULL literal takes an integer type,
+        which a text column of the target refuses: write CAST(NULL AS VARCHAR), or the type the target
+        holds. 'dry-run' lists each column whose type differs from the target's.
+        """;
+
     public IReadOnlyList<(string Flag, bool IsBoolean)> CliTriggerFlags => [("--sql", false)];
 
     public bool IsApplicable(string[] branchArgs)

@@ -53,7 +53,7 @@ public class McpValidateTransformersTests
             readers,
             transformers,
             Array.Empty<IDataWriterFactory>(),
-            new McpHelpService(readers, transformers, Array.Empty<IDataWriterFactory>()),
+            new McpHelpService(readers, transformers, Array.Empty<IDataWriterFactory>(), Array.Empty<IStreamTransformerFactory>()),
             provider);
     }
 

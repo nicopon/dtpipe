@@ -23,7 +23,7 @@ internal static class McpCatalogue
 
         return new DtPipeMcpTools(
             readers, transformers, writers,
-            new McpHelpService(readers, transformers, writers),
+            new McpHelpService(readers, transformers, writers, Array.Empty<IStreamTransformerFactory>()),
             new ServiceCollection().BuildServiceProvider());
     }
 

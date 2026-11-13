@@ -38,7 +38,8 @@ public class McpToolsTests
         _helpService = new McpHelpService(
             readerFactories,
             Array.Empty<IDataTransformerFactory>(),
-            Array.Empty<IDataWriterFactory>());
+            Array.Empty<IDataWriterFactory>(),
+            Array.Empty<IStreamTransformerFactory>());
 
         _tools = new DtPipeMcpTools(
             readerFactories,

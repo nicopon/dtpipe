@@ -53,6 +53,9 @@ public class PipelineValidatorTests
         Assert.Contains("B", error);
         Assert.Contains("--sql <value>", error);
         Assert.Contains("--merge", error);
+        // A job file's author reads the same refusal: the YAML key comes with the flag.
+        Assert.Contains("'provider-options: sql' in YAML", error);
+        Assert.Contains("'provider-options: merge' in YAML", error);
     }
 
     /// <summary>
@@ -71,6 +74,7 @@ public class PipelineValidatorTests
 
         var error = Assert.Single(errors);
         Assert.Contains("--unknown-processor <value>", error);
+        Assert.Contains("'provider-options: pivot' in YAML", error);
         Assert.DoesNotContain("--sql", error);
     }
 

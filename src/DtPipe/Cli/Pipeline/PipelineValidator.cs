@@ -139,20 +139,19 @@ public static class PipelineValidator
     }
 
     /// <summary>
-    /// The processor triggers the catalogue actually carries, with the value each one takes.
-    /// Naming one in a message would be wrong the day a processor is added, renamed or retired,
-    /// and nothing would catch it — the factories already declare their own triggers.
+    /// The ways in to each processor the catalogue actually carries, in YAML and on the command line.
+    /// The validator judges a job whatever surface wrote it, so a message naming only flags misleads a
+    /// job file's author. Naming one processor in a message would be wrong the day one is added,
+    /// renamed or retired: <see cref="ProcessorActivation"/> reads each factory's own declaration.
     /// </summary>
     private static string ProcessorTriggers(IEnumerable<IStreamTransformerFactory> processorFactories)
     {
-        var triggers = processorFactories
-            .SelectMany(f => f.CliTriggerFlags)
-            .Select(t => t.IsBoolean ? t.Flag : $"{t.Flag} <value>")
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(t => t, StringComparer.Ordinal)
+        var ways = processorFactories
+            .OrderBy(f => f.ComponentName, StringComparer.Ordinal)
+            .Select(ProcessorActivation.Describe)
             .ToList();
 
-        return triggers.Count == 0 ? string.Empty : $" ({string.Join(", ", triggers)})";
+        return ways.Count == 0 ? string.Empty : $" ({string.Join("; ", ways)})";
     }
 
     private static bool HasCycle(JobDagDefinition dag)

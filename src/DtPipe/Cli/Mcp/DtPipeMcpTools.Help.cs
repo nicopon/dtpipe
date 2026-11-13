@@ -24,7 +24,7 @@ public partial class DtPipeMcpTools
 {
 
     [McpServerTool(Name = "list-providers")]
-    [System.ComponentModel.Description("List available data source providers, writers, and transformers in dtpipe, each with what it does")]
+    [System.ComponentModel.Description("List available data source providers, writers, transformers and stream processors in dtpipe, each with what it does. A stream processor (what a branch with 'ref' runs) lists the YAML key that selects it.")]
     public string ListProviders()
     {
         // Names alone force a caller to open every component's help to find the one it needs.
@@ -36,6 +36,17 @@ public partial class DtPipeMcpTools
         {
             readers = adapters.Where(a => a.Roles.Contains("reader")).Select(a => new { name = a.Name, description = a.Description }).ToList(),
             transformers = _mcpHelpService.Transformers().Select(t => new { name = t.Name, description = t.Description }).ToList(),
+            // A processor is what a branch with 'ref' runs, selected by a provider-options key: a
+            // different concept from a transformer, so it has its own list and its own shape.
+            processors = _mcpHelpService.Processors().Select(p => new
+            {
+                name = p.Name,
+                description = p.Description,
+                yamlKey = $"provider-options.{p.YamlKey}",
+                cli = p.CliFlags,
+                from = p.Streams,
+                @ref = p.Lookups,
+            }).ToList(),
             writers = adapters.Where(a => a.Roles.Contains("writer")).Select(a => new { name = a.Name, description = a.Description }).ToList()
         }, new JsonSerializerOptions { WriteIndented = true });
     }

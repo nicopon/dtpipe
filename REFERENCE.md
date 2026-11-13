@@ -1521,7 +1521,7 @@ dtpipe mcp
 
 | Tool Name | Parameters | Description |
 |:---|:---|:---|
-| `list-providers` | *(none)* | List all registered data readers, transformers, and writers |
+| `list-providers` | *(none)* | List all registered data readers, transformers, stream processors (with the YAML key that selects each), and writers |
 | `inspect` | `input`, `query?` | Inspect data source schema or auto-discover database tables if query is omitted |
 | `preview-data` | `input`, `limit?`, `query?` | Preview sample data rows (default: 5 rows) |
 | `validate-yaml-job` | `yamlContent` | Validate a YAML job without running it: syntax, topology, provider-option keys, and every transformer built as the engine builds it |
