@@ -167,6 +167,22 @@ public sealed class StudioAgentTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_job_the_validation_refuses_is_refused_before_the_person_is_shown_a_card()
+    {
+        const string unknownKey = "main:\n  source:\n    type: generate\n  output: \"csv:out.csv\"\n";
+        var llm = new ScriptedLlm(Calls("save-job", new { path = "new.yaml", yamlContent = unknownKey }));
+        await StartAsync(llm);
+
+        await TurnAsync("save it");
+        var status = await UntilAsync(Idle);
+
+        Assert.False(Pending(status), "a card was shown for a job the validation refuses");
+        Assert.False(File.Exists(Path.Combine(_dir, "new.yaml")));
+        Assert.Contains("validate-yaml-job", llm.LastToolAnswer());
+        Assert.Contains("source", llm.LastToolAnswer());
+    }
+
+    [Fact]
     public async Task A_file_changed_between_the_card_and_the_answer_is_not_overwritten()
     {
         File.WriteAllText(Path.Combine(_dir, "job.yaml"), Job);

@@ -193,7 +193,10 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   editor alone (// @ts-check), no tool runs them]`
 - **The agent writes a job through the page's paths, after a card, and no target at all.** `--llm-provider` gives the
   studio a `StudioAgent` (one conversation, in memory, a turn in the background read by polling `GET /api/agent?after=N`)
-  over `StudioAgentTools`: dtpipe's tools as `McpToolProvider` offers them (F1) and the studio's own. `save-job` takes the
+  over `StudioAgentTools`: dtpipe's tools as `McpToolProvider` offers them (F1) and the studio's own. `save-job` first asks
+  `validate-yaml-job` (the tool's own check, never a second validator) and answers its refusal, with no card and no write,
+  because composing cards keeps a branch no card describes as written, an option key the engine does not know included; a job
+  in which a branch references a brick skips the check, as the page's own save does. It then takes the
   model's text apart and composes it back (`Decompose`, `Compose`) and writes it with `WriteJob` against the hash read when
   the card was made; it waits for `POST /api/agent/answer` (`AskAsync`), with no delay: no answer, no write, and Stop, a new
   conversation or the quit ends the wait. No tool runs a job for real: that is the page's `Write targets…`, which the role

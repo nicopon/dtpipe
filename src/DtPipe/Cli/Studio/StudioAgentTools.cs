@@ -1,6 +1,7 @@
 using System.Text.Json;
 using DtPipe.Cli.Agent;
 using DtPipe.Cli.Mcp;
+using DtPipe.Jobs;
 
 namespace DtPipe.Cli.Studio;
 
@@ -52,11 +53,44 @@ internal sealed class StudioAgentTools : IAgentToolProvider
             case "readjob":
                 return ToolResult.FromJson(await _server.AgentReadJobAsync(Arg(args, "path"), ct));
             case "savejob":
-                return ToolResult.FromJson(await _server.AgentSaveJobAsync(Arg(args, "path"), Arg(args, "yamlContent") ?? Arg(args, "yaml"), ct));
+                {
+                    var yaml = Arg(args, "yamlContent") ?? Arg(args, "yaml");
+                    if (await RefusalOfInvalidJobAsync(yaml, ct) is { } refusal) return ToolResult.FromJson(refusal);
+                    return ToolResult.FromJson(await _server.AgentSaveJobAsync(Arg(args, "path"), yaml, ct));
+                }
         }
         if (!_inner.RunsPipeline(toolName)) return await _inner.InvokeToolAsync(toolName, args, ct);
         using (await _server.TakeSlotAsync("The agent's dry-run", ct))
             return await _inner.InvokeToolAsync(toolName, args, ct);
+    }
+
+    /// <summary>
+    /// The refusal of a job <c>validate-yaml-job</c> refuses, before the person is shown a card for it: composing cards keeps a
+    /// branch no card describes as written, an option key the engine does not know included, so the card alone would offer to
+    /// write a file no run can read. The check is the tool's own, never a second validator. A job in which a branch still
+    /// references a brick is the engine's to refuse at its run, as the page's own save lets it through. Null: nothing to refuse.
+    /// </summary>
+    private async Task<string?> RefusalOfInvalidJobAsync(string? yaml, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(yaml) || !_inner.GetToolDefinitions().Any(t => McpToolReflector.Normalise(t.Name) == "validateyamljob"))
+            return null;
+        try { if (BrickRef.In(JobYaml.Parse(yaml)).Count > 0) return null; }
+        catch (Exception ex) when (ex is FormatException or YamlDotNet.Core.YamlException) { /* the check below reports it */ }
+
+        var verdict = await _inner.InvokeToolAsync("validate-yaml-job", JsonSerializer.SerializeToElement(new { yamlContent = yaml }), ct);
+        using var doc = JsonDocument.Parse(verdict.Content);
+        var root = doc.RootElement;
+        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("success", out var ok) || ok.ValueKind != JsonValueKind.False)
+            return null;
+
+        var reasons = root.TryGetProperty("errors", out var errors) && errors.ValueKind == JsonValueKind.Array
+            ? string.Join(" ", errors.EnumerateArray().Select(e => e.GetString()))
+            : root.TryGetProperty("error", out var one) ? one.GetString() : "";
+        return JsonSerializer.Serialize(new
+        {
+            error = "Nothing was shown to the person and nothing was written: 'validate-yaml-job' refuses this job. " + reasons
+                + " Change the job, check it with 'validate-yaml-job', then call 'save-job' again.",
+        });
     }
 
     private static string? Arg(JsonElement args, string name) =>
