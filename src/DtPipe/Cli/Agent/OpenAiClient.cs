@@ -176,7 +176,7 @@ public class OpenAiClient : ILlmClient, IStreamingLlmClient
         List<ChatMessage> messages,
         List<ToolDefinition> tools,
         ILlmStreamObserver observer,
-        int numCtx = 16384,
+        int numCtx = AgentOptions.DefaultNumCtx,
         double temperature = 0.7,
         int? seed = null,
         CancellationToken ct = default)

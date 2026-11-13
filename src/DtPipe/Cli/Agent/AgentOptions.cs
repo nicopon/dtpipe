@@ -16,7 +16,16 @@ public sealed class AgentOptions
     /// The agent prompt carries the tool catalogue plus a growing transcript, so the provider's
     /// own small default (4k) is not enough; going much higher mainly costs prefill time and
     /// VRAM.</summary>
-    public const int DefaultNumCtx = 16384;
+    public const int DefaultNumCtx = 32768;
+
+    /// <summary>Share of the window, as the provider reported its use, from which the older messages
+    /// are folded into the facts block for the rest of the conversation. A tool answer of a few
+    /// thousand tokens still fits above it.</summary>
+    public const double CompactFrom = 0.70;
+
+    /// <summary>Share of the window from which the person is told it is nearly full. The provider
+    /// drops the start of a prompt that overflows without saying so.</summary>
+    public const double WarnFrom = 0.90;
 
     /// <summary>
     /// Sampling temperature. 0 is greedy decoding, which is where a weak or heavily quantized

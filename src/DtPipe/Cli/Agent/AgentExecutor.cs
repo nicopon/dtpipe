@@ -35,6 +35,20 @@ public class AgentExecutor
     /// </summary>
     public AgentQuestion? PendingQuestion { get; private set; }
 
+    /// <summary>
+    /// The window's use told the person: the loop folded the older messages, or the window is nearly
+    /// full and nothing more can be folded. Raised on the turn's thread, at most once of each kind per turn.
+    /// </summary>
+    public event Action<string>? ContextNotice;
+
+    // The prompt and the answer of the last call, as the provider reported them: what the next prompt
+    // starts from. Zero until a provider reports one, and always zero for a provider with no window to read.
+    private int _lastWindowUse;
+    // Once the window ran short the conversation stays folded: the use the provider reports is that of
+    // the folded prompt, so reading it again would unfold the messages and send the next call over the line.
+    private bool _foldedByUse;
+    private bool _toldFolded, _toldFull;
+
     private long _turnTokens;
     private readonly Stopwatch _turnClock = new();
     private readonly AgentTrace? _trace;
@@ -105,6 +119,7 @@ public class AgentExecutor
 
         _turnClock.Restart();
         _turnTokens = 0;
+        _toldFolded = _toldFull = false;
 
         var primary = await RunPlanningLoopAsync(Messages, availableTools, model, baseUrl, options, maxIterations, view, stop, ct);
         LastTurnOutcome = primary.Outcome;
@@ -116,6 +131,43 @@ public class AgentExecutor
             ProducedPlan: !string.IsNullOrWhiteSpace(primary.Yaml), Tokens: _turnTokens, ClosingWords: primary.ClosingWords);
         _trace?.Verdict(summary);
         return summary;
+    }
+
+    /// <summary>
+    /// The messages of the next call. The count folds the conversation as it always did; the window's use
+    /// folds it earlier, from <see cref="AgentOptions.CompactFrom"/> of what the provider reads, and
+    /// <see cref="AgentOptions.WarnFrom"/> tells the person when folding is no longer enough. Only a
+    /// provider that takes a window (<c>num_ctx</c>) has one to read.
+    /// </summary>
+    private List<ChatMessage> FitWindow(List<ChatMessage> messages, AgentOptions opts)
+    {
+        int window = _llmClient.ProviderName == "ollama" ? opts.NumCtx : 0;
+        if (window > 0 && _lastWindowUse >= AgentOptions.CompactFrom * window) _foldedByUse = true;
+
+        var fitted = _windowManager.Compact(messages, ContextStore, force: _foldedByUse);
+        if (window <= 0 || _lastWindowUse < AgentOptions.CompactFrom * window) return fitted;
+
+        string use = $"{_lastWindowUse:N0} of {window:N0} tokens";
+        if (_lastWindowUse >= AgentOptions.WarnFrom * window)
+        {
+            if (!_toldFull)
+            {
+                _toldFull = true;
+                Announce($"The model's context is nearly full ({use}): past it the provider drops the start of the conversation without saying so. Start a new conversation, or raise the window.");
+            }
+        }
+        else if (!_toldFolded && fitted.Count < messages.Count)
+        {
+            _toldFolded = true;
+            Announce($"The model's context is at {use}: the older messages are folded into the facts the agent keeps (schemas, samples, errors).");
+        }
+        return fitted;
+    }
+
+    private void Announce(string text)
+    {
+        _trace?.Context(text);
+        ContextNotice?.Invoke(text);
     }
 
     /// <summary>Outcome of one run of the planning loop, including why it stopped.</summary>
@@ -178,7 +230,7 @@ public class AgentExecutor
             string? currentThinking = null;
             LlmUsage? currentUsage = null;
 
-            var compactedMessages = _windowManager.Compact(messages, ContextStore);
+            var compactedMessages = FitWindow(messages, opts);
 
             LlmResponse response;
             try
@@ -209,6 +261,7 @@ public class AgentExecutor
             }
 
             _turnTokens += response.Usage?.CompletionTokens ?? 0;
+            if (response.Usage is { PromptTokens: > 0 } used) _lastWindowUse = used.PromptTokens + used.CompletionTokens;
 
             if (!string.IsNullOrEmpty(response.Error))
             {

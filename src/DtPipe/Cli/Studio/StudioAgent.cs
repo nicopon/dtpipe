@@ -68,6 +68,7 @@ internal sealed class StudioAgent : IAsyncDisposable
     {
         var executor = new AgentExecutor(_tools, _setup.Client, trace: _setup.Trace);
         executor.Trajectory.StepAdded += step => { lock (_gate) { _log.Add(StepEntry(step)); OfferPlan(step); Meter(step); } };
+        executor.ContextNotice += text => Log(new { kind = "notice", text });
         return executor;
     }
 

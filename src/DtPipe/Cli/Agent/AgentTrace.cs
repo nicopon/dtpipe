@@ -155,6 +155,14 @@ public sealed class AgentTrace : IDisposable
             ["completionTokens"] = step.Usage?.CompletionTokens,
         });
 
+    /// <summary>What the loop told the person about the window's use, in the turn it happened in.</summary>
+    public void Context(string text)
+    {
+        int turn;
+        lock (_gate) turn = _turn;
+        Write(new Dictionary<string, object?> { ["kind"] = "context", ["turn"] = turn, ["text"] = text });
+    }
+
     /// <summary>What the human watching made of it — the only ground truth an interactive run has.</summary>
     public void Note(string text)
         => Write(new Dictionary<string, object?> { ["kind"] = "note", ["turn"] = _turn, ["text"] = Safe(text) });

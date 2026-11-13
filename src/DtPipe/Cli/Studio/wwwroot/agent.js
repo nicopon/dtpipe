@@ -139,6 +139,7 @@ async function follow(yaml) {
 
 function entryView(entry) {
   if (entry.kind === "user") return el("div", { class: "msg user" }, entry.text);
+  if (entry.kind === "notice") return el("div", { class: "verdict warn" }, entry.text);
   if (entry.kind === "verdict") {
     return el("div", { class: `verdict ${entry.status === "completed" ? "good" : "warn"}` },
       [STATUS_LABEL[entry.status] || entry.status, entry.reason, entry.tools, entry.duration].filter(Boolean).join(" · "));

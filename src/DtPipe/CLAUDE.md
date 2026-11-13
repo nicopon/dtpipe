@@ -240,7 +240,11 @@ Hardening invariants — fail-closed, non-negotiable:
 - **F2 Guardrails** — `ISqlSafetyPolicy` (destructive verbs / network) + `IApprovalGate`;
   `execute-yaml-job` writes only with `apply` + approval + a clean check, and the agent is never
   offered it (F1).
-- **F4 Non-destructive context** — fact cache + `ConversationWindowManager.Compact`.
+- **F4 Non-destructive context** — fact cache + `ConversationWindowManager.Compact`, which folds on the
+  message count and, once the use the provider reports reaches `AgentOptions.CompactFrom` of `num_ctx`, stays
+  folded for the conversation. `AgentExecutor.ContextNotice` tells the person (studio notice, trace `context`),
+  and a window nearly full is told even when nothing more can be folded: the provider drops the start of an
+  overflowing prompt in silence. `[CI: AgentContextWindowTests, ConversationWindowManagerTests]`
 - **F5 Every call of a turn runs** — the calls that run no pipeline in parallel (`Task.WhenAll`), then
   the tools marked `[RunsPipeline]` one at a time, in the order the model emitted them; results keep
   the turn's order. The set is reflected off the attribute, never listed; a tool that only parses,
