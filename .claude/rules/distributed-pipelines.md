@@ -137,7 +137,7 @@ the control plane, over each replica's node channel; TransportR carries the data
   sink brick (which holds the column) and its source brick: a change refuses the run by name. A launch beside a run of the same
   pipeline is refused, never queued, once a cursor exists. A value is substituted into the source's SQL, so `CursorValues` is the one
   rule the node, the coordinator and the route apply. `BrickRules` admits `cursor` on a sink, never `state`, never `cursor` on a source
-  (the half of a `dtpipe split` cut that reads advances a cursor before the sink has written), and refuses a `cursor://` token that names a
+  (a fragment that reads advances a cursor before the sink has written), and refuses a `cursor://` token that names a
   file. `[CI: Server.Tests CursorRunTests, CursorRoutesTests, CursorRulesTests; Hosting.Tests FragmentCursorsTests] [local: validate_doc_examples.sh]`
   `[unchecked: an older node, which ignores the value it is handed]` Detail: `src/DtPipe.Coordinator.Server/CLAUDE.md`.
 - **The coordinator issues the tokens of the identities a key verifies, and trusts them by their issuer like any other.**

@@ -5,8 +5,8 @@ namespace DtPipe.PipelineNode.Tests;
 /// (<c>--from X --ref Y --sql</c>). Both producers emit <c>generate:</c>
 /// rows (a deterministic <c>GenerateIndex</c> column, no database needed), joined 1:1 on it so the
 /// witness needs no fixture data of its own. The consumer job is hand-built via
-/// <c>--export-job</c> rather than derived from <c>dtpipe split</c>, which only ever cuts a single
-/// linear job at one point and never produces a two-producer join.
+/// <c>--export-job</c> rather than derived from a single job, which <see cref="SplitFixture"/> cuts at
+/// one point into one producer and one consumer, never a two-producer join.
 /// </summary>
 internal sealed class JoinFixture : IDisposable
 {

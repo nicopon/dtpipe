@@ -1,10 +1,10 @@
 namespace DtPipe.PipelineNode.Tests;
 
 /// <summary>
-/// A job cut into a producer/consumer pair by the real <c>dtpipe split</c>, plus the witness CSV a
-/// single unsplit run of the same job produces — the comparison every round-trip guard checks
-/// against. <see cref="ConsumerJobPath"/> is rewritten to write <see cref="SplitCsvPath"/> rather
-/// than <see cref="WitnessCsvPath"/>, which the exported job would otherwise reuse.
+/// A producer/consumer pair of fragments meeting on <c>arrow:-</c>, plus the witness CSV a single
+/// unsplit run of the same job produces — the comparison every round-trip guard checks against.
+/// <c>extraArgs</c> are the stages the producer runs and the witness runs too; the consumer only
+/// writes <see cref="SplitCsvPath"/>, so the two CSV files differ by path alone.
 /// </summary>
 internal sealed class SplitFixture : IDisposable
 {
@@ -15,24 +15,18 @@ internal sealed class SplitFixture : IDisposable
     public required int RowCount { get; init; }
     private DirectoryInfo Dir { get; init; } = null!;
 
-    public static SplitFixture Create(int rowCount, int cutAt = 0, params string[] extraArgs)
+    public static SplitFixture Create(int rowCount, params string[] extraArgs)
     {
         var dir = Directory.CreateTempSubdirectory("pnode-guard-");
         var witnessCsv = Path.Combine(dir.FullName, "witness.csv");
         var splitCsv = Path.Combine(dir.FullName, "split.csv");
-        var jobPath = Path.Combine(dir.FullName, "full.yaml");
+        var producerPath = Path.Combine(dir.FullName, "frag-producer.yaml");
+        var consumerPath = Path.Combine(dir.FullName, "frag-consumer.yaml");
 
-        var generateInput = $"generate:{rowCount}";
-        string[] readerArgs = ["--input", generateInput, .. extraArgs, "--output", $"csv:{witnessCsv}"];
-        DtPipeCli.Run(readerArgs);
-        DtPipeCli.Run([.. readerArgs, "--export-job", jobPath]);
-
-        var outPrefix = Path.Combine(dir.FullName, "frag");
-        DtPipeCli.Run("split", jobPath, "--at", cutAt.ToString(), "--out", outPrefix, "--acknowledge");
-
-        var producerPath = $"{outPrefix}-producer.yaml";
-        var consumerPath = $"{outPrefix}-consumer.yaml";
-        File.WriteAllText(consumerPath, File.ReadAllText(consumerPath).Replace(witnessCsv, splitCsv));
+        string[] producerArgs = ["--input", $"generate:{rowCount}", .. extraArgs];
+        DtPipeCli.Run([.. producerArgs, "--output", $"csv:{witnessCsv}"]);
+        DtPipeCli.Run([.. producerArgs, "--output", "arrow:-", "--export-job", producerPath]);
+        DtPipeCli.Run("--input", "arrow:-", "--output", $"csv:{splitCsv}", "--export-job", consumerPath);
 
         return new SplitFixture
         {

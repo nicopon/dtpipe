@@ -152,7 +152,7 @@ public static class ConnectionStringSanitizer
     /// <para>
     /// It answers about the text <b>as written</b>. A caller that has already interpolated its
     /// <c>${{…}}</c> tokens has no references left for this to recognise, and every value looks
-    /// literal; <c>dtpipe split</c> therefore classifies the verbatim job, not the one it ran.
+    /// literal; a caller classifies the verbatim job (<c>JobCutter.Inspect</c>), not the one it ran.
     /// </para>
     /// </summary>
     public static bool CarriesLiteralSecret(string? input)

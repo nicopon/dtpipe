@@ -42,5 +42,5 @@ coordinator's library. Details: [REFERENCE.md](../REFERENCE.md#studio-dtpipe-stu
 
 ---
 
-`dtpipe split` offers the points where a job can be cut in two:
-[REFERENCE.md](../REFERENCE.md#offering-the-points-a-job-could-be-cut-at).
+How a fragment's boundary is bound to a run is in the
+[reference](../REFERENCE.md#binding-a-fragments-boundary).

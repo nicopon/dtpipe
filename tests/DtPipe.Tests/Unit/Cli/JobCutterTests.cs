@@ -9,12 +9,11 @@ using Xunit;
 namespace DtPipe.Tests.Unit.Cli;
 
 /// <summary>
-/// What <c>dtpipe split --at</c> puts on each side of the cut.
+/// What a cut puts on each side of it, and what stops a job from being cut.
 ///
 /// <para>
-/// The stages the cut moves come from a sample run, which needs a binary and lives in
-/// <c>validate_split.sh</c>; what is decidable here is where each <i>value</i> of the job lands,
-/// and that is the half a wrong answer leaks a credential from.
+/// What is decidable here is where each <i>value</i> of the job lands, and that is the half a wrong
+/// answer leaks a credential from.
 /// </para>
 /// </summary>
 public class JobCutterTests
@@ -24,6 +23,9 @@ public class JobCutterTests
 
     private static CutResult Cut(Dictionary<string, JobDefinition> jobs, int at, string alias = "main")
         => JobCutter.Cut(jobs, alias, at, Readers, Writers);
+
+    private static CutInspection Inspect(Dictionary<string, JobDefinition> jobs, string alias = "main")
+        => JobCutter.Inspect(jobs, alias, Readers, Writers);
 
     private static Dictionary<string, JobDefinition> Job(JobDefinition job, string alias = "main")
         => new(StringComparer.OrdinalIgnoreCase) { [alias] = job };
@@ -169,7 +171,7 @@ public class JobCutterTests
     }
 
     [Fact]
-    public void A_Diagnostic_Path_Reaches_Neither_Half_And_Is_Listed_For_It()
+    public void A_Diagnostic_Path_Reaches_Neither_Half()
     {
         var job = new JobDefinition
         {
@@ -182,9 +184,6 @@ public class JobCutterTests
 
         Assert.Null(result.Producer["main"].MetricsPath);
         Assert.Null(result.Consumer["main"].MetricsPath);
-
-        var dropped = result.Placements.Where(p => p.Side == CutSide.Dropped).Select(p => p.Key).ToList();
-        Assert.Contains("metrics-path", dropped);
     }
 
     // ── Provider options follow the component that owns them ─────────────────
@@ -205,7 +204,7 @@ public class JobCutterTests
 
         var result = Cut(Job(job), at: 0);
 
-        Assert.Empty(result.UnplaceableOptionBlocks);
+        Assert.Empty(Inspect(Job(job)).UnplaceableOptionBlocks);
         Assert.Equal(new[] { "duck" }, result.Producer["main"].ProviderOptions!.Keys);
         Assert.Equal(new[] { "csv" }, result.Consumer["main"].ProviderOptions!.Keys);
     }
@@ -228,7 +227,7 @@ public class JobCutterTests
 
         var result = Cut(Job(job), at: 0);
 
-        Assert.Empty(result.UnplaceableOptionBlocks);
+        Assert.Empty(Inspect(Job(job)).UnplaceableOptionBlocks);
         Assert.Equal(new[] { "csv-reader" }, result.Producer["main"].ProviderOptions!.Keys);
         Assert.Equal(new[] { "csv-writer" }, result.Consumer["main"].ProviderOptions!.Keys);
     }
@@ -246,9 +245,7 @@ public class JobCutterTests
             },
         };
 
-        var result = Cut(Job(job), at: 0);
-
-        Assert.Equal(new[] { "csv" }, result.UnplaceableOptionBlocks);
+        Assert.Equal(new[] { "csv" }, Inspect(Job(job)).UnplaceableOptionBlocks);
     }
 
     [Fact]
@@ -266,9 +263,7 @@ public class JobCutterTests
             },
         };
 
-        var result = Cut(Job(job), at: 0);
-
-        Assert.Equal(new[] { "postgres" }, result.UnplaceableOptionBlocks);
+        Assert.Equal(new[] { "postgres" }, Inspect(Job(job)).UnplaceableOptionBlocks);
     }
 
     // ── The secrets gate ─────────────────────────────────────────────────────
@@ -282,7 +277,7 @@ public class JobCutterTests
             Output = "csv:out.csv",
         };
 
-        Assert.Equal(new[] { "main.input" }, Cut(Job(job), at: 0).Literals);
+        Assert.Equal(new[] { "main.input" }, Inspect(Job(job)).Literals);
     }
 
     [Fact]
@@ -294,7 +289,7 @@ public class JobCutterTests
             Output = "csv:Path=out.csv;Token=${{keyring://ci}}",
         };
 
-        Assert.Empty(Cut(Job(job), at: 0).Literals);
+        Assert.Empty(Inspect(Job(job)).Literals);
     }
 
     [Fact]
@@ -308,7 +303,7 @@ public class JobCutterTests
             ["b"] = new JobDefinition { Input = "pg:Host=db;Password=hunter2" },
         };
 
-        Assert.Equal(new[] { "b.input" }, Cut(jobs, at: 0, alias: "a").Literals);
+        Assert.Equal(new[] { "b.input" }, Inspect(jobs, alias: "a").Literals);
     }
 
     [Fact]
@@ -324,23 +319,7 @@ public class JobCutterTests
             },
         };
 
-        Assert.Equal(new[] { "main.provider-options.duck.init-sql" }, Cut(Job(job), at: 0).Literals);
-    }
-
-    // ── What the acknowledgement shows ───────────────────────────────────────
-
-    [Fact]
-    public void A_Connection_Is_Redacted_Where_The_Placement_Is_Built()
-    {
-        var job = new JobDefinition
-        {
-            Input = "pg:Host=db;Username=u;Password=${{PGPASSWORD}}",
-            Output = "csv:out.csv",
-        };
-
-        var input = Assert.Single(Cut(Job(job), at: 0).Placements, p => p.Key == "input");
-        Assert.DoesNotContain("PGPASSWORD", input.Display);
-        Assert.Contains("Host=db", input.Display);
+        Assert.Equal(new[] { "main.provider-options.duck.init-sql" }, Inspect(Job(job)).Literals);
     }
 
     // ── Stubs ────────────────────────────────────────────────────────────────

@@ -32,7 +32,7 @@ public static class BrickRules
     private const string RunnerHint = "a data node only reads and writes, and everything between belongs on a runner";
 
     // What a branch that only reads or writes may carry: where it reads and writes, and the engine
-    // settings that bound how many rows or bytes move (dtpipe split writes them on every branch). A key
+    // settings that bound how many rows or bytes move (an exported job writes them on every branch). A key
     // that computes (transformers, ref) or touches the node's disk (checkpoint, state, a log or metrics path)
     // is not on the list, so a key dtpipe adds later is refused until someone decides. The one exception
     // is a sink's cursor column (CursorKey): the file that keeps it is the node's own, never the brick's.

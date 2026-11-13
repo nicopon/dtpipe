@@ -7,7 +7,7 @@ namespace DtPipe.Cli.Pipeline;
 
 /// <summary>
 /// Substitutes --bind-input/--bind-output onto matching branches' Input/Output, wiring a
-/// run-specific location into the 'arrow:-' boundary a fragment (<c>dtpipe split</c>) declares.
+/// run-specific location into the 'arrow:-' boundary a fragment declares.
 /// Applied on the job dictionary, indexed by alias, before <see cref="PipelineValidator"/>: a
 /// bound fragment then passes through exactly the same rules as a complete job.
 /// </summary>

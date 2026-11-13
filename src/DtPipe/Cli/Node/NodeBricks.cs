@@ -48,7 +48,7 @@ internal static class NodeBricks
 
     /// <summary>
     /// A brick's version is the hash of its text, so a credential written into it would let anyone who sees the version test
-    /// guesses offline. Every scalar is judged with the vocabulary <c>dtpipe split</c> uses on a job, as written: a
+    /// guesses offline. Every scalar is judged with the vocabulary <c>JobCutter</c> uses on a job, as written: a
     /// <c>${{NAME}}</c> or <c>keyring://</c> reference passes, a value does not. Best-effort by construction, in both directions: a
     /// credential under a key the vocabulary does not know passes, and a query that compares a column named like one
     /// (<c>token_count = 5</c>) is refused.

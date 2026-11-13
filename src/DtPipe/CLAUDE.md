@@ -254,7 +254,7 @@ Mandatory MCP directives:
 A process runs one pipeline at a time (`.claude/rules/engine-invariants.md`), so a run started beside another waits for
 it at `JobExecutor.ExecuteAsync`, behind `JobService.ExecutePipelineAsync`. The agent orders its own runs before they reach that gate
 (F5); `dtpipe mcp` relies on the gate alone, since the SDK handles a client's requests concurrently. `JobRunner` is the only caller-facing way to run a resolved job
-(MCP's sample and real write, `split`, `contract`, the studio): it arms a `RunReports` for the run
+(MCP's sample and real write, `contract`, the studio): it arms a `RunReports` for the run
 through `SampleReportCollector.Begin`, around the whole `ExecutePipelineAsync`, and returns a
 `RunOutcome` (exit code, branch failures, reports, checkpoint keys). A caller that answers a model words
 a failed run through `RunOutcome.FailureText` alone (the sample and the real write of `execute-yaml-job`

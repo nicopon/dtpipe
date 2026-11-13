@@ -2,7 +2,7 @@ namespace DtPipe.PipelineNode.Tests;
 
 /// <summary>
 /// A three-fragment chain (A produces, B relays untouched, C consumes), plus the witness CSV a
-/// single unsplit run of the same source produces. <c>dtpipe split</c> only cuts a job into a
+/// single unsplit run of the same source produces. <see cref="SplitFixture"/> builds only a
 /// producer/consumer pair, so the middle fragment is a plain hand-written <c>arrow:- -&gt; arrow:-</c>
 /// passthrough rather than a second cut - there is no transformer stage to cut it at either side of.
 /// A chain exercises three fragments, a middle one dying mid-flow, and the other two reported as

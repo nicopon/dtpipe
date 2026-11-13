@@ -693,10 +693,10 @@ command line (`--no-stats`, `--log`, `--strict-bindings`, `--export-job`, `--cur
 | `--bind-compression-level N` | Level of that codec; needs `--bind-compression`. Default: the codec's own |
 | `--edges-only` | Refuse every reader and writer that is not an `arrow:-` edge, and run `--sql` without external access |
 
-A fragment written by `dtpipe split` keeps the boundary its text names — a branch whose input or
-output is exactly `arrow:-` — and a single shell pipe wires a two-process chain without either
-flag. Beyond one edge per direction (a fragment with two links, or two producers feeding a join),
-name where each `arrow:-` actually is for this run:
+A fragment keeps the boundary its text names — a branch whose input or output is exactly
+`arrow:-` — and a single shell pipe wires a two-process chain without either flag. Beyond one
+edge per direction (a fragment with two links, or two producers feeding a join), name where each
+`arrow:-` actually is for this run:
 
 ```
 dtpipe --job anonymiser.yaml --bind-input anonymiser=/run/42/in --bind-output anonymiser=/run/42/out
@@ -1164,37 +1164,6 @@ Exit `0` when the new contract still satisfies a consumer the old one satisfied,
 
 A decimal with no declared width is written as `decimal128:38:18` with the field metadata
 `Apache.Arrow.Serialization:decimal-width = undeclared`.
-
-#### Offering the points a job could be cut at
-
-```bash
-dtpipe split producer.yaml
-dtpipe split producer.yaml --branch orders --rows 100
-```
-
-Lists one candidate per stage (`0` is the reader, `1..n` the steps in order), with the schema that
-would cross and the cost: `free` for a columnar stage, `two bridges` for a row stage. The schemas
-come from a sample run. A job with several branches reading a source needs `--branch`.
-
-#### Making the cut
-
-```bash
-dtpipe split producer.yaml --at 1 --out orders
-dtpipe split producer.yaml --at 1 --out orders --acknowledge
-dtpipe --job orders-producer.yaml | dtpipe --job orders-consumer.yaml
-```
-
-| Flag | |
-|:---|:---|
-| `--at <k>` | Cut after stage `k`: the producer keeps stages `1..k`, the consumer the rest |
-| `--out <prefix>` | Writes `<prefix>-producer.yaml` and `<prefix>-consumer.yaml`, meeting on `arrow:-` |
-| `--acknowledge` | Write the files. Without it, the placement is printed and the exit code is `1` |
-
-The source, cursor, `--limit` and sampling go to the producer; the target, `--prefix` and
-`--checkpoint` to the consumer; a `provider-options` block follows the component it configures,
-and a block neither end owns stops the cut. `--metrics-path` goes to neither. A secret written in
-full stops the cut, naming where it is: replace it with `${{ENV_VAR}}` or `${{keyring://alias}}`.
-The halves keep every `${{…}}` as written.
 
 ### Sessions
 
