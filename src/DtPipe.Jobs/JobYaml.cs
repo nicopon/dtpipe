@@ -1,5 +1,3 @@
-using System.Text.Json;
-using System.Text.Json.Nodes;
 using YamlDotNet.Core;
 using YamlDotNet.Core.Events;
 using YamlDotNet.RepresentationModel;
@@ -124,32 +122,8 @@ public static class JobYaml
             ? seq.Children.OfType<YamlMappingNode>().ToList()
             : [];
 
-    /// <summary>
-    /// A YAML tree from JSON: how a brick's branch, declared in a node's JSON file, and a designer
-    /// step's transformers reach the job. Every JSON scalar becomes a plain YAML scalar with its
-    /// text; a multi-line string becomes a literal block, so a SQL query stays readable.
-    /// </summary>
-    public static YamlNode FromJson(JsonNode? node) => node switch
-    {
-        JsonObject o => new YamlMappingNode(o.Select(kv => new KeyValuePair<YamlNode, YamlNode>(new YamlScalarNode(kv.Key), FromJson(kv.Value)))),
-        JsonArray a => new YamlSequenceNode(a.Select(FromJson)),
-        JsonValue v when v.GetValueKind() == JsonValueKind.String => Text(v.GetValue<string>()),
-        JsonValue v => new YamlScalarNode(v.ToJsonString()),
-        _ => new YamlScalarNode("~"),
-    };
-
     public static YamlScalarNode Text(string value) =>
         new(value) { Style = value.Contains('\n') ? ScalarStyle.Literal : ScalarStyle.Any };
-
-    /// <summary>The reverse of <see cref="FromJson"/>: every scalar comes back as a string.</summary>
-    public static JsonNode? ToJson(YamlNode node) => node switch
-    {
-        YamlMappingNode m => new JsonObject(m.Children.Select(kv => new KeyValuePair<string, JsonNode?>(((YamlScalarNode)kv.Key).Value!, ToJson(kv.Value)))),
-        YamlSequenceNode s => new JsonArray(s.Children.Select(ToJson).ToArray()),
-        YamlScalarNode { Value: "~" or null } => null,
-        YamlScalarNode s => JsonValue.Create(s.Value),
-        _ => null,
-    };
 
     /// <summary>Environment variables a job text resolves through <c>${{NAME}}</c>: the names of <see cref="VariableTokens"/>.</summary>
     public static IReadOnlyList<string> Variables(string text) =>

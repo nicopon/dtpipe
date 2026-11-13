@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using YamlDotNet.RepresentationModel;
@@ -137,7 +138,7 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
                     if (step.Transformers is not { Count: > 0 }) warnings.Add($"'{step.Alias}' has no transformer yet: it passes its rows through.");
                     branch = new YamlMappingNode();
                     if (from.Count > 0) branch.Add(JobKeys.From, string.Join(',', from));
-                    if (step.Transformers is { Count: > 0 }) branch.Add("transformers", JobYaml.FromJson(step.Transformers));
+                    if (step.Transformers is { Count: > 0 }) branch.Add("transformers", TransformersYaml(step.Transformers));
                     joinable[step.Alias!] = StepKinds.Transform;
                     break;
 
@@ -341,7 +342,7 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
         {
             if (!middleKeys.Contains("transformers"))
                 return source is not null || sink is not null ? null : NoCard(alias);
-            return new DesignStep(alias, StepKinds.Transform, From: from, Transformers: JobYaml.ToJson(branch["transformers"]) as JsonArray);
+            return new DesignStep(alias, StepKinds.Transform, From: from, Transformers: TransformersJson(branch["transformers"]) as JsonArray);
         }
         if (source is null && rest.SetEquals(["sql"]) && middleKeys.Contains(JobKeys.From) && middleKeys.IsSubsetOf([JobKeys.From, JobKeys.Ref])
             && JobYaml.Mapping(JobYaml.Mapping(branch, JobKeys.ProviderOptions)!, "sql") is { } sql
@@ -546,6 +547,27 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
 
     private static string Indent(string text) =>
         string.Join('\n', text.Replace("\r\n", "\n").Split('\n').Select(l => "  " + l));
+
+    // A Transform card's transformers cross the page's edge as JSON, the page's own structure, and these two are their only
+    // conversion. A scalar is its text both ways, as dtpipe reads a transformer's settings: a JSON null is the empty text,
+    // which dtpipe reads the same, and the text ~ comes back as ~, never as a null. A multi-line string becomes a literal
+    // block, so a script stays readable.
+    private static YamlNode TransformersYaml(JsonNode? node) => node switch
+    {
+        JsonObject o => new YamlMappingNode(o.Select(kv => new KeyValuePair<YamlNode, YamlNode>(new YamlScalarNode(kv.Key), TransformersYaml(kv.Value)))),
+        JsonArray a => new YamlSequenceNode(a.Select(TransformersYaml)),
+        JsonValue v when v.GetValueKind() == JsonValueKind.String => JobYaml.Text(v.GetValue<string>()),
+        JsonValue v => new YamlScalarNode(v.ToJsonString()),
+        _ => JobYaml.Text(""),
+    };
+
+    private static JsonNode? TransformersJson(YamlNode node) => node switch
+    {
+        YamlMappingNode m => new JsonObject(m.Children.Select(kv => new KeyValuePair<string, JsonNode?>(((YamlScalarNode)kv.Key).Value!, TransformersJson(kv.Value)))),
+        YamlSequenceNode s => new JsonArray(s.Children.Select(TransformersJson).ToArray()),
+        YamlScalarNode s => JsonValue.Create(s.Value ?? ""),
+        _ => null,
+    };
 
     [GeneratedRegex("^[A-Za-z][A-Za-z0-9_-]*$")]
     private static partial Regex AliasPattern();
