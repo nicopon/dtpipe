@@ -95,6 +95,13 @@ internal static class ToolError
     /// </summary>
     private static string ShapeHint(string reason)
     {
+        // A list or a map where the loader reads one string: the 'input:' and 'output:' of a branch,
+        // which a caller writes as a list of source objects. The error names the type, never the key.
+        if (reason.EndsWith("into type String", StringComparison.Ordinal))
+            return ". A branch's 'input:' and 'output:' are each one string, '<adapter-prefix>:<source>', "
+                 + "never a list or a map; an adapter's settings go under 'provider-options:'. "
+                 + "Call 'help' for the full shape.";
+
         if (!reason.Contains("JobDefinition", StringComparison.Ordinal)) return string.Empty;
 
         // A key the loader could not place is a different mistake from a shape it could not read:

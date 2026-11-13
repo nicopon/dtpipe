@@ -70,6 +70,20 @@ public class ToolErrorTests
         Assert.DoesNotContain("The top level of a job", described);
     }
 
+    /// <summary>
+    /// A caller that writes 'input:' as a list of source objects is told only that a String could not be
+    /// read: the error names the type, never the key, so it resubmits the same shape.
+    /// </summary>
+    [Fact]
+    public void A_List_Where_A_String_Is_Read_Says_What_Input_And_Output_Are()
+    {
+        var described = ToolError.Describe(Yaml(
+            "No node deserializer was able to deserialize the node into type String", line: 3, column: 5));
+
+        Assert.Contains("'input:' and 'output:' are each one string", described);
+        Assert.Contains("provider-options", described);
+    }
+
     /// <summary>The hint belongs to that one failure; every other message stays as it is.</summary>
     [Fact]
     public void Another_Failure_Gets_No_Shape_Hint()
