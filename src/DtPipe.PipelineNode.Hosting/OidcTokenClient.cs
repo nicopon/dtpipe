@@ -21,14 +21,43 @@ internal sealed class TokenRefusedException(string clientId, string provider, st
 /// until shortly before it expires; <c>fresh</c> asks for a new one, which is what TransportR's retry
 /// after a 401 needs. The provider is <c>Oidc:Authority</c> when given, else the one the coordinator's protected resource metadata names;
 /// its token endpoint comes from its discovery document, read once. The client is <c>Oidc:ClientId</c> when given, else the node's name, and
-/// its secret <c>Oidc:ClientSecret</c>, read once when the client is made (<see cref="SecretReference"/>). What the token entitles the node
+/// its secret <c>Oidc:ClientSecret</c> or <c>Oidc:ClientSecretFile</c>, read once when the client is made (<see cref="SecretReference"/>), or what a provider gives each time a token is requested. What the token entitles the node
 /// to is decided by the coordinator, never here.
 /// </summary>
 internal sealed class OidcTokenClient(NodeOidcOptions options, string nodeName, string coordinatorUrl) : IDisposable
 {
     private static readonly TimeSpan Margin = TimeSpan.FromMinutes(2);
 
-    private readonly string _secret = SecretReference.Read(options.ClientSecret, "DtPipeNode:Oidc:ClientSecret");
+    private readonly Func<CancellationToken, ValueTask<string>> _secret = SecretOf(options);
+
+    // A value or a file is read once, now: a start that cannot read it stops by the setting's name. A provider is asked each time a
+    // token is requested, so a rotated key is the one a 401's retry presents. What it fails with is kept as the inner exception, out
+    // of the message.
+    private static Func<CancellationToken, ValueTask<string>> SecretOf(NodeOidcOptions options)
+    {
+        if (options.ClientSecretProvider is { } provider)
+            return async ct =>
+            {
+                string secret;
+                try
+                {
+                    secret = await provider(ct);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    throw new InvalidOperationException($"The Oidc client secret provider failed: {ex.GetType().Name}.", ex);
+                }
+                return string.IsNullOrEmpty(secret) ? throw new InvalidOperationException("The Oidc client secret provider returned an empty secret.") : secret;
+            };
+        var value = string.IsNullOrEmpty(options.ClientSecretFile)
+            ? SecretReference.Read(options.ClientSecret, "DtPipeNode:Oidc:ClientSecret")
+            : SecretReference.ReadFile(options.ClientSecretFile, "DtPipeNode:Oidc:ClientSecretFile");
+        return _ => ValueTask.FromResult(value);
+    }
 
     private sealed record Discovery([property: JsonPropertyName("token_endpoint")] string TokenEndpoint);
 
@@ -46,9 +75,9 @@ internal sealed class OidcTokenClient(NodeOidcOptions options, string nodeName, 
 
     public string ClientId => string.IsNullOrWhiteSpace(options.ClientId) ? nodeName : options.ClientId;
 
-    public async Task<string> GetAsync(bool fresh = false)
+    public async Task<string> GetAsync(bool fresh = false, CancellationToken ct = default)
     {
-        await _gate.WaitAsync();
+        await _gate.WaitAsync(ct);
         try
         {
             if (!fresh && _token is not null && DateTimeOffset.UtcNow < _expires - Margin) return _token;
@@ -58,7 +87,7 @@ internal sealed class OidcTokenClient(NodeOidcOptions options, string nodeName, 
             {
                 ["grant_type"] = "client_credentials",
                 ["client_id"] = ClientId,
-                ["client_secret"] = _secret,
+                ["client_secret"] = await _secret(ct),
             };
             if (!string.IsNullOrWhiteSpace(options.Scope)) form["scope"] = options.Scope;
             using var response = await _http.PostAsync(_tokenEndpoint, new FormUrlEncodedContent(form));

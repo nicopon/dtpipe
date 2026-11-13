@@ -82,6 +82,19 @@ public sealed class DtPipeNodeBuilder
     }
 
     /// <summary>
+    /// Takes the node's secret at the identity provider from <paramref name="provider"/> (an environment variable, a secret manager,
+    /// a vault), asked each time the node requests a token: a key the host rotates is presented by the next request, a retry after
+    /// a 401 included. The text it returns is used as it is. It replaces <c>Oidc:ClientSecret</c> and <c>Oidc:ClientSecretFile</c>,
+    /// which are then left unset.
+    /// </summary>
+    public DtPipeNodeBuilder UseClientSecret(Func<CancellationToken, ValueTask<string>> provider)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+        Services.PostConfigure<DtPipeNodeOptions>(o => o.Oidc.ClientSecretProvider = provider);
+        return this;
+    }
+
+    /// <summary>
     /// Replaces the check a data node makes of a fragment before it runs it. The host's own word, like
     /// <see cref="FragmentPolicy"/>: nothing the coordinator sends reaches it. The node announces the
     /// <see cref="NodeAnnouncement.RawFragments"/> capability.

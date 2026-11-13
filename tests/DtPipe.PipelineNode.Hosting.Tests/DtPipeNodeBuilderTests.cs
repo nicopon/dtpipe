@@ -139,6 +139,31 @@ public class DtPipeNodeBuilderTests
         var error = await Assert.ThrowsAsync<OptionsValidationException>(() => host.StartAsync(TestContext.Current.CancellationToken));
         Assert.Contains("DtPipeNode: Name is required.", error.Failures);
         Assert.Contains("DtPipeNode: CoordinatorUrl must be an absolute URL.", error.Failures);
-        Assert.Contains("DtPipeNode: Oidc:ClientSecret is required.", error.Failures);
+        Assert.Contains("DtPipeNode: Oidc:ClientSecret is required (or Oidc:ClientSecretFile, or a secret provider).", error.Failures);
+    }
+
+    [Fact]
+    public void The_secret_comes_from_one_source_a_value_a_file_or_a_provider()
+    {
+        static DtPipeNodeOptions Resolve(Action<NodeOidcOptions> secret, Action<DtPipeNodeBuilder>? builder = null)
+        {
+            var services = new ServiceCollection();
+            var node = services.AddDtPipeNode(o =>
+            {
+                o.Name = "crm";
+                o.CoordinatorUrl = "http://coordinator:8080";
+                secret(o.Oidc);
+            });
+            builder?.Invoke(node);
+            return services.BuildServiceProvider().GetRequiredService<IOptions<DtPipeNodeOptions>>().Value;
+        }
+
+        Assert.Equal("secret", Resolve(o => o.ClientSecret = "secret").Oidc.ClientSecret);
+        Assert.Equal("/run/secrets/crm", Resolve(o => o.ClientSecretFile = "/run/secrets/crm").Oidc.ClientSecretFile);
+        Assert.NotNull(Resolve(_ => { }, node => node.UseClientSecret(_ => ValueTask.FromResult("secret"))).Oidc.ClientSecretProvider);
+
+        var both = Assert.Throws<OptionsValidationException>(() => Resolve(o => { o.ClientSecret = "secret"; o.ClientSecretFile = "/run/secrets/crm"; }));
+        Assert.Contains("DtPipeNode: Oidc:ClientSecret, Oidc:ClientSecretFile and a secret provider are exclusive: set one.", both.Failures);
+        Assert.Throws<OptionsValidationException>(() => Resolve(o => o.ClientSecret = "secret", node => node.UseClientSecret(_ => ValueTask.FromResult("other"))));
     }
 }

@@ -25,6 +25,19 @@ public sealed class NodeOidcOptions
     /// <summary>The client's secret, or <c>@path</c> to the file that holds it (a coordinator's key, mounted in a container), read once at start.</summary>
     public string ClientSecret { get; set; } = "";
 
+    /// <summary>
+    /// The path of a file that holds the secret, read once at start. For a secret given as text, <see cref="ClientSecret"/>;
+    /// for one a secret manager holds, <see cref="ClientSecretProvider"/>.
+    /// </summary>
+    public string ClientSecretFile { get; set; } = "";
+
+    /// <summary>
+    /// Gives the secret each time the node requests a token, so a key the host rotates is the one the next request presents. Not
+    /// a setting: a host sets it in code, or through <see cref="DtPipeNodeBuilder.UseClientSecret"/>. The text it returns is used
+    /// as it is, so a secret may begin with <c>@</c>.
+    /// </summary>
+    public Func<CancellationToken, ValueTask<string>>? ClientSecretProvider { get; set; }
+
     /// <summary>Space-separated scopes to ask for, if the provider needs any.</summary>
     public string? Scope { get; set; }
 }
@@ -113,7 +126,10 @@ public sealed class DtPipeNodeOptions
         if (string.IsNullOrWhiteSpace(Name)) yield return "Name is required.";
         if (!Uri.TryCreate(CoordinatorUrl, UriKind.Absolute, out _)) yield return "CoordinatorUrl must be an absolute URL.";
         if (!string.IsNullOrWhiteSpace(Oidc.Authority) && !Uri.TryCreate(Oidc.Authority, UriKind.Absolute, out _)) yield return "Oidc:Authority must be an absolute URL.";
-        if (string.IsNullOrEmpty(Oidc.ClientSecret)) yield return "Oidc:ClientSecret is required.";
+        var secretSources = new[] { Oidc.ClientSecret, Oidc.ClientSecretFile }.Count(s => !string.IsNullOrEmpty(s))
+            + (Oidc.ClientSecretProvider is null ? 0 : 1);
+        if (secretSources == 0) yield return "Oidc:ClientSecret is required (or Oidc:ClientSecretFile, or a secret provider).";
+        if (secretSources > 1) yield return "Oidc:ClientSecret, Oidc:ClientSecretFile and a secret provider are exclusive: set one.";
         if (string.IsNullOrWhiteSpace(DtPipe)) yield return "DtPipe is required.";
         if (!ArrowCompressionValues.Contains(ArrowCompression?.Trim().ToLowerInvariant() ?? ""))
             yield return $"ArrowCompression '{ArrowCompression}' is unknown. Expected one of: {string.Join(", ", ArrowCompressionValues)}.";

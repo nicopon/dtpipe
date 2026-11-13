@@ -107,4 +107,97 @@ public sealed class KeyTokenTests
             Directory.Delete(dir, recursive: true);
         }
     }
+    private static async Task WithKeyedCoordinatorAsync(Func<string, string, Task> body)
+    {
+        var port = KestrelCoordinator.FreePort();
+        var url = $"http://127.0.0.1:{port}";
+        var state = Path.Combine(Path.GetTempPath(), "key-token-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            using var coordinator = new KestrelCoordinator(url, state);
+            coordinator.UseKestrel(port);
+            coordinator.StartServer();
+            var rights = coordinator.Services.GetRequiredService<RightsStore>();
+            rights.AddIdentity(new Identity("edge", "edge", "", ["crm"]) { Auth = new IdentityAuth(AuthModes.Key, []) });
+            var (key, _) = rights.AddKey("edge", null, null);
+            await body(url, key.Reveal());
+        }
+        finally
+        {
+            if (Directory.Exists(state)) Directory.Delete(state, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task A_provider_is_asked_for_each_token_so_a_rotated_key_is_the_one_a_retry_presents()
+    {
+        await WithKeyedCoordinatorAsync(async (url, key) =>
+        {
+            var asked = 0;
+            // The first answer is a key the coordinator does not know (the one before the rotation); the next is the key it holds.
+            using var tokens = new OidcTokenClient(new NodeOidcOptions
+            {
+                Authority = url,
+                ClientSecretProvider = _ => ValueTask.FromResult(Interlocked.Increment(ref asked) == 1 ? ClearKey.New("edge").Reveal() : key),
+            }, "edge", url);
+
+            await Assert.ThrowsAsync<TokenRefusedException>(() => tokens.GetAsync());
+            Assert.NotEmpty(await tokens.GetAsync(fresh: true));
+            Assert.Equal(2, asked);
+        });
+    }
+
+    [Fact]
+    public async Task A_provider_that_fails_or_answers_nothing_stops_the_token_without_its_detail_in_the_message()
+    {
+        await WithKeyedCoordinatorAsync(async (url, _) =>
+        {
+            using var failing = new OidcTokenClient(new NodeOidcOptions
+            {
+                Authority = url,
+                ClientSecretProvider = _ => throw new HttpRequestException("vault answered: secret-in-the-detail"),
+            }, "edge", url);
+            var failed = await Assert.ThrowsAsync<InvalidOperationException>(() => failing.GetAsync());
+            Assert.Contains("HttpRequestException", failed.Message);
+            Assert.DoesNotContain("secret-in-the-detail", failed.Message);
+            Assert.IsType<HttpRequestException>(failed.InnerException);
+
+            using var empty = new OidcTokenClient(new NodeOidcOptions { Authority = url, ClientSecretProvider = _ => ValueTask.FromResult("") }, "edge", url);
+            Assert.Contains("empty secret", (await Assert.ThrowsAsync<InvalidOperationException>(() => empty.GetAsync())).Message);
+        });
+    }
+
+    [Fact]
+    public async Task A_provider_secret_that_begins_with_an_at_sign_is_text_and_not_a_path()
+    {
+        await WithKeyedCoordinatorAsync(async (url, _) =>
+        {
+            using var tokens = new OidcTokenClient(new NodeOidcOptions { Authority = url, ClientSecretProvider = _ => ValueTask.FromResult("@not-a-file") }, "edge", url);
+
+            // Refused as a wrong key by the coordinator: it was sent, and no file was looked for.
+            await Assert.ThrowsAsync<TokenRefusedException>(() => tokens.GetAsync());
+        });
+    }
+
+    [Fact]
+    public void A_secret_file_setting_names_itself_in_a_failure()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "node-secret-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var file = Path.Combine(dir, "secret");
+            File.WriteAllText(file, " s3cret\n");
+            new OidcTokenClient(new NodeOidcOptions { ClientSecretFile = file }, "edge", "http://127.0.0.1:1").Dispose();
+
+            var missing = Assert.Throws<InvalidOperationException>(
+                () => new OidcTokenClient(new NodeOidcOptions { ClientSecretFile = Path.Combine(dir, "absent") }, "edge", "http://127.0.0.1:1"));
+            Assert.Contains("DtPipeNode:Oidc:ClientSecretFile names a file that cannot be read", missing.Message);
+            Assert.DoesNotContain(dir, missing.Message);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
 }
