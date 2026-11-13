@@ -73,13 +73,13 @@ public sealed class StudioAgentTests : IAsyncLifetime
         new LlmResponse(new ChatMessage("assistant", "", null,
             [new ToolCall("c1", tool, JsonSerializer.SerializeToElement(args))]), true, null);
 
-    private async Task StartAsync(ScriptedLlm? llm)
+    private async Task StartAsync(ScriptedLlm? llm, AgentTrace? trace = null)
     {
         var services = new ServiceCollection();
         Program.ConfigureServices(services);
         _server = await StudioServer.StartAsync(new StudioFolder(_dir), 0, new StudioTools(
             StudioEngines.Real(services.BuildServiceProvider()), new DesignService(IBrickLookup.None), [], [], new InMemorySecretsManager(),
-            Agent: llm is null ? null : new StudioAgentSetup(llm, "http://127.0.0.1:1", "m", new McpToolProvider(McpCatalogue.Tools()))), Ct);
+            Agent: llm is null ? null : new StudioAgentSetup(llm, "http://127.0.0.1:1", "m", new McpToolProvider(McpCatalogue.Tools()), trace)), Ct);
     }
 
     private async Task<(HttpStatusCode Status, JsonElement Body)> CallAsync(HttpMethod method, string path, object? body = null)
@@ -121,6 +121,39 @@ public sealed class StudioAgentTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, status);
         Assert.False(body.GetProperty("enabled").GetBoolean());
         Assert.Equal(HttpStatusCode.NotFound, (await CallAsync(HttpMethod.Post, "/api/agent/turn", new { prompt = "x" })).Status);
+    }
+
+    [Fact]
+    public async Task A_verdict_on_a_turn_reaches_the_trace_only_while_there_is_one()
+    {
+        var path = Path.Combine(_dir, "trace.jsonl");
+        var trace = AgentTrace.Open(path, out _);
+        await StartAsync(new ScriptedLlm(), trace);
+
+        await TurnAsync("hello");
+        var status = await UntilAsync(Idle);
+        var turn = status.GetProperty("entries").EnumerateArray().Last(e => e.GetProperty("kind").GetString() == "verdict").GetProperty("turn").GetInt32();
+
+        Assert.Equal(HttpStatusCode.NoContent, (await CallAsync(HttpMethod.Post, "/api/agent/feedback", new { turn, rating = "down" })).Status);
+        Assert.Equal(HttpStatusCode.NoContent, (await CallAsync(HttpMethod.Post, "/api/agent/feedback", new { turn, rating = "comment", text = "wrong tool" })).Status);
+        Assert.Equal(HttpStatusCode.BadRequest, (await CallAsync(HttpMethod.Post, "/api/agent/feedback", new { turn, rating = "comment" })).Status);
+        Assert.Equal(HttpStatusCode.BadRequest, (await CallAsync(HttpMethod.Post, "/api/agent/feedback", new { turn = turn + 1, rating = "up" })).Status);
+
+        trace!.Dispose();
+        var lines = (await File.ReadAllLinesAsync(path, Ct)).Where(l => l.Contains("\"kind\":\"feedback\"")).ToList();
+        Assert.Equal(2, lines.Count);
+        Assert.Contains("\"rating\":\"down\"", lines[0]);
+        Assert.Contains("wrong tool", lines[1]);
+    }
+
+    [Fact]
+    public async Task A_verdict_is_refused_when_the_studio_keeps_no_trace()
+    {
+        await StartAsync(new ScriptedLlm());
+        await TurnAsync("hello");
+        await UntilAsync(Idle);
+
+        Assert.Equal(HttpStatusCode.Conflict, (await CallAsync(HttpMethod.Post, "/api/agent/feedback", new { turn = 1, rating = "up" })).Status);
     }
 
     [Fact]

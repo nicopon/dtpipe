@@ -76,8 +76,9 @@ public sealed partial class StudioServer
                 agent.Answer(answer.Id, answer.Choice, answer.Digest);
                 context.Response.StatusCode = StatusCodes.Status204NoContent;
                 break;
-            case ("POST", "/api/agent/note"):
-                agent.Note((await BodyAsync<AgentNoteRequest>(context)).Text);
+            case ("POST", "/api/agent/feedback"):
+                var feedback = await BodyAsync<AgentFeedbackRequest>(context);
+                agent.Feedback(feedback.Turn, feedback.Rating, feedback.Text);
                 context.Response.StatusCode = StatusCodes.Status204NoContent;
                 break;
             case ("DELETE", "/api/agent"):
@@ -154,5 +155,5 @@ public sealed partial class StudioServer
 
     private sealed record AgentAnswerRequest(string? Id, string? Choice, string? Digest);
 
-    private sealed record AgentNoteRequest(string? Text);
+    private sealed record AgentFeedbackRequest(int Turn, string? Rating, string? Text);
 }

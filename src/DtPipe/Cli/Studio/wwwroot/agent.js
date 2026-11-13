@@ -4,7 +4,7 @@
 // prompt, the open job's cards and the person's answers, and writes no YAML. A write the agent asks for waits for an answer
 // here: nothing is saved or run until the person clicks.
 
-import { $, api, el, fill, status } from "./dom.js";
+import { $, api, el, fill, status, svg } from "./dom.js";
 import { applySizes, bindSplit } from "./designer.js";
 import { invalidate, onZone } from "./render.js";
 import { state } from "./state.js";
@@ -57,17 +57,13 @@ export async function mountAgent(pane, host) {
     el("p", { id: "agent-meter", class: "hint mono", hidden: true, title: "The turn, its step, and the prompt the model read for its last call (what a turn adds to the conversation grows it)" }),
     el("p", { id: "agent-warning", class: "hint warn", hidden: true }),
     el("p", { id: "agent-behind", class: "hint warn", hidden: true }, "You changed the job while the agent worked: its plan is kept below, and replaces your cards only if you apply it."),
-    el("div", { id: "agent-log", class: "agent-log" }),
-    el("div", { id: "agent-now" }),
+    el("div", { id: "agent-log", class: "agent-log" }, el("div", { id: "agent-now" })),
     el("div", { class: "agent-input" },
       el("textarea", { id: "agent-prompt", rows: "3", placeholder: "Ask the agent… (Ctrl+Enter sends)", onkeydown: onPromptKey }),
       el("div", { class: "row" },
         el("span", { class: "hint", title: "The open job goes with every message, and what the agent gives lands on its cards, unsaved" }, "works on the open job"),
         el("button", { id: "agent-send", class: "primary", onclick: () => send() }, "Send"),
-        el("button", { id: "agent-stop", class: "danger", hidden: true, onclick: stop }, "Stop"))),
-    el("div", { id: "agent-note-row", class: "row", hidden: true },
-      el("input", { id: "agent-note", placeholder: "A note for the trace" }),
-      el("button", { class: "small", onclick: note }, "note")));
+        el("button", { id: "agent-stop", class: "danger", hidden: true, onclick: stop }, "Stop"))));
   // Its width is the pane's own: the pointer's distance to the pane's right edge.
   bindSplit(/** @type {HTMLElement} */ (pane.querySelector(".split-agent")), "agent", (e) => pane.getBoundingClientRect().right - e.clientX);
   applySizes();
@@ -94,10 +90,14 @@ async function loadModels() {
  * @param {any} answer @param {boolean} [replay]
  */
 function accept(answer, replay = false) {
-  if (answer.count < shown) { fill($("agent-log")); shown = 0; }
   const log = $("agent-log");
+  if (answer.count < shown) { for (const turn of [...log.getElementsByClassName("turn")]) turn.remove(); shown = 0; }
   following = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
-  for (const entry of answer.entries || []) log.append(entryView(entry));
+  // The live zone follows the last turn: detached while entries are added, put back after.
+  const now = $("agent-now");
+  now.remove();
+  for (const entry of answer.entries || []) turnOf(entry).append(entryView(entry));
+  (lastTurn() ?? log).append(now);
   shown = answer.count;
   if (!replay) for (const entry of answer.entries || []) if (entry.kind === "step" && entry.saved) savedJob(entry.saved);
   if (!replay && answer.job?.yaml && answer.job.revision > appliedRevision) {
@@ -137,12 +137,62 @@ async function follow(yaml) {
   status("the agent's plan is on the cards: save it to keep it", "good");
 }
 
+const lastTurn = () => /** @type {HTMLElement | undefined} */ ([...$("agent-log").getElementsByClassName("turn")].pop());
+
+/** The block a turn's entries go in: a person's message opens one, and stays at the top of the log while that turn scrolls. @param {any} entry */
+function turnOf(entry) {
+  const last = lastTurn();
+  if (last && entry.kind !== "user") return last;
+  const turn = el("section", { class: "turn" });
+  $("agent-log").append(turn);
+  return turn;
+}
+
+const GLYPHS = {
+  up: { label: "Good answer", path: "M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" },
+  down: { label: "Bad answer", path: "M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17" },
+  comment: { label: "Comment on this answer", path: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" },
+};
+
+/** The person's verdict on a turn, written to the trace: a thumb either way, or a comment. Active only while the trace is. @param {number} turn */
+function feedbackView(turn) {
+  /** @type {Record<string, HTMLElement>} */
+  const buttons = {};
+  const input = el("input", { placeholder: "Your comment on this answer", onkeydown: (e) => { if (e.key === "Enter") submit(); } });
+  const form = el("div", { class: "feedback-comment", hidden: true }, input, el("button", { class: "small", onclick: () => submit() }, "Send"));
+  const rate = async (rating) => {
+    if (!(await sendFeedback(turn, rating))) return;
+    buttons.up.classList.toggle("on", rating === "up");
+    buttons.down.classList.toggle("on", rating === "down");
+  };
+  const submit = async () => {
+    if (!input.value.trim() || !(await sendFeedback(turn, "comment", input.value))) return;
+    input.value = "";
+    form.hidden = true;
+    buttons.comment.classList.add("on");
+  };
+  for (const [rating, glyph] of Object.entries(GLYPHS)) {
+    const icon = svg("svg", { viewBox: "0 0 24 24", width: "14", height: "14", fill: "none", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true" });
+    icon.append(svg("path", { d: glyph.path }));
+    buttons[rating] = el("button", {
+      type: "button", class: "icon", "data-label": glyph.label, title: glyph.label, "aria-label": glyph.label,
+      onclick: rating === "comment" ? () => { form.hidden = !form.hidden; if (!form.hidden) input.focus(); } : () => rate(rating),
+    }, icon);
+  }
+  return [el("span", { class: "feedback-icons" }, Object.values(buttons)), form];
+}
+
+async function sendFeedback(turn, rating, text) {
+  try { await api("/api/agent/feedback", { turn, rating, text }); return true; } catch (e) { status(e.message, "bad"); return false; }
+}
+
 function entryView(entry) {
   if (entry.kind === "user") return el("div", { class: "msg user" }, entry.text);
   if (entry.kind === "notice") return el("div", { class: "verdict warn" }, entry.text);
   if (entry.kind === "verdict") {
-    return el("div", { class: `verdict ${entry.status === "completed" ? "good" : "warn"}` },
-      [STATUS_LABEL[entry.status] || entry.status, entry.reason, entry.tools, entry.duration].filter(Boolean).join(" · "));
+    const line = el("div", { class: `verdict ${entry.status === "completed" ? "good" : "warn"}` },
+    [STATUS_LABEL[entry.status] || entry.status, entry.reason, entry.tools, entry.duration].filter(Boolean).join(" · "));
+  return entry.turn ? el("div", { class: "verdict-row" }, line, feedbackView(entry.turn)) : line;
   }
   if (!entry.tool) return el("div", { class: `msg agent${entry.error ? " bad" : ""}` }, entry.text);
   return el("details", { class: `step${entry.error ? " bad" : ""}` },
@@ -163,7 +213,10 @@ function renderAgent() {
   $("agent-behind").hidden = !state.agent.behind;
   $("agent-send").toggleAttribute("disabled", s.busy);
   $("agent-stop").hidden = !s.busy;
-  $("agent-note-row").hidden = !s.trace;
+  for (const button of document.querySelectorAll("#agent-log .feedback-icons button")) {
+    button.toggleAttribute("disabled", !s.trace);
+    button.title = s.trace ? button.dataset.label : `${button.dataset.label}: start the studio with --agent-trace`;
+  }
   fill($("agent-now"),
     s.busy && s.live ? el("div", { class: "live hint" }, el("b", {}, s.live.tool || "the model"), el("pre", {}, s.live.text)) : null,
     s.busy && !s.live && !s.pending ? el("div", { class: "live hint" }, "working…") : null,
@@ -263,11 +316,6 @@ async function reset() {
   poll();
 }
 
-async function note() {
-  const input = /** @type {HTMLInputElement} */ ($("agent-note"));
-  if (!input.value.trim()) return;
-  try { await api("/api/agent/note", { text: input.value }); input.value = ""; } catch (e) { status(e.message, "bad"); }
-}
 
 /** Reads what changed since the last entry shown, again while a turn runs or a card waits. */
 async function poll() {

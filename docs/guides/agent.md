@@ -69,8 +69,9 @@ dtpipe studio ./jobs --llm-provider ollama --agent-trace ./traces/
 ```
 
 The trace records the session as JSON lines: the role prompt, the tools offered, every step and each
-verdict, with connection strings masked. A field in the panel adds your notes to it. It is for
-reading, not for automation.
+verdict, with connection strings masked. Under each answer, a thumb up, a thumb down and a comment
+icon add your verdict to it; they work only with `--agent-trace`. It is for reading, not for
+automation.
 
 ## Pitfalls
 

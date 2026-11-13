@@ -291,7 +291,7 @@ ExecuteYamlJobRealRunTests]`
 
 `--agent-trace <path>` (or `$DTPIPE_AGENT_TRACE`) records a session as JSON lines: what the
 model was **given** (the role prompt, the tool catalogue as offered), every step, each turn's
-verdict, and any note left by the person watching. Keep the first two: without them a wrong tool
+verdict, and the person's verdict on a turn (a thumb or a comment). Keep the first two: without them a wrong tool
 call cannot be told apart from a tool never offered, or one whose description misled.
 
 Never gate on its verdict: a fail-closed criterion over an LLM loop needs an attributable signal this

@@ -233,9 +233,21 @@ main.with-agent { grid-template-columns: 220px minmax(0, 1fr) var(--agent-w, 360
 .agent-head h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0; }
 .agent-head select { flex: 1; min-width: 0; }
 .agent-pane #agent-endpoint { margin: 0; overflow-wrap: anywhere; }
-.agent-log { flex: 1; min-height: 120px; overflow: auto; display: flex; flex-direction: column; gap: 6px; }
+.agent-log { flex: 1; min-height: 120px; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
+.agent-log .turn { display: flex; flex-direction: column; gap: 6px; }
 .agent-log .msg { padding: 6px 8px; border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.agent-log .msg.user { background: var(--code); align-self: flex-end; max-width: 90%; }
+.agent-log .msg.user { background: var(--code); border-left: 3px solid var(--accent); }
+/* A turn's question stays at the top while the turn scrolls; the next turn's takes its place, since each is sticky within its own block. */
+.agent-log .turn > .msg.user { position: sticky; top: 0; z-index: 1; max-height: 6em; overflow: auto; box-shadow: 0 -4px 0 var(--panel); }
+.agent-log .verdict-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.agent-log .verdict-row .verdict { flex: 1; min-width: 0; }
+.feedback-icons { display: inline-flex; gap: 2px; }
+.feedback-icons button.icon { background: none; border: 0; padding: 2px 4px; color: var(--muted); opacity: .7; cursor: pointer; line-height: 0; }
+.feedback-icons button.icon:hover:not(:disabled) { opacity: 1; }
+.feedback-icons button.icon.on { color: var(--accent); opacity: 1; }
+.feedback-icons button.icon:disabled { opacity: .3; cursor: not-allowed; }
+.feedback-comment { flex-basis: 100%; display: flex; gap: 4px; }
+.feedback-comment input { flex: 1; min-width: 0; }
 .agent-log .step summary { cursor: pointer; font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace; }
 .agent-log .verdict { font-size: 12px; }
 .agent-pane pre { max-height: 220px; overflow: auto; background: var(--code); padding: 6px; margin: 4px 0; white-space: pre-wrap; overflow-wrap: anywhere; }

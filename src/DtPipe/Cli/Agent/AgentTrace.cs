@@ -163,9 +163,15 @@ public sealed class AgentTrace : IDisposable
         Write(new Dictionary<string, object?> { ["kind"] = "context", ["turn"] = turn, ["text"] = text });
     }
 
-    /// <summary>What the human watching made of it — the only ground truth an interactive run has.</summary>
-    public void Note(string text)
-        => Write(new Dictionary<string, object?> { ["kind"] = "note", ["turn"] = _turn, ["text"] = Safe(text) });
+    /// <summary>The turn opened last, in the numbering of the file.</summary>
+    public int CurrentTurn { get { lock (_gate) return _turn; } }
+
+    /// <summary>
+    /// What the person watching made of a turn, the only ground truth an interactive session has:
+    /// <paramref name="rating"/> is <c>up</c>, <c>down</c> or <c>comment</c>, and a comment carries its text.
+    /// </summary>
+    public void Feedback(int turn, string rating, string? text)
+        => Write(new Dictionary<string, object?> { ["kind"] = "feedback", ["turn"] = turn, ["rating"] = rating, ["text"] = Safe(text) });
 
     /// <summary>How the turn ended.</summary>
     public void Verdict(TurnSummaryModel summary)

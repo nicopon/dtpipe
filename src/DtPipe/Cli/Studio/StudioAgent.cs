@@ -157,6 +157,9 @@ internal sealed class StudioAgent : IAsyncDisposable
 
     private async Task TurnAsync(string prompt, string model, OpenJob? job, CancellationToken stop)
     {
+        // The number the trace gave this turn, or null when it never opened one: the page rates a turn by it.
+        var before = _setup.Trace?.CurrentTurn ?? 0;
+        int? Traced() => _setup.Trace is { } trace && trace.CurrentTurn > before ? trace.CurrentTurn : null;
         try
         {
             // The open job always goes with the message: the agent works on what the person sees.
@@ -176,7 +179,7 @@ internal sealed class StudioAgent : IAsyncDisposable
             Log(new
             {
                 kind = "verdict",
-                status = summary.Status.ToString().ToLowerInvariant(),
+                turn = Traced(), status = summary.Status.ToString().ToLowerInvariant(),
                 reason = summary.Reason,
                 closing = summary.ClosingWords,
                 tools = summary.ToolSummary,
@@ -186,11 +189,11 @@ internal sealed class StudioAgent : IAsyncDisposable
         }
         catch (OperationCanceledException) when (stop.IsCancellationRequested || _shutdown.IsCancellationRequested)
         {
-            Log(new { kind = "verdict", status = "interrupted", reason = "The turn was stopped." });
+            Log(new { kind = "verdict", turn = Traced(), status = "interrupted", reason = "The turn was stopped." });
         }
         catch (Exception ex)
         {
-            Log(new { kind = "verdict", status = "failed", reason = ConnectionStringSanitizer.Sanitize(ex.Message) });
+            Log(new { kind = "verdict", turn = Traced(), status = "failed", reason = ConnectionStringSanitizer.Sanitize(ex.Message) });
         }
     }
 
@@ -289,11 +292,14 @@ internal sealed class StudioAgent : IAsyncDisposable
         _contextTokens = 0;
     }
 
-    public void Note(string? text)
+    /// <summary>The person's verdict on a turn the trace holds: a thumb, or a comment.</summary>
+    public void Feedback(int turn, string? rating, string? text)
     {
         if (_setup.Trace is not { } trace) throw new StudioRefusal(409, "This studio keeps no agent trace: start it with --agent-trace.");
-        if (string.IsNullOrWhiteSpace(text)) throw new StudioRefusal(400, "A note has a text.");
-        trace.Note(text);
+        if (rating is not ("up" or "down" or "comment")) throw new StudioRefusal(400, "A rating is up, down or comment.");
+        if (rating == "comment" && string.IsNullOrWhiteSpace(text)) throw new StudioRefusal(400, "A comment has a text.");
+        if (turn < 1 || turn > trace.CurrentTurn) throw new StudioRefusal(400, "That turn is not in the trace.");
+        trace.Feedback(turn, rating, rating == "comment" ? text : null);
     }
 
     public async Task<object> ModelsAsync(CancellationToken ct)
