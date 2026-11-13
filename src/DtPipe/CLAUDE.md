@@ -128,13 +128,18 @@ reflex, which unlocks the source side too.
 SQL Server returns `null` for `ReadOnlySessionSql`: `ApplicationIntent=ReadOnly` routes to a replica
 and does not make a session read-only. The report states which guarantee the run had.
 
+`ExportRunState.RunAsync` reads the verdict (`RefuseSourceThatCouldMutate`) between `ReaderFactory.Create`
+and `Reader.OpenAsync`: it needs the SQL of the options and no schema. `PrepareWriterAsync` records the
+run's `Enforcement` afterwards (`ReportSampleEnforcement`), since the dialect that answers it is the
+writer's and the writer is built after the open. A real run reaches neither.
+
 A real run (`execute-yaml-job`, the studio's run) is checked by `JobSqlSafety` on the **parsed** job,
 with the same rule and policy: the SQL of each provider block (a reader's query, a writer's hooks, a
 stream processor's text values) and the network reach of each endpoint, never the YAML text, a key, a
 comment or a transformer option. A real run executes the writer's hooks, so they are classified there.
 The "what is SQL" rule lives once, in `SampleModeSafetyGate.SqlBearingValues`.
 
-`[CI: SampleModeSafetyGateTests, SampleModeDagTests, JobSqlSafetyTests, validate_sample_safety.sh]` `[unchecked: a query that writes
+`[CI: SampleModeSafetyGateTests, SampleModeDagTests, SampleModeRefusalOrderTests, JobSqlSafetyTests, validate_sample_safety.sh]` `[unchecked: a query that writes
 through a function — SELECT my_function() passes a verb scan, hence the server-enforced form]`
 
 ## `dtpipe node`

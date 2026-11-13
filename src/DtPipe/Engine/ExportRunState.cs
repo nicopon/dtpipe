@@ -129,6 +129,11 @@ internal sealed partial class ExportRunState
         Reader = ReaderFactory.Create(Registry);
         try
         {
+            // Opening a reader plays what the source runs on its own (--duck-init), so the verdict
+            // on the SQL the options carry is given before it: a refusal after the open would
+            // report a statement the source had already executed.
+            if (IsSampleMode) RefuseSourceThatCouldMutate();
+
             try
             {
                 await Reader.OpenAsync(ct);

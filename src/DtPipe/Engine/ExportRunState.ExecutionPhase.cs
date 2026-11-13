@@ -31,7 +31,7 @@ internal sealed partial class ExportRunState
         if (IsSampleMode)
         {
             SchemaValidationService.RejectContradictorySettings(writerSchemaSettings);
-            EnforceSampleSafety();
+            ReportSampleEnforcement();
             if (NeutralisesWriter)
             {
                 await PrepareSampleWriterAsync(exportableSchema, ct);
@@ -182,34 +182,47 @@ internal sealed partial class ExportRunState
     }
 
     /// <summary>
-    /// Refuses a sample run whose SOURCE could mutate, and puts the session in read-only mode
-    /// where the engine supports it.
+    /// Refuses a sample run whose SOURCE could mutate, before the reader opens.
     ///
     /// Neutralising the writer says nothing about the reader: DELETE … RETURNING streams rows
-    /// while the server destroys them, and --limit bounds what the client reads, never what was
-    /// already deleted. The verb scan is the floor; the read-only session is the ceiling, and
-    /// the report says which of the two this run actually got.
+    /// while the server destroys them, --limit bounds what the client reads, never what was
+    /// already deleted, and the reader's own init script runs when it opens. The verdict reads
+    /// the SQL the options carry and needs no schema, so it waits for nothing the open produces.
     /// </summary>
-    private void EnforceSampleSafety()
+    private void RefuseSourceThatCouldMutate()
     {
-        var policy = new DtPipe.Cli.Security.DefaultSqlSafetyPolicy();
-        var dialect = (Writer as IHasSqlDialect)?.Dialect ?? (Reader as IHasSqlDialect)?.Dialect;
-
-        var values = DtPipe.Sessions.SampleModeSafetyGate.CollectSqlBearingValues(
-            Registry, ReaderFactory.OptionsType);
-
-        SafetyVerdict = DtPipe.Sessions.SampleModeSafetyGate.Evaluate(
-            policy, new DtPipe.Cli.Security.SqlSafetyOptions(), values, dialect);
+        SafetyVerdict = EvaluateSampleSafety(dialect: null);
 
         if (!SafetyVerdict.Allowed)
             throw new InvalidOperationException(
                 "Sample mode refuses this pipeline: its source could modify data, and neutralising the writer " +
                 "does not prevent that. " + string.Join(" ", SafetyVerdict.Violations));
+    }
 
-        // Where the engine can enforce it, let the server refuse a write rather than trusting a
-        // verb scan — a scan cannot prove a query is read-only.
+    /// <summary>
+    /// Records which guarantee this sample run had. The dialect that answers it is the writer's,
+    /// else the reader's, and the writer is built only after the open; the verdict on the SQL does
+    /// not depend on it, so the refusal never waited for it.
+    /// </summary>
+    private void ReportSampleEnforcement()
+    {
+        var dialect = (Writer as IHasSqlDialect)?.Dialect ?? (Reader as IHasSqlDialect)?.Dialect;
+
+        SafetyVerdict = EvaluateSampleSafety(dialect);
+
+        // Logged, not executed: the statement is not applied to any session here.
         if (dialect?.ReadOnlySessionSql is { } readOnlySql && Reader is IStreamTransformer)
             Logger.LogDebug("[Sample] read-only session statement available: {Sql}", readOnlySql);
+    }
+
+    private DtPipe.Sessions.SampleSafetyVerdict EvaluateSampleSafety(ISqlDialect? dialect)
+    {
+        var policy = new DtPipe.Cli.Security.DefaultSqlSafetyPolicy();
+        var values = DtPipe.Sessions.SampleModeSafetyGate.CollectSqlBearingValues(
+            Registry, ReaderFactory.OptionsType);
+
+        return DtPipe.Sessions.SampleModeSafetyGate.Evaluate(
+            policy, new DtPipe.Cli.Security.SqlSafetyOptions(), values, dialect);
     }
 
     /// <summary>
