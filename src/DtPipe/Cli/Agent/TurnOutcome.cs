@@ -10,8 +10,7 @@ namespace DtPipe.Cli.Agent;
 ///
 /// <see cref="AwaitingUserInput"/> is the odd one out: not a failure, just unfinished. It reports
 /// a non-zero exit like the failures — an agent that could not finish for want of an answer did
-/// not succeed — but interactively it is a pause, not a stop: the user answers and the session
-/// continues.
+/// not succeed — but it is a pause, not a stop: the user answers and the session continues.
 /// </summary>
 public enum TurnOutcome
 {
@@ -44,9 +43,9 @@ public enum TurnOutcome
     CallTookTooLong,
 
     /// <summary>
-    /// The user pressed Esc during a model call on the full-screen surface. The call was
-    /// abandoned, whatever the turn had already done is kept, and the session stays open — so
-    /// this is a soft stop, never the process-wide cancellation that exits 130.
+    /// The person stopped the model call. The call was abandoned, whatever the turn had already
+    /// done is kept, and the session stays open — so this is a soft stop, never the process-wide
+    /// cancellation that exits 130.
     /// </summary>
     UserInterrupted,
 }

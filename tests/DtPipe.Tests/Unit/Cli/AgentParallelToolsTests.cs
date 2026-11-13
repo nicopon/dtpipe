@@ -4,7 +4,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using DtPipe.Cli.Agent;
-using Spectre.Console;
+using DtPipe.Tests.Helpers;
 using Xunit;
 
 namespace DtPipe.Tests.Unit.Cli;
@@ -39,8 +39,7 @@ public class AgentParallelToolsTests
 
         public int CallCount => InvokedNames.Count;
 
-        public List<ToolDefinition> GetToolDefinitions() => new();
-        public List<ToolDefinition> GetToolDefinitions(AgentMode mode) =>
+        public List<ToolDefinition> GetToolDefinitions() =>
             _runDelays.Keys.Concat(new[] { "inspect", "preview-data" }).Select(n => new ToolDefinition(n, "", default)).ToList();
 
         public bool RunsPipeline(string toolName) => _runDelays.ContainsKey(toolName);
@@ -100,12 +99,8 @@ public class AgentParallelToolsTests
         }
     }
 
-    private static AgentExecutor BuildExecutor(IAgentToolProvider tools, ILlmClient llm, out IAnsiConsole console)
-    {
-        console = Spectre.Console.AnsiConsole.Create(new Spectre.Console.AnsiConsoleSettings());
-        var tui = new AgentTui(console);
-        return new AgentExecutor(tools, llm, tui, console);
-    }
+    private static AgentExecutor BuildExecutor(IAgentToolProvider tools, ILlmClient llm)
+        => new(tools, llm);
 
     private static LlmResponse WithToolCalls(string content, params (string id, string name)[] calls)
     {
@@ -128,8 +123,8 @@ public class AgentParallelToolsTests
             new LlmResponse(new ChatMessage("assistant", "done"), true, null)
           });
 
-        var executor = BuildExecutor(provider, llm, out _);
-        await executor.RunTurnAsync("mission", "model", "http://localhost:11434", maxIterations: 5);
+        var executor = BuildExecutor(provider, llm);
+        await executor.TurnAsync("mission", maxIterations: 5);
 
         Assert.Equal(3, provider.CallCount);
         // One "tool" message per call is appended to the conversation.
@@ -148,30 +143,12 @@ public class AgentParallelToolsTests
             new LlmResponse(new ChatMessage("assistant", "done"), true, null)
           });
 
-        var executor = BuildExecutor(provider, llm, out _);
-        // Default options => Sequential = false => parallel.
-        await executor.RunTurnAsync("mission", "model", "http://localhost:11434", new AgentOptions { Sequential = false }, maxIterations: 5);
+        var executor = BuildExecutor(provider, llm);
+        await executor.TurnAsync("mission", maxIterations: 5);
 
         Assert.Equal(3, provider.CallCount);
         // At least two calls overlapped in time, proving parallel execution.
         Assert.True(provider.MaxConcurrentObserved >= 2, $"expected overlap, observed {provider.MaxConcurrentObserved}");
-    }
-
-    [Fact]
-    public async Task Sequential_Does_Not_Overlap_Calls()
-    {
-        var provider = new RecordingToolProvider();
-        var llm = new QueuedLlmClient(new[]
-          {
-            WithToolCalls("reasoning", ("1", "inspect"), ("2", "inspect"), ("3", "inspect")),
-            new LlmResponse(new ChatMessage("assistant", "done"), true, null)
-          });
-
-        var executor = BuildExecutor(provider, llm, out _);
-        await executor.RunTurnAsync("mission", "model", "http://localhost:11434", new AgentOptions { Sequential = true }, maxIterations: 5);
-
-        Assert.Equal(3, provider.CallCount);
-        Assert.Equal(1, provider.MaxConcurrentObserved);
     }
 
     /// <summary>
@@ -191,8 +168,8 @@ public class AgentParallelToolsTests
             new LlmResponse(new ChatMessage("assistant", "done"), true, null)
           });
 
-        var executor = BuildExecutor(provider, llm, out _);
-        await executor.RunTurnAsync("mission", "model", "http://localhost:11434", new AgentOptions { Sequential = false }, maxIterations: 5);
+        var executor = BuildExecutor(provider, llm);
+        await executor.TurnAsync("mission", maxIterations: 5);
 
         Assert.Equal(1, provider.MaxConcurrentRuns);
         Assert.Equal(new[] { "dry-run", "execute-yaml-job" }, provider.FinishedRuns);
@@ -213,8 +190,8 @@ public class AgentParallelToolsTests
             new LlmResponse(new ChatMessage("assistant", "done"), true, null)
           });
 
-        var executor = BuildExecutor(provider, llm, out _);
-        await executor.RunTurnAsync("mission", "model", "http://localhost:11434", new AgentOptions { Sequential = false }, maxIterations: 5);
+        var executor = BuildExecutor(provider, llm);
+        await executor.TurnAsync("mission", maxIterations: 5);
 
         Assert.Equal(5, provider.CallCount);
         Assert.Equal(1, provider.MaxConcurrentRuns);
@@ -234,8 +211,8 @@ public class AgentParallelToolsTests
             new LlmResponse(new ChatMessage("assistant", "done"), true, null)
           });
 
-        var executor = BuildExecutor(provider, llm, out _);
-        await executor.RunTurnAsync("mission", "model", "http://localhost:11434", maxIterations: 5);
+        var executor = BuildExecutor(provider, llm);
+        await executor.TurnAsync("mission", maxIterations: 5);
 
         var toolMessages = executor.Messages.Where(m => m.Role == "tool").ToList();
         Assert.Equal(2, toolMessages.Count);

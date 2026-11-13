@@ -17,7 +17,7 @@ databases, files and object storage, and can anonymize, join, filter and reshape
 | See what a pipeline will do before it does it | [Preview and checkpoints](guides/preview-and-checkpoints.md) |
 | Save a pipeline and run it from CI or every night | [Jobs and production](guides/production.md) |
 | Keep credentials out of the command line | [Secrets](guides/secrets.md) |
-| Let an AI assistant design a pipeline | [The agent](guides/agent.md) |
+| Let an AI assistant drive dtpipe | [MCP server](../REFERENCE.md#model-context-protocol-mcp-server) |
 | Use dtpipe's libraries from .NET code | [dtpipe and .NET](dotnet.md) |
 | Understand an error | [Troubleshooting](troubleshooting.md) |
 

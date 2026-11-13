@@ -24,8 +24,7 @@
 - [Shell Completion](#shell-completion)
 - [Studio](#studio-dtpipe-studio)
 - [Model Context Protocol (MCP) Server](#model-context-protocol-mcp-server)
-- [AI Agent Subcommand](#ai-agent-subcommand-dtpipe-agent)
-- [Agent Guardrails](#agent-guardrails-isqlsafetypolicy--iapprovalgate)
+- [MCP Guardrails](#mcp-guardrails-isqlsafetypolicy--iapprovalgate)
 
 ## Synopsis
 
@@ -611,9 +610,9 @@ dtpipe -i sales.csv -o azure://reports/sales.parquet --azure-connection-string "
   too, over one directory — see [File globs](#file-globs).
 - `https://`, `gs://` and other schemes are **not** claimed by any provider. Reach them through
   the DuckDB engine (`--duck-init "INSTALL httpfs; …"` + `read_parquet(…)` / `COPY … TO …`).
-- Object-storage connection strings count as network access for the agent guardrails: a job using
-  one needs `--allow-network` (see
-  [Agent Guardrails](#agent-guardrails-isqlsafetypolicy--iapprovalgate)).
+- Object-storage connection strings count as network access for the SQL safety policy: a job using
+  one needs the `allowNetwork` argument of `execute-yaml-job` (see
+  [MCP Guardrails](#mcp-guardrails-isqlsafetypolicy--iapprovalgate)).
 - The `httpfs` / `azure` extensions are installed from DuckDB's extension repository on first use,
   so the host needs access to it once (or an extension directory already holding them).
 
@@ -1505,92 +1504,19 @@ dtpipe mcp
 
 ---
 
-### AI Agent Subcommand (`dtpipe agent`)
+### MCP Guardrails (`ISqlSafetyPolicy` / `IApprovalGate`)
 
-```bash
-dtpipe agent [<prompt>] [options]
-```
+`execute-yaml-job` writes nothing unless told to, and refuses when in doubt.
 
-A loop in which a model (local Ollama, or OpenAI with `--provider`) uses the tools above to design
-and validate a pipeline. Guide: [The agent](./docs/guides/agent.md).
-
-On an interactive terminal the session runs full screen: the steps, the plan under construction
-and a transcript, with an input line between turns. `Esc` during a turn cancels the model call and
-keeps the session; `Ctrl-C` ends it with code 130. Elsewhere, or with `--no-tui`, the output
-scrolls, streaming the model's answer token by token on an ANSI terminal.
-
-| Command | Effect |
-|:---|:---|
-| `/exec` | Runs the validated plan through `execute-yaml-job` (a preview unless `--apply`, which asks once more) |
-| `/mode` | Cycles the operating mode |
-| `/save [path]` | Writes the plan's YAML |
-| `/note <text>` | Adds a note to the session trace |
-| `/review` | Moves to the steps list |
-| `/quit` | Leaves |
-
-After a turn, a menu offers a review of the session and, when a validated YAML exists, **Execute
-this plan now**, which runs it without the model. A turn that ends says why: an answer, the
-iteration cap, a failed or silent call, an empty answer, or an interruption.
-
-| Option | Alias | Description | Default |
-|:---|:---|:---|:---|
-| `<prompt>` | `-p`, `--prompt` | Task description for the AI agent | *(Interactive prompt if omitted)* |
-| `--provider` | | LLM provider: `ollama` (local) or `openai` | `ollama` |
-| `--api-key` | | API key for the `openai` provider. Falls back to `DTPIPE_LLM_API_KEY` | *(unset)* |
-| `--model` | `-m` | Model name (e.g. `qwen2.5-coder:7b` for Ollama, `gpt-4o` for OpenAI) | *(Auto-discovered from Ollama)* |
-| `--url` | `-u` | API endpoint URL | `http://localhost:11434` (ollama) · `https://api.openai.com` (openai) |
-| `--max-iterations` | | Maximum loop iterations per turn | `25` |
-| `--llm-timeout` | | Seconds with no token before the turn ends with an error. One call also stops after three times this value | `300` |
-| `--max-output-tokens` | | Tokens one response may generate before it is cut | `4096` |
-| `--no-stream` | | One blocking call per step, no streaming | `false` |
-| `--no-tui` | | Scrolling output instead of the full-screen surface | `false` |
-| `--detail` | | What scrolls per step: `compact`, `peek` (+ a preview of the reasoning), `full` (+ all of it) | `compact` |
-| `--show-thinking` | | Alias for `--detail full` (implied by `DEBUG=1`) | `false` |
-| `--num-ctx` | | Context window to request (Ollama `num_ctx`) | `16384` |
-| `--interactive` | `-i` | Force interactive model selection and prompt entry | `false` |
-| `--mode` | | `plan` designs and validates only; `execute` and `autonomous` may run, through the guardrails | `plan` |
-| `--temperature` | | Sampling temperature. `0` is greedy, and weaker models loop on it | `1` |
-| `--seed` | | Fixed seed for reproducible sampling | `0` |
-| `--repeat` | | Replicate the validated plan N times and report the variance | `1` |
-| `--sequential` | | One tool call at a time instead of independent calls in parallel | `false` |
-| `--trace` | | Record the session as JSON lines (a directory gets a timestamped file). Defaults to `$DTPIPE_AGENT_TRACE` | off |
-| `--mcp-server` | | Drive another MCP server's tools instead of dtpipe's: the command that starts it over stdio | *(unset)* |
-| `--apply` | | Perform a real write | `false` (dry-run) |
-| `--allow-destructive` | | Allow destructive SQL verbs | `false` |
-| `--allow-network` | | Allow network access in SQL | `false` |
-
-#### Driving another MCP server (`--mcp-server`)
-
-```bash
-dtpipe agent -p "list the configured connections" \
-  --mcp-server "sometool mcp" --trace ./traces/ --no-tui
-```
-
-The command is split on spaces and started as a child process; its tools are offered to the model
-in place of dtpipe's, and its handshake instructions become the system message. No dtpipe pipeline
-can run (`/exec` refuses), `--mode` does not filter that catalogue, and dtpipe's `--apply` and
-`--allow-*` flags do not apply to its tools. Use it to compare a server's surface under the same
-loop and trace.
-
----
-
-### Agent Guardrails (`ISqlSafetyPolicy` / `IApprovalGate`)
-
-With no flags, the agent can write nothing: mode `plan`, previews only, destructive SQL and network
-access refused.
-
-- **A write** needs `apply=true` (`--apply`), an approval, and a clean SQL check. A context with
-  nobody to approve, such as the MCP server, denies writes.
+- **A write** needs `apply=true`, an approval, and a clean SQL check. A context with nobody to
+  approve, such as the MCP server, denies writes.
 - **The SQL check** refuses `DROP`, `DELETE`, `TRUNCATE`, `UPDATE`, `ALTER`, `INSERT` and `ATTACH`
-  unless `--allow-destructive`, and `LOAD httpfs` / `LOAD azure` or `read_parquet` / `read_csv` /
-  `read_json` over `http(s)://`, `s3://`, `ftp://` or `gs://` unless `--allow-network`. It reads
+  unless `allowDestructive`, and `LOAD httpfs` / `LOAD azure` or `read_parquet` / `read_csv` /
+  `read_json` over `http(s)://`, `s3://`, `ftp://` or `gs://` unless `allowNetwork`. It reads
   every query, hook and SQL step of the job (`@file` contents included) and each connection
   string; it never reads a key, a comment or a transformer option as SQL.
-- **In plan mode** the tool that writes is not offered to the model at all, and a call to a tool
-  that was not offered is refused, never dispatched.
-- **The trace** (`--trace`) records the launch, the role prompt, the tool catalogue as offered,
-  every step, each verdict and your notes, flushed line by line. Connection-string credentials are
-  blanked, but treat a trace as sensitive. It is a diagnostic, never a gate.
-- **Determinism**: `--temperature 0 --seed N --repeat 3` reports the number of distinct plans
-  minus one; `0` means reproducible.
+- **The CI gate** (`tests/agentic/analyze-traces.sh --gate`, propagated by `run-all.sh --gate`)
+  fails on an unhandled MCP error or a failed mission. A green run is an integration check of the
+  MCP surface under a real model, not a regression gate: the guardrails themselves are covered by
+  the unit suite.
 

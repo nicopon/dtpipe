@@ -8,8 +8,7 @@ namespace DtPipe.Tests.Unit.Cli;
 
 /// <summary>
 /// The DI console writes through a forwarder so
-/// <see cref="Console.SetError"/> — how the agent's full-screen surface holds engine output back
-/// while the toolkit owns the terminal — redirects Spectre too. The forwarder must not shift
+/// <see cref="Console.SetError"/> redirects Spectre too. The forwarder must not shift
 /// Spectre's own capability detection, which keys off whether the writer <em>is</em> a standard
 /// stream; the detection is pinned to a probe against the real stream, so it can't.
 /// </summary>

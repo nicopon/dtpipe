@@ -7,7 +7,7 @@ namespace DtPipe.Cli.Security;
 
 /// <summary>
 /// Classifies a SQL query / SQL-bearing option value for destructive verbs and network
-/// access. Used by the agent guardrails to enforce a fail-closed default: destructive verbs
+/// access. Used by the guardrails to enforce a fail-closed default: destructive verbs
 /// (DROP/DELETE/TRUNCATE/UPDATE/ALTER/INSERT/ATTACH) and network access (LOAD httpfs/azure,
 /// remote read_parquet over http/https/s3/ftp) are denied unless explicitly overridden.
 /// </summary>

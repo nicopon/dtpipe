@@ -4,7 +4,7 @@ using System.Text;
 namespace DtPipe.Cli.Agent;
 
 /// <summary>
-/// Detects a model stuck regenerating the same text over and over — observed on a temperature-0
+/// Detects a model stuck regenerating the same text over and over — observed on a greedy-decoding
 /// run where the thinking channel alternated between two near-identical sentences without end.
 /// Ollama's own <c>repeat_penalty</c> looks back only <c>repeat_last_n</c> tokens (64 by default);
 /// a multi-sentence cycle easily exceeds that window and the built-in penalty never sees it repeat.
@@ -28,8 +28,7 @@ internal sealed class RepetitionGuard
     /// endpoint problem, so it says what to try instead of pointing at the network.</summary>
     public const string DetectedMessage =
         "The model appears to be stuck repeating the same text and was stopped. This often happens " +
-        "with --temperature 0 (fully deterministic decoding) on a weaker or heavily quantized model — " +
-        "retry with a temperature above 0, or try a different model.";
+        "on a weaker or heavily quantized model — retry, or try a different model.";
 
     private readonly StringBuilder _buffer = new();
     private readonly int _windowChars;

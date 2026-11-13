@@ -9,10 +9,10 @@ using Xunit;
 namespace DtPipe.Tests.Unit.Cli;
 
 /// <summary>
-/// A tool call the agent's LLM made must never block on a keypress, even though
-/// dtpipe agent's in-process MCP tools share the same real console/stdin as its own TUI. See the
-/// dry-run interactive-viewer bug this guards against — a manual run where the agent's "dry-run"
-/// tool call launched the keyboard-navigable viewer and waited for Enter.
+/// A tool call the agent's LLM made must never block on a keypress, even though the agent's
+/// in-process MCP tools share the same real console/stdin as the person who started the process.
+/// See the dry-run interactive-viewer bug this guards against — a manual run where the agent's
+/// "dry-run" tool call launched the keyboard-navigable viewer and waited for Enter.
 /// </summary>
 public class NonInteractiveGuardTests
 {

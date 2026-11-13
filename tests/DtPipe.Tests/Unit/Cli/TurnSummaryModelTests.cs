@@ -1,16 +1,13 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using DtPipe.Cli.Agent;
-using Spectre.Console;
 using Xunit;
 
 namespace DtPipe.Tests.Unit.Cli;
 
 /// <summary>
-/// One summary model, two projections. The scrollback table and the
-/// full-screen surface's verdict band both render <see cref="TurnSummaryModel"/>, so the two
-/// surfaces cannot disagree about whether a turn succeeded — and the verdict keeps a single author.
+/// One summary model, read by every host that shows a turn, so no two of them can disagree about
+/// whether a turn succeeded — and the verdict keeps a single author.
 ///
 /// <para>
 /// The status has three states, not two: a turn that stopped to ask the user something neither
@@ -23,58 +20,24 @@ public class TurnSummaryModelTests
     private static readonly Dictionary<string, int> TwoTools =
         new() { ["inspect"] = 2, ["validate-yaml-job"] = 1 };
 
-    private static readonly Dictionary<string, int> NoTools = new();
-
-    private static IAnsiConsole Captured(StringWriter writer)
-    {
-        var console = AnsiConsole.Create(new AnsiConsoleSettings
-        {
-            Out = new AnsiConsoleOutput(writer),
-            Ansi = AnsiSupport.No,
-            ColorSystem = ColorSystemSupport.NoColors,
-            Interactive = InteractionSupport.No,
-        });
-        console.Profile.Width = 120;
-        console.Profile.Height = 40;
-        return console;
-    }
-
-    private static string Render(TurnSummaryModel summary)
-    {
-        var writer = new StringWriter();
-        new AgentTui(Captured(writer)).RenderFinalSummary(summary);
-        return writer.ToString();
-    }
-
-    private static string RenderReport(TurnSummaryModel summary, AgentMode mode,
-        AgentTrajectory? trajectory = null, int maxIterations = 25)
-    {
-        var writer = new StringWriter();
-        new AgentTui(Captured(writer)).ReportTurn(summary, trajectory ?? new AgentTrajectory(), mode, maxIterations);
-        return writer.ToString();
-    }
-
     [Fact]
-    public void A_Completed_Turn_Renders_Every_Row_Of_The_Scrollback_Table()
+    public void A_Completed_Turn_States_Its_Duration_And_Its_Tool_Tally()
     {
         var summary = new TurnSummaryModel(TurnOutcome.Succeeded, 4, TimeSpan.FromSeconds(12.3456), TwoTools);
 
-        var text = Render(summary);
-
-        Assert.Contains("Session Status", text);
-        Assert.Contains("🟢 COMPLETED", text);
-        Assert.Contains("delivered a response", text);
-        Assert.Contains(summary.DurationText, text);
-        Assert.Equal($"{12.3456:F2} seconds", summary.DurationText);
-        Assert.Contains("inspect: 2, validate-yaml-job: 1", text);
+        Assert.Equal($"{12.3456:F2} seconds", summary.DurationText);   // the run's own culture
+        Assert.Equal("inspect: 2, validate-yaml-job: 1", summary.ToolSummary);
+        Assert.Equal(3, summary.TotalToolCalls);
+        Assert.Equal("delivered a response", summary.Reason);
     }
 
     [Fact]
-    public void A_Turn_With_No_Tool_Call_Omits_The_Tool_Row()
+    public void A_Turn_With_No_Tool_Call_Has_No_Tool_Tally()
     {
-        var text = Render(new TurnSummaryModel(TurnOutcome.Succeeded, 1, TimeSpan.FromSeconds(1), new Dictionary<string, int>()));
+        var summary = new TurnSummaryModel(TurnOutcome.Succeeded, 1, TimeSpan.FromSeconds(1), new Dictionary<string, int>());
 
-        Assert.DoesNotContain("Tool Calls", text);
+        Assert.Null(summary.ToolSummary);
+        Assert.Equal(0, summary.TotalToolCalls);
     }
 
     [Theory]
@@ -92,7 +55,6 @@ public class TurnSummaryModelTests
         Assert.Equal(status, summary.Status);
         Assert.Equal(word, summary.StatusWord);
         Assert.Equal(exitCode, summary.ExitCode);
-        Assert.Contains(word, Render(summary));
     }
 
     [Fact]
@@ -105,124 +67,5 @@ public class TurnSummaryModelTests
             Assert.NotEqual(outcome.ToString(), reason);   // never the bare enum name
             Assert.True(reasons.Add(reason), $"{outcome} shares its reason with another outcome");
         }
-    }
-
-    [Fact]
-    public void The_Table_Prints_The_Model_Own_Word_And_Reason()
-    {
-        var summary = new TurnSummaryModel(TurnOutcome.Succeeded, 4, TimeSpan.FromSeconds(12.3456), TwoTools);
-
-        Assert.Contains(summary.StatusWord, Render(summary));
-        Assert.Contains(summary.Reason, Render(summary));
-    }
-
-    // ── R1: AgentTui.ReportTurn is the one place the four-branch verdict sequence lives, so the
-    //    scrollback path and the full-screen session tell the same end of a turn. ──
-
-    [Fact]
-    public void ReportTurn_On_A_Completed_Plan_Turn_Prints_The_Table_Then_The_Plan_Next_Steps()
-    {
-        var summary = new TurnSummaryModel(TurnOutcome.Succeeded, 3, TimeSpan.FromSeconds(4), NoTools, ProducedPlan: true);
-
-        var text = RenderReport(summary, AgentMode.Plan);
-
-        Assert.Contains("Session Status", text);
-        Assert.Contains("Plan ready", text);
-        Assert.DoesNotContain("needs your input", text);
-        Assert.True(text.IndexOf("Session Status", StringComparison.Ordinal)
-            < text.IndexOf("Plan ready", StringComparison.Ordinal),
-            "the summary table is printed before the next-steps line");
-    }
-
-    [Fact]
-    public void ReportTurn_On_A_Completed_Turn_That_Produced_No_Plan_Prints_Only_The_Table()
-    {
-        var summary = new TurnSummaryModel(TurnOutcome.Succeeded, 2, TimeSpan.FromSeconds(1), NoTools, ProducedPlan: false);
-
-        var text = RenderReport(summary, AgentMode.Plan);
-
-        Assert.Contains("Session Status", text);
-        Assert.DoesNotContain("Plan ready", text);
-    }
-
-    [Fact]
-    public void ReportTurn_In_Plan_Mode_Ignores_A_Past_Turns_Plan_On_The_Trajectory()
-    {
-        // The divergence R1 removes: the full-screen session keyed the next-steps line off the
-        // trajectory's last YAML — any earlier turn's — while scrollback keyed it off this turn's.
-        // A turn that produced nothing must not inherit an earlier turn's "plan ready".
-        var trajectory = new AgentTrajectory { LastGeneratedYaml = "jobs:\n  main:\n    input: csv:in.csv\n" };
-        var summary = new TurnSummaryModel(TurnOutcome.Succeeded, 1, TimeSpan.FromSeconds(1), NoTools, ProducedPlan: false);
-
-        var text = RenderReport(summary, AgentMode.Plan, trajectory);
-
-        Assert.DoesNotContain("Plan ready", text);
-    }
-
-    [Fact]
-    public void ReportTurn_On_A_Pending_Question_Prints_The_Question_And_Neither_Failure_Nor_Plan_Lines()
-    {
-        var summary = new TurnSummaryModel(TurnOutcome.AwaitingUserInput, 2, TimeSpan.FromSeconds(3), NoTools,
-            Question: new AgentQuestion("What should the output file be called?"), ProducedPlan: true);
-
-        var text = RenderReport(summary, AgentMode.Plan);
-
-        Assert.Contains("Session Status", text);
-        Assert.Contains("needs your input", text);
-        Assert.Contains("What should the output file be called?", text);
-        Assert.DoesNotContain("Plan ready", text);
-    }
-
-    [Fact]
-    public void ReportTurn_On_A_Failure_Prints_The_Guidance_And_Neither_Question_Nor_Plan_Lines()
-    {
-        var summary = new TurnSummaryModel(TurnOutcome.LlmError, 1, TimeSpan.FromSeconds(1), NoTools, ProducedPlan: true);
-
-        var text = RenderReport(summary, AgentMode.Plan);
-
-        Assert.Contains("Session Status", text);
-        Assert.Contains("The LLM call failed", text);
-        Assert.DoesNotContain("needs your input", text);
-        Assert.DoesNotContain("Plan ready", text);
-    }
-
-    [Fact]
-    public void ReportTurn_Withholds_The_Plan_Next_Steps_Outside_Plan_Mode()
-    {
-        var summary = new TurnSummaryModel(TurnOutcome.Succeeded, 1, TimeSpan.FromSeconds(1), NoTools, ProducedPlan: true);
-
-        var text = RenderReport(summary, AgentMode.Execute);
-
-        Assert.DoesNotContain("Plan ready", text);
-    }
-
-    /// <summary>
-    /// The advice for a degenerate turn names greedy decoding only when the run used it. The
-    /// sentence was written when 0 was the default and asserted "this run used --temperature 0"
-    /// unconditionally; changing the default made it false.
-    /// </summary>
-    [Theory]
-    [InlineData(TurnOutcome.RepetitionDetected)]
-    [InlineData(TurnOutcome.EmptyResponse)]
-    public void Failure_Advice_Names_Greedy_Decoding_Only_When_It_Was_Used(TurnOutcome outcome)
-    {
-        Assert.Contains("--temperature 0", Guidance(outcome, temperature: 0.0));
-        Assert.DoesNotContain("--temperature 0", Guidance(outcome, temperature: 1.0));
-    }
-
-    private static string Guidance(TurnOutcome outcome, double temperature)
-    {
-        var writer = new System.IO.StringWriter();
-        var console = Spectre.Console.AnsiConsole.Create(new Spectre.Console.AnsiConsoleSettings
-        {
-            Ansi = Spectre.Console.AnsiSupport.No,
-            ColorSystem = Spectre.Console.ColorSystemSupport.NoColors,
-            Out = new Spectre.Console.AnsiConsoleOutput(writer)
-        });
-
-        new DtPipe.Cli.Agent.AgentTui(console)
-            .RenderFailureGuidance(outcome, new DtPipe.Cli.Agent.AgentTrajectory(), 25, temperature);
-
-        return writer.ToString();
     }
 }

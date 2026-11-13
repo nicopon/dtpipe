@@ -121,8 +121,9 @@ A reader can mutate: `DELETE … RETURNING`, `… OUTPUT`, `--duck-init`, an `AT
 covered), and `ISqlDialect.ReadOnlySessionSql` lets the server refuse
 instead of a regex guessing.
 
-Never classify writer hooks: they are already suppressed, so refusing them adds no safety and trains
-users to pass `--allow-destructive` by reflex, which unlocks the source side too.
+Never classify writer hooks in a sample: they are already suppressed, so refusing them adds no
+safety and trains whoever unlocks the check (`allowDestructive` of `execute-yaml-job`) to do it by
+reflex, which unlocks the source side too.
 
 SQL Server returns `null` for `ReadOnlySessionSql`: `ApplicationIntent=ReadOnly` routes to a replica
 and does not make a session read-only. The report states which guarantee the run had.
@@ -206,9 +207,10 @@ for the caller of `Compute`, BranchFingerprintTests]`
 
 `dtpipe mcp` (STDIO) exposes schema discovery, validation and execution (`execute-yaml-job` is
 dry-run by default). Tool table: `REFERENCE.md#model-context-protocol-mcp-server`; options:
-`REFERENCE.md#agent-guardrails-isqlsafetypolicy--iapprovalgate`.
-`dtpipe agent` runs an interactive loop against Ollama/OpenAI (`AgentExecutor`, `AgentTui`,
-`OllamaClient`). Agent classes live under `Cli/Agent/`.
+`REFERENCE.md#mcp-guardrails-isqlsafetypolicy--iapprovalgate`. The agent (`AgentExecutor`,
+`OllamaClient`, `OpenAiClient`) lives under `Cli/Agent/`: a loop over a model and the tools of
+`McpToolProvider`, with no command of its own. It names no console and no toolkit: a turn tells its
+host through `ITurnView` and `TurnSummaryModel`, and the host shows them. `[CI: validate_agent_boundary.sh]`
 
 The agentic CI (`.github/workflows/agentic-ci.yml`, `tests/agentic/run-all.sh --gate`, which calls
 `analyze-traces.sh --gate`) fails on an unhandled MCP error or a failed mission; its variance
@@ -218,30 +220,28 @@ a red run does not tell a regression from a bad sample. The unit suite is the au
 for F1–F7.
 
 Hardening invariants — fail-closed, non-negotiable:
-- **F1 Planner/Executor split** — `--mode plan` (default) hides every tool marked `[WritesToTarget]`.
-  The set is reflected off the attribute, never listed. `dry-run` stays unmarked: it runs the real
-  pipeline with the writer neutralised, and the planner's role prompt tells it to call it. The
-  catalogue is not the only guard: `RunPlanningLoopAsync` answers a call to a tool it did not offer
-  (compared through `McpToolReflector.Normalise`, so `_` and `-` agree) with an unknown-tool error
-  and never dispatches it; the provider checks nothing, so `ExecuteValidatedPlanAsync`, the human's
-  go-ahead, still runs. `[CI: AgentModeTests — whole catalogue; AgentExecutorModeTests — the call]`
-- **F2 Guardrails** — `ISqlSafetyPolicy` (destructive verbs / network) + `IApprovalGate`; a write
-  needs `apply` + approval + a clean check.
-- **F3 Determinism** — available, not default: `--temperature 0 --seed N --repeat N`;
-  `DeterminismReport` variance = distinct YAML − 1. Default temperature stays `1`: greedy decoding
-  degenerates weak quantised models. `--seed` keeps a run replayable at any temperature.
+- **F1 No writing tool is offered** — `McpToolProvider` leaves out every tool marked
+  `[WritesToTarget]`. The set is reflected off the attribute, never listed. `dry-run` stays
+  unmarked: it runs the real pipeline with the writer neutralised, and the role prompt tells the
+  model to call it. The catalogue is not the only guard: `RunPlanningLoopAsync` answers a call to a
+  tool it did not offer (compared through `McpToolReflector.Normalise`, so `_` and `-` agree) with
+  an unknown-tool error and never dispatches it; the provider checks nothing.
+  `[CI: AgentCatalogueTests — whole catalogue; AgentExecutorCatalogueTests — the call]`
+- **F2 Guardrails** — `ISqlSafetyPolicy` (destructive verbs / network) + `IApprovalGate`;
+  `execute-yaml-job` writes only with `apply` + approval + a clean check, and the agent is never
+  offered it (F1).
 - **F4 Non-destructive context** — fact cache + `ConversationWindowManager.Compact`.
 - **F5 Every call of a turn runs** — the calls that run no pipeline in parallel (`Task.WhenAll`), then
   the tools marked `[RunsPipeline]` one at a time, in the order the model emitted them; results keep
-  the turn's order, and `--sequential` forces everything serial. The set is reflected off the
-  attribute, never listed; a tool that only parses, validates or reads a source stays unmarked.
-  `[CI: AgentParallelToolsTests, AgentModeTests — whole catalogue]`
+  the turn's order. The set is reflected off the attribute, never listed; a tool that only parses,
+  validates or reads a source stays unmarked.
+  `[CI: AgentParallelToolsTests, AgentCatalogueTests — whole catalogue]`
 - **F6 Single YAML path** — the `yamlContent` tool argument is the sole plan source.
 - **F7 CI gate** — `tests/agentic/analyze-traces.sh --gate` fails on unhandled MCP errors or a failed
   mission. Its variance criterion applies only when `variance_results.jsonl` holds real replication
   data, which the shipped missions do not produce. **Never record a placeholder variance**: a
-  criterion that cannot fire is worse than none. The authoritative signal for F1–F7 is the unit
-  suite (`Unit/Cli/Agent*Tests`, `Unit/Cli/Mcp*Tests`).
+  criterion that cannot fire is worse than none. The authoritative signal for F1, F2 and F4–F7 is the
+  unit suite (`Unit/Cli/Agent*Tests`, `Unit/Cli/Mcp*Tests`).
 
 Mandatory MCP directives:
 1. Reflect help from `[Description]` / `[ComponentHelp]`; never hardcode it. `[unchecked — nothing
@@ -276,10 +276,10 @@ ExecuteYamlJobRealRunTests]`
 
 ### The session trace
 
-`dtpipe agent --trace <path>` (or `$DTPIPE_AGENT_TRACE`) records a session as JSON lines: what the
-model was **given** (the role prompt the mode selected, the tool catalogue as offered), every step,
-each turn's verdict, and any `/note` left by the person watching. Keep the first two: without them a
-wrong tool call cannot be told apart from a tool never offered, or one whose description misled.
+`--agent-trace <path>` (or `$DTPIPE_AGENT_TRACE`) records a session as JSON lines: what the
+model was **given** (the role prompt, the tool catalogue as offered), every step, each turn's
+verdict, and any note left by the person watching. Keep the first two: without them a wrong tool
+call cannot be told apart from a tool never offered, or one whose description misled.
 
 Never gate on its verdict: a fail-closed criterion over an LLM loop needs an attributable signal this
 file does not provide. Arguments and results pass through `ConnectionStringSanitizer`, which blanks

@@ -63,7 +63,6 @@ public class JobService : IRunHost
             new SessionCommand(_console),
             new ContractCommand(_serviceProvider, _console),
             new McpCommand(_serviceProvider),
-            new AgentCommand(_serviceProvider),
             new StudioCommand(_serviceProvider),
             new NodeCommand(_serviceProvider),
             new KeygenCommand(),
@@ -114,10 +113,10 @@ public class JobService : IRunHost
 
     string IRunHost.ChooseSampleBranch(JobDagDefinition dag)
     {
-        // An LLM-driven dry-run (dtpipe agent's in-process MCP call) shares this
-        // process's real console with the agent's own TUI, so the capability check
-        // alone reads as interactive here too — NonInteractiveGuard is the only thing
-        // that tells the two apart (see its doc comment).
+        // An LLM-driven dry-run (an in-process MCP call) shares this process's real console
+        // with the person who started it, so the capability check alone reads as interactive
+        // here too — NonInteractiveGuard is the only thing that tells the two apart (see its
+        // doc comment).
         if (!NonInteractiveGuard.IsSuppressed && _console.Profile.Capabilities.Interactive && !Console.IsOutputRedirected && !Console.IsInputRedirected)
         {
             var prompt = new SelectionPrompt<string>()

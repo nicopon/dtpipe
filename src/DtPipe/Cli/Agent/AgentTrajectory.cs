@@ -28,19 +28,13 @@ public class AgentTrajectory
 
     /// <summary>
     /// Raised on the turn thread once a step is recorded. A diagnostic trace subscribes rather than
-    /// being called at each of the five sites that append one — a site added later would otherwise
-    /// be silently missing from the record.
+    /// being called at each site that appends one — a site added later would otherwise be
+    /// silently missing from the record.
     /// </summary>
     public event Action<TrajectoryStep>? StepAdded;
 
     public List<TrajectoryStep> Steps { get; } = new();
     public string? LastGeneratedYaml { get; set; }
-
-    /// <summary>
-    /// Determinism report produced when the validated plan is replicated N times (<c>--repeat</c>).
-    /// Null when replication is not requested.
-    /// </summary>
-    public DeterminismReport? Determinism { get; set; }
 
     public void AddStep(int iteration, string reasoning, string? toolName = null, string? toolArgs = null, string? toolResult = null, bool isError = false,
         string? thinking = null, LlmUsage? usage = null)
@@ -57,8 +51,8 @@ public class AgentTrajectory
             ToolResult = toolResult,
             IsError = isError
         };
-        // The full-screen surface reads this list from the UI thread while the turn thread appends
-        // to it — the lock keeps a snapshot from tearing. Every other reader runs after the turn.
+        // A poller reads this list while the turn thread appends to it — the lock keeps a snapshot
+        // from tearing. Every other reader runs after the turn.
         lock (_gate) Steps.Add(step);
         StepAdded?.Invoke(step);
     }
@@ -68,31 +62,4 @@ public class AgentTrajectory
     {
         lock (_gate) return Steps.ToArray();
     }
-}
-
-/// <summary>
-/// Result of replicating a validated plan N times to measure determinism.
-/// </summary>
-public class DeterminismReport
-{
-    /// <summary>Number of replications executed.</summary>
-    public int Repetitions { get; init; }
-
-    /// <summary>Distinct generated YAML payloads observed across replications.</summary>
-    public List<string> DistinctYaml { get; init; } = new();
-
-    /// <summary>Number of distinct YAML payloads observed (1 => fully deterministic).</summary>
-    public int DistinctCount => DistinctYaml.Count;
-
-    /// <summary>
-    /// Amount of variance: the number of distinct payloads beyond the canonical one.
-    /// 0 => every replication produced byte-for-byte identical YAML (fully deterministic).
-    /// </summary>
-    public int Variance => Math.Max(0, DistinctYaml.Count - 1);
-
-    /// <summary>True when every replication produced byte-for-byte identical YAML.</summary>
-    public bool IsDeterministic => Variance == 0;
-
-    /// <summary>Whether at least one YAML payload was observed.</summary>
-    public bool HasYaml => DistinctYaml.Count > 0;
 }

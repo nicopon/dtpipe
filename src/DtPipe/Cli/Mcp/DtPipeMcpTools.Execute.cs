@@ -155,16 +155,10 @@ public partial class DtPipeMcpTools
 
             // F2 — guardrails. Fail-closed: by default nothing is written. A real write requires
             // the apply flag, an approving gate, and a clean SQL safety check.
-            // When the agent set options, they are the source of truth for the safety policy and
-            // the approval override; the tool parameters are the MCP/standalone defaults.
-            var agentOpts = AgentOptions;
-            bool effectiveAllowDestructive = agentOpts?.AllowDestructive ?? allowDestructive;
-            bool effectiveAllowNetwork = agentOpts?.AllowNetwork ?? allowNetwork;
-
             var safety = _analysis.CheckSafety(parsed, new SqlSafetyOptions
             {
-                AllowDestructive = effectiveAllowDestructive,
-                AllowNetwork = effectiveAllowNetwork
+                AllowDestructive = allowDestructive,
+                AllowNetwork = allowNetwork
             });
 
             if (!safety.Allowed)
@@ -179,15 +173,9 @@ public partial class DtPipeMcpTools
                 }, new JsonSerializerOptions { WriteIndented = true });
             }
 
-            // Determine whether the operator consented to a real write. In the agent context
-            // the --apply flag (carried via AgentOptions) is the authoritative consent; outside
-            // the agent it comes from the tool parameter.
-            bool consentedApply = AgentOptions != null ? AgentOptions.Apply : apply;
-
-            // A real write requires consent. In the agent context the --apply flag IS the
-            // non-interactive approval. Outside the agent, a shared approval gate (fail-closed,
-            // denies non-interactive writes) makes the decision.
-            if (consentedApply && AgentOptions == null)
+            // A real write requires consent: a shared approval gate (fail-closed, denies
+            // non-interactive writes) makes the decision.
+            if (apply)
             {
                 var approvalGate = _serviceProvider.GetService<IApprovalGate>() ?? new DefaultApprovalGate();
                 var request = new ApprovalRequest
@@ -216,7 +204,7 @@ public partial class DtPipeMcpTools
             // (SampleModeSinkTests), and SampleModeSafetyGate refuses a source that could
             // mutate. It stays fail-closed, and the model learns what the pipeline would
             // actually do.
-            if (!consentedApply)
+            if (!apply)
             {
                 var sample = await _analysis.RunSampleAsync(parsed, rows: 10, shownRows: 10, ct,
                     nextStep: "NOTHING WAS WRITTEN. This ran the pipeline over a sample with the writer "
@@ -235,8 +223,7 @@ public partial class DtPipeMcpTools
             var sw = System.Diagnostics.Stopwatch.StartNew();
 
             // Quiet: this result goes back as JSON. The topology panel and the live progress
-            // display are for a person watching a CLI run, and under the agent's full-screen
-            // surface they would land on a screen the toolkit owns.
+            // display are for a person watching a CLI run.
             var globalOptions = new GlobalOptions { Quiet = true };
             var outcome = await runner.RunAsync(parsed.Jobs, parsed.Dag, contexts, globalOptions, ct);
             sw.Stop();
@@ -263,18 +250,17 @@ public partial class DtPipeMcpTools
         }
         catch (Exception ex)
         {
-            bool consented = AgentOptions?.Apply ?? apply;
             return JsonSerializer.Serialize(new
             {
                 success = false,
                 stage = "execution",
                 // Fail-closed stays legible even on the error path: whatever went wrong, this
                 // call did not consent to a write.
-                applied = consented,
+                applied = apply,
                 // And so does the remedy. A model that is only told the run failed cannot tell
                 // whether writing is still pending — every apply=false answer says the same two
                 // things, on the paths that worked and the ones that did not.
-                nextStep = consented
+                nextStep = apply
                     ? null
                     : "NOTHING WAS WRITTEN. This call ran with apply=false, so the target was never going "
                       + "to be modified. Fix the errors above, then call execute-yaml-job again with "

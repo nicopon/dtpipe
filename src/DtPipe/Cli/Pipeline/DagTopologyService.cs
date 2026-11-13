@@ -11,10 +11,10 @@ namespace DtPipe.Cli.Pipeline;
 
 /// <summary>
 /// The one place a job file turns into a DAG: parse the YAML, build the <see cref="BranchDefinition"/>
-/// list, wrap it in a <see cref="JobDagDefinition"/>. The MCP validate/execute path, the agent's
-/// Spectre topology box, the <c>get-dag-topology</c> tool and the full-screen plan panel all read it
-/// from here — the <c>yaml → DAG</c> construction is not re-typed at each call site (the duplication
-/// the init-SQL note of .claude/rules/adapters.md warns about).
+/// list, wrap it in a <see cref="JobDagDefinition"/>. The MCP validate/execute path, the
+/// <c>get-dag-topology</c> tool and <c>contract</c> all read it from here — the <c>yaml → DAG</c>
+/// construction is not re-typed at each call site (the duplication the init-SQL note of
+/// .claude/rules/adapters.md warns about).
 /// </summary>
 public sealed class DagTopologyService
 {

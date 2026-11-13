@@ -11,17 +11,9 @@ namespace DtPipe.Cli.Agent;
 public class McpToolProvider : IAgentToolProvider
 {
     private readonly object _toolsInstance;
-    private readonly Type _toolsType;
-    private readonly List<ToolDefinition> _definitions;
-    private readonly IReadOnlySet<string> _writingTools;
+    private readonly List<ToolDefinition> _offered;
     private readonly IReadOnlySet<string> _runningTools;
 
-    /// <summary>
-    /// A tool the model can call to stop and ask the user a question. It is defined here, not on
-    /// the MCP tool surface: outside an interactive agent session there is no user to answer, so
-    /// an external MCP client should never see it. The planning loop intercepts the call and never
-    /// dispatches it — the user's next message is the answer.
-    /// </summary>
     /// <summary>
     /// True when <paramref name="toolName"/> is the ask-user terminator, tolerating the underscore
     /// spelling a model may emit (<c>ask_user</c>) as well as the canonical <c>ask-user</c>.
@@ -31,6 +23,12 @@ public class McpToolProvider : IAgentToolProvider
         && (toolName.Equals("ask-user", StringComparison.OrdinalIgnoreCase)
             || toolName.Equals("ask_user", StringComparison.OrdinalIgnoreCase));
 
+    /// <summary>
+    /// A tool the model can call to stop and ask the user a question. It is defined here, not on
+    /// the MCP tool surface: outside an agent session there is no user to answer, so an MCP client
+    /// should never see it. The planning loop intercepts the call and never dispatches it — the
+    /// user's next message is the answer.
+    /// </summary>
     internal static ToolDefinition AskUserTool { get; } = new(
         "ask-user",
         "Stop and ask the user a question when a decision is needed that only they can make — a "
@@ -53,37 +51,22 @@ public class McpToolProvider : IAgentToolProvider
     public McpToolProvider(object toolsInstance)
     {
         _toolsInstance = toolsInstance;
-        _toolsType = toolsInstance.GetType();
-        _definitions = McpToolReflector.BuildToolDefinitions(_toolsType);
-        _definitions.Add(AskUserTool);
-        _writingTools = ToolModePolicy.WritingTools(_toolsType);
-        _runningTools = ToolModePolicy.RunningTools(_toolsType);
-    }
+        var toolsType = toolsInstance.GetType();
+        var writing = ToolModePolicy.WritingTools(toolsType);
 
-    /// <inheritdoc />
-    /// <remarks>Stated rather than inherited: these tools are dtpipe's own engine.</remarks>
-    public bool CanRunDtPipePlans => true;
+        // The agent only plans and validates: it must never be able to trigger a real write.
+        // Every tool marked as writing to a target is left out of what the model is offered.
+        _offered = McpToolReflector.BuildToolDefinitions(toolsType)
+            .Where(d => !writing.Contains(d.Name))
+            .ToList();
+        _offered.Add(AskUserTool);
+        _runningTools = ToolModePolicy.RunningTools(toolsType);
+    }
 
     /// <inheritdoc />
     public bool RunsPipeline(string toolName) => _runningTools.Contains(toolName);
 
-    public List<ToolDefinition> GetToolDefinitions() => _definitions;
-
-    public List<ToolDefinition> GetToolDefinitions(AgentMode mode)
-    {
-        // In Plan mode the agent only plans & validates: it must never be able to trigger
-        // a real write. Every tool marked as writing to a target is excluded from the allow-list.
-        if (mode == AgentMode.Plan)
-        {
-            return _definitions
-                  .Where(d => !_writingTools.Contains(d.Name))
-                  .ToList();
-        }
-
-        // Execute / Autonomous: the full tool set is available, but execution remains
-        // gated by the guardrails (dry-run by default, approval gate, SQL safety policy).
-        return _definitions;
-    }
+    public List<ToolDefinition> GetToolDefinitions() => _offered;
 
     public async Task<ToolResult> InvokeToolAsync(string toolName, JsonElement args, CancellationToken ct)
     {
@@ -94,7 +77,7 @@ public class McpToolProvider : IAgentToolProvider
             throw new InvalidOperationException("'ask-user' is a turn terminator; it must not be dispatched as a tool.");
 
         // The LLM drove this call — nobody is watching for a keypress, even though the process
-        // shares a real interactive console with the agent's own TUI (NonInteractiveGuard).
+        // may share a real interactive console with the person who started it (NonInteractiveGuard).
         using var _ = NonInteractiveGuard.Suppress();
         var rawResult = await McpToolReflector.InvokeToolAsync(_toolsInstance, toolName, args, ct);
         return ToolResult.FromJson(rawResult);
@@ -102,13 +85,13 @@ public class McpToolProvider : IAgentToolProvider
 }
 
 /// <summary>
-/// Central definition of which tools are available in each <see cref="AgentMode"/>.
-/// Fail-closed: a tool that writes to a target is blocked in <see cref="AgentMode.Plan"/>.
+/// Which tools carry the marks the agent reads. Fail-closed: a tool that writes to a target is
+/// never offered to the model.
 ///
 /// <para>
 /// Which tools those are is read off <see cref="WritesToTargetAttribute"/>, never listed here.
 /// A list in this file is a second place to edit when a tool is added, and the first symptom of
-/// forgetting it is a planner that can write.
+/// forgetting it is a model that can write.
 /// </para>
 /// </summary>
 public static class ToolModePolicy
@@ -123,12 +106,4 @@ public static class ToolModePolicy
     /// </summary>
     public static IReadOnlySet<string> RunningTools(Type toolsType) =>
         McpToolReflector.ToolsMarked<RunsPipelineAttribute>(toolsType);
-
-    private static readonly IReadOnlySet<string> DtPipeWritingTools = WritingTools(typeof(DtPipeMcpTools));
-
-    /// <summary>True when <paramref name="toolName"/> must not be offered in Plan mode.</summary>
-    public static bool IsBlockedInPlanMode(string toolName) => IsExecutionTool(toolName);
-
-    /// <summary>True when <paramref name="toolName"/> performs a real write / execution.</summary>
-    public static bool IsExecutionTool(string toolName) => DtPipeWritingTools.Contains(toolName);
 }

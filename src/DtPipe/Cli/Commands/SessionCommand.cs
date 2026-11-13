@@ -7,7 +7,7 @@ namespace DtPipe.Cli.Commands;
 /// <summary>
 /// Inspects and removes the session stores that hold materialised artefacts.
 ///
-/// The family the CLI already has (secret, mcp, agent, inspect) extended by one, rather than a
+/// The family the CLI already has (secret, mcp, inspect) extended by one, rather than a
 /// second convention. <c>export</c> is the deliberate way out of the store: encryption is not
 /// optional, so the answer to "I want these rows in a real file" is a destination and the
 /// ordinary writer path — not a flag that would void the store's guarantee for every session

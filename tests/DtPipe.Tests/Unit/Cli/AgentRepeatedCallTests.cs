@@ -5,7 +5,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using DtPipe.Cli.Agent;
-using Spectre.Console;
+using DtPipe.Tests.Helpers;
 using Xunit;
 
 namespace DtPipe.Tests.Unit.Cli;
@@ -38,8 +38,7 @@ public class AgentRepeatedCallTests
             _answers = new Queue<ToolResult>(answers);
         }
 
-        public List<ToolDefinition> GetToolDefinitions() => new();
-        public List<ToolDefinition> GetToolDefinitions(AgentMode mode) => new[] { "validate-yaml-job", "inspect" }.Select(n => new ToolDefinition(n, "", default)).ToList();
+        public List<ToolDefinition> GetToolDefinitions() => new[] { "validate-yaml-job", "inspect" }.Select(n => new ToolDefinition(n, "", default)).ToList();
 
         public Task<ToolResult> InvokeToolAsync(string toolName, JsonElement args, CancellationToken ct)
         {
@@ -76,13 +75,10 @@ public class AgentRepeatedCallTests
     private static readonly ToolResult SameError = ToolResult.Error("{\"error\":\"line 18, column 41\"}");
 
     private static AgentExecutor Build(IAgentToolProvider tools, ILlmClient llm)
-    {
-        var console = AnsiConsole.Create(new AnsiConsoleSettings());
-        return new AgentExecutor(tools, llm, new AgentTui(console), console);
-    }
+        => new(tools, llm);
 
     private static async Task<(ScriptedToolProvider Tools, AgentExecutor Executor)> RunTwice(
-        bool sequential, params ToolResult[] answers)
+        params ToolResult[] answers)
     {
         var tools = new ScriptedToolProvider(SameError, answers);
         var executor = Build(tools, new QueuedLlmClient(
@@ -90,8 +86,7 @@ public class AgentRepeatedCallTests
             Calls(("2", "validate-yaml-job", Job)),
             Done));
 
-        await executor.RunTurnAsync("mission", "model", "http://localhost:11434",
-            new AgentOptions { Sequential = sequential }, maxIterations: 6);
+        await executor.TurnAsync("mission", maxIterations: 6);
 
         return (tools, executor);
     }
@@ -103,22 +98,18 @@ public class AgentRepeatedCallTests
     /// The call is dispatched every time. Answering the second one from a cache would have dtpipe
     /// claim nothing can have changed about a source another process is free to write to.
     /// </summary>
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task A_Repeated_Call_Is_Still_Dispatched(bool sequential)
+    [Fact]
+    public async Task A_Repeated_Call_Is_Still_Dispatched()
     {
-        var (tools, _) = await RunTwice(sequential);
+        var (tools, _) = await RunTwice();
 
         Assert.Equal(2, tools.Invoked.Count);
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task An_Answer_That_Came_Back_The_Same_Is_Named_As_A_Repeat(bool sequential)
+    [Fact]
+    public async Task An_Answer_That_Came_Back_The_Same_Is_Named_As_A_Repeat()
     {
-        var (_, executor) = await RunTwice(sequential);
+        var (_, executor) = await RunTwice();
 
         var replies = ToolReplies(executor);
         Assert.Equal(2, replies.Count);
@@ -133,12 +124,10 @@ public class AgentRepeatedCallTests
     /// The repeat is the pair, not the question. A source that moved between two identical calls
     /// answers differently, and that is not a repeat — it is the new answer the model asked for.
     /// </summary>
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task An_Answer_That_Changed_Is_Not_A_Repeat(bool sequential)
+    [Fact]
+    public async Task An_Answer_That_Changed_Is_Not_A_Repeat()
     {
-        var (_, executor) = await RunTwice(sequential,
+        var (_, executor) = await RunTwice(
             ToolResult.Error("{\"error\":\"line 18, column 41\"}"),
             ToolResult.Success("{\"success\":true}"));
 
@@ -150,7 +139,7 @@ public class AgentRepeatedCallTests
     [Fact]
     public async Task The_Advice_Keeps_The_Error_Flag_Of_The_Answer_It_Wraps()
     {
-        var (_, executor) = await RunTwice(sequential: true);
+        var (_, executor) = await RunTwice();
 
         var steps = executor.Trajectory.Steps.Where(s => s.ToolName != null).ToList();
         Assert.Equal(2, steps.Count);
@@ -167,7 +156,7 @@ public class AgentRepeatedCallTests
             Calls(("1", "inspect", "{\"input\":\"a.csv\"}"), ("2", "inspect", "{\"input\":\"a.csv\"}")),
             Done));
 
-        await executor.RunTurnAsync("mission", "model", "http://localhost:11434", maxIterations: 5);
+        await executor.TurnAsync("mission", maxIterations: 5);
 
         Assert.Equal(2, tools.Invoked.Count);
     }
@@ -182,7 +171,7 @@ public class AgentRepeatedCallTests
             Calls(("2", "inspect", "{\"input\":\"b.csv\"}")),
             Done));
 
-        await executor.RunTurnAsync("mission", "model", "http://localhost:11434", maxIterations: 5);
+        await executor.TurnAsync("mission", maxIterations: 5);
 
         Assert.Equal(2, tools.Invoked.Count);
         Assert.All(ToolReplies(executor), r => Assert.DoesNotContain(Marker, r));

@@ -5,14 +5,14 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using DtPipe.Cli.Agent;
-using Spectre.Console;
+using DtPipe.Tests.Helpers;
 using Xunit;
 
 namespace DtPipe.Tests.Unit.Cli;
 
 /// <summary>
-/// Token usage and the model's chain of thought reach the trajectory so the step
-/// inspector and the compact trace can show them.
+/// Token usage and the model's chain of thought reach the trajectory, where a host and the trace
+/// read them.
 /// </summary>
 public class AgentTraceTests
 {
@@ -30,16 +30,12 @@ public class AgentTraceTests
     private sealed class NoopToolProvider : IAgentToolProvider
     {
         public List<ToolDefinition> GetToolDefinitions() => new();
-        public List<ToolDefinition> GetToolDefinitions(AgentMode mode) => new();
         public Task<ToolResult> InvokeToolAsync(string toolName, JsonElement args, CancellationToken ct)
             => Task.FromResult(ToolResult.Success("{}"));
     }
 
     private static AgentExecutor Build(LlmResponse response)
-    {
-        IAnsiConsole console = AnsiConsole.Create(new AnsiConsoleSettings());
-        return new AgentExecutor(new NoopToolProvider(), new OneShotLlmClient(response), new AgentTui(console), console);
-    }
+        => new(new NoopToolProvider(), new OneShotLlmClient(response));
 
     [Fact]
     public async Task Thinking_And_Usage_Are_Recorded_On_The_Trajectory_Step()
@@ -48,7 +44,7 @@ public class AgentTraceTests
         var response = new LlmResponse(new ChatMessage("assistant", "here is the plan"), true, null, usage, "first I will inspect the source");
 
         var executor = Build(response);
-        await executor.RunTurnAsync("mission", "m", "http://x", new AgentOptions(), maxIterations: 3);
+        await executor.TurnAsync("mission", maxIterations: 3);
 
         var step = executor.Trajectory.Steps.Single();
         Assert.Equal("first I will inspect the source", step.Thinking);
@@ -61,7 +57,7 @@ public class AgentTraceTests
     public async Task A_Response_Without_Usage_Leaves_The_Step_Usage_Null()
     {
         var executor = Build(new LlmResponse(new ChatMessage("assistant", "done"), true, null));
-        await executor.RunTurnAsync("mission", "m", "http://x", new AgentOptions(), maxIterations: 3);
+        await executor.TurnAsync("mission", maxIterations: 3);
 
         Assert.Null(executor.Trajectory.Steps.Single().Usage);
     }

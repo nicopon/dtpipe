@@ -62,7 +62,7 @@ public class ExportService
             _logger.LogInformation("Starting export from {Provider} to {OutputPath}", providerName, ConnectionStringSanitizer.Redact(outputPath));
 
         // A run started for a program (the MCP tools) suppresses the chatter, even under DEBUG,
-        // because its console feeds a JSON reply or a screen the agent's toolkit owns.
+        // because its console feeds a JSON reply.
         bool silenceInternal = quiet;
         bool outputIsStdio = string.Equals(outputPath, "-", StringComparison.Ordinal);
 

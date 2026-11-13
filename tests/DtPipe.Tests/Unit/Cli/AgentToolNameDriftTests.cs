@@ -12,7 +12,7 @@ namespace DtPipe.Tests.Unit.Cli;
 /// Tool names written by hand, held against the live catalogue.
 ///
 /// <para>
-/// Three places name tools without asking the catalogue: the role prompts, the set whose results
+/// Three places name tools without asking the catalogue: the role prompt, the set whose results
 /// are cached as facts, and the two names that move the plan badge. Each perishes silently — a
 /// renamed tool leaves the model briefed on a name that no longer exists, stops a result being
 /// cached, or freezes the badge — and none of the three symptoms points back here.
@@ -29,10 +29,7 @@ public class AgentToolNameDriftTests
 
     public static TheoryData<string, string> RolePrompts => new()
     {
-        { nameof(AgentSystemPrompt.DefaultSystemPrompt), AgentSystemPrompt.DefaultSystemPrompt },
         { nameof(AgentSystemPrompt.PlannerSystemPrompt), AgentSystemPrompt.PlannerSystemPrompt },
-        { nameof(AgentSystemPrompt.ExecutorSystemPrompt), AgentSystemPrompt.ExecutorSystemPrompt },
-        { nameof(AgentSystemPrompt.ExternalServerFallbackPrompt), AgentSystemPrompt.ExternalServerFallbackPrompt },
     };
 
     [Theory]

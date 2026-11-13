@@ -43,9 +43,8 @@ public record GlobalOptions
     /// Suppress every human-facing console rendering the run would otherwise emit — the DAG
     /// topology panel, the live progress display, the results table, orchestrator log events.
     /// Set by callers whose consumer is a program, not a person: the MCP tools hand their result
-    /// back as JSON and the panel is decoration nobody reads (and, under the agent's full-screen
-    /// surface, decoration that lands on a screen the toolkit owns). Never the default — the CLI
-    /// path keeps its output.
+    /// back as JSON and the panel is decoration nobody reads. Never the default — the CLI path
+    /// keeps its output.
     /// </summary>
     public bool Quiet { get; init; }
 

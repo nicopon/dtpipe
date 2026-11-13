@@ -5,8 +5,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using DtPipe.Cli.Agent;
-using DtPipe.Cli.Agent.Tui;
-using Spectre.Console;
+using DtPipe.Tests.Helpers;
 using Xunit;
 
 namespace DtPipe.Tests.Unit.Cli;
@@ -16,8 +15,8 @@ namespace DtPipe.Tests.Unit.Cli;
 /// actually happened. In particular an empty model response is a failure, not a "COMPLETED".
 ///
 /// <para>
-/// The soft cancel extends this: Esc on the full-screen surface
-/// stops the model call and nothing else. The session lives, the partial trajectory stays, and the
+/// The soft cancel extends this: a stop
+/// ends the model call and nothing else. The session lives, the partial trajectory stays, and the
 /// run does <em>not</em> report the 130 reserved for a real interrupt (F16) — the two cancellation
 /// sources must stay distinguishable, exactly as <c>LinearPipelineService</c> keeps its own apart.
 /// </para>
@@ -46,17 +45,12 @@ public class AgentTurnOutcomeTests
 
     private sealed class NoopToolProvider : IAgentToolProvider
     {
-        public List<ToolDefinition> GetToolDefinitions() => new();
-        public List<ToolDefinition> GetToolDefinitions(AgentMode mode) => new[] { "inspect" }.Select(n => new ToolDefinition(n, "", default)).ToList();
+        public List<ToolDefinition> GetToolDefinitions() => new[] { "inspect" }.Select(n => new ToolDefinition(n, "", default)).ToList();
         public Task<ToolResult> InvokeToolAsync(string toolName, JsonElement args, CancellationToken ct)
             => Task.FromResult(ToolResult.Success("{}"));
     }
 
-    private static AgentExecutor BuildExecutor(ILlmClient llm)
-    {
-        IAnsiConsole console = AnsiConsole.Create(new AnsiConsoleSettings());
-        return new AgentExecutor(new NoopToolProvider(), llm, new AgentTui(console), console);
-    }
+    private static AgentExecutor BuildExecutor(ILlmClient llm) => new(new NoopToolProvider(), llm);
 
     private static LlmResponse Text(string content) => new(new ChatMessage("assistant", content), true, null);
 
@@ -71,7 +65,7 @@ public class AgentTurnOutcomeTests
     {
         var executor = BuildExecutor(new QueuedLlmClient(Text("here is the plan")));
 
-        int code = await executor.RunTurnAsync("mission", "m", "http://x", new AgentOptions(), maxIterations: 5);
+        int code = (await executor.TurnAsync("mission", maxIterations: 5)).ExitCode;
 
         Assert.Equal(0, code);
         Assert.Equal(TurnOutcome.Succeeded, executor.LastTurnOutcome);
@@ -84,7 +78,7 @@ public class AgentTurnOutcomeTests
     {
         var executor = BuildExecutor(new QueuedLlmClient(Text(emptyContent)));
 
-        int code = await executor.RunTurnAsync("mission", "m", "http://x", new AgentOptions(), maxIterations: 5);
+        int code = (await executor.TurnAsync("mission", maxIterations: 5)).ExitCode;
 
         Assert.Equal(1, code);
         Assert.Equal(TurnOutcome.EmptyResponse, executor.LastTurnOutcome);
@@ -97,7 +91,7 @@ public class AgentTurnOutcomeTests
         // The model never stops calling a tool, so the loop exhausts its budget.
         var executor = BuildExecutor(new QueuedLlmClient(ToolCall("inspect")));
 
-        int code = await executor.RunTurnAsync("mission", "m", "http://x", new AgentOptions(), maxIterations: 3);
+        int code = (await executor.TurnAsync("mission", maxIterations: 3)).ExitCode;
 
         Assert.Equal(1, code);
         Assert.Equal(TurnOutcome.MaxIterationsReached, executor.LastTurnOutcome);
@@ -110,7 +104,7 @@ public class AgentTurnOutcomeTests
             "Ollama at http://x did not respond within 300s.");
         var executor = BuildExecutor(new QueuedLlmClient(errored));
 
-        int code = await executor.RunTurnAsync("mission", "m", "http://x", new AgentOptions(), maxIterations: 5);
+        int code = (await executor.TurnAsync("mission", maxIterations: 5)).ExitCode;
 
         Assert.Equal(1, code);
         Assert.Equal(TurnOutcome.LlmError, executor.LastTurnOutcome);
@@ -140,8 +134,7 @@ public class AgentTurnOutcomeTests
 
         public HookedToolProvider(Func<CancellationToken, Task> hook) => _hook = hook;
 
-        public List<ToolDefinition> GetToolDefinitions() => new();
-        public List<ToolDefinition> GetToolDefinitions(AgentMode mode) => new[] { "inspect" }.Select(n => new ToolDefinition(n, "", default)).ToList();
+        public List<ToolDefinition> GetToolDefinitions() => new[] { "inspect" }.Select(n => new ToolDefinition(n, "", default)).ToList();
 
         public async Task<ToolResult> InvokeToolAsync(string toolName, JsonElement args, CancellationToken ct)
         {
@@ -151,11 +144,11 @@ public class AgentTurnOutcomeTests
     }
 
     [Fact]
-    public async Task Esc_During_A_Model_Call_Interrupts_The_Turn_And_Keeps_What_It_Had()
+    public async Task A_Stop_During_A_Model_Call_Interrupts_The_Turn_And_Keeps_What_It_Had()
     {
-        // The first call asks for a tool, the second is the one the user stops. The soft token is
-        // tripped from inside that call, which is exactly what the key handler does from the UI
-        // thread while the worker sits in the request.
+        // The first call asks for a tool, the second is the one the person stops. The soft token is
+        // tripped from inside that call, which is what a host does from another thread while the
+        // worker sits in the request.
         using var soft = new CancellationTokenSource();
         var llm = new ScriptedLlmClient(async (call, ct) =>
         {
@@ -165,14 +158,11 @@ public class AgentTurnOutcomeTests
             return Text("unreachable");
         });
 
-        IAnsiConsole console = AnsiConsole.Create(new AnsiConsoleSettings());
-        var executor = new AgentExecutor(new NoopToolProvider(), llm, new AgentTui(console), console);
-        var log = new TranscriptLog();
+        var executor = new AgentExecutor(new NoopToolProvider(), llm);
 
-        // No exception escapes: a soft stop is a stated outcome, not the cancellation the CLI
+        // No exception escapes: a soft stop is a stated outcome, not the cancellation a host
         // turns into exit 130.
-        var summary = await executor.RunTurnOnSurfaceAsync("mission", "m", "http://x", new AgentOptions(),
-            maxIterations: 5, executor.CreateSurfaceView(log), soft.Token, CancellationToken.None);
+        var summary = await executor.TurnAsync("mission", maxIterations: 5, stop: soft.Token);
 
         Assert.Equal(TurnOutcome.UserInterrupted, summary.Outcome);
         Assert.Equal(TurnOutcome.UserInterrupted, executor.LastTurnOutcome);
@@ -185,16 +175,16 @@ public class AgentTurnOutcomeTests
     }
 
     [Fact]
-    public async Task Esc_Never_Cancels_A_Tool_Call_Already_In_Flight()
+    public async Task A_Stop_Never_Cancels_A_Tool_Call_Already_In_Flight()
     {
-        // A call already running against a database is not something a keystroke may abandon
+        // A call already running against a database is not something a stop may abandon
         // halfway: the soft token reaches the model call only, tools run on the session token.
         using var soft = new CancellationTokenSource();
         bool toolFinished = false;
 
         var tools = new HookedToolProvider(async ct =>
         {
-            await soft.CancelAsync();          // the user hits Esc while the tool is running
+            await soft.CancelAsync();          // the person stops the turn while the tool is running
             await Task.Delay(20, ct);          // would throw here if the soft token reached tools
             toolFinished = true;
         });
@@ -206,12 +196,9 @@ public class AgentTurnOutcomeTests
             return Text("unreachable");
         });
 
-        IAnsiConsole console = AnsiConsole.Create(new AnsiConsoleSettings());
-        var executor = new AgentExecutor(tools, llm, new AgentTui(console), console);
-        var log = new TranscriptLog();
+        var executor = new AgentExecutor(tools, llm);
 
-        var summary = await executor.RunTurnOnSurfaceAsync("mission", "m", "http://x", new AgentOptions(),
-            maxIterations: 5, executor.CreateSurfaceView(log), soft.Token, CancellationToken.None);
+        var summary = await executor.TurnAsync("mission", maxIterations: 5, stop: soft.Token);
 
         Assert.True(toolFinished, "the tool call was cut short by a soft cancel");
         Assert.Contains(executor.Trajectory.Steps, s => s.ToolName == "inspect" && s.ToolResult!.Contains("rows"));
@@ -219,10 +206,10 @@ public class AgentTurnOutcomeTests
     }
 
     [Fact]
-    public async Task Ctrl_C_Still_Escapes_As_A_Cancellation_So_The_Run_Reports_130()
+    public async Task Ctrl_C_Still_Escapes_As_A_Cancellation_So_The_Host_Reports_130()
     {
         // The other half of the split: the session token is the process one, and cancelling it
-        // must still surface as an OperationCanceledException for AgentCommand to map to 130.
+        // must still surface as an OperationCanceledException, for a host to map to 130.
         using var session = new CancellationTokenSource();
         var llm = new ScriptedLlmClient(async (_, ct) =>
         {
@@ -231,13 +218,10 @@ public class AgentTurnOutcomeTests
             return Text("unreachable");
         });
 
-        IAnsiConsole console = AnsiConsole.Create(new AnsiConsoleSettings());
-        var executor = new AgentExecutor(new NoopToolProvider(), llm, new AgentTui(console), console);
-        var log = new TranscriptLog();
+        var executor = new AgentExecutor(new NoopToolProvider(), llm);
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            executor.RunTurnOnSurfaceAsync("mission", "m", "http://x", new AgentOptions(),
-                maxIterations: 5, executor.CreateSurfaceView(log), CancellationToken.None, session.Token));
+            executor.TurnAsync("mission", maxIterations: 5, ct: session.Token));
     }
 
     [Fact]
@@ -249,7 +233,7 @@ public class AgentTurnOutcomeTests
         var errored = new LlmResponse(new ChatMessage("assistant", null), true, RepetitionGuard.DetectedMessage);
         var executor = BuildExecutor(new QueuedLlmClient(errored));
 
-        int code = await executor.RunTurnAsync("mission", "m", "http://x", new AgentOptions(), maxIterations: 5);
+        int code = (await executor.TurnAsync("mission", maxIterations: 5)).ExitCode;
 
         Assert.Equal(1, code);
         Assert.Equal(TurnOutcome.RepetitionDetected, executor.LastTurnOutcome);

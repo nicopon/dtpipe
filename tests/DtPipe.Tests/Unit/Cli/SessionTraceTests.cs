@@ -65,9 +65,9 @@ public class SessionTraceTests : IDisposable
         using (var trace = AgentTrace.Open(path, out _))
         {
             Assert.NotNull(trace);
-            trace!.Session("gpt-oss:20b", "http://localhost:11434", AgentMode.Plan, new AgentOptions(), 25);
-            trace.SystemPrompt(AgentMode.Plan, "you are a planner");
-            trace.Catalogue(AgentMode.Plan, Catalogue);
+            trace!.Session("gpt-oss:20b", "http://localhost:11434", new AgentOptions(), 25);
+            trace.SystemPrompt("you are a planner");
+            trace.Catalogue(Catalogue);
             trace.Turn("build me a pipeline");
             trace.Step(new TrajectoryStep
             {

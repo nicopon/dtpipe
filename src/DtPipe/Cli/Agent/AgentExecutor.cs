@@ -5,9 +5,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using DtPipe.Cli.Agent.Tui;
 using DtPipe.Cli.Mcp;
-using Spectre.Console;
 
 namespace DtPipe.Cli.Agent;
 
@@ -15,9 +13,6 @@ public class AgentExecutor
 {
     private readonly IAgentToolProvider _toolProvider;
     private readonly ILlmClient _llmClient;
-    private readonly AgentTui _tui;
-    private readonly IAnsiConsole _console;
-    private readonly DtPipe.Cli.Pipeline.DagTopologyService? _dagTopology;
     private readonly ConversationWindowManager _windowManager = new();
 
     /// <summary>
@@ -30,8 +25,7 @@ public class AgentExecutor
     public AgentTrajectory Trajectory { get; } = new();
     public List<ChatMessage> Messages { get; } = new();
 
-    /// <summary>Why the most recent turn ended (null before the first turn). Drives the exit code
-    /// and the reason line in the session summary.</summary>
+    /// <summary>Why the most recent turn ended (null before the first turn).</summary>
     public TurnOutcome? LastTurnOutcome { get; private set; }
 
     /// <summary>
@@ -41,7 +35,6 @@ public class AgentExecutor
     /// </summary>
     public AgentQuestion? PendingQuestion { get; private set; }
 
-    private AgentMode? _mode;
     private long _turnTokens;
     private readonly Stopwatch _turnClock = new();
     private readonly AgentTrace? _trace;
@@ -50,212 +43,65 @@ public class AgentExecutor
     internal AgentTrace? Trace => _trace;
     private bool _traceOpened;
 
-    /// <summary>
-    /// The session's live operating mode. Seeded from the first turn's <see cref="AgentOptions.Mode"/>
-    /// and thereafter the authority for the role prompt and the tool allow-list — the model sees
-    /// the tools for <em>this</em> value at the top of every turn (F1 is a per-turn invariant), so
-    /// switching it between turns is safe by construction. It never loosens a write gate: <c>--apply</c>
-    /// and the <c>--allow-*</c> flags stay launch-time only.
-    /// </summary>
-    public AgentMode Mode => _mode ?? AgentMode.Plan;
-
-    /// <summary>The next mode in the cycle plan → execute → autonomous → plan.</summary>
-    internal static AgentMode NextMode(AgentMode mode) => mode switch
-    {
-        AgentMode.Plan => AgentMode.Execute,
-        AgentMode.Execute => AgentMode.Autonomous,
-        _ => AgentMode.Plan,
-    };
-
-    /// <summary>Advances <see cref="Mode"/> one step around the cycle and returns the new value.</summary>
-    public AgentMode CycleMode()
-    {
-        _mode = NextMode(Mode);
-        return _mode.Value;
-    }
-
-    public AgentExecutor(IAgentToolProvider toolProvider, ILlmClient llmClient, AgentTui tui, IAnsiConsole console, AgentContextStore? contextStore = null, DtPipe.Cli.Pipeline.DagTopologyService? dagTopology = null, AgentTrace? trace = null)
+    public AgentExecutor(IAgentToolProvider toolProvider, ILlmClient llmClient, AgentContextStore? contextStore = null, AgentTrace? trace = null)
     {
         _toolProvider = toolProvider;
         _llmClient = llmClient;
-        _tui = tui;
-        _console = console;
         ContextStore = contextStore ?? new AgentContextStore();
-        _dagTopology = dagTopology;
         _trace = trace;
         if (_trace is not null) Trajectory.StepAdded += _trace.Step;
 
-        Messages.Add(new ChatMessage("system", AgentSystemPrompt.DefaultSystemPrompt));
+        Messages.Add(new ChatMessage("system", SystemPrompt));
     }
 
     /// <summary>
-    /// The turn view a full-screen session renders into. Built here because the plan panel needs
-    /// the topology service this executor was given, and because the view is toolkit-free — it
-    /// feeds a <see cref="TranscriptLog"/> and nothing else.
+    /// Runs one agent turn and returns its verdict as data. <paramref name="view"/> is told what
+    /// is in flight. <paramref name="stop"/> aborts the model call in flight only: tool calls run
+    /// on <paramref name="ct"/> and are never interrupted mid-flight, and <paramref name="stop"/>
+    /// must never be the process token, or a soft stop would report the 130 reserved for a real
+    /// interrupt (F16).
     /// </summary>
-    internal TuiTurnView CreateSurfaceView(TranscriptLog log) => new(log, _dagTopology);
-
-    /// <summary>
-    /// The clock and token meter for the turn in flight, polled by the full-screen surface's
-    /// repaint timer. Reading a running <see cref="Stopwatch"/> from another thread is a display
-    /// concern only — it never feeds the verdict.
-    /// </summary>
-    internal (string Clock, string Meter) LiveHeader()
-        => (FormatClock(_turnClock.Elapsed), _turnTokens > 0 ? $"{_turnTokens} tok" : string.Empty);
-
-    /// <summary>
-    /// Whether this run may take over the terminal: an ANSI interactive console, a streaming
-    /// client, real stdin, and streaming not turned off. A necessary condition for the full-screen
-    /// surface (<see cref="WantsFullScreen"/>), never sufficient on its own.
-    /// <paramref name="stdinRedirected"/> is a parameter rather than a direct
-    /// <see cref="Console.IsInputRedirected"/> read so the predicate stays pure and testable —
-    /// the real property is always true inside a unit-test host (stdin is a pipe there), which
-    /// would make this method return false unconditionally if it read it itself.
-    /// </summary>
-    internal static bool CanOwnTerminal(IAnsiConsole console, ILlmClient client, AgentOptions opts, bool stdinRedirected)
-        => console.Profile.Capabilities.Ansi && console.Profile.Capabilities.Interactive
-           && !opts.NoStream && client is IStreamingLlmClient && !stdinRedirected;
-
-    /// <summary>
-    /// Whether the whole session belongs in the full-screen surface. This is the default on a real
-    /// interactive terminal — <c>--no-tui</c> is the opt-out, not the surface an opt-in — plus an
-    /// extra refusal of a redirected stdout: the surface drives the terminal directly, so a
-    /// captured run stays on the sequential path even though nothing else about it looks piped.
-    /// The caller that owns the conversation (<c>AgentCommand</c>) asks this once and then drives
-    /// every turn through <see cref="RunTurnOnSurfaceAsync"/>. Same reason for
-    /// <paramref name="stdoutRedirected"/> as a parameter as on <see cref="CanOwnTerminal"/>.
-    /// </summary>
-    internal static bool WantsFullScreen(IAnsiConsole console, ILlmClient client, AgentOptions opts,
-        bool stdinRedirected, bool stdoutRedirected)
-        => CanOwnTerminal(console, client, opts, stdinRedirected) && !opts.NoTui && !stdoutRedirected;
-
-    /// <summary>
-    /// Runs a single agent turn and prints its verdict to scrollback. When
-    /// <see cref="AgentOptions.Repeat"/> &gt; 1 the validated plan is replicated that many times
-    /// (each from a fresh conversation) and a <see cref="DeterminismReport"/> is attached to the
-    /// trajectory (F3 — determinism).
-    /// </summary>
-    public async Task<int> RunTurnAsync(
+    internal async Task<TurnSummaryModel> RunTurnAsync(
         string userPrompt,
         string model,
         string baseUrl,
-        AgentOptions? options = null,
-        int maxIterations = 25,
-        CancellationToken ct = default)
-    {
-        var opts = options ?? new AgentOptions();
-        var summary = await RunTurnCoreAsync(userPrompt, model, baseUrl, opts, maxIterations,
-            surface: null, softCancel: CancellationToken.None, ct);
-
-        _tui.ReportTurn(summary, Trajectory, Mode, maxIterations);
-
-        // AwaitingUserInput is a pause interactively but still a non-zero exit — an agent that
-        // stopped for want of an answer did not finish. Fail-closed: piped / CI reads it as 1.
-        return summary.ExitCode;
-    }
-
-    /// <summary>
-    /// Runs one turn inside a surface that already owns the screen, and returns the verdict as
-    /// data instead of printing it — nothing may write through Spectre while the toolkit holds the
-    /// terminal. <paramref name="softCancel"/> aborts the model call in flight only: tool calls run
-    /// on <paramref name="ct"/> and are never interrupted mid-flight, and this token must never be
-    /// the process one, or a soft stop would report the 130 reserved for a real interrupt (F16).
-    /// </summary>
-    internal Task<TurnSummaryModel> RunTurnOnSurfaceAsync(
-        string userPrompt,
-        string model,
-        string baseUrl,
-        AgentOptions opts,
+        AgentOptions options,
         int maxIterations,
-        ITurnView surface,
-        CancellationToken softCancel,
-        CancellationToken ct)
-        => RunTurnCoreAsync(userPrompt, model, baseUrl, opts, maxIterations, surface, softCancel, ct);
-
-    private async Task<TurnSummaryModel> RunTurnCoreAsync(
-        string userPrompt,
-        string model,
-        string baseUrl,
-        AgentOptions opts,
-        int maxIterations,
-        ITurnView? surface,
-        CancellationToken softCancel,
+        ITurnView view,
+        CancellationToken stop,
         CancellationToken ct)
     {
-        _mode ??= opts.Mode;
         PendingQuestion = null;   // this turn's prompt is the answer to any previous ask-user
-                                  // F1: select the role prompt for the live operating mode (PLAN forbids execution).
         Messages[0] = new ChatMessage("system", SystemPrompt);
         Messages.Add(new ChatMessage("user", userPrompt));
 
+        var availableTools = _toolProvider.GetToolDefinitions();
+
         if (_trace is not null)
         {
-            // The launch context and the role prompt go down once; the catalogue goes down every
-            // turn, because /mode changes which tools are offered between them.
+            // The launch context goes down once; the role prompt and the catalogue go down every
+            // turn, because they are what that turn's model was given.
             if (!_traceOpened)
             {
                 _traceOpened = true;
-                _trace.Session(model, baseUrl, Mode, opts, maxIterations);
+                _trace.Session(model, baseUrl, options, maxIterations);
             }
-            _trace.SystemPrompt(Mode, SystemPrompt);
-            _trace.Catalogue(Mode, _toolProvider.GetToolDefinitions(Mode));
+            _trace.SystemPrompt(SystemPrompt);
+            _trace.Catalogue(availableTools);
             _trace.Turn(userPrompt);
         }
 
-        var toolCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         _turnClock.Restart();
         _turnTokens = 0;
 
-        // Primary run uses the instance Messages so the interactive / inspection flows keep state.
-        // A full-screen session (surface not null) owns the screen for the whole conversation and
-        // supplies its own view and soft-cancel token. Everything else — piped, --no-stream,
-        // --no-tui, replication, or a caller driving a single turn by hand — is the sequential
-        // scrollback path; there is no third rendering path.
-        PlanningLoopResult primary;
-        if (surface is not null)
-        {
-            primary = await RunPlanningLoopAsync(Messages, userPrompt, model, baseUrl, opts, maxIterations,
-                recordTrajectory: true, renderTui: true, surface, softCancel, ct);
-        }
-        else
-        {
-            _tui.RenderWorkingHeader(Mode, opts.Detail, opts.Apply);
-            primary = await RunPlanningLoopAsync(Messages, userPrompt, model, baseUrl, opts, maxIterations,
-                recordTrajectory: true, renderTui: true, new ScrollbackTurnView(_console, _tui), CancellationToken.None, ct);
-        }
-        int turnIterations = primary.Iterations;
+        var primary = await RunPlanningLoopAsync(Messages, availableTools, model, baseUrl, options, maxIterations, view, stop, ct);
         LastTurnOutcome = primary.Outcome;
         PendingQuestion = primary.Outcome == TurnOutcome.AwaitingUserInput ? primary.Question : null;
-        foreach (var kv in primary.ToolCounts)
-            toolCounts[kv.Key] = kv.Value;
-
-        var observedYamls = new List<string>();
-        if (!string.IsNullOrWhiteSpace(primary.Yaml))
-            observedYamls.Add(primary.Yaml);
-
-        // Replication (F3): re-run the planning loop from a fresh conversation with the same
-        // temperature/seed and compare the generated YAML to measure variance.
-        int repls = Math.Max(1, opts.Repeat);
-        for (int r = 1; r < repls; r++)
-        {
-            var fresh = new List<ChatMessage>
-               {
-                 new("system", SystemPrompt),
-                 new("user", userPrompt)
-               };
-            var repl = await RunPlanningLoopAsync(fresh, userPrompt, model, baseUrl, opts, maxIterations,
-                recordTrajectory: false, renderTui: false, view: null, CancellationToken.None, ct);
-            if (!string.IsNullOrWhiteSpace(repl.Yaml))
-                observedYamls.Add(repl.Yaml);
-        }
-
-        Trajectory.Determinism = BuildDeterminismReport(repls, observedYamls);
 
         _turnClock.Stop();
-        int shownIterations = turnIterations <= maxIterations ? turnIterations : maxIterations;
-        var summary = new TurnSummaryModel(primary.Outcome, shownIterations, _turnClock.Elapsed, toolCounts, primary.Question,
-            ProducedPlan: !string.IsNullOrWhiteSpace(primary.Yaml), Tokens: _turnTokens, ClosingWords: primary.ClosingWords,
-            Temperature: opts.Temperature);
+        int shownIterations = primary.Iterations <= maxIterations ? primary.Iterations : maxIterations;
+        var summary = new TurnSummaryModel(primary.Outcome, shownIterations, _turnClock.Elapsed, primary.ToolCounts, primary.Question,
+            ProducedPlan: !string.IsNullOrWhiteSpace(primary.Yaml), Tokens: _turnTokens, ClosingWords: primary.ClosingWords);
         _trace?.Verdict(summary);
         return summary;
     }
@@ -272,42 +118,36 @@ public class AgentExecutor
 
     private async Task<PlanningLoopResult> RunPlanningLoopAsync(
         List<ChatMessage> messages,
-        string userPrompt,
+        List<ToolDefinition> availableTools,
         string model,
         string baseUrl,
         AgentOptions opts,
         int maxIterations,
-        bool recordTrajectory,
-        bool renderTui,
-        ITurnView? view,
-        CancellationToken softCancel,
+        ITurnView view,
+        CancellationToken stop,
         CancellationToken ct)
     {
         var toolCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         // What each call already answered in this turn — see AnsweredCall.
         var answered = new Dictionary<string, AnsweredCall>(StringComparer.Ordinal);
-        // F1: the LLM only sees the tools allowed for the current mode (in PLAN mode,
-        // 'execute-yaml-job' is filtered out so the model cannot drive execution), and a call
-        // naming any other tool is refused below, whatever the provider behind would have done.
-        var availableTools = _toolProvider.GetToolDefinitions(Mode);
+        // F1: the LLM only sees the tools it is offered ('execute-yaml-job' is not among them, so
+        // the model cannot drive execution), and a call naming any other tool is refused below,
+        // whatever the provider behind would have done.
         var offeredNames = availableTools
             .Select(t => McpToolReflector.Normalise(t.Name))
             .ToHashSet(StringComparer.Ordinal);
         string? producedYaml = null;     // resolved plan, sourced from the yamlContent tool-call argument
         string? argYaml = null;          // from the yamlContent tool-call argument (the sole source, F6)
 
-        // Stream token-by-token into a live view when the client can, the caller renders a TUI, and
-        // the console can host an in-place region. Replication runs (renderTui: false), --no-stream
-        // and piped / dumb terminals take the blocking path (which still reports token stats).
-        bool consoleCanLive = _console.Profile.Capabilities.Ansi && _console.Profile.Capabilities.Interactive;
-        bool useStreaming = renderTui && !opts.NoStream && consoleCanLive && _llmClient is IStreamingLlmClient;
+        // Stream token-by-token when the client can and the view can follow it; any other pairing
+        // takes the blocking path (which still reports token stats).
+        bool useStreaming = view.CanStream && _llmClient is IStreamingLlmClient;
 
-        // Esc on the full-screen surface cancels the model call and nothing else: the token below
-        // is linked so a real interrupt still cuts through, while tool calls keep running on `ct`
-        // alone. A call already in flight against a database is not something a keystroke may
-        // abandon halfway.
-        using var llmCancel = softCancel.CanBeCanceled
-            ? CancellationTokenSource.CreateLinkedTokenSource(ct, softCancel)
+        // A stop cancels the model call and nothing else: the token below is linked so a real
+        // interrupt still cuts through, while tool calls keep running on `ct` alone. A call already
+        // in flight against a database is not something a stop may abandon halfway.
+        using var llmCancel = stop.CanBeCanceled
+            ? CancellationTokenSource.CreateLinkedTokenSource(ct, stop)
             : null;
         var llmCt = llmCancel?.Token ?? ct;
 
@@ -327,7 +167,6 @@ public class AgentExecutor
             LlmUsage? currentUsage = null;
 
             var compactedMessages = _windowManager.Compact(messages, ContextStore);
-            var iterationSw = Stopwatch.StartNew();
 
             LlmResponse response;
             try
@@ -335,36 +174,28 @@ public class AgentExecutor
                 if (useStreaming)
                 {
                     var streaming = (IStreamingLlmClient)_llmClient;
-                    response = await view!.StreamingStepAsync(currentStepNum, maxIterations, opts.Detail,
+                    response = await view.StreamingStepAsync(currentStepNum, maxIterations,
                         obs => streaming.ChatStreamAsync(baseUrl, model, compactedMessages, availableTools, obs,
                             opts.NumCtx, opts.Temperature, opts.Seed, llmCt));
                 }
-                else if (renderTui)
+                else
                 {
-                    response = await view!.BlockingStepAsync(currentStepNum,
+                    response = await view.BlockingStepAsync(currentStepNum,
                         c => _llmClient.ChatAsync(baseUrl, model, compactedMessages, availableTools,
                             opts.NumCtx, temperature: opts.Temperature, seed: opts.Seed, c), llmCt);
                 }
-                else
-                {
-                    response = await _llmClient.ChatAsync(baseUrl, model, compactedMessages, availableTools,
-                        opts.NumCtx, temperature: opts.Temperature, seed: opts.Seed, llmCt);
-                }
             }
-            catch (OperationCanceledException) when (softCancel.IsCancellationRequested && !ct.IsCancellationRequested)
+            catch (OperationCanceledException) when (stop.IsCancellationRequested && !ct.IsCancellationRequested)
             {
-                // The user pressed Esc. The session lives on, so this must not escape as the
-                // cancellation the CLI turns into exit 130 — it is a stated outcome like any other,
-                // and the steps taken so far stay in the trajectory.
-                const string note = "Interrupted — you stopped the model call.";
-                if (renderTui) view!.AgentResponse(note);
-                if (recordTrajectory) Trajectory.AddStep(currentStepNum, note);
+                // The person stopped the model call. The session lives on, so this must not escape
+                // as the cancellation a host turns into exit 130 — it is a stated outcome like any
+                // other, and the steps taken so far stay in the trajectory.
+                Trajectory.AddStep(currentStepNum, "Interrupted — you stopped the model call.");
                 success = false;
                 turnOutcome = TurnOutcome.UserInterrupted;
                 break;
             }
 
-            iterationSw.Stop();
             _turnTokens += response.Usage?.CompletionTokens ?? 0;
 
             if (!string.IsNullOrEmpty(response.Error))
@@ -384,11 +215,8 @@ public class AgentExecutor
                 // loop are ours, and labelling them "LLM Error" sends the reader to check a
                 // connection that is working.
                 var prefix = failure == TurnOutcome.LlmError ? "LLM Error: " : string.Empty;
-                if (renderTui)
-                    view!.AgentResponse(failure == TurnOutcome.LlmError ? $"Error calling LLM: {errMsg}" : errMsg);
-                if (recordTrajectory)
-                    Trajectory.AddStep(currentStepNum, $"{prefix}{errMsg}",
-                        thinking: response.Thinking ?? response.Message.Content, isError: true);
+                Trajectory.AddStep(currentStepNum, $"{prefix}{errMsg}",
+                    thinking: response.Thinking ?? response.Message.Content, isError: true);
                 success = false;
                 turnOutcome = failure;
                 break;
@@ -399,11 +227,6 @@ public class AgentExecutor
             currentThinking = response.Thinking;
             currentUsage = response.Usage;
 
-            // The streaming step renders its own digest once the stream ends; the blocking step
-            // does not, so the digest is written here.
-            if (renderTui && !useStreaming)
-                view!.Digest(currentStepNum, maxIterations, iterationSw.Elapsed, response, opts.Detail);
-
             var lastMsg = messages[^1];
             if (lastMsg.ToolCalls == null || lastMsg.ToolCalls.Count == 0)
             {
@@ -413,10 +236,7 @@ public class AgentExecutor
                     // answer IS the ask-user call, written out instead of emitted. A weak model
                     // does that, and the turn then reported success while the agent waited for a
                     // reply nobody had been asked for.
-                    if (renderTui)
-                        view!.AgentResponse(lastMsg.Content!);
-                    if (recordTrajectory)
-                        Trajectory.AddStep(currentStepNum, currentReasoning ?? "Finished response.", thinking: currentThinking, usage: currentUsage);
+                    Trajectory.AddStep(currentStepNum, currentReasoning ?? "Finished response.", thinking: currentThinking, usage: currentUsage);
 
                     closingWords = lastMsg.Content;
                     pendingQuestion = AgentQuestion.FromTextualCall(lastMsg.Content);
@@ -427,17 +247,16 @@ public class AgentExecutor
                 {
                     // No tool call and no text: the model stopped with nothing to show. Not a
                     // success: an empty turn must not read as "done".
-                    if (recordTrajectory)
-                        Trajectory.AddStep(currentStepNum, "Model returned an empty response with no tool call.", isError: true, thinking: currentThinking, usage: currentUsage);
+                    Trajectory.AddStep(currentStepNum, "Model returned an empty response with no tool call.", isError: true, thinking: currentThinking, usage: currentUsage);
                     success = false;
                     turnOutcome = TurnOutcome.EmptyResponse;
                 }
                 break;
             }
 
-            // Execute every tool call in this turn (F5). Calls that run no pipeline run in parallel
-            // by default; --sequential forces one-at-a-time execution. Results are appended in the
-            // same order as the calls so each "tool" message stays correlated with its call id.
+            // Execute every tool call in this turn (F5). Calls that run no pipeline run in parallel.
+            // Results are appended in the same order as the calls so each "tool" message stays
+            // correlated with its call id.
             var allCalls = lastMsg.ToolCalls!;
 
             // 'ask-user' is a turn terminator, not a tool: the model needs a decision only the
@@ -461,11 +280,10 @@ public class AgentExecutor
                 }
             }
 
-            // E1: surface a fresh plan to the turn view (no-op on the scrollback path). The
-            // replication pass has view == null and skips it — nothing else to do there.
-            if (renderTui && !string.IsNullOrWhiteSpace(argYaml)
+            // Surface a fresh plan to the turn view.
+            if (!string.IsNullOrWhiteSpace(argYaml)
                 && !string.Equals(argYaml, yamlBeforeThisIteration, StringComparison.Ordinal))
-                view!.PlanUpdated(argYaml!);
+                view.PlanUpdated(argYaml!);
 
             // A call to a tool that was not offered is answered here, as an error, and never
             // reaches the provider. The answer takes the place of the result, so the call keeps its
@@ -481,31 +299,23 @@ public class AgentExecutor
                         McpToolReflector.UnknownToolAnswer(calls[i].Name, availableTools.Select(t => t.Name)), true);
             }
 
-            if (opts.Sequential)
-            {
-                foreach (var i in dispatched)
-                    outcomes[i] = await InvokeToolInto(calls[i].Name, calls[i].Arguments, ct);
-            }
-            else
-            {
-                // A call that runs a pipeline waits on the process's one-run gate. Started
-                // together, such calls would reach it in whatever order the scheduler gives: they
-                // run after the others, one at a time, in the order the model emitted them.
-                var runs = dispatched
-                      .Where(i => _toolProvider.RunsPipeline(calls[i].Name))
-                      .ToList();
-                var others = dispatched.Except(runs).ToList();
+            // A call that runs a pipeline waits on the process's one-run gate. Started together,
+            // such calls would reach it in whatever order the scheduler gives: they run after the
+            // others, one at a time, in the order the model emitted them.
+            var runs = dispatched
+                  .Where(i => _toolProvider.RunsPipeline(calls[i].Name))
+                  .ToList();
+            var others = dispatched.Except(runs).ToList();
 
-                var tasks = others
-                      .Select(i => InvokeToolInto(calls[i].Name, calls[i].Arguments, ct))
-                      .ToArray();
-                await Task.WhenAll(tasks);
-                for (int k = 0; k < others.Count; k++)
-                    outcomes[others[k]] = await tasks[k];
+            var tasks = others
+                  .Select(i => InvokeToolInto(calls[i].Name, calls[i].Arguments, ct))
+                  .ToArray();
+            await Task.WhenAll(tasks);
+            for (int k = 0; k < others.Count; k++)
+                outcomes[others[k]] = await tasks[k];
 
-                foreach (var i in runs)
-                    outcomes[i] = await InvokeToolInto(calls[i].Name, calls[i].Arguments, ct);
-            }
+            foreach (var i in runs)
+                outcomes[i] = await InvokeToolInto(calls[i].Name, calls[i].Arguments, ct);
 
             foreach (var call in calls)
                 toolCounts[call.Name] = toolCounts.GetValueOrDefault(call.Name, 0) + 1;
@@ -529,11 +339,9 @@ public class AgentExecutor
                 else
                     answered[callKey] = new AnsweredCall(Trajectory.Steps.Count + 1, answer);
 
-                if (renderTui)
-                    view!.ToolResult(call.Name, toolResultRaw, outcome.IsError);
-                if (recordTrajectory)
-                    Trajectory.AddStep(Trajectory.Steps.Count + 1, currentReasoning ?? "", call.Name, argsFormatted, toolResultRaw, outcome.IsError,
-                        thinking: i == 0 ? currentThinking : null, usage: i == 0 ? currentUsage : null);
+                view.ToolResult(call.Name, toolResultRaw, outcome.IsError);
+                Trajectory.AddStep(Trajectory.Steps.Count + 1, currentReasoning ?? "", call.Name, argsFormatted, toolResultRaw, outcome.IsError,
+                    thinking: i == 0 ? currentThinking : null, usage: i == 0 ? currentUsage : null);
 
                 messages.Add(new ChatMessage("tool", toolResultRaw, call.Name, ToolCallId: call.Id));
 
@@ -551,11 +359,9 @@ public class AgentExecutor
                 pendingQuestion = AgentQuestion.From(askUserCall.Arguments);
                 const string ack = "{\"status\":\"question delivered to the user; awaiting their reply\"}";
 
-                if (renderTui)
-                    view!.ToolResult("ask-user", ack, isError: false);
-                if (recordTrajectory)
-                    Trajectory.AddStep(Trajectory.Steps.Count + 1, currentReasoning ?? "",
-                        "ask-user", askUserCall.Arguments.ToString(), ack, isError: false);
+                view.ToolResult("ask-user", ack, isError: false);
+                Trajectory.AddStep(Trajectory.Steps.Count + 1, currentReasoning ?? "",
+                    "ask-user", askUserCall.Arguments.ToString(), ack, isError: false);
 
                 // The conversation stays valid for the next turn: every tool call gets a 'tool'
                 // reply, and the user's answer follows as the next 'user' message.
@@ -570,54 +376,16 @@ public class AgentExecutor
             turnIterations++;
         }
 
-        // Promote the primary run's YAML to the instance trajectory for interactive / inspection flows.
-        if (recordTrajectory && !string.IsNullOrWhiteSpace(producedYaml))
+        // Promote the turn's YAML to the trajectory, where the plan a host offers is read from.
+        if (!string.IsNullOrWhiteSpace(producedYaml))
             Trajectory.LastGeneratedYaml = producedYaml;
 
         return new PlanningLoopResult(success, producedYaml, turnIterations, toolCounts, turnOutcome, pendingQuestion, closingWords);
     }
 
-    /// <summary>
-    /// Runs the validated plan the planner produced — the YAML on <see cref="AgentTrajectory.LastGeneratedYaml"/>
-    /// — straight through the execution tool, never back through the LLM. This is the deterministic
-    /// step <see cref="AgentMode.Plan"/>'s contract promises ("execution is a step run by the engine").
-    /// The model never sees <c>execute-yaml-job</c> in Plan mode (F1); a human choosing to run the
-    /// plan they just reviewed is the intended escape hatch, and the F2 guardrails inside the tool
-    /// still apply — <c>apply=false</c> stays a sample run with the writer neutralised.
-    /// </summary>
-    /// <summary>
-    /// The system message in force. A foreign server gets its own instructions (or the neutral
-    /// fallback); dtpipe's own tools get the role prompt for the mode. Read from three places —
-    /// Messages[0], the trace and each replication — so they cannot drift apart.
-    /// </summary>
-    private string SystemPrompt =>
-        _toolProvider.CanRunDtPipePlans
-            ? AgentSystemPrompt.Select(Mode)
-            : AgentSystemPrompt.ForExternalServer(ExternalServerInstructions);
-
-    /// <summary>What a foreign server said about itself at the handshake; null for dtpipe's own.</summary>
-    public string? ExternalServerInstructions { get; init; }
-
-    public async Task<ToolResult> ExecuteValidatedPlanAsync(CancellationToken ct = default)
-    {
-        if (!_toolProvider.CanRunDtPipePlans)
-            throw new InvalidOperationException(
-                "This session drives an external MCP server, so there is no dtpipe pipeline to run.");
-
-        var yaml = Trajectory.LastGeneratedYaml;
-        if (string.IsNullOrWhiteSpace(yaml))
-            throw new InvalidOperationException("No validated plan to execute — the planner produced no YAML.");
-
-        // F6: yamlContent is the sole plan source. Pass it through byte-for-byte.
-        var args = JsonSerializer.SerializeToElement(new { yamlContent = yaml });
-        return await _toolProvider.InvokeToolAsync("execute-yaml-job", args, ct);
-    }
-
-
-    private static string FormatClock(TimeSpan t) =>
-        t.TotalMinutes >= 1
-            ? $"{(int)t.TotalMinutes}m{t.Seconds:D2}s"
-            : $"{t.TotalSeconds:F0}s";
+    /// <summary>The system message in force. Read from two places — Messages[0] and the trace — so
+    /// they cannot drift apart.</summary>
+    private static string SystemPrompt => AgentSystemPrompt.PlannerSystemPrompt;
 
     private async Task<ToolInvocationOutcome> InvokeToolInto(string toolName, JsonElement args, CancellationToken ct)
     {
@@ -630,27 +398,6 @@ public class AgentExecutor
         {
             return new ToolInvocationOutcome(JsonSerializer.Serialize(new { error = ex.Message }), true);
         }
-    }
-
-    /// <summary>
-    /// Builds the <see cref="DeterminismReport"/> from the YAMLs observed across replications.
-    /// When only one replication was requested, a report is still produced (variance is 0 by
-    /// definition) so the trajectory always carries a determinism signal.
-    /// </summary>
-    private static DeterminismReport BuildDeterminismReport(int repetitions, List<string> observedYamls)
-    {
-        var distinct = new List<string>();
-        foreach (var y in observedYamls)
-        {
-            if (!distinct.Contains(y))
-                distinct.Add(y);
-        }
-
-        return new DeterminismReport
-        {
-            Repetitions = repetitions,
-            DistinctYaml = distinct
-        };
     }
 
     /// <summary>

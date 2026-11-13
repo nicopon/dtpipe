@@ -4,7 +4,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using DtPipe.Cli.Agent;
-using Spectre.Console;
+using DtPipe.Tests.Helpers;
 using Xunit;
 
 namespace DtPipe.Tests.Unit.Cli;
@@ -20,8 +20,7 @@ public class AgentYamlExtractionTests
         public string? LastYamlContentArg { get; private set; }
         public int CallCount { get; private set; }
 
-        public List<ToolDefinition> GetToolDefinitions() => new();
-        public List<ToolDefinition> GetToolDefinitions(AgentMode mode) => new[] { "validate-yaml-job" }.Select(n => new ToolDefinition(n, "", default)).ToList();
+        public List<ToolDefinition> GetToolDefinitions() => new[] { "validate-yaml-job" }.Select(n => new ToolDefinition(n, "", default)).ToList();
 
         public Task<ToolResult> InvokeToolAsync(string toolName, JsonElement args, CancellationToken ct)
         {
@@ -60,11 +59,7 @@ public class AgentYamlExtractionTests
     }
 
     private static AgentExecutor BuildExecutor(IAgentToolProvider tools, ILlmClient llm)
-    {
-        IAnsiConsole console = Spectre.Console.AnsiConsole.Create(new Spectre.Console.AnsiConsoleSettings());
-        var tui = new AgentTui(console);
-        return new AgentExecutor(tools, llm, tui, console);
-    }
+        => new(tools, llm);
 
     private static LlmResponse WithToolCall(string content, string toolName, string argsJson)
     {
@@ -96,7 +91,7 @@ public class AgentYamlExtractionTests
            });
 
         var executor = BuildExecutor(provider, llm);
-        await executor.RunTurnAsync("mission", "model", "http://localhost:11434", maxIterations: 5);
+        await executor.TurnAsync("mission", maxIterations: 5);
 
         Assert.Equal(argYaml, executor.Trajectory.LastGeneratedYaml);
     }
@@ -112,7 +107,7 @@ public class AgentYamlExtractionTests
         var llm = new QueuedLlmClient(new[] { TextOnly(content) });
 
         var executor = BuildExecutor(provider, llm);
-        await executor.RunTurnAsync("mission", "model", "http://localhost:11434", maxIterations: 5);
+        await executor.TurnAsync("mission", maxIterations: 5);
 
         Assert.Null(executor.Trajectory.LastGeneratedYaml);
     }
@@ -124,7 +119,7 @@ public class AgentYamlExtractionTests
         var llm = new QueuedLlmClient(new[] { TextOnly("planning done, no yaml") });
 
         var executor = BuildExecutor(provider, llm);
-        await executor.RunTurnAsync("mission", "model", "http://localhost:11434", maxIterations: 5);
+        await executor.TurnAsync("mission", maxIterations: 5);
 
         Assert.Null(executor.Trajectory.LastGeneratedYaml);
     }

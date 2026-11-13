@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Threading;
@@ -8,8 +7,8 @@ using System.Threading.Tasks;
 using DtPipe.Cli.Agent;
 using DtPipe.Cli.Mcp;
 using DtPipe.Core.Abstractions;
+using DtPipe.Tests.Helpers;
 using Microsoft.Extensions.DependencyInjection;
-using Spectre.Console;
 using Xunit;
 
 namespace DtPipe.Tests.Unit.Cli;
@@ -18,8 +17,8 @@ namespace DtPipe.Tests.Unit.Cli;
 /// The agent can stop to ask the user something. <c>ask-user</c> is a
 /// turn terminator, not a tool — the loop never dispatches it, the turn ends on
 /// <see cref="TurnOutcome.AwaitingUserInput"/> carrying the question, and the run exits non-zero
-/// (an agent that stopped for want of an answer did not finish). Interactively the user answers
-/// and the session continues; piped, it is a fail-closed 1.
+/// (an agent that stopped for want of an answer did not finish). The person answers, and the
+/// next turn carries on.
 /// </summary>
 public class AgentClarificationTests
 {
@@ -39,8 +38,7 @@ public class AgentClarificationTests
     private sealed class RecordingToolProvider : IAgentToolProvider
     {
         public List<string> Invoked { get; } = new();
-        public List<ToolDefinition> GetToolDefinitions() => new();
-        public List<ToolDefinition> GetToolDefinitions(AgentMode mode) => new[] { "inspect" }.Select(n => new ToolDefinition(n, "", default)).ToList();
+        public List<ToolDefinition> GetToolDefinitions() => new[] { "inspect" }.Select(n => new ToolDefinition(n, "", default)).ToList();
         public Task<ToolResult> InvokeToolAsync(string toolName, JsonElement args, CancellationToken ct)
         {
             Invoked.Add(toolName);
@@ -48,19 +46,10 @@ public class AgentClarificationTests
         }
     }
 
-    private static (AgentExecutor Executor, StringWriter Out, RecordingToolProvider Tools) Build(ILlmClient llm)
+    private static (AgentExecutor Executor, RecordingToolProvider Tools) Build(ILlmClient llm)
     {
-        var sw = new StringWriter();
-        var console = AnsiConsole.Create(new AnsiConsoleSettings
-        {
-            Out = new AnsiConsoleOutput(sw),
-            Ansi = AnsiSupport.No,
-            ColorSystem = ColorSystemSupport.NoColors,
-            Interactive = InteractionSupport.No,
-        });
-        console.Profile.Width = 100;
         var tools = new RecordingToolProvider();
-        return (new AgentExecutor(tools, llm, new AgentTui(console), console), sw, tools);
+        return (new AgentExecutor(tools, llm), tools);
     }
 
     private static LlmResponse AskUser(string question, string reasoning = "INTENT: I need one thing from the user")
@@ -90,9 +79,9 @@ public class AgentClarificationTests
     [Fact]
     public async Task Ask_User_Ends_The_Turn_Awaiting_Input_And_Keeps_The_Question()
     {
-        var (executor, _, _) = Build(new QueuedLlmClient(AskUser("What should the output file be called?")));
+        var (executor, _) = Build(new QueuedLlmClient(AskUser("What should the output file be called?")));
 
-        int code = await executor.RunTurnAsync("anonymise the CSV", "m", "http://x", new AgentOptions(), maxIterations: 5);
+        int code = (await executor.TurnAsync("anonymise the CSV", maxIterations: 5)).ExitCode;
 
         Assert.Equal(1, code);   // fail-closed: not a finished turn
         Assert.Equal(TurnOutcome.AwaitingUserInput, executor.LastTurnOutcome);
@@ -102,22 +91,22 @@ public class AgentClarificationTests
     /// <summary>
     /// ask-user's schema declares an 'options' array — "a short list of choices, when the answer is
     /// a pick" — so a model that fills it answered the schema correctly. Reading only 'question'
-    /// discarded that half before any surface could show it.
+    /// discarded that half before any host could show it.
     /// </summary>
     [Fact]
     public async Task The_Choices_The_Model_Offered_Survive_The_Turn()
     {
-        var (executor, _, _) = Build(new QueuedLlmClient(
+        var (executor, _) = Build(new QueuedLlmClient(
             AskUserWithOptions("Which column keys the upsert?", "order_id", "customer_id")));
 
-        await executor.RunTurnAsync("mission", "m", "http://x", new AgentOptions(), maxIterations: 5);
+        await executor.TurnAsync("mission", maxIterations: 5);
 
         Assert.Equal("Which column keys the upsert?", executor.PendingQuestion?.Text);
         Assert.Equal(new[] { "order_id", "customer_id" }, executor.PendingQuestion?.Options);
     }
 
-    /// <summary>The choices are numbered once, by the question itself, so the two surfaces cannot
-    /// number them differently.</summary>
+    /// <summary>The choices are numbered once, by the question itself, so no host numbers them its
+    /// own way.</summary>
     [Fact]
     public void The_Choices_Are_Numbered_For_Display()
     {
@@ -139,10 +128,10 @@ public class AgentClarificationTests
     [Fact]
     public async Task An_Ask_User_Call_Written_As_Text_Still_Ends_The_Turn_Awaiting_Input()
     {
-        var (executor, _, _) = Build(new QueuedLlmClient(TextOnly(
+        var (executor, _) = Build(new QueuedLlmClient(TextOnly(
             """{"question": "Which column keys the upsert?", "options": ["order_id", "customer_id"]}""")));
 
-        int code = await executor.RunTurnAsync("mission", "m", "http://x", new AgentOptions(), maxIterations: 5);
+        int code = (await executor.TurnAsync("mission", maxIterations: 5)).ExitCode;
 
         Assert.Equal(1, code);
         Assert.Equal(TurnOutcome.AwaitingUserInput, executor.LastTurnOutcome);
@@ -155,10 +144,10 @@ public class AgentClarificationTests
     [Fact]
     public async Task A_Fenced_Ask_User_Call_Is_Recognised_Too()
     {
-        var (executor, _, _) = Build(new QueuedLlmClient(TextOnly(
+        var (executor, _) = Build(new QueuedLlmClient(TextOnly(
             "```json\n{\"name\": \"ask-user\", \"arguments\": {\"question\": \"Which file?\"}}\n```")));
 
-        await executor.RunTurnAsync("mission", "m", "http://x", new AgentOptions(), maxIterations: 5);
+        await executor.TurnAsync("mission", maxIterations: 5);
 
         Assert.Equal(TurnOutcome.AwaitingUserInput, executor.LastTurnOutcome);
         Assert.Equal("Which file?", executor.PendingQuestion?.Text);
@@ -175,9 +164,9 @@ public class AgentClarificationTests
     [InlineData("**Question**\nQuel nom de fichier SQLite souhaitez-vous utiliser ?")]
     public async Task A_Reply_That_Is_Not_The_Call_Stays_A_Finished_Turn(string content)
     {
-        var (executor, _, _) = Build(new QueuedLlmClient(TextOnly(content)));
+        var (executor, _) = Build(new QueuedLlmClient(TextOnly(content)));
 
-        int code = await executor.RunTurnAsync("mission", "m", "http://x", new AgentOptions(), maxIterations: 5);
+        int code = (await executor.TurnAsync("mission", maxIterations: 5)).ExitCode;
 
         Assert.Equal(0, code);
         Assert.Equal(TurnOutcome.Succeeded, executor.LastTurnOutcome);
@@ -185,7 +174,7 @@ public class AgentClarificationTests
     }
 
     /// <summary>
-    /// A surface picks a choice by the line the reader is standing on. The choices are the trailing
+    /// A reader picks a choice by the line it is standing on. The choices are the trailing
     /// lines, so a question that spans several lines still maps: counting forward from the top
     /// would misread every option after the first newline.
     /// </summary>
@@ -213,9 +202,9 @@ public class AgentClarificationTests
     [Fact]
     public async Task The_Partial_Trajectory_Is_Kept()
     {
-        var (executor, _, _) = Build(new QueuedLlmClient(AskUser("Which column holds the customer id?")));
+        var (executor, _) = Build(new QueuedLlmClient(AskUser("Which column holds the customer id?")));
 
-        await executor.RunTurnAsync("mission", "m", "http://x", new AgentOptions(), maxIterations: 5);
+        await executor.TurnAsync("mission", maxIterations: 5);
 
         Assert.Contains(executor.Trajectory.Steps, s => s.ToolName == "ask-user");
     }
@@ -223,9 +212,9 @@ public class AgentClarificationTests
     [Fact]
     public async Task Ask_User_Is_Never_Dispatched_As_A_Tool()
     {
-        var (executor, _, tools) = Build(new QueuedLlmClient(AskUser("pick one")));
+        var (executor, tools) = Build(new QueuedLlmClient(AskUser("pick one")));
 
-        await executor.RunTurnAsync("mission", "m", "http://x", new AgentOptions(), maxIterations: 5);
+        await executor.TurnAsync("mission", maxIterations: 5);
 
         Assert.DoesNotContain("ask-user", tools.Invoked);
     }
@@ -238,9 +227,9 @@ public class AgentClarificationTests
         var args = JsonSerializer.SerializeToElement(new { question = "which id column?" });
         var calls = new List<ToolCall> { new("q1", "ask_user", args) };
         var response = new LlmResponse(new ChatMessage("assistant", "INTENT: ask", null, calls), true, null);
-        var (executor, _, tools) = Build(new QueuedLlmClient(response));
+        var (executor, tools) = Build(new QueuedLlmClient(response));
 
-        await executor.RunTurnAsync("mission", "m", "http://x", new AgentOptions(), maxIterations: 5);
+        await executor.TurnAsync("mission", maxIterations: 5);
 
         Assert.Equal(TurnOutcome.AwaitingUserInput, executor.LastTurnOutcome);
         Assert.Equal("which id column?", executor.PendingQuestion?.Text);
@@ -250,9 +239,9 @@ public class AgentClarificationTests
     [Fact]
     public async Task Other_Tool_Calls_In_The_Same_Turn_Still_Run()
     {
-        var (executor, _, tools) = Build(new QueuedLlmClient(ToolThenAsk("inspect", "Which schema?")));
+        var (executor, tools) = Build(new QueuedLlmClient(ToolThenAsk("inspect", "Which schema?")));
 
-        await executor.RunTurnAsync("mission", "m", "http://x", new AgentOptions(), maxIterations: 5);
+        await executor.TurnAsync("mission", maxIterations: 5);
 
         Assert.Contains("inspect", tools.Invoked);            // F5 preserved
         Assert.DoesNotContain("ask-user", tools.Invoked);
@@ -262,39 +251,38 @@ public class AgentClarificationTests
     [Fact]
     public async Task Awaiting_Input_Is_Distinct_From_An_Empty_Response()
     {
-        var (executor, _, _) = Build(new QueuedLlmClient(AskUser("something", reasoning: "")));
+        var (executor, _) = Build(new QueuedLlmClient(AskUser("something", reasoning: "")));
 
-        await executor.RunTurnAsync("mission", "m", "http://x", new AgentOptions(), maxIterations: 5);
+        await executor.TurnAsync("mission", maxIterations: 5);
 
         // Empty reasoning text must not make this read as EmptyResponse — the tool call is what matters.
         Assert.Equal(TurnOutcome.AwaitingUserInput, executor.LastTurnOutcome);
     }
 
     [Fact]
-    public async Task The_Summary_Renders_The_Third_State()
+    public async Task The_Summary_States_The_Third_State()
     {
-        var (executor, sw, _) = Build(new QueuedLlmClient(AskUser("What is the target table?")));
+        var (executor, _) = Build(new QueuedLlmClient(AskUser("What is the target table?")));
 
-        await executor.RunTurnAsync("mission", "m", "http://x", new AgentOptions(), maxIterations: 5);
+        var summary = await executor.TurnAsync("mission", maxIterations: 5);
 
-        var output = sw.ToString();
-        Assert.Contains("AWAITING INPUT", output);
-        Assert.Contains("asked you a question", output);
-        Assert.Contains("What is the target table?", output);
-        Assert.DoesNotContain("COMPLETED", output);
+        Assert.Equal(TurnStatus.AwaitingInput, summary.Status);
+        Assert.Contains("AWAITING INPUT", summary.StatusWord);
+        Assert.Contains("asked you a question", summary.Reason);
+        Assert.Equal("What is the target table?", summary.Question?.Text);
     }
 
     [Fact]
     public async Task An_Answer_On_The_Next_Turn_Clears_The_Pending_Question()
     {
-        var (executor, _, _) = Build(new QueuedLlmClient(
+        var (executor, _) = Build(new QueuedLlmClient(
             AskUser("Which id column?"),
             new LlmResponse(new ChatMessage("assistant", "Understood — here is the plan."), true, null)));
 
-        await executor.RunTurnAsync("mission", "m", "http://x", new AgentOptions(), maxIterations: 5);
+        await executor.TurnAsync("mission", maxIterations: 5);
         Assert.Equal("Which id column?", executor.PendingQuestion?.Text);
 
-        int code = await executor.RunTurnAsync("the 'client_ref' column", "m", "http://x", new AgentOptions(), maxIterations: 5);
+        int code = (await executor.TurnAsync("the 'client_ref' column", maxIterations: 5)).ExitCode;
 
         Assert.Equal(0, code);
         Assert.Equal(TurnOutcome.Succeeded, executor.LastTurnOutcome);
@@ -302,7 +290,7 @@ public class AgentClarificationTests
     }
 
     [Fact]
-    public void Ask_User_Is_Offered_In_Every_Mode_Including_Plan()
+    public void Ask_User_Is_Offered()
     {
         var services = new ServiceCollection();
         services.AddSingleton<DtPipe.Core.Options.OptionsRegistry>();
@@ -319,7 +307,6 @@ public class AgentClarificationTests
             sp);
         var provider = new McpToolProvider(mcpTools);
 
-        foreach (var mode in new[] { AgentMode.Plan, AgentMode.Execute, AgentMode.Autonomous })
-            Assert.Contains(provider.GetToolDefinitions(mode), t => t.Name == "ask-user");
+        Assert.Contains(provider.GetToolDefinitions(), t => t.Name == "ask-user");
     }
 }

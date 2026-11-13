@@ -5,7 +5,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using DtPipe.Cli.Agent;
-using Spectre.Console;
+using DtPipe.Tests.Helpers;
 using Xunit;
 
 namespace DtPipe.Tests.Unit.Cli;
@@ -25,8 +25,7 @@ public class AgentContextStoreTests
         public InspectToolProvider(string inspectResult)
              => InspectResult = inspectResult;
 
-        public List<ToolDefinition> GetToolDefinitions() => new();
-        public List<ToolDefinition> GetToolDefinitions(AgentMode mode) => new[] { "inspect", "validate-yaml-job" }.Select(n => new ToolDefinition(n, "", default)).ToList();
+        public List<ToolDefinition> GetToolDefinitions() => new[] { "inspect", "validate-yaml-job" }.Select(n => new ToolDefinition(n, "", default)).ToList();
 
         public Task<ToolResult> InvokeToolAsync(string toolName, JsonElement args, CancellationToken ct)
         {
@@ -63,11 +62,7 @@ public class AgentContextStoreTests
     }
 
     private static AgentExecutor BuildExecutor(IAgentToolProvider tools, ILlmClient llm, AgentContextStore? store = null)
-    {
-        IAnsiConsole console = Spectre.Console.AnsiConsole.Create(new Spectre.Console.AnsiConsoleSettings());
-        var tui = new AgentTui(console);
-        return new AgentExecutor(tools, llm, tui, console, store);
-    }
+        => new(tools, llm, store);
 
     private static LlmResponse WithToolCall(string content, string toolName, string argsJson)
     {
@@ -98,7 +93,7 @@ public class AgentContextStoreTests
            });
 
         var executor = BuildExecutor(provider, llm, store);
-        await executor.RunTurnAsync("inspects then plans", "m", "http://localhost:11434", maxIterations: 5);
+        await executor.TurnAsync("inspects then plans", maxIterations: 5);
 
         // The fact must be cached in the store.
         var facts = store.GetFacts().ToList();

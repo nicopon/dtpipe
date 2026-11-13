@@ -6,15 +6,16 @@ using System.Threading.Tasks;
 using DtPipe.Cli.Agent;
 using DtPipe.Cli.Mcp;
 using ModelContextProtocol.Server;
-using Spectre.Console;
+using DtPipe.Tests.Helpers;
 using Xunit;
 
 namespace DtPipe.Tests.Unit.Cli;
 
 /// <summary>
-/// F1 — executor wiring: the LLM only ever sees the tools allowed for the operating mode.
+/// F1 — executor wiring: the LLM only ever sees the tools it is offered, and a call to any other is
+/// refused where the loop reads it.
 /// </summary>
-public class AgentExecutorModeTests
+public class AgentExecutorCatalogueTests
 {
     private sealed class PlanAndExecuteTools
     {
@@ -79,27 +80,25 @@ public class AgentExecutorModeTests
         }
     }
 
+    /// <summary>
+    /// A call naming an offered tool or not, with the arguments a model would send to write: the
+    /// <c>apply</c> flag is set, so a call that reached the execution tool would write.
+    /// </summary>
     private static LlmResponse CallsTo(params (string Id, string Name)[] calls) =>
         new(new ChatMessage("assistant", "calling", null,
-            calls.Select(c => new ToolCall(c.Id, c.Name, JsonDocument.Parse("""{"yamlContent":"x"}""").RootElement)).ToList()),
+            calls.Select(c => new ToolCall(c.Id, c.Name, JsonDocument.Parse("""{"yamlContent":"x","apply":true}""").RootElement)).ToList()),
             true, null);
 
     private static AgentExecutor BuildExecutor(PlanAndExecuteTools tools, ILlmClient llm)
-    {
-        IAnsiConsole console = Spectre.Console.AnsiConsole.Create(new Spectre.Console.AnsiConsoleSettings());
-        var tui = new AgentTui(console);
-        var provider = new McpToolProvider(tools);
-        return new AgentExecutor(provider, llm, tui, console);
-    }
+        => new(new McpToolProvider(tools), llm);
 
     [Fact]
-    public async Task In_Plan_Mode_The_Llm_Never_Sees_The_Execution_Tool()
+    public async Task The_Llm_Never_Sees_The_Execution_Tool()
     {
         var llm = new CapturingLlmClient();
         var executor = BuildExecutor(new PlanAndExecuteTools(), llm);
 
-        var options = new AgentOptions { Mode = AgentMode.Plan };
-        await executor.RunTurnAsync("plan a pipeline", "m", "http://localhost:11434", options, maxIterations: 3);
+        await executor.TurnAsync("plan a pipeline", maxIterations: 3);
 
         Assert.DoesNotContain("execute-yaml-job", llm.SeenToolNames);
         Assert.Contains("validate-yaml-job", llm.SeenToolNames);
@@ -111,7 +110,7 @@ public class AgentExecutorModeTests
     /// answer, so the conversation stays valid and the step stays in the trajectory.
     /// </summary>
     [Fact]
-    public async Task In_Plan_Mode_A_Call_To_The_Hidden_Execution_Tool_Is_Refused_And_Never_Invoked()
+    public async Task A_Call_To_The_Hidden_Execution_Tool_Is_Refused_And_Never_Invoked()
     {
         var tools = new PlanAndExecuteTools();
         var llm = new ScriptedLlmClient(
@@ -119,8 +118,7 @@ public class AgentExecutorModeTests
             new LlmResponse(new ChatMessage("assistant", "done planning"), true, null));
         var executor = BuildExecutor(tools, llm);
 
-        await executor.RunTurnAsync("write it", "m", "http://localhost:11434",
-            new AgentOptions { Mode = AgentMode.Plan, Apply = true }, maxIterations: 3);
+        await executor.TurnAsync("write it", maxIterations: 3);
 
         Assert.Equal(0, tools.ExecuteInvocations);
         Assert.Equal(new[] { "1", "2" }, llm.ToolMessagesSeen.Select(m => m.ToolCallId));
@@ -139,7 +137,7 @@ public class AgentExecutorModeTests
     }
 
     [Fact]
-    public async Task In_Plan_Mode_An_Offered_Tool_Written_With_Underscores_Is_Still_Invoked()
+    public async Task An_Offered_Tool_Written_With_Underscores_Is_Still_Invoked()
     {
         var tools = new PlanAndExecuteTools();
         var llm = new ScriptedLlmClient(
@@ -147,87 +145,22 @@ public class AgentExecutorModeTests
             new LlmResponse(new ChatMessage("assistant", "done planning"), true, null));
         var executor = BuildExecutor(tools, llm);
 
-        await executor.RunTurnAsync("check it", "m", "http://localhost:11434",
-            new AgentOptions { Mode = AgentMode.Plan, Apply = true }, maxIterations: 3);
+        await executor.TurnAsync("check it", maxIterations: 3);
 
         Assert.Equal(1, tools.ValidateInvocations);
         Assert.False(executor.Trajectory.Steps.Single(s => s.ToolName is not null).IsError);
     }
 
+    /// <summary>The system message is the role prompt, which forbids execution.</summary>
     [Fact]
-    public async Task In_Execute_Mode_The_Llm_Sees_The_Execution_Tool()
+    public async Task The_System_Prompt_Is_The_Planner_Prompt()
     {
         var llm = new CapturingLlmClient();
         var executor = BuildExecutor(new PlanAndExecuteTools(), llm);
 
-        var options = new AgentOptions { Mode = AgentMode.Execute };
-        await executor.RunTurnAsync("run a pipeline", "m", "http://localhost:11434", options, maxIterations: 3);
-
-        Assert.Contains("execute-yaml-job", llm.SeenToolNames);
-    }
-
-    /// <summary>
-    /// Verifies the system prompt injected into the LLM conversation reflects the operating mode
-    /// (F1): the planner prompt forbids execution.
-    /// </summary>
-    [Fact]
-    public async Task Plan_Mode_Injects_The_Planner_System_Prompt()
-    {
-        var llm = new CapturingLlmClient();
-        var executor = BuildExecutor(new PlanAndExecuteTools(), llm);
-        var options = new AgentOptions { Mode = AgentMode.Plan };
-
-        await executor.RunTurnAsync("plan", "m", "http://localhost:11434", options, maxIterations: 3);
+        await executor.TurnAsync("plan", maxIterations: 3);
 
         var systemMsg = executor.Messages.First(m => m.Role == "system");
-        Assert.Contains("PLANNER", systemMsg.Content);
-    }
-
-    // ── The operating mode is a live session state ──
-
-    [Theory]
-    [InlineData(AgentMode.Plan, AgentMode.Execute)]
-    [InlineData(AgentMode.Execute, AgentMode.Autonomous)]
-    [InlineData(AgentMode.Autonomous, AgentMode.Plan)]
-    public void CycleMode_Walks_Plan_Execute_Autonomous_And_Wraps(AgentMode from, AgentMode expected)
-    {
-        Assert.Equal(expected, AgentExecutor.NextMode(from));
-    }
-
-    [Fact]
-    public async Task Switching_From_Plan_To_Execute_Between_Turns_Unlocks_The_Execution_Tool()
-    {
-        var llm = new CapturingLlmClient();
-        var executor = BuildExecutor(new PlanAndExecuteTools(), llm);
-        var options = new AgentOptions { Mode = AgentMode.Plan };
-
-        await executor.RunTurnAsync("plan a pipeline", "m", "http://localhost:11434", options, maxIterations: 3);
-        Assert.DoesNotContain("execute-yaml-job", llm.SeenToolNames);
-
-        executor.CycleMode();
-        Assert.Equal(AgentMode.Execute, executor.Mode);
-
-        await executor.RunTurnAsync("now run it", "m", "http://localhost:11434", options, maxIterations: 3);
-
-        Assert.Contains("execute-yaml-job", llm.SeenToolNames);
-        var systemMsg = executor.Messages.First(m => m.Role == "system");
-        Assert.Contains("EXECUTOR", systemMsg.Content);
-    }
-
-    [Fact]
-    public async Task The_Session_Mode_Is_Authoritative_Once_Seeded()
-    {
-        // A later turn passing a different options.Mode must not silently override a mode the
-        // user cycled — the executor's Mode is the single authority after the first turn.
-        var llm = new CapturingLlmClient();
-        var executor = BuildExecutor(new PlanAndExecuteTools(), llm);
-
-        await executor.RunTurnAsync("plan", "m", "http://localhost:11434", new AgentOptions { Mode = AgentMode.Plan }, maxIterations: 3);
-        Assert.Equal(AgentMode.Plan, executor.Mode);
-
-        await executor.RunTurnAsync("again", "m", "http://localhost:11434", new AgentOptions { Mode = AgentMode.Execute }, maxIterations: 3);
-
-        Assert.Equal(AgentMode.Plan, executor.Mode);
-        Assert.DoesNotContain("execute-yaml-job", llm.SeenToolNames);
+        Assert.Equal(AgentSystemPrompt.PlannerSystemPrompt, systemMsg.Content);
     }
 }

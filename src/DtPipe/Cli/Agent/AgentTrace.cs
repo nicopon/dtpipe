@@ -16,8 +16,8 @@ namespace DtPipe.Cli.Agent;
 /// mission, what would have to change here for it to succeed?</em> That question has four possible
 /// answers — the system prompt, a tool's description, a tool's behaviour, or nothing (the model was
 /// simply not up to it) — and telling them apart needs what the model was given, not only what it
-/// did. So the trace carries the system prompt actually selected and the tool catalogue as it was
-/// offered, alongside the steps. A trace without those two records the symptom and loses the cause.
+/// did. So the trace carries the system prompt in force and the tool catalogue as it was offered,
+/// alongside the steps. A trace without those two records the symptom and loses the cause.
 /// </para>
 ///
 /// <para>
@@ -91,7 +91,7 @@ public sealed class AgentTrace : IDisposable
     }
 
     /// <summary>How the run was launched. Written once, first.</summary>
-    public void Session(string model, string endpoint, AgentMode mode, AgentOptions opts, int maxIterations)
+    public void Session(string model, string endpoint, AgentOptions opts, int maxIterations)
         => Write(new Dictionary<string, object?>
         {
             ["kind"] = "session",
@@ -99,22 +99,19 @@ public sealed class AgentTrace : IDisposable
                 .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion,
             ["model"] = model,
             ["endpoint"] = Safe(endpoint),
-            ["mode"] = mode.ToString().ToLowerInvariant(),
-            ["apply"] = opts.Apply,
-            ["allowDestructive"] = opts.AllowDestructive,
-            ["allowNetwork"] = opts.AllowNetwork,
-            ["detail"] = opts.Detail.ToString().ToLowerInvariant(),
+            ["temperature"] = opts.Temperature,
+            ["seed"] = opts.Seed,
+            ["numCtx"] = opts.NumCtx,
             ["maxIterations"] = maxIterations,
             ["warning"] = "Tool arguments and results are recorded as the model saw them; "
                         + "known credential shapes are blanked, others are not.",
         });
 
-    /// <summary>The role prompt the mode selected, in full — a prompt fix is only attributable against it.</summary>
-    public void SystemPrompt(AgentMode mode, string text)
+    /// <summary>The role prompt in force, in full — a prompt fix is only attributable against it.</summary>
+    public void SystemPrompt(string text)
         => Write(new Dictionary<string, object?>
         {
             ["kind"] = "system-prompt",
-            ["mode"] = mode.ToString().ToLowerInvariant(),
             ["text"] = text,
         });
 
@@ -123,11 +120,10 @@ public sealed class AgentTrace : IDisposable
     /// wrong tool call cannot be told apart from a tool that was never offered, or one whose
     /// description sent the model elsewhere.
     /// </summary>
-    public void Catalogue(AgentMode mode, IReadOnlyList<ToolDefinition> tools)
+    public void Catalogue(IReadOnlyList<ToolDefinition> tools)
         => Write(new Dictionary<string, object?>
         {
             ["kind"] = "tools",
-            ["mode"] = mode.ToString().ToLowerInvariant(),
             ["tools"] = tools.Select(t => new Dictionary<string, object?>
             {
                 ["name"] = t.Name,
