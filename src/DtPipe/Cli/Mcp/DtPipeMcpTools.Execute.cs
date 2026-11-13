@@ -101,7 +101,8 @@ public partial class DtPipeMcpTools
                             + "the engine builds it.",
                 ["notChecked"] = "The source is never opened here, so no column name is verified: a transformer "
                                + "naming a column the source does not carry fails when the job runs, not now. "
-                               + "Call 'dry-run' on this same YAML to check it against the real schema.",
+                               + "Nor is the form of a connection string read: an adapter that cannot parse it refuses it "
+                               + "when it opens. Call 'dry-run' on this same YAML to check it against the real source.",
                 ["shape"] = Shape(parsed),
             };
 
