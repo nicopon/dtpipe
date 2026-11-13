@@ -68,6 +68,9 @@ public sealed class PassiveCoordinatorTests : IDisposable
         Assert.False(starting.IsCompleted);
         // The standby's bootstrap ran nowhere: it read and wrote nothing before holding the database.
         Assert.DoesNotContain("runner", (string)_bed.Read("SELECT doc FROM rights")!);
+        // The responder listens before the wait for the database logs its warning: the log is read once it holds it.
+        var logging = Stopwatch.StartNew();
+        while (!log.Entries.Any(e => e.Contains("passive")) && logging.Elapsed < TimeSpan.FromSeconds(20)) await Task.Delay(50, Ct);
         var logged = string.Join('\n', log.Entries);
         Assert.Contains("passive", logged);
         Assert.DoesNotContain(PasswordOf(provider), logged);
