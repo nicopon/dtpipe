@@ -155,7 +155,7 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   `Coordinator:Auth:PersonTokenLifetime` (an hour, 5 minutes at least); without a studio's client, or with
   `Coordinator:Auth:PersonKeys=false`, a person's key is refused as any other client is. While `PublicUrl` is plain HTTP the exchange is refused unless
   `Coordinator:Auth:AllowHttpKeys`, and while that setting is in effect the start logs a warning and every page shows a banner
-  (`/api/info` `httpKeys`, `AccessPage`). The metadata lists the issuer after `Authority`, which the studio and a node with no
+  (`/api/info` `httpKeys`, `#http-keys-banner`). The metadata lists the issuer after `Authority`, which the studio and a node with no
   `Oidc:Authority` read first: a node verified by a key sets `Oidc:Authority` to the coordinator's address. **Without `Coordinator:Authority` the issuer is
   the only one: `AddTrustedIdp` registers neither `IdpBearer`, `IdpPerson` nor OpenID Connect, every token goes to the key issuer's
   schemes, the challenge is the cookie's (the form), the metadata lists the issuer alone and `dtpipe_auth` is `key`, the form links to

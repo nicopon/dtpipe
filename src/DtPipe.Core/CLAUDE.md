@@ -82,7 +82,7 @@ Core/Abstractions declare]`
 
 - **`Redact`** parses a connection string and prints only keys on the safe list; every other
   `key=value` is masked, including a key nobody anticipated. Use it wherever the value *is* a
-  connection: a message, the DAG panel, an MCP plan, the agent's approval dialog.
+  connection: a message, the DAG panel, an MCP plan.
 - **`Sanitize`** scans text with no grammar (a driver exception, a YAML excerpt, a tool argument)
   for keys that look sensitive. Best-effort by construction.
 

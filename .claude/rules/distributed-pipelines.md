@@ -173,7 +173,7 @@ the control plane, over each replica's node channel; TransportR carries the data
   is the one file that names it, so the runtime loads it when `dtpipe node` runs and for no other command. The CLI references no
   other project of the family, maps no SignalR hub, and `dtpipe studio` is a client of the coordinator's `/api`, only when it is
   given `--coordinator`. A node started by the CLI takes no setting from a message and no secret from an argument: the client
-  secret is a reference (`keyring://`, `${{NAME}}`) read once at start.
+  secret is a reference (`keyring://`, `${{NAME}}`, `@file`) read once at start.
   `[CI: validate_distributed_boundary.sh — names and references, one file naming the Launcher, no SignalR hub under src/DtPipe;
   NodeCommandTests in DtPipe.Tests — no TransportR loaded after --version, --help or node --help]`
   `[CI: DtPipe.PipelineNode.Tests NodeCommandTests — a node started by the command announces its bricks and shows its secret nowhere]`

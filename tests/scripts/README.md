@@ -22,7 +22,7 @@ DtPipe uses a centralized Docker infrastructure for all integration tests.
 # Docker required: above + driver chain + upsert/ignore + DuckDB hub
 ./tests/scripts/run.sh --test-docker
 
-# 135-command catalog suite (Docker + init_test_data.sh required)
+# Numbered catalog suite (Docker + init_test_data.sh required)
 ./tests/scripts/init_test_data.sh
 ./tests/scripts/run.sh --catalog
 
@@ -39,7 +39,7 @@ DtPipe uses a centralized Docker infrastructure for all integration tests.
 | `--smoke` | Golden smoke test: edge cases, 1M rows, all DB drivers | Yes |
 | `--test` | Transformers, schema, options, hooks, docs, DAG | No |
 | `--test-docker` | All `--test` suites + driver chain (upsert/ignore/cross-DB) + DuckDB Hub | Yes |
-| `--catalog` | 135-command catalog (requires `init_test_data.sh` first) | Yes |
+| `--catalog` | The numbered catalog (requires `init_test_data.sh` first) | Yes |
 | `--dag` | DAG topology validation only | No |
 | `--bench` | Performance benchmarks (linear pipeline, DuckDB) | No |
 | `--full` | All of the above | Yes |
@@ -57,19 +57,24 @@ DtPipe uses a centralized Docker infrastructure for all integration tests.
 | Script | Validates |
 |:---|:---|
 | **`run_unit_tests.sh`** | Every suite that needs no infrastructure: the `.Unit.` tests of DtPipe.Tests plus each other `tests/*/*.Tests.csproj`, discovered; the node's tests need `dist/release/dtpipe` built first. Run by `build.sh`, by the `test` job of `build.yml` on every pull request, and by the release's `test` job, which gates the binaries, the NuGet packages and the images. |
-| **`validate_transformers.sh`** | All 13 row transformers: Overwrite, Null, Mask, Fake, Format, Compute, Drop, Project, Rename, Filter, Expand, Window, ordering. |
+| **`validate_transformers.sh`** | Every row transformer: Overwrite, Null, Mask, Fake, Format, Compute, Drop, Project, Rename, Filter, Expand, Window; their ordering and the CLI help flags. |
 | **`validate_schema.sh`** | Strict-schema rejection, `--no-schema-validation` bypass, `--auto-migrate` for SQLite and Postgres. |
 | **`validate_options.sh`** | Provider option scoping (global/writer/YAML), sampling rate + seed + determinism, YAML `provider-options`, `--metrics-path`. |
 | **`validate_hooks.sh`** | `--pre-exec` (inline + file), `--post-exec`, `--finally-exec` lifecycle hooks via SQLite. |
 | **`validate_cursor.sh`** | Incremental loading: `--cursor`, `--state`, `${{cursor://...}}` value resolution, state file lifecycle. |
 | **`validate_docs.sh`** | All `--flags` in README and the docs/ site are present in `--help`; representative README examples execute correctly. |
-| **`validate_dag.sh`** | All 9 canonical DAG topologies: Linear, Two-source, SQL, SQL JOIN, Fan-out, Fan-out+SQL, Diamond, Join→fan-out, Nested data. |
+| **`validate_dag.sh`** | The canonical DAG topologies: Linear, Two-source, SQL, SQL JOIN, Fan-out, Fan-out+SQL, Diamond, Join→fan-out, Nested data; then mixed-schema, UUID and nested-join cases. |
 | **`validate_duck_streaming.sh`** | A `duck:` read stays flat as the result grows — 20× the rows at the same peak memory, linear and fan-out. Calibrates its own tolerance against a query that holds the result whole, and skips rather than fails where that calibration does not hold. Not the ownership net: a missed `Dispose` is caught by `CDataOwnershipTests`, not by memory. |
+
+Every other `validate_*.sh` states what it checks in the comment at its top. `build.yml` runs them
+all except the scripts that need a database (they source `lib/test_connections.sh`), those that test
+the images of a checkout (they require `DTPIPE_RUNNER_IMAGE`), `validate_vitals.sh` and
+`validate_xml.sh`.
 
 ### 📋 Catalog Suite
 | Script | Description | Docker? |
 |:---|:---|:---|
-| **`run_catalog_tests.sh`** | 142 numbered commands covering the full feature surface: adapters, DAG patterns, transformers, volumetrics, error cases, real-world scenarios. A test that must fail declares the message fragment it expects as a third argument to `run_test`, so it asserts *why* it failed rather than only that it did. Requires `init_test_data.sh`. | Yes |
+| **`run_catalog_tests.sh`** | Numbered commands covering the full feature surface: adapters, DAG patterns, transformers, volumetrics, error cases, real-world scenarios. A test that must fail declares the message fragment it expects as a third argument to `run_test`, so it asserts *why* it failed rather than only that it did. Requires `init_test_data.sh`. | Yes |
 | **`init_test_data.sh`** | Provisions all data sources (CSV, Parquet, Arrow, DuckDB, PG, MSSQL, Oracle) used by the catalog suite. Idempotent. | Yes |
 | **`clean_test_data.sh`** | Removes all provisioned artifacts for a full reset. | No |
 

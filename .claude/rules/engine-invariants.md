@@ -36,7 +36,7 @@ deliberate, understood shift.
 ## No magic conversions in the engine core
 
 Core, Processors and the DAG orchestrator never convert types implicitly to work around an adapter.
-On a type mismatch, prefer in order: (1) adapter parameterisation (`--column-type "Id:uuid"`), (2) a
+On a type mismatch, prefer in order: (1) adapter parameterisation (`--column-types "Id:uuid"`), (2) a
 transformer (`--compute`), (3) the SQL processor (`CAST(... AS UUID)`). Forbidden:
 - detecting a source format and silently converting in a type mapper or schema factory;
 - changing `ArrowTypeMapper` / `PipeColumnInfo` to compensate for an adapter;

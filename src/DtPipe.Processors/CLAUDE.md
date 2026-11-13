@@ -17,7 +17,7 @@ stream, never its end, or the query finishes on part of its input.
 - `DuckHubConnectionParser` parses `duck+{provider}:` strings and issues `INSTALL` / `LOAD` /
   `ATTACH`.
 - `--duck-init` / `--compute` / `--expand` values resolve through `IStringContentResolver`
-  (`CliStringContentResolver` for the CLI, `DefaultStringContentResolver` headless).
+  (`CompositeStringContentResolver` for the CLI, `DefaultStringContentResolver` headless).
 - `DuckInitSqlRunner` (Core) is the single init-SQL runner for reader, writer and processor.
 - `MergeTransformer.OpenAsync` refuses channels that do not share a schema (count, names, structural
   types; a zone, nullability or field metadata is not compared, since a published channel schema

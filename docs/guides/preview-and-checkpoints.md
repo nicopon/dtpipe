@@ -38,7 +38,7 @@ past the first N.
 | The target | Inspected, never changed: no file created, no table created or migrated. A DuckDB or SQLite database file that does not exist yet is still created, empty, when the preview connects |
 | Hooks (`--pre-exec`…) | Not run |
 | Cursor and metrics file | Not written |
-| A source query with `DELETE`, `UPDATE`, `DROP`, `TRUNCATE`, `ALTER`, `INSERT` or `ATTACH` | Refused |
+| A source query, an init script or a SQL step with `DELETE`, `UPDATE`, `DROP`, `TRUNCATE`, `ALTER`, `INSERT` or `ATTACH` | Refused, before the source opens |
 
 On PostgreSQL, Oracle, MySQL and SQLite the source session is also set read-only, so the server
 itself refuses a write. SQL Server has no read-only session, and the run says it had the weaker

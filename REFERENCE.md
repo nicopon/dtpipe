@@ -180,8 +180,8 @@ dtpipe -i duck:memory --duck-init "keyring://s3-init" ...
 | **S3 object storage** | ✅ | ✅ | `s3://` / `s3a://` | — | — | See [Object storage](#object-storage-s3-azure) |
 | **Azure Blob** | ✅ | ✅ | `azure://` / `az://` | — | — | See [Object storage](#object-storage-s3-azure) |
 | **Data Gen** | ✅ | — | `generate:N` | — | — |
-| **Null** | — | ✅ | `null:` | — | — |
-| **Checksum** | — | ✅ | `checksum:` | — | — |
+| **Null** | — | ✅ | `null:` | — | ✅ |
+| **Checksum** | — | ✅ | `checksum:` | — | ✅ |
 
 > `dtpipe providers` lists what the binary carries, as a table on stderr. `dtpipe providers --format
 > json` writes the same inventory to stdout for a script: one object per component with `name`,
@@ -852,8 +852,8 @@ branch-name:
     - type: project
       mappings:
         id: ~
-          name: ~
-          email: ~
+        name: ~
+        email: ~
 
   # Provider-specific options (keyed by component name)
   provider-options:
@@ -884,6 +884,9 @@ output type is `--compute-types` on the command line and `compute-types` in YAML
 SQL is `--duck-init` and `init-sql`. A key that matches no property gets a warning that lists the
 valid keys, and fails the run under `--strict-bindings`. `--export-job` is the authority on any
 shape this table leaves open.
+
+A key written twice in one mapping is refused, naming the key and the line of its first
+occurrence: two `provider-options` blocks in a branch are one block to write.
 
 ### Environment variable and secret interpolation
 

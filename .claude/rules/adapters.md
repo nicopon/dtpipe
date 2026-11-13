@@ -12,8 +12,9 @@ Rules of readers, writers and dialects. The root `CLAUDE.md` holds the rules eve
 ## Validators CI never runs — run them before you push
 
 `build.yml` runs every `tests/scripts/validate_*.sh` **except** the scripts that source
-`lib/test_connections.sh` (they need a database), `validate_vitals` and `validate_xml` (2.7 GB of
-scratch). Run that set with the `dtpipe-prepush` skill, which derives it the same way. A new
+`lib/test_connections.sh` (they need a database), those that require `DTPIPE_RUNNER_IMAGE` (they
+test the images of a checkout), `validate_vitals` and `validate_xml` (2.7 GB of scratch). Run that
+set with the `dtpipe-prepush` skill, which derives it the same way. A new
 validator declares a database need by sourcing that file; never add an exclusion list.
 
 **Run them before pushing any change to an adapter, a dialect, a type mapping or a cursor.** A green
