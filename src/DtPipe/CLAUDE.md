@@ -238,10 +238,9 @@ Hardening invariants — fail-closed, non-negotiable:
   `[CI: AgentParallelToolsTests, AgentCatalogueTests — whole catalogue]`
 - **F6 Single YAML path** — the `yamlContent` tool argument is the sole plan source.
 - **F7 CI gate** — `tests/agentic/analyze-traces.sh --gate` fails on unhandled MCP errors or a failed
-  mission. Its variance criterion applies only when `variance_results.jsonl` holds real replication
-  data, which the shipped missions do not produce. **Never record a placeholder variance**: a
-  criterion that cannot fire is worse than none. The authoritative signal for F1, F2 and F4–F7 is the
-  unit suite (`Unit/Cli/Agent*Tests`, `Unit/Cli/Mcp*Tests`).
+  mission. **Never add a criterion nothing can trigger**: it reads as a guard and guards nothing. The
+  authoritative signal for F1, F2 and F4–F7 is the unit suite (`Unit/Cli/Agent*Tests`,
+  `Unit/Cli/Mcp*Tests`). `[CI: test-gate-smoke.sh]`
 
 Mandatory MCP directives:
 1. Reflect help from `[Description]` / `[ComponentHelp]`; never hardcode it. `[unchecked — nothing

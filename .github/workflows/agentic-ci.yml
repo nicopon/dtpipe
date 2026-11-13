@@ -60,10 +60,9 @@ jobs:
        - name: Run agentic gate
          env:
            OLLAMA_MODEL: ${{ matrix.model }}
-           GATE_REPEAT: '3'
          run: |
             chmod +x tests/agentic/*.sh
-            bash tests/agentic/run-all.sh --gate --threshold=0 --max-mcp-errors=0 ${{ matrix.model }}
+            bash tests/agentic/run-all.sh --gate --max-mcp-errors=0 ${{ matrix.model }}
          continue-on-error: false
 
        - name: Upload trace artifacts

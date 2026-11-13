@@ -16,7 +16,7 @@ the loop, not the provider `[CI: AgentCatalogueTests, AgentExecutorCatalogueTest
 **F5** every tool call of a turn runs; those that run a pipeline (`[RunsPipeline]`, reflected) one
 after the other ·
 **F6** `yamlContent` is the sole plan source ·
-**F7** `analyze-traces.sh --gate`; never record a placeholder variance.
+**F7** `analyze-traces.sh --gate` fails on unhandled MCP errors or a failed mission.
 
 MCP directives: reflect help from `[Description]` / `[ComponentHelp]`, never hardcode it; execute
 in memory via `JobFileParser` + `JobRunner`, no temp files; discover tables
