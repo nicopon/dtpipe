@@ -169,7 +169,9 @@ public partial class DtPipeMcpTools
                     stage = "safety",
                     applied = false,
                     violation = safety.Violations,
-                    message = "Execution blocked by the SQL safety policy. Re-run with the appropriate --allow-* flag."
+                    message = "Execution blocked by the SQL safety policy (default: deny). Pass allowDestructive=true to "
+                            + "permit the destructive SQL verbs a violation names, or allowNetwork=true to permit the "
+                            + "network access it names."
                 }, new JsonSerializerOptions { WriteIndented = true });
             }
 

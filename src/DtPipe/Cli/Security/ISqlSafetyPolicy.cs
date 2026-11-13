@@ -105,16 +105,14 @@ public sealed class DefaultSqlSafetyPolicy : ISqlSafetyPolicy
         {
             violations.Add(
                  "Destructive SQL verb(s) detected: " +
-                 string.Join(", ", destructiveMatches) +
-                 ". Set --allow-destructive to permit (default: deny).");
+                 string.Join(", ", destructiveMatches) + ".");
         }
 
         if (networkDetected && !options.AllowNetwork)
         {
             violations.Add(
                  "Network access detected (LOAD httpfs/azure, remote read_parquet/read_csv, " +
-                 "or an s3://, azure:// connection string). " +
-                 "Set --allow-network to permit (default: deny).");
+                 "or an s3://, azure:// connection string).");
         }
 
         if (violations.Count == 0)

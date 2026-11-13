@@ -1514,7 +1514,9 @@ dtpipe mcp
   unless `allowDestructive`, and `LOAD httpfs` / `LOAD azure` or `read_parquet` / `read_csv` /
   `read_json` over `http(s)://`, `s3://`, `ftp://` or `gs://` unless `allowNetwork`. It reads
   every query, hook and SQL step of the job (`@file` contents included) and each connection
-  string; it never reads a key, a comment or a transformer option as SQL.
+  string; it never reads a key, a comment or a transformer option as SQL. A refusal comes back as
+  `stage: "safety"`: each `violation` says what the policy refuses, and the `message` names the
+  arguments that would lift it.
 - **The CI gate** (`tests/agentic/analyze-traces.sh --gate`, propagated by `run-all.sh --gate`)
   fails on an unhandled MCP error or a failed mission. A green run is an integration check of the
   MCP surface under a real model, not a regression gate: the guardrails themselves are covered by

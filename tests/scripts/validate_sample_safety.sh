@@ -42,6 +42,11 @@ echo "$OUT" | grep -q "Sample mode refuses" \
     || { echo "$OUT" | tail -5; fail "a destructive --duck-init was not refused in sample mode"; }
 pass "a source-side destructive statement is refused"
 
+# The refusal says what is refused. A command line has no flag that lifts it, so none is named.
+echo "$OUT" | grep -q -- "--allow" \
+    && { echo "$OUT" | tail -5; fail "the refusal sends the reader to a flag the command line lacks"; }
+pass "the refusal names no flag"
+
 # ── 2. …and the target was never touched ──────────────────────────────────────
 [ ! -f out.csv ] || fail "the target file was created by a refused run"
 pass "the refused run created nothing"

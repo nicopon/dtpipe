@@ -132,7 +132,7 @@ public sealed class JobSqlSafetyTests : IDisposable
         var refusal = await Assert.ThrowsAsync<InvalidOperationException>(() => Engine().RunAsync(yaml, StudioBindings.None, Ct));
 
         Assert.Contains("DROP", refusal.Message);
-        Assert.DoesNotContain("appropriate --allow-", refusal.Message);
+        Assert.DoesNotContain("--allow", refusal.Message);
         Assert.Contains("The studio cannot permit what the policy refuses", refusal.Message);
         Assert.Contains("run the saved job from a terminal with dtpipe --job", refusal.Message);
     }
@@ -155,6 +155,39 @@ public sealed class JobSqlSafetyTests : IDisposable
         var json = await Mcp().ExecuteYamlJob(yaml, ct: Ct);
 
         Assert.Contains("\"stage\": \"safety\"", json);
-        Assert.Contains("--allow-network", json);
+        AssertTheToolCarriesTheAdvice(json, "allowNetwork");
+    }
+
+    [Fact]
+    public async Task A_Destructive_Verb_Is_Refused_With_The_Tool_Argument_That_Permits_It()
+    {
+        var yaml = "main:\n  input: \"generate:5\"\n  output: \"duck:t.duckdb\"\n  provider-options:\n    duck-writer:\n      pre-exec: \"DROP TABLE sales\"\n";
+
+        var json = await Mcp().ExecuteYamlJob(yaml, ct: Ct);
+
+        Assert.Contains("\"stage\": \"safety\"", json);
+        AssertTheToolCarriesTheAdvice(json, "allowDestructive");
+    }
+
+    /// <summary>
+    /// Shape of the refusal: the policy says what it refuses, and the tool, which is the host that
+    /// can lift it, says how. The violation names no flag and no argument; the message names the
+    /// arguments the tool takes, and not a command-line flag the host lacks.
+    /// </summary>
+    private static void AssertTheToolCarriesTheAdvice(string json, string argument)
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        foreach (var violation in root.GetProperty("violation").EnumerateArray())
+        {
+            Assert.DoesNotContain("--allow", violation.GetString());
+            Assert.DoesNotContain("allowDestructive", violation.GetString());
+            Assert.DoesNotContain("allowNetwork", violation.GetString());
+        }
+
+        var message = root.GetProperty("message").GetString();
+        Assert.Contains(argument, message);
+        Assert.DoesNotContain("--allow", message);
     }
 }

@@ -6,11 +6,21 @@ namespace DtPipe.Tests.Unit.Security;
 
 /// <summary>
 /// F2 — SQL safety policy: destructive verbs and network access are denied by default and only
-/// permitted with the matching allow flag (fail-closed).
+/// permitted with the matching option (fail-closed). A violation says what the policy refuses and
+/// nothing about how to lift it: the policy cannot know which host shows it, and a host that has no
+/// way to lift it would send the reader after one that does not exist.
 /// </summary>
 public class DefaultSqlSafetyPolicyTests
 {
     private readonly DefaultSqlSafetyPolicy _policy = new();
+
+    private static void AssertNamesWhatIsRefusedAndNoFlag(SqlSafetyResult result, string refused)
+    {
+        var violation = Assert.Single(result.Violations);
+        Assert.Contains(refused, violation);
+        Assert.DoesNotContain("--", violation);
+        Assert.DoesNotContain("allow", violation, System.StringComparison.OrdinalIgnoreCase);
+    }
 
     [Theory]
     [InlineData("DROP TABLE t")]
@@ -25,7 +35,7 @@ public class DefaultSqlSafetyPolicyTests
         var result = _policy.Analyze(sql, new SqlSafetyOptions());
         Assert.False(result.Allowed);
         Assert.NotEmpty(result.DetectedDestructive);
-        Assert.Contains(result.Violations, v => v.Contains("--allow-destructive"));
+        AssertNamesWhatIsRefusedAndNoFlag(result, "Destructive SQL verb(s) detected");
     }
 
     [Theory]
@@ -57,7 +67,7 @@ public class DefaultSqlSafetyPolicyTests
         var result = _policy.Analyze(sql, new SqlSafetyOptions());
         Assert.False(result.Allowed);
         Assert.True(result.NetworkDetected);
-        Assert.Contains(result.Violations, v => v.Contains("--allow-network"));
+        AssertNamesWhatIsRefusedAndNoFlag(result, "Network access detected");
     }
 
     [Theory]
@@ -84,7 +94,7 @@ public class DefaultSqlSafetyPolicyTests
 
         Assert.False(result.Allowed);
         Assert.True(result.NetworkDetected);
-        Assert.Contains(result.Violations, v => v.Contains("--allow-network"));
+        AssertNamesWhatIsRefusedAndNoFlag(result, "Network access detected");
     }
 
     [Theory]
