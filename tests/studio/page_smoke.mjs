@@ -288,6 +288,7 @@ const scenarios = {
     check("the panel shows", await p.until(`!document.querySelector("#agent-pane").hidden && !!document.querySelector("#agent-prompt")`));
     check("the model is the one the server lists", await p.until(`document.querySelector("#agent-model")?.value === "fake:1"`));
     check("a local model raises no warning", (await p.ev(`document.querySelector("#agent-warning").hidden`)) === true);
+    check("the header shows the provider and the address, read only", await p.ev(`document.querySelector("#agent-endpoint")?.textContent === "ollama · ${fakeLlm.url}" && !document.querySelector("#agent-endpoint input")`));
     await p.shot("1-panel");
 
     await send("please save it");

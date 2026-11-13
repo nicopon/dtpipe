@@ -231,6 +231,7 @@ main.with-agent { grid-template-columns: 220px minmax(0, 1fr) 360px; }
 .agent-pane { border-left: 1px solid var(--line); background: var(--panel); padding: 10px; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
 .agent-head h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0; }
 .agent-head select { flex: 1; min-width: 0; }
+.agent-pane #agent-endpoint { margin: 0; overflow-wrap: anywhere; }
 .agent-log { flex: 1; min-height: 120px; overflow: auto; display: flex; flex-direction: column; gap: 6px; }
 .agent-log .msg { padding: 6px 8px; border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .agent-log .msg.user { background: var(--code); align-self: flex-end; max-width: 90%; }

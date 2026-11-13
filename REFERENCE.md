@@ -1266,8 +1266,9 @@ you can apply to the open job's cards or open as a new job. Guide:
   value, and asks whether to send it, send the message without the job, or cancel; `read-job` asks
   the same. The check is best-effort: a credential under an unknown key passes, and a column named
   like one is flagged. `${{NAME}}` and `keyring://` references pass.
-- **What the tools read goes to the model's address**, schemas and rows included. The panel warns
-  when that address is not this machine. The key never reaches the page or the trace.
+- **What the tools read goes to the model's address**, schemas and rows included. The panel shows
+  the provider and the address, read only, and warns when the address is not this machine. The key
+  never reaches the page or the trace.
 - `execute-yaml-job` is never offered to the agent; a call to a tool it was not offered is refused.
   A turn and a run of yours refuse each other; a preview of yours and the agent's `dry-run` take
   turns.

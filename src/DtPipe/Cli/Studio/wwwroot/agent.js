@@ -43,6 +43,7 @@ export async function mountAgent(pane, host) {
       el("h2", {}, "Agent"),
       el("select", { id: "agent-model", title: "The model the provider lists; another one starts a new conversation" }),
       el("button", { class: "small ghost", title: "Forget this conversation", onclick: reset }, "new")),
+    el("p", { id: "agent-endpoint", class: "hint mono", title: "Set on the command line (--llm-provider, --llm-url): the page cannot change it" }),
     el("p", { id: "agent-warning", class: "hint warn", hidden: true }),
     el("div", { id: "agent-log", class: "agent-log" }),
     el("div", { id: "agent-now" }),
@@ -110,6 +111,7 @@ function entryView(entry) {
 function renderAgent() {
   const s = state.agent.status;
   if (!state.agent.enabled || !s) return;
+  $("agent-endpoint").textContent = `${s.provider} · ${s.endpoint}`;
   const warning = $("agent-warning");
   warning.hidden = s.local;
   warning.textContent = s.local ? "" : `The model is at ${s.endpoint}: what its tools read (schemas, rows) and the open job go there.`;
