@@ -40,7 +40,7 @@ public class AgentClarificationTests
     {
         public List<string> Invoked { get; } = new();
         public List<ToolDefinition> GetToolDefinitions() => new();
-        public List<ToolDefinition> GetToolDefinitions(AgentMode mode) => new();
+        public List<ToolDefinition> GetToolDefinitions(AgentMode mode) => new[] { "inspect" }.Select(n => new ToolDefinition(n, "", default)).ToList();
         public Task<ToolResult> InvokeToolAsync(string toolName, JsonElement args, CancellationToken ct)
         {
             Invoked.Add(toolName);

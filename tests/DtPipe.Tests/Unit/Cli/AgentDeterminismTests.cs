@@ -14,7 +14,7 @@ public class AgentDeterminismTests
     private sealed class EmptyToolProvider : IAgentToolProvider
     {
         public List<ToolDefinition> GetToolDefinitions() => new();
-        public List<ToolDefinition> GetToolDefinitions(AgentMode mode) => new();
+        public List<ToolDefinition> GetToolDefinitions(AgentMode mode) => new[] { "validate-yaml-job" }.Select(n => new ToolDefinition(n, "", default)).ToList();
         public Task<ToolResult> InvokeToolAsync(string toolName, System.Text.Json.JsonElement args, CancellationToken ct)
             => Task.FromResult(ToolResult.Success("{}"));
     }

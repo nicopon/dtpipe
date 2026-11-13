@@ -21,7 +21,7 @@ from then on it runs without a model.
 
 | Mode | The model gets |
 |:---|:---|
-| `--mode plan` (default) | Every tool except those that write. They are not offered at all |
+| `--mode plan` (default) | Every tool except those that write. They are not offered at all, and a call to one anyway is refused |
 | `--mode execute` | The writing tools too, behind `--apply` and your approval |
 | `--mode autonomous` | The same, with approvals given automatically |
 

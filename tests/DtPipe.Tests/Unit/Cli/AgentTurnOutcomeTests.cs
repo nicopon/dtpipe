@@ -47,7 +47,7 @@ public class AgentTurnOutcomeTests
     private sealed class NoopToolProvider : IAgentToolProvider
     {
         public List<ToolDefinition> GetToolDefinitions() => new();
-        public List<ToolDefinition> GetToolDefinitions(AgentMode mode) => new();
+        public List<ToolDefinition> GetToolDefinitions(AgentMode mode) => new[] { "inspect" }.Select(n => new ToolDefinition(n, "", default)).ToList();
         public Task<ToolResult> InvokeToolAsync(string toolName, JsonElement args, CancellationToken ct)
             => Task.FromResult(ToolResult.Success("{}"));
     }
@@ -141,7 +141,7 @@ public class AgentTurnOutcomeTests
         public HookedToolProvider(Func<CancellationToken, Task> hook) => _hook = hook;
 
         public List<ToolDefinition> GetToolDefinitions() => new();
-        public List<ToolDefinition> GetToolDefinitions(AgentMode mode) => new();
+        public List<ToolDefinition> GetToolDefinitions(AgentMode mode) => new[] { "inspect" }.Select(n => new ToolDefinition(n, "", default)).ToList();
 
         public async Task<ToolResult> InvokeToolAsync(string toolName, JsonElement args, CancellationToken ct)
         {

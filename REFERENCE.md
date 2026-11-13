@@ -1586,7 +1586,8 @@ access refused.
   `read_json` over `http(s)://`, `s3://`, `ftp://` or `gs://` unless `--allow-network`. It reads
   every query, hook and SQL step of the job (`@file` contents included) and each connection
   string; it never reads a key, a comment or a transformer option as SQL.
-- **In plan mode** the tool that writes is not offered to the model at all.
+- **In plan mode** the tool that writes is not offered to the model at all, and a call to a tool
+  that was not offered is refused, never dispatched.
 - **The trace** (`--trace`) records the launch, the role prompt, the tool catalogue as offered,
   every step, each verdict and your notes, flushed line by line. Connection-string credentials are
   blanked, but treat a trace as sensitive. It is a diagnostic, never a gate.

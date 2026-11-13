@@ -8,7 +8,9 @@ paths:
 
 `dtpipe mcp` (STDIO) and `dtpipe agent`. Never enumerate tool names here; see
 `REFERENCE.md#model-context-protocol-mcp-server`. Hardening invariants, fail-closed:
-**F1** plan mode hides every `[WritesToTarget]` tool (reflected, never listed) ·
+**F1** plan mode hides every `[WritesToTarget]` tool (reflected, never listed), and the model loop
+refuses a call to any tool it did not offer, `_` and `-` spellings alike; the refusal lives in the
+loop, not the provider, so the reviewed plan's go-ahead still runs `[CI: AgentExecutorModeTests]` ·
 **F2** `ISqlSafetyPolicy` + `IApprovalGate`; a write needs `apply` + approval ·
 **F3** determinism available, not default (`--temperature 0 --seed N --repeat N`) ·
 **F4** fact cache + `ConversationWindowManager.Compact` ·

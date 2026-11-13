@@ -40,7 +40,8 @@ public class AgentParallelToolsTests
         public int CallCount => InvokedNames.Count;
 
         public List<ToolDefinition> GetToolDefinitions() => new();
-        public List<ToolDefinition> GetToolDefinitions(AgentMode mode) => new();
+        public List<ToolDefinition> GetToolDefinitions(AgentMode mode) =>
+            _runDelays.Keys.Concat(new[] { "inspect", "preview-data" }).Select(n => new ToolDefinition(n, "", default)).ToList();
 
         public bool RunsPipeline(string toolName) => _runDelays.ContainsKey(toolName);
 

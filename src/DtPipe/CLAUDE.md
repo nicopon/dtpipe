@@ -220,8 +220,11 @@ for F1–F7.
 Hardening invariants — fail-closed, non-negotiable:
 - **F1 Planner/Executor split** — `--mode plan` (default) hides every tool marked `[WritesToTarget]`.
   The set is reflected off the attribute, never listed. `dry-run` stays unmarked: it runs the real
-  pipeline with the writer neutralised, and the planner's role prompt tells it to call it.
-  `[CI: AgentModeTests — whole catalogue]`
+  pipeline with the writer neutralised, and the planner's role prompt tells it to call it. The
+  catalogue is not the only guard: `RunPlanningLoopAsync` answers a call to a tool it did not offer
+  (compared through `McpToolReflector.Normalise`, so `_` and `-` agree) with an unknown-tool error
+  and never dispatches it; the provider checks nothing, so `ExecuteValidatedPlanAsync`, the human's
+  go-ahead, still runs. `[CI: AgentModeTests — whole catalogue; AgentExecutorModeTests — the call]`
 - **F2 Guardrails** — `ISqlSafetyPolicy` (destructive verbs / network) + `IApprovalGate`; a write
   needs `apply` + approval + a clean check.
 - **F3 Determinism** — available, not default: `--temperature 0 --seed N --repeat N`;

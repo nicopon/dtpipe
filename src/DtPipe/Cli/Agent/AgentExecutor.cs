@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -286,8 +287,12 @@ public class AgentExecutor
         // What each call already answered in this turn — see AnsweredCall.
         var answered = new Dictionary<string, AnsweredCall>(StringComparer.Ordinal);
         // F1: the LLM only sees the tools allowed for the current mode (in PLAN mode,
-        // 'execute-yaml-job' is filtered out so the model cannot drive execution).
+        // 'execute-yaml-job' is filtered out so the model cannot drive execution), and a call
+        // naming any other tool is refused below, whatever the provider behind would have done.
         var availableTools = _toolProvider.GetToolDefinitions(Mode);
+        var offeredNames = availableTools
+            .Select(t => McpToolReflector.Normalise(t.Name))
+            .ToHashSet(StringComparer.Ordinal);
         string? producedYaml = null;     // resolved plan, sourced from the yamlContent tool-call argument
         string? argYaml = null;          // from the yamlContent tool-call argument (the sole source, F6)
 
@@ -462,10 +467,23 @@ public class AgentExecutor
                 && !string.Equals(argYaml, yamlBeforeThisIteration, StringComparison.Ordinal))
                 view!.PlanUpdated(argYaml!);
 
+            // A call to a tool that was not offered is answered here, as an error, and never
+            // reaches the provider. The answer takes the place of the result, so the call keeps its
+            // "tool" message, its trajectory step and its line in the view.
             var outcomes = new ToolInvocationOutcome[calls.Count];
+            var dispatched = new List<int>(calls.Count);
+            for (int i = 0; i < calls.Count; i++)
+            {
+                if (offeredNames.Contains(McpToolReflector.Normalise(calls[i].Name)))
+                    dispatched.Add(i);
+                else
+                    outcomes[i] = new ToolInvocationOutcome(
+                        McpToolReflector.UnknownToolAnswer(calls[i].Name, availableTools.Select(t => t.Name)), true);
+            }
+
             if (opts.Sequential)
             {
-                for (int i = 0; i < calls.Count; i++)
+                foreach (var i in dispatched)
                     outcomes[i] = await InvokeToolInto(calls[i].Name, calls[i].Arguments, ct);
             }
             else
@@ -473,10 +491,10 @@ public class AgentExecutor
                 // A call that runs a pipeline waits on the process's one-run gate. Started
                 // together, such calls would reach it in whatever order the scheduler gives: they
                 // run after the others, one at a time, in the order the model emitted them.
-                var runs = Enumerable.Range(0, calls.Count)
+                var runs = dispatched
                       .Where(i => _toolProvider.RunsPipeline(calls[i].Name))
                       .ToList();
-                var others = Enumerable.Range(0, calls.Count).Except(runs).ToList();
+                var others = dispatched.Except(runs).ToList();
 
                 var tasks = others
                       .Select(i => InvokeToolInto(calls[i].Name, calls[i].Arguments, ct))
