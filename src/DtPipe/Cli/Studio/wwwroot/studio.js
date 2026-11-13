@@ -282,7 +282,7 @@ async function start() {
   await refreshCoordinator();
   await loadBricks();
   await loadLibrary();
-  await mountAgent($("agent-pane"), { applyPlan, openPlan, reopen: (path) => open(path, true) });
+  await mountAgent($("agent-pane"), { applyPlan, openPlan, reopen: (path) => open(path, true), jobsChanged: loadJobs });
 }
 
 // ---------------------------------------------------------------- the agent's plans

@@ -203,8 +203,8 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   (`AgentExecutor.Context`), as data, under `StudioAgent.MaxJobChars`. A text that `JobSecrets.Literals` flags reaches the
   model, open job or `read-job`, only after a card that names `branch.path`, never the value; the answer holds for that
   text, by hash, for the session. The key (`--llm-key`) is a reference read once at start, kept in the client; the page
-  never sets the model's address. `[CI: StudioAgentTests]`
-  `[unchecked: the panel, beyond a real session of the owner's; Quit and Ctrl+C during a turn]`
+  never sets the model's address. `[CI: StudioAgentTests]` `[local: page_smoke.mjs agent — a scripted endpoint that speaks
+  Ollama's API]` `[unchecked: Quit and Ctrl+C during a turn]`
 - Quit from the page exits 0, Ctrl+C 130. A quit is refused while a run goes on; Ctrl+C cancels
   the run and the studio then exits.
 

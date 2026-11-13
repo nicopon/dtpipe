@@ -2,7 +2,8 @@
 // Plays the studio's page in headless Chrome over the DevTools protocol and checks what a person sees:
 // opening a job, Preview, a click on each card, pins, an edit while a preview or a run holds the engine,
 // Save then Write targets…, review before writing, Write and Abandon from a sink, a run left suspended by an earlier
-// session, Forget pins, typing in the inspector.
+// session, Forget pins, typing in the inspector; the agent's panel against a scripted endpoint that speaks Ollama's API (a
+// save refused then accepted, a run, a question, a plan put on the cards, a job holding a credential, Stop, a reload mid-turn).
 //
 // Local only: it needs Node 22+ (native WebSocket, no dependency), Chrome, and a built dtpipe. CI never
 // runs it. The page is embedded in the DLL, so build before playing it.
@@ -13,10 +14,12 @@
 //                      (macOS, Windows and Linux are searched)
 // DTPIPE_SMOKE_DLL     the built DtPipe.dll (default: src/DtPipe/bin/Debug/net10.0/DtPipe.dll)
 // DTPIPE_SMOKE_BIN     a dtpipe executable, used instead of the DLL
+// DTPIPE_SMOKE_SHOTS   a folder: the agent's scenario saves screenshots of the page there
 // Exit code 1 on any FAIL and on any script error the page raises.
 
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
+import http from "node:http";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -69,8 +72,8 @@ function kill(child) {
   else child.kill("SIGKILL");
 }
 
-async function startStudio(folder) {
-  const [command, args] = BIN ? [BIN, ["studio", folder]] : ["dotnet", [DLL, "studio", folder]];
+async function startStudio(folder, extra = []) {
+  const [command, args] = BIN ? [BIN, ["studio", folder, ...extra]] : ["dotnet", [DLL, "studio", folder, ...extra]];
   // Started in the job's folder: a job that writes a relative path writes there, never into the directory the test was run from.
   const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], cwd: folder });
   let out = "";
@@ -132,6 +135,23 @@ function session(ws) {
     const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
     if (r.result.exceptionDetails) throw new Error(JSON.stringify(r.result.exceptionDetails.exception?.description || r.result.exceptionDetails));
     return r.result.result.value;
+  };
+  // A button found by its text and clicked as a person would: the panels name their choices in words.
+  s.clickText = async (selector, text) => {
+    const found = await s.until(`[...document.querySelectorAll(${JSON.stringify(selector)})].some((e) => e.textContent.trim() === ${JSON.stringify(text)})`, 20000);
+    if (!found) throw new Error(`no ${selector} reading ${text}`);
+    const at = await s.ev(`(() => { const e = [...document.querySelectorAll(${JSON.stringify(selector)})].find((e) => e.textContent.trim() === ${JSON.stringify(text)});
+      e.scrollIntoView({ block: "center", inline: "center" }); const b = e.getBoundingClientRect(); return [b.x + b.width / 2, b.y + b.height / 2]; })()`);
+    for (const type of ["mouseMoved", "mousePressed", "mouseReleased"]) {
+      await send("Input.dispatchMouseEvent", { type, x: at[0], y: at[1], button: "left", clickCount: 1, buttons: type === "mousePressed" ? 1 : 0 });
+    }
+    await s.frame();
+  };
+  s.shot = async (name) => {
+    if (!process.env.DTPIPE_SMOKE_SHOTS) return;
+    fs.mkdirSync(process.env.DTPIPE_SMOKE_SHOTS, { recursive: true });
+    const { result } = await send("Page.captureScreenshot", { format: "png" });
+    fs.writeFileSync(path.join(process.env.DTPIPE_SMOKE_SHOTS, `${name}.png`), Buffer.from(result.data, "base64"));
   };
   // Polls a page expression until it is truthy; the last value tells a failure what it saw.
   s.until = async (expression, ms = 20000) => {
@@ -201,12 +221,151 @@ function session(ws) {
   return s;
 }
 
+// ---------------------------------------------------------------- a model that follows a script
+
+// Speaks the part of Ollama's API the agent uses: /api/tags, and /api/chat streamed as JSON lines. What it answers
+// depends on the conversation it is sent: after a tool's answer it closes the turn quoting it, after a person's message
+// it does what a keyword asks. "slow" streams words that never repeat (the agent ends a turn that loops) until the call
+// is abandoned. `seen` keeps every system message.
+const AGENT_JOB = 'main:\n  input: "generate:5"\n  output: "csv:agent-out.csv"\n';
+const PLAN_JOB = 'main:\n  input: "generate:7"\n  output: "csv:plan-out.csv"\n';
+
+function startFakeLlm() {
+  const llm = { seen: [], open: 0 };
+  const call = (name, args) => ({ role: "assistant", content: "", tool_calls: [{ function: { name, arguments: args } }] });
+  const server = http.createServer((req, res) => {
+    if (req.url === "/api/tags") { res.end(JSON.stringify({ models: [{ name: "fake:1" }] })); return; }
+    let body = "";
+    req.on("data", (d) => { body += d; });
+    req.on("end", () => {
+      const { messages } = JSON.parse(body);
+      llm.seen.push(messages[0]?.content ?? "");
+      const last = messages[messages.length - 1];
+      const line = (o) => res.write(JSON.stringify(o) + "\n");
+      res.writeHead(200, { "Content-Type": "application/x-ndjson" });
+      if (last.role === "tool") { line({ message: { role: "assistant", content: `done: ${String(last.content).slice(0, 60)}` }, done: true }); res.end(); return; }
+      const text = String(last.content);
+      const job = /<open-job>\n/.test(messages[0]?.content ?? "") ? "job seen" : "no job seen";
+      const reply = /save/.test(text) ? call("save-job", { path: "agent.yaml", yamlContent: AGENT_JOB })
+        : /run/.test(text) ? call("run-job", { path: "agent.yaml" })
+        : /ask/.test(text) ? call("ask-user", { question: "Which target?", options: ["a.csv", "b.csv"] })
+        : /plan/.test(text) ? call("validate-yaml-job", { yamlContent: PLAN_JOB })
+        : /secret/.test(text) ? { role: "assistant", content: job }
+        : null;
+      if (reply) { line({ message: reply, done: false }); line({ done: true }); res.end(); return; }
+      if (/slow/.test(text)) {
+        llm.open++;
+        const timer = setInterval(() => line({ message: { role: "assistant", content: `${Math.random().toString(36).slice(2)} ` }, done: false }), 150);
+        res.on("close", () => { clearInterval(timer); llm.open--; });
+        return;
+      }
+      line({ message: { role: "assistant", content: `ok: ${text}` }, done: true });
+      res.end();
+    });
+  });
+  return new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve({ llm, url: `http://127.0.0.1:${server.address().port}`, stop: () => server.close() })));
+}
+
+const fakeLlm = await startFakeLlm();
+
 // ---------------------------------------------------------------- scenarios
 
 const KEY_OF_B = '#d-inspector .transformer[data-index="0"] .kv[data-section="mappings"] input[data-kv="key"]';
 const stateFile = (folder, job) => path.join(folder, ".dtpipe/studio", `${job}-debug.json`);
 
 const scenarios = {
+  // The agent's panel: every write waits for a card, a refusal writes nothing, the open job reaches the model unless it
+  // holds a credential the person keeps here, Stop ends a turn, a reload finds the conversation again.
+  async agent({ page: p, folder }) {
+    const send = async (text) => {
+      await p.ev(`(() => { const t = document.querySelector("#agent-prompt"); t.value = ${JSON.stringify(text)}; })()`);
+      await p.click("#agent-send");
+    };
+    const idle = () => p.until(`document.querySelector("#agent-stop").hidden && !document.querySelector("#agent-now .agent-card button")`, 30000);
+    const verdicts = () => p.ev(`document.querySelectorAll("#agent-log .verdict").length`);
+    const lastText = () => p.ev(`[...document.querySelectorAll("#agent-log .msg.agent")].pop()?.textContent ?? ""`);
+
+    check("the panel shows", await p.until(`!document.querySelector("#agent-pane").hidden && !!document.querySelector("#agent-prompt")`));
+    check("the model is the one the server lists", await p.until(`document.querySelector("#agent-model")?.value === "fake:1"`));
+    check("a local model raises no warning", (await p.ev(`document.querySelector("#agent-warning").hidden`)) === true);
+    await p.shot("1-panel");
+
+    await send("please save it");
+    check("a save waits on a card", await p.until(`/asks to save agent.yaml/.test(document.querySelector("#agent-now")?.textContent ?? "")`));
+    check("the card shows the text the studio composed", /generate:5/.test(await p.ev(`document.querySelector("#agent-now pre")?.textContent ?? ""`)));
+    check("nothing is written before the answer", !fs.existsSync(path.join(folder, "agent.yaml")));
+    await p.shot("2-save-card");
+    await p.clickText("#agent-now button", "Refuse");
+    check("a refused save ends the turn", await idle());
+    check("a refused save writes nothing", !fs.existsSync(path.join(folder, "agent.yaml")));
+    check("the model reads the refusal", /refused/.test(await lastText()), await lastText());
+
+    await send("please save it");
+    await p.clickText("#agent-now button", "Save");
+    check("an accepted save ends the turn", await idle());
+    check("an accepted save writes the job", fs.existsSync(path.join(folder, "agent.yaml")));
+    check("the folder lists the saved job", await p.until(`[...document.querySelectorAll("#jobs button.job")].some((b) => b.textContent === "agent.yaml")`));
+
+    await send("now run it");
+    check("a run waits on a card that names its target", await p.until(`/agent-out\.csv/.test(document.querySelector("#agent-now .agent-card")?.textContent ?? "")`));
+    check("nothing is run before the answer", !fs.existsSync(path.join(folder, "agent-out.csv")));
+    await p.shot("3-run-card");
+    await p.clickText("#agent-now button", "Run");
+    check("an accepted run ends the turn", await idle());
+    check("the run writes its target", fs.existsSync(path.join(folder, "agent-out.csv")));
+    check("the model reads the exit code", /"code":0/.test(await lastText()), await lastText());
+
+    await send("ask me");
+    check("a question shows its choices", await p.until(`[...document.querySelectorAll("#agent-now button")].some((b) => b.textContent === "b.csv")`));
+    await p.shot("4-question");
+    await p.clickText("#agent-now button", "b.csv");
+    check("a choice is the next message", await p.until(`[...document.querySelectorAll("#agent-log .msg.user")].pop()?.textContent === "b.csv"`));
+    check("the answer comes back", await p.until(`/ok: b\.csv/.test([...document.querySelectorAll("#agent-log .msg.agent")].pop()?.textContent ?? "")`));
+
+    check("a job opens", await p.openJob("chain.yaml"));
+    await send("make a plan");
+    check("the plan shows once the turn ends", await p.until(`!!document.querySelector("#agent-now .agent-plan")`, 30000));
+    await p.ev(`document.querySelector("#agent-now .agent-plan").open = true`);
+    await p.shot("5-plan");
+    await p.clickText("#agent-now .agent-plan button", "Apply to the open job");
+    check("the plan is on the cards", await p.waitStatus(/plan is on the cards/, 15000), await p.status());
+    check("the cards are the plan's", await p.until(`document.querySelectorAll(".dcard").length === 2`), JSON.stringify(await p.badges()));
+    check("the job is still the one open", (await p.ev(`document.querySelector("#job-name").textContent`)).startsWith("chain.yaml"));
+
+    fs.writeFileSync(path.join(folder, "secret.yaml"), 'main:\n  input: "pg:Host=h;Username=u;Password=abc"\n  output: "csv:s.csv"\n');
+    await p.reload();
+    check("the conversation survives a reload", await p.until(`document.querySelectorAll("#agent-log .msg.user").length >= 5`), String(await p.ev(`document.querySelectorAll("#agent-log .msg.user").length`)));
+    check("the secret job opens", await p.openJob("secret.yaml") || await p.until(`/secret\.yaml/.test(document.querySelector("#job-name").textContent)`));
+    await send("look at this secret");
+    check("a credential in the open job waits on a card", await p.until(`/main\.input/.test(document.querySelector("#agent-now .agent-card")?.textContent ?? "")`));
+    check("the card never shows the value", !/abc/.test(await p.ev(`document.querySelector("#agent-now").textContent`)));
+    await p.shot("6-secret-card");
+    const calls = fakeLlm.llm.seen.length;
+    check("the model is not called before the answer", fakeLlm.llm.seen.length === calls);
+    await p.clickText("#agent-now button", "Send without the job");
+    check("the turn goes on without the job", await p.until(`/^no job seen$/.test([...document.querySelectorAll("#agent-log .msg.agent")].pop()?.textContent ?? "")`), await lastText());
+    check("the credential never reached the model", fakeLlm.llm.seen.every((m) => !/Password=abc/.test(m)));
+    await send("one more secret");
+    check("sending without the job holds for that turn alone", await p.until(`/main\.input/.test(document.querySelector("#agent-now .agent-card")?.textContent ?? "")`));
+    check("the last message stays in sight above the card", await p.ev(`(() => { const log = document.querySelector("#agent-log"); const m = [...log.querySelectorAll(".msg.user")].pop();
+      return m.textContent === "one more secret" && m.getBoundingClientRect().bottom <= log.getBoundingClientRect().bottom + 1; })()`));
+    await p.clickText("#agent-now button", "Cancel the turn");
+    check("a cancelled turn calls no model", await idle() && fakeLlm.llm.seen.length === calls + 1);
+    await p.click("#agent-attach");
+
+    const before = await verdicts();
+    await send("slow down");
+    check("a turn shows what the model streams", await p.until(`/answering/.test(document.querySelector("#agent-now")?.textContent ?? "")`));
+    await p.shot("7-streaming");
+    await p.reload();
+    check("a reload mid-turn finds the turn running", await p.until(`!document.querySelector("#agent-stop").hidden`));
+    await p.click("#agent-stop");
+    check("Stop ends the turn", await idle());
+    check("Stop leaves a verdict", await p.until(`document.querySelectorAll("#agent-log .verdict").length === ${before + 1}`));
+    check("Stop abandons the model call", await p.until(`${fakeLlm.llm.open} === 0`) && fakeLlm.llm.open === 0);
+    await p.shot("8-stopped");
+  },
+
   // Opening, Preview, a click on each card, pin, ▶ that pins nothing, an edit, ▶ on the pin, Save then Run, unpin.
   async journey({ page: p, folder }) {
     const file = stateFile(folder, "chain.yaml");
@@ -513,6 +672,10 @@ async function seed(name, folder) {
   }
 }
 
+const argsOf = {
+  agent: () => ["--llm-provider", "ollama", "--llm-url", fakeLlm.url],
+};
+
 const fixturesOf = {
   "whole-branch": ["whole.yaml"], "edit-during-run": ["slow.yaml"], "open-race": ["chain.yaml", "whole.yaml"],
   "write-plain": ["review.yaml"], "review-write": ["review.yaml"], "review-abandon": ["review.yaml"], "review-reload": ["review.yaml"],
@@ -538,7 +701,7 @@ for (const name of names) {
   const logsBefore = page.logs.length;
   try {
     await seed(name, folder);
-    studio = await startStudio(folder);
+    studio = await startStudio(folder, argsOf[name]?.() ?? []);
     await page.send("Page.navigate", { url: studio.url });
     await scenarios[name]({ page, folder });
   } catch (e) {
@@ -552,5 +715,6 @@ for (const name of names) {
 }
 
 chrome.stop();
+fakeLlm.stop();
 console.log(`\n${pass} PASS, ${fail} FAIL`);
 process.exit(fail ? 1 : 0);

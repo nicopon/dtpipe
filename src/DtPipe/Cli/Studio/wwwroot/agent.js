@@ -14,17 +14,22 @@ const CHOICE_LABEL = {
   send: "Send anyway", omit: "Send without the job", cancel: "Cancel the turn", withhold: "Keep it here",
 };
 
+const STATUS_LABEL = { completed: "completed", awaitinginput: "awaiting your answer", incomplete: "incomplete" };
+
 let hooks = {};
 let pollTimer = null;
 let polling = false;
 let shown = 0;
+// Whether the conversation follows its last entry: true until the person scrolls up to read.
+let following = true;
 
 onZone("agent", renderAgent);
 
 /**
  * Builds the panel in `pane` when this studio has an agent. The host gives what only it knows: `applyPlan(yaml)` puts a plan
- * on the open job's cards, `openPlan(yaml)` opens one as a new job, `reopen(path)` reads a saved job again.
- * @param {HTMLElement} pane @param {{ applyPlan: (yaml: string) => Promise<void>, openPlan: (yaml: string) => Promise<void>, reopen: (path: string) => Promise<void> }} host
+ * on the open job's cards, `openPlan(yaml)` opens one as a new job, `reopen(path)` reads a saved job again, `jobsChanged()`
+ * reads the folder's jobs again.
+ * @param {HTMLElement} pane @param {{ applyPlan: (yaml: string) => Promise<void>, openPlan: (yaml: string) => Promise<void>, reopen: (path: string) => Promise<void>, jobsChanged: () => Promise<void> }} host
  */
 export async function mountAgent(pane, host) {
   hooks = host;
@@ -71,18 +76,19 @@ async function loadModels() {
 function accept(answer) {
   if (answer.count < shown) { fill($("agent-log")); shown = 0; }
   const log = $("agent-log");
+  following = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
   for (const entry of answer.entries || []) log.append(entryView(entry));
   shown = answer.count;
-  if (answer.entries?.length) log.scrollTop = log.scrollHeight;
   for (const entry of answer.entries || []) if (entry.kind === "step" && entry.tool === "save-job") savedJob(entry.result);
   state.agent.status = answer;
   invalidate("agent");
 }
 
-/** A job the agent saved is read again when it is the one open and holds no change of the person's. */
+/** The folder lists a job the agent saved; it is read again when it is the one open and holds no change of the person's. */
 function savedJob(result) {
   try {
     const saved = JSON.parse(result || "{}").saved;
+    if (saved) hooks.jobsChanged();
     if (saved && saved === state.job?.path && !state.cards.dirty) hooks.reopen(saved);
   } catch { /* a result cut at its bound is no JSON: nothing to read again */ }
 }
@@ -91,7 +97,7 @@ function entryView(entry) {
   if (entry.kind === "user") return el("div", { class: "msg user" }, entry.text);
   if (entry.kind === "verdict") {
     return el("div", { class: `verdict ${entry.status === "completed" ? "good" : "warn"}` },
-      [entry.status, entry.reason, entry.tools, entry.duration].filter(Boolean).join(" · "));
+      [STATUS_LABEL[entry.status] || entry.status, entry.reason, entry.tools, entry.duration].filter(Boolean).join(" · "));
   }
   if (!entry.tool) return el("div", { class: `msg agent${entry.error ? " bad" : ""}` }, entry.text);
   return el("details", { class: `step${entry.error ? " bad" : ""}` },
@@ -116,6 +122,8 @@ function renderAgent() {
     s.pending ? cardView(s.pending) : null,
     !s.busy && s.question ? questionView(s.question) : null,
     !s.busy && s.plan?.yaml ? planView(s.plan) : null);
+  // A card drawn below the conversation takes its height: the last entry stays in sight.
+  if (following) { const log = $("agent-log"); log.scrollTop = log.scrollHeight; }
 }
 
 /** The card a write waits on: what it would do, and the person's choices. */
