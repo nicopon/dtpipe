@@ -9,7 +9,7 @@ import { compose, markSaved, mountDesigner, openBlank, openJob, restoreSizes, se
 import { readView, rememberView, sizesRead, viewRestored } from "./prefs.js";
 import { afterFlush, invalidate, onZone } from "./render.js";
 import { sequence, state } from "./state.js";
-import { adoptDraft, cardBadge, cardTool, cardTools, debugComposed, forgetPins, forgetPreview, previewView, restoreRows, runPreview, setDebugRows } from "./preview.js";
+import { adoptDraft, cardBadge, cardTool, cardTools, debugComposed, forgetPins, forgetPreview, heldBranch, heldTargets, previewView, restoreRows, runPreview, setDebugRows } from "./preview.js";
 import { forgetRun, prepareRun, restoreReview, runView } from "./run.js";
 import { forgetPublication, publicationView, publish } from "./publish.js";
 import { loadVariables, onLaunchChanged, unreadyCount, variablesView } from "./variables.js";
@@ -214,6 +214,11 @@ function renderBar() {
   set("d-run", { disabled: dbg.running || suspended, title: suspended ? SUSPENDED : RUN_TITLE });
 }
 
+/** A sink writes the rows held for it, and for it only: the dialog lists the other held targets to tick. @param {string} alias */
+function writeHeld(alias) {
+  const branch = heldBranch(alias);
+  return branch ? prepareRun(true, heldTargets(), [branch]) : undefined;
+}
 const SUSPENDED = "A real run is suspended before its targets are written: write it or abandon it from the sink cards.";
 const PREVIEW_TITLE = "Run the whole job over the first source rows, with the writers neutralised: every card shows the rows it delivers";
 const RUN_TITLE = "Run the saved job here and write its targets, after you confirm what it writes";
@@ -255,7 +260,7 @@ async function start() {
     cardTools,
     cardBadge,
     // A sink writes the run it waits on; the rest of the card's tools belong to the preview.
-    cardTool: (alias, name) => (name === "write" ? prepareRun(true) : cardTool(alias, name)),
+    cardTool: (alias, name) => (name === "write" ? writeHeld(alias) : cardTool(alias, name)),
     previewView,
     extraTabs: [{
       name: "variables",

@@ -45,13 +45,17 @@ public sealed partial class StudioServer
         public object? View { get; set; }
     }
 
-    private sealed record RunRequest(string? Path, string? Hash, List<SampledBrick>? Bricks, string? Digest, bool? Debug = null, bool? Review = null);
+    private sealed record RunRequest(string? Path, string? Hash, List<SampledBrick>? Bricks, string? Digest, bool? Debug = null, bool? Review = null, List<string>? Targets = null);
 
     private sealed record RunWrite(string Alias, bool Throwaway, string? Output, string? Block);
 
     private sealed record RunPlan(
         string Path, BrickSampling Sampling, IReadOnlyDictionary<string, string> Launch, IReadOnlyList<RunWrite> Writes, string Digest,
-        bool Sample, StagedRun? Staged = null);
+        bool Sample, StagedRun? Staged = null, DebugCut? Subset = null, IReadOnlyList<string>? Targets = null)
+    {
+        /// <summary>The job's text as the run reads it: the cut when the run is staged or chosen targets only, else the job whole.</summary>
+        public DebugCut? Cut => Staged?.Cut ?? Subset;
+    }
 
     /// <summary>
     /// A real run cut at the cards the person watches: the job to run, the levels it may read back, and what it
@@ -61,7 +65,7 @@ public sealed partial class StudioServer
     /// </summary>
     private sealed record StagedRun(
         DebugPlan Plan, DebugState State, bool Review, List<DebugWatch> Holds, List<DebugWatch> Watch, List<HeldLevel> Keep, HashSet<string> Drop,
-        DebugCut Cut, object Stages, object Held, int Discards, string Signature, bool Sample);
+        DebugCut Cut, object Stages, object Held, int Discards, string Signature, bool Sample, IReadOnlySet<string>? Only = null);
 
     private bool RunInProgress
     {
@@ -113,15 +117,18 @@ public sealed partial class StudioServer
                 + $"Refused outputs: {string.Join(", ", refused.Select(w => $"'{w.Alias}' → {ConnectionStringSanitizer.Redact(w.Output)}"))}. "
                 + "Write them from a job that reads a source of its own, or make them sink bricks.");
 
-        var stagedRun = staged ? Stage(asked, path, job.Text, sampling, launch, sample) : null;
+        var only = ChosenTargets(asked.Targets, writes, sample);
+        var stagedRun = staged ? Stage(asked, path, job.Text, sampling, launch, sample, only) : null;
+        var subset = only is not null && stagedRun is null ? SubsetCut(sampling.Yaml, only, writes) : null;
 
         var material = new StringBuilder(job.Text).Append('\0');
         foreach (var (name, value) in launch.OrderBy(p => p.Key, StringComparer.Ordinal)) material.Append(name).Append('=').Append(value).Append('\0');
         foreach (var (alias, brick) in sampling.Sources.OrderBy(s => s.Alias, StringComparer.Ordinal)) material.Append("source-brick:").Append(alias).Append('=').Append(brick.Key).Append('\0');
         foreach (var alias in sampling.Sinks.Order(StringComparer.Ordinal)) material.Append("throwaway:").Append(alias).Append('\0');
         if (stagedRun is not null) material.Append("staged:").Append(stagedRun.Signature).Append('\0');
+        if (only is not null) material.Append("targets:").Append(string.Join(',', only.Order(StringComparer.OrdinalIgnoreCase))).Append('\0');
         var digest = Convert.ToHexStringLower(HMACSHA256.HashData(_token, Encoding.UTF8.GetBytes(material.ToString())));
-        return new RunPlan(path, sampling, launch, writes, digest, sample, stagedRun);
+        return new RunPlan(path, sampling, launch, writes, digest, sample, stagedRun, subset, only?.Order(StringComparer.OrdinalIgnoreCase).ToList());
     }
 
     /// <summary>
@@ -129,7 +136,7 @@ public sealed partial class StudioServer
     /// run with, and the stages that would run, told before anything does. Pure: nothing leaves the session until
     /// the run starts. The levels of a real run are keyed to every row, never to a sample's bound.
     /// </summary>
-    private StagedRun Stage(RunRequest asked, string path, string text, BrickSampling sampling, IReadOnlyDictionary<string, string> launch, bool sample)
+    private StagedRun Stage(RunRequest asked, string path, string text, BrickSampling sampling, IReadOnlyDictionary<string, string> launch, bool sample, IReadOnlySet<string>? only = null)
     {
         var cutter = _tools.Engine.Cutter;
         var key = DebugKey(path, null);
@@ -146,15 +153,16 @@ public sealed partial class StudioServer
         // A suspended run is continued whole or not at all: a target that holds nothing would be read from its source and written unreviewed.
         if (state.Real)
         {
-            var missing = plan.Branches.Where(b => b.Writes && !keep.Any(h => Same(h.Branch, b.Branch) && h.Level == b.Transformers)).Select(b => b.Branch).ToList();
+            var missing = plan.Branches.Where(b => b.Writes && (only is null || only.Contains(b.Branch)) && !keep.Any(h => Same(h.Branch, b.Branch) && h.Level == b.Transformers)).Select(b => b.Branch).ToList();
             if (missing.Count > 0)
                 throw new StudioRefusal(409, $"The suspended run does not hold the rows of every target ({string.Join(", ", missing)}): abandon it, then review again.");
         }
 
         DebugCut cut;
-        try { cut = cutter.Cut(sampling.Yaml, watch, null, keep.Select(l => new DebugHeld(l.Branch, l.Level, l.Key)).ToList(), write: true, beforeWriters: review); }
+        try { cut = cutter.Cut(sampling.Yaml, watch, null, keep.Select(l => new DebugHeld(l.Branch, l.Level, l.Key)).ToList(), write: true, beforeWriters: review, only: only); }
         catch (InvalidOperationException ex) { throw new StudioRefusal(422, ex.Message); }
-        var holds = review ? plan.Branches.Where(b => b.Writes).Select(b => new DebugWatch(b.Branch, DebugAt.End)).ToList() : [];
+        if (only is not null) RefuseWritersOutside(cut, plan.Branches.Where(b => b.Writes).Select(b => b.Branch), only);
+        var holds = review ? plan.Branches.Where(b => b.Writes && (only is null || only.Contains(b.Branch))).Select(b => new DebugWatch(b.Branch, DebugAt.End)).ToList() : [];
 
         var stages = JobFileParser.ParseContent(cut.Yaml, null, interpolate: false).Select(kv => new
         {
@@ -177,7 +185,7 @@ public sealed partial class StudioServer
         var signature = string.Join('|', new[] { $"review={(review ? 1 : 0)}" }
             .Concat(watch.Select(w => $"w:{w.Branch}/{AtName(w.At)}").Order(StringComparer.Ordinal))
             .Concat(keep.Select(h => $"h:{h.Branch}/{h.Level}/{h.Key}").Order(StringComparer.Ordinal)));
-        return new StagedRun(plan, state, review, holds, watch, keep, drop, cut, stages, held, state.Levels.Count - keep.Count, signature, sample);
+        return new StagedRun(plan, state, review, holds, watch, keep, drop, cut, stages, held, state.Levels.Count - keep.Count, signature, sample, only);
     }
 
     /// <summary>What a held level was read with, hashed under the session's token: the launch values and the state files a cursor reads.</summary>
@@ -198,6 +206,78 @@ public sealed partial class StudioServer
         return Convert.ToHexStringLower(HMACSHA256.HashData(_token, Encoding.UTF8.GetBytes(material.ToString())));
     }
 
+    /// <summary>
+    /// The targets a request chose, among the branches that write: null when it chose none or all of them, so a run that chooses
+    /// everything is the job's own. A list that is empty, names a branch that does not write, or accompanies a run that writes
+    /// nothing real is refused, never read as "all".
+    /// </summary>
+    private static HashSet<string>? ChosenTargets(List<string>? asked, IReadOnlyList<RunWrite> writes, bool sample)
+    {
+        if (asked is null) return null;
+        if (sample) throw new StudioRefusal(409, "A run that reads a source brick writes nothing real: there is no target to choose.");
+        if (asked.Count == 0) throw new StudioRefusal(400, "Choose at least one target to write.");
+        var known = writes.Select(w => w.Alias).ToList();
+        var unknown = asked.Where(a => !known.Contains(a, StringComparer.OrdinalIgnoreCase)).ToList();
+        if (unknown.Count > 0)
+            throw new StudioRefusal(400, $"The job has no target {string.Join(", ", unknown.Select(u => $"'{u}'"))}: it writes {string.Join(", ", known.Select(k => $"'{k}'"))}.");
+        var chosen = known.Where(k => asked.Contains(k, StringComparer.OrdinalIgnoreCase)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return chosen.Count == known.Count ? null : chosen;
+    }
+
+    /// <summary>The job cut down to the chosen targets: what only the others need is left out, and none of them runs.</summary>
+    private DebugCut SubsetCut(string yaml, IReadOnlySet<string> only, IReadOnlyList<RunWrite> writes)
+    {
+        DebugCut cut;
+        try { cut = _tools.Engine.Cutter.Cut(yaml, [], null, null, write: true, only: only); }
+        catch (InvalidOperationException ex) { throw new StudioRefusal(422, ex.Message); }
+        RefuseWritersOutside(cut, writes.Select(w => w.Alias), only);
+        RefuseCursorsOthersRead(cut, _tools.Engine.Cutter.Plan(yaml, 0), writes.Select(w => w.Alias), only);
+        return cut;
+    }
+
+    /// <summary>
+    /// A cut that still writes through a branch the person did not choose is refused: a chosen target that reads it pulls it in, and
+    /// the choice would not hold. Read off the cut itself, whatever pulled the branch in.
+    /// </summary>
+    private static void RefuseWritersOutside(DebugCut cut, IEnumerable<string> writers, IReadOnlySet<string> only)
+    {
+        var writing = writers.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var (name, piece) in JobFileParser.ParseContent(cut.Yaml, null, interpolate: false))
+        {
+            var branch = name.Split(DebugCutter.Mark, 2)[0];
+            if (only.Contains(branch) || !writing.Contains(branch)) continue;
+            if (piece.Output is { Length: > 0 } output && output != "null:")
+                throw new StudioRefusal(409, $"'{branch}' writes, and a target you chose reads it: choose it too, or leave both out.");
+        }
+    }
+
+    /// <summary>
+    /// A cursor that a target left out also reads is refused: the run would move it past rows that target never received, and its
+    /// next incremental run would skip them with an exit code of 0. Read off the cut, over everything downstream of the cursor.
+    /// </summary>
+    private static void RefuseCursorsOthersRead(DebugCut cut, DebugPlan plan, IEnumerable<string> writers, IReadOnlySet<string> only)
+    {
+        var left = writers.Where(w => !only.Contains(w)).ToList();
+        foreach (var (name, piece) in JobFileParser.ParseContent(cut.Yaml, null, interpolate: false))
+        {
+            if (piece.Cursor is not { Length: > 0 } && piece.State is not { Length: > 0 }) continue;
+            var branch = name.Split(DebugCutter.Mark, 2)[0];
+            var downstream = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var pending = new Stack<string>([branch]);
+            while (pending.Count > 0)
+                if (plan.Readers.TryGetValue(pending.Pop(), out var readers))
+                    foreach (var reader in readers.Where(downstream.Add)) pending.Push(reader);
+            var reading = left.Where(downstream.Contains).ToList();
+            if (reading.Count > 0)
+                throw new StudioRefusal(409, $"'{branch}' keeps a cursor that {string.Join(", ", reading.Select(r => $"'{r}'"))} also reads: writing without it would move the cursor past rows it never received. Choose it too, or leave the cursor out.");
+        }
+    }
+
+    /// <summary>Rows held before a writer that the run just done did not write: its target was not chosen.</summary>
+    private static bool WaitsForWriter(StagedRun staged, HeldLevel held) =>
+        staged.Only is { } only && !only.Contains(held.Branch)
+        && staged.Plan.Branches.Any(b => b.Writes && Same(b.Branch, held.Branch) && b.Transformers == held.Level);
+
     private async Task PrepareRunAsync(HttpContext context)
     {
         var plan = PlanRun(await BodyAsync<RunRequest>(context));
@@ -205,6 +285,7 @@ public sealed partial class StudioServer
         {
             digest = plan.Digest,
             writes = plan.Writes,
+            targets = plan.Targets,
             sample = plan.Sample,
             sampleRows = plan.Sample ? CoordinatorApi.MaxSampleRows : (int?)null,
             staged = plan.Staged is not { } staged ? null : new
@@ -240,8 +321,8 @@ public sealed partial class StudioServer
             var inputs = new List<string>();
             foreach (var (alias, brick) in plan.Sampling.Sources)
             {
-                if (plan.Staged?.Cut.Dropped.Contains(alias) == true) continue;
-                if (plan.Staged?.Cut.Unread.Contains(alias) == true) continue;
+                if (plan.Cut?.Dropped.Contains(alias) == true) continue;
+                if (plan.Cut?.Unread.Contains(alias) == true) continue;
                 byte[] arrow;
                 try { arrow = await _tools.Coordinator!.SampleAsync(brick.Node, brick.Id, CoordinatorApi.MaxSampleRows, context.RequestAborted); }
                 catch (CoordinatorLinkException ex) { throw new StudioRefusal(502, $"'{alias}': {ex.Message}"); }
@@ -251,7 +332,7 @@ public sealed partial class StudioServer
             var outputs = new List<string>();
             foreach (var alias in plan.Sampling.Sinks)
             {
-                if (plan.Staged?.Cut.Dropped.Contains(alias) == true) continue;
+                if (plan.Cut?.Dropped.Contains(alias) == true) continue;
                 // A review ends every branch before its writer: the sink's output is gone from the cut, so nothing is left to bind.
                 if (plan.Staged?.Review == true) continue;
                 files.Add(_local.SampleFile(null));
@@ -292,7 +373,7 @@ public sealed partial class StudioServer
             // Armed inside the task, for this run's call chain alone; the environment is never written.
             using var armed = LaunchValues.Arm(plan.Launch);
             using var quiet = NonInteractiveGuard.Suppress();
-            var outcome = await _tools.Engine.RunAsync(plan.Staged?.Cut.Yaml ?? plan.Sampling.Yaml, bindings, state.Cts.Token);
+            var outcome = await _tools.Engine.RunAsync(plan.Cut?.Yaml ?? plan.Sampling.Yaml, bindings, state.Cts.Token);
             code = outcome.ExitCode;
             checkpoints = outcome.Checkpoints;
             foreach (var (alias, reason) in outcome.Failures) state.Failures[alias] = reason;
@@ -347,8 +428,12 @@ public sealed partial class StudioServer
         if (code == 0 && !staged.Review && !staged.Sample)
         {
             var store = DebugStore();
-            foreach (var held in state.Levels) ForgetCheckpoint(store, held.Key);
-            state.Levels.Clear();
+            // A target the run did not write keeps its held rows.
+            foreach (var held in state.Levels.Where(h => !WaitsForWriter(staged, h)).ToList())
+            {
+                ForgetCheckpoint(store, held.Key);
+                state.Levels.Remove(held);
+            }
         }
         state.Real = !staged.Sample && state.Levels.Count > 0;
         if (staged.Review)

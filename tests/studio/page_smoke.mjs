@@ -205,6 +205,7 @@ function session(ws) {
   s.state = (alias) => s.ev(`document.querySelector('.dcard[data-alias="${alias}"] .dcard-badge')?.dataset.cardState ?? null`);
   s.pinned = (alias) => s.ev(`document.querySelector('.dcard[data-alias="${alias}"] [data-card-tool="pin"]')?.getAttribute("aria-pressed") ?? null`);
   s.drawerText = () => s.ev(`document.querySelector("#d-drawer .drawer-body")?.innerText ?? ""`);
+  s.dialogText = () => s.ev(`document.querySelector("#d-run-dialog")?.innerText ?? ""`);
   s.tab = () => s.ev(`document.querySelector("#d-drawer .tabs button.active")?.dataset.tab ?? null`);
   s.visible = (selector) => s.ev(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); return !!e && !e.hidden; })()`);
   // A reload takes a moment to replace the document: a job asked for before it would be asked of the old page.
@@ -432,9 +433,10 @@ const scenarios = {
     await p.click("#d-save");
     check("Save writes the job", await p.waitStatus(/saved/, 15000), await p.status());
     await p.click("#d-run");
-    check("Run opens its confirmation", await p.until(`document.querySelector("#d-drawer .tabs button.active")?.dataset.tab === "run"`));
-    const text = await p.drawerText();
+    check("Run opens its confirmation", await p.until(`!!document.querySelector("#d-run-dialog[open]")`));
+    const text = await p.dialogText();
     check("Run is the plain real run", /This run is real: its writers write/.test(text) && !/stops at/.test(text), text.slice(0, 200));
+    await p.click("#d-run-cancel");
 
     await p.click(`.dcard[data-alias="${mid}"] [data-card-tool="pin"]`);
     check("unpinning removes the pin and the state file", await p.until(`document.querySelector('.dcard[data-alias="${mid}"] [data-card-tool="pin"]')?.getAttribute("aria-pressed") === "false"`) && !fs.existsSync(file));
@@ -451,10 +453,8 @@ const scenarios = {
     check("the verb that writes is held back", (await p.disabled("#d-run")) === true);
     check("the verb that writes is named Write targets…", (await p.ev(`document.querySelector("#d-run")?.textContent`)) === "Write targets…");
     check("the sink says the run waits on it", await p.until(`/⏸/.test(document.querySelector('.dcard[data-alias="c"] .dcard-badge')?.textContent ?? "")`), JSON.stringify(await p.badges()));
-    check("the sink offers Write and Abandon", await p.ev(`!!document.querySelector('.dcard[data-alias="c"] [data-card-tool="write"]') && !!document.querySelector('.dcard[data-alias="c"] [data-card-tool="abandon"]')`));
+    check("the sink that holds no rows offers Abandon and no Write", await p.ev(`!document.querySelector('.dcard[data-alias="c"] [data-card-tool="write"]') && !!document.querySelector('.dcard[data-alias="c"] [data-card-tool="abandon"]')`));
     check("a card that is no sink offers neither", await p.ev(`!document.querySelector('.dcard[data-alias="b"] [data-card-tool="write"], .dcard[data-alias="b"] [data-card-tool="abandon"]')`));
-    await p.cardTool("c", "write");
-    check("Write on a run that holds nothing of its target is refused", await p.waitStatus(/does not hold the rows/i, 10000), await p.status());
     await p.cardTool("c", "abandon");
     check("Abandon hands the page back", await p.until(`document.querySelector("#d-suspended").hidden && document.querySelector("#d-run").disabled === false && document.querySelector("#d-preview").disabled === false`));
     await p.click("#d-preview");
@@ -472,12 +472,26 @@ const scenarios = {
     await p.click("#d-run");
     check("the confirmation opens", await p.until(`!!document.querySelector("#d-run-confirm")`));
     check("the case is not ticked", (await p.ev(`document.querySelector("#d-review")?.checked`)) === false);
-    check("the confirmation says the targets are written", /reaches the end|real: its writers write/.test(await p.drawerText()), (await p.drawerText()).slice(0, 200));
+    check("the confirmation says the targets are written", /reaches the end|real: its writers write/.test(await p.dialogText()), (await p.dialogText()).slice(0, 200));
     check("nothing is written before the confirmation", !fs.existsSync(path.join(folder, "c.csv")) && !fs.existsSync(path.join(folder, "e.csv")));
     await p.click("#d-run-confirm");
     check("the run succeeds", await p.waitStatus(/run succeeded/, 30000), await p.status());
     check("both targets are written", fs.existsSync(path.join(folder, "c.csv")) && fs.existsSync(path.join(folder, "e.csv")));
     check("no sink is left waiting", await p.ev(`document.querySelector("#d-suspended").hidden && !document.querySelector("[data-card-tool='write']")`));
+  },
+
+  // Write targets… with a target unticked writes the others only, and the confirmation names the number it writes.
+  async "write-choose"({ page: p, folder }) {
+    check("the job opens", await p.openJob("review.yaml"));
+    await p.click("#d-run");
+    check("the confirmation lists both targets", await p.until(`!!document.querySelector("#d-target-c") && !!document.querySelector("#d-target-e")`));
+    check("it offers to write both", /Write 2 targets/.test(await p.ev(`document.querySelector("#d-run-confirm")?.innerText ?? ""`)));
+    await p.click("#d-target-e");
+    check("the choice re-prepares for one target", await p.until(`/Write 1 target$/.test(document.querySelector("#d-run-confirm")?.innerText ?? "")`));
+    check("the target ticked keeps its box", (await p.ev(`document.querySelector("#d-target-c")?.checked`)) === true && (await p.ev(`document.querySelector("#d-target-e")?.checked`)) === false);
+    await p.click("#d-run-confirm");
+    check("the run succeeds", await p.waitStatus(/run succeeded/, 30000), await p.status());
+    check("only the chosen target is written", fs.existsSync(path.join(folder, "c.csv")) && !fs.existsSync(path.join(folder, "e.csv")));
   },
 
   // Review first: nothing is written, every sink says what waits, a sink writes the whole run.
@@ -487,7 +501,7 @@ const scenarios = {
     await p.click("#d-run");
     check("the confirmation opens", await p.until(`!!document.querySelector("#d-review")`));
     await p.click("#d-review");
-    check("the case re-prepares the run as a review", await p.until(`/stops before every writer/.test(document.querySelector("#d-drawer .drawer-body")?.innerText ?? "")`), (await p.drawerText()).slice(0, 200));
+    check("the case re-prepares the run as a review", await p.until(`/stops before every writer/.test(document.querySelector("#d-run-dialog")?.innerText ?? "")`), (await p.drawerText()).slice(0, 200));
     check("the case stays ticked", (await p.ev(`document.querySelector("#d-review")?.checked`)) === true);
     await p.click("#d-run-confirm");
     check("the review ends", await p.waitStatus(/run succeeded/, 30000), await p.status());
@@ -502,10 +516,16 @@ const scenarios = {
     await p.cardTool("c", "write");
     check("Write opens the confirmation of the continuation", await p.until(`!!document.querySelector("#d-run-confirm")`));
     check("the continuation has no case", await p.ev(`!document.querySelector("#d-review")`));
-    check("the continuation reads the held rows", /Held from before/.test(await p.drawerText()), (await p.drawerText()).slice(0, 300));
+    check("the continuation reads the held rows", /Held from before/.test(await p.dialogText()), (await p.dialogText()).slice(0, 300));
     check("nothing is written before the confirmation", files().every((f) => !f));
     await p.click("#d-run-confirm");
     check("the continuation succeeds", await p.waitStatus(/run succeeded/, 30000), await p.status());
+    check("only the sink that was written is written", files()[0] === true && files()[1] === false, JSON.stringify(files()));
+    check("the other sink still waits", await p.until(`!!document.querySelector('.dcard[data-alias="e"] [data-card-tool="write"]') && !document.querySelector("#d-suspended").hidden`));
+    await p.cardTool("e", "write");
+    await p.until(`!!document.querySelector("#d-run-confirm")`);
+    await p.click("#d-run-confirm");
+    for (let i = 0; i < 150 && !files()[1]; i++) await new Promise((r) => setTimeout(r, 200));
     check("both targets are written", files().every(Boolean), JSON.stringify(files()));
     check("the targets hold the reviewed rows", fs.readFileSync(path.join(folder, "c.csv"), "utf8").trim().split("\n").length === 11 && fs.readFileSync(path.join(folder, "e.csv"), "utf8").trim().split("\n").length === 21);
     check("the page is handed back", await p.until(`document.querySelector("#d-suspended").hidden && document.querySelector("#d-run").disabled === false && !document.querySelector("[data-card-tool='write']")`));
@@ -518,7 +538,7 @@ const scenarios = {
     await p.click("#d-run");
     await p.until(`!!document.querySelector("#d-review")`);
     await p.click("#d-review");
-    await p.until(`/stops before every writer/.test(document.querySelector("#d-drawer .drawer-body")?.innerText ?? "")`);
+    await p.until(`/stops before every writer/.test(document.querySelector("#d-run-dialog")?.innerText ?? "")`);
     await p.click("#d-run-confirm");
     check("the review ends", await p.waitStatus(/run succeeded/, 30000), await p.status());
     check("the sinks wait", await p.until(`document.querySelectorAll("[data-card-tool='abandon']").length === 2`));
@@ -535,7 +555,7 @@ const scenarios = {
     await p.click("#d-run");
     await p.until(`!!document.querySelector("#d-review")`);
     await p.click("#d-review");
-    await p.until(`/stops before every writer/.test(document.querySelector("#d-drawer .drawer-body")?.innerText ?? "")`);
+    await p.until(`/stops before every writer/.test(document.querySelector("#d-run-dialog")?.innerText ?? "")`);
     await p.click("#d-run-confirm");
     check("the review ends", await p.waitStatus(/run succeeded/, 30000), await p.status());
     await p.until(`!!document.querySelector("[data-card-tool='write']")`);
@@ -548,7 +568,13 @@ const scenarios = {
     await p.cardTool("e", "write");
     await p.until(`!!document.querySelector("#d-run-confirm")`);
     await p.click("#d-run-confirm");
-    check("Write finishes the run", await p.waitStatus(/run succeeded/, 30000), await p.status());
+    check("Write finishes the run of that target", await p.waitStatus(/run succeeded/, 30000), await p.status());
+    check("that target is written and the other still waits", fs.existsSync(path.join(folder, "e.csv")) && !fs.existsSync(path.join(folder, "c.csv"))
+      && await p.until(`!!document.querySelector('.dcard[data-alias="c"] [data-card-tool="write"]')`));
+    await p.cardTool("c", "write");
+    await p.until(`!!document.querySelector("#d-run-confirm")`);
+    await p.click("#d-run-confirm");
+    for (let i = 0; i < 150 && !fs.existsSync(path.join(folder, "c.csv")); i++) await new Promise((r) => setTimeout(r, 200));
     check("both targets are written", fs.existsSync(path.join(folder, "c.csv")) && fs.existsSync(path.join(folder, "e.csv")));
   },
 
@@ -681,7 +707,7 @@ const argsOf = {
 
 const fixturesOf = {
   "whole-branch": ["whole.yaml"], "edit-during-run": ["slow.yaml"], "open-race": ["chain.yaml", "whole.yaml"],
-  "write-plain": ["review.yaml"], "review-write": ["review.yaml"], "review-abandon": ["review.yaml"], "review-reload": ["review.yaml"],
+  "write-plain": ["review.yaml"], "write-choose": ["review.yaml"], "review-write": ["review.yaml"], "review-abandon": ["review.yaml"], "review-reload": ["review.yaml"],
 };
 
 const wanted = process.argv.slice(2);

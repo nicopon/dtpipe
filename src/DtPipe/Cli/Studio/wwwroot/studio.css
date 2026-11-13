@@ -127,6 +127,17 @@ textarea { width: 100%; resize: vertical; }
 .ctool.wide.danger { color: var(--bad); }
 .designer-bar .suspended { color: var(--warn); font-size: 12px; }
 label.review { display: block; margin: 0 0 8px; }
+/* The confirmation of a real run: a modal dialog, so what is about to be written is what the person is reading. */
+.run-dialog { width: min(640px, calc(100vw - 32px)); max-height: calc(100vh - 64px); padding: 16px 20px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--ink); box-shadow: 0 8px 32px rgba(0, 0, 0, .3); }
+.run-dialog::backdrop { background: rgba(0, 0, 0, .45); }
+.run-dialog h3 { margin: 0 0 4px; font-size: 16px; }
+.run-dialog p { margin: 6px 0; }
+.run-targets { margin: 10px 0; }
+.run-dialog .run-write { margin: 6px 0; }
+.run-dialog .run-write label { display: block; }
+.run-dialog details { margin: 2px 0 0 22px; }
+.run-dialog summary { cursor: pointer; color: var(--muted); font-size: 12.5px; }
+.run-dialog .run-actions { justify-content: flex-end; margin-top: 14px; }
 .ctool.pin.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
 .ctool[aria-disabled="true"] { opacity: .35; cursor: not-allowed; }
 .port {

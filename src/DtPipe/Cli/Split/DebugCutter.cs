@@ -164,18 +164,22 @@ public sealed class DebugCutter(
     /// <summary>
     /// The job to run. <paramref name="upTo"/> stops the run at that level, and drops what it does not need;
     /// <paramref name="beforeWriters"/> stops every branch that has an output at its end instead, whatever its card; <paramref name="held"/>
-    /// are the levels the run may read back instead of producing.
+    /// are the levels the run may read back instead of producing. <paramref name="only"/> keeps, of the branches that have an
+    /// output, the ones named: the others are left out with whatever only they need, and never run.
     /// </summary>
     /// <param name="write">The run is the job's own, not a sample: the writer is not neutralised by the engine, so a stop
     /// is a piece with no writer at all, and the cursor and its state file stay with the piece that writes.</param>
     /// <exception cref="InvalidOperationException">The stop names no branch, or one that runs whole at that level; no branch has an
-    /// output to stop before.</exception>
+    /// output to stop before; <paramref name="only"/> is empty or names a branch with no output.</exception>
     public DebugCut Cut(
-        string yaml, IEnumerable<DebugWatch> watch, DebugWatch? upTo = null, IReadOnlyList<DebugHeld>? held = null, bool write = false, bool beforeWriters = false)
+        string yaml, IEnumerable<DebugWatch> watch, DebugWatch? upTo = null, IReadOnlyList<DebugHeld>? held = null, bool write = false, bool beforeWriters = false,
+        IReadOnlySet<string>? only = null)
     {
         var jobs = Parse(yaml);
         var infos = Inspect(jobs);
         held ??= [];
+        if (only is not null && (only.Count == 0 || only.Any(a => !infos.TryGetValue(a, out var i) || string.IsNullOrEmpty(i.Job.Output))))
+            throw new InvalidOperationException("The targets to write name a branch with no output, or none.");
 
         var watched = new HashSet<(string Branch, int Level)>();
         foreach (var w in watch)
@@ -193,7 +197,7 @@ public sealed class DebugCutter(
         if (beforeWriters)
         {
             foreach (var (alias, info) in infos)
-                if (!string.IsNullOrEmpty(info.Job.Output)) targets[alias] = info.Transformers;
+                if (!string.IsNullOrEmpty(info.Job.Output) && (only is null || only.Contains(alias))) targets[alias] = info.Transformers;
             if (targets.Count == 0) throw new InvalidOperationException("No branch of this job writes: there is nothing to stop before.");
         }
         foreach (var (alias, level) in targets) watched.Add((alias, level));
@@ -219,7 +223,7 @@ public sealed class DebugCutter(
             // leaves its upstream out, since nothing would read what that upstream delivers.
             var read = infos.Values.SelectMany(i => Reads(i.Job)).ToHashSet(StringComparer.OrdinalIgnoreCase);
             foreach (var (alias, info) in infos)
-                if (!read.Contains(alias) || !string.IsNullOrEmpty(info.Job.Output)) Need(alias, info.Transformers);
+                if (only is not null ? only.Contains(alias) : !read.Contains(alias) || !string.IsNullOrEmpty(info.Job.Output)) Need(alias, info.Transformers);
         }
 
         var result = new Dictionary<string, JobDefinition>(StringComparer.OrdinalIgnoreCase);

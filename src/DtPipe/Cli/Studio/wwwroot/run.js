@@ -2,11 +2,11 @@
 // The real run of the saved job: what it would write, confirmed first; then the run, polled until it ends. A run that
 // reviews first stops before every writer and is left suspended; the sink cards write it or abandon it.
 
-import { api, el, status } from "./dom.js";
+import { api, el, fill, status, targetOf } from "./dom.js";
 import { brickBranches, showTab } from "./designer.js";
 import { invalidate } from "./render.js";
 import { showHeld } from "./preview.js";
-import { state } from "./state.js";
+import { sequence, state } from "./state.js";
 
 let runTimer = null;
 
@@ -15,6 +15,8 @@ const runLabel = (code) => code === 0 ? "succeeded" : code === 130 ? "stopped" :
 /** A run still going is kept when another job opens, since it goes on whatever is open. */
 export function forgetRun() {
   if (state.run && state.run.phase !== "running") state.run = null;
+  preparing.cancel();
+  closeDialog();
 }
 
 /** The choice the job was left with. @param {boolean} review */
@@ -22,51 +24,175 @@ export function restoreReview(review) {
   state.writing.review = review === true;
 }
 
-/** What the confirmation asks for: the case "Review before writing" being ticked or not. @param {boolean} review */
-async function setReview(review) {
-  state.writing.review = review;
+// ---------------------------------------------------------------- the confirmation: a dialog over the page
+
+/** The open confirmation's dialog; there is at most one. @type {HTMLDialogElement | null} */
+let dialog = null;
+// One counter for the confirmations asked: the answer to an earlier choice never replaces the one to the latest.
+const preparing = sequence();
+const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+/** The targets the confirmation lists: each one that writes, or, for a continuation, each one that holds rows. @param {any} run */
+function listedOf(run) {
+  const writes = run.prepared?.writes ?? [];
+  return run.asked.continuation ? writes.filter((w) => run.asked.held.includes(w.alias)) : writes;
+}
+
+function closeDialog() {
+  const old = dialog;
+  dialog = null;
+  if (!old) return;
+  if (old.open) old.close();
+  old.remove();
+}
+
+/** Escape and Cancel: the confirmation is dropped, nothing runs. */
+function dropConfirmation() {
+  preparing.cancel();
+  if (state.run?.phase === "confirm") state.run = null;
+  closeDialog();
   invalidate("drawer");
-  await prepareRun();
 }
 
 /**
- * Opens the confirmation of a run. `continuation` writes the rows a suspended run holds; otherwise the run reads the sources
- * again, and stops before its writers when the case "Review before writing" is ticked.
- * @param {boolean} [continuation]
+ * Opens the confirmation of a run. `continuation` writes the rows a suspended run holds, among the targets `held` that hold
+ * some; otherwise the run reads the sources again, and stops before its writers when the case "Review before writing" is
+ * ticked. `targets` are the ones it writes: every one when null.
+ * @param {boolean} [continuation] @param {string[] | null} [held] @param {string[] | null} [targets]
  */
-export async function prepareRun(continuation = false) {
+export async function prepareRun(continuation = false, held = null, targets = null) {
   const job = state.job;
   if (!job) return;
-
   if (state.cards.dirty || !job.hash) {
     status("Save the job first: a run executes the job saved in the folder.", "bad");
     return;
   }
-  try {
-    // The mode is always said: a run is the job's own, written whole, unless it reviews first or continues a suspended run.
-    const staged = continuation ? { debug: true, review: false } : { review: state.writing.review };
-    const prepared = await api("/api/run/prepare", { path: job.path, hash: job.hash, bricks: brickBranches(), ...staged });
-    if (state.job?.path !== job.path) return;
-    state.run = { phase: "confirm", prepared, bricks: brickBranches(), hash: job.hash, path: job.path, staged: { ...staged, continuation } };
-    showTab("run");
-  } catch (e) {
-    // A refused review keeps its confirmation open: the case is where the person unticks it.
-    state.run = !continuation && state.writing.review ? { phase: "confirm", refused: e.message, staged: { review: true, continuation: false } } : null;
-    status(e.message, "bad");
-    if (state.run) showTab("run");
+  await ask({ continuation, review: continuation ? false : state.writing.review, targets, held });
+}
+
+/**
+ * Asks the server what the run would do for what the controls say now, and shows it. What the digest was prepared for is
+ * `confirmed`, and it is what Confirm sends: the controls (`asked`) may be ahead of it while an answer is awaited or refused.
+ * @param {{ continuation: boolean, review: boolean, targets: string[] | null, held: string[] | null }} wanted
+ */
+async function ask(wanted) {
+  const job = state.job;
+  if (!job) return;
+  const ticket = preparing.begin();
+  const open = state.run?.phase === "confirm" && state.run.path === job.path ? state.run : null;
+  if (open) {
+    state.run = { ...open, asked: wanted, busy: true };
+    drawDialog();
   }
+  const bricks = brickBranches();
+  // The mode is always said: a run is the job's own, written whole, unless it reviews first or continues a suspended run.
+  const mode = wanted.continuation ? { debug: true, review: false } : { review: wanted.review };
+  try {
+    const prepared = await api("/api/run/prepare", { path: job.path, hash: job.hash, bricks, ...mode, ...(wanted.targets ? { targets: wanted.targets } : {}) });
+    if (preparing.stale(ticket) || state.job?.path !== job.path) return;
+    state.run = { phase: "confirm", path: job.path, hash: job.hash, bricks, prepared, asked: wanted, confirmed: wanted, refused: null, busy: false };
+  } catch (e) {
+    if (preparing.stale(ticket) || state.job?.path !== job.path) return;
+    status(e.message, "bad");
+    // A refusal inside an open confirmation stays in it, where the controls change the choice; a refused review opens one
+    // too, since its case is where the person unticks it. Any other refusal opens nothing.
+    if (open) state.run = { ...state.run, refused: e.message, busy: false };
+    else state.run = !wanted.continuation && wanted.review
+      ? { phase: "confirm", path: job.path, hash: job.hash, bricks, prepared: null, asked: wanted, confirmed: null, refused: e.message, busy: false } : null;
+  }
+  drawDialog();
+}
+
+/** Draws the confirmation in its dialog, or closes the dialog when none is open. */
+function drawDialog() {
+  const run = state.run;
+  if (!run || run.phase !== "confirm") { closeDialog(); return; }
+  if (!dialog) {
+    dialog = /** @type {HTMLDialogElement} */ (el("dialog", { id: "d-run-dialog", class: "run-dialog", "aria-labelledby": "d-run-title" }));
+    dialog.addEventListener("cancel", dropConfirmation);
+    document.body.append(dialog);
+    dialog.showModal();
+  }
+  const active = document.activeElement?.id;
+  fill(dialog, confirmView(run));
+  // A choice redraws the dialog: the control the person is on keeps the focus.
+  const again = active ? [...dialog.querySelectorAll("[id]")].find((n) => n.id === active) : null;
+  if (again instanceof HTMLElement) again.focus();
+}
+
+/** @param {boolean} review */
+function setReview(review) {
+  state.writing.review = review;
+  invalidate("drawer");
+  return ask({ ...state.run.asked, review });
+}
+
+/** Ticks or unticks a target: a choice of none is never made. @param {string} alias @param {boolean} on */
+function choose(alias, on) {
+  const run = state.run;
+  if (!run || run.phase !== "confirm") return;
+  const listed = listedOf(run).map((w) => w.alias);
+  const now = new Set(run.asked.targets ?? listed);
+  if (on) now.add(alias); else now.delete(alias);
+  if (now.size === 0) { drawDialog(); return; }
+  // A continuation always says which held targets it writes, since the others may no longer hold rows.
+  return ask({ ...run.asked, targets: run.asked.continuation || now.size < listed.length ? listed.filter((a) => now.has(a)) : null });
+}
+
+/** What the dialog says: what would be written, to which targets, and the choice of both. @param {any} run */
+function confirmView(run) {
+  const { asked, prepared } = run;
+  const sample = !!prepared?.sample;
+  const listed = listedOf(run);
+  const chosen = new Set(asked.targets ?? listed.map((w) => w.alias));
+  const selectable = !sample && listed.length > 1;
+  const count = listed.length ? chosen.size : 0;
+  const review = asked.continuation ? null : el("label", { class: "review" },
+    el("input", { id: "d-review", type: "checkbox", checked: asked.review, onchange: (e) => setReview(targetOf(e).checked) }),
+    " Review before writing ", el("span", { class: "hint" }, "(stop before every writer and read the rows; the sink cards then write or abandon)"));
+  const label = run.busy ? "Checking…" : asked.continuation ? `Write ${plural(count, "target")}`
+    : sample ? "Run the sample" : !listed.length ? "Run" : asked.review ? `Hold ${plural(count, "target")} for review` : `Write ${plural(count, "target")}`;
+  const staged = prepared?.staged;
+  return [
+    el("h3", { id: "d-run-title" }, asked.continuation ? "Write the held rows" : sample ? "Run the sample" : "Write targets"),
+    el("p", { class: "hint" }, el("code", {}, run.path), asked.continuation
+      ? " holds the rows read earlier: choose the targets that receive them now; the others stay held."
+      : " runs here, as dtpipe --job would."),
+    review,
+    run.refused ? el("p", { class: "warn" }, run.refused) : null,
+    prepared && !run.refused ? [
+      sample ? el("p", { class: "warn" }, `This run is a sample: its source bricks are read at ${prepared.sampleRows} rows through the coordinator, and nothing real is written. A sink brick is written to a throwaway file here, never to its node.`) : null,
+      staged ? stagedView(staged, sample) : sample ? null : el("p", { class: "warn" }, "This run is real: its writers write their targets. A sink brick is written to a throwaway file here, never to its node."),
+    ] : null,
+    listed.length ? el("div", { class: "run-targets" }, listed.map((w) => el("div", { class: "run-write" },
+      el("label", {},
+        selectable ? el("input", { id: `d-target-${w.alias}`, type: "checkbox", checked: chosen.has(w.alias), onchange: (e) => choose(w.alias, targetOf(e).checked) }) : null,
+        selectable ? " " : null, el("b", {}, w.alias),
+        w.throwaway ? " → a throwaway file (the brick's node is not reached)" : [" → ", el("code", {}, w.output)]),
+      w.block ? el("details", {}, el("summary", {}, "writer block"), el("pre", {}, w.block)) : null)))
+      : prepared ? el("p", { class: "hint" }, "No branch of this job writes anywhere.") : null,
+    el("div", { class: "row run-actions" },
+      el("button", { id: "d-run-cancel", class: "ghost", onclick: dropConfirmation }, "Cancel"),
+      el("button", { id: "d-run-confirm", class: "primary", disabled: run.busy || !!run.refused || !prepared, onclick: startRun }, label)),
+  ];
 }
 
 async function startRun() {
   const run = state.run;
+  if (!run || run.phase !== "confirm" || run.busy || run.refused || !run.confirmed) return;
+  // What was confirmed, never what the controls say now: the digest is of that.
+  const { continuation, review, targets } = run.confirmed;
+  const mode = continuation ? { debug: true, review: false } : { review };
   try {
-    const { continuation, ...mode } = run.staged;
-    await api("/api/run", { path: run.path, hash: run.hash, bricks: run.bricks, digest: run.prepared.digest, ...mode });
+    await api("/api/run", { path: run.path, hash: run.hash, bricks: run.bricks, digest: run.prepared.digest, ...mode, ...(targets ? { targets } : {}) });
     state.run = { ...run, phase: "running", status: null };
+    closeDialog();
     pollRun();
     showTab("run");
   } catch (e) {
     status(e.message, "bad");
+    // The job or its values may have changed since: what the dialog says is asked again.
+    await ask(run.asked);
   }
 }
 
@@ -113,33 +239,10 @@ function stagedView(staged, sample) {
   ];
 }
 
-/** The Run tab. */
+/** The Run tab: the run under way and its verdict. What it would write is confirmed first, in a dialog (`drawDialog`). */
 export function runView() {
   const run = state.run;
-  if (!run) return el("p", { class: "hint" }, "Write targets… runs the job saved in this folder, as dtpipe --job would, on this machine. You confirm what it writes first.");
-  if (run.phase === "confirm") {
-    const review = run.staged.continuation ? null : el("label", { class: "review" },
-      el("input", { id: "d-review", type: "checkbox", checked: state.writing.review, onchange: (e) => setReview(/** @type {HTMLInputElement} */ (e.target).checked) }),
-      " Review before writing ", el("span", { class: "hint" }, "(stop before every writer and read the rows; the sink cards then write or abandon)"));
-    if (run.refused) {
-      return [review, el("p", { class: "warn" }, run.refused),
-        el("div", { class: "row" }, el("button", { class: "ghost", onclick: () => { state.run = null; showTab("run"); } }, "Cancel"))];
-    }
-    const writes = run.prepared.writes;
-    const staged = run.prepared.staged;
-    const sample = run.prepared.sample;
-    return [
-      review,
-      sample ? el("p", { class: "warn" }, `This run is a sample: its source bricks are read at ${run.prepared.sampleRows} rows through the coordinator, and nothing real is written. A sink brick is written to a throwaway file here, never to its node.`) : null,
-      staged ? stagedView(staged, !!sample) : sample ? null : el("p", { class: "warn" }, "This run is real: its writers write their targets. A sink brick is written to a throwaway file here, never to its node."),
-      writes.length ? writes.map((w) => el("div", { class: "run-write" },
-        el("p", {}, el("b", {}, w.alias), w.throwaway ? " → a throwaway file (the brick's node is not reached)" : [" → ", el("code", {}, w.output)]),
-        w.block ? el("pre", {}, w.block) : null)) : el("p", { class: "hint" }, "No branch of this job writes anywhere."),
-      el("div", { class: "row" },
-        el("button", { id: "d-run-confirm", class: "primary", onclick: startRun }, run.staged.continuation ? "Confirm and write" : state.writing.review ? "Confirm and review" : "Confirm and write"),
-        el("button", { class: "ghost", onclick: () => { state.run = null; showTab("run"); } }, "Cancel")),
-    ];
-  }
+  if (!run || run.phase === "confirm") return el("p", { class: "hint" }, "Write targets… runs the job saved in this folder, as dtpipe --job would, on this machine. You confirm what it writes first.");
   const now = run.status;
   if (run.phase === "running" || !now) {
     return [el("p", {}, "Running ", el("code", {}, run.path), "…"),

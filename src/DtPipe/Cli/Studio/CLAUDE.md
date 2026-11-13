@@ -118,6 +118,14 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   the bound and the refused outputs; the prepare result carries `sample` and `sampleRows`, and the page says nothing
   real is written. A staged run of it keys its levels as a sample's (the bound and `SampleSalt`), never as `real`, and
   its digest still binds the source bricks. A review binds no sink: the cut has no writer left. `[CI: StudioRunTests]`
+- **A run writes the targets it names, never more.** `targets` of `POST /api/run/prepare` and `/api/run` are branches that write:
+  absent or all of them is the job's own run; an empty list, an unknown branch or a branch that writes nothing is refused (400),
+  and so is any list beside a sample (409). A choice is cut by `DebugCutter.Cut(only:)`, which leaves out the other targets and what
+  only they need, never run (a plain run) or held (a review); the digest binds the list, so a run sent with other targets than it
+  was confirmed for is a 409. **The guarantee is read off the cut** (`RefuseWritersOutside`): a cut that still writes through an
+  unchosen branch, because a chosen one reads it, is refused naming it, whatever pulled it in; so is a cut that moves a cursor
+  (`RefuseCursorsOthersRead`) that an unchosen target reads downstream, which would skip rows on its next incremental run.
+  `[CI: StudioStagedRunTests]` `[local: page_smoke.mjs write-choose]`
 - **A preview is the real sample of the job, cut only at the pinned cards, never the job's run.** A
   watcher (the page's pin) sits at a card's read (level 0) or at the end of its branch. `DebugCutter` cuts a branch
   there into mini-branches joined by `from:` (`__level` is reserved), each with a checkpoint in the
@@ -153,7 +161,10 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   (`resetAll`) a sample, a change of watchers and any run but its continuation are a 409.
   **A review's holds are the run's, never pins**: they are watchers for the run only, leave `state.Watch`
   before it is saved, and `Judge` keeps a held end of a writing branch without a pin while `Real`. The
-  continuation is refused (409) unless every writing branch holds its end, so no row is written unread.
+  continuation is refused (409) unless every writing branch **it names** holds its end, so no row is written unread; one that
+  names none is every writing branch.
+  **A continuation writes the targets it names and leaves the other held rows held**: a written target's level is forgotten, an
+  unwritten one stays (`WaitsForWriter`) and the run stays `real` while any remains.
   `view.queue` lists, while `real`, every writing branch of the saved file with its key and the rows
   counted once when the review ended (`HeldLevel.Rows`, a count in the clear file, never a row).
   `POST /api/debug/rows` reads the first rows of a held key, the only way a person sees them before the

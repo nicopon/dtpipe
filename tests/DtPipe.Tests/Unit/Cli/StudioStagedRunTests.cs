@@ -147,6 +147,25 @@ public sealed class StudioStagedRunTests : IAsyncLifetime
     private static Dictionary<string, JobDefinition> Parsed(DebugCut cut) =>
         DtPipe.Configuration.JobFileParser.ParseContent(cut.Yaml, null, interpolate: false);
 
+    private Task<(HttpStatusCode Status, JsonElement Body)> PrepareTargetsAsync(string hash, bool? debug, bool? review, string[]? targets) =>
+        PostAsync("/api/run/prepare", new { path = "job.yaml", hash, debug, review, targets });
+
+    /// <summary>A run that names the targets to write, confirmed with the digest its own prepare gave, and awaited.</summary>
+    private async Task<JsonElement> RunTargetsAsync(string hash, bool? debug, bool? review, string[]? targets)
+    {
+        var (prepared, answer) = await PrepareTargetsAsync(hash, debug, review, targets);
+        Assert.True(prepared == HttpStatusCode.OK, answer.ToString());
+        var (status, body) = await PostAsync("/api/run", new { path = "job.yaml", hash, debug, review, targets, digest = answer.GetProperty("digest").GetString() });
+        Assert.True(status == HttpStatusCode.Accepted, body.ToString());
+        for (var i = 0; i < 300; i++)
+        {
+            var now = await StatusAsync();
+            if (now.GetProperty("started").GetBoolean() && !now.GetProperty("running").GetBoolean()) return now;
+            await Task.Delay(100, Ct);
+        }
+        throw new TimeoutException("the run did not finish");
+    }
+
     // ---- the cut
 
     [Fact]
@@ -584,5 +603,100 @@ public sealed class StudioStagedRunTests : IAsyncLifetime
         Assert.Equal(0, done.GetProperty("code").GetInt32());
         Assert.Equal(11, File.ReadAllLines(b).Length);
         Assert.Equal(21, File.ReadAllLines(e).Length);
+    }
+
+    [Fact]
+    public async Task A_run_of_chosen_targets_writes_those_and_reads_nothing_for_the_others()
+    {
+        var hash = await SaveAsync(Twin());
+
+        var done = await RunTargetsAsync(hash, debug: null, review: null, ["b"]);
+
+        Assert.Equal(0, done.GetProperty("code").GetInt32());
+        Assert.Equal(11, File.ReadAllLines(Path.Combine(_dir, "b.csv")).Length);
+        Assert.False(File.Exists(Path.Combine(_dir, "c.csv")));
+    }
+
+    [Fact]
+    public async Task A_choice_that_is_empty_unknown_not_a_target_or_not_the_confirmed_one_is_refused()
+    {
+        var hash = await SaveAsync(Twin());
+
+        Assert.Equal(HttpStatusCode.BadRequest, (await PrepareTargetsAsync(hash, null, null, [])).Status);
+        Assert.Equal(HttpStatusCode.BadRequest, (await PrepareTargetsAsync(hash, null, null, ["zz"])).Status);
+        // a reads a source and writes nothing: it is no target.
+        Assert.Equal(HttpStatusCode.BadRequest, (await PrepareTargetsAsync(hash, null, null, ["a"])).Status);
+
+        var (_, prepared) = await PrepareTargetsAsync(hash, null, null, ["b"]);
+        var (status, body) = await PostAsync("/api/run", new { path = "job.yaml", hash, targets = new[] { "c" }, digest = prepared.GetProperty("digest").GetString() });
+        Assert.Equal(HttpStatusCode.Conflict, status);
+        Assert.False(File.Exists(Path.Combine(_dir, "b.csv")), body.ToString());
+        Assert.False(File.Exists(Path.Combine(_dir, "c.csv")));
+    }
+
+    [Fact]
+    public async Task A_chosen_target_that_reads_a_branch_that_writes_is_refused_and_nothing_is_written()
+    {
+        var hash = await SaveAsync("a:\n  input: generate:20\nb:\n  from: a\n  output: csv:b.csv\nc:\n  from: b\n  output: csv:c.csv\n");
+
+        var (status, body) = await PrepareTargetsAsync(hash, null, null, ["c"]);
+
+        Assert.Equal(HttpStatusCode.Conflict, status);
+        Assert.Contains("a target you chose reads it", body.GetProperty("error").GetString());
+        Assert.False(File.Exists(Path.Combine(_dir, "b.csv")));
+    }
+
+    [Fact]
+    public async Task A_cursor_that_a_target_left_out_also_reads_refuses_the_choice_and_moves_nothing()
+    {
+        var hash = await SaveAsync(Twin().Replace("input: generate:20\n", "input: generate:20\n  cursor: GenerateIndex\n  state: " + State.Replace('\\', '/') + "\n"));
+
+        var (status, body) = await PrepareTargetsAsync(hash, null, null, ["b"]);
+
+        Assert.Equal(HttpStatusCode.Conflict, status);
+        Assert.Contains("keeps a cursor that 'c' also reads", body.GetProperty("error").GetString());
+        Assert.False(File.Exists(State));
+        Assert.False(File.Exists(Path.Combine(_dir, "b.csv")));
+    }
+
+    [Fact]
+    public async Task A_review_of_one_target_holds_that_one_and_continuing_writes_each_target_apart()
+    {
+        var hash = await SaveAsync(Twin());
+
+        var reviewed = await RunTargetsAsync(hash, debug: true, review: true, ["c"]);
+
+        var view = reviewed.GetProperty("view");
+        Assert.Equal(20, QueueOf(view, "c").GetProperty("rows").GetInt64());
+        Assert.Null(KeyOf(view, "b"));
+        Assert.False(File.Exists(Path.Combine(_dir, "c.csv")));
+
+        // Continuing every target wants the rows of every target, and b holds none.
+        var (all, body) = await PrepareTargetsAsync(hash, debug: true, review: false, null);
+        Assert.Equal(HttpStatusCode.Conflict, all);
+        Assert.Contains("does not hold the rows of every target", body.GetProperty("error").GetString());
+
+        var written = await RunTargetsAsync(hash, debug: true, review: false, ["c"]);
+        Assert.Equal(0, written.GetProperty("code").GetInt32());
+        Assert.Equal(21, File.ReadAllLines(Path.Combine(_dir, "c.csv")).Length);
+        Assert.False(File.Exists(Path.Combine(_dir, "b.csv")));
+        Assert.False(File.Exists(DebugFile));
+    }
+
+    [Fact]
+    public async Task Writing_one_held_target_keeps_the_rows_of_the_other_held()
+    {
+        var hash = await SaveAsync(Twin());
+        await RunAsync(hash, review: true);
+
+        var written = await RunTargetsAsync(hash, debug: true, review: false, ["b"]);
+
+        Assert.Equal(0, written.GetProperty("code").GetInt32());
+        Assert.Equal(11, File.ReadAllLines(Path.Combine(_dir, "b.csv")).Length);
+        Assert.False(File.Exists(Path.Combine(_dir, "c.csv")));
+        var view = written.GetProperty("view");
+        Assert.True(view.GetProperty("real").GetBoolean());
+        Assert.Null(KeyOf(view, "b"));
+        Assert.Equal(20, QueueOf(view, "c").GetProperty("rows").GetInt64());
     }
 }

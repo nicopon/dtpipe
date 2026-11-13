@@ -1237,8 +1237,8 @@ dtpipe studio ./jobs --llm-provider ollama --llm-model qwen2.5-coder:7b  # with 
 | **Save** | Writes the job composed from the cards. A job written by hand loses its inner comments and key order, and the page says so. Refuses a file changed on disk since it was opened, never creates a folder, and never overwrites another file |
 | **Variables** | Lists every `${{…}}` the job reads. For a preview, give each a keyring alias or a value; a preview with an unresolved variable is refused |
 | **Import** | Turns a dtpipe command line into a new job, as `--export-job` would. `--bind-input` and `--bind-output` are refused |
-| **Write targets…** | Runs the saved job for real, as `dtpipe --job`, after you confirm each target. **Stop** ends it with code 130 |
-| **Review before writing** | An option of **Write targets…**: the run stops before every writing branch and holds the rows; **Write** writes them all, **Abandon** forgets them. A run stopped or failed before every target held its rows can only be abandoned |
+| **Write targets…** | Opens a dialog that lists what the saved job writes; untick a target to leave it out (the job runs without it and what only it needs). **Write N targets** runs the job for real, as `dtpipe --job`, and writes only the targets ticked. **Stop** ends it with code 130 |
+| **Review before writing** | An option of **Write targets…**: the run stops before every writing branch it was asked to write and holds the rows; **Write** on a sink card opens the same dialog for the held targets, ticks that one and writes what you confirm, and the others stay held; **Abandon** forgets every row still held (what was already written stays written). A run stopped or failed before every target held its rows can only be abandoned |
 | **▶** on a card | Runs the job up to that card |
 | **📌** on a card | Keeps the card's rows as a checkpoint, so later runs start from there. **Forget pins** clears them all |
 
