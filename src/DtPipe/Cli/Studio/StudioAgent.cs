@@ -330,7 +330,7 @@ internal sealed class StudioAgent : IAsyncDisposable
                 busy = !_turn.IsCompleted,
                 count = _log.Count,
                 entries = _log.Skip(after).ToList(),
-                live = live is { } step ? new { step = step.Iteration, tool = step.ToolName, text = Bound(ConnectionStringSanitizer.Sanitize(step.Text)) } : null,
+                live = live is { } step ? new { step = step.Iteration, tool = step.ToolName, text = Bound(AgentTrace.Safe(step.Text)) } : null,
                 plan = new { state = plan.State.ToString(), message = plan.Message, yaml = _executor.Trajectory.LastGeneratedYaml },
                 meter = new
                 {
@@ -359,8 +359,8 @@ internal sealed class StudioAgent : IAsyncDisposable
         text = Bound(step.Reasoning),
         tool = step.ToolName,
         saved = SavedPath(step),
-        args = step.ToolArgs is null ? null : Bound(ConnectionStringSanitizer.Sanitize(step.ToolArgs)),
-        result = step.ToolResult is null ? null : Bound(ConnectionStringSanitizer.Sanitize(step.ToolResult)),
+        args = step.ToolArgs is null ? null : Bound(AgentTrace.Safe(step.ToolArgs)),
+        result = step.ToolResult is null ? null : Bound(AgentTrace.Safe(step.ToolResult)),
         error = step.IsError,
     };
 

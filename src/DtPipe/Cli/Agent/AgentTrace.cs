@@ -206,7 +206,8 @@ public sealed class AgentTrace : IDisposable
         }
     }
 
-    private static string? Safe(string? text) => text is null ? null : ConnectionStringSanitizer.Sanitize(text);
+    /// <summary>A step's free text with the connection strings inside it masked: what the trace writes and the studio's panel shows.</summary>
+    internal static string? Safe(string? text) => text is null ? null : ConnectionStringSanitizer.Sanitize(text);
 
     public void Dispose()
     {
