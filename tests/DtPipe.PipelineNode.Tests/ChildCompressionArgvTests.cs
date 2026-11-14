@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -13,6 +14,7 @@ public class ChildCompressionArgvTests : IDisposable
 
     public void Dispose() => _dir.Delete(recursive: true);
 
+    [UnsupportedOSPlatform("windows")]
     private async Task<(List<string> Args, List<string> Env)> RecordAsync(string codec, int? level, params EdgeBinding[] edges)
     {
         var record = Path.Combine(_dir.FullName, "record.txt");

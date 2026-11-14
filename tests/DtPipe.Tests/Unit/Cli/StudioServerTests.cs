@@ -748,7 +748,7 @@ public sealed class StudioServerTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, ok);
         Assert.Equal(["--input", "csv:a b.csv", "-o", "csv:x.csv"], received);
         Assert.Equal("main:\n  input: csv:a b.csv\n", answer.GetProperty("yaml").GetString());
-        Assert.Empty(Directory.GetFiles(_dir, "*.yaml").Where(f => !new[] { "a.yaml" }.Contains(Path.GetFileName(f))));
+        Assert.DoesNotContain(Directory.GetFiles(_dir, "*.yaml"), f => Path.GetFileName(f) != "a.yaml");
 
         Assert.Equal(HttpStatusCode.BadRequest, (await Import(new { args = Array.Empty<string>() })).Status);
         Assert.Equal(HttpStatusCode.BadRequest, (await Import(new { })).Status);
