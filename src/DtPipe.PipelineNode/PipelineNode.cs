@@ -1,9 +1,8 @@
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using TransportR.Abstractions;
+using TransportR;
 using TransportR.Client;
-using TransportR.Client.Services;
 
 namespace DtPipe.PipelineNode;
 
@@ -161,6 +160,11 @@ public sealed class PipelineNode : IAsyncDisposable
         var receiveMaxBytes = options.ReceiveMaxBytes
             ?? ((long)options.BatchBytes * (options.MaxInFlightBatches ?? 8));
         builder.WithReceiveCapacity(receiveMaxBytes);
+
+        // The probe runs in the background after each registration of the client's event stream and only
+        // informs: the coordinator logs and shows what the path to the hub carries, and no transfer waits
+        // on it or takes its transport from it.
+        builder.WithWriteTransportProbe();
 
         return builder.Build();
     }

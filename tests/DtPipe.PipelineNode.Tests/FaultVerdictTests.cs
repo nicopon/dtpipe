@@ -3,7 +3,7 @@ using DtPipe.Coordinator;
 using DtPipe.Coordinator.Tests.Infrastructure;
 using DtPipe.PipelineNode.Tests.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
-using TransportR.FlowControl;
+using TransportR.Hub;
 using Xunit;
 
 namespace DtPipe.PipelineNode.Tests;

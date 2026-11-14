@@ -1,6 +1,5 @@
 using DtPipe.Coordinator.Contracts;
-using TransportR.Interfaces;
-using TransportR.Models;
+using TransportR.Hub;
 
 namespace DtPipe.Coordinator;
 

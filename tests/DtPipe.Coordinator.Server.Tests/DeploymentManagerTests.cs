@@ -5,9 +5,7 @@ using DtPipe.Coordinator.Server.Deployments;
 using DtPipe.Coordinator.Server.Nodes;
 using DtPipe.Coordinator.Server.Runs;
 using Microsoft.Extensions.Logging.Abstractions;
-using TransportR.Interfaces;
-using TransportR.Models;
-using TransportR.Services;
+using TransportR.Hub;
 using Xunit;
 using DtPipe.Tests.Shared;
 

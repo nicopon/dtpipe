@@ -24,7 +24,10 @@ stdin/stdout and TransportR. It speaks to no coordinator itself.
   `[CI: ArrowIpcRowCounterTests]`
 - **A replica has one TransportR client at a time, shared by all its runs, and is the only TransportR client
   they have.** dtpipe has no TransportR adapter and reaches the node only through `arrow:`. The client bounds each
-  transfer it receives (`WithReceiveCapacity`), so a replica running several carries one bound apiece. A run keeps
+  transfer it receives (`WithReceiveCapacity`), so a replica running several carries one bound apiece. It enables the
+  write-transport probe (`WithWriteTransportProbe`): after each registration of its event stream it proves in the
+  background what the path to the hub carries of a write stream, the hub announces it, and no transfer waits on it
+  or takes its transport from it. A run keeps
   the client it was launched with; a client the hub refuses to renew is dropped and another registered
   (`src/DtPipe.PipelineNode.Hosting/CLAUDE.md`).
 - **A transfer handle is claimed once, and an unclaimed one is released.** The handshake delivers a handle on

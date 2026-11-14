@@ -13,9 +13,7 @@ using DtPipe.Jobs.Coordinator;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using TransportR.FlowControl;
 using TransportR.Hub;
-using TransportR.Interfaces;
 
 namespace DtPipe.Coordinator.Server;
 
@@ -73,7 +71,7 @@ public static class CoordinatorServer
         // The state the coordinator keeps beyond the process is in one database, a SQLite file, a PostgreSQL or a SQL Server database, which the stores borrow.
         builder.Services.AddCoordinatorStores(server);
         builder.Services.AddSingleton<RightsStore>();
-        builder.Services.AddCoordinatorHub(_ => { }).Build();
+        builder.Services.AddCoordinatorHub(_ => { });
         builder.Services.AddNodeLink<NodeChannelHub>();
         // A node answers a designer's check with a source brick's first row, larger than SignalR's 32 KB default.
         builder.Services.Configure<HubOptions<NodeChannelHub>>(o => o.MaximumReceiveMessageSize = 1024 * 1024);

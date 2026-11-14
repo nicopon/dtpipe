@@ -5,7 +5,7 @@ using DtPipe.Coordinator.Server.Nodes;
 using DtPipe.Coordinator.Server.Runs;
 using DtPipe.Jobs.Coordinator;
 using Microsoft.Extensions.Logging.Abstractions;
-using TransportR.Models;
+using TransportR.Hub;
 using Xunit;
 using DtPipe.Tests.Shared;
 

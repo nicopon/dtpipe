@@ -7,7 +7,7 @@ using DtPipe.Coordinator.Server.Runs;
 using DtPipe.Coordinator.Server.Stores;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging.Abstractions;
-using TransportR.Interfaces;
+using TransportR.Hub;
 
 namespace DtPipe.Coordinator.Server.Tests;
 

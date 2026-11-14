@@ -4,8 +4,7 @@ using DtPipe.Coordinator;
 using DtPipe.Coordinator.Tests.Infrastructure;
 using DtPipe.PipelineNode.Tests.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
-using TransportR.FlowControl;
-using TransportR.Interfaces;
+using TransportR.Hub;
 using Xunit;
 
 namespace DtPipe.PipelineNode.Tests;
@@ -43,9 +42,9 @@ public class RemoteFailureGraceTests
         public ConcurrentQueue<string> Opened { get; } = new();
 
         public async Task<string> InitTransferAsync(
-            Guid senderClientId, Guid receiverClientId, int timeoutMs, CancellationToken cancellationToken = default)
+            Guid senderClientId, Guid receiverClientId, TimeSpan handshakeTimeout, CancellationToken cancellationToken = default)
         {
-            var transferId = await inner.InitTransferAsync(senderClientId, receiverClientId, timeoutMs, cancellationToken);
+            var transferId = await inner.InitTransferAsync(senderClientId, receiverClientId, handshakeTimeout, cancellationToken);
             Opened.Enqueue(transferId);
             return transferId;
         }

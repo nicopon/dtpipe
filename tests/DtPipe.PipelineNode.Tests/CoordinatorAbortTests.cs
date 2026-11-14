@@ -43,7 +43,7 @@ public class CoordinatorAbortTests
     {
         using var fixture = ChainFixture.Create(rowCount: 1_000);
         await using var host = await CoordinatorTestHost.StartAsync(
-            o => o.Groups["test"] = new TransportR.FlowControl.GroupAccess { CanSendTo = ["test"] });
+            o => o.Groups["test"] = new TransportR.Hub.GroupAccess { CanSendTo = ["test"] });
         var orchestrator = host.Host.Services.GetRequiredService<IRunOrchestrator>();
 
         await using var a = await ConnectNode(host, fixture.FragmentAJobPath, "A", new EdgeBinding("out", EdgeDirection.Outbound));
@@ -73,7 +73,7 @@ public class CoordinatorAbortTests
     {
         using var fixture = ChainFixture.Create(rowCount: 1_000);
         await using var host = await CoordinatorTestHost.StartAsync(
-            o => o.Groups["test"] = new TransportR.FlowControl.GroupAccess { CanSendTo = ["test"] },
+            o => o.Groups["test"] = new TransportR.Hub.GroupAccess { CanSendTo = ["test"] },
             services => services.AddSingleton(new RunOrchestratorOptions
             {
                 ReadyTimeout = TimeSpan.FromSeconds(3),
@@ -128,7 +128,7 @@ public class CoordinatorAbortTests
     {
         using var fixture = ChainFixture.Create(rowCount: 1_000_000, "--throttle", "100000");
         await using var host = await CoordinatorTestHost.StartAsync(
-            o => o.Groups["test"] = new TransportR.FlowControl.GroupAccess { CanSendTo = ["test"] });
+            o => o.Groups["test"] = new TransportR.Hub.GroupAccess { CanSendTo = ["test"] });
         var orchestrator = host.Host.Services.GetRequiredService<IRunOrchestrator>();
 
         var a = await ConnectNode(host, fixture.FragmentAJobPath, "A", new EdgeBinding("out", EdgeDirection.Outbound));
@@ -183,7 +183,7 @@ public class CoordinatorAbortTests
             File.WriteAllText(consumerJob, $"main:\n  input: arrow:-\n  output: csv:{Path.Combine(dir.FullName, "out.csv")}\n");
 
             await using var host = await CoordinatorTestHost.StartAsync(
-                o => o.Groups["test"] = new TransportR.FlowControl.GroupAccess { CanSendTo = ["test"] });
+                o => o.Groups["test"] = new TransportR.Hub.GroupAccess { CanSendTo = ["test"] });
             var orchestrator = host.Host.Services.GetRequiredService<IRunOrchestrator>();
 
             await using var a = await ConnectNode(host, producerJob, "A", new EdgeBinding("out", EdgeDirection.Outbound));
@@ -228,7 +228,7 @@ public class CoordinatorAbortTests
     {
         using var fixture = ChainFixture.Create(rowCount: 1_000);
         await using var host = await CoordinatorTestHost.StartAsync(
-            o => o.Groups["test"] = new TransportR.FlowControl.GroupAccess { CanSendTo = ["test"] });
+            o => o.Groups["test"] = new TransportR.Hub.GroupAccess { CanSendTo = ["test"] });
         var orchestrator = host.Host.Services.GetRequiredService<IRunOrchestrator>();
         var registry = host.Host.Services.GetRequiredService<ReplicaRegistry>();
 

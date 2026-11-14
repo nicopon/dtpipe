@@ -7,8 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using TransportR.Identity;
-using TransportR.Interfaces;
+using TransportR.Hub;
 using Xunit;
 
 namespace DtPipe.PipelineNode.Tests;
@@ -48,7 +47,7 @@ public class FaultInjectionTests : IDisposable
     [Fact]
     public async Task AHostThatEnabledFaultInjection_EndsTheChildOfTheFragment_AndSaysHowManyItEnded()
     {
-        await using var host = await CoordinatorTestHost.StartAsync(o => o.Groups["test"] = new TransportR.FlowControl.GroupAccess { CanSendTo = ["test"] });
+        await using var host = await CoordinatorTestHost.StartAsync(o => o.Groups["test"] = new TransportR.Hub.GroupAccess { CanSendTo = ["test"] });
         await using var node = await TestNode.StartAsync(host, "A", SlowJob(100), [], faultInjection: true);
         var orchestrator = host.Host.Services.GetRequiredService<IRunOrchestrator>();
         var link = host.Host.Services.GetRequiredService<INodeLink>();
@@ -66,7 +65,7 @@ public class FaultInjectionTests : IDisposable
     [Fact]
     public async Task AHostThatDidNotEnableFaultInjection_EndsNothing_AndSaysNoneWasEnded()
     {
-        await using var host = await CoordinatorTestHost.StartAsync(o => o.Groups["test"] = new TransportR.FlowControl.GroupAccess { CanSendTo = ["test"] });
+        await using var host = await CoordinatorTestHost.StartAsync(o => o.Groups["test"] = new TransportR.Hub.GroupAccess { CanSendTo = ["test"] });
         await using var node = await TestNode.StartAsync(host, "A", SlowJob(30), []);
         var orchestrator = host.Host.Services.GetRequiredService<IRunOrchestrator>();
         var link = host.Host.Services.GetRequiredService<INodeLink>();

@@ -46,7 +46,7 @@ public class CoordinatorDrivenTests
     {
         using var fixture = ChainFixture.Create(rowCount: 1_000);
         await using var host = await CoordinatorTestHost.StartAsync(
-            o => o.Groups["test"] = new TransportR.FlowControl.GroupAccess { CanSendTo = ["test"] });
+            o => o.Groups["test"] = new TransportR.Hub.GroupAccess { CanSendTo = ["test"] });
         var orchestrator = host.Host.Services.GetRequiredService<IRunOrchestrator>();
 
         await using var a = await ConnectNode(host, fixture.FragmentAJobPath, "A", new EdgeBinding("out", EdgeDirection.Outbound));
@@ -68,7 +68,7 @@ public class CoordinatorDrivenTests
     {
         using var fixture = ChainFixture.Create(rowCount: 50_000);
         await using var host = await CoordinatorTestHost.StartAsync(
-            o => o.Groups["test"] = new TransportR.FlowControl.GroupAccess { CanSendTo = ["test"] });
+            o => o.Groups["test"] = new TransportR.Hub.GroupAccess { CanSendTo = ["test"] });
         var orchestrator = host.Host.Services.GetRequiredService<IRunOrchestrator>();
 
         await using var a = await ConnectNode(host, fixture.FragmentAJobPath, "A", new EdgeBinding("out", EdgeDirection.Outbound));
@@ -104,7 +104,7 @@ public class CoordinatorDrivenTests
         // 200ms delay before killing B, so A is still mid-stream when the kill lands.
         using var fixture = ChainFixture.Create(rowCount: 1_000_000, "--throttle", "100000");
         await using var host = await CoordinatorTestHost.StartAsync(
-            o => o.Groups["test"] = new TransportR.FlowControl.GroupAccess { CanSendTo = ["test"] });
+            o => o.Groups["test"] = new TransportR.Hub.GroupAccess { CanSendTo = ["test"] });
         var orchestrator = host.Host.Services.GetRequiredService<IRunOrchestrator>();
 
         await using var a = await ConnectNode(host, fixture.FragmentAJobPath, "A", new EdgeBinding("out", EdgeDirection.Outbound));

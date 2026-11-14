@@ -1,9 +1,7 @@
 using System.Collections.Concurrent;
 using DtPipe.Coordinator.Contracts;
 using Microsoft.Extensions.Logging.Abstractions;
-using TransportR.Interfaces;
-using TransportR.Models;
-using TransportR.Services;
+using TransportR.Hub;
 using Xunit;
 
 namespace DtPipe.Coordinator.Tests;
@@ -66,7 +64,7 @@ public class ScriptedRunTests
         public ConcurrentQueue<string> Opened { get; } = new();
         public ConcurrentQueue<string> Terminated { get; } = new();
 
-        public async Task<string> InitTransferAsync(Guid producerClientId, Guid consumerClientId, int timeoutMs, CancellationToken ct)
+        public async Task<string> InitTransferAsync(Guid producerClientId, Guid consumerClientId, TimeSpan handshakeTimeout, CancellationToken ct)
         {
             var id = OnInit is null ? $"transfer-{Interlocked.Increment(ref _next)}" : await OnInit();
             Opened.Enqueue(id);

@@ -5,7 +5,7 @@ using DtPipe.Coordinator.Server.Access;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
-using TransportR.Protocol;
+using TransportR;
 using Xunit;
 
 namespace DtPipe.Coordinator.Server.Tests;
@@ -85,6 +85,7 @@ public sealed class RouteTableTests
         "GET /service/runs/{id} [launcher]",
         ClientRoute("GET", WireRoutes.EventsSegment),
         ClientRoute("GET", WireRoutes.ReceiversSegment),
+        ProbeRoute("GET"),
         StreamRoute("GET", "receive"),
         StreamRoute("GET", "send"),
         "POST /api/bricks/recognize [reader]",
@@ -107,6 +108,7 @@ public sealed class RouteTableTests
         ClientRoute("POST", WireRoutes.TransfersSegment),
         ClientRoute("POST", $"{WireRoutes.TransfersSegment}/{{transferId}}/{WireRoutes.HeartbeatSegment}"),
         ClientRoute("POST", $"{WireRoutes.TransfersSegment}/{{transferId}}/{WireRoutes.PingSegment}"),
+        ProbeRoute("POST"),
         StreamRoute("POST", WireRoutes.AbortSegment),
         StreamRoute("POST", "send"),
         "PUT /api/library/{id} [reader > designer]",
@@ -116,6 +118,10 @@ public sealed class RouteTableTests
         "PUT /api/rights/matrix [reader > admin]",
         ClientRoute("PUT", WireRoutes.TokenSegment),
     ];
+
+    /// <summary>The write-transport probe's route, which answers outside any transfer: <c>GET</c> opens its WebSocket, <c>POST</c> is the segment fallback.</summary>
+    private static string ProbeRoute(string method) =>
+        $"{method} {WireRoutes.StreamBase.TrimStart('/')}/{WireRoutes.ProbeSegment}/{WireRoutes.SendSegment} [default]";
 
     [Fact]
     public void The_Routes_Are_The_Ones_Listed_With_The_Authorization_Of_Each()

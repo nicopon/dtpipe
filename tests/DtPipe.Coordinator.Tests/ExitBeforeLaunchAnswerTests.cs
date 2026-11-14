@@ -1,7 +1,7 @@
 using DtPipe.Coordinator.Contracts;
 using DtPipe.Coordinator.Tests.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
-using TransportR.FlowControl;
+using TransportR.Hub;
 using Xunit;
 
 namespace DtPipe.Coordinator.Tests;

@@ -20,7 +20,7 @@ public class FailedLaunchTests : IDisposable
     public async Task AReplicaWhoseChildCouldNotBeStarted_AnswersThatItDidNotStart_AndKeepsNoRun()
     {
         await using var host = await CoordinatorTestHost.StartAsync(
-            o => o.Groups["test"] = new TransportR.FlowControl.GroupAccess { CanSendTo = ["test"] });
+            o => o.Groups["test"] = new TransportR.Hub.GroupAccess { CanSendTo = ["test"] });
         await using var node = await PipelineNode.ConnectAsync(new NodeClientOptions { HubUrl = host.Url }, ct: TestContext.Current.CancellationToken);
         await using var runs = new ReplicaRuns(
             host.CreateNodeChannel(), node, "A", Path.Combine(_dir.FullName, "no-such-dtpipe"), new Dictionary<string, string>(), _dir.FullName,
@@ -40,7 +40,7 @@ public class FailedLaunchTests : IDisposable
     public async Task ANodeWhoseChildCouldNotBeStarted_IsDisposedWithoutError()
     {
         await using var host = await CoordinatorTestHost.StartAsync(
-            o => o.Groups["test"] = new TransportR.FlowControl.GroupAccess { CanSendTo = ["test"] });
+            o => o.Groups["test"] = new TransportR.Hub.GroupAccess { CanSendTo = ["test"] });
         var job = Path.Combine(_dir.FullName, "job.yaml");
         await File.WriteAllTextAsync(job, "a:\n  input: generate:1\n  output: arrow:-\n", TestContext.Current.CancellationToken);
         var node = await PipelineNode.ConnectAsync(new NodeClientOptions { HubUrl = host.Url }, ct: TestContext.Current.CancellationToken);

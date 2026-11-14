@@ -5,9 +5,7 @@ using DtPipe.Coordinator.Server.Library;
 using DtPipe.Coordinator.Server.Nodes;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging.Abstractions;
-using TransportR.FlowControl;
-using TransportR.Interfaces;
-using TransportR.Services;
+using TransportR.Hub;
 using Xunit;
 
 namespace DtPipe.Coordinator.Server.Tests;

@@ -7,8 +7,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using TransportR.Identity;
-using TransportR.Interfaces;
+using TransportR.Hub;
 using Xunit;
 
 namespace DtPipe.PipelineNode.Tests;

@@ -33,7 +33,7 @@ public class ReplicaReplacementTests
 
     private static Task<CoordinatorTestHost> StartHost() =>
         CoordinatorTestHost.StartAsync(
-            o => o.Groups["test"] = new TransportR.FlowControl.GroupAccess { CanSendTo = ["test"] },
+            o => o.Groups["test"] = new TransportR.Hub.GroupAccess { CanSendTo = ["test"] },
             services =>
             {
                 services.AddSignalR(o => o.AddFilter(new SlowDisconnectFilter(SlowDisconnect)));

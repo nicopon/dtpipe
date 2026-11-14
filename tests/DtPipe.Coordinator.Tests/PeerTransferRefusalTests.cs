@@ -1,8 +1,8 @@
 using Microsoft.Extensions.DependencyInjection;
 using DtPipe.Coordinator.Tests.Infrastructure;
-using TransportR.Abstractions;
-using TransportR.FlowControl;
-using TransportR.Interfaces;
+using TransportR;
+using TransportR.Client;
+using TransportR.Hub;
 using Xunit;
 
 namespace DtPipe.Coordinator.Tests;
@@ -59,7 +59,7 @@ public class PeerTransferRefusalTests
         await receiver.ConnectAsync();
 
         var initiator = host.Host.Services.GetRequiredService<ITransferInitiator>();
-        await initiator.InitTransferAsync(sender.ClientId, receiver.ClientId, timeoutMs: 20_000);
+        await initiator.InitTransferAsync(sender.ClientId, receiver.ClientId, handshakeTimeout: TimeSpan.FromSeconds(20));
 
         await using var send = await sendHandle.Task;
         await using var receive = await receiveHandle.Task;

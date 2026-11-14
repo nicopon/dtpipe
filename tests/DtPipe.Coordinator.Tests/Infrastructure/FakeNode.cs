@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using DtPipe.Coordinator.Contracts;
 using Microsoft.AspNetCore.SignalR.Client;
-using TransportR.Client.Services;
+using TransportR.Client;
 
 namespace DtPipe.Coordinator.Tests.Infrastructure;
 

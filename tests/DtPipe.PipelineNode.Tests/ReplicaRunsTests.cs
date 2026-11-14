@@ -57,7 +57,7 @@ public class ReplicaRunsTests : IDisposable
 
     private async Task<(CoordinatorTestHost Host, PipelineNode Node, ReplicaRuns Runs)> StartAsync(TimeSpan unwired, int maxRuns = 0)
     {
-        var host = await CoordinatorTestHost.StartAsync(o => o.Groups["test"] = new TransportR.FlowControl.GroupAccess { CanSendTo = ["test"] });
+        var host = await CoordinatorTestHost.StartAsync(o => o.Groups["test"] = new TransportR.Hub.GroupAccess { CanSendTo = ["test"] });
         var node = await PipelineNode.ConnectAsync(new NodeClientOptions { HubUrl = host.Url });
         var runs = new ReplicaRuns(
             host.CreateNodeChannel(), node, "A", DtPipeExecutableLocator.Path, new Dictionary<string, string>(), _dir.FullName,
@@ -209,7 +209,7 @@ public class ReplicaRunsTests : IDisposable
         var job = Path.Combine(_dir.FullName, "job.yaml");
         File.WriteAllText(job, $"a:\n  input: generate:50\n  provider-options:\n    generate:\n      rows-per-second: 10\n  output: csv:{Path.Combine(_dir.FullName, "out.csv")}\n");
         await using var host = await CoordinatorTestHost.StartAsync(
-            o => o.Groups["test"] = new TransportR.FlowControl.GroupAccess { CanSendTo = ["test"] },
+            o => o.Groups["test"] = new TransportR.Hub.GroupAccess { CanSendTo = ["test"] },
             services => services.Replace(ServiceDescriptor.Singleton<INodeLink>(sp => new LaunchAnswerSignal(ActivatorUtilities.CreateInstance<HubNodeLink<TestNodeHub>>(sp)))));
         await using var node = await TestNode.StartAsync(host, "A", job, []);
         var orchestrator = host.Host.Services.GetRequiredService<IRunOrchestrator>();

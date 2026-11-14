@@ -7,7 +7,7 @@ using DtPipe.Coordinator.Server.Library;
 using DtPipe.Coordinator.Server.Nodes;
 using DtPipe.Coordinator.Server.Runs;
 using DtPipe.Coordinator.Server.Stores;
-using TransportR.Interfaces;
+using TransportR.Hub;
 
 namespace DtPipe.Coordinator.Server.Deployments;
 

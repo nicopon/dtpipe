@@ -6,7 +6,7 @@ using DtPipe.Coordinator.Server.Deployments;
 using DtPipe.Coordinator.Server.Nodes;
 using DtPipe.Jobs.Coordinator;
 using Microsoft.Extensions.DependencyInjection;
-using TransportR.Protocol;
+using TransportR;
 using Xunit;
 
 namespace DtPipe.Coordinator.Server.Tests;

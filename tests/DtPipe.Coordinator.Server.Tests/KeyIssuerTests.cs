@@ -10,7 +10,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.JsonWebTokens;
-using TransportR.Protocol;
+using TransportR;
 using Xunit;
 
 namespace DtPipe.Coordinator.Server.Tests;

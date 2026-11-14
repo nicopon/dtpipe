@@ -1,4 +1,4 @@
-using TransportR.Interfaces;
+using TransportR.Hub;
 
 namespace DtPipe.Coordinator;
 
