@@ -87,8 +87,10 @@ export const state = {
   jobs: { folder: "", paths: [], library: { shown: false, pipelines: null, error: null } },
   /** The coordinator the command line named, or null: { url, state, reason, me, studioVersion, contract }. @type {any} */
   coordinator: null,
-  /** The agent's panel: whether the command line opened one, and the server's last answer (GET /api/agent). @type {{ enabled: boolean, status: any, behind: boolean }} */
-  agent: { enabled: false, status: null, behind: false },
+  /** The agent's panel: whether the command line opened one, the server's last answer (GET /api/agent), and what the agent gave
+   * that waits for the person's Apply because they changed the cards since the agent read them (a plan, or the file it saved).
+   * @type {{ enabled: boolean, status: any, behind: { yaml?: string, saved?: string } | null }} */
+  agent: { enabled: false, status: null, behind: null },
 };
 
 /**

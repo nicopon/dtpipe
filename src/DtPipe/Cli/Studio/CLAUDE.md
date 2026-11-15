@@ -221,12 +221,14 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   `StudioAgent.MaxJobChars`, or a line says none is open. A job a tool call carries as `yamlContent` is the plan:
   `StudioAgent.OfferPlan` keeps the last differing one as a revision (a save is read back from the folder instead),
   `GET /api/agent?rev=N` answers its text only above `N`, and the page puts it on the open job's cards unsaved
-  (`followPlan`), or opens it as a new job; a person's edit since the agent last read the cards is never overwritten, the
-  plan then waits behind its button. A text that `JobSecrets.Literals` flags reaches the model, open job or `read-job`, only
+  (`followPlan`), or opens it as a new job; a person's edit since the agent last read the cards is never overwritten, by a
+  plan or by a save read back (`moved` in `agent.js`, the one comparison): what the agent gave then waits behind the notice's
+  Apply, which asks before it replaces an unsaved edit. A turn that ends without a result gives the person's text back to an
+  empty prompt. A text that `JobSecrets.Literals` flags reaches the model, open job or `read-job`, only
   after a card that names `branch.path`, never the value; the answer holds for that text, by hash, for the session. The
   key (`--llm-key`) is a reference read once at start, kept in the client; the page never sets the model's address. The
   panel's width is the `agent` pane, resized and kept as the designer's (`bindSplit`, `applySizes`).
-  `[CI: StudioAgentTests]` `[local: page_smoke.mjs agent — a scripted endpoint that speaks Ollama's API]`
+  `[CI: StudioAgentTests]` `[local: page_smoke.mjs agent, agent-edit — a scripted endpoint that speaks Ollama's API]`
   `[unchecked: Quit and Ctrl+C during a turn]`
 - Quit from the page exits 0, Ctrl+C 130. A quit is refused while a run goes on; Ctrl+C cancels
   the run and the studio then exits.

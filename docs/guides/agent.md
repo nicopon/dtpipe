@@ -38,10 +38,11 @@ the coordinator stay your gestures.
 
 The open job always goes with your message, as the studio composes it, so you can ask "fix the
 filter of this job"; the agent works on what you see, and what it gives lands on the same cards,
-unsaved, until you save. With no job open, what it gives opens as a new job (`agent-job.yaml`). If
-you change the cards while it works, your changes stay: its job waits behind **Apply to the open
-job**. A job it saves under the open job's path is read back into the cards, and a run it starts
-shows in the Run tab.
+unsaved, until you save. With no job open, what it gives opens as a new job (`agent-job.yaml`). A
+job it saves under the open job's path is read back into the cards, and a run it starts shows in
+the Run tab. If you change the cards while it works, your changes stay: what it gives waits behind
+**Apply**, in the notice above the conversation. When a turn fails, your message comes back in the
+box: **Send** tries it again.
 
 When the job holds a credential written as a value, such as `Password=secret` in a connection
 string, a card names where it is, never the value, and asks what to do: send anyway, or cancel the

@@ -29,6 +29,8 @@ let synced = null;
 let appliedYaml = null;
 // Plans are applied one after the other, each over the cards the last one left.
 let applying = Promise.resolve();
+// The text of the person's last message: a turn that ends without a result gives it back to the field.
+let asked = null;
 // Whether the conversation follows its last entry: true until the person scrolls up to read.
 let following = true;
 // The live zone: what the turn at work shows now (a step, a card, a question, a plan). The page holds the node,
@@ -41,7 +43,7 @@ onZone("agent", renderAgent);
  * Builds the panel in `pane` when this studio has an agent. The host gives what only it knows: `applyPlan(yaml)` puts a plan
  * on the open job's cards, `openPlan(yaml)` opens one as a new job, `reopen(path)` reads a saved job again, `jobsChanged()`
  * reads the folder's jobs again.
- * @param {HTMLElement} pane @param {{ applyPlan: (yaml: string) => Promise<void>, openPlan: (yaml: string) => Promise<void>, reopen: (path: string) => Promise<void>, jobsChanged: () => Promise<void>, followPlan: (yaml: string) => Promise<boolean> }} host
+ * @param {HTMLElement} pane @param {{ applyPlan: (yaml: string) => Promise<boolean>, openPlan: (yaml: string) => Promise<boolean>, reopen: (path: string, ask?: boolean) => Promise<boolean>, jobsChanged: () => Promise<void>, followPlan: (yaml: string) => Promise<boolean> }} host
  */
 export async function mountAgent(pane, host) {
   hooks = host;
@@ -59,7 +61,7 @@ export async function mountAgent(pane, host) {
     el("p", { id: "agent-endpoint", class: "hint mono", title: "Set on the command line (--llm-provider, --llm-url): the page cannot change it" }),
     el("p", { id: "agent-meter", class: "hint mono", hidden: true, title: "The turn, its step, and the prompt the model read for its last call (what a turn adds to the conversation grows it)" }),
     el("p", { id: "agent-warning", class: "hint warn", hidden: true }),
-    el("p", { id: "agent-behind", class: "hint warn", hidden: true }, "You changed the job while the agent worked: its plan is kept below, and replaces your cards only if you apply it."),
+    el("p", { id: "agent-behind", class: "hint warn", hidden: true }),
     el("div", { id: "agent-log", class: "agent-log" }, live),
     el("div", { class: "agent-input" },
       el("textarea", { id: "agent-prompt", rows: "3", placeholder: "Ask the agent… (Ctrl+Enter sends)", onkeydown: onPromptKey }),
@@ -97,7 +99,12 @@ function accept(answer, replay = false) {
   const log = $("agent-log");
   following = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
   try {
-    for (const entry of answer.entries || []) { turnOf(entry).append(entryView(entry)); shown++; }
+    for (const entry of answer.entries || []) {
+      turnOf(entry).append(entryView(entry));
+      shown++;
+      if (entry.kind === "user") asked = entry.text;
+      else if (!replay && entry.kind === "verdict") giveBack(entry.status);
+    }
     if (!replay) for (const entry of answer.entries || []) if (entry.kind === "step" && entry.saved) savedJob(entry.saved);
     if (!replay && answer.job?.yaml && answer.job.revision > appliedRevision) {
       const yaml = answer.job.yaml;
@@ -116,35 +123,65 @@ function dropLog() {
   shown = 0;
   following = true;
   appliedYaml = null;
-  state.agent.behind = false;
+  asked = null;
+  state.agent.behind = null;
+}
+
+/** A turn that ended without a result gives the person's text back to the field, unless they typed another since: Send retries it. @param {string} status */
+function giveBack(status) {
+  if (status === "completed" || status === "awaitinginput" || asked === null) return;
+  const prompt = /** @type {HTMLTextAreaElement} */ ($("agent-prompt"));
+  if (!prompt.value.trim()) prompt.value = asked;
 }
 
 /**
  * The folder lists a job the agent saved; it is read again when it is the one open, or when none is: the person saw this very
- * text on the card, so the page keeps no other hash than the file's and its next save finds the job it opened.
+ * text on the card, so the page keeps no other hash than the file's and its next save finds the job it opened. When the person
+ * changed the open job's cards since the agent last read them, the cards stay and the file waits behind the notice's Apply.
  * @param {string} saved
  */
 function savedJob(saved) {
   hooks.jobsChanged();
-  // A draft the agent opened and the person left alone gives way to the file the agent saved under another name.
-  const draft = state.job && !state.job.hash && (state.cards.result?.yaml ?? null) === synced;
-  if (!state.job || saved === state.job.path || draft) applying = applying.then(() => hooks.reopen(saved)).then(markSynced).catch((e) => status(e.message, "bad"));
+  applying = applying.then(async () => {
+    // A file saved under another name is read only in place of a draft the agent opened and the person left alone.
+    if (state.job && saved !== state.job.path && (state.job.hash || moved())) return;
+    if (moved()) { hold({ saved }); return; }
+    if (await hooks.reopen(saved)) markSynced();
+  }).catch((e) => status(e.message, "bad"));
 }
 
 const markSynced = () => { synced = state.cards.result?.yaml ?? null; };
 
-/** A plan on the open job's cards, unless the person changed them since the agent last saw them: the button keeps it then. @param {string} yaml */
+/** Whether the person changed the open job's cards since the agent last read or wrote them: what the agent gives then waits. */
+const moved = () => !!state.job && (state.cards.result?.yaml ?? null) !== synced;
+
+/** What the agent gave, kept behind the notice's Apply: a plan, or the file it saved. @param {{ yaml?: string, saved?: string }} given */
+function hold(given) {
+  state.agent.behind = given;
+  invalidate("agent");
+}
+
+/** The cards are what the agent last gave, or another job is open: no notice is left to apply. */
+function settled() {
+  markSynced();
+  state.agent.behind = null;
+  invalidate("agent");
+}
+
+/** A plan on the open job's cards, unless the person changed them since the agent last saw them: the notice keeps it then. @param {string} yaml */
 async function follow(yaml) {
-  if (state.job && (state.cards.result?.yaml ?? null) !== synced) {
-    state.agent.behind = true;
-    invalidate("agent");
-    return;
-  }
-  state.agent.behind = false;
+  if (moved()) { hold({ yaml }); return; }
   if (!(await hooks.followPlan(yaml))) return;
   appliedYaml = yaml;
-  markSynced();
+  settled();
   status("the agent's plan is on the cards: save it to keep it", "good");
+}
+
+/** Applies what the person asked for, over their cards once they agree: a plan on the cards, or the saved file read again. @param {{ yaml?: string, saved?: string }} given */
+async function apply(given) {
+  if (!(await (given.saved ? hooks.reopen(given.saved, true) : hooks.applyPlan(given.yaml ?? "")))) return;
+  if (given.yaml) appliedYaml = given.yaml;
+  settled();
 }
 
 const lastTurn = () => /** @type {HTMLElement | undefined} */ ([...$("agent-log").getElementsByClassName("turn")].pop());
@@ -223,7 +260,7 @@ function renderAgent() {
   warning.hidden = s.local;
   warning.textContent = s.local ? "" : `The model is at ${s.endpoint}: what its tools read (schemas, rows) and the open job go there.`;
   renderMeter(s);
-  $("agent-behind").hidden = !state.agent.behind;
+  renderBehind(state.agent.behind);
   $("agent-send").toggleAttribute("disabled", s.busy);
   $("agent-stop").hidden = !s.busy;
   for (const button of document.querySelectorAll("#agent-log .feedback-icons button")) {
@@ -238,6 +275,17 @@ function renderAgent() {
     !s.busy && s.plan?.yaml ? planView(s.plan) : null);
   // A card drawn below the conversation takes its height: the last entry stays in sight.
   if (following) { const log = $("agent-log"); log.scrollTop = log.scrollHeight; }
+}
+
+/** The notice of what waits for the person's Apply, with its button in sight. @param {{ yaml?: string, saved?: string } | null} given */
+function renderBehind(given) {
+  const notice = $("agent-behind");
+  notice.hidden = !given;
+  fill(notice, !given ? null : [
+    given.saved
+      ? `You changed the job while the agent saved ${given.saved}: your cards are kept, and the saved file replaces them only if you apply it. `
+      : "You changed the job while the agent worked: your cards are kept, and its plan replaces them only if you apply it. ",
+    el("button", { class: "small", title: "Replace the open job's cards with what the agent gave", onclick: () => apply(given) }, "Apply")]);
 }
 
 const tokens = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
@@ -276,13 +324,15 @@ function questionView(question) {
     question.options?.length ? el("div", { class: "row wrap" }, question.options.map((o) => el("button", { class: "small", onclick: () => send(o) }, o))) : null);
 }
 
+/** The plan, its text folded and its buttons in sight; Apply is the notice's while the person's cards hold it back. */
 function planView(plan) {
-  return el("details", { class: "agent-plan" },
-    el("summary", {}, `The agent's plan (${plan.state.toLowerCase()})`, plan.message ? el("span", { class: "hint" }, ` · ${plan.message}`) : null),
-    el("pre", {}, plan.yaml),
+  return el("div", {},
+    el("details", { class: "agent-plan" },
+      el("summary", {}, `The agent's plan (${plan.state.toLowerCase()})`, plan.message ? el("span", { class: "hint" }, ` · ${plan.message}`) : null),
+      el("pre", {}, plan.yaml)),
     el("div", { class: "row" },
-      state.job && plan.yaml !== appliedYaml ? el("button", { class: "small", title: "Replace the open job's cards with the plan; nothing is saved", onclick: () => hooks.applyPlan(plan.yaml) }, "Apply to the open job") : null,
-      el("button", { class: "small", title: "Open the plan as a new job, not saved yet", onclick: () => hooks.openPlan(plan.yaml) }, "Open as a new job")));
+      state.job && !state.agent.behind && plan.yaml !== appliedYaml ? el("button", { class: "small", title: "Replace the open job's cards with the plan; nothing is saved", onclick: () => apply({ yaml: plan.yaml }) }, "Apply to the open job") : null,
+      el("button", { class: "small", title: "Open the plan as a new job, not saved yet", onclick: async () => { if (await hooks.openPlan(plan.yaml)) settled(); } }, "Open as a new job")));
 }
 
 async function answer(card, choice) {
@@ -308,8 +358,7 @@ async function send(text) {
     ? { path: state.job?.path ?? null, unsaved: state.cards.dirty || !state.job?.hash, model: state.cards.model }
     : null;
   try {
-    markSynced();
-    state.agent.behind = false;
+    settled();
     await api("/api/agent/turn", { prompt: message, model, job });
     if (text === undefined) prompt.value = "";
   } catch (e) {

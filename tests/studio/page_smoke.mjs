@@ -3,7 +3,8 @@
 // opening a job, Preview, a click on each card, pins, an edit while a preview or a run holds the engine,
 // Save then Write targets…, review before writing, Write and Abandon from a sink, a run left suspended by an earlier
 // session, Forget pins, typing in the inspector; the agent's panel against a scripted endpoint that speaks Ollama's API (a
-// save refused then accepted, a run, a question, a plan put on the cards, a job holding a credential, Stop, a reload mid-turn).
+// save refused then accepted, a run, a question, a plan put on the cards, a job holding a credential, Stop, a reload mid-turn, an
+// edit made while a save waits, a turn that fails).
 //
 // Local only: it needs Node 22+ (native WebSocket, no dependency), Chrome, and a built dtpipe. CI never
 // runs it. The page is embedded in the DLL, so build before playing it.
@@ -243,11 +244,13 @@ function startFakeLlm() {
       llm.seen.push(messages[0]?.content ?? "");
       const last = messages[messages.length - 1];
       const line = (o) => res.write(JSON.stringify(o) + "\n");
+      if (last.role !== "tool" && /fail/.test(String(last.content))) { res.writeHead(500); res.end("the model is down"); return; }
       res.writeHead(200, { "Content-Type": "application/x-ndjson" });
       if (last.role === "tool") { line({ message: { role: "assistant", content: `done: ${String(last.content).slice(0, 60)}` }, done: true }); res.end(); return; }
       const text = String(last.content);
       const job = /<open-job>\n/.test(messages[0]?.content ?? "") ? "job seen" : "no job seen";
       const reply = /save/.test(text) ? call("save-job", { path: "agent.yaml", yamlContent: AGENT_JOB })
+        : /overwrite/.test(text) ? call("save-job", { path: "chain.yaml", yamlContent: AGENT_JOB })
         : /ask/.test(text) ? call("ask-user", { question: "Which target?", options: ["a.csv", "b.csv"] })
         : /plan/.test(text) ? call("validate-yaml-job", { yamlContent: PLAN_JOB })
         : /secret/.test(text) ? { role: "assistant", content: job }
@@ -368,6 +371,40 @@ const scenarios = {
     check("Stop leaves a verdict", await p.until(`document.querySelectorAll("#agent-log .verdict").length === ${before + 1}`));
     check("Stop abandons the model call", await p.until(`${fakeLlm.llm.open} === 0`) && fakeLlm.llm.open === 0);
     await p.shot("8-stopped");
+  },
+
+  // What the person changed is never replaced without a word: an edit made while a save card waits survives the save, which
+  // waits behind the notice's Apply; Apply clears the notice; a turn that fails gives the text typed back.
+  async "agent-edit"({ page: p, folder }) {
+    const send = async (text) => {
+      await p.ev(`(() => { const t = document.querySelector("#agent-prompt"); t.value = ${JSON.stringify(text)}; })()`);
+      await p.click("#agent-send");
+    };
+    const idle = () => p.until(`document.querySelector("#agent-stop").hidden && !document.querySelector("#agent-now .agent-card button")`, 30000);
+
+    check("the job opens", await p.openJob("chain.yaml"));
+    await send("overwrite it");
+    check("a save over the open job waits on a card", await p.until(`/asks to save chain\\.yaml/.test(document.querySelector("#agent-now")?.textContent ?? "")`));
+    const cards = await p.ev(`document.querySelectorAll(".dcard").length`);
+    await p.pick("b");
+    const since = p.seen.length;
+    await p.type(KEY_OF_B, " && true");
+    check("the edit is composed while the card waits", await p.waitSeen("/api/design/compose", since));
+    await p.clickText("#agent-now button", "Save");
+    check("the save ends the turn", await idle());
+    check("the save writes the file the person approved", /generate:5/.test(fs.readFileSync(path.join(folder, "chain.yaml"), "utf8")));
+    check("the notice says the saved file waits", await p.until(`!document.querySelector("#agent-behind").hidden`));
+    check("the edit made while the card waited survives the save",
+      await p.ev(`document.querySelectorAll(".dcard").length === ${cards} && (document.querySelector(${JSON.stringify(KEY_OF_B)})?.value ?? "").endsWith("&& true")`),
+      String(await p.ev(`document.querySelectorAll(".dcard").length`)));
+    check("Apply is in sight with the notice", await p.ev(`(document.querySelector("#agent-behind button")?.offsetWidth ?? 0) > 0`));
+    await p.clickText("#agent-behind button", "Apply");
+    check("Apply puts the saved file on the cards", await p.until(`document.querySelectorAll(".dcard").length === 2`));
+    check("Apply clears the notice", await p.until(`document.querySelector("#agent-behind").hidden`));
+
+    await send("fail now");
+    check("a failed turn ends", await idle() && await p.until(`[...document.querySelectorAll("#agent-log .verdict")].length > 1`));
+    check("a failed turn gives the text typed back", await p.until(`document.querySelector("#agent-prompt").value === "fail now"`), await p.ev(`document.querySelector("#agent-prompt").value`));
   },
 
   // The panel draws the server's last answer: a conversation the server reset (new, or another model) leaves
@@ -737,6 +774,7 @@ async function seed(name, folder) {
 const argsOf = {
   agent: () => ["--llm-provider", "ollama", "--llm-url", fakeLlm.url],
   "agent-reset": () => ["--llm-provider", "ollama", "--llm-url", fakeLlm.url],
+  "agent-edit": () => ["--llm-provider", "ollama", "--llm-url", fakeLlm.url],
 };
 
 const fixturesOf = {

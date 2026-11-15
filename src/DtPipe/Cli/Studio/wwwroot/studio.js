@@ -78,25 +78,28 @@ function forgetResults() {
 
 const leaveCurrent = () => !state.cards.dirty || confirm(`${state.job?.path || "This job"} has changes that are not saved. Leave it anyway?`);
 
+// True once the job is on the cards.
 async function open(path, left = false) {
-  if (!left && !leaveCurrent()) return;
+  if (!left && !leaveCurrent()) return false;
   // A job asked for while another is still being read replaces it: only the last one asked for is opened.
   const ticket = opening.begin();
   try {
     const [job, view] = await Promise.all([api(`/api/job?path=${encodeURIComponent(path)}`), readView(path)]);
-    if (opening.stale(ticket)) return;
+    if (opening.stale(ticket)) return false;
     state.job = { path, hash: job.hash, rewrites: job.rewrites };
     forgetResults();
     invalidate("jobs");
     // The rows asked are the person's last, unless the job kept its own.
     if (view.job?.rows) restoreRows(view.job.rows);
     restoreReview(view.job?.review === true);
-    if (!(await openJob(job.yaml, job.layout, false, view.job))) return;
+    if (!(await openJob(job.yaml, job.layout, false, view.job))) return false;
     viewRestored(path, view.job);
     status(job.rewrites ? "saving rewrites this file" : "", job.rewrites ? "warn" : "");
     await loadJobs();
+    return true;
   } catch (e) {
     status(e.message, "bad");
+    return false;
   }
 }
 
@@ -295,15 +298,17 @@ async function start() {
   await refreshCoordinator();
   await loadBricks();
   await loadLibrary();
-  await mountAgent($("agent-pane"), { applyPlan, openPlan, reopen: (path) => open(path, true), jobsChanged: loadJobs, followPlan });
+  await mountAgent($("agent-pane"), { applyPlan, openPlan, reopen: (path, ask = false) => open(path, !ask), jobsChanged: loadJobs, followPlan });
 }
 
 // ---------------------------------------------------------------- the agent's plans
 
-// A plan replaces the open job's cards, unsaved: the job keeps its path and the hash a save must find.
+// A plan replaces the open job's cards, unsaved: the job keeps its path and the hash a save must find. True once it has.
 async function applyPlan(yaml) {
-  if (!state.job || !leaveCurrent()) return;
-  if (await openJob(yaml, state.cards.model?.layout, true)) status("the agent's plan is on the cards: save it to keep it", "good");
+  if (!state.job || !leaveCurrent()) return false;
+  if (!(await openJob(yaml, state.cards.model?.layout, true))) return false;
+  status("the agent's plan is on the cards: save it to keep it", "good");
+  return true;
 }
 
 // The plan the agent just gave, on the cards as the person's message left them: unsaved, with the card and the tab kept. With
@@ -322,19 +327,20 @@ async function followPlan(yaml) {
   return openJob(yaml, null, true);
 }
 
-// A plan opened as a new job, not saved yet, as an imported command line opens.
+// A plan opened as a new job, not saved yet, as an imported command line opens. True once it is open.
 async function openPlan(yaml) {
-  if (!leaveCurrent()) return;
+  if (!leaveCurrent()) return false;
   const path = prompt("The new job's path in the folder (its folder must exist):", "agent-plan.yaml");
-  if (!path) return;
-  if (!/\.ya?ml$/i.test(path)) { status("A job is a .yaml or .yml file.", "bad"); return; }
+  if (!path) return false;
+  if (!/\.ya?ml$/i.test(path)) { status("A job is a .yaml or .yml file.", "bad"); return false; }
   opening.cancel();
   state.job = { path, hash: null, rewrites: false };
   forgetResults();
   viewRestored(path);
-  await openJob(yaml, null, true);
+  const opened = await openJob(yaml, null, true);
   status("the agent's plan: save it to keep it", "good");
   await loadJobs();
+  return opened;
 }
 
 $("quit").addEventListener("click", quit);
