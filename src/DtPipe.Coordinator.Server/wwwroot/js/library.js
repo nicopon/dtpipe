@@ -1,6 +1,6 @@
 // Library: the pipelines kept in the coordinator's git repository, their plan and deployment
 // state and their history. A pipeline is written with dtpipe studio and published into it.
-import { ago, api, deploymentOf, esc, healthChip, isActive, lastRunOf, toast } from "./core.js";
+import { ROWS_CROSSED_HINT, ago, api, deploymentOf, esc, healthChip, isActive, lastRunOf, rowsCrossed, toast } from "./core.js";
 import * as detail from "./library-detail.js";
 
 let host = null;
@@ -50,8 +50,9 @@ function deploymentChip(e) {
 function runCell(id) {
   const run = lastRunOf(id);
   if (!run) return `<span class="hint">never run</span>`;
-  const rows = run.result?.edgeCounts?.reduce((s, e) => s + (e.received ?? 0), 0);
-  return `<span class="outcome-chip ${esc(run.state)}">${esc(run.state)}</span> <span class="hint">${isActive(run) ? "" : ago(run.finishedAt)}${rows ? ` · ${rows.toLocaleString("en-US")} rows` : ""}</span>`;
+  const rows = rowsCrossed(run);
+  const why = run.reason ? ` <span class="hint" title="${esc(run.reason)}">· ${esc(run.reason.length > 90 ? `${run.reason.slice(0, 90)}…` : run.reason)}</span>` : "";
+  return `<span class="outcome-chip ${esc(run.state)}">${esc(run.state)}</span> <span class="hint" title="${esc(ROWS_CROSSED_HINT)}">${isActive(run) ? "" : ago(run.finishedAt)}${rows ? ` · ${rows.toLocaleString("en-US")} rows crossed` : ""}</span>${why}`;
 }
 
 // Deploy, Run and Undeploy from the list. Deploying arms the pipeline at the commit the library holds, and the server

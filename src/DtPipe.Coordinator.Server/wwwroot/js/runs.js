@@ -1,6 +1,6 @@
 // Runs: what is deployed, the runs in flight and the queue behind them, the journal of finished runs,
 // and the live events of every node.
-import { $, api, duration, esc, fmt, nodeColor, cursorsOf, ranPlan, shortNode, store, toast } from "./core.js";
+import { $, ROWS_CROSSED_HINT, api, duration, endNotes, esc, fmt, nodeColor, cursorsOf, ranPlan, rowsCrossed, shortNode, store, toast } from "./core.js";
 
 let host = null;
 let openRun = null;          // runId whose report is unfolded
@@ -65,8 +65,17 @@ function renderQueue() {
   el.innerHTML = store.queue.length ? store.queue.map((r) => {
     const since = r.state === "running" ? `${((Date.now() - new Date(r.startedAt)) / 1000).toFixed(0)} s` : `queued ${((Date.now() - new Date(r.queuedAt)) / 1000).toFixed(0)} s ago`;
     return `<div class="queue-item"><span class="outcome-chip ${esc(r.state)}">${esc(r.state)}</span> <b>${esc(r.pipelineId)}</b> <code>${esc(r.runId)}</code> <span class="hint">${since}${r.launchedBy ? ` · by ${esc(r.launchedBy)}` : ""}</span>
-      <button class="small ghost danger" data-cancel="${esc(r.runId)}">Cancel</button></div>`;
+      <button class="small ghost danger" data-cancel="${esc(r.runId)}">Cancel</button>${r.state === "running" ? awayNotes(r) : ""}</div>`;
   }).join("") : `<p class="hint">Idle.</p>`;
+}
+
+// A node of a running run whose host dropped its connection: the run is kept while the coordinator waits for the host to
+// announce again, and the page says since when and until when, rather than leaving "running" unexplained.
+function awayNotes(run) {
+  const nodes = new Set((run.plan?.fragments || []).map((f) => f.node));
+  const seconds = (from, to) => Math.max(0, Math.round((to - from) / 1000));
+  return store.nodes.filter((n) => nodes.has(n.name)).flatMap((n) => (n.replicas || []).filter((r) => !r.connected && r.awaySince).map((r) =>
+    `<p class="hint mismatch">Node ${esc(n.name)} lost its connection ${seconds(new Date(r.awaySince), Date.now())} s ago: the coordinator waits ${seconds(Date.now(), new Date(r.givenUpAt))} s more for its host to return before it gives the node up.</p>`)).join("");
 }
 
 function renderSelectors() {
@@ -83,9 +92,7 @@ function report(r) {
     <td class="num">${e.sent == null ? "?" : fmt(e.sent)}</td><td class="num ${e.sent === e.received && e.sent != null ? "" : "mismatch"}">${e.received == null ? "?" : fmt(e.received)}</td></tr>`).join("");
   const exits = res ? Object.values(res.reports).map((p) => `<tr><td>${esc(shortNode(p.fragment))}</td><td class="num">${p.exitCode}</td><td>${esc(p.origin ?? "")}</td><td class="wrap">${esc(p.firstFault ?? "")}</td></tr>`).join("") : "";
   return `<div class="run-report">
-    ${r.refusal ? `<p class="mismatch">${esc(r.refusal)}</p>` : ""}
-    ${r.sinkMayBePartial ? `<p class="mismatch">The coordinator restarted while this run was in progress: its sinks may hold part of what it wrote.</p>` : ""}
-    ${res?.cause ? `<p><b>Cause:</b> ${esc(shortNode(res.cause))}${res.causeIsUnresponsive ? " (unresponsive)" : ""}</p>` : ""}
+    ${endNotes(r)}
     ${res?.consequences?.length ? `<p><b>Consequences:</b> ${res.consequences.map((c) => esc(shortNode(c))).join(", ")}</p>` : ""}
     ${edges ? `<table><tr><th>from</th><th>to</th><th>sent</th><th>received</th></tr>${edges}</table>` : ""}
     ${exits ? `<h3>Exit reports</h3><table><tr><th>fragment</th><th>exit</th><th>origin</th><th>first fault</th></tr>${exits}</table>` : ""}
@@ -100,12 +107,12 @@ function renderJournal() {
   if (!el) return;
   const runs = store.runs.filter((r) => !filter || r.pipelineId === filter).slice(0, 60);
   el.innerHTML = runs.length ? `<table class="journal">
-    <tr><th>run</th><th>pipeline</th><th>outcome</th><th>by</th><th>started</th><th>duration</th><th>rows crossed</th><th>cause</th></tr>
+    <tr><th>run</th><th>pipeline</th><th>outcome</th><th>by</th><th>started</th><th>duration</th><th title="${esc(ROWS_CROSSED_HINT)}">rows crossed</th><th>cause</th></tr>
     ${runs.map((r) => {
-      const rows = r.result?.edgeCounts?.reduce((s, e) => s + (e.received ?? 0), 0);
+      const rows = rowsCrossed(r);
       return `<tr class="clickable" data-open="${esc(r.runId)}"><td><code>${esc(r.runId)}</code></td><td>${esc(r.pipelineId ?? r.planId)}</td>
         <td><span class="outcome-chip ${esc(r.state)}">${esc(r.state)}</span></td><td class="wrap">${esc(r.launchedBy ?? "")}</td><td>${esc(new Date(r.startedAt).toLocaleTimeString())}</td>
-        <td class="num">${esc(duration(r))}</td><td class="num">${rows ? fmt(rows) : ""}</td><td class="wrap">${esc(r.result?.cause ? shortNode(r.result.cause) : r.refusal ? r.refusal.slice(0, 80) : "")}</td></tr>
+        <td class="num">${esc(duration(r))}</td><td class="num">${rows ? fmt(rows) : ""}</td><td class="wrap">${esc(r.reason ?? (r.result?.cause ? shortNode(r.result.cause) : ""))}</td></tr>
         ${openRun === r.runId ? `<tr><td colspan="8">${report(r)}</td></tr>` : ""}`;
     }).join("")}</table>` : `<p class="hint">No run yet.</p>`;
 }

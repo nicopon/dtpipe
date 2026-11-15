@@ -63,9 +63,10 @@ internal static partial class RunEndpoints
             context.Response.Headers.CacheControl = "no-cache";
             var json = context.RequestServices.GetRequiredService<Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.Http.Json.JsonOptions>>().Value.SerializerOptions;
 
-            async Task WriteAsync(string type, object data)
+            // `at` is when the event happened, so a page opened later dates the backlog it replays as it was, never as it loaded.
+            async Task WriteAsync(string type, object data, DateTimeOffset? at = null)
             {
-                await context.Response.WriteAsync($"data: {JsonSerializer.Serialize(new { type, data }, json)}\n\n");
+                await context.Response.WriteAsync($"data: {JsonSerializer.Serialize(new { type, data, at }, json)}\n\n");
                 await context.Response.Body.FlushAsync();
             }
 
@@ -76,8 +77,8 @@ internal static partial class RunEndpoints
                 var plan = deployments.ActivePlan;
                 await WriteAsync("state", new { plan, run = deployments.CurrentRun(plan?.PipelineId) });
                 await WriteAsync("deployments", await deployments.DeploymentsAsync());
-                foreach (var evt in backlog.Where(e => e.Type == "log").TakeLast(150)) await WriteAsync(evt.Type, evt.Data);
-                await foreach (var evt in live.ReadAllAsync(context.RequestAborted)) await WriteAsync(evt.Type, evt.Data);
+                foreach (var evt in backlog.Where(e => e.Type == "log").TakeLast(150)) await WriteAsync(evt.Type, evt.Data, evt.At);
+                await foreach (var evt in live.ReadAllAsync(context.RequestAborted)) await WriteAsync(evt.Type, evt.Data, evt.At);
             }
             catch (OperationCanceledException) { }
             finally { unsubscribe(); }

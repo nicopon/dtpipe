@@ -531,6 +531,12 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   A reason that goes into `RunView.Refusal` is the server's own text, never a driver's message.
   A run that had started carries `RunView.SinkMayBePartial` (also in `/service/runs`), true: its fragments had been launched and a sink may hold part of
   what they wrote. It is a label only: nothing ranks resumption strategies or reruns the run, and a run that was only queued, or that ended any other way, has none.
+  **A run says why in one line, and saying it changes nothing**: `RunView.Reason` is derived each time it is read from `Result` and `Refusal`
+  (the first line of the failing fragment's own error, the fragment that stopped answering, a refusal without the runner it was tried
+  on), never stored as a verdict and never an input to one: state, `Result` and `Refusal` are what the run reports, and a cancelled
+  or successful run has no reason. The pages show it wherever a run is shown (`endNotes` in `core.js`), and count rows as
+  `rowsCrossed` does, on every edge. An event of `/api/events` carries `at`, when it happened, so a page opened later dates the
+  backlog it replays by it; a replica whose connection dropped carries `awaySince` and `givenUpAt` in the nodes' snapshot.
   `[CI: RunJournalTests (the label), RunQueueTests, OrphanRunsTests, NodeChannelHubTests; SqlStoreTests] [local: tools/campaign.py F4]` `[unchecked: a wired
   child with nothing to write ends only once a relay touches its torn-down transfer]`
 - **A run that was placed records the replica of each fragment.** `RunJournal` keeps the `RunResult` whole,

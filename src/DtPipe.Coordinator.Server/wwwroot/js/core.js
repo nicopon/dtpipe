@@ -31,6 +31,25 @@ export const shortNode = (fragment) => {
   return text.includes(" ") ? text : text.split("@").pop();
 };
 
+/** The rows a run's edges delivered, counted on every edge: a row that crosses two edges counts twice. */
+export const rowsCrossed = (run) => run?.result?.edgeCounts?.reduce((s, e) => s + (e.received ?? 0), 0) || 0;
+export const ROWS_CROSSED_HINT = "Counted on every edge of the run: a row that crosses two edges counts twice.";
+
+/** What a run says of why it ended as it did, and of what it may have left behind: the same words wherever a run is shown. */
+export function endNotes(run) {
+  const r = run.result;
+  const cause = run.reason ?? (r?.cause ? `${shortNode(r.cause)}${r.causeIsUnresponsive ? " (unresponsive)" : ""}` : null);
+  const where = run.reason && r?.cause && run.reason !== r.cause ? ` <span class="hint">(${esc(shortNode(r.cause))})</span>` : "";
+  const started = run.plan != null && ["failed", "cancelled"].includes(run.state);
+  return [
+    run.refusal && run.refusal !== run.reason ? `<p class="mismatch">${esc(run.refusal)}</p>` : "",
+    cause ? `<p><b>Cause:</b> ${esc(cause)}${where}</p>` : "",
+    run.sinkMayBePartial
+      ? `<p class="mismatch">The coordinator restarted while this run was in progress: its sinks may hold part of what it wrote.</p>`
+      : started ? `<p class="hint">It stopped before its end: a sink it was writing may hold part of the rows, or none.</p>` : "",
+  ].join("");
+}
+
 export function bytes(b) {
   return b > 1 << 30 ? (b / (1 << 30)).toFixed(2) + " GiB" : b > 1 << 20 ? (b / (1 << 20)).toFixed(1) + " MiB" : b > 1024 ? (b / 1024).toFixed(0) + " KiB" : b + " B";
 }
@@ -76,7 +95,7 @@ export function toast(message, kind = "error") {
 
 export function addLog(line) {
   if (/:\s*$/.test(line.message)) return; // a label whose value was empty, e.g. a silent child's stderr
-  store.logs.push({ ...line, at: new Date() });
+  store.logs.push({ at: new Date(), ...line });
   if (store.logs.length > 1500) store.logs.splice(0, store.logs.length - 1500);
   emit("logs");
 }
@@ -165,7 +184,7 @@ export async function start() {
   source.onopen = () => { store.connected = true; emit("connection"); };
   source.onerror = () => { store.connected = false; emit("connection"); };
   source.onmessage = (message) => {
-    const { type, data } = JSON.parse(message.data);
+    const { type, data, at } = JSON.parse(message.data);
     switch (type) {
       case "nodes":
         store.nodes = data;
@@ -180,7 +199,7 @@ export async function start() {
         if (data.state === "failed") addLog({ node: "coordinator", level: "Error", message: `${data.pipelineId}: deployment failed: ${data.message}` });
         refreshHealth();
         break;
-      case "log": addLog({ node: data.node, fragment: data.fragment, level: data.level, message: data.message }); break;
+      case "log": addLog({ node: data.node, fragment: data.fragment, level: data.level, message: data.message, ...(at ? { at: new Date(at) } : {}) }); break;
       case "bytes": store.bytes = data; emit("bytes"); break;
       case "library": emit("library"); refreshHealth(); break;
       case "rights":

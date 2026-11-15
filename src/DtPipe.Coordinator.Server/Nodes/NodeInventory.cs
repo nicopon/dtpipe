@@ -9,11 +9,12 @@ namespace DtPipe.Coordinator.Server.Nodes;
 /// One host carrying a node's identity, as a page shows it. <see cref="Id"/> is the start of its instance id,
 /// <see cref="Origin"/> the text it gave (untrusted: the page escapes it), <see cref="Bricks"/> a hash of the bricks it
 /// announces, which differs from a sibling's while a rolling update is under way, and <see cref="Runs"/> the runs the
-/// coordinator placed on it.
+/// coordinator placed on it. While its connection is dropped, <see cref="AwaySince"/> is when it dropped and
+/// <see cref="GivenUpAt"/> when the coordinator stops waiting for its host to announce again; both are null otherwise.
 /// </summary>
 public sealed record NodeReplica(
     string Id, DateTimeOffset Since, string? Origin, bool Connected, string? DtpipeVersion, string Bricks,
-    IReadOnlyList<string> Capabilities, int Runs);
+    IReadOnlyList<string> Capabilities, int Runs, DateTimeOffset? AwaySince = null, DateTimeOffset? GivenUpAt = null);
 
 public sealed record NodeView(
     string Name, IReadOnlyList<string> Groups, string Description, bool Online, IReadOnlyList<DatasetInfo> Datasets,
@@ -102,7 +103,8 @@ public sealed class NodeInventory(ReplicaRegistry registry)
             var announcement = reference?.Announcement ?? n.Value.Announcement;
             var views = replicas.Select(r => new NodeReplica(
                 r.Key.Short, r.FirstAnnouncedAt, r.Announcement.Origin, r.Connected, r.Announcement.DtpipeVersion,
-                BricksHash(r.Announcement.Bricks), r.Announcement.Capabilities ?? [], r.Leases.Count)).ToList();
+                BricksHash(r.Announcement.Bricks), r.Announcement.Capabilities ?? [], r.Leases.Count,
+                r.AwaySince, r.AwaySince + registry.DisconnectGrace)).ToList();
             return new NodeView(
                 n.Value.Name, reference?.Groups ?? n.Value.Groups, announcement.Description, connected.Count > 0, announcement.Datasets,
                 announcement.Role, announcement.Bricks ?? [], announcement.Capabilities ?? [], announcement.DtpipeVersion, views,

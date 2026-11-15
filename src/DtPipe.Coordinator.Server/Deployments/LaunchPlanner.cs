@@ -153,10 +153,17 @@ internal sealed class LaunchPlanner(AutoPlacer placer, BrickCatalog bricks, Node
         var missing = plan.Fragments.Where(f => eligibility[f.Name].Eligible.Count == 0).ToList();
         if (missing.Count == 0) return (null, []);
         var runners = inventory.Snapshot().Where(n => n.Role == NodeRole.Runner).Select(n => n.Name).ToHashSet(StringComparer.Ordinal);
-        var refusal = string.Join(" ", missing.Select(f => $"{f.Name} has no replica that could run it ({eligibility[f.Name].Reason ?? "none is eligible"})."));
+        var refusal = string.Join(" ", missing.Select(f => CannotRun(f, eligibility[f.Name])));
         var causes = missing.Select(f => new LaunchCause(
             runners.Contains(f.Node) ? LaunchCauses.NoAdmissibleRunner : LaunchCauses.NoEligibleReplica,
-            $"{f.Name} has no replica that could run it ({eligibility[f.Name].Reason ?? "none is eligible"}).", f.Node, f.Name)).ToList();
+            CannotRun(f, eligibility[f.Name]), f.Node, f.Name)).ToList();
         return (refusal, causes);
+    }
+
+    /// <summary>The refusal of one fragment, its node the subject of the sentence: the node is what is missing, never the runner that tried.</summary>
+    private static string CannotRun(PlannedFragment fragment, FragmentEligibility eligibility)
+    {
+        var why = (eligibility.Reason ?? "none of its replicas is eligible").Trim();
+        return $"Node '{fragment.Node}' cannot run {fragment.Name}: {(why.EndsWith('.') ? why : why + ".")}";
     }
 }

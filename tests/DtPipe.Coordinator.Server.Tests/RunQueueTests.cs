@@ -67,6 +67,9 @@ public sealed class RunQueueTests : IDisposable
         public void End(string runId, RunOutcome outcome) =>
             Ends.GetOrAdd(runId, _ => new(TaskCreationOptions.RunContinuationsAsynchronously)).TrySetResult(Result(outcome));
 
+        public void End(string runId, RunResult result) =>
+            Ends.GetOrAdd(runId, _ => new(TaskCreationOptions.RunContinuationsAsynchronously)).TrySetResult(result);
+
         public bool Saw(string runId) => Specs.Any(s => s.RunId == runId);
     }
 
@@ -372,6 +375,24 @@ public sealed class RunQueueTests : IDisposable
         await FinishedAsync(running.RunId);
         Assert.Equal(RunState.Succeeded, _deployments.FindRun(running.RunId)!.State);
         Assert.Null(_deployments.FindRun("run-999"));
+    }
+
+    [Fact]
+    public async Task A_Run_Whose_Fragment_Failed_Says_The_First_Line_Of_Its_Error_And_Keeps_Its_Verdict()
+    {
+        await ReplicaAsync("n");
+        await DeployAsync(DataPlan("p", "n"));
+        var run = _deployments.Enqueue("p");
+        await RunningAsync(run.RunId);
+        var report = new FragmentExitReport("p@n", 1, DtPipe.Coordinator.FaultOrigin.Local, "Conversion Error: could not convert 'boom'\n   at Reader.Next()", new Dictionary<string, long>());
+
+        _runs.End(run.RunId, new RunResult(RunOutcome.Failed, "p@n", [], new Dictionary<string, FragmentExitReport> { ["p@n"] = report }, []));
+        await FinishedAsync(run.RunId);
+
+        var failed = Journaled(run.RunId);
+        Assert.Equal("Conversion Error: could not convert 'boom'", failed.Reason);
+        Assert.Equal((RunState.Failed, RunOutcome.Failed, "p@n"), (failed.State, failed.Result!.Outcome, failed.Result.Cause));
+        Assert.Contains("\"reason\":\"Conversion Error", JsonSerializer.Serialize(failed, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
     }
 
     [Theory]
