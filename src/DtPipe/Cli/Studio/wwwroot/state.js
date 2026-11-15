@@ -14,8 +14,12 @@
 
 /**
  * The cards of the open job. `selected` is a card, a transformer of the zoomed card (`t`) or a wire; `zoom` is
- * the alias of the transform step shown as the chain of its transformers.
- * @typedef {{ model: Model | null, result: Composed | null, selected: Selection | null, zoom: string | null, dirty: boolean }} Cards
+ * the alias of the transform step shown as the chain of its transformers. `history` is what Undo puts back, last change
+ * last: the cards before a card was deleted or a text replaced them (`label`), whether they were unsaved and the hash the job
+ * had then, and the cards as that change left them (`after`, layout aside). It holds job values, so it stays in the page:
+ * no request carries it and nothing keeps it.
+ * @typedef {{ label: string, model: Model, dirty: boolean, hash: string | null, after: string }} Change
+ * @typedef {{ model: Model | null, result: Composed | null, selected: Selection | null, zoom: string | null, dirty: boolean, history: Change[] }} Cards
  */
 
 /**
@@ -65,7 +69,7 @@ export const state = {
   /** The job open: its path, the hash a save must find on disk (null for a job not written yet), and whether saving rewrites a text written by hand. @type {Job | null} */
   job: null,
   /** @type {Cards} */
-  cards: { model: null, result: null, selected: null, zoom: null, dirty: false },
+  cards: { model: null, result: null, selected: null, zoom: null, dirty: false, history: [] },
   /** @type {View} */
   view: { drawer: "yaml", sizes: { pal: 220, insp: 330, drawer: 260, agent: 360 } },
   preview: freshPreview(),
@@ -88,9 +92,12 @@ export const state = {
   /** The coordinator the command line named, or null: { url, state, reason, me, studioVersion, contract }. @type {any} */
   coordinator: null,
   /** The agent's panel: whether the command line opened one, the server's last answer (GET /api/agent), and what the agent gave
-   * that waits for the person's Apply because they changed the cards since the agent read them (a plan, or the file it saved).
-   * @type {{ enabled: boolean, status: any, behind: { yaml?: string, saved?: string } | null }} */
-  agent: { enabled: false, status: null, behind: null },
+   * that waits for the person's Apply because they changed the cards since the agent read them (a plan, or the file it saved),
+   * and the cards the agent's last plan adds, changes and removes against the cards it came to (`unknown` when either side does
+   * not take apart into cards).
+   * @type {{ enabled: boolean, status: any, behind: { yaml?: string, saved?: string } | null,
+   *   marks: { yaml: string, unknown?: boolean, added: string[], changed: string[], removed: string[] } | null }} */
+  agent: { enabled: false, status: null, behind: null, marks: null },
 };
 
 /**

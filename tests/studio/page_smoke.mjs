@@ -4,7 +4,7 @@
 // Save then Write targets…, review before writing, Write and Abandon from a sink, a run left suspended by an earlier
 // session, Forget pins, typing in the inspector; the agent's panel against a scripted endpoint that speaks Ollama's API (a
 // save refused then accepted, a run, a question, a plan put on the cards, a job holding a credential, Stop, a reload mid-turn, an
-// edit made while a save waits, a turn that fails).
+// edit made while a save waits, a turn that fails); Undo of a deleted card and of a plan, and the cards a plan names.
 //
 // Local only: it needs Node 22+ (native WebSocket, no dependency), Chrome, and a built dtpipe. CI never
 // runs it. The page is embedded in the DLL, so build before playing it.
@@ -407,6 +407,40 @@ const scenarios = {
     check("a failed turn gives the text typed back", await p.until(`document.querySelector("#agent-prompt").value === "fail now"`), await p.ev(`document.querySelector("#agent-prompt").value`));
   },
 
+  // What removes or replaces cards is undone: a configured card deleted comes back with what it held, and so do the cards an
+  // agent's plan replaced, which the plan names; undone back to the file, the job is saved again; another job has nothing to undo.
+  async undo({ page: p }) {
+    const send = async (text) => {
+      await p.ev(`(() => { const t = document.querySelector("#agent-prompt"); t.value = ${JSON.stringify(text)}; })()`);
+      await p.click("#agent-send");
+    };
+    const keyOfB = () => p.ev(`document.querySelector(${JSON.stringify(KEY_OF_B)})?.value ?? null`);
+    const hasB = `!!document.querySelector('.dcard[data-alias="b"]')`;
+
+    check("the job opens", await p.openJob("chain.yaml"));
+    check("a job opens with nothing to undo", (await p.disabled("#d-undo")) === true);
+    await p.pick("b");
+    check("the card holds a mapping", await p.until(`!!document.querySelector(${JSON.stringify(KEY_OF_B)})?.value`));
+    const key = await keyOfB();
+    await p.clickText("#d-inspector button", "Delete card");
+    check("Delete card removes the card", await p.until(`document.querySelectorAll(".dcard").length === 2 && !${hasB}`));
+    await p.click("#d-undo");
+    check("Undo brings the deleted card back", await p.until(`document.querySelectorAll(".dcard").length === 3 && ${hasB}`));
+    await p.pick("b");
+    check("the card comes back with what it held", await p.until(`(document.querySelector(${JSON.stringify(KEY_OF_B)})?.value ?? null) === ${JSON.stringify(key)}`), String(await keyOfB()));
+    check("undone back to the file, the job is not unsaved", await p.until(`document.querySelector("#d-dirty").hidden`));
+
+    await send("make a plan");
+    check("the plan names the cards it changes", await p.until(`/b removed/.test(document.querySelector("#agent-now .plan-marks")?.textContent ?? "")`, 30000),
+      await p.ev(`document.querySelector("#agent-now")?.textContent ?? ""`));
+    check("the plan is on the cards", await p.until(`document.querySelectorAll(".dcard").length === 2 && !${hasB}`));
+    await p.click("#d-undo");
+    check("Undo brings back the cards the plan replaced", await p.until(`document.querySelectorAll(".dcard").length === 3 && ${hasB}`));
+
+    check("another job opens", await p.openJob("whole.yaml"));
+    check("another job has nothing to undo", await p.until(`document.querySelector("#d-undo")?.disabled === true`));
+  },
+
   // The panel draws the server's last answer: a conversation the server reset (new, or another model) leaves
   // no entry of the old one, and the next turn is drawn.
   async "agent-reset"({ page: p }) {
@@ -775,9 +809,11 @@ const argsOf = {
   agent: () => ["--llm-provider", "ollama", "--llm-url", fakeLlm.url],
   "agent-reset": () => ["--llm-provider", "ollama", "--llm-url", fakeLlm.url],
   "agent-edit": () => ["--llm-provider", "ollama", "--llm-url", fakeLlm.url],
+  undo: () => ["--llm-provider", "ollama", "--llm-url", fakeLlm.url],
 };
 
 const fixturesOf = {
+  undo: ["chain.yaml", "whole.yaml"],
   "whole-branch": ["whole.yaml"], "edit-during-run": ["slow.yaml"], "open-race": ["chain.yaml", "whole.yaml"],
   "write-plain": ["review.yaml"], "write-choose": ["review.yaml"], "review-write": ["review.yaml"], "review-abandon": ["review.yaml"], "review-reload": ["review.yaml"],
 };

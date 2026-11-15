@@ -78,9 +78,10 @@ function forgetResults() {
 
 const leaveCurrent = () => !state.cards.dirty || confirm(`${state.job?.path || "This job"} has changes that are not saved. Leave it anyway?`);
 
-// True once the job is on the cards.
-async function open(path, left = false) {
+// True once the job is on the cards. `replacing` names a reading of the open job that replaces its cards, which Undo puts back.
+async function open(path, left = false, replacing = null) {
   if (!left && !leaveCurrent()) return false;
+  const replaces = state.job?.path === path ? replacing : null;
   // A job asked for while another is still being read replaces it: only the last one asked for is opened.
   const ticket = opening.begin();
   try {
@@ -92,7 +93,7 @@ async function open(path, left = false) {
     // The rows asked are the person's last, unless the job kept its own.
     if (view.job?.rows) restoreRows(view.job.rows);
     restoreReview(view.job?.review === true);
-    if (!(await openJob(job.yaml, job.layout, false, view.job))) return false;
+    if (!(await openJob(job.yaml, job.layout, false, view.job, replaces))) return false;
     viewRestored(path, view.job);
     status(job.rewrites ? "saving rewrites this file" : "", job.rewrites ? "warn" : "");
     await loadJobs();
@@ -298,7 +299,7 @@ async function start() {
   await refreshCoordinator();
   await loadBricks();
   await loadLibrary();
-  await mountAgent($("agent-pane"), { applyPlan, openPlan, reopen: (path, ask = false) => open(path, !ask), jobsChanged: loadJobs, followPlan });
+  await mountAgent($("agent-pane"), { applyPlan, openPlan, reopen: (path, ask = false) => open(path, !ask, "the file the agent saved"), jobsChanged: loadJobs, followPlan });
 }
 
 // ---------------------------------------------------------------- the agent's plans
@@ -306,7 +307,7 @@ async function start() {
 // A plan replaces the open job's cards, unsaved: the job keeps its path and the hash a save must find. True once it has.
 async function applyPlan(yaml) {
   if (!state.job || !leaveCurrent()) return false;
-  if (!(await openJob(yaml, state.cards.model?.layout, true))) return false;
+  if (!(await openJob(yaml, state.cards.model?.layout, true, null, "the agent's plan"))) return false;
   status("the agent's plan is on the cards: save it to keep it", "good");
   return true;
 }
@@ -316,7 +317,7 @@ async function applyPlan(yaml) {
 async function followPlan(yaml) {
   const probe = await api("/api/design/decompose", { yaml, layout: null });
   if (probe.errors?.length) return false;
-  if (state.job) return openJob(yaml, state.cards.model?.layout, true, { card: state.cards.selected?.alias, tab: state.view.drawer });
+  if (state.job) return openJob(yaml, state.cards.model?.layout, true, { card: state.cards.selected?.alias, tab: state.view.drawer }, "the agent's plan");
   const taken = new Set(state.jobs.paths);
   let path = "agent-job.yaml";
   for (let n = 2; taken.has(path); n++) path = `agent-job-${n}.yaml`;

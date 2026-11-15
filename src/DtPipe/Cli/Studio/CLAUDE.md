@@ -200,6 +200,14 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   `.dtpipe/studio/view.json`, whose values the server checks and rewrites, and which is read only as a
   preference. A new script needs its route in `StudioServer.Assets`.
   `[CI: StudioServerTests (every module is served, every import resolves; the view's bounds)]`
+- **What removes or replaces cards is undone, never asked first.** Deleting a card, *Apply* and the
+  agent's plan put on the cards go through one function (`remember` in `designer.js`), which keeps the
+  cards before the change in `state.cards.history`; Undo puts them back through the step an open takes
+  (`putCards`), unsaved unless they were saved and the file has not been written since. Undo waits
+  while the cards differ from what the change left, so an edit made since is never lost. The history
+  holds job values: it is bounded, no request carries it, nothing keeps it, and any other open empties
+  it. A plan names the cards it adds, changes and removes (`cardChanges`), both sides taken apart by
+  the server. `[local: page_smoke.mjs undo, agent-edit]`
   `[local: tests/studio/page_smoke.mjs - Node 22+, Chrome and a built dtpipe; types are checked by the
   editor alone (// @ts-check), no tool runs them]`
 - **The agent writes a job through the page's paths, after a card, and no target at all.** `--llm-provider` gives the

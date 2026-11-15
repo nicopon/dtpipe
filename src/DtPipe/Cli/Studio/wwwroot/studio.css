@@ -265,6 +265,10 @@ main.with-agent { grid-template-columns: 220px minmax(0, 1fr) var(--agent-w, 360
 .agent-card { border: 1px solid var(--accent); border-radius: 8px; padding: 8px; margin: 4px 0; }
 .agent-card p { margin: 0 0 6px; }
 .agent-card ul { margin: 0 0 6px; padding-left: 18px; }
+.plan-marks .mark { display: inline-block; font-size: 12px; padding: 0 6px; margin: 0 4px 2px 0; border-radius: 8px; border: 1px solid currentColor; }
+.plan-marks .mark-added { color: var(--good); }
+.plan-marks .mark-changed { color: var(--warn); }
+.plan-marks .mark-removed { color: var(--bad); }
 .row.wrap { flex-wrap: wrap; }
 .agent-input .row { margin-top: 4px; }
 .agent-input #agent-send { margin-left: auto; }

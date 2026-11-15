@@ -5,7 +5,7 @@
 // here: nothing is saved or run until the person clicks.
 
 import { $, api, el, fill, status, svg } from "./dom.js";
-import { applySizes, bindSplit } from "./designer.js";
+import { applySizes, bindSplit, cardChanges } from "./designer.js";
 import { invalidate, onZone } from "./render.js";
 import { state } from "./state.js";
 
@@ -125,6 +125,7 @@ function dropLog() {
   appliedYaml = null;
   asked = null;
   state.agent.behind = null;
+  state.agent.marks = null;
 }
 
 /** A turn that ended without a result gives the person's text back to the field, unless they typed another since: Send retries it. @param {string} status */
@@ -170,11 +171,31 @@ function settled() {
 
 /** A plan on the open job's cards, unless the person changed them since the agent last saw them: the notice keeps it then. @param {string} yaml */
 async function follow(yaml) {
+  await mark(yaml);
   if (moved()) { hold({ yaml }); return; }
   if (!(await hooks.followPlan(yaml))) return;
   appliedYaml = yaml;
   settled();
   status("the agent's plan is on the cards: save it to keep it", "good");
+}
+
+/**
+ * The cards a plan adds, changes and removes against the open job's cards as they are now, both taken apart by the server, so
+ * the page compares cards of one making and never reads YAML. With no job open there is nothing to mark.
+ * @param {string} yaml
+ */
+async function mark(yaml) {
+  const current = state.job && state.cards.model ? state.cards.result : null;
+  if (!current) { state.agent.marks = null; return; }
+  const none = { yaml, unknown: true, added: [], changed: [], removed: [] };
+  if (current.errors?.length || !current.yaml) { state.agent.marks = none; return; }
+  try {
+    const [before, after] = await Promise.all([current.yaml, yaml].map((text) => api("/api/design/decompose", { yaml: text, layout: null })));
+    state.agent.marks = before.errors?.length || after.errors?.length ? none : { yaml, ...cardChanges(before.model, after.model) };
+  } catch {
+    state.agent.marks = none;
+  }
+  invalidate("agent");
 }
 
 /** Applies what the person asked for, over their cards once they agree: a plan on the cards, or the saved file read again. @param {{ yaml?: string, saved?: string }} given */
@@ -285,7 +306,26 @@ function renderBehind(given) {
     given.saved
       ? `You changed the job while the agent saved ${given.saved}: your cards are kept, and the saved file replaces them only if you apply it. `
       : "You changed the job while the agent worked: your cards are kept, and its plan replaces them only if you apply it. ",
+    given.yaml ? marksView(given.yaml, false) : null,
     el("button", { class: "small", title: "Replace the open job's cards with what the agent gave", onclick: () => apply(given) }, "Apply")]);
+}
+
+/**
+ * The cards a plan touches, each marked added, changed or removed: what Apply would do to the cards, or what the plan did to
+ * those it came to. Nothing when the plan was not compared.
+ * @param {string} yaml @param {boolean} applied
+ */
+function marksView(yaml, applied) {
+  const marks = state.agent.marks;
+  if (!marks || marks.yaml !== yaml) return null;
+  if (marks.unknown) return el("span", { class: "plan-marks hint" }, "The cards it changes cannot be named: the open job or the plan does not take apart into cards. ");
+  const items = [
+    ...marks.added.map((a) => el("span", { class: "mark mark-added" }, `${a} added`)),
+    ...marks.changed.map((a) => el("span", { class: "mark mark-changed" }, `${a} changed`)),
+    ...marks.removed.map((a) => el("span", { class: "mark mark-removed" }, `${a} removed`)),
+  ];
+  return el("span", { class: "plan-marks" },
+    items.length ? [applied ? "Cards it changed: " : "Cards it would change: ", items, " "] : "It changes no card. ");
 }
 
 const tokens = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
@@ -326,12 +366,14 @@ function questionView(question) {
 
 /** The plan, its text folded and its buttons in sight; Apply is the notice's while the person's cards hold it back. */
 function planView(plan) {
+  const marks = state.agent.behind?.yaml === plan.yaml ? null : marksView(plan.yaml, plan.yaml === appliedYaml && !moved());
   return el("div", {},
     el("details", { class: "agent-plan" },
       el("summary", {}, `The agent's plan (${plan.state.toLowerCase()})`, plan.message ? el("span", { class: "hint" }, ` · ${plan.message}`) : null),
       el("pre", {}, plan.yaml)),
+    marks ? el("p", {}, marks) : null,
     el("div", { class: "row" },
-      state.job && !state.agent.behind && plan.yaml !== appliedYaml ? el("button", { class: "small", title: "Replace the open job's cards with the plan; nothing is saved", onclick: () => apply({ yaml: plan.yaml }) }, "Apply to the open job") : null,
+      state.job && !state.agent.behind && (plan.yaml !== appliedYaml || moved()) ? el("button", { class: "small", title: "Replace the open job's cards with the plan; nothing is saved", onclick: () => apply({ yaml: plan.yaml }) }, "Apply to the open job") : null,
       el("button", { class: "small", title: "Open the plan as a new job, not saved yet", onclick: async () => { if (await hooks.openPlan(plan.yaml)) settled(); } }, "Open as a new job")));
 }
 

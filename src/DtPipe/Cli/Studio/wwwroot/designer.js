@@ -61,33 +61,111 @@ export function mountDesigner(root, options = {}) {
 
 /**
  * Opens a job: its text taken apart into cards by the server, with the layout it was saved with. A job not on disk opens
- * as unsaved changes. `kept` is how the page was left on it: the tab and the card, where they are still there.
+ * as unsaved changes. `kept` is how the page was left on it: the tab and the card, where they are still there. `replacing`
+ * names a text that replaces the open job's cards (a plan, a file the agent saved), which Undo puts back; any other open
+ * starts the history afresh.
  * @param {string} yaml @param {any} layout @param {boolean} [unsaved] @param {{ tab?: string, card?: string } | null} [kept]
+ * @param {string | null} [replacing]
  */
-export async function openJob(yaml, layout, unsaved = false, kept = null) {
+export async function openJob(yaml, layout, unsaved = false, kept = null, replacing = null) {
   const ticket = opening.begin();
   reading.cancel();
   state.brickRows = null;
   const answer = await api("/api/design/decompose", { yaml, layout: layout || null });
   // Another job was asked for meanwhile: its cards are the ones to show.
   if (opening.stale(ticket)) return false;
-  cards.model = normalize(answer.model);
-  cards.model.layout = Object.fromEntries(Object.entries(cards.model.layout).filter(([a]) => stepOf(a)));
-  if (cards.model.steps.some((s) => !cards.model.layout[s.alias])) autoLayout(false);
-  cards.result = answer;
-  cards.selected = kept?.card && stepOf(kept.card) ? { alias: kept.card } : null;
-  cards.zoom = null; cards.dirty = false;
-  // A job that does not compose opens on its problems, whatever was kept.
-  state.view.drawer = cards.result.errors?.length ? "problems" : kept?.tab && KEPT_TABS.includes(kept.tab) ? kept.tab : "yaml";
-  renderShell();
+  const show = () => putCards(normalize(answer.model), answer, kept);
+  if (replacing && cards.model) remember(replacing, show);
+  else { cards.history = []; show(); }
   await compose();
   if (!opening.stale(ticket)) cards.dirty = unsaved;
   return !opening.stale(ticket);
 }
 
+/**
+ * Puts a model on the cards and draws them, the one step opening a job and undoing share. `kept` is the tab and the card to
+ * keep, where they are still there; `tab`, when given, stays the drawer's tab whatever it is.
+ * @param {Model} model @param {Composed | null} result @param {{ tab?: string, card?: string } | null} kept @param {string | null} [tab]
+ */
+function putCards(model, result, kept, tab = null) {
+  cards.model = model;
+  cards.model.layout = Object.fromEntries(Object.entries(cards.model.layout).filter(([a]) => stepOf(a)));
+  if (cards.model.steps.some((s) => !cards.model.layout[s.alias])) autoLayout(false);
+  cards.result = result;
+  cards.selected = kept?.card && stepOf(kept.card) ? { alias: kept.card } : null;
+  cards.zoom = null; cards.dirty = false;
+  // A job that does not compose opens on its problems, whatever was kept.
+  state.view.drawer = tab ?? (cards.result?.errors?.length ? "problems" : kept?.tab && KEPT_TABS.includes(kept.tab) ? kept.tab : "yaml");
+  renderShell();
+}
+
+// ---------------------------------------------------------------- the cards' history
+
+const HISTORY_LIMIT = 20;
+
+/** A value as text with its keys sorted, so two models the server and the inspector built alike read alike. @param {any} value */
+const canonical = (value) => JSON.stringify(value, (_, v) => (v && typeof v === "object" && !Array.isArray(v)
+  ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) : v));
+
+/** What a model holds besides where its cards sit. @param {Model} model */
+const fingerprint = ({ layout, ...rest }) => canonical(rest);
+
+/**
+ * Runs `change`, which removes or replaces cards, after keeping the cards as they were: Undo puts them back. The history lives
+ * in the page only (never saved, never sent), holds the last few changes, and an open of another job empties it.
+ * @param {string} label what Undo undoes, as its title says it @param {() => void} change
+ */
+function remember(label, change) {
+  const entry = { label, model: structuredClone(cards.model), dirty: cards.dirty, hash: state.job?.hash ?? null, after: "" };
+  change();
+  entry.after = fingerprint(/** @type {Model} */ (cards.model));
+  cards.history = [...cards.history.slice(1 - HISTORY_LIMIT), entry];
+  invalidate("bar");
+}
+
+/** The change Undo would undo, and whether it can: only while the cards are as that change left them, so no edit made since is lost. */
+function undoable() {
+  const entry = cards.history.at(-1);
+  return { entry, ready: !!entry && !!cards.model && fingerprint(cards.model) === entry.after };
+}
+
+/**
+ * Puts back the cards the last change removed or replaced, through the step an open takes. They are unsaved unless they were
+ * saved when the change came and the file has not been written since.
+ */
+export async function undo() {
+  const { entry, ready } = undoable();
+  if (!entry || !ready) return;
+  cards.history = cards.history.slice(0, -1);
+  const ticket = opening.begin();
+  reading.cancel();
+  state.brickRows = null;
+  putCards(entry.model, null, { card: cards.selected?.alias }, state.view.drawer);
+  invalidate("agent");
+  await compose();
+  if (!opening.stale(ticket)) cards.dirty = entry.dirty || entry.hash !== (state.job?.hash ?? null);
+  invalidate("bar");
+}
+
+/**
+ * The cards `after` adds, changes and removes against `before`, by alias, where they sit left aside. Both models should come
+ * from the server's decomposition, so that a card reads alike on both sides.
+ * @param {any} before @param {any} after
+ */
+export function cardChanges(before, after) {
+  const of = (/** @type {any} */ m) => new Map((m?.steps || []).map((/** @type {any} */ s) => [s.alias, canonical(s)]));
+  const was = of(before), now = of(after);
+  return {
+    added: [...now.keys()].filter((a) => !was.has(a)),
+    changed: [...now.keys()].filter((a) => was.has(a) && was.get(a) !== now.get(a)),
+    removed: [...was.keys()].filter((a) => !now.has(a)),
+  };
+}
+
 /** Starts from no card at all. */
 export async function openBlank(title) {
   opening.cancel();
+  cards.history = [];
   cards.model = normalize({ title, steps: [], layout: {} });
   cards.result = null; cards.selected = null; cards.zoom = null; cards.dirty = true; state.view.drawer = "yaml";
   renderShell();
@@ -208,9 +286,11 @@ function addStep(kind, component, x, y, brick) {
 }
 
 function removeStep(alias) {
-  cards.model.steps = cards.model.steps.filter((s) => s.alias !== alias);
-  for (const s of cards.model.steps) { s.from = s.from.filter((a) => a !== alias); s.ref = s.ref.filter((a) => a !== alias); }
-  delete cards.model.layout[alias];
+  remember(`deleting card '${alias}'`, () => {
+    cards.model.steps = cards.model.steps.filter((s) => s.alias !== alias);
+    for (const s of cards.model.steps) { s.from = s.from.filter((a) => a !== alias); s.ref = s.ref.filter((a) => a !== alias); }
+    delete cards.model.layout[alias];
+  });
   if (cards.zoom === alias) cards.zoom = null;
   cards.selected = null;
   touch({ inspector: true });
@@ -353,6 +433,7 @@ function renderShell() {
       el("input", { id: "d-description", class: "grow", value: cards.model.description, placeholder: "What this job does", "aria-label": "Description" }),
       el("span", { id: "d-dirty", class: "pill warn", hidden: true }, "unsaved"),
       el("span", { class: "actions" },
+        seg("d-undo", "Undo", "Nothing to undo"),
         seg("d-layout", "Arrange", "Arrange the cards in columns, sources first"),
         hooks.toolbar?.() || null)),
     el("div", { class: "designer-body" },
@@ -369,6 +450,7 @@ function renderShell() {
   $("d-title").addEventListener("input", (e) => { cards.model.title = targetOf(e).value; touch({ canvas: !!cards.zoom }); });
   $("d-description").addEventListener("input", (e) => { cards.model.description = targetOf(e).value; touch({ canvas: false }); });
   $("d-layout").addEventListener("click", () => autoLayout());
+  $("d-undo").addEventListener("click", () => { undo().catch((e) => status(e.message, "bad")); });
   applySizes();
   bindSplits();
   bindCanvas();
@@ -431,7 +513,14 @@ export function bindSplit(handle, name, target) {
 function renderToolbarState() {
   const flag = $("d-dirty");
   if (flag) flag.hidden = !cards.dirty;
-  }
+  const button = /** @type {HTMLButtonElement | null} */ ($("d-undo"));
+  if (!button) return;
+  const { entry, ready } = undoable();
+  button.disabled = !ready;
+  button.title = !entry ? "Nothing to undo"
+    : ready ? `Undo ${entry.label}`
+    : `Undo ${entry.label}: the cards changed since, and undoing would lose that change`;
+}
 
 function renderPalette() {
   const view = $("d-palette");
