@@ -278,6 +278,9 @@ public sealed partial class StudioServer : IAsyncDisposable
                 case ("POST", "/api/publish"):
                     await PublishAsync(context);
                     break;
+                case ("POST", "/api/publish/check"):
+                    await PublicationCheckAsync(context);
+                    break;
                 case ("POST", "/api/import"):
                     await ImportAsync(context);
                     break;
@@ -622,6 +625,68 @@ public sealed partial class StudioServer : IAsyncDisposable
     }
 
     /// <summary>
+    /// What a publication of a job would refuse, judged as the coordinator's runner judges it (<see cref="PublicationCheck"/>):
+    /// the job saved in the folder (<c>path</c> and the <c>hash</c> the page saved) or the cards' composition (<c>yaml</c>).
+    /// Each source brick is bound to the first row its node sends through the coordinator, as a publication's check samples it,
+    /// and each sink brick to a throwaway file. Only while a person is signed in: a brick's rows come through the coordinator,
+    /// and a verdict without them would be another check. Asked by the page, never at each edit: it starts a process.
+    /// </summary>
+    private async Task PublicationCheckAsync(HttpContext context)
+    {
+        var link = _tools.Coordinator ?? throw new StudioRefusal(404, "This studio was opened without --coordinator.");
+        if (link.Status().State != CoordinatorLink.SignedIn)
+            throw new StudioRefusal(409, "Sign in to the coordinator: what a publication would refuse is judged over its bricks' rows.");
+        var asked = await BodyAsync<PublicationCheckRequest>(context);
+        string yaml;
+        if (asked.Path is { } asPath)
+        {
+            var path = JobPath(asPath) ?? throw new StudioRefusal(400, "Check a job saved in the folder: name its path.");
+            var job = _folder.ReadJob(path);
+            if (asked.Hash is null || asked.Hash != job.Hash)
+                throw new StudioRefusal(409, $"{path} is not the job saved last: save it, then check it.");
+            yaml = job.Text;
+        }
+        else yaml = asked.Yaml ?? throw new StudioRefusal(400, "A check is asked as {\"yaml\": \"...\"} or {\"path\": \"...\", \"hash\": \"...\"}.");
+        await JsonAsync(context, await JudgeForPublicationAsync(link, yaml, context.RequestAborted));
+    }
+
+    private async Task<PublicationVerdict> JudgeForPublicationAsync(CoordinatorLink link, string yaml, CancellationToken ct)
+    {
+        var catalog = link.Catalog ?? new BrickCatalogView([], []);
+        IReadOnlyDictionary<string, BrickReference> references;
+        try { references = BrickRef.In(JobYaml.Parse(yaml)); }
+        catch (Exception ex) when (ex is FormatException or YamlDotNet.Core.YamlException) { references = new Dictionary<string, BrickReference>(); }
+        // A reference is bound only to a brick of its own kind: a source's rows read as a sink's target would pass for a job the
+        // runner takes. Any other is left as written, for the dry run to refuse.
+        var bound = references.Values
+            .Where(r => catalog.Bricks.FirstOrDefault(b => b.Key == r.Key) is { } brick && (brick.Kind == StepKinds.Sink) == r.IsSink)
+            .Select(r => new SampledBrick(r.Alias, r.Key)).ToList();
+        if (references.Values.Any(r => catalog.Bricks.All(b => b.Key != r.Key)))
+        {
+            try { RefuseReferences(yaml, catalog); }
+            catch (StudioRefusal refusal) { return new PublicationVerdict(false, refusal.Message); }
+        }
+        var sampling = BrickSampling.Of(yaml, bound, catalog);
+
+        var directory = _local.CheckDirectory();
+        try
+        {
+            var sources = new List<(string Alias, byte[] Arrow)>();
+            foreach (var (alias, brick) in sampling.Sources)
+            {
+                // One row, as a publication's check asks each source brick's node.
+                try { sources.Add((alias, await link.SampleAsync(brick.Node, brick.Id, 1, ct))); }
+                catch (CoordinatorLinkException ex) { return new PublicationVerdict(false, $"'{alias}': {ex.Message}"); }
+            }
+            return await PublicationCheck.RunAsync(directory, sampling.Yaml, sources, sampling.Sinks, ct);
+        }
+        finally
+        {
+            try { Directory.Delete(directory, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    /// <summary>
     /// The job a command line stands for, as <c>--export-job</c> would write it: the arguments arrive as the
     /// array the page split, never as one string to cut here. The result is not saved anywhere.
     /// </summary>
@@ -837,6 +902,8 @@ public sealed partial class StudioServer : IAsyncDisposable
     private sealed record ImportRequest(List<string?>? Args);
 
     private sealed record PublishRequest(string? Path, string? Hash, string? Id, string? Message, string? Replace);
+
+    private sealed record PublicationCheckRequest(string? Path, string? Hash, string? Yaml);
 
     private sealed record VariablesRequest(string? Path, string? Yaml, List<SampledBrick>? Bricks);
 

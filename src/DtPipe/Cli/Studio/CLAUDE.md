@@ -61,10 +61,10 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   the CSRF header. `[CI: StudioCoordinatorTests, StudioKeyTests]`
 - **Without `--coordinator` the studio is whole, minus the bricks, the library and the publication.**
   `StudioTools.Coordinator` is null: `/api/coordinator` has no address, `/api/bricks` an empty catalogue,
-  `GET /api/publish` no publication, and `/api/coordinator/login`, `/api/library`, `/api/library/open` and
-  `POST /api/publish` answer 404 "opened without --coordinator". Jobs, cards, variables and samples never
-  ask for the link; a route that needs it refuses the same way.
-  `[CI: StudioServerTests — jobs, cards, variables, samples and the five refusals]`
+  `GET /api/publish` no publication, and `/api/coordinator/login`, `/api/library`, `/api/library/open`,
+  `POST /api/publish` and `POST /api/publish/check` answer 404 "opened without --coordinator". Jobs, cards, variables and
+  samples never ask for the link; a route that needs it refuses the same way.
+  `[CI: StudioServerTests — jobs, cards, variables, samples and the six refusals]`
   `[unchecked: import, debug and run without a coordinator; that a new route needing the link refuses]`
 - **The coordinator decides what a brick is; the studio reads its answer.** A card that is a brick is written as the reference to
   it (`input: brick:<node>/<id>` for a source, `output: brick:<node>/<id>` with `from` for a sink): `DesignService` writes it from the
@@ -84,8 +84,18 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   binding path. A source's rows come from its node through the coordinator, at most
   `CoordinatorApi.MaxSampleRows`; a sink's end in a throwaway file. Those files live under
   `.dtpipe/studio/samples/`, created owner-only, deleted when the sample ends and purged when the
-  studio starts, never reached through a link. A brick's branch is out of the Variables tab: its node
-  resolves those.
+  studio starts, never reached through a link; so does the directory a publication's check works in. A brick's branch is
+  out of the Variables tab: its node resolves those.
+- **What a publication would refuse is the runner's dry run, replayed, never a rule of the studio's.**
+  `POST /api/publish/check` (`PublicationCheck`) runs the command a runner runs for a library save's check (`--job`,
+  `--dry-run 1`, `--edges-only`) with the binary the studio runs as, as a child process in a directory of its own, each source
+  brick bound to the first row its node sends through the coordinator and each sink brick to a file there: the refusals are
+  the engine's, as the last lines of its stderr. The runner's own code (`DelegatedJobs`) is the distributed family's, which the
+  CLI does not reference, so the arguments are restated here; what the coordinator checks around that dry run (its structural
+  phase, each sink brick's target) is not played. A reference no catalog brick of its kind holds is left for the dry run to
+  refuse, or named by `RefuseReferences` when no node offers its key. Only while a person is signed in (409 otherwise): without
+  the bricks' rows the verdict would be another check. It is bounded (`PublicationCheck.Bound`), cancelled with its request,
+  and starts a process: it is asked for, never run at each edit. `[CI: StudioPublicationCheckTests — the real binary]`
 - **A publication sends no binding.** A reference names its node and its brick, so `/api/publish` sends the saved job alone
   (`LibrarySave.Bindings` stays absent): the coordinator keeps the mode of each reference and writes its pin. `[CI: StudioPublishTests]`
 - **A publication sends the job saved in the folder, nothing beside it.** `/api/publish` reads the

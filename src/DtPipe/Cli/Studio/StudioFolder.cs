@@ -293,6 +293,22 @@ public sealed class StudioLocalFiles(StudioFolder folder)
         return path;
     }
 
+    /// <summary>
+    /// A new throwaway directory under <c>.dtpipe/studio/samples/</c>, reached by its owner only: the working directory of a
+    /// publication's check, which writes its job and its samples there. The caller deletes it.
+    /// </summary>
+    public string CheckDirectory()
+    {
+        RefuseLinks(SamplesDirectory);
+        SessionStore.EnsureIgnored(DtpipeDirectory);
+        Directory.CreateDirectory(SamplesDirectory);
+        RefuseLinks(SamplesDirectory);
+        var path = Path.Combine(SamplesDirectory, Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(16)));
+        if (OperatingSystem.IsWindows()) Directory.CreateDirectory(path);
+        else Directory.CreateDirectory(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        return path;
+    }
+
     /// <summary>Removes what a studio that stopped short left under <c>.dtpipe/studio/samples/</c>; never through a link.</summary>
     public void PurgeSamples()
     {
@@ -302,6 +318,8 @@ public sealed class StudioLocalFiles(StudioFolder folder)
             if (!Directory.Exists(SamplesDirectory)) return;
             foreach (var file in Directory.EnumerateFiles(SamplesDirectory))
                 if ((File.GetAttributes(file) & FileAttributes.ReparsePoint) == 0) File.Delete(file);
+            foreach (var directory in Directory.EnumerateDirectories(SamplesDirectory))
+                if ((File.GetAttributes(directory) & FileAttributes.ReparsePoint) == 0) Directory.Delete(directory, recursive: true);
         }
         catch (Exception ex) when (ex is StudioRefusal or IOException or UnauthorizedAccessException) { }
     }
