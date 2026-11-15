@@ -88,7 +88,7 @@ public sealed partial class StudioServer
         var sampling = BrickSampling.Of(job.Text, asked.Bricks, _tools.Coordinator?.Catalog);
         if (sampling.Sources.Count > 0 && _tools.Coordinator?.Status().State != CoordinatorLink.SignedIn)
             throw new StudioRefusal(409, "This job reads a node's brick: sign in to the coordinator to run it.");
-        RefuseReferences(sampling.Yaml);
+        RefuseReferences(sampling.Yaml, SignedInCatalog());
         var launch = _variables.LaunchEnvironment(path, sampling.Yaml);
         var staged = asked.Debug == true || asked.Review == true;
         // A suspended run has its rows; any run but its continuation would write the job again and leave them to be written twice.

@@ -168,7 +168,14 @@ export function debugComposed() {
 /** @param {Event} e */
 export async function setDebugRows(e) {
   const input = /** @type {HTMLInputElement} */ (e.target);
-  dbg.rows = Math.max(1, Math.min(MAX_DEBUG_ROWS, parseInt(input.value, 10) || 1000));
+  // A value the field cannot keep as typed is refused and the field shows what stays: never a number read off its prefix.
+  const asked = input.value.trim() === "" ? NaN : Number(input.value);
+  if (!Number.isInteger(asked) || asked < 1 || asked > MAX_DEBUG_ROWS) {
+    input.value = String(dbg.rows);
+    status(`Rows: a whole number from 1 to ${MAX_DEBUG_ROWS}. Kept ${dbg.rows}.`, "bad");
+    return;
+  }
+  dbg.rows = asked;
   input.value = String(dbg.rows);
   invalidate("bar");
   await (dbg.watch.length > 0 && !dbg.real ? debugSync() : planNow());
@@ -367,10 +374,12 @@ export function previewView(alias) {
         : "📌 Pinned: its checkpoint is kept at the next run."));
     }
   }
-  const errors = dbg.report?.errors || (dbg.report?.error ? [dbg.report.error] : []);
+  const errors = [dbg.report?.error, ...(dbg.report?.errors || [])].filter(Boolean);
   if (dbg.report && !dbg.report.success && composedYaml() === dbg.ranYaml) {
+    // A failure that came back with no reason says so, never a bare "failed" a person reads as the whole story.
     parts.push(el("p", { class: "bad" }, `The last preview failed${dbg.report.stage ? ` (${dbg.report.stage})` : ""}.`),
-      errors.length ? el("ul", { class: "msgs bad" }, errors.map((m) => el("li", {}, m))) : null);
+      errors.length ? el("ul", { class: "msgs bad" }, errors.map((m) => el("li", {}, m)))
+        : el("p", { class: "hint" }, "The engine returned no reason. Check each endpoint's address and component; dtpipe --job on the saved file prints the error."));
   }
   if (dbg.notice) parts.push(el("p", { class: "hint warn" }, dbg.notice));
   return parts;

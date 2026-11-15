@@ -245,6 +245,8 @@ export async function compose() {
     if (!composing.stale(seq)) cards.result = { yaml: "", steps: [], errors: [e.message], warnings: [] };
   }
   invalidate("canvas", "drawer", "bar");
+  // With no wire and no card of the job selected the inspector shows the job's verdict, and holds no field a redraw would take.
+  if (!cards.selected?.edge && !(cards.selected?.alias && cards.model && stepOf(cards.selected.alias))) invalidate("inspector");
   hooks.onComposed?.(cards.result);
   return cards.result;
 }
@@ -278,7 +280,7 @@ function addStep(kind, component, x, y, brick) {
   if (kind === "source" && !brick) step.yaml = `input: "${component}:"\n`;
   if (kind === "sink" && !brick) step.yaml = `output: "${component}:"\n`;
   if (kind === "transform") step.transformers = [];
-  if (kind === "sql") step.query = "SELECT *\nFROM input";
+  if (kind === "sql") step.query = starterQuery(null);
   cards.model.steps.push(step);
   cards.model.layout[alias] = { x: Math.max(10, Math.round(x)), y: Math.max(10, Math.round(y)) };
   cards.selected = { alias };
@@ -315,6 +317,13 @@ function renameStep(from, to) {
   touch({ inspector: true });
 }
 
+/**
+ * The query a new SQL card starts with: it reads its main input by that input's alias, which is the table the SQL
+ * processor exposes. Until one is wired it names a placeholder, which composing refuses for want of an input anyway.
+ * @param {string | null} from
+ */
+const starterQuery = (from) => `SELECT *\nFROM ${from || "input"}`;
+
 function connect(fromAlias, toAlias, port) {
   const target = stepOf(toAlias);
   if (!target || fromAlias === toAlias) return;
@@ -324,6 +333,8 @@ function connect(fromAlias, toAlias, port) {
   } else if (target.kind === "merge" || target.kind === "branch") {
     if (!target.from.includes(fromAlias)) target.from.push(fromAlias);
   } else {
+    // A query nobody has edited follows the input it reads; one the person wrote is theirs.
+    if (target.kind === "sql" && target.query === starterQuery(target.from[0] ?? null)) target.query = starterQuery(fromAlias);
     target.from = [fromAlias];
     target.ref = target.ref.filter((a) => a !== fromAlias);
   }
@@ -912,7 +923,7 @@ function renderInspector() {
   if (!step) {
     const errors = cards.result?.errors?.length || 0;
     fill(view, el("h2", {}, "Job"),
-      el("p", { class: "hint" }, `${cards.model.steps.length} card(s). `, errors ? el("span", { class: "bad" }, `${errors} problem(s)`) : "Composes cleanly."),
+      el("p", { class: "hint" }, `${cards.model.steps.length} card(s). `, errors ? el("span", { class: "bad" }, `${errors} error(s): see Problems.`) : "Composes cleanly."),
       el("p", { class: "hint" }, "Select a card to edit it. A source and a sink of their own carry their endpoint as YAML; the server joins a source, its transform and its sink back into one branch when nothing else reads between them."),
       cards.model.directives.length ? [el("h3", {}, "Header directives"), el("ul", { class: "inputs" }, cards.model.directives.map((d) => el("li", {}, el("code", {}, d))))] : null);
     return;
@@ -1081,23 +1092,28 @@ function bindInspector() {
 function renderDrawer() {
   const view = $("d-drawer");
   if (!view || !cards.result) return;
-  const problems = (cards.result.errors?.length || 0) + (cards.result.warnings?.length || 0);
-  const tab = (name, label, extra) => el("button", { class: state.view.drawer === name ? "active" : "", "data-tab": name }, label, extra || null);
+  const errors = cards.result.errors?.length || 0;
+  const warnings = cards.result.warnings?.length || 0;
+  const problems = errors + warnings;
+  const tab = (name, label, ...extra) => el("button", { class: state.view.drawer === name ? "active" : "", "data-tab": name }, label, ...extra);
   const tabs = el("div", { class: "tabs" },
     tab("yaml", "YAML"),
-    tab("problems", "Problems ", problems ? el("span", { class: "count" }, problems) : null),
+    tab("problems", "Problems ",
+      errors ? el("span", { class: "count", title: `${errors} error(s)` }, errors) : null,
+      warnings ? el("span", { class: "count warn", title: `${warnings} warning(s)` }, warnings) : null),
     tab("edit", "Edit as YAML"),
     tab("preview", "Preview"),
     (hooks.extraTabs || []).map((t) => tab(t.name, t.label, t.badge?.())),
-    el("span", { class: "drawer-status" }, cards.result.errors?.length ? el("span", { class: "bad" }, `${cards.result.errors.length} error(s)`) : el("span", { class: "good" }, "composes")));
+    el("span", { class: "drawer-status" }, errors ? el("span", { class: "bad" }, `${errors} error(s)`) : el("span", { class: "good" }, "composes"),
+      warnings ? el("span", { class: "warn" }, ` · ${warnings} warning(s)`) : null));
   let body;
   if (state.view.drawer === "yaml") {
     body = [el("div", { class: "row" }, el("button", { "data-copy": true }, "Copy"),
       el("span", { class: "hint" }, "The job the server composed: a plain dtpipe job, runnable whole with dtpipe --job.")),
     el("pre", { id: "d-yaml" }, cards.result.yaml)];
   } else if (state.view.drawer === "problems") {
-    body = [cards.result.errors?.length ? el("ul", { class: "msgs bad" }, cards.result.errors.map((m) => el("li", {}, m))) : null,
-      cards.result.warnings?.length ? el("ul", { class: "msgs warn" }, cards.result.warnings.map((m) => el("li", {}, m))) : null,
+    body = [errors ? [el("h3", {}, `Errors (${errors})`), el("ul", { class: "msgs bad" }, cards.result.errors.map((m) => el("li", {}, m)))] : null,
+      warnings ? [el("h3", {}, `Warnings (${warnings})`), el("ul", { class: "msgs warn" }, cards.result.warnings.map((m) => el("li", {}, m)))] : null,
       problems ? null : el("p", { class: "hint" }, "Nothing to report.")];
   } else if (state.view.drawer === "edit") {
     body = [el("textarea", { id: "d-edit", class: "mono", rows: "16", spellcheck: "false", value: cards.result.yaml }),

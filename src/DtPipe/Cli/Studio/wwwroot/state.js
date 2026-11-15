@@ -81,7 +81,7 @@ export const state = {
   publication: { outcome: null, request: null },
   /** @type {BrickRows | null} */
   brickRows: null,
-  /** The variables of the composed job, by name, and the keyring's aliases: never a value the person did not type. @type {{ variables: any[], aliases: string[], error?: string }} */
+  /** The variables of the composed job, by name, and the keyring's aliases: never a value the person did not type. @type {{ variables: any[], aliases: string[], error?: string, pending?: boolean }} */
   vars: { variables: [], aliases: [] },
   /** The components the palette offers. */
   components: { readers: /** @type {any[]} */ ([]), writers: /** @type {any[]} */ ([]) },

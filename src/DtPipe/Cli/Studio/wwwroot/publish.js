@@ -29,11 +29,20 @@ export async function publish(replace) {
     status("Save the job first: the coordinator receives the job saved in the folder.", "bad");
     return;
   }
+  // What the studio can already tell is said before a question: the coordinator's own check of the job runs at publication.
+  if (state.cards.result?.errors?.length) {
+    showTab("problems");
+    status("The cards do not compose into a job: see Problems before publishing.", "bad");
+    return;
+  }
   if (replace === undefined) {
     let last = null;
     try { last = (await api(`/api/publish?path=${encodeURIComponent(job.path)}`)).publication; } catch { /* none */ }
     const id = prompt("The pipeline's id in the coordinator's library (lowercase letters, digits and '-'):", last?.id || defaultId(job.path));
     if (!id) return;
+    let idError = null;
+    try { idError = (await api(`/api/publish?path=${encodeURIComponent(job.path)}&id=${encodeURIComponent(id)}`)).idError; } catch { /* publication says */ }
+    if (idError) { status(idError, "bad"); return; }
     const message = prompt("Describe this version (the commit message):", `Publish ${job.path} from dtpipe studio`);
     if (message === null) return;
     publication.request = { id, message };

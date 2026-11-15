@@ -267,7 +267,13 @@ public sealed partial class StudioServer : IAsyncDisposable
                     break;
                 case ("GET", "/api/publish"):
                     var published = JobPath(request.Query["path"].ToString()) is { } publishedJob ? _local.ReadPublication(publishedJob) : null;
-                    await JsonAsync(context, new { publication = published?.Coordinator == _tools.Coordinator?.Origin.ToString() ? published : null });
+                    // An id the page proposes is judged by the rule a publication applies, before the person writes a message for it.
+                    var proposed = request.Query["id"].ToString();
+                    await JsonAsync(context, new
+                    {
+                        publication = published?.Coordinator == _tools.Coordinator?.Origin.ToString() ? published : null,
+                        idError = proposed.Length == 0 || CoordinatorApi.IsPipelineId(proposed) ? null : NotAPipelineId(proposed),
+                    });
                     break;
                 case ("POST", "/api/publish"):
                     await PublishAsync(context);
@@ -527,7 +533,7 @@ public sealed partial class StudioServer : IAsyncDisposable
         var sampling = BrickSampling.Of(yaml, bricks, _tools.Coordinator?.Catalog);
         if (sampling.Sources.Count > 0 && _tools.Coordinator?.Status().State != CoordinatorLink.SignedIn)
             throw new StudioRefusal(409, "This job reads a node's brick: sign in to the coordinator to sample it.");
-        RefuseReferences(sampling.Yaml);
+        RefuseReferences(sampling.Yaml, SignedInCatalog());
 
         // Every variable resolves before anything runs, and is named when it would not.
         var launch = _variables.LaunchEnvironment(JobPath(path), sampling.Yaml);
@@ -572,6 +578,8 @@ public sealed partial class StudioServer : IAsyncDisposable
         }
     }
 
+    private static string NotAPipelineId(string? id) => $"'{id}' is not a pipeline id: lowercase letters, digits and '-'.";
+
     /// <summary>
     /// Publishes the job as it is saved in the folder, never the page's cards: read again from disk and
     /// refused when it is not the text the page saved (its hash). Its launch file and its layout stay on
@@ -584,8 +592,7 @@ public sealed partial class StudioServer : IAsyncDisposable
         var link = _tools.Coordinator ?? throw new StudioRefusal(404, "This studio was opened without --coordinator.");
         var asked = await BodyAsync<PublishRequest>(context);
         var path = JobPath(asked.Path) ?? throw new StudioRefusal(400, "Publish a job saved in the folder: name its path.");
-        if (!CoordinatorApi.IsPipelineId(asked.Id))
-            throw new StudioRefusal(400, $"'{asked.Id}' is not a pipeline id: lowercase letters, digits and '-'.");
+        if (!CoordinatorApi.IsPipelineId(asked.Id)) throw new StudioRefusal(400, NotAPipelineId(asked.Id));
         var job = _folder.ReadJob(path);
         if (asked.Hash is null || asked.Hash != job.Hash)
             throw new StudioRefusal(409, $"{path} is not the job saved last: save it, then publish.");
@@ -712,17 +719,28 @@ public sealed partial class StudioServer : IAsyncDisposable
     /// <summary>
     /// Refuses a job in which a branch still references a brick: the engine has no <c>brick:</c>, so what a sample or a run
     /// does not bind to a throwaway file or a node's rows must not reach it. A job that is not readable is the engine's to report.
+    /// With <paramref name="signedIn"/>, the catalog read last while a person is signed in: a reference it does not hold is
+    /// named as no node's brick, not as a sign-in to make. Without it, the refusal asks for a sign-in.
     /// </summary>
-    internal static void RefuseReferences(string yaml)
+    internal static void RefuseReferences(string yaml, BrickCatalogView? signedIn = null)
     {
         IReadOnlyDictionary<string, BrickReference> left;
         try { left = BrickRef.In(JobYaml.Parse(yaml)); }
         catch (Exception ex) when (ex is FormatException or YamlDotNet.Core.YamlException) { return; }
-        if (left.Count > 0)
-            throw new StudioRefusal(409, "A branch references a brick, which only its node reads: "
-                + string.Join(", ", left.Values.Select(r => $"'{r.Alias}' ({r.Key})"))
-                + ". Sign in to the coordinator to sample it.");
+        if (left.Count == 0) return;
+        var unknown = signedIn is null ? new List<BrickReference>() : left.Values.Where(r => signedIn.Bricks.All(b => b.Key != r.Key)).ToList();
+        if (unknown.Count > 0)
+            throw new StudioRefusal(409, "No node offers the brick a branch references: "
+                + string.Join(", ", unknown.Select(r => $"'{r.Alias}' ({r.Key})"))
+                + ". Choose a brick of the palette, or write the branch's own endpoint.");
+        throw new StudioRefusal(409, "A branch references a brick, which only its node reads: "
+            + string.Join(", ", left.Values.Select(r => $"'{r.Alias}' ({r.Key})"))
+            + ". Sign in to the coordinator to sample it.");
     }
+
+    /// <summary>The catalog read from the coordinator while a person is signed in to it, or null.</summary>
+    private BrickCatalogView? SignedInCatalog() =>
+        _tools.Coordinator is { } link && link.Status().State == CoordinatorLink.SignedIn ? link.Catalog : null;
 
     /// <summary>The job with each brick's branch replaced as a sample replaces it; as it is when that cannot be done.</summary>
     private string WithoutBricks(string yaml, List<SampledBrick>? bricks)

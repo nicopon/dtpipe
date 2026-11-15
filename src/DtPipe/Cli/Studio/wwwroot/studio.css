@@ -196,6 +196,7 @@ label.review { display: block; margin: 0 0 8px; }
 .tabs button { border: none; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; padding: 6px 10px; }
 .tabs button.active { border-bottom-color: var(--accent); color: var(--accent); }
 .tabs .count { background: var(--bad); color: #fff; border-radius: 999px; padding: 0 6px; font-size: 11px; margin-left: 4px; }
+.tabs .count.warn { background: var(--warn); }
 .drawer-status { margin-left: auto; font-size: 12.5px; }
 .msgs { margin: 4px 0; padding-left: 20px; }
 .vars td { font-family: inherit; font-size: 12.5px; vertical-align: middle; white-space: nowrap; max-width: none; }
