@@ -5,7 +5,8 @@
 // session, Forget pins, typing in the inspector; the agent's panel against a scripted endpoint that speaks Ollama's API (a
 // save refused then accepted, a run, a question, a plan put on the cards, a job holding a credential, Stop, a reload mid-turn, an
 // edit made while a save waits, the person's save over the file the agent saved, a turn that fails); Undo of a deleted card and of
-// a plan, and the cards a plan names.
+// a plan, and the cards a plan names; a preview cancelled
+// while its source is still answering.
 //
 // Local only: it needs Node 22+ (native WebSocket, no dependency), Chrome, and a built dtpipe. CI never
 // runs it. The page is embedded in the DLL, so build before playing it.
@@ -794,6 +795,18 @@ const scenarios = {
     check("the pane has the size it was left at", (await p.ev(`document.querySelector("#designer").style.getPropertyValue("--pal-w")`)) === "236px", await p.ev(`document.querySelector("#designer").style.getPropertyValue("--pal-w")`));
   },
 
+  // A preview over a source that answers one row at a time slowly: Cancel abandons the request, the page is free again at
+  // once and says so, and the engine stops at its next batch instead of reading the thousand rows.
+  async "cancel-preview"({ page: p }) {
+    check("the job opens", await p.openJob("cancel.yaml"));
+    check("Cancel is hidden while nothing runs", !(await p.visible("#d-preview-cancel")));
+    await p.click("#d-preview");
+    check("Cancel shows while the preview runs", await p.until(`!document.querySelector("#d-preview-cancel").hidden`));
+    await p.click("#d-preview-cancel");
+    check("the preview says it was cancelled", await p.waitStatus(/preview cancelled/, 15000), await p.status());
+    check("Preview is available again and Cancel is gone", await p.until(`!document.querySelector("#d-preview").disabled && document.querySelector("#d-preview-cancel").hidden`));
+  },
+
   // Typing in the inspector across the page's own timers: the field keeps its focus, its text and its caret.
   async typing({ page: p }) {
     check("the job opens", await p.openJob("chain.yaml"));
@@ -813,6 +826,12 @@ const scenarios = {
 // ---------------------------------------------------------------- the runner
 
 async function seed(name, folder) {
+  if (name === "cancel-preview") {
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(path.join(folder, "slow.db"));
+    db.exec("create table t(a integer)");
+    db.close();
+  }
   if (name === "real-state") {
     fs.mkdirSync(path.join(folder, ".dtpipe/studio"), { recursive: true });
     fs.writeFileSync(stateFile(folder, "chain.yaml"), JSON.stringify({
@@ -831,6 +850,7 @@ const argsOf = {
 const fixturesOf = {
   undo: ["chain.yaml", "whole.yaml"],
   "whole-branch": ["whole.yaml"], "edit-during-run": ["slow.yaml"], "open-race": ["chain.yaml", "whole.yaml"],
+  "cancel-preview": ["cancel.yaml"],
   "write-plain": ["review.yaml"], "write-choose": ["review.yaml"], "review-write": ["review.yaml"], "review-abandon": ["review.yaml"], "review-reload": ["review.yaml"],
 };
 

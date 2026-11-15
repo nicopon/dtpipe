@@ -11,6 +11,12 @@ import { invalidate } from "./render.js";
 import { freshPreview, sequence, state } from "./state.js";
 
 const dbg = state.preview;
+// The preview that is under way, whose request Cancel abandons: the server reads the abandoned request as a stop.
+/** @type {AbortController | null} */
+let running = null;
+/** The rows a stage delivered: one that stopped at the preview's cap says "+", since its source may hold more. @param {any} stage */
+const rowsOf = (stage) => `${stage.rowsSeen}${stage.more || atCap(stage) ? "+" : ""}`;
+const atCap = (stage) => dbg.rowCap > 0 && stage.rowsSeen >= dbg.rowCap;
 const MAX_DEBUG_ROWS = 100000;
 
 // One counter per kind of request. A state change and a plan are answered about the same job but are not the same
@@ -182,6 +188,10 @@ export async function setDebugRows(e) {
 }
 
 // A preview is one more turn of the queue: it never meets a state change still holding the engine slot.
+/** Cancel: the request is abandoned, and the engine stops at its next batch of rows. */
+export function cancelPreview() {
+  running?.abort();
+}
 export const runPreview = (place) => (!state.job || dbg.running ? Promise.resolve() : queued(() => runPreviewNow(place)));
 
 // The sample of a branch that failed names it: the cards it runs show the failure, the others keep what they showed.
@@ -217,8 +227,9 @@ async function runPreviewNow(place) {
   dbg.failed = new Set();
   redrawPreview();
   status("preview…", "warn");
+  running = new AbortController();
   try {
-    const answer = await api("/api/debug", { ...debugScope(), yaml: result.yaml, rows: dbg.rows, bricks: brickBranches(), upTo: place });
+    const answer = await api("/api/debug", { ...debugScope(), yaml: result.yaml, rows: dbg.rows, bricks: brickBranches(), upTo: place }, undefined, running.signal);
     // Another job may have been opened while it ran: its answer is not that job's.
     if (forJob !== state.job) { status("preview ended", "warn"); return; }
     dbg.running = false;
@@ -228,12 +239,17 @@ async function runPreviewNow(place) {
     if (!answer.report.success) dbg.failed = failedCards(answer.report);
     dbg.notice = answer.notice;
     dbg.report = answer.report;
+    dbg.rowCap = answer.rowCap ?? 0;
     if (place?.card) focusCard(place.card); else showTab("preview");
     status(answer.report.success ? (place?.card ? `ran up to ${place.card}` : "preview done") : "preview failed", answer.report.success ? "good" : "bad");
   } catch (e) {
-    if (e.status === 422 && state.vars.variables.some((v) => !v.ready)) showTab("variables");
-    status(e.message, "bad");
+    if (e.name === "AbortError") status("preview cancelled: the engine stops at its next batch of rows, and a query that has not answered yet runs on until it does", "warn");
+    else {
+      if (e.status === 422 && state.vars.variables.some((v) => !v.ready)) showTab("variables");
+      status(e.message, "bad");
+    }
   } finally {
+    running = null;
     dbg.running = false;
     redrawPreview();
     // An edit made while the run went on was not judged: the rows just taken are those of the text that ran.
@@ -256,7 +272,7 @@ function cardState(alias) {
   const shown = dbg.shown.get(alias);
   if (shown) {
     const stage = shown.stage;
-    return { name: "fresh", glyph: "●", text: `${stage.rowsSeen}${stage.more ? "+" : ""} rows · ${(stage.columns || []).length} col` };
+    return { name: "fresh", glyph: "●", text: `${rowsOf(stage)} rows · ${(stage.columns || []).length} col` };
   }
   return dbg.edited.has(alias) ? { name: "edited", glyph: "○", text: "edited since preview" } : { name: "never", glyph: "○", text: "no preview" };
 }
@@ -328,7 +344,7 @@ export async function forgetPins() {
 export function previewView(alias) {
   const place = alias ? cardWatch(alias) : null;
   const parts = [];
-  if (dbg.running) parts.push(el("p", { class: "warn" }, "Running…"));
+  if (dbg.running) parts.push(el("p", { class: "warn" }, "Running… ", el("button", { class: "ghost small", onclick: cancelPreview }, "Cancel")));
   const waiting = alias && !place ? queueOf(alias) : null;
   if (waiting) {
     const held = dbg.held.get(waiting.branch);
@@ -357,8 +373,9 @@ export function previewView(alias) {
     const shown = dbg.shown.get(alias);
     if (shown) {
       const stage = shown.stage;
-      const total = `${stage.rowsSeen}${stage.more ? "+" : ""}`;
-      const cut = (stage.sample || []).length < stage.rowsSeen ? " (the first 1000 shown)" : "";
+      const total = rowsOf(stage);
+      const cut = (stage.sample || []).length < stage.rowsSeen ? " (the first 1000 shown)"
+        : atCap(stage) ? ` (a preview reads at most ${dbg.rowCap} rows of a source: it may hold more)` : "";
       parts.push(el("p", { class: "muted" }, `${alias}: ${total} rows${dbg.real ? " held" : " delivered"}${cut}. The target was not written.`),
         el("div", { class: "scroll" }, stageTable(stage)));
     } else if (dbg.edited.has(alias)) {

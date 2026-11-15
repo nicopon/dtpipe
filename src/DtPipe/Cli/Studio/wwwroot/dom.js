@@ -52,8 +52,10 @@ export function svg(tag, attrs = {}) {
   return node;
 }
 
-export async function api(path, body, method) {
+/** @param {string} path @param {any} [body] @param {string} [method] @param {AbortSignal} [signal] aborting it abandons the request, which the server reads as a stop */
+export async function api(path, body, method, signal) {
   const response = await fetch(path, {
+    signal,
     method: method || (body === undefined ? "GET" : "POST"),
     headers: { "X-Dtpipe-Studio": token, "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),

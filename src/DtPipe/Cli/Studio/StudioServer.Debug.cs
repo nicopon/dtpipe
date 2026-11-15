@@ -299,6 +299,8 @@ public sealed partial class StudioServer
         {
             report = JsonNode.Parse(reported!),
             rows,
+            // The most rows the engine reads of a source whatever was asked: a stage that reached it may have had more.
+            rowCap = DtPipe.DryRun.SampleTapRecorder.MaxQuota,
             upTo = asked.UpTo,
             view = DebugView(plan, state!, cut!.Pieces, cut, RanOf(reported!)),
             notice = "This is a debug run, not the job's run: every cut passes through Arrow, batches differ and so does the concurrency. "

@@ -155,6 +155,11 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   the bound applies to each source alone (at most `DebugMaxRows`, a thousand rows shown per stage) and a
   checkpoint read back is not bounded again. With no stop the run reaches the end of the job: only the branches
   that write or that nothing reads start it, so a branch whose reader reads a checkpoint back is left out.
+- **A preview stops when its request is abandoned.** The page's *Cancel* and a reload abandon the request, the server hands its
+  `RequestAborted` to the engine through `SampleCoreAsync`, and the engine stops at its next batch of rows; a source query that has
+  not answered its first row cannot be interrupted by the reader, so the slot stays taken until it does and the next action is a 409
+  that names the preview. The answer carries `rowCap`, the most rows the engine reads of a source, so a card that stopped there says
+  "+" and the drawer says why. `[local: page_smoke.mjs cancel-preview]` `[unchecked: that the engine stops, played by hand against a slow source]`
 - **The server says where a card's rows are; the page never rebuilds the cut's names.** The view lists
   `places`, one per branch read and end, with the digest of what its rows depend on and, after a run, the `alias` of
   the piece of the report that holds it (first stage for a read, last for an end) or null when the run did not

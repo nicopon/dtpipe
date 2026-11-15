@@ -9,7 +9,7 @@ import { compose, markSaved, mountDesigner, openBlank, openJob, restoreSizes, se
 import { readView, rememberView, sizesRead, viewRestored } from "./prefs.js";
 import { afterFlush, invalidate, onZone } from "./render.js";
 import { sequence, state } from "./state.js";
-import { adoptDraft, cardBadge, cardTool, cardTools, debugComposed, forgetPins, forgetPreview, heldBranch, heldTargets, previewView, restoreRows, runPreview, setDebugRows } from "./preview.js";
+import { adoptDraft, cancelPreview, cardBadge, cardTool, cardTools, debugComposed, forgetPins, forgetPreview, heldBranch, heldTargets, previewView, restoreRows, runPreview, setDebugRows } from "./preview.js";
 import { forgetRun, prepareRun, restoreReview, runView } from "./run.js";
 import { forgetPublication, publicationProblems, publicationView, publish } from "./publish.js";
 import { loadVariables, onLaunchChanged, unreadyCount, variablesView } from "./variables.js";
@@ -223,6 +223,7 @@ function renderBar() {
   const set = (id, props) => { const node = $(id); if (node) Object.assign(node, props); };
   const suspended = dbg.real;
   set("d-preview", { disabled: dbg.running || suspended, title: suspended ? SUSPENDED : PREVIEW_TITLE });
+  set("d-preview-cancel", { hidden: !dbg.running });
   set("d-suspended", { hidden: !suspended });
   // The rows are typed here: a drawing never rewrites what the person is typing.
   set("d-watch-rows", { disabled: dbg.running || dbg.real, ...(document.activeElement === $("d-watch-rows") ? {} : { value: String(dbg.rows) }) });
@@ -249,7 +250,8 @@ function barButtons() {
   return [
     el("button", { id: "d-save", title: "Write the job and its layout (Ctrl+S)", onclick: () => save() }, "Save"),
     el("button", { id: "d-preview", class: "primary", title: PREVIEW_TITLE, onclick: () => runPreview(null) }, "▶ Preview"),
-    el("label", { id: "d-watch-rows-label", class: "rows", title: "Source rows each source reads (each card shows at most 1000 of them)" },
+    el("button", { id: "d-preview-cancel", class: "ghost danger", hidden: true, title: "Stop the preview: the engine stops at its next batch of rows", onclick: cancelPreview }, "Cancel"),
+    el("label", { id: "d-watch-rows-label", class: "rows", title: "Source rows each source reads, up to the preview's cap: a card says when a source stopped there" },
       "rows ", el("input", { id: "d-watch-rows", type: "number", min: "1", max: String(MAX_DEBUG_ROWS), value: String(state.preview.rows), onchange: setDebugRows })),
     el("button", { id: "d-forget-pins", class: "ghost small", hidden: true, title: "Unpin every card and forget the checkpoints they kept", onclick: forgetPins }, "Forget pins"),
     el("span", { id: "d-suspended", class: "suspended", hidden: true, title: SUSPENDED }, "⏸ run suspended: write or abandon it on the sink cards"),
