@@ -104,9 +104,9 @@ function bindingsCard() {
       ${pin ? `<span class="hint">checked at brick ${esc(pin.version.slice(0, 12))}</span>` : ""}${problemOf(a)}</td></tr>`;
   }).join("");
   const strays = stray.map((a) => `<tr><td class="mono">${esc(a)}</td><td>${problemOf(a) || `<span class="hint">no brick branch of this job</span>`}
-      <button class="small ghost" data-drop="${esc(a)}" ${busy ? "disabled" : ""}>Remove</button></td></tr>`).join("");
+      <button class="small ghost" data-needs="designer" data-drop="${esc(a)}" ${busy ? "disabled" : ""}>Remove</button></td></tr>`).join("");
   return `<section class="card"><div class="card-head"><h2>Bindings</h2>
-      <span class="actions"><button id="x-bind" class="primary" ${bindingsDirty() && !busy ? "" : "disabled"}>Save bindings</button></span></div>
+      <span class="actions"><button data-needs="designer" id="x-bind" class="primary" ${bindingsDirty() && !busy ? "" : "disabled"}>Save bindings</button></span></div>
     <p class="hint">The node each source and sink runs on, and how its brick may change. Saving checks the bindings against the nodes and pins what
       the check saw. Every other step runs on the runner, which is never named.</p>
     <table class="library">${rows}${strays}</table></section>`;
@@ -152,9 +152,9 @@ function render() {
       <div class="row">${status}
         <span class="actions">
           <a class="button" href="#/library">← Library</a>
-          <button id="x-deploy" ${canDeploy && !busy && !bindingsDirty() ? "" : "disabled"} title="${bindingsDirty() ? "Save the bindings first" : ""}">${current ? "Deploy again" : "Deploy"}</button>
-          <button id="x-run" class="primary" ${canRun && !busy ? "" : "disabled"}>Run</button>
-          ${deployment ? `<button id="x-undeploy" class="ghost danger" ${isActive(run) || busy ? "disabled" : ""}>Undeploy</button>` : ""}
+          <button data-needs="designer" id="x-deploy" ${canDeploy && !busy && !bindingsDirty() ? "" : "disabled"} title="${bindingsDirty() ? "Save the bindings first" : ""}">${current ? "Deploy again" : "Deploy"}</button>
+          <button data-needs="designer" id="x-run" class="primary" ${canRun && !busy ? "" : "disabled"}>Run</button>
+          ${deployment ? `<button data-needs="designer" id="x-undeploy" class="ghost danger" ${isActive(run) || busy ? "disabled" : ""}>Undeploy</button>` : ""}
         </span>
       </div>
     </div>

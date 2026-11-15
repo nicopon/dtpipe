@@ -63,9 +63,9 @@ function deployRowActions(e) {
   const unbound = (e.bindingProblems || []).some((p) => p.blocking);
   const deploy = !active && !unbound;
   const run = deployment && deployment.state !== "failed";
-  return `<button class="small" data-deploy="${esc(e.id)}" ${deploy ? "" : "disabled"} title="${unbound ? "Its bindings do not hold" : ""}">${deployment ? "Redeploy" : "Deploy"}</button>
-        <button class="small primary" data-run="${esc(e.id)}" ${run ? "" : "disabled"}>Run</button>
-        ${deployment ? `<button class="small ghost danger" data-undeploy="${esc(e.id)}" ${active ? "disabled" : ""}>Undeploy</button>` : ""}`;
+  return `<button class="small" data-needs="designer" data-deploy="${esc(e.id)}" ${deploy ? "" : "disabled"} title="${unbound ? "Its bindings do not hold" : ""}">${deployment ? "Redeploy" : "Deploy"}</button>
+        <button class="small primary" data-needs="designer" data-run="${esc(e.id)}" ${run ? "" : "disabled"}>Run</button>
+        ${deployment ? `<button class="small ghost danger" data-needs="designer" data-undeploy="${esc(e.id)}" ${active ? "disabled" : ""}>Undeploy</button>` : ""}`;
 }
 
 function render() {
@@ -81,7 +81,7 @@ function render() {
         <a class="button small" href="#/library/${encodeURIComponent(e.id)}" title="The plan a launch would make, and its runs">Open</a>
         ${deployRowActions(e)}
         <button class="small ghost" data-history="${esc(e.id)}">${historyOf === e.id ? "Hide history" : "History"}</button>
-        <button class="small ghost danger" data-delete="${esc(e.id)}">Delete</button>
+        <button class="small ghost danger" data-needs="designer" data-delete="${esc(e.id)}">Delete</button>
       </td>
     </tr>
     ${historyOf === e.id ? `<tr class="history-row"><td colspan="6">${historyPanel(e.id)}</td></tr>` : ""}`).join("");
@@ -106,7 +106,7 @@ function historyPanel(id) {
     <div class="commit ${shown?.commit === c.hash ? "active" : ""}">
       <code>${esc(c.hash.slice(0, 8))}</code> <span>${esc(c.message)}</span> <span class="hint">${esc(new Date(c.date).toLocaleString())}</span>
       <span class="actions"><button class="small ghost" data-show="${esc(c.hash)}">show</button>
-      <button class="small ghost" data-restore="${esc(c.hash)}" data-id="${esc(id)}">restore</button></span>
+      <button class="small ghost" data-needs="designer" data-restore="${esc(c.hash)}" data-id="${esc(id)}">restore</button></span>
     </div>`).join("");
   return `<div class="history-panel"><div>${list || `<p class="hint">No commit.</p>`}</div>
     ${shown ? `<div class="grid2"><div><h3>Change</h3><pre class="diff">${diffHtml(shown.diff)}</pre></div><div><h3>Job at ${esc(shown.commit.slice(0, 8))}</h3><pre>${esc(shown.yaml)}</pre></div></div>` : ""}</div>`;

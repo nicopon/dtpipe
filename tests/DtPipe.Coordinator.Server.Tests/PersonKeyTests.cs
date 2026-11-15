@@ -391,7 +391,7 @@ public sealed partial class PersonKeyTests : IDisposable
             answers.Add((refused.StatusCode, Alert().Match(await refused.Content.ReadAsStringAsync(Ct)).Groups[1].Value));
         }
 
-        Assert.Equal((HttpStatusCode.BadRequest, "This key signs nobody in here."), Assert.Single(answers.Distinct()));
+        Assert.Equal((HttpStatusCode.BadRequest, "No person signs in to this coordinator with this key: it is unknown, revoked, expired, or made for a node or a runner."), Assert.Single(answers.Distinct()));
         Assert.Equal(HttpStatusCode.Unauthorized, await StatusAsync(browser, CoordinatorApi.Me));
         Assert.Contains(_log.Entries, e => e.Contains("A sign-in with a key for alice"));
         foreach (var key in presented.Where(k => k.StartsWith(ClearKey.Prefix, StringComparison.Ordinal))) AssertNoLogCarries(key);

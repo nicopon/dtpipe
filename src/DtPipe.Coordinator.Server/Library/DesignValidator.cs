@@ -101,7 +101,7 @@ public class DesignValidator(BrickCatalog bricks, NodeRequests nodes)
         {
             return new DesignCheck(false, $"The runner did not answer within {RunnerBound.TotalSeconds:F0}s.");
         }
-        if (!dryRun.Ok) return new DesignCheck(false, dryRun.Report);
+        if (!dryRun.Ok) return new DesignCheck(false, ShownFailure.OfConsole(dryRun.Report));
 
         var checks = await Task.WhenAll(sinks.Select(async s =>
         {

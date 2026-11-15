@@ -54,8 +54,8 @@ function renderDeployments() {
       <td><span class="chip ${d.state === "ready" ? "ok" : d.state === "failed" ? "bad" : "warn"}" title="${esc(d.message || "")}">${esc(d.state)}</span>${d.commit ? ` <span class="hint mono" title="The commit it is armed at">${esc(d.commit.slice(0, 8))}</span>` : ""}</td>
       <td class="wrap">${d.fragments.length ? "" : (d.nodes || []).map((n) => `<span class="chip" style="color:${nodeColor(n)}" title="Bound by this deployment; planned at each launch">${esc(n)}</span>`).join(" ")}${d.fragments.map((f) => `<span class="chip" style="color:${nodeColor(f.node)}" title="${esc(f.name)} · ${esc(f.version.slice(0, 12))} · ${f.replicas ?? 0} replica(s) could run it now">${esc(f.node)}${f.replicas != null ? ` · ${f.replicas}` : ""}</span>`).join(" ")}</td>
       <td class="num">${d.edges}</td><td class="num">${d.queued || ""}</td>
-      <td class="actions-cell"><button class="small" data-run="${esc(d.pipelineId)}" ${d.state === "failed" ? "disabled" : ""}>Run</button>
-        <button class="small ghost danger" data-undeploy="${esc(d.pipelineId)}" ${d.runningRunId || d.queued ? "disabled" : ""}>Undeploy</button></td>
+      <td class="actions-cell"><button class="small" data-needs="designer" data-run="${esc(d.pipelineId)}" ${d.state === "failed" ? "disabled" : ""}>Run</button>
+        <button class="small ghost danger" data-needs="designer" data-undeploy="${esc(d.pipelineId)}" ${d.runningRunId || d.queued ? "disabled" : ""}>Undeploy</button></td>
     </tr>`).join("")}</table>` : `<p class="hint">Nothing deployed. Deploy a pipeline from the Library.</p>`;
 }
 
@@ -65,7 +65,7 @@ function renderQueue() {
   el.innerHTML = store.queue.length ? store.queue.map((r) => {
     const since = r.state === "running" ? `${((Date.now() - new Date(r.startedAt)) / 1000).toFixed(0)} s` : `queued ${((Date.now() - new Date(r.queuedAt)) / 1000).toFixed(0)} s ago`;
     return `<div class="queue-item"><span class="outcome-chip ${esc(r.state)}">${esc(r.state)}</span> <b>${esc(r.pipelineId)}</b> <code>${esc(r.runId)}</code> <span class="hint">${since}${r.launchedBy ? ` · by ${esc(r.launchedBy)}` : ""}</span>
-      <button class="small ghost danger" data-cancel="${esc(r.runId)}">Cancel</button>${r.state === "running" ? awayNotes(r) : ""}</div>`;
+      <button class="small ghost danger" data-needs="designer" data-cancel="${esc(r.runId)}">Cancel</button>${r.state === "running" ? awayNotes(r) : ""}</div>`;
   }).join("") : `<p class="hint">Idle.</p>`;
 }
 

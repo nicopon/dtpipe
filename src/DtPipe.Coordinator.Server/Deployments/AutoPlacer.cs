@@ -208,7 +208,7 @@ public sealed class AutoPlacer(BrickCatalog bricks, NodeInventory inventory, Pla
         }
         catch (Exception ex)
         {
-            errors.Add($"The job is not readable: {ex.Message}");
+            errors.Add($"The job is not readable: {ShownFailure.Of(ex)}");
         }
 
         var plan = planner.Build(new PlanRequest(pipelineId, yaml, placed, named), PlanMode.Library);

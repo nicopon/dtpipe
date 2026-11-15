@@ -68,6 +68,24 @@ export function duration(run) {
   return ((new Date(run.finishedAt) - new Date(run.startedAt)) / 1000).toFixed(1) + " s";
 }
 
+/** Whether the signed-in person's role allows `role`: the server sends every role the person holds, the highest first. */
+export const can = (role) => !store.me || store.me.roles.includes(role);
+
+/** What a refusal for the person's role says, in the words of the pages: the role they have and who can do it instead. */
+export function forbidden() {
+  const role = store.me?.roles?.[0];
+  return `Your role${role ? ` (${role})` : ""} does not allow this: ask ${role === "designer" ? "an administrator" : "a designer or an administrator"}.`;
+}
+
+/** Disables, inside `root`, what the person's role does not allow: an element marked `data-needs="<role>"`, with the reason as its title. */
+export function gate(root) {
+  for (const el of root.querySelectorAll("[data-needs]")) {
+    if (can(el.dataset.needs)) continue;
+    el.disabled = true;
+    el.title = forbidden();
+  }
+}
+
 export async function api(path, body, method) {
   // The CSRF header rides every call: the server refuses a change without it.
   const init = { method: method || (body === undefined ? "GET" : "POST"), headers: { "X-Dtpipe-Csrf": "1" } };
@@ -78,7 +96,7 @@ export async function api(path, body, method) {
   const text = await response.text();
   let data = {};
   try { data = text ? JSON.parse(text) : {}; } catch { data = { error: text }; }
-  if (!response.ok) throw new Error(data.error || data.title || `${response.status} ${response.statusText}`);
+  if (!response.ok) throw new Error(data.error || data.detail || (response.status === 403 ? forbidden() : data.title) || `${response.status} ${response.statusText}`);
   return data;
 }
 

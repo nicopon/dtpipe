@@ -115,6 +115,11 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   never answers. The pages' `api()` helpers send it. Never add a cookie-authenticated route outside
   those groups.
   `[CI: RouteTableTests] [local: the lab's smoke.py rights]`
+- **The pages read the person's role, and a refusal for it is in words.** `store.me.roles` (`/api/me`, highest first) decides what a view
+  offers: an element marked `data-needs="<role>"` is disabled with the reason (`gate`, one observer on the view), the Access view is an
+  administrator's alone, and a 403 with no body of its own reads as the role the person has and who can do it (`forbidden` in `core.js`).
+  An address that names no view says "No such page". The sign-in form words one refusal for every key it turns down (unknown, revoked,
+  expired, a node's, not a key), never telling them apart. `[CI: PersonKeyTests]` `[unchecked: the pages, which no test plays in a browser]`
 - **A route's authorization is the group it is mapped on, and `MapCoordinatorServerAsync` declares the groups.** The reader,
   designer and admin groups of `/api` (their roles, and the CSRF filter they inherit) are built once there. `NodeEndpoints`,
   `LibraryEndpoints`, `RightsEndpoints` and `RunEndpoints` each map their domain on the reader group they extend and on

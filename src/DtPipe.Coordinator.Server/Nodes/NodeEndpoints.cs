@@ -31,7 +31,7 @@ internal static class NodeEndpoints
         {
             YamlDotNet.RepresentationModel.YamlMappingNode job;
             try { job = JobYaml.Parse(request.Job); }
-            catch (Exception ex) { return Results.BadRequest(new { error = $"The job is not readable: {ex.Message}" }); }
+            catch (Exception ex) { return Results.BadRequest(new { error = $"The job is not readable: {ShownFailure.Of(ex)}" }); }
             var answers = new Dictionary<string, Recognition>(StringComparer.Ordinal);
             foreach (var (alias, branch) in JobYaml.Branches(job))
             {
