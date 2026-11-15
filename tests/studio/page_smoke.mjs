@@ -6,7 +6,8 @@
 // save refused then accepted, a run, a question, a plan put on the cards, a job holding a credential, Stop, a reload mid-turn, an
 // edit made while a save waits, the person's save over the file the agent saved, a turn that fails); Undo of a deleted card and of
 // a plan, and the cards a plan names; a preview cancelled
-// while its source is still answering.
+// while its source is still answering; Tab to a card, a wire made and undone from the keyboard, every control named,
+// the text at 4.5:1 in both themes.
 //
 // Local only: it needs Node 22+ (native WebSocket, no dependency), Chrome, and a built dtpipe. CI never
 // runs it. The page is embedded in the DLL, so build before playing it.
@@ -218,6 +219,79 @@ function session(ws) {
   s.pick = (alias) => s.click(`.dcard[data-alias="${alias}"] .dcard-head`);
   s.waitStatus = (pattern, ms) => s.until(`${pattern}.test(document.querySelector("#status")?.textContent ?? "")`, ms);
   // Found and clicked in one evaluation: the list of jobs is drawn again at any moment, and a button found is not one still there.
+  s.key = async (key, code, vk, text) => {
+    const base = { key, code, windowsVirtualKeyCode: vk };
+    await send("Input.dispatchKeyEvent", { type: text ? "keyDown" : "rawKeyDown", ...base, ...(text ? { text } : {}) });
+    await send("Input.dispatchKeyEvent", { type: "keyUp", ...base });
+    await s.frame();
+  };
+  s.tabKey = () => s.key("Tab", "Tab", 9);
+  s.enterKey = () => s.key("Enter", "Enter", 13, "\r");
+  // A drag with the mouse from the centre of one element to the centre of another: the pointer's path, which the keyboard's must not replace.
+  s.drag = async (from, to) => {
+    const centre = (selector) => s.ev(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e) return null; const b = e.getBoundingClientRect(); return [b.x + b.width / 2, b.y + b.height / 2]; })()`);
+    const a = await centre(from);
+    const b = await centre(to);
+    if (!a || !b) throw new Error(`no element ${a ? to : from}`);
+    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: a[0], y: a[1], button: "none", buttons: 0 });
+    await send("Input.dispatchMouseEvent", { type: "mousePressed", x: a[0], y: a[1], button: "left", clickCount: 1, buttons: 1 });
+    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: (a[0] + b[0]) / 2, y: (a[1] + b[1]) / 2, button: "left", buttons: 1 });
+    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: b[0], y: b[1], button: "left", buttons: 1 });
+    await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: b[0], y: b[1], button: "left", clickCount: 1, buttons: 0 });
+    await s.frame();
+  };
+  s.theme = async (name) => {
+    await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: name }] });
+    await s.frame();
+  };
+  // Every control the accessibility tree holds with no name a person could be read: none, or one that is only
+  // a symbol ("+", "×") or only the tooltip or the placeholder, which are neither a label nor a name Chrome
+  // reads the same everywhere. Chrome computes the names, so this is the page as a screen reader gets it.
+  s.unnamed = async () => {
+    await send("DOM.enable");
+    await send("Accessibility.enable");
+    const tree = (await send("Accessibility.getFullAXTree")).result.nodes;
+    const controls = new Set(["button", "textbox", "combobox", "checkbox", "radio", "searchbox", "spinbutton", "slider", "switch", "listbox", "tab", "link", "menuitem", "option"]);
+    const found = [];
+    for (const n of tree) {
+      if (n.ignored || !controls.has(n.role?.value)) continue;
+      const name = String(n.name?.value ?? "").trim();
+      const used = (n.name?.sources ?? []).find((x) => x.value && !x.superseded && x.value.value);
+      const weak = !name || !/[\p{L}\p{N}]/u.test(name) || (used?.type === "attribute" && used.attribute !== "aria-label") || used?.type === "placeholder";
+      if (!weak) continue;
+      const described = (await send("DOM.describeNode", { backendNodeId: n.backendDOMNodeId })).result?.node;
+      const attrs = Object.fromEntries((described?.attributes ?? []).reduce((acc, v, i, a) => (i % 2 ? acc : [...acc, [v, a[i + 1]]]), []));
+      found.push(`${described?.localName}${attrs.id ? `#${attrs.id}` : ""}${attrs.class ? `.${attrs.class.split(" ").join(".")}` : ""} [${name}]`);
+    }
+    return found;
+  };
+  // The text the page draws against its background, as WCAG measures it: relative luminance of the colour and of
+  // what is behind it, both read as drawn (the canvas resolves any colour the CSS writes, color-mix included).
+  // Inactive (disabled) controls are exempt. Answers the worst pairs, each once.
+  s.contrast = (minimum = 4.5) => s.ev(`(() => {
+    const ctx = document.createElement("canvas").getContext("2d", { willReadFrequently: true });
+    const rgba = (css) => { ctx.clearRect(0, 0, 1, 1); ctx.fillStyle = "#000"; ctx.fillStyle = css; ctx.fillRect(0, 0, 1, 1); const d = ctx.getImageData(0, 0, 1, 1).data; return [d[0], d[1], d[2], d[3] / 255]; };
+    const over = (top, bottom) => { const a = top[3] + bottom[3] * (1 - top[3]); return a ? [0, 1, 2].map((i) => (top[i] * top[3] + bottom[i] * bottom[3] * (1 - top[3])) / a).concat(a) : [0, 0, 0, 0]; };
+    const lum = (c) => { const f = (v) => { v /= 255; return v <= .03928 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4; }; return .2126 * f(c[0]) + .7152 * f(c[1]) + .0722 * f(c[2]); };
+    const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + .05) / (y + .05); };
+    const behind = (e) => { let bg = [0, 0, 0, 0]; for (let n = e; n; n = n.parentElement) bg = over(bg, rgba(getComputedStyle(n).backgroundColor)); return over(bg, rgba(getComputedStyle(document.documentElement).backgroundColor)); };
+    const opacityOf = (e) => { let o = 1; for (let n = e; n; n = n.parentElement) o *= Number(getComputedStyle(n).opacity); return o; };
+    const worst = new Map();
+    for (const e of document.querySelectorAll("body *")) {
+      if (![...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())) continue;
+      if (e.closest("[hidden], [disabled]") || !e.getClientRects().length) continue;
+      const style = getComputedStyle(e);
+      if (style.visibility === "hidden") continue;
+      const bg = behind(e);
+      let fg = rgba(style.color);
+      fg = over([fg[0], fg[1], fg[2], fg[3] * opacityOf(e)], bg);
+      const r = ratio(fg, bg);
+      if (r >= ${minimum}) continue;
+      const key = e.tagName.toLowerCase() + (e.className && typeof e.className === "string" ? "." + e.className.trim().split(/\\s+/).join(".") : "") + " " + style.color + " on " + style.backgroundColor;
+      if (!worst.has(key) || worst.get(key).r > r) worst.set(key, { r: Math.round(r * 100) / 100, text: e.textContent.trim().slice(0, 24) });
+    }
+    return [...worst].map(([k, v]) => k + " = " + v.r + " (" + v.text + ")");
+  })()`);
   s.openJob = async (name) => {
     await s.until(`(() => { const b = [...document.querySelectorAll("#jobs button.job")].find((b) => b.textContent === ${JSON.stringify(name)}); if (!b) return false; b.click(); return true; })()`);
     return s.until(`document.querySelectorAll(".dcard").length >= 2 && !!document.querySelector("#d-drawer .tabs")`);
@@ -821,6 +895,99 @@ const scenarios = {
     check("the field keeps what was typed", field.tail === "# note", JSON.stringify(field));
     check("the caret stays at the end", field.caret, JSON.stringify(field));
   },
+
+  // What a pointer does, the keyboard does: Tab reaches every card, a card is chosen with Enter, and a wire is undone and
+  // made again from its inspector; the drag of a wire still works. Every control has a name, and the text reads at 4.5:1
+  // in both themes, across the screens a person opens.
+  async keyboard({ page: p }) {
+    const wires = () => p.ev(`[...document.querySelectorAll(".dedge-hit")].map((e) => e.dataset.from + ">" + e.dataset.to).sort().join(",")`);
+    const focused = () => p.ev(`(() => { const e = document.activeElement; return e?.classList?.contains("dcard") ? e.dataset.alias : null; })()`);
+    const wired = (from, to) => p.until(`[...document.querySelectorAll(".dedge-hit")].some((e) => e.dataset.from === "${from}" && e.dataset.to === "${to}")`);
+    const unwired = (to) => p.until(`[...document.querySelectorAll(".dedge-hit")].every((e) => e.dataset.to !== "${to}")`);
+    check("the job opens", await p.openJob("chain.yaml"));
+    check("the cards are wired a, b, c", (await wires()) === "a>b,b>c", await wires());
+    await p.click("#d-preview");
+    check("Preview finishes", await p.waitStatus(/preview (done|failed)/, 30000));
+
+    // The screens a person opens, visited once per question: the designer, each card, the zoom into a step, each tab of the drawer.
+    const visit = async (look) => {
+      const tabs = await p.ev(`[...document.querySelectorAll("#d-drawer .tabs button")].map((b) => b.dataset.tab)`);
+      for (const card of ["a", "b", "c"]) {
+        await p.pick(card);
+        for (const tab of tabs) { await p.click(`#d-drawer .tabs button[data-tab="${tab}"]`); await look(); }
+      }
+      await p.ev(`document.querySelector("#d-inner").click()`);
+      await look();
+      await p.ev(`document.querySelector('.dcard[data-alias="b"] .dcard-zoom').click()`);
+      await p.until(`!document.querySelector("#d-chain").hidden`);
+      await p.ev(`document.querySelector("#d-chain .chain-item")?.click()`);
+      await p.frame();
+      await look();
+      await p.ev(`document.querySelector("[data-crumb]")?.click()`);
+      await p.until(`!document.querySelector("#d-inner").hidden`);
+    };
+
+    // Every control has a name.
+    const unnamed = new Set();
+    await visit(async () => { for (const u of await p.unnamed()) unnamed.add(u); });
+    check("the page's controls all have a name", unnamed.size === 0, [...unnamed].join(" | "));
+
+    // The text reads at 4.5:1 in each theme.
+    for (const theme of ["light", "dark"]) {
+      await p.theme(theme);
+      const low = new Set();
+      await visit(async () => { for (const line of await p.contrast()) low.add(line); });
+      check(`the text reads at 4.5:1 in the ${theme} theme`, low.size === 0, [...low].join(" | "));
+    }
+    await p.theme("light");
+
+    // Tab alone reaches each card.
+    await p.ev(`document.activeElement?.blur()`);
+    const reached = new Set();
+    for (let i = 0; i < 120 && reached.size < 3; i++) {
+      await p.tabKey();
+      const at = await focused();
+      if (at) reached.add(at);
+    }
+    check("Tab reaches every card", ["a", "b", "c"].every((a) => reached.has(a)), [...reached].join(","));
+
+    // Choose c, then unwire and wire it again, with keys alone.
+    await p.ev(`document.querySelector("#d-inner").click()`);
+    await p.ev(`document.querySelector('.dcard[data-alias="c"]')?.focus()`);
+    check("a focused card shows where the focus is", (await focused()) === "c" && await p.ev(`(() => { const s = getComputedStyle(document.activeElement); return s.outlineStyle !== "none" && parseFloat(s.outlineWidth) > 0; })()`));
+    await p.enterKey();
+    check("Enter chooses the card", await p.until(`document.querySelector('.dcard[data-alias="c"]')?.classList.contains("selected") && !!document.querySelector("#d-inspector [data-unwire]")`));
+    await p.ev(`document.querySelector('#d-inspector [data-unwire="b"]')?.focus()`);
+    await p.enterKey();
+    check("a wire is undone from the inspector", await unwired("c"), await wires());
+    check("the status says so", /removed/i.test(await p.status()) && /b/.test(await p.status()) && /c/.test(await p.status()), await p.status());
+    await p.until(`!!document.querySelector("#i-connect-from")`);
+    await p.ev(`(() => { const s = document.querySelector("#i-connect-from"); s.focus(); s.value = "in:a"; s.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+    await p.ev(`document.querySelector("#i-connect")?.focus()`);
+    await p.enterKey();
+    check("a wire is made from the inspector", await wired("a", "c"), await wires());
+    check("the status says so too", /wired/i.test(await p.status()) && /a/.test(await p.status()), await p.status());
+    check("the focus stays in the inspector", await p.until(`document.activeElement?.closest("#d-inspector") !== null`));
+
+    // The pointer's drag is still there: b's output onto c's input.
+    await p.ev(`document.querySelector('#d-inspector [data-unwire="a"]')?.click()`);
+    check("the wire is undone", await unwired("c"), await wires());
+
+    // A card with no input is a problem the page counts and colours: those read at 4.5:1 too.
+    check("the problem is counted", await p.until(`!!document.querySelector("#d-drawer .tabs .count")`));
+    for (const theme of ["light", "dark"]) {
+      await p.theme(theme);
+      const low = new Set();
+      for (const tab of ["problems", "yaml"]) {
+        await p.click(`#d-drawer .tabs button[data-tab="${tab}"]`);
+        for (const line of await p.contrast()) low.add(line);
+      }
+      check(`a job with a problem reads at 4.5:1 in the ${theme} theme`, low.size === 0, [...low].join(" | "));
+    }
+    await p.theme("light");
+    await p.drag('.dcard[data-alias="b"] .port.out', '.dcard[data-alias="c"] .port.in');
+    check("a drag still wires two cards", await wired("b", "c"), await wires());
+  },
 };
 
 // ---------------------------------------------------------------- the runner
@@ -845,6 +1012,7 @@ const argsOf = {
   "agent-reset": () => ["--llm-provider", "ollama", "--llm-url", fakeLlm.url],
   "agent-edit": () => ["--llm-provider", "ollama", "--llm-url", fakeLlm.url],
   undo: () => ["--llm-provider", "ollama", "--llm-url", fakeLlm.url],
+  keyboard: () => ["--llm-provider", "ollama", "--llm-url", fakeLlm.url],
 };
 
 const fixturesOf = {

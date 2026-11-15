@@ -325,10 +325,11 @@ function renameStep(from, to) {
  */
 const starterQuery = (from) => `SELECT *\nFROM ${from || "input"}`;
 
+/** Wires `fromAlias`'s output into `toAlias`: the one write both the drag and the inspector's Connect make. Answers whether it wired. */
 function connect(fromAlias, toAlias, port) {
   const target = stepOf(toAlias);
-  if (!target || fromAlias === toAlias) return;
-  if (target.kind === "source") { status("A source reads its own input: it takes no other.", "bad"); return; }
+  if (!target || fromAlias === toAlias) return false;
+  if (target.kind === "source") { status("A source reads its own input: it takes no other.", "bad"); return false; }
   if (port === "ref") {
     if (!target.ref.includes(fromAlias) && !target.from.includes(fromAlias)) target.ref.push(fromAlias);
   } else if (target.kind === "merge" || target.kind === "branch") {
@@ -340,15 +341,46 @@ function connect(fromAlias, toAlias, port) {
     target.ref = target.ref.filter((a) => a !== fromAlias);
   }
   touch({ inspector: cards.selected?.alias === toAlias });
+  status(`Wired ${fromAlias} → ${toAlias}${port === "ref" ? " as a join" : ""}.`);
+  return true;
 }
 
 function disconnect(edge) {
   const target = stepOf(edge.to);
   if (!target) return;
+  const fromInspector = !!document.activeElement && !!$("d-inspector")?.contains(document.activeElement);
   if (edge.port === "ref") target.ref = target.ref.filter((a) => a !== edge.from);
   else target.from = target.from.filter((a) => a !== edge.from);
-  cards.selected = null;
+  // A wire selected goes with its selection; a card whose input is removed stays chosen, to be wired again.
+  if (cards.selected?.edge) cards.selected = null;
   touch({ inspector: true });
+  status(`Wire ${edge.from} → ${edge.to} removed.`);
+  if (fromInspector) focusAfterDraw("#i-connect-from", `.dcard[data-alias="${CSS.escape(edge.to)}"]`);
+}
+
+/** Puts the focus on the first of these that exists once the zones are drawn: a control the person was on is gone when its zone is. */
+function focusAfterDraw(...selectors) {
+  flush();
+  for (const selector of selectors) {
+    const node = document.querySelector(selector);
+    if (node) { /** @type {HTMLElement} */ (node).focus(); return; }
+  }
+}
+
+/** Chooses a card: marks it in place (the node under the pointer or the focus is never redrawn), shows its inspector and what it delivers. @param {string} alias */
+function selectCard(alias) {
+  if (cards.selected?.alias === alias) return;
+  cards.selected = { alias };
+  invalidate("inspector");
+  for (const c of $("d-inner").querySelectorAll(".dcard")) {
+    const chosen = c.dataset.alias === alias;
+    c.classList.toggle("selected", chosen);
+    if (chosen) c.setAttribute("aria-current", "true"); else c.removeAttribute("aria-current");
+  }
+  drawEdges();
+  // Choosing a card shows what it delivers, unless the person is reading another tab.
+  if (state.view.drawer === "yaml") state.view.drawer = "preview";
+  if (state.view.drawer === "preview") invalidate("drawer");
 }
 
 function autoLayout(render = true) {
@@ -539,7 +571,7 @@ function renderPalette() {
   if (!view) return;
   const item = (kind, label, hint, component) => el("div",
     { class: `pal-item kind-${kind}`, draggable: "true", "data-kind": kind, "data-component": component, title: hint },
-    el("span", {}, label), el("button", { class: "small ghost", "data-add": true, title: "Add to the canvas" }, "+"));
+    el("span", {}, label), el("button", { class: "small ghost", "data-add": true, "aria-label": `Add ${label} to the canvas`, title: "Add to the canvas" }, "+"));
   const endpoints = (list, kind) => list.length
     ? list.map((c) => item(kind, c.name, `${c.category} · ${kind === "source" ? "reads" : "writes"} through the ${c.name} component`, c.name))
     : el("p", { class: "hint" }, "none");
@@ -547,7 +579,7 @@ function renderPalette() {
     const node = el("div",
       { class: `pal-item kind-${b.kind}${b.online ? "" : " offline"}`, draggable: "true", "data-kind": b.kind, "data-brick": b.key,
         title: `${b.kind} brick of ${b.node} · version ${b.version}${b.online ? "" : " · its node is offline"}${b.description ? "\n" + b.description : ""}` },
-      el("span", {}, b.title || b.id), el("button", { class: "small ghost", "data-add": true, title: "Add to the canvas" }, "+"));
+      el("span", {}, b.title || b.id), el("button", { class: "small ghost", "data-add": true, "aria-label": `Add ${b.title || b.id} to the canvas`, title: "Add to the canvas" }, "+"));
     return node;
   };
   const nodes = state.catalog.nodes.filter((n) => state.catalog.bricks.some((b) => b.node === n.name));
@@ -614,6 +646,9 @@ function renderCanvas() {
   $("d-palette").classList.toggle("dimmed", !!cards.zoom);
   if (cards.zoom) { renderChain(); return; }
   const problems = new Set((cards.result?.errors || []).flatMap((e) => [...e.matchAll(/'([^']+)'/g)].map((m) => m[1])));
+  // The cards are drawn again; a card or a tool of one that holds the focus gets it back.
+  const held = document.activeElement?.closest?.(".dcard") ? document.activeElement : null;
+  const heldAt = held ? { alias: held.closest(".dcard").dataset.alias, tool: held.dataset.cardTool ?? null, self: held.classList.contains("dcard") } : null;
   inner.querySelectorAll(".dcard, .canvas-empty").forEach((c) => c.remove());
   let width = 900, height = 520;
   for (const step of cards.model.steps) {
@@ -621,7 +656,8 @@ function renderCanvas() {
     const { subtitle, branch } = cardInfo(step);
     const card = el("div", {
       class: `dcard kind-${step.kind} ${cards.selected?.alias === step.alias ? "selected" : ""} ${problems.has(step.alias) ? "problem" : ""}`,
-      "data-alias": step.alias,
+      "data-alias": step.alias, tabindex: "0", role: "group", "aria-label": `${KIND_LABEL[step.kind] || step.kind} ${step.alias}`,
+      "aria-current": cards.selected?.alias === step.alias ? "true" : null,
     },
       el("div", { class: "dcard-head" }, el("span", { class: "kind" }, KIND_LABEL[step.kind] || step.kind), el("span", { class: "alias" }, step.alias)),
       step.kind === "transform" ? el("button", { class: "dcard-zoom", title: "Zoom into the transformers (or double-click the card)", "aria-label": `Zoom into ${step.alias}` }, "⌕") : null,
@@ -637,6 +673,10 @@ function renderCanvas() {
     inner.appendChild(card);
     width = Math.max(width, pos.x + CARD_W + 200);
     height = Math.max(height, pos.y + CARD_H + 160);
+  }
+  if (heldAt && (heldAt.self || heldAt.tool)) {
+    const card = `.dcard[data-alias="${CSS.escape(heldAt.alias)}"]`;
+    /** @type {HTMLElement | null} */ (inner.querySelector(heldAt.self ? card : `${card} [data-card-tool="${CSS.escape(heldAt.tool)}"]`))?.focus();
   }
   inner.style.width = `${width}px`;
   inner.style.height = `${height}px`;
@@ -679,7 +719,7 @@ function drawEdges(temp) {
   inner.querySelector(".edge-delete")?.remove();
   if (selectedHit && !temp) {
     const mid = selectedHit.getPointAtLength(selectedHit.getTotalLength() / 2);
-    const button = el("button", { class: "edge-delete", title: "Remove this wire (Delete)" }, "×");
+    const button = el("button", { class: "edge-delete", "aria-label": "Remove this wire", title: "Remove this wire (Delete)" }, "×");
     button.style.left = `${mid.x}px`;
     button.style.top = `${mid.y}px`;
     inner.appendChild(button);
@@ -743,15 +783,7 @@ function bindCanvas() {
       const pos = cards.model.layout[card.dataset.alias];
       const p = canvasPoint(e);
       drag = { type: "move", alias: card.dataset.alias, dx: p.x - pos.x, dy: p.y - pos.y, moved: false };
-      if (cards.selected?.alias !== card.dataset.alias) {
-        cards.selected = { alias: card.dataset.alias };
-        invalidate("inspector");
-        inner.querySelectorAll(".dcard").forEach((c) => c.classList.toggle("selected", c === card));
-        drawEdges();
-        // Clicking a card shows what it delivers, unless the person is reading another tab.
-        if (state.view.drawer === "yaml") state.view.drawer = "preview";
-        if (state.view.drawer === "preview") invalidate("drawer");
-      }
+      selectCard(card.dataset.alias);
       inner.setPointerCapture(e.pointerId);
     } else if (edge) {
       cards.selected = { edge: { from: edge.dataset.from, to: edge.dataset.to, port: edge.dataset.port } };
@@ -801,6 +833,13 @@ function bindCanvas() {
     }
   });
 
+  // A card is chosen with Enter or Space, as a click chooses it; its wires are the inspector's.
+  inner.addEventListener("keydown", (e) => {
+    const card = targetOf(e);
+    if (!card.classList?.contains("dcard") || (e.key !== "Enter" && e.key !== " ")) return;
+    e.preventDefault();
+    selectCard(card.dataset.alias);
+  });
   inner.addEventListener("dblclick", (e) => {
     const card = targetOf(e).closest(".dcard");
     if (card && !targetOf(e).closest(".port")) enterZoom(card.dataset.alias);
@@ -878,19 +917,42 @@ function onKey(e) {
 // ---------------------------------------------------------------- inspector
 
 function kvRows(obj, section, index, placeholders) {
+  const names = (section === "mappings" ? [`Mapping ${placeholders[0]}`, `Mapping ${placeholders[1]}`] : ["Option name", "Option value"]).map((n) => `${n} of transformer ${index + 1}`);
   return el("div", { class: "kv", "data-section": section, "data-index": index },
     Object.entries(obj || {}).map(([k, v], row) => el("div", { class: "kv-row", "data-row": row },
-      el("input", { class: "mono", "data-kv": "key", value: k, placeholder: placeholders[0] }),
-      el("input", { class: "mono", "data-kv": "value", value: v ?? "", placeholder: placeholders[1] }),
-      el("button", { class: "small ghost", "data-kv-remove": true, title: "Remove" }, "×"))),
+      el("input", { class: "mono", "data-kv": "key", "aria-label": names[0], value: k, placeholder: placeholders[0] }),
+      el("input", { class: "mono", "data-kv": "value", "aria-label": names[1], value: v ?? "", placeholder: placeholders[1] }),
+      el("button", { class: "small ghost", "data-kv-remove": true, "aria-label": `Remove this ${section === "mappings" ? "mapping" : "option"} of transformer ${index + 1}`, title: "Remove" }, "×"))),
     el("button", { class: "small ghost", "data-kv-add": true }, `+ ${section === "mappings" ? "mapping" : "option"}`));
 }
 
 function inputsList(step) {
   const item = (alias, port) => el("li", {}, el("code", {}, alias), port === "ref" ? [" ", el("span", { class: "chip" }, "ref")] : null, " ",
-    el("button", { class: "small ghost", "data-unwire": alias, "data-port": port, title: "Disconnect" }, "×"));
+    el("button", { class: "small ghost", "data-unwire": alias, "data-port": port, "aria-label": `Disconnect ${alias} from ${step.alias}`, title: "Disconnect" }, "×"));
   const items = [...step.from.map((a) => item(a, "in")), ...step.ref.map((a) => item(a, "ref"))];
-  return [el("h3", {}, "Inputs"), items.length ? el("ul", { class: "inputs" }, items) : el("p", { class: "hint" }, "Not wired yet: drag from another card's output port.")];
+  return [el("h3", {}, "Inputs"), items.length ? el("ul", { class: "inputs" }, items) : el("p", { class: "hint" }, "Not wired yet: drag from another card's output port, or connect one below."), connectControls(step)];
+}
+
+// The keyboard's way to wire a card: the choice of an input and a button, which make the wire the drag makes.
+function connectControls(step) {
+  const others = cards.model.steps.filter((s) => s.alias !== step.alias && s.kind !== "sink");
+  const option = (port, s) => el("option", { value: `${port}:${s.alias}` }, s.alias);
+  const asInput = others.filter((s) => !step.from.includes(s.alias));
+  const groups = step.kind === "sql"
+    ? [el("optgroup", { label: "Main input" }, asInput.map((s) => option("in", s))),
+      el("optgroup", { label: "Joined (ref)" }, asInput.filter((s) => !step.ref.includes(s.alias)).map((s) => option("ref", s)))]
+    : asInput.map((s) => option("in", s));
+  if (!asInput.length) return null;
+  return el("div", { class: "row connect" },
+    el("select", { id: "i-connect-from", "aria-label": `Card to connect to ${step.alias}` }, el("option", { value: "" }, "Connect an input…"), groups),
+    el("button", { id: "i-connect", class: "small", "data-connect": true, "aria-label": `Connect the chosen card to ${step.alias}` }, "Connect"));
+}
+
+function connectChosen(step) {
+  const chosen = $("i-connect-from")?.value ?? "";
+  if (!chosen) { status("Choose the card to connect first.", "warn"); return; }
+  const colon = chosen.indexOf(":");
+  if (connect(chosen.slice(colon + 1), step.alias, chosen.slice(0, colon))) focusAfterDraw("#i-connect-from", `.dcard[data-alias="${CSS.escape(step.alias)}"]`);
 }
 
 // One transformer's editor: its type, order buttons, mappings and options. `data-index` is its place in the step.
@@ -899,11 +961,11 @@ function transformerEditor(step, t, i) {
   const types = Object.keys(TRANSFORMERS).concat(TRANSFORMERS[t.type] ? [] : [t.type]);
   return el("div", { class: "transformer", "data-index": i },
     el("div", { class: "row" },
-      el("select", { "data-ttype": true }, types.map((k) => el("option", { selected: k === t.type }, k))),
+      el("select", { "data-ttype": true, "aria-label": `Type of transformer ${i + 1}` }, types.map((k) => el("option", { selected: k === t.type }, k))),
       el("span", { class: "actions" },
-        el("button", { class: "small ghost", "data-tmove": "-1", disabled: i === 0 }, "↑"),
-        el("button", { class: "small ghost", "data-tmove": "1", disabled: i === step.transformers.length - 1 }, "↓"),
-        el("button", { class: "small ghost danger", "data-tremove": true }, "×"))),
+        el("button", { class: "small ghost", "data-tmove": "-1", "aria-label": `Move transformer ${i + 1} up`, disabled: i === 0 }, "↑"),
+        el("button", { class: "small ghost", "data-tmove": "1", "aria-label": `Move transformer ${i + 1} down`, disabled: i === step.transformers.length - 1 }, "↓"),
+        el("button", { class: "small ghost danger", "data-tremove": true, "aria-label": `Remove transformer ${i + 1}` }, "×"))),
     el("p", { class: "hint" }, spec.hint),
     spec.mapping !== null || t.mappings ? [el("div", { class: "sub" }, "mappings"), kvRows(t.mappings, "mappings", i, [spec.mapping || "key", spec.value ?? "value"])] : null,
     el("div", { class: "sub" }, "options"), kvRows(t.options, "options", i, ["option", "value"]));
@@ -939,7 +1001,7 @@ function renderInspector() {
   if (isEndpoint(step) && !step.brick) {
     body = [step.kind === "sink" ? inputsList(step) : null,
       el("h3", {}, step.kind === "source" ? "Its reader" : "Its writer"),
-      el("textarea", { id: "i-yaml", class: "mono", rows: "10", spellcheck: "false", value: step.yaml || "" }),
+      el("textarea", { id: "i-yaml", "aria-label": `${step.kind === "source" ? "Reader" : "Writer"} of ${step.alias}, as YAML`, class: "mono", rows: "10", spellcheck: "false", value: step.yaml || "" }),
       el("p", { class: "hint" }, step.kind === "source"
         ? "input, the keys that bound or sample what it reads (limit, cursor, sampling-rate…), and its reader's provider-options blocks."
         : "output, the keys that govern what it writes (prefix, checkpoint, contract-save), and its writer's provider-options blocks.")];
@@ -951,12 +1013,12 @@ function renderInspector() {
       el("button", { "data-tadd": true }, "+ transformer")];
   } else if (step.kind === "sql") {
     body = [inputsList(step), el("h3", {}, "Query ", el("span", { class: "hint" }, "DuckDB; each input is a table named by its alias")),
-      el("textarea", { id: "i-query", class: "mono", rows: "10", spellcheck: "false", value: step.query || "" })];
+      el("textarea", { id: "i-query", "aria-label": `Query of ${step.alias}`, class: "mono", rows: "10", spellcheck: "false", value: step.query || "" })];
   } else if (step.kind === "merge") {
     body = [inputsList(step), el("p", { class: "hint" }, "UNION ALL: every input must carry the same columns, with the same types. dtpipe converts nothing on the way.")];
   } else {
     body = [inputsList(step), el("h3", {}, "Branch, as written"),
-      el("textarea", { id: "i-yaml", class: "mono", rows: "12", spellcheck: "false", value: step.yaml || "" }),
+      el("textarea", { id: "i-yaml", "aria-label": `Branch ${step.alias}, as written`, class: "mono", rows: "12", spellcheck: "false", value: step.yaml || "" }),
       el("p", { class: "hint" }, "A branch no card describes: kept exactly as dtpipe reads it.")];
   }
   fill(view,
@@ -1057,6 +1119,7 @@ function bindInspector() {
     if (b.dataset.readBrick !== undefined) { readBrick(b.dataset.readBrick); return; }
     if (b.dataset.unwire !== undefined) { disconnect({ from: b.dataset.unwire, to: b.dataset.to || step.alias, port: b.dataset.port }); return; }
     if (!step) return;
+    if (b.dataset.connect !== undefined) { connectChosen(step); return; }
     if (b.dataset.removeStep !== undefined) { removeStep(step.alias); return; }
     if (b.dataset.tadd !== undefined) { addTransformer(step); return; }
     const box = b.closest(".transformer");
@@ -1120,7 +1183,7 @@ function renderDrawer() {
       problems ? null : el("p", { class: "hint" }, "Nothing to report."),
       hooks.publicationProblems?.() || null];
   } else if (state.view.drawer === "edit") {
-    body = [el("textarea", { id: "d-edit", class: "mono", rows: "16", spellcheck: "false", value: cards.result.yaml }),
+    body = [el("textarea", { id: "d-edit", "aria-label": "The job, as YAML", class: "mono", rows: "16", spellcheck: "false", value: cards.result.yaml }),
       el("div", { class: "row" }, el("button", { "data-apply": true }, "Apply"),
         el("span", { class: "hint" }, "The job is taken apart into cards again; cards that keep their alias keep their place."))];
   } else if (state.view.drawer === "preview") {

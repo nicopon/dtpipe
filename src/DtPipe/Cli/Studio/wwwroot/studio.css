@@ -1,8 +1,9 @@
 :root {
-  --bg: #f7f7f8; --panel: #ffffff; --ink: #1d1f23; --muted: #6b7079; --line: #e2e4e8;
-  --accent: #2f6fdb; --good: #1f8a4c; --bad: #c2362f; --warn: #a76a00; --code: #f1f2f4;
+  --bg: #f7f7f8; --panel: #ffffff; --ink: #1d1f23; --muted: #646a73; --line: #e2e4e8;
+  --accent: #2f6fdb; --good: #1a7a43; --bad: #c2362f; --warn: #9a6200; --code: #f1f2f4;
+  --on-solid: #ffffff;
   --wire: #8a93a3; --shadow: 0 1px 3px rgba(0, 0, 0, .08);
-  --source: #14a58a; --sink: #2f6fdb; --step: #8a93a3;
+  --source: #0c7a64; --sink: #2f6fdb; --step: #5f6878;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -10,7 +11,8 @@
     --bg: #15171b; --panel: #1d2026; --ink: #e6e8eb; --muted: #9097a1; --line: #2c3038;
     --accent: #6c9cff; --good: #4cc27f; --bad: #ff7a70; --warn: #e3ac43; --code: #23262d;
     --wire: #6b7383; --shadow: 0 1px 3px rgba(0, 0, 0, .4);
-    --source: #2fc6a6; --sink: #6c9cff; --step: #7d8696;
+    --source: #2fc6a6; --sink: #6c9cff; --step: #8a93a3;
+    --on-solid: #15171b;
     color-scheme: dark;
   }
 }
@@ -28,11 +30,11 @@ main { display: grid; grid-template-columns: 220px minmax(0, 1fr); height: calc(
 .jobs-pane ul { list-style: none; margin: 0; padding: 0; }
 .job { width: 100%; text-align: left; border: 0; background: none; color: var(--ink); padding: 5px 8px; border-radius: 6px; font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; cursor: pointer; overflow-wrap: anywhere; }
 .job:hover { background: var(--code); }
-.job.open { background: var(--accent); color: #fff; }
+.job.open { background: var(--accent); color: var(--on-solid); }
 .intro { margin: 24px; max-width: 640px; }
 button, input, select, textarea { font: inherit; color: inherit; }
 button { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 4px 12px; cursor: pointer; }
-button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-solid); }
 button.ghost { background: none; }
 button.small { padding: 1px 7px; font-size: 12px; }
 button.danger { color: var(--bad); }
@@ -100,6 +102,7 @@ textarea { width: 100%; resize: vertical; }
   cursor: move; user-select: none;
 }
 .dcard.selected { outline: 2px solid var(--accent); outline-offset: 1px; }
+.dcard:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
 .dcard.problem { border-color: var(--bad); }
 .dcard-head { display: flex; gap: 6px; align-items: baseline; padding: 5px 10px 0; }
 .dcard-head .kind { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
@@ -159,7 +162,7 @@ label.review { display: block; margin: 0 0 8px; }
   position: absolute; transform: translate(-50%, -50%); z-index: 3; width: 22px; height: 22px; padding: 0;
   border-radius: 50%; border: 1px solid var(--bad); background: var(--panel); color: var(--bad); font-weight: 700; line-height: 1;
 }
-.edge-delete:hover { background: var(--bad); color: #fff; }
+.edge-delete:hover { background: var(--bad); color: var(--on-solid); }
 /* The chain: a Transform step's transformers, in order, between its input and its output. */
 .chain-view { padding: 14px 18px; min-height: 100%; }
 .crumbs { display: flex; gap: 8px; align-items: baseline; margin-bottom: 18px; }
@@ -195,7 +198,7 @@ label.review { display: block; margin: 0 0 8px; }
 .tabs { display: flex; gap: 4px; align-items: center; border-bottom: 1px solid var(--line); margin-bottom: 8px; flex-wrap: wrap; flex: none; }
 .tabs button { border: none; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; padding: 6px 10px; }
 .tabs button.active { border-bottom-color: var(--accent); color: var(--accent); }
-.tabs .count { background: var(--bad); color: #fff; border-radius: 999px; padding: 0 6px; font-size: 11px; margin-left: 4px; }
+.tabs .count { background: var(--bad); color: var(--on-solid); border-radius: 999px; padding: 0 6px; font-size: 11px; margin-left: 4px; }
 .tabs .count.warn { background: var(--warn); }
 .drawer-status { margin-left: auto; font-size: 12.5px; }
 .msgs { margin: 4px 0; padding-left: 20px; }

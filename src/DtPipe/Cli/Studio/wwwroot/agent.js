@@ -56,7 +56,7 @@ export async function mountAgent(pane, host) {
     el("div", { class: "split split-col split-agent", "data-split": "agent", role: "separator", "aria-orientation": "vertical", "aria-label": "Resize the agent", tabindex: "0" }),
     el("div", { class: "row agent-head" },
       el("h2", {}, "Agent"),
-      el("select", { id: "agent-model", title: "The model the provider lists; another one starts a new conversation", onchange: changeModel }),
+      el("select", { id: "agent-model", "aria-label": "Model", title: "The model the provider lists; another one starts a new conversation", onchange: changeModel }),
       el("button", { class: "small ghost", title: "Forget this conversation", onclick: reset }, "new")),
     el("p", { id: "agent-endpoint", class: "hint mono", title: "Set on the command line (--llm-provider, --llm-url): the page cannot change it" }),
     el("p", { id: "agent-meter", class: "hint mono", hidden: true, title: "The turn, its step, and the prompt the model read for its last call (what a turn adds to the conversation grows it)" }),
@@ -64,7 +64,7 @@ export async function mountAgent(pane, host) {
     el("p", { id: "agent-behind", class: "hint warn", hidden: true }),
     el("div", { id: "agent-log", class: "agent-log" }, live),
     el("div", { class: "agent-input" },
-      el("textarea", { id: "agent-prompt", rows: "3", placeholder: "Ask the agent… (Ctrl+Enter sends)", onkeydown: onPromptKey }),
+      el("textarea", { id: "agent-prompt", "aria-label": "Message to the agent", rows: "3", placeholder: "Ask the agent… (Ctrl+Enter sends)", onkeydown: onPromptKey }),
       el("div", { class: "row" },
         el("span", { class: "hint", title: "The open job goes with every message, and what the agent gives lands on its cards, unsaved" }, "works on the open job"),
         el("button", { id: "agent-send", class: "primary", onclick: () => send() }, "Send"),
@@ -233,7 +233,7 @@ const GLYPHS = {
 function feedbackView(turn) {
   /** @type {Record<string, HTMLElement>} */
   const buttons = {};
-  const input = el("input", { placeholder: "Your comment on this answer", onkeydown: (e) => { if (e.key === "Enter") submit(); } });
+  const input = el("input", { "aria-label": "Your comment on this answer", placeholder: "Your comment on this answer", onkeydown: (e) => { if (e.key === "Enter") submit(); } });
   const form = el("div", { class: "feedback-comment", hidden: true }, input, el("button", { class: "small", onclick: () => submit() }, "Send"));
   const rate = async (rating) => {
     if (!(await sendFeedback(turn, rating))) return;

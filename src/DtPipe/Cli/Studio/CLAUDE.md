@@ -221,6 +221,13 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   `.dtpipe/studio/view.json`, whose values the server checks and rewrites, and which is read only as a
   preference. A new script needs its route in `StudioServer.Assets`.
   `[CI: StudioServerTests (every module is served, every import resolves; the view's bounds)]`
+- **What the pointer does, the keyboard does, through the same function.** A card is a stop of Tab and Enter or Space chooses
+  it (`selectCard`, which a click calls too); a wire is made by the inspector's Connect and undone by the × of its Inputs list,
+  and both call `connect` and `disconnect`, the functions the drag calls, never a second wiring path. Every control has a name
+  (`aria-label`, a wrapping `label` or a text with a letter in it; a tooltip, a placeholder or a symbol alone is no name), the
+  status is a live region, and what holds the focus when its zone is drawn again gets it back. Text colours are tokens that reach
+  4.5:1 on the panel, the page and the code background in both themes, and a solid fill (`--accent`, `--bad`, `--warn`) carries
+  `--on-solid`, never a literal white. `[local: page_smoke.mjs keyboard — the tree's names and the contrast of what the screens draw]`
 - **What removes or replaces cards is undone, never asked first.** Deleting a card, *Apply* and the
   agent's plan put on the cards go through one function (`remember` in `designer.js`), which keeps the
   cards before the change in `state.cards.history`; Undo puts them back through the step an open takes
