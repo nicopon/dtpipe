@@ -181,10 +181,15 @@ public static class ConnectionStringSanitizer
     /// <summary>
     /// A value that names a secret rather than holding one. Whole-value test: <c>abc${{SUFFIX}}</c>
     /// still puts <c>abc</c> in the file, so only a value left empty by removing its tokens counts.
+    /// One pair of matching quotes around the value is stepped over first, since a reference written
+    /// into SQL is a string literal (<c>SET s3_access_key_id='${{keyring://aws-key}}'</c>); the pair
+    /// carries no secret, and what stands inside it is judged as a bare value is.
     /// </summary>
     private static bool IsIndirection(string value)
     {
         var trimmed = value.Trim();
+        if (trimmed.Length >= 2 && trimmed[0] is '\'' or '"' && trimmed[^1] == trimmed[0])
+            trimmed = trimmed[1..^1].Trim();
         if (trimmed.Length == 0) return true;
         if (trimmed.StartsWith(KeyringPrefix, StringComparison.OrdinalIgnoreCase)) return true;
         return InterpolationTokenRegex.Replace(trimmed, string.Empty).Trim().Length == 0;

@@ -165,6 +165,28 @@ public class ConnectionStringSanitizerTests
     public void CarriesLiteralSecret_Sees_An_Identity_Key_By_Its_Shape(string input, bool expected)
         => Assert.Equal(expected, ConnectionStringSanitizer.CarriesLiteralSecret(input));
 
+    /// <summary>
+    /// A reference stays a reference inside one pair of quotes, the way SQL spells it; anything else
+    /// the quotes hold, or a pair that does not close on itself, is a literal.
+    /// </summary>
+    [Theory]
+    [InlineData("api_key = ${{API_KEY}}", false)]
+    [InlineData("api_key = '${{API_KEY}}'", false)]
+    [InlineData("api_key = \"${{API_KEY}}\"", false)]
+    [InlineData("api_key = '${{A}}${{B}}'", false)]
+    [InlineData("api_key = 'keyring://aws-key'", false)]
+    [InlineData("LOAD httpfs; SET s3_access_key_id='${{keyring://aws-key}}';", false)]
+    [InlineData("LOAD httpfs; SET s3_secret_access_key='${{keyring://aws-key}}';", false)]
+    [InlineData("api_key = 'abc'", true)]
+    [InlineData("api_key = 'abc${{X}}'", true)]
+    [InlineData("api_key = '${{X}}abc'", true)]
+    [InlineData("api_key = ${{X}}abc", true)]
+    [InlineData("api_key = '${{X}}''abc'", true)]
+    [InlineData("api_key = '${{X}}\"", true)]
+    [InlineData("api_key = '${{X}}", true)]
+    public void CarriesLiteralSecret_Steps_Over_One_Pair_Of_Quotes_Around_A_Reference(string input, bool expected)
+        => Assert.Equal(expected, ConnectionStringSanitizer.CarriesLiteralSecret(input));
+
     [Theory]
     [InlineData("postgresql://postgres@localhost:5432/mydb")]
     [InlineData("sqlite:data.db")]
