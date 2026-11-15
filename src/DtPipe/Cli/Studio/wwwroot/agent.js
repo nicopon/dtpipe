@@ -31,6 +31,9 @@ let appliedYaml = null;
 let applying = Promise.resolve();
 // Whether the conversation follows its last entry: true until the person scrolls up to read.
 let following = true;
+// The live zone: what the turn at work shows now (a step, a card, a question, a plan). The page holds the node,
+// never looks it up in the log: the log empties and refills around it, and the agent's drawing puts it last.
+const live = el("div", { id: "agent-now" });
 
 onZone("agent", renderAgent);
 
@@ -51,13 +54,13 @@ export async function mountAgent(pane, host) {
     el("div", { class: "split split-col split-agent", "data-split": "agent", role: "separator", "aria-orientation": "vertical", "aria-label": "Resize the agent", tabindex: "0" }),
     el("div", { class: "row agent-head" },
       el("h2", {}, "Agent"),
-      el("select", { id: "agent-model", title: "The model the provider lists; another one starts a new conversation" }),
+      el("select", { id: "agent-model", title: "The model the provider lists; another one starts a new conversation", onchange: changeModel }),
       el("button", { class: "small ghost", title: "Forget this conversation", onclick: reset }, "new")),
     el("p", { id: "agent-endpoint", class: "hint mono", title: "Set on the command line (--llm-provider, --llm-url): the page cannot change it" }),
     el("p", { id: "agent-meter", class: "hint mono", hidden: true, title: "The turn, its step, and the prompt the model read for its last call (what a turn adds to the conversation grows it)" }),
     el("p", { id: "agent-warning", class: "hint warn", hidden: true }),
     el("p", { id: "agent-behind", class: "hint warn", hidden: true }, "You changed the job while the agent worked: its plan is kept below, and replaces your cards only if you apply it."),
-    el("div", { id: "agent-log", class: "agent-log" }, el("div", { id: "agent-now" })),
+    el("div", { id: "agent-log", class: "agent-log" }, live),
     el("div", { class: "agent-input" },
       el("textarea", { id: "agent-prompt", rows: "3", placeholder: "Ask the agent… (Ctrl+Enter sends)", onkeydown: onPromptKey }),
       el("div", { class: "row" },
@@ -85,28 +88,35 @@ async function loadModels() {
 }
 
 /**
- * What the server answered: new entries are appended to the log, the rest is drawn by the zone. A save the person allowed is
- * read back, and a plan newer than the page's goes onto the cards; the entries a reload replays change nothing.
+ * What the server answered: new entries are appended to the log, the rest is drawn by zone. A save the person allowed is
+ * read back, and a plan newer than the page's goes onto the cards; the entries a reload replays change nothing. The panel
+ * is drawn from the answer whatever fails on the way: a stale panel would show what is no longer the server's.
  * @param {any} answer @param {boolean} [replay]
  */
 function accept(answer, replay = false) {
   const log = $("agent-log");
-  if (answer.count < shown) { for (const turn of [...log.getElementsByClassName("turn")]) turn.remove(); shown = 0; }
   following = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
-  // The live zone follows the last turn: detached while entries are added, put back after.
-  const now = $("agent-now");
-  now.remove();
-  for (const entry of answer.entries || []) turnOf(entry).append(entryView(entry));
-  (lastTurn() ?? log).append(now);
-  shown = answer.count;
-  if (!replay) for (const entry of answer.entries || []) if (entry.kind === "step" && entry.saved) savedJob(entry.saved);
-  if (!replay && answer.job?.yaml && answer.job.revision > appliedRevision) {
-    const yaml = answer.job.yaml;
-    applying = applying.then(() => follow(yaml)).catch((e) => status(e.message, "bad"));
+  try {
+    for (const entry of answer.entries || []) { turnOf(entry).append(entryView(entry)); shown++; }
+    if (!replay) for (const entry of answer.entries || []) if (entry.kind === "step" && entry.saved) savedJob(entry.saved);
+    if (!replay && answer.job?.yaml && answer.job.revision > appliedRevision) {
+      const yaml = answer.job.yaml;
+      applying = applying.then(() => follow(yaml)).catch((e) => status(e.message, "bad"));
+    }
+    appliedRevision = Math.max(appliedRevision, answer.job?.revision ?? 0);
+  } finally {
+    state.agent.status = answer;
+    invalidate("agent");
   }
-  appliedRevision = Math.max(appliedRevision, answer.job?.revision ?? 0);
-  state.agent.status = answer;
-  invalidate("agent");
+}
+
+/** The conversation the server reset: nothing of the old one stays on the page, which then reads the new one whole. */
+function dropLog() {
+  for (const turn of [...$("agent-log").getElementsByClassName("turn")]) turn.remove();
+  shown = 0;
+  following = true;
+  appliedYaml = null;
+  state.agent.behind = false;
 }
 
 /**
@@ -205,6 +215,9 @@ function entryView(entry) {
 function renderAgent() {
   const s = state.agent.status;
   if (!state.agent.enabled || !s) return;
+  // The live zone closes the last turn, so a turn's message and its card scroll together; with no turn it closes the log.
+  const host = lastTurn() ?? $("agent-log");
+  if (host.lastElementChild !== live) host.append(live);
   $("agent-endpoint").textContent = `${s.provider} · ${s.endpoint}`;
   const warning = $("agent-warning");
   warning.hidden = s.local;
@@ -217,7 +230,7 @@ function renderAgent() {
     button.toggleAttribute("disabled", !s.trace);
     button.title = s.trace ? button.dataset.label : `${button.dataset.label}: start the studio with --agent-trace`;
   }
-  fill($("agent-now"),
+  fill(live,
     s.busy && s.live ? el("div", { class: "live hint" }, el("b", {}, s.live.tool || "the model"), el("pre", {}, s.live.text)) : null,
     s.busy && !s.live && !s.pending ? el("div", { class: "live hint" }, "working…") : null,
     s.pending ? cardView(s.pending) : null,
@@ -310,10 +323,21 @@ async function stop() {
   poll();
 }
 
-async function reset() {
-  if (shown > 0 && !confirm("Forget this conversation?")) return;
-  try { await api("/api/agent", undefined, "DELETE"); } catch (e) { status(e.message, "bad"); return; }
+async function reset() { await forget("Forget this conversation?"); }
+
+/** Another model starts a new conversation, so the page asks as `new` does, and the choice goes back when refused. @param {Event} e */
+async function changeModel(e) {
+  const select = /** @type {HTMLSelectElement} */ (e.target);
+  const current = state.agent.status?.model;
+  if (shown > 0 && current && select.value !== current && !(await forget("Another model starts a new conversation: forget this one?"))) select.value = current;
+}
+
+/** Forgets the conversation once the person agrees (nothing to ask when there is none); false when it stays. @param {string} question */
+async function forget(question) {
+  if (shown > 0 && !confirm(question)) return false;
+  try { await api("/api/agent", undefined, "DELETE"); } catch (e) { status(e.message, "bad"); return false; }
   poll();
+  return true;
 }
 
 
@@ -322,13 +346,19 @@ async function poll() {
   clearTimeout(pollTimer);
   if (polling) { pollTimer = setTimeout(poll, POLL_MS); return; }
   polling = true;
+  let answer = null;
   try {
-    const answer = await api(`/api/agent?after=${shown}&rev=${appliedRevision}`);
+    answer = await api(`/api/agent?after=${shown}&rev=${appliedRevision}`);
+    // Fewer entries than the page drew: the server reset the conversation, and what it holds now is read from its start.
+    if (answer.count < shown) {
+      dropLog();
+      answer = await api(`/api/agent?after=0&rev=${appliedRevision}`);
+    }
     accept(answer);
-    if (answer.busy || answer.pending) pollTimer = setTimeout(poll, POLL_MS);
   } catch (e) {
     status(e.message, "bad");
   } finally {
     polling = false;
   }
+  if (answer?.busy || answer?.pending) pollTimer = setTimeout(poll, POLL_MS);
 }

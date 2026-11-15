@@ -235,7 +235,7 @@ function startFakeLlm() {
   const llm = { seen: [], open: 0 };
   const call = (name, args) => ({ role: "assistant", content: "", tool_calls: [{ function: { name, arguments: args } }] });
   const server = http.createServer((req, res) => {
-    if (req.url === "/api/tags") { res.end(JSON.stringify({ models: [{ name: "fake:1" }] })); return; }
+    if (req.url === "/api/tags") { res.end(JSON.stringify({ models: [{ name: "fake:1" }, { name: "fake:2" }] })); return; }
     let body = "";
     req.on("data", (d) => { body += d; });
     req.on("end", () => {
@@ -368,6 +368,38 @@ const scenarios = {
     check("Stop leaves a verdict", await p.until(`document.querySelectorAll("#agent-log .verdict").length === ${before + 1}`));
     check("Stop abandons the model call", await p.until(`${fakeLlm.llm.open} === 0`) && fakeLlm.llm.open === 0);
     await p.shot("8-stopped");
+  },
+
+  // The panel draws the server's last answer: a conversation the server reset (new, or another model) leaves
+  // no entry of the old one, and the next turn is drawn.
+  async "agent-reset"({ page: p }) {
+    const send = async (text) => {
+      await p.ev(`(() => { const t = document.querySelector("#agent-prompt"); t.value = ${JSON.stringify(text)}; })()`);
+      await p.click("#agent-send");
+    };
+    const idle = () => p.until(`document.querySelector("#agent-stop").hidden && !document.querySelector("#agent-now .agent-card button")`, 30000);
+    const users = () => p.ev(`[...document.querySelectorAll("#agent-log .msg.user")].map((e) => e.textContent)`);
+    const quiet = async () => !/bad/.test(await p.ev(`document.querySelector("#status").className`));
+
+    check("the panel shows", await p.until(`!document.querySelector("#agent-pane").hidden && document.querySelector("#agent-model")?.value === "fake:1"`));
+    await send("first");
+    check("a turn is drawn", await p.until(`/ok: first/.test(document.querySelector("#agent-log")?.textContent ?? "")`) && await idle());
+
+    await p.clickText("#agent-pane .agent-head button", "new");
+    check("new empties the log", await p.until(`document.querySelectorAll("#agent-log .turn").length === 0`));
+    check("new raises nothing in the status line", await quiet(), await p.status());
+    await send("second");
+    check("the turn after new is drawn", await p.until(`/ok: second/.test(document.querySelector("#agent-log")?.textContent ?? "")`), JSON.stringify(await users()));
+    check("the log holds the new conversation only", (await users()).join() === "second", JSON.stringify(await users()));
+    await idle();
+
+    await p.ev(`(() => { const s = document.querySelector("#agent-model"); s.value = "fake:2"; s.dispatchEvent(new Event("change")); })()`);
+    check("another model empties the log like new", await p.until(`document.querySelectorAll("#agent-log .turn").length === 0`));
+    await send("third");
+    check("the turn after another model is drawn", await p.until(`/ok: third/.test(document.querySelector("#agent-log")?.textContent ?? "")`), JSON.stringify(await users()));
+    check("the log holds the new conversation only, again", (await users()).join() === "third", JSON.stringify(await users()));
+    check("the status line stays quiet", await quiet(), await p.status());
+    check("the last turn can end and be followed", await idle());
   },
 
   // Opening, Preview, a click on each card, pin, ▶ that pins nothing, an edit, ▶ on the pin, Save then Run, unpin.
@@ -703,6 +735,7 @@ async function seed(name, folder) {
 
 const argsOf = {
   agent: () => ["--llm-provider", "ollama", "--llm-url", fakeLlm.url],
+  "agent-reset": () => ["--llm-provider", "ollama", "--llm-url", fakeLlm.url],
 };
 
 const fixturesOf = {

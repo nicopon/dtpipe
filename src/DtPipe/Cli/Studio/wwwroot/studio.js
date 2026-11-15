@@ -223,6 +223,12 @@ const SUSPENDED = "A real run is suspended before its targets are written: write
 const PREVIEW_TITLE = "Run the whole job over the first source rows, with the writers neutralised: every card shows the rows it delivers";
 const RUN_TITLE = "Run the saved job here and write its targets, after you confirm what it writes";
 
+/** A publication changes the coordinator's library: the list beside the jobs is read again once the job is published. */
+async function publishAndRead() {
+  await publish();
+  if (state.publication.outcome?.saved) await loadLibrary();
+}
+
 function barButtons() {
   return [
     el("button", { id: "d-save", title: "Write the job and its layout (Ctrl+S)", onclick: () => save() }, "Save"),
@@ -232,7 +238,7 @@ function barButtons() {
     el("button", { id: "d-forget-pins", class: "ghost small", hidden: true, title: "Unpin every card and forget the checkpoints they kept", onclick: forgetPins }, "Forget pins"),
     el("span", { id: "d-suspended", class: "suspended", hidden: true, title: SUSPENDED }, "⏸ run suspended: write or abandon it on the sink cards"),
     el("button", { id: "d-run", class: "danger", title: RUN_TITLE, onclick: () => prepareRun() }, "Write targets…"),
-    state.coordinator ? el("button", { id: "d-publish", title: "Send the saved job to the coordinator's library", onclick: () => publish() }, "Publish") : null,
+    state.coordinator ? el("button", { id: "d-publish", title: "Send the saved job to the coordinator's library", onclick: () => publishAndRead() }, "Publish") : null,
   ];
 }
 
