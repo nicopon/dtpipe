@@ -144,7 +144,8 @@ internal sealed class StudioAgent : IAsyncDisposable
             if (_model is null) throw new StudioRefusal(400, "Choose a model first.");
             _stop?.Dispose();
             _stop = new CancellationTokenSource();
-            _log.Add(new { kind = "user", text = prompt });
+            _log.Add(new { kind = "user", text = AgentTrace.Safe(prompt) });
+            if (ConnectionStringSanitizer.CarriesLiteralSecret(prompt)) _log.Add(new { kind = "notice", text = TypedSecretNotice });
             _turns++;
             _stepsInTurn = 0;
             var stop = _stop.Token;
@@ -181,7 +182,7 @@ internal sealed class StudioAgent : IAsyncDisposable
                 kind = "verdict",
                 turn = Traced(), status = summary.Status.ToString().ToLowerInvariant(),
                 reason = summary.Reason,
-                closing = summary.ClosingWords,
+                closing = AgentTrace.Safe(summary.ClosingWords),
                 tools = summary.ToolSummary,
                 duration = summary.DurationText,
             });
@@ -212,6 +213,12 @@ internal sealed class StudioAgent : IAsyncDisposable
         if (choice == "send") lock (_gate) _cleared.Add(hash);
         return choice;
     }
+
+    /// <summary>
+    /// What the person is told when a message spells a credential out. The model reads the message as typed; the panel and the trace
+    /// show it masked, as they show every other entry of the conversation.
+    /// </summary>
+    internal const string TypedSecretNotice = "Your message holds what looks like a password or a key: the model reads it as typed, this panel and the trace show it masked. Pass a secret as ${{NAME}} or keyring:// instead.";
 
     /// <summary>What the model reads when the page has no job open: a plan it gives opens as a new job.</summary>
     internal const string NoOpenJob = "The person has no job open in the designer: a job you give as 'yamlContent' opens there as a new job, not saved yet.";
@@ -331,7 +338,7 @@ internal sealed class StudioAgent : IAsyncDisposable
                 count = _log.Count,
                 entries = _log.Skip(after).ToList(),
                 live = live is { } step ? new { step = step.Iteration, tool = step.ToolName, text = Bound(AgentTrace.Safe(step.Text)) } : null,
-                plan = new { state = plan.State.ToString(), message = plan.Message, yaml = _executor.Trajectory.LastGeneratedYaml },
+                plan = new { state = plan.State.ToString(), message = AgentTrace.Safe(plan.Message), yaml = _executor.Trajectory.LastGeneratedYaml },
                 meter = new
                 {
                     turn = _turns,
@@ -341,7 +348,7 @@ internal sealed class StudioAgent : IAsyncDisposable
                     window = _setup.Client.ProviderName == "ollama" ? _options.NumCtx : (int?)null,
                 },
                 job = new { revision = _planRevision, yaml = _planRevision > seen ? _planYaml : null },
-                question = _turn.IsCompleted && _executor.PendingQuestion is { } q ? new { text = q.Text, options = q.Options } : null,
+                question = _turn.IsCompleted && _executor.PendingQuestion is { } q ? new { text = AgentTrace.Safe(q.Text), options = q.Options.Select(AgentTrace.Safe).ToList() } : null,
                 pending = _pending is { } card ? new { id = card.Id, kind = card.Kind, body = card.Body, digest = card.Digest, choices = card.Choices } : null,
             };
         }
@@ -356,7 +363,7 @@ internal sealed class StudioAgent : IAsyncDisposable
     {
         kind = "step",
         step = step.Iteration,
-        text = Bound(step.Reasoning),
+        text = Bound(AgentTrace.Safe(step.Reasoning)),
         tool = step.ToolName,
         saved = SavedPath(step),
         args = step.ToolArgs is null ? null : Bound(AgentTrace.Safe(step.ToolArgs)),

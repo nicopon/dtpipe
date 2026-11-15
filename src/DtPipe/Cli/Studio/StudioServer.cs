@@ -330,7 +330,7 @@ public sealed partial class StudioServer : IAsyncDisposable
         catch (StudioRefusal refusal)
         {
             context.Response.StatusCode = refusal.Status;
-            await JsonAsync(context, new { error = refusal.Message });
+            await JsonAsync(context, new { error = ConnectionStringSanitizer.Sanitize(refusal.Message) });
         }
         catch (Exception ex) when (!context.RequestAborted.IsCancellationRequested)
         {

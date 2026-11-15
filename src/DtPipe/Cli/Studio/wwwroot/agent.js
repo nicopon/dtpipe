@@ -108,7 +108,7 @@ function accept(answer, replay = false) {
     for (const entry of answer.entries || []) {
       turnOf(entry).append(entryView(entry));
       shown++;
-      if (entry.kind === "user") asked = entry.text;
+      if (entry.kind === "user") asked ??= entry.text;
       else if (!replay && entry.kind === "verdict") giveBack(entry.status);
     }
     if (!replay) for (const entry of answer.entries || []) if (entry.kind === "step" && entry.saved) savedJob(entry.saved);
@@ -425,6 +425,8 @@ async function send(text) {
   const prompt = /** @type {HTMLTextAreaElement} */ ($("agent-prompt"));
   const message = (text ?? prompt.value).trim();
   if (!message) return;
+  // The log shows the message masked; a turn that fails gives back what was typed.
+  asked = message;
   const model = /** @type {HTMLSelectElement} */ ($("agent-model")).value || undefined;
   const job = state.cards.model
     ? { path: state.job?.path ?? null, unsaved: state.cards.dirty || !state.job?.hash, model: state.cards.model }

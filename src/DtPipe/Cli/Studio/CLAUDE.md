@@ -281,7 +281,12 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   plan or by a save read back (`moved` in `agent.js`, the one comparison): what the agent gave then waits behind the notice's
   Apply, which asks before it replaces an unsaved edit. A turn that ends without a result gives the person's text back to an
   empty prompt. A text that `JobSecrets.Literals` flags reaches the model, open job or `read-job`, only
-  after a card that names `branch.path`, never the value; the answer holds for that text, by hash, for the session. The
+  after a card that names `branch.path`, never the value; the answer holds for that text, by hash, for the session.
+  **The panel shows what the trace holds, never more**: every text of the conversation the page reads (the person's message, the
+  model's words and question, a call's arguments and results, the plan's message) goes through `AgentTrace.Safe`, the trace's own
+  mask, while the model keeps the words as typed; a message that spells a credential out is told so by a notice and is never held
+  back. A job (a plan, a save card) is shown as written: it is the text to save. A refusal's words go through the same mask in
+  `HandleAsync`'s catch. `[CI: StudioAgentTests — the conversation]` `[unchecked: a refusal's mask]` The
   key (`--llm-key`) is a reference read once at start, kept in the client; the page never sets the model's address. The
   panel's width is the `agent` pane, resized and kept as the designer's (`bindSplit`, `applySizes`).
   `[CI: StudioAgentTests]` `[local: page_smoke.mjs agent, agent-edit — a scripted endpoint that speaks Ollama's API]`

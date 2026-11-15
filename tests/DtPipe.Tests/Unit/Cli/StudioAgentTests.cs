@@ -311,6 +311,39 @@ public sealed class StudioAgentTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task What_the_trace_masks_no_answer_of_the_agent_shows()
+    {
+        var path = Path.Combine(_dir, "masked-trace.jsonl");
+        var trace = AgentTrace.Open(path, out _);
+        var llm = new ScriptedLlm(
+            _ => new LlmResponse(new ChatMessage("assistant", "Trying Password=hunter2 now", null,
+                [new ToolCall("c1", "list-jobs", JsonSerializer.SerializeToElement(new { note = "Password=hunter2" }))]), true, null),
+            Calls("ask-user", new { question = "Connect with Password=hunter2?", options = new[] { "Password=hunter2", "no" } }),
+            _ => new LlmResponse(new ChatMessage("assistant", "All set with Password=hunter2"), true, null));
+        await StartAsync(llm, trace);
+
+        await TurnAsync("Connect with Password=hunter2");
+        var asked = await UntilAsync(s => Idle(s) && s.GetProperty("question").ValueKind == JsonValueKind.Object);
+        await TurnAsync("list the jobs in the folder, please");
+        var answered = await UntilAsync(s => Idle(s) && s.GetProperty("count").GetInt32() > asked.GetProperty("count").GetInt32() + 1);
+        var (_, whole) = await CallAsync(HttpMethod.Get, "/api/agent?after=0");
+
+        // The page is shown what the trace holds: every field of the conversation, the person's message, the model's words,
+        // a call's arguments and the question's choices.
+        trace!.Dispose();
+        var fromTrace = await File.ReadAllTextAsync(path, Ct);
+        Assert.DoesNotContain("hunter2", fromTrace);
+        foreach (var shown in new[] { asked.GetRawText(), answered.GetRawText(), whole.GetRawText() })
+            Assert.DoesNotContain("hunter2", shown);
+
+        // The other direction: a message with nothing to hide reads as typed, and the model is still given the person's own words.
+        var users = whole.GetProperty("entries").EnumerateArray().Where(e => e.GetProperty("kind").GetString() == "user").Select(e => e.GetProperty("text").GetString());
+        Assert.Contains("list the jobs in the folder, please", users);
+        Assert.Single(whole.GetProperty("entries").EnumerateArray(), e => e.GetProperty("kind").GetString() == "notice" && e.GetProperty("text").GetString() == StudioAgent.TypedSecretNotice);
+        Assert.Contains(llm.Calls[0], m => m.Role == "user" && m.Content == "Connect with Password=hunter2");
+    }
+
+    [Fact]
     public async Task A_turn_has_no_step_bound_and_the_meter_counts_turns_and_steps_and_reads_the_context()
     {
         // More calls than the old bound of a turn, then the model's closing text.
