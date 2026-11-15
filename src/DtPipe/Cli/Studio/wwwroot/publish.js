@@ -60,8 +60,9 @@ async function send(replace) {
     const commit = e.data?.commit ?? null;
     publication.outcome = { id: request.id, conflict: { error: e.data?.error || e.message, commit } };
     showTab("publish");
+    // The coordinator says why: the id was taken meanwhile, or the version this studio published last is no longer in place.
     const question = commit
-      ? `The library holds ${request.id} at ${short(commit)}, not the version this studio published last. Replace it with this job?`
+      ? `${e.data?.error || `The library holds ${request.id} at ${short(commit)}.`} Replace it with this job?`
       : `${request.id} is no longer in the library. Publish this job as a new pipeline?`;
     if (confirm(question)) return publish(commit ?? "");
     status("not published", "warn");

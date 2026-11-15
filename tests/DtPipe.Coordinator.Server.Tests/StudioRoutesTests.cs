@@ -24,8 +24,9 @@ public sealed class StudioRoutesTests : IDisposable
     private readonly CoordinatorHost _host;
     private DesignCheck _verdict = new(true, null);
     private string? _checked;
+    private Action? _whileChecking;
 
-    public StudioRoutesTests() => _host = new(check: yaml => { _checked = yaml; return _verdict; });
+    public StudioRoutesTests() => _host = new(check: yaml => { _checked = yaml; _whileChecking?.Invoke(); return _verdict; });
 
     public void Dispose() => _host.Dispose();
 
@@ -156,6 +157,25 @@ public sealed class StudioRoutesTests : IDisposable
         Assert.Equal(HttpStatusCode.OK, (await Save("orders", "# Three\na:\n  input: x\n", ifMatch: unchanged.Saved.Commit)).Status);
 
         Assert.Equal(HttpStatusCode.PreconditionFailed, (await Save("missing", "a:\n  input: x\n", ifMatch: first)).Status);
+    }
+
+    [Fact]
+    public async Task Two_Saves_Of_One_Pipeline_At_Once_Publish_One_And_Give_The_Other_The_Conflict()
+    {
+        // Both saves are past the check before either writes: what follows is the library's alone.
+        using var together = new Barrier(2);
+        _whileChecking = () => { if (!together.SignalAndWait(TimeSpan.FromSeconds(10))) throw new TimeoutException("the other save never reached the check"); };
+        async Task<(HttpStatusCode Status, string? Commit)> Create(string yaml)
+        {
+            var outcome = await Save("race", yaml, create: true);
+            return (outcome.Status, outcome.Saved?.Commit ?? outcome.Conflict?.Commit);
+        }
+
+        var outcomes = await Task.WhenAll(Create("# One\na:\n  input: x\n"), Create("# Two\na:\n  input: x\n"));
+
+        var won = Assert.Single(outcomes, o => o.Status == HttpStatusCode.OK);
+        var lost = Assert.Single(outcomes, o => o.Status == HttpStatusCode.PreconditionFailed);
+        Assert.Equal(won.Commit, lost.Commit);
     }
 
     [Fact]
