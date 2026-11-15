@@ -46,9 +46,9 @@ public class OpenAiClient : ILlmClient, IStreamingLlmClient
                 client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _apiKey);
             }
 
-            var response = await client.GetAsync(url, cts.Token);
+            using var response = await client.GetAsync(url, cts.Token);
             if (!response.IsSuccessStatusCode)
-                return new List<string>();
+                throw new HttpRequestException($"{url} answered {(int)response.StatusCode}.");
 
             var json = await response.Content.ReadAsStringAsync(ct);
             using var doc = JsonDocument.Parse(json);
@@ -67,9 +67,9 @@ public class OpenAiClient : ILlmClient, IStreamingLlmClient
 
             return list;
         }
-        catch
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            return new List<string>();
+            throw new HttpRequestException("no answer in time");
         }
     }
 

@@ -243,6 +243,9 @@ export async function compose() {
     if (composing.stale(seq)) return cards.result;
     cards.result = answer;
   } catch (e) {
+    // A studio that does not answer composed nothing: the cards are not wrong and the last verdict stays, but what asked
+    // (a save, a preview) is told no verdict came.
+    if (e.transport) { if (!composing.stale(seq)) status(e.message, "bad"); return { ...cards.result, unanswered: true }; }
     if (!composing.stale(seq)) cards.result = { yaml: "", steps: [], errors: [e.message], warnings: [] };
   }
   invalidate("canvas", "drawer", "bar");

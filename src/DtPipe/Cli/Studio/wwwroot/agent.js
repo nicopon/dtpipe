@@ -38,6 +38,7 @@ let following = true;
 const live = el("div", { id: "agent-now" });
 
 onZone("agent", renderAgent);
+onZone("agent", renderAgentLink);
 
 /**
  * Builds the panel in `pane` when this studio has an agent. The host gives what only it knows: `applyPlan(yaml)` puts a plan
@@ -48,7 +49,7 @@ onZone("agent", renderAgent);
 export async function mountAgent(pane, host) {
   hooks = host;
   const first = await api("/api/agent?after=0");
-  if (!first.enabled) return;
+  if (!first.enabled) { invalidate("agent"); return; }
   state.agent.enabled = true;
   pane.hidden = false;
   pane.parentElement?.classList.add("with-agent");
@@ -84,9 +85,14 @@ async function loadModels() {
     const select = /** @type {HTMLSelectElement} */ ($("agent-model"));
     const names = model && !models.includes(model) ? [model, ...models] : models;
     fill(select, names.map((name) => el("option", { value: name, selected: name === (state.agent.status?.model ?? model) }, name)));
+    state.agent.problem = model && !models.includes(model)
+      ? { short: "model not listed", text: `The model ${model} is not among the ${models.length} its provider lists: a message would fail until another is chosen.` }
+      : null;
   } catch (e) {
-    status(e.message, "bad");
+    // A studio that does not answer is the header's studio line; the model's server is this one's.
+    if (!e.transport) state.agent.problem = { short: "model's server not answering", text: e.message };
   }
+  invalidate("agent");
 }
 
 /**
@@ -277,6 +283,19 @@ function entryView(entry) {
     entry.result ? el("pre", {}, entry.result) : null);
 }
 
+// The header's line for the agent: off when the studio was opened without one, else whether its provider answers.
+function renderAgentLink() {
+  const host = $("agent-link");
+  if (!state.agent.enabled) {
+    fill(host, el("span", { class: "dot" }), " agent: off");
+    host.title = "Open the studio with --llm-provider to ask an agent";
+    return;
+  }
+  const problem = state.agent.problem;
+  fill(host, el("span", { class: problem ? "dot warn" : "dot good" }), ` agent: ${problem ? problem.short : (state.agent.status?.provider ?? "ready")}`);
+  host.title = problem?.text ?? "";
+}
+
 function renderAgent() {
   const s = state.agent.status;
   if (!state.agent.enabled || !s) return;
@@ -285,8 +304,12 @@ function renderAgent() {
   if (host.lastElementChild !== live) host.append(live);
   $("agent-endpoint").textContent = `${s.provider} · ${s.endpoint}`;
   const warning = $("agent-warning");
-  warning.hidden = s.local;
-  warning.textContent = s.local ? "" : `The model is at ${s.endpoint}: what its tools read (schemas, rows) and the open job go there.`;
+  const notes = [
+    s.local ? null : `The model is at ${s.endpoint}: what its tools read (schemas, rows) and the open job go there.`,
+    state.agent.problem?.text,
+  ].filter(Boolean);
+  warning.hidden = notes.length === 0;
+  warning.textContent = notes.join(" ");
   renderMeter(s);
   renderBehind(state.agent.behind);
   $("agent-send").toggleAttribute("disabled", s.busy);

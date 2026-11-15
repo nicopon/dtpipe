@@ -207,6 +207,41 @@ public sealed class StudioCoordinatorTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_coordinator_that_does_not_answer_is_unreachable_in_the_status_until_one_answer_clears_it()
+    {
+        var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var closed = ((IPEndPoint)listener.LocalEndpoint).Port;
+        listener.Stop();
+        using var absent = new CoordinatorLink(new Uri($"http://127.0.0.1:{closed}"), _time);
+        Assert.Null(absent.Status().Unreachable);
+
+        await absent.ProbeAsync(Ct);
+
+        var down = absent.Status();
+        Assert.Equal(CoordinatorLink.SignedOut, down.State);
+        Assert.Null(down.Reason);
+        Assert.Contains("does not answer", down.Unreachable);
+
+        await _link.ProbeAsync(Ct);
+        Assert.Null(_link.Status().Unreachable);
+    }
+
+    [Fact]
+    public async Task A_signed_in_link_whose_coordinator_falls_stays_signed_in_and_says_it_does_not_answer()
+    {
+        await SignInAsync();
+        await _fakes.DisposeAsync();
+
+        await Assert.ThrowsAsync<CoordinatorLinkException>(() => _link.SendAsync(HttpMethod.Get, CoordinatorApi.Me, ct: Ct));
+
+        var status = _link.Status();
+        Assert.Equal(CoordinatorLink.SignedIn, status.State);
+        Assert.Null(status.Reason);
+        Assert.Contains("does not answer", status.Unreachable);
+    }
+
+    [Fact]
     public async Task A_401_renews_the_token_once_and_sends_again_once()
     {
         await SignInAsync();

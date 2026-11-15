@@ -52,17 +52,43 @@ export function svg(tag, attrs = {}) {
   return node;
 }
 
+// Said when a request got no answer at all: the studio is stopped, or its address gone. That is the link's failure, never the
+// content's: every module that shows an error's message shows this one, and the header keeps saying it until an answer comes.
+export const STUDIO_SILENT = "The studio does not answer: it may have stopped. Start it again and reload this page.";
+const doubts = [];
+
+/** Called when the coordinator or what hangs on it failed for a request: the link's status is worth reading again. @param {() => void} listener */
+export function onLinkDoubt(listener) { doubts.push(listener); }
+
+function studioAnswered(answered) {
+  const note = $("studio-link");
+  if (!note) return;
+  note.hidden = answered;
+  if (!answered) fill(note, el("span", { class: "dot bad" }), " studio: not answering");
+}
+
 /** @param {string} path @param {any} [body] @param {string} [method] @param {AbortSignal} [signal] aborting it abandons the request, which the server reads as a stop */
 export async function api(path, body, method, signal) {
-  const response = await fetch(path, {
-    signal,
-    method: method || (body === undefined ? "GET" : "POST"),
-    headers: { "X-Dtpipe-Studio": token, "Content-Type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+  let response;
+  try {
+    response = await fetch(path, {
+      signal,
+      method: method || (body === undefined ? "GET" : "POST"),
+      headers: { "X-Dtpipe-Studio": token, "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch (e) {
+    // An abandoned request is the page's own doing; a request that never reached an answer is the transport's.
+    if (e?.name === "AbortError") throw e;
+    studioAnswered(false);
+    throw Object.assign(new Error(STUDIO_SILENT), { transport: true });
+  }
+  studioAnswered(true);
   const text = await response.text();
   const data = text ? JSON.parse(text) : {};
   if (!response.ok) {
+    // A 502 of the coordinator's routes: what the link last met is in its status.
+    if (response.status === 502 && !path.startsWith("/api/agent")) for (const listener of doubts) listener();
     throw Object.assign(new Error(data.error || `${response.status} ${response.statusText}`), { status: response.status, data });
   }
   return data;

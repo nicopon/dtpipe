@@ -40,6 +40,12 @@ async function loadLibrary() {
     library.error = e.message;
   }
   invalidate("jobs");
+  await linkRead();
+}
+
+// What an exchange with the coordinator met, read again from the studio once it is done: the header says the answer or its absence.
+async function linkRead() {
+  if (state.coordinator) await refreshCoordinator().catch(() => {});
 }
 
 function renderJobs() {
@@ -174,6 +180,7 @@ async function save() {
   const job = state.job;
   if (!job) return;
   const result = await compose();
+  if (result.unanswered) return;
   if (job.rewrites && !confirm("Saving writes this job as the studio composes it: comments inside it and the order of its keys are not kept. Save anyway?")) return;
   const acceptErrors = result.errors?.length > 0;
   if (acceptErrors && !confirm(`${result.errors.length} problem(s) remain: the job written may not run. Save anyway?`)) return;
@@ -212,6 +219,7 @@ async function loadBricks() {
   } catch (e) {
     status(e.message, "bad");
   }
+  await linkRead();
 }
 
 // ---------------------------------------------------------------- the bar

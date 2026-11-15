@@ -220,6 +220,7 @@ function takeReport(answer) {
 async function runPreviewNow(place) {
   if (!state.job || dbg.running) return;
   const result = await compose();
+  if (result.unanswered) return;
   if (result.errors?.length) { showTab("problems"); status("The cards do not compose into a job yet: see Problems.", "bad"); return; }
   const forJob = state.job;
   clearTimeout(debugTimer);

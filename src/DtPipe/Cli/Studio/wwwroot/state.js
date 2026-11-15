@@ -7,7 +7,7 @@
 /** @typedef {{ x: number, y: number }} Point */
 /** @typedef {{ alias: string, kind: string, from: string[], ref: string[], yaml?: string, query?: string, brick?: string, transformers?: any[] }} Step */
 /** @typedef {{ title: string, description: string, directives: string[], steps: Step[], layout: Record<string, Point> }} Model */
-/** @typedef {{ yaml: string, steps: any[], errors: string[], warnings: string[] }} Composed */
+/** @typedef {{ yaml: string, steps: any[], errors: string[], warnings: string[], unanswered?: boolean }} Composed `unanswered`: a result a request got back when the studio gave no verdict */
 /** @typedef {{ alias?: string, t?: number, edge?: { from: string, to: string, port: string } }} Selection */
 /** @typedef {{ path: string, hash: string | null, rewrites: boolean }} Job */
 /** @typedef {{ branch: string, at: string, card?: string, key?: string }} Watch */
@@ -98,10 +98,12 @@ export const state = {
   /** The agent's panel: whether the command line opened one, the server's last answer (GET /api/agent), and what the agent gave
    * that waits for the person's Apply because they changed the cards since the agent read them (a plan, or the file it saved),
    * and the cards the agent's last plan adds, changes and removes against the cards it came to (`unknown` when either side does
-   * not take apart into cards).
+   * not take apart into cards). `problem` is what the provider's list of models says is wrong with the agent before a first
+   * message: its server does not answer, or the model the command line names is not among those it lists.
    * @type {{ enabled: boolean, status: any, behind: { yaml?: string, saved?: string } | null,
-   *   marks: { yaml: string, unknown?: boolean, added: string[], changed: string[], removed: string[] } | null }} */
-  agent: { enabled: false, status: null, behind: null, marks: null },
+   *   marks: { yaml: string, unknown?: boolean, added: string[], changed: string[], removed: string[] } | null,
+   *   problem: { short: string, text: string } | null }} */
+  agent: { enabled: false, status: null, behind: null, marks: null, problem: null },
 };
 
 /**

@@ -305,7 +305,7 @@ internal sealed class StudioAgent : IAsyncDisposable
     public async Task<object> ModelsAsync(CancellationToken ct)
     {
         try { return new { models = await _setup.Client.ListModelsAsync(_setup.BaseUrl, ct), model = _model }; }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or InvalidOperationException)
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or InvalidOperationException or System.Text.Json.JsonException or KeyNotFoundException)
         {
             throw new StudioRefusal(502, "The model's server did not list its models: " + ConnectionStringSanitizer.Sanitize(ex.Message));
         }

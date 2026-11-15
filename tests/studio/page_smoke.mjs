@@ -988,6 +988,36 @@ const scenarios = {
     await p.drag('.dcard[data-alias="b"] .port.out', '.dcard[data-alias="c"] .port.in');
     check("a drag still wires two cards", await wired("b", "c"), await wires());
   },
+
+  // The header says each link and why: a studio that stops is never a problem of the cards, and a save is not offered anyway.
+  async "link-studio"({ page: p, studio }) {
+    check("the job opens", await p.openJob("chain.yaml"));
+    check("the header says the agent is off and the studio answers", await p.ev(`document.querySelector("#agent-link")?.textContent.includes("agent: off") && document.querySelector("#studio-link").hidden`));
+    await p.ev(`(() => { window.__asked = []; window.confirm = (m) => { window.__asked.push(m); return true; }; })()`);
+    studio.stop();
+    await sleep(500);
+    await p.click("#d-save");
+    check("Save says the studio does not answer", await p.waitStatus(/studio does not answer/, 15000), await p.status());
+    check("the header keeps saying it", await p.ev(`!document.querySelector("#studio-link").hidden && /not answering/.test(document.querySelector("#studio-link").textContent)`));
+    check("no question of saving anyway is asked", (await p.ev(`window.__asked.length`)) === 0, await p.ev(`JSON.stringify(window.__asked)`));
+    check("no problem is laid on the cards", (await p.ev(`document.querySelector("#d-drawer")?.textContent.includes("Failed to fetch") ?? false`)) === false);
+  },
+
+  // A coordinator the command line names that does not answer: the header says so from the opening, not "not signed in".
+  async "link-coordinator"({ page: p }) {
+    check("the header names the coordinator and that it does not answer", await p.until(`/unreachable: .*does not answer/.test(document.querySelector("#coordinator")?.textContent ?? "")`, 20000), await p.ev(`document.querySelector("#coordinator")?.textContent ?? "none"`));
+    check("it no longer says the person is not signed in", !/not signed in/.test(await p.ev(`document.querySelector("#coordinator").textContent`)));
+  },
+
+  // The agent's provider does not answer, or lacks the configured model: said at the opening, in the header and the panel's warning.
+  async "link-agent-down"({ page: p }) {
+    check("the header says the model's server does not answer", await p.until(`/model's server not answering/.test(document.querySelector("#agent-link")?.textContent ?? "")`, 20000), await p.ev(`document.querySelector("#agent-link")?.textContent ?? "none"`));
+    check("the panel's warning says why", await p.ev(`!document.querySelector("#agent-warning").hidden && /did not list its models/.test(document.querySelector("#agent-warning").textContent)`));
+  },
+  async "link-agent-model"({ page: p }) {
+    check("the header says the model is not listed", await p.until(`/model not listed/.test(document.querySelector("#agent-link")?.textContent ?? "")`, 20000), await p.ev(`document.querySelector("#agent-link")?.textContent ?? "none"`));
+    check("the panel's warning names the model", await p.ev(`/absent:9/.test(document.querySelector("#agent-warning").textContent)`));
+  },
 };
 
 // ---------------------------------------------------------------- the runner
@@ -1007,7 +1037,11 @@ async function seed(name, folder) {
   }
 }
 
+const closedUrl = async () => `http://127.0.0.1:${await freePort()}`;
 const argsOf = {
+  "link-coordinator": async () => ["--coordinator", await closedUrl()],
+  "link-agent-down": async () => ["--llm-provider", "ollama", "--llm-url", await closedUrl()],
+  "link-agent-model": () => ["--llm-provider", "ollama", "--llm-url", fakeLlm.url, "--llm-model", "absent:9"],
   agent: () => ["--llm-provider", "ollama", "--llm-url", fakeLlm.url],
   "agent-reset": () => ["--llm-provider", "ollama", "--llm-url", fakeLlm.url],
   "agent-edit": () => ["--llm-provider", "ollama", "--llm-url", fakeLlm.url],
@@ -1042,9 +1076,9 @@ for (const name of names) {
   const logsBefore = page.logs.length;
   try {
     await seed(name, folder);
-    studio = await startStudio(folder, argsOf[name]?.() ?? []);
+    studio = await startStudio(folder, (await argsOf[name]?.()) ?? []);
     await page.send("Page.navigate", { url: studio.url });
-    await scenarios[name]({ page, folder });
+    await scenarios[name]({ page, folder, studio });
   } catch (e) {
     check(`${name} runs to its end`, false, e.stack || String(e));
   } finally {

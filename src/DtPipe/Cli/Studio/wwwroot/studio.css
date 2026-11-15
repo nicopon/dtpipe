@@ -21,8 +21,8 @@
 body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--ink); background: var(--bg); }
 header { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
 header #quit { margin-left: auto; }
-header #coordinator { margin-left: auto; font-size: 12.5px; }
-header #coordinator:not([hidden]) + #quit { margin-left: 0; }
+header .links { margin-left: auto; display: flex; align-items: center; gap: 14px; font-size: 12.5px; }
+header .links + #quit { margin-left: 0; }
 main { display: grid; grid-template-columns: 220px minmax(0, 1fr); height: calc(100vh - 49px); }
 .jobs-pane { border-right: 1px solid var(--line); padding: 12px; overflow: auto; background: var(--panel); }
 .jobs-pane .row { justify-content: space-between; margin-bottom: 8px; }

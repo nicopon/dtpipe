@@ -59,6 +59,18 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   two minutes ahead, a 401 renews once and sends once, a refused renewal signs out with its reason.
   The link's client sends to the coordinator's origin only, follows no redirect, and always carries
   the CSRF header. `[CI: StudioCoordinatorTests, StudioKeyTests]`
+- **A link that does not answer says so as a transport failure, never as an error of what was asked.** Each exchange of the
+  `CoordinatorLink` goes through `ExchangeAsync`: an answer of any status clears `CoordinatorStatus.Unreachable`, none (refused,
+  unresolved, timed out) keeps its words there and throws a `CoordinatorLinkException` naming who did not answer. A person who is not
+  signed in has no exchange to fail, so `/api/bricks` probes the coordinator's metadata (`ProbeAsync`, `ProbeBound`, no token, no
+  polling) and the header says "unreachable" from the opening. The page reads the status again after each exchange it makes with
+  the coordinator (`linkRead`, and a 502 through `onLinkDoubt`), never on a timer. A request that got no answer from the studio
+  itself is `STUDIO_SILENT` in `api()` (`transport` on the error): every module shows that message, `compose` keeps the last
+  verdict and returns it `unanswered` (a save or a preview then stops quietly, with no "Save anyway?"), and the header's
+  `#studio-link` holds until an answer comes. The model's provider is the third link: `loadModels` reads its list at the opening
+  (`ILlmClient.ListModelsAsync` throws when the server does not answer), and `#agent-link` and `#agent-warning` say that it does not,
+  that the configured model is not in the list, or that the studio has no agent. `[CI: StudioCoordinatorTests]`
+  `[local: page_smoke.mjs link-studio, link-coordinator, link-agent-down, link-agent-model]` `[unchecked: the page's header after a signed-in coordinator falls, which the status test covers server side only]`
 - **Without `--coordinator` the studio is whole, minus the bricks, the library and the publication.**
   `StudioTools.Coordinator` is null: `/api/coordinator` has no address, `/api/bricks` an empty catalogue,
   `GET /api/publish` no publication, and `/api/coordinator/login`, `/api/library`, `/api/library/open`,
