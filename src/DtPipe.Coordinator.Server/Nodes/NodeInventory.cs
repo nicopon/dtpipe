@@ -41,6 +41,30 @@ public sealed class NodeInventory(ReplicaRegistry registry)
     // By subject: the identity's client id, which is also the key of its replicas in the registry. A rename changes
     // the name an entry shows when the host announces under it, and never makes a second entry.
     private readonly Dictionary<string, Node> _nodes = new(StringComparer.Ordinal);
+    // The runs whose requester asked for a cancellation and that have not ended: a view of what is being wound down, never a verdict.
+    private readonly HashSet<string> _cancelRequested = new(StringComparer.Ordinal);
+
+    /// <summary>Records that the requester of run <paramref name="runId"/> asked for its cancellation.</summary>
+    public void CancelRequested(string runId)
+    {
+        lock (_lock) _cancelRequested.Add(runId);
+    }
+
+    /// <summary>Forgets the cancellation request of run <paramref name="runId"/>, which has ended.</summary>
+    public void CancelSettled(string runId)
+    {
+        lock (_lock) _cancelRequested.Remove(runId);
+    }
+
+    /// <summary>
+    /// Whether the replica behind <paramref name="connectionId"/> holds runs and the requester of every one of them asked for its
+    /// cancellation: what it logs now belongs to that teardown. A replica that also holds a run nobody asked to cancel is not winding down.
+    /// </summary>
+    public bool IsWindingDown(string connectionId)
+    {
+        if (registry.OfConnection(connectionId) is not { Leases.Count: > 0 } replica) return false;
+        lock (_lock) return replica.Leases.All(l => _cancelRequested.Contains(l.RunId));
+    }
 
     /// <summary>Records what a replica announced, once the registry took it.</summary>
     public void Announced(string name, string subject, NodeAnnouncement announcement, IReadOnlyList<string> groups)
@@ -210,9 +234,19 @@ public sealed class NodeChannelHub(
     public Task ReportLog(NodeLogLine line)
     {
         if (inventory.NodeOf(Context.ConnectionId) is not { } node) return Task.CompletedTask;
-        bus.Publish("log", line with { Node = node });
+        bus.Publish("log", Classified(line with { Node = node }, inventory.IsWindingDown(Context.ConnectionId)));
         return Task.CompletedTask;
     }
+
+    /// <summary>
+    /// A warning or an error of the transport library, logged by a replica whose runs are all being cancelled at their requester's
+    /// asking, is how a transfer ends under that cancellation: it is shown as information and says so. The category decides, never the
+    /// message; the line is kept, and no run, branch or cancellation verdict reads it.
+    /// </summary>
+    internal static NodeLogLine Classified(NodeLogLine line, bool windingDown) =>
+        windingDown && LogCategories.IsTransport(line.Category) && line.Level is "Warning" or "Error" or "Critical"
+            ? line with { Level = "Information", Message = $"{line.Message} (a consequence of the run's cancellation)" }
+            : line;
 
     public override Task OnDisconnectedAsync(Exception? exception)
     {

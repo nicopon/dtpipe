@@ -539,6 +539,13 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   backlog it replays by it; a replica whose connection dropped carries `awaySince` and `givenUpAt` in the nodes' snapshot.
   `[CI: RunJournalTests (the label), RunQueueTests, OrphanRunsTests, NodeChannelHubTests; SqlStoreTests] [local: tools/campaign.py F4]` `[unchecked: a wired
   child with nothing to write ends only once a relay touches its torn-down transfer]`
+- **A transport line during a requested cancellation is shown as information, and nothing reads it.** `NodeLogLine.Category` is the
+  category of the logger that wrote the line (`NodeLogForwarder` fills it); `NodeChannelHub.ReportLog` shows a warning or an error of
+  `LogCategories.IsTransport` as information, with its label, when the replica that reported it holds runs and the requester asked to
+  cancel every one of them (`NodeInventory.IsWindingDown`, fed by `RunQueue`'s cancel and cleared when the run ends). The category
+  decides, never the message; the line is kept, a run's own teardown (the orchestrator's) is no requested cancellation, and no state,
+  code or verdict reads the classification. `[CI: RunQueueTests; Hosting.Tests NodeLogForwarderTests]`
+  `[unchecked: that a real transfer's lines all arrive before its run ends]`
 - **A run that was placed records the replica of each fragment.** `RunJournal` keeps the `RunResult` whole,
   `RunResult.Replicas` included: an instance id and the `Origin` the replica announced, untrusted text the pages
   escape. A run refused at admission has none, and a document that names none reads as a run with none.

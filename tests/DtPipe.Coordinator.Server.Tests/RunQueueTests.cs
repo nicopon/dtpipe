@@ -53,12 +53,15 @@ public sealed class RunQueueTests : IDisposable
         public ConcurrentDictionary<string, TaskCompletionSource<RunResult>> Ends { get; } = new();
         public Func<RunSpec, Exception?> Fails { get; set; } = _ => null;
 
+        /// <summary>Runs ignore their token and end only when the test says so, as a run whose teardown is still under way does.</summary>
+        public bool IgnoreToken { get; set; }
+
         public Task<RunResult> RunAsync(RunSpec spec, CancellationToken ct = default)
         {
             Specs.Enqueue(spec);
             if (Fails(spec) is { } failure) return Task.FromException<RunResult>(failure);
             var end = Ends.GetOrAdd(spec.RunId, _ => new(TaskCreationOptions.RunContinuationsAsynchronously));
-            ct.Register(() => end.TrySetResult(Result(RunOutcome.Cancelled)));
+            if (!IgnoreToken) ct.Register(() => end.TrySetResult(Result(RunOutcome.Cancelled)));
             return end.Task;
         }
 
@@ -464,6 +467,38 @@ public sealed class RunQueueTests : IDisposable
         await RunningAsync(q.RunId);
         foreach (var run in new[] { q, s, t, u }) _runs.End(run.RunId, RunOutcome.Succeeded);
         await Task.WhenAll(new[] { p, q, s, t, u }.Select(r => FinishedAsync(r.RunId)));
+    }
+
+    [Fact]
+    public async Task A_Transport_Warning_During_A_Requested_Cancellation_Is_Information_And_Never_Moves_The_Verdict()
+    {
+        await ReplicaAsync("n");
+        await DeployAsync(DataPlan("p", "n"));
+        _runs.IgnoreToken = true;
+        var connection = _connectionsOf["n"].Single();
+        var transport = new NodeLogLine("n", null, "Warning", "Session loop error", "TransportR.Client.Session");
+        var other = transport with { Category = "DtPipe.PipelineNode.Hosting.NodeAgent" };
+
+        var run = _deployments.Enqueue("p");
+        await RunningAsync(run.RunId);
+        Assert.NotNull(_registry.TryReserve(run.RunId, [("p@n", "node-n")], (_, _) => true));
+
+        // Nobody asked for a cancellation: the same line stays a warning.
+        Assert.Equal(transport, NodeChannelHub.Classified(transport, _inventory.IsWindingDown(connection)));
+
+        _deployments.Cancel(run.RunId);
+        var kept = NodeChannelHub.Classified(transport, _inventory.IsWindingDown(connection));
+        Assert.Equal(("Information", transport.Category), (kept.Level, kept.Category));
+        Assert.StartsWith(transport.Message, kept.Message);
+        Assert.Equal(other, NodeChannelHub.Classified(other, _inventory.IsWindingDown(connection)));
+        Assert.Equal(RunState.Running, _deployments.FindRun(run.RunId)!.State);
+
+        // The run ends as its requester asked, and a transport line after it is a warning again.
+        _runs.End(run.RunId, RunOutcome.Cancelled);
+        await FinishedAsync(run.RunId);
+        _registry.Release(run.RunId);
+        Assert.Equal(RunState.Cancelled, Journaled(run.RunId).State);
+        Assert.Equal(transport, NodeChannelHub.Classified(transport, _inventory.IsWindingDown(connection)));
     }
 
     [Fact]

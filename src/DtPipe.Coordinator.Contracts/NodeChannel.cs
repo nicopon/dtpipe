@@ -252,4 +252,19 @@ public static class ExitOrigins
 [JsonConverter(typeof(JsonStringEnumConverter<ExitedAck>))]
 public enum ExitedAck { Accepted, NotAdmitted, UnknownConnection }
 
-public sealed record NodeLogLine(string Node, string? Fragment, string Level, string Message);
+/// <summary>
+/// One log line a node forwards. <see cref="Category"/> is the category of the logger that wrote it, which is how the
+/// coordinator tells a line of the transport library from any other without reading its message; null when the
+/// writer names none.
+/// </summary>
+public sealed record NodeLogLine(string Node, string? Fragment, string Level, string Message, string? Category = null);
+
+/// <summary>What a logger category says about the library that wrote the line.</summary>
+public static class LogCategories
+{
+    /// <summary>The namespace of the transport library: every category a logger of it carries starts with it.</summary>
+    private const string TransportNamespace = "TransportR";
+
+    public static bool IsTransport(string? category) =>
+        category is not null && category.StartsWith(TransportNamespace, StringComparison.Ordinal);
+}
