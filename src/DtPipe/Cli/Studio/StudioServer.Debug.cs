@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using DtPipe.Cli.Split;
 using DtPipe.Core.Infrastructure.Arrow;
+using DtPipe.Jobs;
 using DtPipe.Sessions;
 using Microsoft.AspNetCore.Http;
 
@@ -76,7 +77,7 @@ public sealed partial class StudioServer
         try { return cutter.Plan(yaml, rows, salt); }
         catch (Exception ex) when (ex is InvalidOperationException or FormatException or YamlDotNet.Core.YamlException)
         {
-            throw new StudioRefusal(422, ex.Message);
+            throw new StudioRefusal(422, ShownFailure.Of(ex));
         }
     }
 
@@ -279,7 +280,7 @@ public sealed partial class StudioServer
             RefuseWhileSuspended(state);
             Settle(state, plan, []);
             try { cut = cutter.Cut(yaml, state.Watch, upTo, state.Levels.Select(l => new DebugHeld(l.Branch, l.Level, l.Key)).ToList()); }
-            catch (InvalidOperationException ex) { throw new StudioRefusal(422, ex.Message); }
+            catch (InvalidOperationException ex) { throw new StudioRefusal(422, ShownFailure.Of(ex)); }
             SaveDebug(key, state);
             return (cut.Yaml, cut.Dropped, cut.Unread);
         }

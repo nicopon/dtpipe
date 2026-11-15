@@ -25,18 +25,21 @@ public sealed record RunOutcome(
     /// <summary>
     /// Why the run failed, for a caller that answers a model: the engine's exception, else each failed
     /// branch's reason in alias order. Sanitised; null when the run gave neither. A failed branch does not
-    /// throw (the orchestrator turns it into an exit code), so this is the only place its reason surfaces
-    /// when the console is silenced.
+    /// throw (the orchestrator turns it into an exit code), so this is the only place its reason
+    /// surfaces when the console is silenced. A model gets the whole chain; <paramref name="forPerson"/> gives
+    /// the cause alone, as <see cref="DtPipe.Jobs.ShownFailure"/> words it.
     /// </summary>
-    public string? FailureText()
+    public string? FailureText(bool forPerson = false)
     {
+        string OfFault(Exception fault) => forPerson ? DtPipe.Jobs.ShownFailure.Of(fault) : fault.Message;
+        string Reason(string reason) => forPerson ? DtPipe.Jobs.ShownFailure.Of(reason) : reason;
         if (Fault is not null)
-            return DtPipe.Core.Security.ConnectionStringSanitizer.Sanitize(Fault.Message);
+            return DtPipe.Core.Security.ConnectionStringSanitizer.Sanitize(OfFault(Fault));
         if (Failures.Count == 0)
             return null;
         return string.Join(" ", Failures
             .OrderBy(kv => kv.Key, StringComparer.Ordinal)
-            .Select(kv => $"Branch '{kv.Key}': {DtPipe.Core.Security.ConnectionStringSanitizer.Sanitize(kv.Value)}"));
+            .Select(kv => $"Branch '{kv.Key}': {DtPipe.Core.Security.ConnectionStringSanitizer.Sanitize(Reason(kv.Value))}"));
     }
 }
 

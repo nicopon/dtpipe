@@ -213,7 +213,7 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
         try { job = JobYaml.Parse(yaml); }
         catch (Exception ex)
         {
-            return new DesignResult(new DesignModel(title, description, directives, []), yaml, [], [$"The job is not readable: {ex.Message}"], []);
+            return new DesignResult(new DesignModel(title, description, directives, []), yaml, [], [$"The job is not readable: {ShownFailure.Of(ex)}"], []);
         }
 
         var taken = JobYaml.Branches(job).Select(b => b.Alias).ToHashSet(StringComparer.Ordinal);
@@ -472,7 +472,7 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
         }
         catch (Exception ex)
         {
-            errors.Add($"'{step.Alias}': its YAML is not a branch ({ex.Message}).");
+            errors.Add($"'{step.Alias}': its YAML is not a branch ({ShownFailure.Of(ex)}).");
             return null;
         }
     }

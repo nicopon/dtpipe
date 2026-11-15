@@ -274,7 +274,7 @@ it at `JobExecutor.ExecuteAsync`, behind `JobService.ExecutePipelineAsync`. The 
 through `SampleReportCollector.Begin`, around the whole `ExecutePipelineAsync`, and returns a
 `RunOutcome` (exit code, branch failures, reports, checkpoint keys). A caller that answers a model words
 a failed run through `RunOutcome.FailureText` alone (the sample and the real write of `execute-yaml-job`
-share it), since a failed branch throws nothing and the console that would show its reason is silenced. `SampleReportCollector` is the
+share it; the studio asks it `forPerson`, which gives the cause alone), since a failed branch throws nothing and the console that would show its reason is silenced. `SampleReportCollector` is the
 singleton the engine and the observer publish to; it forwards to the collection the calling async flow
 armed, branches included, and drops everything when none is armed. Never read it from a caller, and
 never arm it from an `async` method that returns before the run ends: the value is gone with the frame.

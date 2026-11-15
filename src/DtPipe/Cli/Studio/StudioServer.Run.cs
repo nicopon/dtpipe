@@ -160,7 +160,7 @@ public sealed partial class StudioServer
 
         DebugCut cut;
         try { cut = cutter.Cut(sampling.Yaml, watch, null, keep.Select(l => new DebugHeld(l.Branch, l.Level, l.Key)).ToList(), write: true, beforeWriters: review, only: only); }
-        catch (InvalidOperationException ex) { throw new StudioRefusal(422, ex.Message); }
+        catch (InvalidOperationException ex) { throw new StudioRefusal(422, ShownFailure.Of(ex)); }
         if (only is not null) RefuseWritersOutside(cut, plan.Branches.Where(b => b.Writes).Select(b => b.Branch), only);
         var holds = review ? plan.Branches.Where(b => b.Writes && (only is null || only.Contains(b.Branch))).Select(b => new DebugWatch(b.Branch, DebugAt.End)).ToList() : [];
 
@@ -229,7 +229,7 @@ public sealed partial class StudioServer
     {
         DebugCut cut;
         try { cut = _tools.Engine.Cutter.Cut(yaml, [], null, null, write: true, only: only); }
-        catch (InvalidOperationException ex) { throw new StudioRefusal(422, ex.Message); }
+        catch (InvalidOperationException ex) { throw new StudioRefusal(422, ShownFailure.Of(ex)); }
         RefuseWritersOutside(cut, writes.Select(w => w.Alias), only);
         RefuseCursorsOthersRead(cut, _tools.Engine.Cutter.Plan(yaml, 0), writes.Select(w => w.Alias), only);
         return cut;
@@ -376,13 +376,13 @@ public sealed partial class StudioServer
             var outcome = await _tools.Engine.RunAsync(plan.Cut?.Yaml ?? plan.Sampling.Yaml, bindings, state.Cts.Token);
             code = outcome.ExitCode;
             checkpoints = outcome.Checkpoints;
-            foreach (var (alias, reason) in outcome.Failures) state.Failures[alias] = reason;
+            foreach (var (alias, reason) in outcome.Failures) state.Failures[alias] = ConnectionStringSanitizer.Sanitize(ShownFailure.Of(reason));
             // The engine answers a fault and a cancellation alike as a fault: a stop asked decides the verdict below.
             if (outcome.Fault is not null && outcome.Fault is not OperationCanceledException)
-                error = ConnectionStringSanitizer.Sanitize(outcome.Fault.Message);
+                error = Shown(outcome.Fault);
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { error = ConnectionStringSanitizer.Sanitize(ex.Message); }
+        catch (Exception ex) { error = Shown(ex); }
         finally
         {
             foreach (var file in files) { try { File.Delete(file); } catch (IOException) { } }
@@ -394,7 +394,7 @@ public sealed partial class StudioServer
                 try { state.View = await FinishStagedAsync(plan.Path, staged, checkpoints, stopped ? Stopped : code); }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    error ??= "The checkpoints of this run could not be settled: " + ConnectionStringSanitizer.Sanitize(ex.Message);
+                    error ??= "The checkpoints of this run could not be settled: " + Shown(ex);
                 }
             }
             lock (_runLock)

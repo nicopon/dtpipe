@@ -44,6 +44,7 @@ public sealed class StudioFolder
     public StudioFolder(string path)
     {
         Root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+        if (File.Exists(Root)) throw new DirectoryNotFoundException($"{Root} is a file, not a folder: give the folder that holds the jobs.");
         if (!Directory.Exists(Root)) throw new DirectoryNotFoundException($"No folder at {Root}.");
     }
 

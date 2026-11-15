@@ -387,7 +387,16 @@ public sealed class CoordinatorLink : IDisposable
             var response = await ExchangeAsync(() => _http.SendAsync(request, ct), Url, ct);
             if (response.StatusCode != HttpStatusCode.Unauthorized) return response;
             response.Dispose();
-            if (attempt > 0) throw SignOut($"{Url} no longer accepts this session: sign in again.");
+            if (attempt > 0)
+            {
+                // A key that was just exchanged and is refused before it has named anyone opened a session for no person: the
+                // coordinator issues a node's or a runner's key a token of their own kind, which no person's page accepts.
+                bool unnamed;
+                lock (_lock) unnamed = ByKey && _me is null;
+                throw SignOut(unnamed
+                    ? $"{Url} took this key but opens no person's session with it: a key made for a node or a runner does not."
+                    : $"{Url} no longer accepts this session: sign in again.");
+            }
         }
     }
 
@@ -456,7 +465,9 @@ public sealed class CoordinatorLink : IDisposable
                 TokenError? refusal = null;
                 try { refusal = await response.Content.ReadFromJsonAsync<TokenError>(ct); }
                 catch (JsonException) { }
-                throw SignOut($"{Url} refused this studio's key: {refusal?.Description ?? refusal?.Error ?? $"{(int)response.StatusCode} {response.ReasonPhrase}"}");
+                throw SignOut(refusal?.Description is null && refusal?.Error == "invalid_client"
+                    ? $"{Url} opens no identity with this key: it is unknown to that coordinator, revoked or expired, and the coordinator does not say which."
+                    : $"{Url} refused this studio's key: {refusal?.Description ?? refusal?.Error ?? $"{(int)response.StatusCode} {response.ReasonPhrase}"}");
             }
             if (!response.IsSuccessStatusCode)
                 throw new CoordinatorLinkException($"{Url}'s token endpoint answered {(int)response.StatusCode}.");

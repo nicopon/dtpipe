@@ -1,24 +1,23 @@
 using System.Diagnostics;
 using System.Text;
+using DtPipe.Jobs;
 
 namespace DtPipe.Cli.Studio;
 
-/// <summary>What a publication would refuse: <see cref="Report"/> is the runner's own words, null when it takes the job.</summary>
+/// <summary>What a publication would refuse: <see cref="Report"/> is the cause the runner's dry run states, null when it takes the job.</summary>
 public sealed record PublicationVerdict(bool Ok, string? Report);
 
 /// <summary>
 /// The runner's dry run of a job, replayed on this machine: the binary the studio runs as, the command a runner runs for a
 /// library save's check (<c>--dry-run 1 --edges-only</c>, each source brick bound to the rows its node sent, each sink brick
 /// to a file of the run's directory), in a directory of its own. The rules are the engine's under <c>--edges-only</c>, never
-/// the studio's: a refusal is what the runner's child writes on stderr, its last lines as the coordinator reports them.
+/// the studio's: a refusal is the cause the child writes on stderr, worded as <see cref="ShownFailure.OfConsole"/> words it.
 /// The coordinator's own checks around that dry run (a reference no node offers, each sink brick's target) are not played here.
 /// </summary>
 internal static class PublicationCheck
 {
     /// <summary>The bound a runner gives the same dry run.</summary>
     public static readonly TimeSpan Bound = TimeSpan.FromSeconds(60);
-
-    private const int ReportLines = 8;
 
     public static async Task<PublicationVerdict> RunAsync(
         string directory, string yaml, IReadOnlyList<(string Alias, byte[] Arrow)> sources, IReadOnlyList<string> sinks, CancellationToken ct)
@@ -66,8 +65,8 @@ internal static class PublicationCheck
         }
         await stdout;
         if (process.ExitCode == 0) return new PublicationVerdict(true, null);
-        var lines = (await stderr).Split('\n').Select(l => l.TrimEnd()).Where(l => l.Length > 0).TakeLast(ReportLines);
-        return new PublicationVerdict(false, string.Join('\n', lines));
+        var cause = ShownFailure.OfConsole(await stderr);
+        return new PublicationVerdict(false, cause.Length > 0 ? cause : "The runner's dry run refused the job and said nothing more.");
     }
 
     /// <summary>

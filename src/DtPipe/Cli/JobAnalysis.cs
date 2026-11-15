@@ -139,10 +139,11 @@ public sealed class JobAnalysis(IServiceProvider services, IEnumerable<IStreamRe
     /// job, runs it in sample mode and shapes what each stage saw. Each stage shows at most
     /// <paramref name="shownRows"/> of the rows it passed: a model is given ten, a person may ask for
     /// every row read. <paramref name="bindInput"/> and <paramref name="bindOutput"/> bind the job's
-    /// <c>arrow:-</c> boundaries as <c>--bind-input</c> and <c>--bind-output</c> do: no second binding path.
+    /// <c>arrow:-</c> boundaries as <c>--bind-input</c> and <c>--bind-output</c> do: no second binding path. A failure is worded for a person when
+    /// <paramref name="forPerson"/> (the cause alone), for a model otherwise (the whole chain).
     /// </summary>
     public async Task<string> SampleAsync(string yamlContent, int rows, int shownRows, CancellationToken ct,
-        string? bindInput = null, string? bindOutput = null, int maxRows = 1000, string? nextStep = null, JobHints? hints = null)
+        string? bindInput = null, string? bindOutput = null, int maxRows = 1000, string? nextStep = null, JobHints? hints = null, bool forPerson = false)
     {
         if (string.IsNullOrWhiteSpace(yamlContent))
             return JsonSerializer.Serialize(new { success = false, error = "YAML job content cannot be empty." });
@@ -154,7 +155,7 @@ public sealed class JobAnalysis(IServiceProvider services, IEnumerable<IStreamRe
                 return JsonSerializer.Serialize(new { success = false, stage = "validation", errors = parsed.Errors },
                     new JsonSerializerOptions { WriteIndented = true });
 
-            var report = await RunSampleAsync(parsed, Math.Clamp(rows, 1, maxRows), shownRows, ct, nextStep);
+            var report = await RunSampleAsync(parsed, Math.Clamp(rows, 1, maxRows), shownRows, ct, nextStep, forPerson);
             return JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true });
         }
         catch (Exception ex)
@@ -165,7 +166,7 @@ public sealed class JobAnalysis(IServiceProvider services, IEnumerable<IStreamRe
                 stage = "dry-run",
                 applied = false,
                 mode = "sample",
-                errors = new[] { DtPipe.Core.Security.ConnectionStringSanitizer.Sanitize(ex.Message) }
+                errors = new[] { DtPipe.Core.Security.ConnectionStringSanitizer.Sanitize(forPerson ? DtPipe.Jobs.ShownFailure.Of(ex.Message) : ex.Message) }
             }, new JsonSerializerOptions { WriteIndented = true });
         }
     }
@@ -178,7 +179,7 @@ public sealed class JobAnalysis(IServiceProvider services, IEnumerable<IStreamRe
     /// would be a second engine. Such a tool never runs a transformer, so it could not tell a
     /// model that its --window step produced nothing.
     /// </summary>
-    public async Task<object> RunSampleAsync(ParsedJob parsed, int rows, int shownRows, CancellationToken ct, string? nextStep = null)
+    public async Task<object> RunSampleAsync(ParsedJob parsed, int rows, int shownRows, CancellationToken ct, string? nextStep = null, bool forPerson = false)
     {
         var runner = _services.GetRequiredService<JobRunner>();
 
@@ -197,7 +198,7 @@ public sealed class JobAnalysis(IServiceProvider services, IEnumerable<IStreamRe
         // A failed sample is still a sample that wrote nothing: it keeps `applied: false`, so a model can
         // tell "nothing was written" from "something was written and then it failed" (F2). The reason
         // goes in `error`, since the console that would show it is silenced.
-        var failure = outcome.FailureText();
+        var failure = outcome.FailureText(forPerson);
 
         return new
         {

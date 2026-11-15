@@ -13,11 +13,11 @@ public sealed class StudioEngine(JobAnalysis analysis, JobRunner runner, DebugCu
     public DebugCutter Cutter => cutter;
 
     public Task<string> SampleAsync(string yaml, int rows, StudioBindings bindings, CancellationToken ct) =>
-        analysis.SampleAsync(yaml, rows, shownRows: rows, ct, bindings.Input, bindings.Output);
+        analysis.SampleAsync(yaml, rows, shownRows: rows, ct, bindings.Input, bindings.Output, forPerson: true);
 
     public Task<string> DebugSampleAsync(string yaml, int rows, StudioBindings bindings, CancellationToken ct) =>
         analysis.SampleAsync(yaml, rows, shownRows: Math.Min(rows, StudioServer.MaxRows), ct, bindings.Input, bindings.Output,
-            maxRows: StudioServer.DebugMaxRows);
+            maxRows: StudioServer.DebugMaxRows, forPerson: true);
 
     public Task<RunOutcome> RunAsync(string yaml, StudioBindings bindings, CancellationToken ct)
     {

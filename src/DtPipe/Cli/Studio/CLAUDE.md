@@ -102,7 +102,7 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   `POST /api/publish/check` (`PublicationCheck`) runs the command a runner runs for a library save's check (`--job`,
   `--dry-run 1`, `--edges-only`) with the binary the studio runs as, as a child process in a directory of its own, each source
   brick bound to the first row its node sends through the coordinator and each sink brick to a file there: the refusals are
-  the engine's, as the last lines of its stderr. The runner's own code (`DelegatedJobs`) is the distributed family's, which the
+  the engine's, worded by `ShownFailure.OfConsole` (below). The runner's own code (`DelegatedJobs`) is the distributed family's, which the
   CLI does not reference, so the arguments are restated here; what the coordinator checks around that dry run (its structural
   phase, each sink brick's target) is not played. A reference no catalog brick of its kind holds is left for the dry run to
   refuse, or named by `RefuseReferences` when no node offers its key. Only while a person is signed in (409 otherwise): without
@@ -112,6 +112,14 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   apart from the composition's, for the composed text it judged, and says there is none while signed out. A job whose ends are
   no bricks runs here and is refused by it: a verdict of publication, not an error.
   `[CI: StudioPublicationCheckTests — the real binary]` `[unchecked: the page, which page_smoke.mjs plays without a coordinator]`
+- **A failure shown to a person is worded once, by `ShownFailure` (`DtPipe.Jobs`).** The cause alone: the innermost exception's first
+  line, or the last link of a flattened chain without its type, a YAML failure with its line, and for a child's console
+  (`OfConsole`) without its log lines, its verdict lines, its wrapped lines' breaks or the `--edges-only` the check runs under, which reads
+  as a published job. The studio's engine asks it of a sample (`JobAnalysis.SampleAsync(forPerson:)`, `RunOutcome.FailureText(forPerson:)`),
+  `StudioServer.Shown` of a run, an import and an unforeseen fault, the coordinator of a job that is not readable and of the runner's report. The
+  model's path keeps the whole chain. The form is read off the message, never off a provider or an exception type held in a list.
+  The messages `ToolError` writes for a model (the key list of a branch, `Call 'help'`) are not reworded here.
+  `[CI: StudioFailureWordingTests]`
 - **A publication sends no binding.** A reference names its node and its brick, so `/api/publish` sends the saved job alone
   (`LibrarySave.Bindings` stays absent): the coordinator keeps the mode of each reference and writes its pin. `[CI: StudioPublishTests]`
 - **A publication sends the job saved in the folder, nothing beside it.** `/api/publish` reads the

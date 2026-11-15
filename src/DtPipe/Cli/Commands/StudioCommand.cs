@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.Net.Sockets;
 using DtPipe.Cli.Agent;
 using DtPipe.Cli.Expressions;
 using DtPipe.Cli.Mcp;
@@ -84,6 +85,12 @@ public sealed class StudioCommand : Command
             catch (DirectoryNotFoundException ex)
             {
                 Console.Error.WriteLine(ex.Message);
+                return 1;
+            }
+            var port = parseResult.GetValue(portOption);
+            if (port is < 0 or > 65535)
+            {
+                Console.Error.WriteLine($"[ERROR] --port is a port number from 0 to 65535, not {port}.");
                 return 1;
             }
             CoordinatorLink? link = null;
@@ -187,11 +194,11 @@ public sealed class StudioCommand : Command
             StudioServer server;
             try
             {
-                server = await StudioServer.StartAsync(folder, parseResult.GetValue(portOption), tools, ct);
+                server = await StudioServer.StartAsync(folder, port, tools, ct);
             }
-            catch (IOException ex)
+            catch (Exception ex) when (ex is IOException or SocketException)
             {
-                Console.Error.WriteLine($"dtpipe studio could not listen: {ex.Message}");
+                Console.Error.WriteLine($"[ERROR] {ListenFailure(port, ex)}");
                 return 1;
             }
 
@@ -211,6 +218,14 @@ public sealed class StudioCommand : Command
             }
         });
     }
+
+    /// <summary>Why the studio could not listen at <paramref name="port"/>: the cause, with the option that changes it.</summary>
+    private static string ListenFailure(int port, Exception failure) =>
+        failure.GetBaseException() is SocketException { SocketErrorCode: var code } && port != 0 && code is SocketError.AddressAlreadyInUse or SocketError.AccessDenied
+            ? code == SocketError.AddressAlreadyInUse
+                ? $"Port {port} is already in use: give another with --port, or leave it out to take any free port."
+                : $"This user may not listen on port {port}: give another with --port, or leave it out to take any free port."
+            : $"dtpipe studio could not listen: {ShownFailure.Of(failure)}";
 
     /// <summary>
     /// The key <paramref name="reference"/> names, read once (<c>${{NAME}}</c>, <c>keyring://alias</c> or <c>@file</c>), or why not. A

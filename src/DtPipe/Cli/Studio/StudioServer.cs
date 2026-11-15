@@ -335,9 +335,12 @@ public sealed partial class StudioServer : IAsyncDisposable
         catch (Exception ex) when (!context.RequestAborted.IsCancellationRequested)
         {
             context.Response.StatusCode = StatusCodes.Status500InternalServerError;
-            await JsonAsync(context, new { error = ConnectionStringSanitizer.Sanitize(ex.Message) });
+            await JsonAsync(context, new { error = Shown(ex) });
         }
     }
+
+    /// <summary>A failure as a person reads it: the cause alone (<see cref="ShownFailure"/>), without a secret.</summary>
+    internal static string Shown(Exception failure) => ConnectionStringSanitizer.Sanitize(ShownFailure.Of(failure));
 
     /// <summary>Refuses a request this session's page could not have sent.</summary>
     private void Admit(HttpRequest request)
@@ -705,7 +708,7 @@ public sealed partial class StudioServer : IAsyncDisposable
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            throw new StudioRefusal(422, $"This command does not make a job: {ConnectionStringSanitizer.Sanitize(ex.Message)}");
+            throw new StudioRefusal(422, $"This command does not make a job: {Shown(ex)}");
         }
         await JsonAsync(context, new { yaml });
     }
