@@ -49,8 +49,11 @@
 /** How the targets are written: `review` stops the real run before every writer, to be read before it writes. @typedef {{ review: boolean }} Writing */
 
 /**
- * The last publication's outcome ({ id, saved }, { id, conflict } or { id, refused }); the id and message being published.
- * @typedef {{ outcome: any, request: { id: string, message: string } | null }} Publication
+ * The last publication's outcome ({ id, saved }, { id, conflict } or { id, refused }); the id and message being published;
+ * and the last verdict of the runner's dry run, for the composed text it judged (`yaml`): `pending` while it runs, then
+ * `ok` with the runner's `report`, or `error` when it could not run.
+ * @typedef {{ yaml: string, pending: boolean, ok?: boolean, report?: string | null, error?: string }} PublicationCheck
+ * @typedef {{ outcome: any, request: { id: string, message: string } | null, check: PublicationCheck | null }} Publication
  */
 
 /**
@@ -78,7 +81,7 @@ export const state = {
   /** @type {Writing} */
   writing: { review: false },
   /** @type {Publication} */
-  publication: { outcome: null, request: null },
+  publication: { outcome: null, request: null, check: null },
   /** @type {BrickRows | null} */
   brickRows: null,
   /** The variables of the composed job, by name, and the keyring's aliases: never a value the person did not type. @type {{ variables: any[], aliases: string[], error?: string, pending?: boolean }} */

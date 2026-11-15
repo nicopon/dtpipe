@@ -20,6 +20,9 @@ export async function refreshCoordinator() {
   const next = await api("/api/coordinator");
   state.coordinator = next.url ? next : null;
   invalidate("coordinator");
+  // The drawer's Problems and Publish say what a publication would refuse only while signed in; a poll that changes
+  // nothing leaves the drawer, and what is typed in it, alone.
+  if (state.coordinator?.state !== before) invalidate("drawer");
   if (state.coordinator && state.coordinator.state !== before) for (const listener of listeners) listener(state.coordinator);
   return state.coordinator;
 }

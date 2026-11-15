@@ -11,7 +11,7 @@ import { afterFlush, invalidate, onZone } from "./render.js";
 import { sequence, state } from "./state.js";
 import { adoptDraft, cardBadge, cardTool, cardTools, debugComposed, forgetPins, forgetPreview, heldBranch, heldTargets, previewView, restoreRows, runPreview, setDebugRows } from "./preview.js";
 import { forgetRun, prepareRun, restoreReview, runView } from "./run.js";
-import { forgetPublication, publicationView, publish } from "./publish.js";
+import { forgetPublication, publicationProblems, publicationView, publish } from "./publish.js";
 import { loadVariables, onLaunchChanged, unreadyCount, variablesView } from "./variables.js";
 import { fileReplaced, mountAgent } from "./agent.js";
 
@@ -284,6 +284,7 @@ async function start() {
     // A sink writes the run it waits on; the rest of the card's tools belong to the preview.
     cardTool: (alias, name) => (name === "write" ? writeHeld(alias) : cardTool(alias, name)),
     previewView,
+    publicationProblems,
     extraTabs: [{
       name: "variables",
       label: "Variables ",

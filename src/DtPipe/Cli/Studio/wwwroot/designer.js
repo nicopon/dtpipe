@@ -51,7 +51,8 @@ let composeTimer = null;
 
 /**
  * Builds the designer in `root`. The host gives what only it knows: `toolbar` (the bar's buttons), `onComposed`,
- * `cardTools`, `cardBadge` and `cardTool` (what a card shows and does), `previewView` (the Preview tab) and `extraTabs`.
+ * `cardTools`, `cardBadge` and `cardTool` (what a card shows and does), `previewView` (the Preview tab), `publicationProblems`
+ * (the second verdict of Problems) and `extraTabs`.
  */
 export function mountDesigner(root, options = {}) {
   host = root;
@@ -1112,9 +1113,12 @@ function renderDrawer() {
       el("span", { class: "hint" }, "The job the server composed: a plain dtpipe job, runnable whole with dtpipe --job.")),
     el("pre", { id: "d-yaml" }, cards.result.yaml)];
   } else if (state.view.drawer === "problems") {
-    body = [errors ? [el("h3", {}, `Errors (${errors})`), el("ul", { class: "msgs bad" }, cards.result.errors.map((m) => el("li", {}, m)))] : null,
-      warnings ? [el("h3", {}, `Warnings (${warnings})`), el("ul", { class: "msgs warn" }, cards.result.warnings.map((m) => el("li", {}, m)))] : null,
-      problems ? null : el("p", { class: "hint" }, "Nothing to report.")];
+    // Two verdicts, never mixed: what the composition says of a run here, and what a publication would refuse (the host's).
+    body = [el("h3", {}, "Will not run here"),
+      errors ? [el("h4", {}, `Errors (${errors})`), el("ul", { class: "msgs bad" }, cards.result.errors.map((m) => el("li", {}, m)))] : null,
+      warnings ? [el("h4", {}, `Warnings (${warnings})`), el("ul", { class: "msgs warn" }, cards.result.warnings.map((m) => el("li", {}, m)))] : null,
+      problems ? null : el("p", { class: "hint" }, "Nothing to report."),
+      hooks.publicationProblems?.() || null];
   } else if (state.view.drawer === "edit") {
     body = [el("textarea", { id: "d-edit", class: "mono", rows: "16", spellcheck: "false", value: cards.result.yaml }),
       el("div", { class: "row" }, el("button", { "data-apply": true }, "Apply"),

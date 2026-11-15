@@ -95,7 +95,11 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   phase, each sink brick's target) is not played. A reference no catalog brick of its kind holds is left for the dry run to
   refuse, or named by `RefuseReferences` when no node offers its key. Only while a person is signed in (409 otherwise): without
   the bricks' rows the verdict would be another check. It is bounded (`PublicationCheck.Bound`), cancelled with its request,
-  and starts a process: it is asked for, never run at each edit. `[CI: StudioPublicationCheckTests — the real binary]`
+  and starts a process: it is asked for, never run at each edit. The page asks for it from Problems and before *Publish*'s
+  questions (`checkPublication` in `publish.js`), where a refusal stops before the first; Problems shows it as a second verdict,
+  apart from the composition's, for the composed text it judged, and says there is none while signed out. A job whose ends are
+  no bricks runs here and is refused by it: a verdict of publication, not an error.
+  `[CI: StudioPublicationCheckTests — the real binary]` `[unchecked: the page, which page_smoke.mjs plays without a coordinator]`
 - **A publication sends no binding.** A reference names its node and its brick, so `/api/publish` sends the saved job alone
   (`LibrarySave.Bindings` stays absent): the coordinator keeps the mode of each reference and writes its pin. `[CI: StudioPublishTests]`
 - **A publication sends the job saved in the folder, nothing beside it.** `/api/publish` reads the
