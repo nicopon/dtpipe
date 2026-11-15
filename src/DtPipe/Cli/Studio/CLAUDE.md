@@ -29,10 +29,12 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   a dot, no symbolic link below it. The empty builder reads no `appsettings.json` from the folder.
 - **The server writes, from cards.** `PUT /api/job` composes the page's cards and writes that text
   (`WriteJob`): whole and atomic, only where a job could be read, into a folder that exists, against
-  the hash the page opened (409 otherwise), never over a file with a new job. What the studio keeps
-  for a job (`StudioLocalFiles`) lives under `.dtpipe/studio/`, which `SessionStore.EnsureIgnored`
-  keeps out of git; nothing there is reached through a link, and a link refuses the save before the
-  job is written.
+  the hash the page opened (409 otherwise), never over a file with a new job. The one replacement the
+  page offers after that 409 is of a file the agent saved while the cards held the person's edit: it
+  reads the file again, names what is lost, and writes against that hash once the person agrees.
+  What the studio keeps for a job (`StudioLocalFiles`) lives under `.dtpipe/studio/`, which
+  `SessionStore.EnsureIgnored` keeps out of git; nothing there is reached through a link, and a link
+  refuses the save before the job is written.
 - **A variable's name is the contract.** `StudioVariables` reads a job's `${{…}}` with the run's own
   grammar (`VariableTokens` in `DtPipe.Jobs`), and an action arms each chosen value for
   its own call chain (`LaunchValues.Arm`, an `AsyncLocal` like `NonInteractiveGuard`) which

@@ -4,7 +4,8 @@
 // Save then Write targets…, review before writing, Write and Abandon from a sink, a run left suspended by an earlier
 // session, Forget pins, typing in the inspector; the agent's panel against a scripted endpoint that speaks Ollama's API (a
 // save refused then accepted, a run, a question, a plan put on the cards, a job holding a credential, Stop, a reload mid-turn, an
-// edit made while a save waits, a turn that fails); Undo of a deleted card and of a plan, and the cards a plan names.
+// edit made while a save waits, the person's save over the file the agent saved, a turn that fails); Undo of a deleted card and of
+// a plan, and the cards a plan names.
 //
 // Local only: it needs Node 22+ (native WebSocket, no dependency), Chrome, and a built dtpipe. CI never
 // runs it. The page is embedded in the DLL, so build before playing it.
@@ -250,7 +251,7 @@ function startFakeLlm() {
       const text = String(last.content);
       const job = /<open-job>\n/.test(messages[0]?.content ?? "") ? "job seen" : "no job seen";
       const reply = /save/.test(text) ? call("save-job", { path: "agent.yaml", yamlContent: AGENT_JOB })
-        : /overwrite/.test(text) ? call("save-job", { path: "chain.yaml", yamlContent: AGENT_JOB })
+        : /overwrite/.test(text) ? call("save-job", { path: "chain.yaml", yamlContent: /again/.test(text) ? PLAN_JOB : AGENT_JOB })
         : /ask/.test(text) ? call("ask-user", { question: "Which target?", options: ["a.csv", "b.csv"] })
         : /plan/.test(text) ? call("validate-yaml-job", { yamlContent: PLAN_JOB })
         : /secret/.test(text) ? { role: "assistant", content: job }
@@ -401,6 +402,21 @@ const scenarios = {
     await p.clickText("#agent-behind button", "Apply");
     check("Apply puts the saved file on the cards", await p.until(`document.querySelectorAll(".dcard").length === 2`));
     check("Apply clears the notice", await p.until(`document.querySelector("#agent-behind").hidden`));
+
+    await send("overwrite it again");
+    check("a second save waits on a card", await p.until(`/asks to save chain\\.yaml/.test(document.querySelector("#agent-now")?.textContent ?? "")`));
+    const before = p.seen.length;
+    await p.type("#d-title", " kept");
+    check("the title is composed while the card waits", await p.waitSeen("/api/design/compose", before));
+    await p.clickText("#agent-now button", "Save");
+    check("the second save ends the turn", await idle());
+    check("the notice says the saved file waits again", await p.until(`!document.querySelector("#agent-behind").hidden`));
+    check("the agent's second save is on disk", /generate:7/.test(fs.readFileSync(path.join(folder, "chain.yaml"), "utf8")));
+    await p.click("#d-save");
+    check("Save replaces the agent's file once the person agrees", await p.waitStatus(/^saved$/, 15000), await p.status());
+    const saved = fs.readFileSync(path.join(folder, "chain.yaml"), "utf8");
+    check("the file holds the person's cards", /kept/.test(saved) && /generate:5/.test(saved), saved);
+    check("the replaced file leaves no notice to apply", await p.until(`document.querySelector("#agent-behind").hidden`));
 
     await send("fail now");
     check("a failed turn ends", await idle() && await p.until(`[...document.querySelectorAll("#agent-log .verdict")].length > 1`));

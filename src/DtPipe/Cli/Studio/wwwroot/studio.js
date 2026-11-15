@@ -13,7 +13,7 @@ import { adoptDraft, cardBadge, cardTool, cardTools, debugComposed, forgetPins, 
 import { forgetRun, prepareRun, restoreReview, runView } from "./run.js";
 import { forgetPublication, publicationView, publish } from "./publish.js";
 import { loadVariables, onLaunchChanged, unreadyCount, variablesView } from "./variables.js";
-import { mountAgent } from "./agent.js";
+import { fileReplaced, mountAgent } from "./agent.js";
 
 const MAX_DEBUG_ROWS = 100000;
 const opening = sequence();
@@ -177,8 +177,20 @@ async function save() {
   if (job.rewrites && !confirm("Saving writes this job as the studio composes it: comments inside it and the order of its keys are not kept. Save anyway?")) return;
   const acceptErrors = result.errors?.length > 0;
   if (acceptErrors && !confirm(`${result.errors.length} problem(s) remain: the job written may not run. Save anyway?`)) return;
+  const write = (hash) => api("/api/job", { path: job.path, hash, model: state.cards.model, acceptErrors }, "PUT");
   try {
-    const answer = await api("/api/job", { path: job.path, hash: job.hash, model: state.cards.model, acceptErrors }, "PUT");
+    let answer;
+    try {
+      answer = await write(job.hash);
+    } catch (e) {
+      // The agent saved this file while the cards kept the person's edit: saving them replaces the agent's text, once the
+      // person agrees, against the file as it is now. Any other conflict is said as the server words it.
+      if (e.status !== 409 || !job.hash || state.agent.behind?.saved !== job.path) throw e;
+      const disk = await api(`/api/job?path=${encodeURIComponent(job.path)}`);
+      if (!confirm(`The agent saved ${job.path} after you opened it. Saving replaces the agent's text with your cards: what the agent wrote is lost (its notice's Apply shows it on the cards instead). Replace it?`)) throw e;
+      answer = await write(disk.hash);
+      fileReplaced(job.path);
+    }
     state.job = { path: job.path, hash: answer.hash, rewrites: false };
     // What a preview pinned before the first save belongs to the job now.
     if (!job.hash) await adoptDraft();

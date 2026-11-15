@@ -169,6 +169,13 @@ function settled() {
   invalidate("agent");
 }
 
+/** The person's save replaced the file the agent saved: the notice no longer has it to apply. @param {string} path */
+export function fileReplaced(path) {
+  if (state.agent.behind?.saved !== path) return;
+  state.agent.behind = null;
+  invalidate("agent");
+}
+
 /** A plan on the open job's cards, unless the person changed them since the agent last saw them: the notice keeps it then. @param {string} yaml */
 async function follow(yaml) {
   await mark(yaml);
