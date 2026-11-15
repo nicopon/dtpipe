@@ -288,6 +288,8 @@ async function start() {
   if (kept.sizes) restoreSizes(kept.sizes);
   sizesRead();
   await loadJobs();
+  // The job that was open comes back, when the folder still lists it.
+  if (typeof kept.open === "string" && state.jobs.paths.includes(kept.open)) await open(kept.open, true);
   onCoordinator(loadBricks);
   onCoordinator(loadLibrary);
   await refreshCoordinator();

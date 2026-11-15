@@ -1250,7 +1250,7 @@ Editing a card clears the preview and the checkpoints of every card that depends
 through pins is not exactly the job's run: every cut passes through Arrow and batches differ.
 
 The studio keeps its own files under `.dtpipe/studio/` in the folder: the cards' layout
-(`<job>-layout.json`), the page's state (`view.json`), the launch values (`<job>-launch.json`,
+(`<job>-layout.json`), the page's state, the job open included (`view.json`), the launch values (`<job>-launch.json`,
 aliases and typed values, never a keyring value), and the pins (`<job>-debug.json`). Checkpoints
 live in the session `.dtpipe/sessions/studio-debug/`.
 

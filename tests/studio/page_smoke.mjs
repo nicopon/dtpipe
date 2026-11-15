@@ -592,7 +592,7 @@ const scenarios = {
     check("the review ends", await p.waitStatus(/run succeeded/, 30000), await p.status());
     await p.until(`!!document.querySelector("[data-card-tool='write']")`);
     await p.reload();
-    check("the job opens again", await p.openJob("review.yaml"));
+    check("the job opens again", await p.until(`document.querySelector("#job-name")?.textContent === "review.yaml" && document.querySelectorAll(".dcard").length >= 2 && !!document.querySelector("#d-drawer .tabs")`));
     check("the sinks still wait, with their rows", await p.until(`/⏸ 10 rows queued/.test(document.querySelector('.dcard[data-alias="c"] .dcard-badge')?.textContent ?? "") && /⏸ 20 rows queued/.test(document.querySelector('.dcard[data-alias="e"] .dcard-badge')?.textContent ?? "")`), JSON.stringify(await p.badges()));
     check("the bar says a run is suspended", await p.until(`!document.querySelector("#d-suspended")?.hidden`));
     check("the rows that wait are shown on a sink", await p.until(`!!document.querySelector("#d-drawer .drawer-body table")`), (await p.drawerText()).slice(0, 200));
@@ -699,7 +699,8 @@ const scenarios = {
     check("the browser kept nothing", (await p.ev(`localStorage.length`)) === 0);
 
     await p.reload();
-    check("the job opens again", await p.openJob("chain.yaml"));
+    check("the studio kept the job open", kept().open === "chain.yaml", JSON.stringify(kept()));
+    check("the job opens again by itself", await p.until(`document.querySelector("#job-name")?.textContent === "chain.yaml" && document.querySelectorAll(".dcard").length >= 2 && !!document.querySelector("#d-drawer .tabs")`));
     check("the tab is the one left", (await p.tab()) === "preview", await p.tab());
     check("the card is the one left", await p.ev(`document.querySelector('.dcard[data-alias="b"]')?.classList.contains("selected")`));
     check("the rows are the ones asked", (await p.ev(`document.querySelector("#d-watch-rows")?.value`)) === "7");

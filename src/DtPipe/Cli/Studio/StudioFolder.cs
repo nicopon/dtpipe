@@ -313,8 +313,8 @@ public sealed class StudioLocalFiles(StudioFolder folder)
 
     /// <summary>
     /// The page's own preferences, kept in one file for the folder (<c>.dtpipe/studio/view.json</c>): the sizes of its
-    /// panes, and for each job the drawer's tab, the rows asked and the card selected. Nothing in it is true of a
-    /// job: the page draws the same without it.
+    /// panes, the job open, and for each job the drawer's tab, the rows asked and the card selected. Nothing in it is
+    /// true of a job: the page draws the same without it.
     /// </summary>
     public JsonObject ReadView()
     {
@@ -330,15 +330,16 @@ public sealed class StudioLocalFiles(StudioFolder folder)
     }
 
     /// <summary>
-    /// Replaces the sizes, and a job's preferences, when given. The jobs kept are the last <see cref="MaxViewJobs"/>
+    /// Replaces the sizes, the job open and a job's preferences, when given. The jobs kept are the last <see cref="MaxViewJobs"/>
     /// written, so the file does not grow with every job ever opened.
     /// </summary>
-    public void UpdateView(JsonObject? sizes, string? job, JsonObject? jobView)
+    public void UpdateView(JsonObject? sizes, string? job, JsonObject? jobView, string? open = null)
     {
         lock (_viewLock)
         {
             var view = ReadViewLocked();
             if (sizes is not null) view["sizes"] = sizes;
+            if (open is not null) view["open"] = open;
             if (job is not null && jobView is not null)
             {
                 var jobs = view["jobs"] as JsonObject ?? [];

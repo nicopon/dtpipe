@@ -651,7 +651,7 @@ public sealed class StudioServerTests : IAsyncLifetime
     {
         var (put, _) = await SendAsync(Request(HttpMethod.Put, "/api/view", body: new
         {
-            sizes = new { pal = 200, drawer = 300 }, path = "a.yaml", job = new { tab = "preview", rows = 50, card = "b", review = true },
+            sizes = new { pal = 200, drawer = 300 }, open = "a.yaml", path = "a.yaml", job = new { tab = "preview", rows = 50, card = "b", review = true },
         }));
         var (_, a) = await SendAsync(Request(HttpMethod.Get, "/api/view?path=a.yaml"));
         var (_, other) = await SendAsync(Request(HttpMethod.Get, "/api/view?path=sub/b.yml"));
@@ -665,6 +665,7 @@ public sealed class StudioServerTests : IAsyncLifetime
         Assert.True(a.GetProperty("job").GetProperty("review").GetBoolean());
         Assert.Equal(JsonValueKind.Null, other.GetProperty("job").ValueKind);
         Assert.Equal(300, none.GetProperty("sizes").GetProperty("drawer").GetInt32());
+        Assert.Equal("a.yaml", none.GetProperty("open").GetString());
         Assert.True(File.Exists(Path.Combine(_dir, ".dtpipe", "studio", "view.json")));
     }
 
@@ -689,6 +690,8 @@ public sealed class StudioServerTests : IAsyncLifetime
     public async Task The_preferences_of_a_job_outside_the_folder_are_refused()
     {
         var (status, _) = await SendAsync(Request(HttpMethod.Put, "/api/view", body: new { path = "../x.yaml", job = new { tab = "yaml" } }));
+        var (opened, _) = await SendAsync(Request(HttpMethod.Put, "/api/view", body: new { open = "../x.yaml" }));
+        Assert.NotEqual(HttpStatusCode.NoContent, opened);
 
         Assert.NotEqual(HttpStatusCode.NoContent, status);
         Assert.False(File.Exists(Path.Combine(_dir, ".dtpipe", "studio", "view.json")));
