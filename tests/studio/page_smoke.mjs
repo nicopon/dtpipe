@@ -445,6 +445,8 @@ const scenarios = {
     await p.click("#agent-stop");
     check("Stop ends the turn", await idle());
     check("Stop leaves a verdict", await p.until(`document.querySelectorAll("#agent-log .verdict").length === ${before + 1}`));
+    const lastVerdict = () => p.ev(`[...document.querySelectorAll("#agent-log .verdict")].pop()?.textContent ?? ""`);
+    check("a turn the person stopped says stopped", /^stopped\b/.test(await lastVerdict()), await lastVerdict());
     check("Stop abandons the model call", await p.until(`${fakeLlm.llm.open} === 0`) && fakeLlm.llm.open === 0);
     await p.shot("8-stopped");
   },

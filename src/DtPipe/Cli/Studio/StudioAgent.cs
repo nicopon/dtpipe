@@ -177,11 +177,13 @@ internal sealed class StudioAgent : IAsyncDisposable
             }
             _executor.Context = context;
             var summary = await _executor.RunTurnAsync(prompt, model, _setup.BaseUrl, _options, AgentExecutor.Unbounded, _view, stop, _shutdown.Token);
+            // A turn the person stopped is told as stopped, as the page says it, never as one that ended for another cause.
+            var stopped = summary.Outcome == TurnOutcome.UserInterrupted;
             Log(new
             {
                 kind = "verdict",
-                turn = Traced(), status = summary.Status.ToString().ToLowerInvariant(),
-                reason = summary.Reason,
+                turn = Traced(), status = stopped ? "interrupted" : summary.Status.ToString().ToLowerInvariant(),
+                reason = stopped ? null : summary.Reason,
                 closing = AgentTrace.Safe(summary.ClosingWords),
                 tools = summary.ToolSummary,
                 duration = summary.DurationText,

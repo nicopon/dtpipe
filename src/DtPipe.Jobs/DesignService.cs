@@ -371,7 +371,7 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
         var (endpointKey, other) = step.Kind == StepKinds.Source ? (JobKeys.Input, JobKeys.Output) : (JobKeys.Output, JobKeys.Input);
         if (!JobYaml.Has(local, endpointKey)) errors.Add($"'{step.Alias}' is a {step.Kind}: its YAML names no {endpointKey}.");
         var stray = new[] { JobKeys.From, JobKeys.Ref, "transformers", other }.Where(k => JobYaml.Has(local, k)).ToList();
-        if (stray.Count > 0) errors.Add($"'{step.Alias}' is a {step.Kind}: {string.Join(", ", stray)} belong to other cards.");
+        if (stray.Count > 0) errors.Add($"'{step.Alias}' is a {step.Kind}: {string.Join(", ", stray)} belong to other steps.");
 
         if (step.Kind == StepKinds.Source)
         {
