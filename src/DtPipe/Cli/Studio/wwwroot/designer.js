@@ -29,7 +29,7 @@ const TRANSFORMERS = {
   project: { hint: "options: project \"a,b\", drop \"c\", rename \"Old:New\"", mapping: null, value: null },
 };
 
-const KIND_LABEL = { source: "source", sink: "sink", transform: "transform", sql: "sql", merge: "merge", branch: "branch" };
+const KIND_LABEL = { source: "source", sink: "output", transform: "transform", sql: "sql", merge: "merge", branch: "branch" };
 
 // The panels' sizes, kept across visits.
 const SIZE_LIMITS = { pal: [160, 420], insp: [240, 640], drawer: [100, 640], agent: [260, 720] };
@@ -600,7 +600,7 @@ function renderPalette() {
     item("transform", "Transform", "An ordered list of transformers over one input"),
     item("sql", "SQL", "A DuckDB query over one main input, joined to others as ref"),
     item("merge", "Merge", "UNION ALL of several inputs with the same schema"),
-    el("h3", {}, "Sinks"), endpoints(state.components.writers, "sink"),
+    el("h3", {}, "Outputs"), endpoints(state.components.writers, "sink"),
     el("p", { class: "hint" }, "Drag a component or a step onto the canvas, then wire an output port (right) to an input port (left). Drag a wire's end off its input port to move it or, dropped in the void, to remove it."),
     versions());
 }
@@ -684,7 +684,7 @@ function renderCanvas() {
   inner.style.width = `${width}px`;
   inner.style.height = `${height}px`;
   drawEdges();
-  if (!cards.model.steps.length) inner.appendChild(el("p", { class: "canvas-empty hint" }, "Drag sources, steps and sinks here from the palette."));
+  if (!cards.model.steps.length) inner.appendChild(el("p", { class: "canvas-empty hint" }, "Drag sources, steps and outputs here from the palette."));
 }
 
 function portPoint(alias, port) {
@@ -990,7 +990,7 @@ function renderInspector() {
     const errors = cards.result?.errors?.length || 0;
     fill(view, el("h2", {}, "Job"),
       el("p", { class: "hint" }, `${cards.model.steps.length} card(s). `, errors ? el("span", { class: "bad" }, `${errors} error(s): see Problems.`) : "Composes cleanly."),
-      el("p", { class: "hint" }, "Select a card to edit it. A source and a sink of their own carry their endpoint as YAML; the server joins a source, its transform and its sink back into one branch when nothing else reads between them."),
+      el("p", { class: "hint" }, "Select a card to edit it. A source and an output of their own carry their endpoint as YAML; the server joins a source, its transform and its output back into one branch when nothing else reads between them."),
       cards.model.directives.length ? [el("h3", {}, "Header directives"), el("ul", { class: "inputs" }, cards.model.directives.map((d) => el("li", {}, el("code", {}, d))))] : null);
     return;
   }
@@ -1003,11 +1003,11 @@ function renderInspector() {
   let body;
   if (isEndpoint(step) && !step.brick) {
     body = [step.kind === "sink" ? inputsList(step) : null,
-      el("h3", {}, step.kind === "source" ? "Its reader" : "Its writer"),
-      el("textarea", { id: "i-yaml", "aria-label": `${step.kind === "source" ? "Reader" : "Writer"} of ${step.alias}, as YAML`, class: "mono", rows: "10", spellcheck: "false", value: step.yaml || "" }),
+      el("h3", {}, step.kind === "source" ? "Its reader" : "Its output"),
+      el("textarea", { id: "i-yaml", "aria-label": `${step.kind === "source" ? "Reader" : "Output"} of ${step.alias}, as YAML`, class: "mono", rows: "10", spellcheck: "false", value: step.yaml || "" }),
       el("p", { class: "hint" }, step.kind === "source"
         ? "input, the keys that bound or sample what it reads (limit, cursor, sampling-rate…), and its reader's provider-options blocks."
-        : "output, the keys that govern what it writes (prefix, checkpoint, contract-save), and its writer's provider-options blocks.")];
+        : "output, the keys that govern what it writes (prefix, checkpoint, contract-save), and its provider-options blocks.")];
   } else if (isEndpoint(step)) {
     body = [step.kind === "sink" ? inputsList(step) : null, brickView(step)];
   } else if (step.kind === "transform") {

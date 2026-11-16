@@ -13,6 +13,7 @@
     <span id="job-name" class="mono"></span>
     <span id="status" class="pill" role="status"></span>
     <span class="links">
+<a id="help" class="help" href="https://github.com/nicopon/dtpipe/blob/main/docs/guides/distributed-first-pipeline.md" target="_blank" rel="noopener noreferrer" title="The guide: your first distributed pipeline, with the studio">Help</a>
 <span id="studio-link" hidden></span>
 <span id="agent-link"></span>
 <span id="coordinator" class="coordinator" hidden></span>
@@ -29,9 +30,9 @@
       </div>
     </aside>
     <section id="designer" class="designer">
-      <p class="muted intro">Open a job on the left. It opens as cards: its sources, its steps and its sinks. Preview
-        runs it through the real engine over the first source rows, with the writers neutralised, and every card shows
-        the rows it delivers: no target is written. Save writes the job the studio composes, and keeps where its cards are under .dtpipe/, outside git.</p>
+      <p class="muted intro">Open a job on the left. It opens as cards: its sources, its steps and its outputs. Preview
+        runs it through the real engine over the first source rows, with the outputs neutralised, and every card shows
+        the rows it delivers: nothing is written. Save writes the job the studio composes, and keeps where its cards are under .dtpipe/, outside git.</p>
     </section>
     <aside id="agent-pane" class="agent-pane" hidden></aside>
   </main>

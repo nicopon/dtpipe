@@ -17,6 +17,12 @@ const CHOICE_LABEL = {
 
 const STATUS_LABEL = { completed: "completed", awaitinginput: "awaiting your answer", incomplete: "incomplete" };
 
+// How far the agent's plan has got, said as a sentence: the server's state is an identifier, never a label.
+const PLAN_LABEL = {
+  drafted: "not checked yet", validated: "checked, and the job is valid", invalid: "checked, and the job is refused",
+  dryrunok: "tried on a few rows, nothing written", applied: "written", failed: "failed", saved: "saved in the folder",
+};
+
 let hooks = {};
 let pollTimer = null;
 let polling = false;
@@ -399,7 +405,7 @@ function planView(plan) {
   const marks = state.agent.behind?.yaml === plan.yaml ? null : marksView(plan.yaml, plan.yaml === appliedYaml && !moved());
   return el("div", {},
     el("details", { class: "agent-plan" },
-      el("summary", {}, `The agent's plan (${plan.state.toLowerCase()})`, plan.message ? el("span", { class: "hint" }, ` · ${plan.message}`) : null),
+      el("summary", {}, `The agent's plan: ${PLAN_LABEL[plan.state.toLowerCase()] || plan.state.toLowerCase()}`, plan.message ? el("span", { class: "hint" }, ` · ${plan.message}`) : null),
       el("pre", {}, plan.yaml)),
     marks ? el("p", {}, marks) : null,
     el("div", { class: "row" },

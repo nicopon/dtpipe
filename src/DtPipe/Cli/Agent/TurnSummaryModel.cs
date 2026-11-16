@@ -96,7 +96,7 @@ public sealed record TurnSummaryModel(
     {
         TurnOutcome.Succeeded => "delivered a response",
         TurnOutcome.AwaitingUserInput => "the agent asked you a question",
-        TurnOutcome.UserInterrupted => "you interrupted the model call",
+        TurnOutcome.UserInterrupted => "you stopped it",
         TurnOutcome.MaxIterationsReached => "hit the iteration limit without finishing",
         TurnOutcome.LlmError => "the LLM call failed",
         TurnOutcome.EmptyResponse => "the model returned an empty response",

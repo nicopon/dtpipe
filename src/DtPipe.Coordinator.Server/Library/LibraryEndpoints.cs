@@ -120,7 +120,7 @@ internal static class LibraryEndpoints
         try { check = await validator.ValidateAsync(yaml, bindings, ct); }
         catch (Exception ex) when (ex is not OperationCanceledException) { check = new DesignCheck(false, $"The job is not readable: {ShownFailure.Of(ex)}"); }
         return check.Ok ? (null, check)
-            : (Results.Json(new LibraryRefused("The designer's check refused this job: nothing was saved.", check.Report),
+            : (Results.Json(new LibraryRefused("The coordinator's check refused this job: nothing was saved.", check.Report),
                 statusCode: StatusCodes.Status422UnprocessableEntity), null);
     }
 }

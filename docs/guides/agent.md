@@ -16,7 +16,7 @@ Open the address it prints. The panel on the right takes a mission:
 > and writes them to big.csv. Check it with a dry-run, save it as big.yaml, then run it.*
 
 The agent inspects the source, writes the job, previews it on a few rows, then asks to save it. Once
-saved, the job runs without a model: you run it with **Write targets…**.
+saved, the job runs without a model: you run it with **Run for real…**.
 
 ## What the agent may do
 
@@ -26,10 +26,10 @@ saved, the job runs without a model: you run it with **Write targets…**.
 | validates a job and previews it (`dry-run`): nothing is written | no |
 | gives a job to check or preview: it lands on the open job's cards, unsaved, as soon as the call returns | no, nothing saved |
 | saves a job into the folder | **yes**: the card shows the text the studio will write |
-| tells you to run a saved job with **Write targets…** | no: it writes no target itself |
+| tells you to run a saved job with **Run for real…** | no: it writes no output itself |
 
 Nothing waits on a timer: without your answer, nothing is saved. **Refuse** tells the agent you
-declined; it is not an error. The agent never writes a target: when the job is ready, save it and
+declined; it is not an error. The agent never writes an output: when the job is ready, save it and
 run it yourself. A turn has no step limit; **Stop** ends it. The panel shows the turn, its step
 and the context the model last read. Drag its left edge to resize it. Publishing, the library and
 the coordinator stay your gestures.

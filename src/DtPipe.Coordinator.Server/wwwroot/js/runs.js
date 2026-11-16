@@ -16,7 +16,7 @@ export function mount(el) {
     <div class="view-head"><h1>Runs</h1><p class="hint">Runs that share no data node are in flight together; a run that shares one waits its turn, in the order runs came, until that run ends and its own fragments are registered again. The runner never counts.</p></div>
     <section class="card"><h2>Deployments</h2><div id="r-deployments"></div></section>
     <section class="card"><h2>In flight and queued</h2><div id="r-queue"></div></section>
-    <section class="card"><div class="card-head"><h2>Journal</h2><select id="r-filter"></select></div><div id="r-journal"></div></section>
+    <section class="card"><div class="card-head"><h2>Runs log</h2><select id="r-filter"></select></div><div id="r-journal"></div></section>
     <section class="card"><div class="card-head"><h2>Events</h2>
       <div class="actions"><select id="r-lognode"></select><label class="check"><input type="checkbox" id="r-debug"> child stderr</label><button id="r-clear" class="ghost small">Clear</button></div></div>
       <div id="r-log" class="log mono"></div></section>`;

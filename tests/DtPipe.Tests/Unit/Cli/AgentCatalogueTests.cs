@@ -75,7 +75,7 @@ public class AgentCatalogueTests
 
         Assert.Contains("'save-job'", prompt);
         Assert.DoesNotContain("run-job", prompt);
-        Assert.Contains("Write targets", prompt);
+        Assert.Contains("Run for real", prompt);
         Assert.Contains("confirm", prompt);
         Assert.DoesNotContain("FORBIDDEN", prompt, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("execute-yaml-job", prompt);

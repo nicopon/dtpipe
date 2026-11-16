@@ -23,6 +23,7 @@ header { display: flex; align-items: center; gap: 12px; padding: 10px 16px; bord
 header #quit { margin-left: auto; }
 header .links { margin-left: auto; display: flex; align-items: center; gap: 14px; font-size: 12.5px; }
 header .links + #quit { margin-left: 0; }
+header .links a { color: var(--muted); }
 main { display: grid; grid-template-columns: 220px minmax(0, 1fr); height: calc(100vh - 49px); }
 .jobs-pane { border-right: 1px solid var(--line); padding: 12px; overflow: auto; background: var(--panel); }
 .jobs-pane .row { justify-content: space-between; margin-bottom: 8px; }

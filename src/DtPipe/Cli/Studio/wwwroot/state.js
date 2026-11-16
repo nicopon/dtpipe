@@ -54,7 +54,7 @@
  * and the last verdict of the runner's dry run, for the composed text it judged (`yaml`): `pending` while it runs, then
  * `ok` with the runner's `report`, or `error` when it could not run.
  * @typedef {{ yaml: string, pending: boolean, ok?: boolean, report?: string | null, error?: string }} PublicationCheck
- * @typedef {{ outcome: any, request: { id: string, message: string } | null, check: PublicationCheck | null }} Publication
+ * @typedef {{ outcome: any, request: { id: string, message: string, previous?: string | null } | null, check: PublicationCheck | null }} Publication
  */
 
 /**

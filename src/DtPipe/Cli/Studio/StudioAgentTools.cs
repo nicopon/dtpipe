@@ -9,7 +9,7 @@ namespace DtPipe.Cli.Studio;
 /// The tools the studio's agent is offered: dtpipe's, as <see cref="McpToolProvider"/> offers them (no tool that writes to a
 /// target, F1), and the studio's own gestures on the folder. <c>save-job</c> writes a job, never a target: it waits for the
 /// person's answer to a card, which nothing of the command line, the environment or the model skips. No tool runs a job for
-/// real: that is the page's <c>Write targets…</c>. A tool that runs the engine waits for the studio's slot, so a page's sample
+/// real: that is the page's <c>Run for real…</c>. A tool that runs the engine waits for the studio's slot, so a page's sample
 /// and the agent's never run together.
 /// </summary>
 internal sealed class StudioAgentTools : IAgentToolProvider

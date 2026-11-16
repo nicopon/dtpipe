@@ -16,7 +16,7 @@ the loop, not the provider `[CI: AgentCatalogueTests, AgentExecutorCatalogueTest
 **F2** `ISqlSafetyPolicy` + `IApprovalGate`; a write by `execute-yaml-job` needs `apply` + approval;
 the studio's agent writes a job only through `save-job`, waiting in its call for the person's answer
 to a card, which nothing of the command line, the environment or the model skips, and offers no tool
-that writes a target: a real run is the page's `Write targets…`
+that writes an output: a real run is the page's `Run for real…`
 `[CI: StudioAgentTests]` ·
 **F4** fact cache + `ConversationWindowManager.Compact` ·
 **F5** every tool call of a turn runs; those that run a pipeline (`[RunsPipeline]`, reflected, compared

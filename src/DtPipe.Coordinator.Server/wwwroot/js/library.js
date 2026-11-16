@@ -63,7 +63,7 @@ function deployRowActions(e) {
   const unbound = (e.bindingProblems || []).some((p) => p.blocking);
   const deploy = !active && !unbound;
   const run = deployment && deployment.state !== "failed";
-  return `<button class="small" data-needs="designer" data-deploy="${esc(e.id)}" ${deploy ? "" : "disabled"} title="${unbound ? "Its bindings do not hold" : ""}">${deployment ? "Redeploy" : "Deploy"}</button>
+  return `<button class="small" data-needs="designer" data-deploy="${esc(e.id)}" ${deploy ? "" : "disabled"} title="${unbound ? "Its bindings do not hold" : ""}">Deploy</button>
         <button class="small primary" data-needs="designer" data-run="${esc(e.id)}" ${run ? "" : "disabled"}>Run</button>
         ${deployment ? `<button class="small ghost danger" data-needs="designer" data-undeploy="${esc(e.id)}" ${active ? "disabled" : ""}>Undeploy</button>` : ""}`;
 }
@@ -80,7 +80,7 @@ function render() {
       <td class="actions-cell">
         <a class="button small" href="#/library/${encodeURIComponent(e.id)}" title="The plan a launch would make, and its runs">Open</a>
         ${deployRowActions(e)}
-        <button class="small ghost" data-history="${esc(e.id)}">${historyOf === e.id ? "Hide history" : "History"}</button>
+        <button class="small ghost" data-history="${esc(e.id)}">${historyOf === e.id ? "Hide versions" : "Versions"}</button>
         <button class="small ghost danger" data-needs="designer" data-delete="${esc(e.id)}">Delete</button>
       </td>
     </tr>
@@ -152,7 +152,7 @@ async function onClick(e) {
       await api(`/api/deployments/${encodeURIComponent(t.dataset.undeploy)}`, undefined, "DELETE");
     } else if (t.dataset.delete) {
       const id = t.dataset.delete;
-      if (!confirm(`Delete ${id} from the library? Its history stays in the repository.`)) return;
+      if (!confirm(`Delete ${id} from the library? Its versions stay in the repository.`)) return;
       await api(`/api/library/${encodeURIComponent(id)}`, undefined, "DELETE");
       if (historyOf === id) historyOf = null;
       await load();

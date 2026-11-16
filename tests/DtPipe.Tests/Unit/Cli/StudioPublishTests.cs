@@ -189,7 +189,7 @@ public sealed class StudioPublishTests : IAsyncLifetime
     public async Task A_refused_publication_shows_the_report_of_the_coordinators_check()
     {
         await SignInAsync();
-        _fakes.Refusal = new LibraryRefused("The designer's check refused this job: nothing was saved.", "'main': n1/archive does not accept what reaches it");
+        _fakes.Refusal = new LibraryRefused("The coordinator's check refused this job: nothing was saved.", "'main': n1/archive does not accept what reaches it");
 
         var (status, answer) = await PublishAsync(await HashAsync());
 

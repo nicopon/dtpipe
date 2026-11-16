@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Plays the studio's page in headless Chrome over the DevTools protocol and checks what a person sees:
 // opening a job, Preview, a click on each card, pins, an edit while a preview or a run holds the engine,
-// Save then Write targets…, review before writing, Write and Abandon from a sink, a run left suspended by an earlier
+// Save then Run for real…, review before writing, Write and Abandon from a sink, a run left suspended by an earlier
 // session, Forget pins, typing in the inspector; the agent's panel against a scripted endpoint that speaks Ollama's API (a
 // save refused then accepted, a run, a question, a plan put on the cards, a job holding a credential, Stop, a reload mid-turn, an
 // edit made while a save waits, the person's save over the file the agent saved, a turn that fails); Undo of a deleted card and of
@@ -629,7 +629,7 @@ const scenarios = {
     await p.click("#d-run");
     check("Run opens its confirmation", await p.until(`!!document.querySelector("#d-run-dialog[open]")`));
     const text = await p.dialogText();
-    check("Run is the plain real run", /This run is real: its writers write/.test(text) && !/stops at/.test(text), text.slice(0, 200));
+    check("Run is the plain real run", /This run is real: its outputs are written/.test(text) && !/stops at/.test(text), text.slice(0, 200));
     await p.click("#d-run-cancel");
 
     await p.click(`.dcard[data-alias="${mid}"] [data-card-tool="pin"]`);
@@ -645,7 +645,7 @@ const scenarios = {
     check("the bar has no Abandon and no Continue", await p.ev(`!document.querySelector("#d-abandon, #d-continue")`));
     check("Preview is held back", await p.until(`document.querySelector("#d-preview")?.disabled === true`));
     check("the verb that writes is held back", (await p.disabled("#d-run")) === true);
-    check("the verb that writes is named Write targets…", (await p.ev(`document.querySelector("#d-run")?.textContent`)) === "Write targets…");
+    check("the verb that writes is named Run for real…", (await p.ev(`document.querySelector("#d-run")?.textContent`)) === "Run for real…");
     check("the sink says the run waits on it", await p.until(`/⏸/.test(document.querySelector('.dcard[data-alias="c"] .dcard-badge')?.textContent ?? "")`), JSON.stringify(await p.badges()));
     check("the sink that holds no rows offers Abandon and no Write", await p.ev(`!document.querySelector('.dcard[data-alias="c"] [data-card-tool="write"]') && !!document.querySelector('.dcard[data-alias="c"] [data-card-tool="abandon"]')`));
     check("a card that is no sink offers neither", await p.ev(`!document.querySelector('.dcard[data-alias="b"] [data-card-tool="write"], .dcard[data-alias="b"] [data-card-tool="abandon"]')`));
@@ -660,13 +660,13 @@ const scenarios = {
     check("Forget pins leaves no state file", !fs.existsSync(file));
   },
 
-  // Write targets… without the case ticked writes at once, after the confirmation, to every sink.
+  // Run for real… without the case ticked writes at once, after the confirmation, to every sink.
   async "write-plain"({ page: p, folder }) {
     check("the job opens", await p.openJob("review.yaml"));
     await p.click("#d-run");
     check("the confirmation opens", await p.until(`!!document.querySelector("#d-run-confirm")`));
     check("the case is not ticked", (await p.ev(`document.querySelector("#d-review")?.checked`)) === false);
-    check("the confirmation says the targets are written", /reaches the end|real: its writers write/.test(await p.dialogText()), (await p.dialogText()).slice(0, 200));
+    check("the confirmation says the targets are written", /reaches the end|real: its outputs are written/.test(await p.dialogText()), (await p.dialogText()).slice(0, 200));
     check("nothing is written before the confirmation", !fs.existsSync(path.join(folder, "c.csv")) && !fs.existsSync(path.join(folder, "e.csv")));
     await p.click("#d-run-confirm");
     check("the run succeeds", await p.waitStatus(/run succeeded/, 30000), await p.status());
@@ -674,14 +674,14 @@ const scenarios = {
     check("no sink is left waiting", await p.ev(`document.querySelector("#d-suspended").hidden && !document.querySelector("[data-card-tool='write']")`));
   },
 
-  // Write targets… with a target unticked writes the others only, and the confirmation names the number it writes.
+  // Run for real… with a target unticked writes the others only, and the confirmation names the number it writes.
   async "write-choose"({ page: p, folder }) {
     check("the job opens", await p.openJob("review.yaml"));
     await p.click("#d-run");
     check("the confirmation lists both targets", await p.until(`!!document.querySelector("#d-target-c") && !!document.querySelector("#d-target-e")`));
-    check("it offers to write both", /Write 2 targets/.test(await p.ev(`document.querySelector("#d-run-confirm")?.innerText ?? ""`)));
+    check("it offers to write both", /Write 2 outputs/.test(await p.ev(`document.querySelector("#d-run-confirm")?.innerText ?? ""`)));
     await p.click("#d-target-e");
-    check("the choice re-prepares for one target", await p.until(`/Write 1 target$/.test(document.querySelector("#d-run-confirm")?.innerText ?? "")`));
+    check("the choice re-prepares for one target", await p.until(`/Write 1 output$/.test(document.querySelector("#d-run-confirm")?.innerText ?? "")`));
     check("the target ticked keeps its box", (await p.ev(`document.querySelector("#d-target-c")?.checked`)) === true && (await p.ev(`document.querySelector("#d-target-e")?.checked`)) === false);
     await p.click("#d-run-confirm");
     check("the run succeeds", await p.waitStatus(/run succeeded/, 30000), await p.status());
@@ -702,7 +702,7 @@ const scenarios = {
     check("nothing is written", files().every((f) => !f), JSON.stringify(files()));
     check("the sinks say what waits", await p.until(`/⏸ 10 rows queued/.test(document.querySelector('.dcard[data-alias="c"] .dcard-badge')?.textContent ?? "") && /⏸ 20 rows queued/.test(document.querySelector('.dcard[data-alias="e"] .dcard-badge')?.textContent ?? "")`), JSON.stringify(await p.badges()));
     check("the bar says a run is suspended", await p.visible("#d-suspended"));
-    check("Preview and Write targets… are held back", (await p.disabled("#d-preview")) === true && (await p.disabled("#d-run")) === true);
+    check("Preview and Run for real… are held back", (await p.disabled("#d-preview")) === true && (await p.disabled("#d-run")) === true);
     const held = JSON.parse(fs.readFileSync(stateFile(folder, "review.yaml"), "utf8"));
     check("the review pinned nothing", held.watch.length === 0 && held.levels.length === 2, JSON.stringify(held));
     await p.pick("c");

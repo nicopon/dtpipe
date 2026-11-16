@@ -401,7 +401,7 @@ public sealed class StudioStagedRunTests : IAsyncLifetime
         var (status, changed) = await PostAsync("/api/run/prepare", new { path = "job.yaml", hash, debug = true });
 
         Assert.Equal(HttpStatusCode.Conflict, status);
-        Assert.Contains("does not hold the rows of every target", changed.GetProperty("error").GetString());
+        Assert.Contains("does not hold the rows of every output", changed.GetProperty("error").GetString());
         Assert.NotEmpty(key);
     }
 
@@ -501,7 +501,7 @@ public sealed class StudioStagedRunTests : IAsyncLifetime
         var (status, body) = await PostAsync("/api/run/prepare", new { path = "job.yaml", hash, debug = true });
 
         Assert.Equal(HttpStatusCode.Conflict, status);
-        Assert.Contains("does not hold the rows of every target", body.GetProperty("error").GetString());
+        Assert.Contains("does not hold the rows of every output", body.GetProperty("error").GetString());
         // Abandoning is the way out.
         var (abandon, view) = await PostAsync("/api/debug/state", new { yaml = Twin(), rows = 20, path = "job.yaml", resetAll = true });
         Assert.Equal(HttpStatusCode.OK, abandon);
@@ -642,7 +642,7 @@ public sealed class StudioStagedRunTests : IAsyncLifetime
         var (status, body) = await PrepareTargetsAsync(hash, null, null, ["c"]);
 
         Assert.Equal(HttpStatusCode.Conflict, status);
-        Assert.Contains("a target you chose reads it", body.GetProperty("error").GetString());
+        Assert.Contains("an output you chose reads it", body.GetProperty("error").GetString());
         Assert.False(File.Exists(Path.Combine(_dir, "b.csv")));
     }
 
@@ -674,7 +674,7 @@ public sealed class StudioStagedRunTests : IAsyncLifetime
         // Continuing every target wants the rows of every target, and b holds none.
         var (all, body) = await PrepareTargetsAsync(hash, debug: true, review: false, null);
         Assert.Equal(HttpStatusCode.Conflict, all);
-        Assert.Contains("does not hold the rows of every target", body.GetProperty("error").GetString());
+        Assert.Contains("does not hold the rows of every output", body.GetProperty("error").GetString());
 
         var written = await RunTargetsAsync(hash, debug: true, review: false, ["c"]);
         Assert.Equal(0, written.GetProperty("code").GetInt32());

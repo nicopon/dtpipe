@@ -84,7 +84,7 @@ export function publicationProblems() {
   if (current.error) return [title, ask, el("p", { class: "warn" }, `The check did not run: ${current.error}`)];
   if (current.ok) {
     return [title, ask, el("p", { class: "good" }, "Nothing: the runner's dry run takes this job."),
-      el("p", { class: "hint" }, "A publication also has each sink brick's node judge its target, which this check does not ask.")];
+      el("p", { class: "hint" }, "A publication also has each sink brick's node judge its output, which this check does not ask.")];
   }
   return [title, ask, refusalView(current)];
 }
@@ -130,7 +130,7 @@ export async function publish(replace) {
     if (idError) { status(idError, "bad"); return; }
     const message = prompt("Describe this version (the commit message):", `Publish ${job.path} from dtpipe studio`);
     if (message === null) return;
-    publication.request = { id, message };
+    publication.request = { id, message, previous: last?.id === id ? last.commit ?? null : null };
   }
   return send(replace);
 }
@@ -141,8 +141,9 @@ async function send(replace) {
   const request = publication.request;
   try {
     const saved = await api("/api/publish", { path: job.path, hash: job.hash, id: request.id, message: request.message, replace });
-    publication.outcome = { id: request.id, saved };
-    status(`published at ${short(saved.commit)}`, "good");
+    const unchanged = !!request.previous && saved.commit === request.previous;
+    publication.outcome = { id: request.id, saved, unchanged };
+    status(unchanged ? `already published at ${short(saved.commit)}, nothing changed` : `published at ${short(saved.commit)}`, "good");
   } catch (e) {
     if (e.status === 422) {
       publication.outcome = { id: request.id, refused: { error: e.data?.error || e.message, report: e.data?.report ?? null } };
@@ -191,7 +192,7 @@ function outcomeView(outcome) {
   }
   const saved = outcome.saved;
   return [
-    el("p", { class: "good" }, `${saved.id} is published at the commit `, el("code", {}, short(saved.commit)), "."),
-    saved.deployed ? el("p", { class: "warn" }, "The version in production stays the previous one until it is deployed again from the coordinator's console.") : null,
+    el("p", { class: "good" }, `${saved.id} is ${outcome.unchanged ? "already published, nothing changed, at" : "published at"} the commit `, el("code", {}, short(saved.commit)), "."),
+    saved.deployed ? el("p", { class: "warn" }, "The version in production stays the previous one until you press Deploy in the coordinator's console.") : null,
   ];
 }

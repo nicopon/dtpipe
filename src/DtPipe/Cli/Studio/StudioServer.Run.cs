@@ -93,7 +93,7 @@ public sealed partial class StudioServer
         var staged = asked.Debug == true || asked.Review == true;
         // A suspended run has its rows; any run but its continuation would write the job again and leave them to be written twice.
         if (!staged && LoadDebug(DebugKey(path, null)).Real)
-            throw new StudioRefusal(409, "A real run is suspended before its targets are written: write it or abandon it from the sink cards first.");
+            throw new StudioRefusal(409, "A real run is suspended before its outputs are written: write it or abandon it from the output cards first.");
 
         var writes = new List<RunWrite>();
         foreach (var (alias, branch) in JobYaml.Branches(JobYaml.Parse(sampling.Yaml)))
@@ -147,7 +147,7 @@ public sealed partial class StudioServer
             : PlanOf(cutter, text, 0, RealSalt(text, launch));
         var state = LoadDebug(key);
         if (state.Real && review)
-            throw new StudioRefusal(409, "A real run is suspended before its targets are written: write it or abandon it before reviewing another.");
+            throw new StudioRefusal(409, "A real run is suspended before its outputs are written: write it or abandon it before reviewing another.");
         var (watch, keep, drop) = Judge(state, plan, []);
 
         // A suspended run is continued whole or not at all: a target that holds nothing would be read from its source and written unreviewed.
@@ -155,7 +155,7 @@ public sealed partial class StudioServer
         {
             var missing = plan.Branches.Where(b => b.Writes && (only is null || only.Contains(b.Branch)) && !keep.Any(h => Same(h.Branch, b.Branch) && h.Level == b.Transformers)).Select(b => b.Branch).ToList();
             if (missing.Count > 0)
-                throw new StudioRefusal(409, $"The suspended run does not hold the rows of every target ({string.Join(", ", missing)}): abandon it, then review again.");
+                throw new StudioRefusal(409, $"The suspended run does not hold the rows of every output ({string.Join(", ", missing)}): abandon it, then review again.");
         }
 
         DebugCut cut;
@@ -214,12 +214,12 @@ public sealed partial class StudioServer
     private static HashSet<string>? ChosenTargets(List<string>? asked, IReadOnlyList<RunWrite> writes, bool sample)
     {
         if (asked is null) return null;
-        if (sample) throw new StudioRefusal(409, "A run that reads a source brick writes nothing real: there is no target to choose.");
-        if (asked.Count == 0) throw new StudioRefusal(400, "Choose at least one target to write.");
+        if (sample) throw new StudioRefusal(409, "A run that reads a source brick writes nothing real: there is no output to choose.");
+        if (asked.Count == 0) throw new StudioRefusal(400, "Choose at least one output to write.");
         var known = writes.Select(w => w.Alias).ToList();
         var unknown = asked.Where(a => !known.Contains(a, StringComparer.OrdinalIgnoreCase)).ToList();
         if (unknown.Count > 0)
-            throw new StudioRefusal(400, $"The job has no target {string.Join(", ", unknown.Select(u => $"'{u}'"))}: it writes {string.Join(", ", known.Select(k => $"'{k}'"))}.");
+            throw new StudioRefusal(400, $"The job has no output {string.Join(", ", unknown.Select(u => $"'{u}'"))}: it writes {string.Join(", ", known.Select(k => $"'{k}'"))}.");
         var chosen = known.Where(k => asked.Contains(k, StringComparer.OrdinalIgnoreCase)).ToHashSet(StringComparer.OrdinalIgnoreCase);
         return chosen.Count == known.Count ? null : chosen;
     }
@@ -247,7 +247,7 @@ public sealed partial class StudioServer
             var branch = name.Split(DebugCutter.Mark, 2)[0];
             if (only.Contains(branch) || !writing.Contains(branch)) continue;
             if (piece.Output is { Length: > 0 } output && output != "null:")
-                throw new StudioRefusal(409, $"'{branch}' writes, and a target you chose reads it: choose it too, or leave both out.");
+                throw new StudioRefusal(409, $"'{branch}' writes, and an output you chose reads it: choose it too, or leave both out.");
         }
     }
 

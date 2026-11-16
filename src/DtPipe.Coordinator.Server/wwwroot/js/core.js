@@ -45,8 +45,8 @@ export function endNotes(run) {
     run.refusal && run.refusal !== run.reason ? `<p class="mismatch">${esc(run.refusal)}</p>` : "",
     cause ? `<p><b>Cause:</b> ${esc(cause)}${where}</p>` : "",
     run.sinkMayBePartial
-      ? `<p class="mismatch">The coordinator restarted while this run was in progress: its sinks may hold part of what it wrote.</p>`
-      : started ? `<p class="hint">It stopped before its end: a sink it was writing may hold part of the rows, or none.</p>` : "",
+      ? `<p class="mismatch">The coordinator restarted while this run was in progress: its outputs may hold part of what it wrote.</p>`
+      : started ? `<p class="hint">It stopped before its end: an output it was writing may hold part of the rows, or none.</p>` : "",
   ].join("");
 }
 

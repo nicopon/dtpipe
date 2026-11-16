@@ -283,7 +283,7 @@ export function cardBadge(alias) {
   const cardState_ = cardState(alias);
   const watcher = watcherOf(alias);
   const place = cardWatch(alias);
-  const title = cardState_.name === "held" ? "A real run is suspended before its targets are written: Write writes the rows held for this target, Abandon forgets the rows still held."
+  const title = cardState_.name === "held" ? "A real run is suspended before its outputs are written: Write writes the rows held for this output, Abandon forgets the rows still held."
     : wholeBranch(place) && place.at === "read" ? "This card runs whole with its branch: its rows are those of its read, and it cannot be pinned inside." : cardState_.text;
   return el("div", { class: `dcard-badge ${cardState_.name}`, "data-card-state": cardState_.name, title },
     `${cardState_.glyph} ${cardState_.text}${watcher ? " · 📌" : ""}`);
@@ -297,8 +297,8 @@ export function cardTools(alias) {
     if (!queueOf(alias)) return null;
     const word = (name, label, title, extra = "") => el("button", { class: `ctool wide ${extra}`, "data-card-tool": name, title, "aria-label": title }, label);
     return el("div", { class: "dcard-tools queue" },
-      heldBranch(alias) ? word("write", "Write", "Write the rows held for this target: you confirm first, and the other held targets stay held") : null,
-      word("abandon", "Abandon", "Forget the rows held for every target; what was already written stays written", "danger"));
+      heldBranch(alias) ? word("write", "Write", "Write the rows held for this output: you confirm first, and the other held outputs stay held") : null,
+      word("abandon", "Abandon", "Forget the rows held for every output; what was already written stays written", "danger"));
   }
   const watcher = watcherOf(alias);
   const whole = place.at === "read" && wholeBranch(place);
@@ -353,18 +353,18 @@ export function previewView(alias) {
       const stage = held.stage;
       const total = waiting.rows ?? `${stage.rowsSeen}${stage.more ? "+" : ""}`;
       const cut = (stage.sample || []).length < (waiting.rows ?? stage.rowsSeen) ? " (the first 1000 shown)" : "";
-      parts.push(el("p", { class: "muted" }, `${alias}: ${total} rows queued for its target${cut}. Nothing is written until you write.`),
+      parts.push(el("p", { class: "muted" }, `${alias}: ${total} rows queued for its output${cut}. Nothing is written until you write.`),
         el("div", { class: "scroll" }, stageTable(stage)));
     } else {
       parts.push(el("p", { class: "hint" }, waiting.key
         ? `${alias} waits on rows a real run holds: loading them…`
         : `The suspended run holds none of the rows ${alias} waits on: abandon it, then review again.`));
     }
-    parts.push(el("p", { class: "hint" }, "Write writes the rows held for this target, after you confirm; Abandon forgets the rows held for every target."));
+    parts.push(el("p", { class: "hint" }, "Write writes the rows held for this output, after you confirm; Abandon forgets the rows held for every output."));
   } else if (!place) {
     parts.push(el("p", { class: "hint" }, alias
-      ? `${alias} writes a target and holds no rows of its own: select the card before it.`
-      : "Select a card to see the rows it delivers. Preview runs the whole job; ▶ on a card runs it up to that card. The writers are neutralised: no target is written."));
+      ? `${alias} is an output and holds no rows of its own: select the card before it.`
+      : "Select a card to see the rows it delivers. Preview runs the whole job; ▶ on a card runs it up to that card. The outputs are neutralised: nothing is written."));
   } else {
     if (place.at === "read" && wholeBranch(place)) {
       parts.push(el("p", { class: "hint" }, `${alias} belongs to the branch ${place.branch}, which runs whole (a stream processor or a job the cut refuses): `
@@ -377,7 +377,7 @@ export function previewView(alias) {
       const total = rowsOf(stage);
       const cut = (stage.sample || []).length < stage.rowsSeen ? " (the first 1000 shown)"
         : atCap(stage) ? ` (a preview reads at most ${dbg.rowCap} rows of a source: it may hold more)` : "";
-      parts.push(el("p", { class: "muted" }, `${alias}: ${total} rows${dbg.real ? " held" : " delivered"}${cut}. The target was not written.`),
+      parts.push(el("p", { class: "muted" }, `${alias}: ${total} rows${dbg.real ? " held" : " delivered"}${cut}. The output was not written.`),
         el("div", { class: "scroll" }, stageTable(stage)));
     } else if (dbg.edited.has(alias)) {
       parts.push(el("p", { class: "hint" }, `${alias} was modified since its preview: run Preview to see its rows again.`));

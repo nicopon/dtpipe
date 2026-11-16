@@ -1241,8 +1241,8 @@ dtpipe studio ./jobs --llm-provider ollama --llm-model qwen2.5-coder:7b  # with 
 | **Save** | Writes the job composed from the cards. A job written by hand loses its inner comments and key order, and the page says so. Refuses a file changed on disk since it was opened, never creates a folder, and never overwrites another file |
 | **Variables** | Lists every `${{…}}` the job reads. For a preview, give each a keyring alias or a value; a preview with an unresolved variable is refused |
 | **Import** | Turns a dtpipe command line into a new job, as `--export-job` would. `--bind-input` and `--bind-output` are refused |
-| **Write targets…** | Opens a dialog that lists what the saved job writes; untick a target to leave it out (the job runs without it and what only it needs). **Write N targets** runs the job for real, as `dtpipe --job`, and writes only the targets ticked. **Stop** ends it with code 130 |
-| **Review before writing** | An option of **Write targets…**: the run stops before every writing branch it was asked to write and holds the rows; **Write** on a sink card opens the same dialog for the held targets, ticks that one and writes what you confirm, and the others stay held; **Abandon** forgets every row still held (what was already written stays written). A run stopped or failed before every target held its rows can only be abandoned |
+| **Run for real…** | Opens a dialog that lists what the saved job writes; untick an output to leave it out (the job runs without it and what only it needs). **Write N outputs** runs the job for real, as `dtpipe --job`, and writes only the outputs ticked. **Stop** ends it with code 130 |
+| **Review before writing** | An option of **Run for real…**: the run stops before every writing branch it was asked to write and holds the rows; **Write** on an output card opens the same dialog for the held outputs, ticks that one and writes what you confirm, and the others stay held; **Abandon** forgets every row still held (what was already written stays written). A run stopped or failed before every output held its rows can only be abandoned |
 | **▶** on a card | Runs the job up to that card |
 | **📌** on a card | Keeps the card's rows as a checkpoint, so later runs start from there. **Forget pins** clears them all |
 
@@ -1266,7 +1266,7 @@ lands on the open job's cards, unsaved, or opens as a new job when none is open.
   `validate-yaml-job` refuses never reaches a card: the model gets the refusal and corrects it.
   A turn that checked a job without a dry-run ends with a notice saying the job is not yet known to
   run. **No tool
-  writes a target**: to run a job for real, save it and use **Write targets…**, which shows what
+  writes an output**: to run a job for real, save it and use **Run for real…**, which shows what
   each branch writes and asks first. A job with a brick runs from the page.
 - **A turn has no step limit**: it ends with the model's answer or with **Stop**. The panel shows
   its turn, its step and the prompt the model last read, against the window on Ollama. Its left
@@ -1295,11 +1295,11 @@ the studio's memory. The coordinator's administrator must list you, and
 |:---|:---|
 | Palette | Offers the bricks of the coordinator's nodes, an offline node greyed out, with each node's dtpipe version |
 | **Publish** | Sends the saved job to the library under an id you choose. It replaces only the version you last read; if someone else saved since, it asks. A deployed pipeline keeps running its armed version until deployed again |
-| **Open from library** | Writes a library pipeline as a new `<id>.yaml` in the folder, never over a file |
+| **Library** list | Under the jobs once you are signed in. Clicking a pipeline writes it as a new `<id>.yaml` in the folder, never over a file |
 
 A preview with bricks reads at most 100 rows of each source brick through the coordinator; a sink
 brick receives nothing, its rows going to a throwaway file under `.dtpipe/studio/samples/`. A run
-with a source brick is refused unless every output is a sink brick. **Write targets…** also writes a
+with a source brick is refused unless every output is a sink brick. **Run for real…** also writes a
 sink brick to a throwaway file, never to its node. A brick's variables belong to its node and do
 not appear in the Variables tab.
 

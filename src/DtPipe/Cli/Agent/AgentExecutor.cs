@@ -254,7 +254,7 @@ public class AgentExecutor
                 // The person stopped the model call. The session lives on, so this must not escape
                 // as the cancellation a host turns into exit 130 — it is a stated outcome like any
                 // other, and the steps taken so far stay in the trajectory.
-                Trajectory.AddStep(currentStepNum, "Interrupted — you stopped the model call.");
+                Trajectory.AddStep(currentStepNum, "Interrupted — you stopped the agent here, and it took no further step.");
                 success = false;
                 turnOutcome = TurnOutcome.UserInterrupted;
                 break;

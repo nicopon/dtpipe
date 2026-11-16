@@ -194,7 +194,7 @@ public sealed partial class StudioServer
     private static void RefuseWhileSuspended(DebugState state)
     {
         if (state.Real)
-            throw new StudioRefusal(409, "A real run is suspended before its target is written: continue it, or abandon it to forget its rows.");
+            throw new StudioRefusal(409, "A real run is suspended before its output is written: continue it, or abandon it to forget its rows.");
     }
 
     private static void ForgetCheckpoint(CheckpointStore store, string key)

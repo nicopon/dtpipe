@@ -148,11 +148,11 @@ function render() {
   host.innerHTML = `
     <div class="view-head">
       <h1>${esc(doc.yaml.split("\n")[0].replace(/^#\s*/, ""))} <span class="mono muted">${esc(id)}</span></h1>
-      <p class="hint">Planned at each launch: every brick on the node it is bound to, every other step on a runner chosen then. A source wired straight into a sink crosses no runner. A launch of the version the library holds ${plan.deployable ? `would run${runner ? ` on ${esc(runner)}` : ""} now` : armable ? "would be refused until Deploy pins the bricks no check has pinned" : "would be refused now"}.</p>
+      <p class="hint">Planned at each launch: every brick on the node it is bound to, every other step on a runner chosen then. A source wired straight into an output crosses no runner. A launch of the version the library holds ${plan.deployable ? `would run${runner ? ` on ${esc(runner)}` : ""} now` : armable ? "would be refused until Deploy pins the bricks no check has pinned" : "would be refused now"}.</p>
       <div class="row">${status}
         <span class="actions">
           <a class="button" href="#/library">← Library</a>
-          <button data-needs="designer" id="x-deploy" ${canDeploy && !busy && !bindingsDirty() ? "" : "disabled"} title="${bindingsDirty() ? "Save the bindings first" : ""}">${current ? "Deploy again" : "Deploy"}</button>
+          <button data-needs="designer" id="x-deploy" ${canDeploy && !busy && !bindingsDirty() ? "" : "disabled"} title="${bindingsDirty() ? "Save the bindings first" : ""}">Deploy</button>
           <button data-needs="designer" id="x-run" class="primary" ${canRun && !busy ? "" : "disabled"}>Run</button>
           ${deployment ? `<button data-needs="designer" id="x-undeploy" class="ghost danger" ${isActive(run) || busy ? "disabled" : ""}>Undeploy</button>` : ""}
         </span>
