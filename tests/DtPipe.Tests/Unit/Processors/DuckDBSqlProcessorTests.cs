@@ -121,6 +121,73 @@ public class DuckDBSqlProcessorTests
     }
 
     /// <summary>
+    /// Two sources that carry a column of the same name are scanned with their own projections: the ref
+    /// is read for <c>Name</c> alone, and is never handed the <c>GenerateIndex</c> the main side reads.
+    /// A scan given a column the plan did not ask for takes it as the next one, here an integer as text,
+    /// and DuckDB faults natively.
+    /// </summary>
+    [Fact]
+    public async Task OpenAsync_SourcesSharingAColumnName_EachScanReadsItsOwnProjection()
+    {
+        var mainSchema = new Schema(new[]
+        {
+            new Field("GenerateIndex", Int64Type.Default, nullable: false),
+            new Field("Product", StringType.Default, nullable: false),
+        }, null);
+        var mainBatch = new RecordBatch(mainSchema, new IArrowArray[]
+        {
+            new Int64Array.Builder().Append(0).Append(1).Build(),
+            new StringArray.Builder().Append("a product name past inline").Append("another product name past inline").Build(),
+        }, 2);
+
+        var refSchema = new Schema(new[]
+        {
+            new Field("GenerateIndex", Int64Type.Default, nullable: false),
+            new Field("Name", StringType.Default, nullable: false),
+        }, null);
+        var refBatch = new RecordBatch(refSchema, new IArrowArray[]
+        {
+            new Int64Array.Builder().Append(7).Append(8).Build(),
+            new StringArray.Builder().Append("a customer name past inline").Append("one more customer name past inline").Build(),
+        }, 2);
+
+        var channelMain = Channel.CreateUnbounded<RecordBatch>();
+        channelMain.Writer.TryWrite(mainBatch);
+        channelMain.Writer.Complete();
+        var channelRef = Channel.CreateUnbounded<RecordBatch>();
+        channelRef.Writer.TryWrite(refBatch);
+        channelRef.Writer.Complete();
+
+        var mock = new Mock<IMemoryChannelRegistry>();
+        mock.Setup(r => r.WaitForArrowChannelSchemaAsync("main", It.IsAny<CancellationToken>())).ReturnsAsync(mainSchema);
+        mock.Setup(r => r.GetArrowChannel("main")).Returns((channelMain, mainSchema));
+        mock.Setup(r => r.WaitForArrowChannelSchemaAsync("ref", It.IsAny<CancellationToken>())).ReturnsAsync(refSchema);
+        mock.Setup(r => r.GetArrowChannel("ref")).Returns((channelRef, refSchema));
+
+        await using var processor = new DuckDBSqlProcessor(
+            mock.Object,
+            "SELECT m.*, r.Name FROM main m JOIN ref r ON true",
+            "main", "main",
+            refAliases: ["ref"], refChannelAliases: ["ref"],
+            NullLogger<DuckDBSqlProcessor>.Instance);
+
+        await processor.OpenAsync();
+        var names = new List<string>();
+        await foreach (var b in processor.ReadRecordBatchesAsync())
+        {
+            using (b)
+            {
+                var column = (StringArray)b.Column("Name");
+                for (var i = 0; i < b.Length; i++) names.Add(column.GetString(i));
+            }
+        }
+
+        Assert.Equal(
+            ["a customer name past inline", "a customer name past inline", "one more customer name past inline", "one more customer name past inline"],
+            names.Order(StringComparer.Ordinal).ToArray());
+    }
+
+    /// <summary>
     /// Regression test: WHERE clauses on CDI streaming sources (duckdb_arrow_scan) must be applied.
     ///
     /// Root cause: duckdb_arrow_scan declares filter_pushdown=true. DuckDB removes the Filter

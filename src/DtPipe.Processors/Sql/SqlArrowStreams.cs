@@ -81,21 +81,44 @@ internal sealed class StaticArrowStream : IArrowArrayStream
 
 internal interface IProjectableArrowStream : IArrowArrayStream
 {
+    /// <summary>What every exported column name starts with: it names this stream in a plan.</summary>
+    string Prefix { get; }
+
+    /// <summary>The schema of the data the stream carries, under its own column names.</summary>
+    Schema SourceSchema { get; }
+
     void SetProjectedColumns(IReadOnlyList<string>? columns);
 }
 
+/// <summary>
+/// A stream DuckDB scans through the C Data Interface, which hands the scan only the columns the plan
+/// uses, in the plan's order. The exported schema names each column behind <see cref="Prefix"/>, so the
+/// projection a plan lists for a scan names the stream it belongs to: two streams that carry a column of
+/// the same name are told apart, and a stream is never handed a column another scan asked for.
+/// </summary>
 internal sealed class ProjectedArrowStream : IProjectableArrowStream
 {
     private readonly IArrowArrayStream _underlying;
+    private readonly Schema _exportedSchema;
     private List<string>? _projections;
     private Schema? _projectedSchema;
 
-    public ProjectedArrowStream(IArrowArrayStream underlying)
+    public ProjectedArrowStream(IArrowArrayStream underlying, string prefix)
     {
         _underlying = underlying;
+        Prefix = prefix;
+        var source = underlying.Schema;
+        var fields = source.FieldsList
+            .Select(f => new Field(prefix + f.Name, f.DataType, f.IsNullable, f.HasMetadata ? f.Metadata : null))
+            .ToList();
+        _exportedSchema = new Schema(fields, source.HasMetadata ? source.Metadata : null);
     }
 
-    public Schema Schema => _underlying.Schema;
+    public string Prefix { get; }
+
+    public Schema SourceSchema => _underlying.Schema;
+
+    public Schema Schema => _exportedSchema;
 
     public void SetProjectedColumns(IReadOnlyList<string>? columns)
     {

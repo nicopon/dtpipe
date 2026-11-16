@@ -14,6 +14,13 @@ since `DagOrchestrator` returns only when every branch has ended. A cancellation
 stream, never its end, or the query finishes on part of its input.
 `[CI: DagOrchestratorTests, validate_cancellation.sh]`
 
+**A registered scan exports its columns behind a per-stream prefix and the user's table is a view that
+names them back.** DuckDB hands an Arrow scan only the columns its plan uses, in the plan's order, and
+EXPLAIN lists them per `ARROW_SCAN` without naming the table: the prefix is what ties a scan's
+projection to exactly one stream. Never merge the projections of two scans: two sources that carry a
+column of the same name hand each other's column to DuckDB, which reads it as another type and faults
+natively. `[CI: DuckDBSqlProcessorTests — SourcesSharingAColumnName]`
+
 - `DuckHubConnectionParser` parses `duck+{provider}:` strings and issues `INSTALL` / `LOAD` /
   `ATTACH`.
 - `--duck-init` / `--compute` / `--expand` values resolve through `IStringContentResolver`
