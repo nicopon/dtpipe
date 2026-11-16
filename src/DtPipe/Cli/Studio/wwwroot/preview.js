@@ -6,7 +6,7 @@
 // text; the page only shows what it answers, and never decides what is still true.
 
 import { api, el, status } from "./dom.js";
-import { brickBranches, cardBranch, cardWatch, compose, focusCard, showTab, stageTable } from "./designer.js";
+import { brickBranches, cardBranch, cardWatch, compose, editingText, focusCard, showTab, stageTable } from "./designer.js";
 import { invalidate } from "./render.js";
 import { freshPreview, sequence, state } from "./state.js";
 
@@ -219,6 +219,8 @@ function takeReport(answer) {
 
 async function runPreviewNow(place) {
   if (!state.job || dbg.running) return;
+  // A preview samples the cards: the rows of a text the YAML tab holds would be the rows of another job.
+  if (editingText()) { showTab("yaml"); status("The YAML is not applied: apply or revert it, then preview.", "bad"); return; }
   const result = await compose();
   if (result.unanswered) return;
   if (result.errors?.length) { showTab("problems"); status("The steps do not compose into a job yet: see Problems.", "bad"); return; }

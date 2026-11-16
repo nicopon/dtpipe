@@ -99,7 +99,7 @@ function putCards(model, result, kept, tab = null) {
   if (cards.model.steps.some((s) => !cards.model.layout[s.alias])) autoLayout(false);
   cards.result = result;
   cards.selected = kept?.card && stepOf(kept.card) ? { alias: kept.card } : null;
-  cards.zoom = null; cards.dirty = false;
+  cards.zoom = null; cards.dirty = false; cards.text = null;
   // A job that does not compose opens on its problems, whatever was kept.
   state.view.drawer = tab ?? (cards.result?.errors?.length ? "problems" : kept?.tab && KEPT_TABS.includes(kept.tab) ? kept.tab : "yaml");
   renderShell();
@@ -141,7 +141,7 @@ function undoable() {
  */
 export async function undo() {
   const { entry, ready } = undoable();
-  if (!entry || !ready) return;
+  if (!entry || !ready || editingText()) return;
   cards.history = cards.history.slice(0, -1);
   const ticket = opening.begin();
   reading.cancel();
@@ -173,7 +173,7 @@ export async function openBlank(title) {
   opening.cancel();
   cards.history = [];
   cards.model = normalize({ title, steps: [], layout: {} });
-  cards.result = null; cards.selected = null; cards.zoom = null; cards.dirty = true; state.view.drawer = "yaml";
+  cards.result = null; cards.selected = null; cards.zoom = null; cards.dirty = true; cards.text = null; state.view.drawer = "yaml";
   renderShell();
   await compose();
 }
@@ -225,6 +225,12 @@ export function restoreSizes(sizes) {
 
 export function markSaved() { cards.dirty = false; invalidate("bar"); }
 
+/** Whether the YAML tab holds a text the cards do not: they are held until it is applied or reverted. */
+export const editingText = () => cards.text !== null && cards.text !== (cards.result?.yaml ?? "");
+
+/** Whether leaving the job loses what the person did: cards not saved, or a YAML text not applied. */
+export const holdsEdits = () => cards.dirty || editingText();
+
 function normalize(m) {
   return {
     title: m.title || "Untitled job", description: m.description || "", directives: m.directives || [],
@@ -254,7 +260,7 @@ export async function compose() {
     if (!composing.stale(seq)) cards.result = { yaml: "", steps: [], errors: [e.message], warnings: [] };
   }
   invalidate("canvas", "drawer", "bar");
-  // With no wire and no card of the job selected the inspector shows the job's verdict, and holds no field a redraw would take.
+  // With no wire and no card of the job selected the inspector shows the job's steps, and holds no field a redraw would take.
   if (!cards.selected?.edge && !(cards.selected?.alias && cards.model && stepOf(cards.selected.alias))) invalidate("inspector");
   hooks.onComposed?.(cards.result);
   return cards.result;
@@ -493,7 +499,9 @@ function renderShell() {
         el("div", { class: "canvas-inner", id: "d-inner" }, svg("svg", { id: "d-svg" })),
         el("div", { class: "chain-view", id: "d-chain", hidden: true })),
       el("aside", { class: "inspector card", id: "d-inspector" }),
-      el("div", { class: "split split-col split-insp", "data-split": "insp", role: "separator", "aria-orientation": "vertical", "aria-label": "Resize the inspector", tabindex: "0" })),
+      el("div", { class: "split split-col split-insp", "data-split": "insp", role: "separator", "aria-orientation": "vertical", "aria-label": "Resize the inspector", tabindex: "0" }),
+      el("p", { id: "d-held", class: "held-note", hidden: true }, "The steps are held: the YAML tab has a text not applied. ",
+        el("button", { class: "small", onclick: () => showTab("yaml") }, "Show the YAML"))),
     el("div", { class: "split split-row", "data-split": "drawer", role: "separator", "aria-orientation": "horizontal", "aria-label": "Resize the drawer", tabindex: "0" }),
     el("div", { class: "drawer card", id: "d-drawer" }));
   // The palette lives in the page's side panel (Steps), a new one for each job like the rest of the designer.
@@ -904,7 +912,7 @@ function bindPalette() {
 }
 
 function onKey(e) {
-  if (!cards.model || !host?.isConnected) return;
+  if (!cards.model || !host?.isConnected || editingText()) return;
   if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) return;
   if (cards.zoom) {
     // Zoomed, Delete removes the selected transformer, never the step.
@@ -992,11 +1000,9 @@ function renderInspector() {
   }
   const step = cards.selected?.alias ? stepOf(cards.selected.alias) : null;
   if (!step) {
-    const errors = cards.result?.errors?.length || 0;
-    const warnings = cards.result?.warnings?.length || 0;
+    // The composition's verdict is the YAML tab's light, never repeated here.
     fill(view, el("h2", {}, "Job"),
-      el("p", { class: "hint" }, `${plural(cards.model.steps.length, "step")}. `, errors ? el("span", { class: "bad" }, `${plural(errors, "error")}: see Problems.`)
-        : warnings ? ["Composes, ", el("span", { class: "warn" }, `with ${plural(warnings, "warning")}: see Problems.`)] : "Composes cleanly."),
+      el("p", { class: "hint" }, `${plural(cards.model.steps.length, "step")}.`),
       el("p", { class: "hint" }, "Select a step to edit it. A source and an output of their own carry their endpoint as YAML; the server joins a source, its transform and its output back into one branch when nothing else reads between them."),
       cards.model.directives.length ? [el("h3", {}, "Header directives"), el("ul", { class: "inputs" }, cards.model.directives.map((d) => el("li", {}, el("code", {}, d))))] : null);
     return;
@@ -1171,20 +1177,25 @@ function renderDrawer() {
   const problems = errors + warnings;
   const tab = (name, label, ...extra) => el("button", { class: state.view.drawer === name ? "active" : "", "data-tab": name }, label, ...extra);
   const tabs = el("div", { class: "tabs" },
-    tab("yaml", "YAML"),
+    // The light and its name are drawn by drawHold, which typing calls too.
+    el("button", { id: "d-yaml-tab", class: state.view.drawer === "yaml" ? "active" : "", "data-tab": "yaml" }),
     tab("problems", "Problems ",
       errors ? el("span", { class: "count", title: plural(errors, "error") }, errors) : null,
       warnings ? el("span", { class: "count warn", title: plural(warnings, "warning") }, warnings) : null),
-    tab("edit", "Edit as YAML"),
     tab("preview", "Preview"),
-    (hooks.extraTabs || []).map((t) => tab(t.name, t.label, t.badge?.())),
-    el("span", { class: "drawer-status" }, errors ? el("span", { class: "bad" }, plural(errors, "error")) : el("span", { class: "good" }, "composes"),
-      warnings ? el("span", { class: "warn" }, ` · ${plural(warnings, "warning")}`) : null));
+    (hooks.extraTabs || []).map((t) => tab(t.name, t.label, t.badge?.())));
+  // A redraw while the person types keeps the text (it is state) and gives the editor back its caret.
+  const typing = document.activeElement?.id === "d-edit" ? /** @type {HTMLTextAreaElement} */ (document.activeElement) : null;
+  const caret = typing ? { start: typing.selectionStart, end: typing.selectionEnd, top: typing.scrollTop } : null;
   let body;
   if (state.view.drawer === "yaml") {
-    body = [el("div", { class: "row" }, el("button", { "data-copy": true }, "Copy"),
-      el("span", { class: "hint" }, "The job the server composed: a plain dtpipe job, runnable whole with dtpipe --job.")),
-    el("pre", { id: "d-yaml" }, cards.result.yaml)];
+    body = [el("div", { class: "row" }, el("span", { id: "d-verdict" })),
+      el("textarea", { id: "d-edit", "aria-label": "The job, as YAML", class: "mono yaml-edit", rows: "16", spellcheck: "false", value: cards.text ?? cards.result.yaml }),
+      el("div", { class: "row" },
+        el("button", { "data-copy": true, title: "Copy the text shown" }, "Copy"),
+        el("button", { id: "d-apply", "data-apply": true, title: "Take this text apart into steps again" }, "Apply"),
+        el("button", { id: "d-revert", "data-revert": true, title: "Show the job the steps compose again, and free the steps" }, "Revert"),
+        el("span", { class: "hint" }, "Apply takes the text apart into steps again: steps that keep their alias keep their place. Until then the steps are held."))];
   } else if (state.view.drawer === "problems") {
     // Two verdicts, never mixed: what the composition says of a run here, and what a publication would refuse (the host's).
     body = [el("h3", {}, "Will not run here"),
@@ -1192,16 +1203,60 @@ function renderDrawer() {
       warnings ? [el("h4", {}, `Warnings (${warnings})`), el("ul", { class: "msgs warn" }, cards.result.warnings.map((m) => el("li", {}, m)))] : null,
       problems ? null : el("p", { class: "hint" }, "Nothing to report."),
       hooks.publicationProblems?.() || null];
-  } else if (state.view.drawer === "edit") {
-    body = [el("textarea", { id: "d-edit", "aria-label": "The job, as YAML", class: "mono", rows: "16", spellcheck: "false", value: cards.result.yaml }),
-      el("div", { class: "row" }, el("button", { "data-apply": true }, "Apply"),
-        el("span", { class: "hint" }, "The job is taken apart into steps again; steps that keep their alias keep their place."))];
   } else if (state.view.drawer === "preview") {
     body = hooks.previewView?.(cards.selected?.alias || null) || null;
   } else {
     body = (hooks.extraTabs || []).find((t) => t.name === state.view.drawer)?.render() || null;
   }
   fill(view, tabs, el("div", { class: "drawer-body" }, body));
+  drawHold();
+  const editor = /** @type {HTMLTextAreaElement | null} */ ($("d-edit"));
+  if (caret && editor) { editor.focus(); editor.setSelectionRange(caret.start, caret.end); editor.scrollTop = caret.top; }
+}
+
+// What the steps hold while the YAML tab has a text they do not: these are greyed and take no input.
+const HELD = ["d-canvas", "d-inspector", "d-palette", "d-title", "d-description", "d-undo", "d-layout"];
+
+/**
+ * The verdict the YAML tab's light gives: the composition's on the cards, unless the tab holds a text not applied, of which
+ * the light says nothing more (a verdict on the cards would vouch for a text not on screen).
+ */
+function verdict() {
+  if (editingText()) return { tone: "held", short: "not applied", words: "Not applied: the steps are held until you apply or revert this text." };
+  const errors = cards.result?.errors?.length || 0;
+  const warnings = cards.result?.warnings?.length || 0;
+  if (errors) return { tone: "bad", short: plural(errors, "error"), words: `${plural(errors, "error")}: the steps do not compose into a job.` };
+  if (warnings) return { tone: "warn", short: plural(warnings, "warning"), words: `Composes, with ${plural(warnings, "warning")}.` };
+  return { tone: "good", short: "composes", words: "Composes cleanly: a plain dtpipe job, runnable whole with dtpipe --job." };
+}
+
+/**
+ * Draws in place what the YAML tab's text decides: the tab's light and its name, the verdict, Apply and Revert, and the steps
+ * held. Typing calls it instead of redrawing the drawer, which would take the editor's caret.
+ */
+function drawHold() {
+  const held = editingText();
+  for (const id of HELD) {
+    const node = $(id);
+    if (!node) continue;
+    node.toggleAttribute("inert", held);
+    node.classList.toggle("held", held);
+  }
+  const note = $("d-held");
+  if (note) note.hidden = !held;
+  const v = verdict();
+  const light = () => el("span", { class: `dot ${v.tone}`, "aria-hidden": "true" });
+  const tabButton = $("d-yaml-tab");
+  // The light is no name on its own: the tab's name carries its words.
+  if (tabButton) { fill(tabButton, light(), " YAML"); tabButton.setAttribute("aria-label", `YAML, ${v.short}`); tabButton.title = v.words; }
+  const line = $("d-verdict");
+  const problems = !held && ((cards.result?.errors?.length || 0) + (cards.result?.warnings?.length || 0)) > 0;
+  if (line) fill(line, light(), " ", el("span", { class: v.tone === "held" ? "hint" : v.tone }, v.words),
+    problems ? [" ", el("button", { class: "ghost small", "data-tab": "problems" }, "See Problems")] : null);
+  for (const id of ["d-apply", "d-revert"]) {
+    const button = /** @type {HTMLButtonElement | null} */ ($(id));
+    if (button) button.disabled = !held;
+  }
 }
 
 export function showTab(name) {
@@ -1210,26 +1265,41 @@ export function showTab(name) {
 }
 
 function bindDrawer() {
+  $("d-drawer").addEventListener("input", (e) => {
+    const t = targetOf(e);
+    if (t.id !== "d-edit") return;
+    // A text typed back to the composed one is no text: kept, it would come back stale once the cards compose another.
+    cards.text = t.value === (cards.result?.yaml ?? "") ? null : t.value;
+    drawHold();
+  });
   $("d-drawer").addEventListener("click", async (e) => {
     const b = targetOf(e).closest("button");
     if (!b) return;
     if (b.dataset.tab) showTab(b.dataset.tab);
     else if (b.dataset.copy !== undefined) {
-      try { await navigator.clipboard.writeText(cards.result.yaml); status("YAML copied."); }
-      catch { window.getSelection().selectAllChildren($("d-yaml")); status("Selected: copy it with your keyboard."); }
+      try { await navigator.clipboard.writeText(cards.text ?? cards.result.yaml); status("YAML copied."); }
+      catch { /** @type {HTMLTextAreaElement} */ ($("d-edit")).select(); status("Selected: copy it with your keyboard."); }
+    } else if (b.dataset.revert !== undefined) {
+      cards.text = null;
+      invalidate("drawer");
+      status("the YAML is the steps' again");
     } else if (b.dataset.apply !== undefined) {
       try {
         const ticket = opening.begin();
-        const answer = await api("/api/design/decompose", { yaml: /** @type {HTMLTextAreaElement} */ ($("d-edit")).value, layout: cards.model.layout });
+        const answer = await api("/api/design/decompose", { yaml: cards.text ?? cards.result.yaml, layout: cards.model.layout });
         if (opening.stale(ticket)) return;
-        const layout = cards.model.layout;
-        cards.model = normalize(answer.model);
-        cards.model.layout = Object.fromEntries(Object.entries(layout).filter(([a]) => stepOf(a)));
-        if (cards.model.steps.some((s) => !cards.model.layout[s.alias])) autoLayout(false);
-        cards.selected = null;
-        cards.zoom = null;
-        state.view.drawer = "yaml";
-        cards.dirty = true;
+        // The text replaces every card: Undo puts back the cards it replaced.
+        remember("applying the YAML", () => {
+          const layout = cards.model.layout;
+          cards.model = normalize(answer.model);
+          cards.model.layout = Object.fromEntries(Object.entries(layout).filter(([a]) => stepOf(a)));
+          if (cards.model.steps.some((s) => !cards.model.layout[s.alias])) autoLayout(false);
+          cards.selected = null;
+          cards.zoom = null;
+          cards.text = null;
+          state.view.drawer = "yaml";
+          cards.dirty = true;
+        });
         renderShell();
         await compose();
       } catch (err) { status(err.message, "bad"); }

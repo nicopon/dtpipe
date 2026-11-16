@@ -5,7 +5,7 @@
 
 import { $, api, el, fill, forgetToken, plural, status, svg, token } from "./dom.js";
 import { onCoordinator, refreshCoordinator } from "./coordinator.js";
-import { bindSplit, compose, markSaved, mountDesigner, openBlank, openJob, restoreSizes, setCatalog } from "./designer.js";
+import { bindSplit, compose, editingText, holdsEdits, markSaved, mountDesigner, openBlank, openJob, restoreSizes, setCatalog, showTab } from "./designer.js";
 import { readView, rememberView, sizesRead, viewRestored } from "./prefs.js";
 import { afterFlush, invalidate, onZone } from "./render.js";
 import { sequence, state } from "./state.js";
@@ -127,7 +127,7 @@ function forgetResults() {
   forgetRun();
 }
 
-const leaveCurrent = () => !state.cards.dirty || confirm(`${state.job?.path || "This job"} has changes that are not saved. Leave it anyway?`);
+const leaveCurrent = () => !holdsEdits() || confirm(`${state.job?.path || "This job"} has changes that are not saved. Leave it anyway?`);
 
 // True once the job is on the cards. `replacing` names a reading of the open job that replaces its cards, which Undo puts back.
 async function open(path, left = false, replacing = null) {
@@ -224,6 +224,8 @@ async function importCommand() {
 async function save() {
   const job = state.job;
   if (!job) return;
+  // A save writes the cards: a text the YAML tab holds would be left out of the file without a word.
+  if (editingText()) { showTab("yaml"); status("The YAML is not applied: apply or revert it, then save.", "bad"); return; }
   const result = await compose();
   if (result.unanswered) return;
   if (job.rewrites && !confirm("Saving writes this job as the studio composes it: comments inside it and the order of its keys are not kept. Save anyway?")) return;
@@ -314,7 +316,7 @@ function barButtons() {
 }
 
 async function quit() {
-  if (state.cards.dirty && !confirm("Changes are not saved. Quit anyway?")) return;
+  if (holdsEdits() && !confirm("Changes are not saved. Quit anyway?")) return;
   try {
     await api("/api/quit", {});
   } catch (e) {
@@ -421,7 +423,7 @@ $("library-refresh").addEventListener("click", loadLibrary);
 document.addEventListener("keydown", (e) => {
   if (e.key === "s" && (e.ctrlKey || e.metaKey) && state.job) { e.preventDefault(); save(); }
 });
-window.addEventListener("beforeunload", (e) => { if (state.cards.dirty) e.preventDefault(); });
+window.addEventListener("beforeunload", (e) => { if (holdsEdits()) e.preventDefault(); });
 
 if (!token) status("Open the address dtpipe studio printed: it carries this session's token.", "bad");
 else start().catch((e) => status(e.message, "bad"));

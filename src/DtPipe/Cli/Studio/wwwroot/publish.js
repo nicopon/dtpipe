@@ -4,7 +4,7 @@
 // the server replays on demand.
 
 import { api, el, status } from "./dom.js";
-import { brickBranches, showTab } from "./designer.js";
+import { brickBranches, holdsEdits, showTab } from "./designer.js";
 import { invalidate } from "./render.js";
 import { sequence, state } from "./state.js";
 
@@ -98,7 +98,7 @@ export function publicationProblems() {
 export async function publish(replace) {
   const job = state.job;
   if (!job) return;
-  if (state.cards.dirty || !job.hash) {
+  if (holdsEdits() || !job.hash) {
     status("Save the job first: the coordinator receives the job saved in the folder.", "bad");
     return;
   }

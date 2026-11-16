@@ -255,8 +255,15 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   status is a live region, and what holds the focus when its zone is drawn again gets it back. Text colours are tokens that reach
   4.5:1 on the panel, the page and the code background in both themes, and a solid fill (`--accent`, `--bad`, `--warn`) carries
   `--on-solid`, never a literal white. `[local: page_smoke.mjs keyboard — the tree's names and the contrast of what the screens draw]`
-- **What removes or replaces cards is undone, never asked first.** Deleting a card, *Apply* and the
-  agent's plan put on the cards go through one function (`remember` in `designer.js`), which keeps the
+- **A YAML text not applied holds the cards, so the two never say different things.** The YAML tab edits the composed
+  job; what the person types is `state.cards.text`, never read off the editor, so a redraw keeps it. While it differs from
+  the composed text (`editingText`), the canvas, inspector, palette, title and Undo are inert, Save, Preview and a message
+  to the agent refuse, the agent's plan waits behind its notice (`moved`), and a run or a publication refuses and leaving the job asks, as with unsaved
+  cards (`holdsEdits`); a text typed back to the composed one is none. *Apply* or
+  *Revert* frees them. The tab's light is the composition's verdict on the cards and says only "not applied" while a text
+  differs: a verdict on the cards would vouch for a text not on screen. `[local: page_smoke.mjs journey]`
+- **What removes or replaces cards is undone, never asked first.** Deleting a card, the YAML tab's *Apply* and
+  the agent's plan put on the cards go through one function (`remember` in `designer.js`), which keeps the
   cards before the change in `state.cards.history`; Undo puts them back through the step an open takes
   (`putCards`), unsaved unless they were saved and the file has not been written since. Undo waits
   while the cards differ from what the change left, so an edit made since is never lost. The history

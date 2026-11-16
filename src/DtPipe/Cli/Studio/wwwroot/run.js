@@ -3,7 +3,7 @@
 // reviews first stops before every writer and is left suspended; the sink cards write it or abandon it.
 
 import { api, el, fill, plural, status, targetOf } from "./dom.js";
-import { brickBranches, showTab } from "./designer.js";
+import { brickBranches, holdsEdits, showTab } from "./designer.js";
 import { invalidate } from "./render.js";
 import { showHeld } from "./preview.js";
 import { sequence, state } from "./state.js";
@@ -65,7 +65,7 @@ export async function prepareRun(continuation = false, held = null, targets = nu
     status("Open or save a job first: a run executes the job saved in the folder.", "bad");
     return;
   }
-  if (state.cards.dirty || !job.hash) {
+  if (holdsEdits() || !job.hash) {
     status("Save the job first: a run executes the job saved in the folder.", "bad");
     return;
   }

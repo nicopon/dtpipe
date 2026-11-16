@@ -5,7 +5,7 @@
 // here: nothing is saved or run until the person clicks.
 
 import { $, api, el, fill, status, svg } from "./dom.js";
-import { applySizes, bindSplit, cardChanges } from "./designer.js";
+import { applySizes, bindSplit, cardChanges, editingText, showTab } from "./designer.js";
 import { invalidate, onZone } from "./render.js";
 import { state } from "./state.js";
 
@@ -165,8 +165,11 @@ function savedJob(saved) {
 
 const markSynced = () => { synced = state.cards.result?.yaml ?? null; };
 
-/** Whether the person changed the open job's cards since the agent last read or wrote them: what the agent gives then waits. */
-const moved = () => !!state.job && (state.cards.result?.yaml ?? null) !== synced;
+/**
+ * Whether the person changed the open job's cards since the agent last read or wrote them, or holds a YAML text not applied:
+ * what the agent gives then waits.
+ */
+const moved = () => !!state.job && ((state.cards.result?.yaml ?? null) !== synced || editingText());
 
 /** What the agent gave, kept behind the notice's Apply: a plan, or the file it saved. @param {{ yaml?: string, saved?: string }} given */
 function hold(given) {
@@ -451,6 +454,8 @@ async function send(text) {
   const prompt = /** @type {HTMLTextAreaElement} */ ($("agent-prompt"));
   const message = (text ?? prompt.value).trim();
   if (!message) return;
+  // A message carries the cards: with a YAML text not applied, the agent would work on a job the person no longer sees.
+  if (editingText()) { showTab("yaml"); status("The YAML is not applied: apply or revert it, then send.", "bad"); return; }
   // The log shows the message masked; a turn that fails gives back what was typed.
   asked = message;
   const model = /** @type {HTMLSelectElement} */ ($("agent-model")).value || undefined;

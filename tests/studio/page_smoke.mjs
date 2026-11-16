@@ -547,6 +547,16 @@ const scenarios = {
     await p.click("#d-undo");
     check("Undo brings back the cards the plan replaced", await p.until(`document.querySelectorAll(".dcard").length === 3 && ${hasB}`));
 
+    await p.click('#d-drawer button[data-tab="yaml"]');
+    await p.until(`!!document.querySelector("#d-edit")`);
+    await p.ev(`(() => { const t = document.querySelector("#d-edit"); t.value = ${JSON.stringify('a:\n  input: generate:20\nc:\n  from: a\n  output: "null:"\n')}; t.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+    await send("look at it");
+    check("a message waits for the YAML text to be applied", await p.waitStatus(/not applied/, 5000), await p.status());
+    await p.click("#d-drawer button[data-apply]");
+    check("Apply puts the text on the steps", await p.until(`document.querySelectorAll(".dcard").length === 2 && !${hasB}`));
+    await p.click("#d-undo");
+    check("Undo brings back the cards the YAML replaced", await p.until(`document.querySelectorAll(".dcard").length === 3 && ${hasB}`));
+
     check("another job opens", await p.openJob("whole.yaml"));
     check("another job has nothing to undo", await p.until(`document.querySelector("#d-undo")?.disabled === true`));
   },
@@ -621,9 +631,10 @@ const scenarios = {
     check("▶ finishes", await p.waitStatus(/ran up to/, 30000));
     check("▶ on another card pins nothing", JSON.parse(fs.readFileSync(file)).watch.length === 1, fs.readFileSync(file, "utf8"));
 
-    await p.click('#d-drawer button[data-tab="edit"]');
+    await p.click('#d-drawer button[data-tab="yaml"]');
     await p.until(`!!document.querySelector("#d-edit")`);
-    await p.ev(`(() => { const t = document.querySelector("#d-edit"); t.value = t.value.replace("% 2 == 0", "% 3 == 0"); })()`);
+    await p.ev(`(() => { const t = document.querySelector("#d-edit"); t.value = t.value.replace("% 2 == 0", "% 3 == 0"); t.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+    check("a YAML text not applied holds the steps", await p.ev(`document.querySelector("#d-canvas").inert && /not applied/.test(document.querySelector("#d-yaml-tab").getAttribute("aria-label"))`));
     await p.click("#d-drawer button[data-apply]");
     check("an edit through YAML marks the cards it touches", await p.until(`[...document.querySelectorAll(".dcard-badge")].some((e) => /edited since preview/.test(e.textContent))`), JSON.stringify(await p.badges()));
 
@@ -639,7 +650,7 @@ const scenarios = {
     check("▶ on the pin finishes", await p.waitStatus(/ran up to/, 30000));
     b = await p.badges();
     check("▶ on the pin reads its checkpoint back", JSON.parse(fs.readFileSync(file)).levels[0]?.key === key);
-    // Edit as YAML recomposes the job, so the cards carry new names: the first one is the source.
+    // Applying the YAML recomposes the job, so the cards carry new names: the first one is the source.
     check("the card upstream keeps its rows", /20 rows/.test(b[Object.keys(b)[0]]), JSON.stringify(b));
     check("the pinned card reads 7 rows", /7 rows/.test(b[mid]), JSON.stringify(b));
 

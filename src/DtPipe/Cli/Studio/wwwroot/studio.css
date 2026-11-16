@@ -213,7 +213,11 @@ label.review { display: block; margin: 0 0 8px; }
 .tabs button.active { border-bottom-color: var(--accent); color: var(--accent); }
 .tabs .count { background: var(--bad); color: var(--on-solid); border-radius: 999px; padding: 0 6px; font-size: 11px; margin-left: 4px; }
 .tabs .count.warn { background: var(--warn); }
-.drawer-status { margin-left: auto; font-size: 12.5px; }
+.yaml-edit { display: block; background: var(--code); margin: 6px 0; }
+/* The steps while the YAML tab holds a text not applied: greyed, and inert in the page. */
+.held { opacity: .45; filter: grayscale(1); }
+.held-note { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 5; margin: 0; padding: 6px 10px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 2px 8px rgba(0, 0, 0, .15); }
 .msgs { margin: 4px 0; padding-left: 20px; }
 .msgs li, .agent-log .verdict { white-space: pre-wrap; overflow-wrap: anywhere; }
 .vars td { font-family: inherit; font-size: 12.5px; vertical-align: middle; white-space: nowrap; max-width: none; }
@@ -224,6 +228,7 @@ label.review { display: block; margin: 0 0 8px; }
 .dot.good { background: var(--good); }
 .dot.bad { background: var(--bad); }
 .dot.warn { background: var(--warn); }
+.dot.held { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); }
 
 /* A sample's report */
 .branch { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; margin: 10px 0; }
