@@ -307,6 +307,7 @@ function session(ws) {
 // is abandoned. `seen` keeps every system message.
 const AGENT_JOB = 'main:\n  input: "generate:5"\n  output: "csv:agent-out.csv"\n';
 const PLAN_JOB = 'main:\n  input: "generate:7"\n  output: "csv:plan-out.csv"\n';
+const REFUSED_PLAN = 'main:\n  input: [\n';
 
 function startFakeLlm() {
   const llm = { seen: [], open: 0 };
@@ -328,6 +329,7 @@ function startFakeLlm() {
       const reply = /save/.test(text) ? call("save-job", { path: "agent.yaml", yamlContent: AGENT_JOB })
         : /overwrite/.test(text) ? call("save-job", { path: "chain.yaml", yamlContent: /again/.test(text) ? PLAN_JOB : AGENT_JOB })
         : /ask/.test(text) ? call("ask-user", { question: "Which target?", options: ["a.csv", "b.csv"] })
+        : /refused plan/.test(text) ? call("validate-yaml-job", { yamlContent: REFUSED_PLAN })
         : /plan/.test(text) ? call("validate-yaml-job", { yamlContent: PLAN_JOB })
         : /secret/.test(text) ? { role: "assistant", content: job }
         : null;
@@ -498,6 +500,14 @@ const scenarios = {
     await send("fail now");
     check("a failed turn ends", await idle() && await p.until(`[...document.querySelectorAll("#agent-log .verdict")].length > 1`));
     check("a failed turn gives the text typed back", await p.until(`document.querySelector("#agent-prompt").value === "fail now"`), await p.ev(`document.querySelector("#agent-prompt").value`));
+
+    await send("a refused plan");
+    check("a plan the check refused neither replaces the steps nor opens, and says why", await idle() && await p.until(`(() => {
+      const buttons = [...document.querySelectorAll("#agent-now button")];
+      const apply = buttons.find((b) => b.textContent === "Apply to the open job");
+      const open = buttons.find((b) => b.textContent === "Open as a new job");
+      return !!apply?.disabled && !!open?.disabled && /refused this plan/.test(document.querySelector("#agent-plan-refused")?.textContent ?? "");
+    })()`), await p.ev(`document.querySelector("#agent-now")?.textContent ?? ""`));
   },
 
   // What removes or replaces cards is undone: a configured card deleted comes back with what it held, and so do the cards an

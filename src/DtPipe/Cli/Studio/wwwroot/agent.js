@@ -343,7 +343,8 @@ function renderBehind(given) {
       ? `You changed the job while the agent saved ${given.saved}: your steps are kept, and the saved file replaces them only if you apply it. `
       : "You changed the job while the agent worked: your steps are kept, and its plan replaces them only if you apply it. ",
     given.yaml ? marksView(given.yaml, false) : null,
-    el("button", { class: "small", title: "Replace the open job's steps with what the agent gave", onclick: () => apply(given) }, "Apply")]);
+    el("button", { class: "small", title: "Replace the open job's steps with what the agent gave", disabled: refused(given.yaml), onclick: () => apply(given) }, "Apply"),
+    refused(given.yaml) ? el("span", { class: "hint" }, " The check refused this plan: it does not apply.") : null]);
 }
 
 /**
@@ -400,17 +401,26 @@ function questionView(question) {
     question.options?.length ? el("div", { class: "row wrap" }, question.options.map((o) => el("button", { class: "small", onclick: () => send(o) }, o))) : null);
 }
 
+/**
+ * Whether the check refused this text of the plan: then nothing puts it on the steps or opens it, since what it would give is no
+ * job. The verdict is the server's (the plan's state), never judged again here. @param {string} [yaml]
+ */
+const refused = (yaml) => !!yaml && state.agent.status?.plan?.yaml === yaml && state.agent.status.plan.state?.toLowerCase() === "invalid";
+
 /** The plan, its text folded and its buttons in sight; Apply is the notice's while the person's cards hold it back. */
 function planView(plan) {
   const marks = state.agent.behind?.yaml === plan.yaml ? null : marksView(plan.yaml, plan.yaml === appliedYaml && !moved());
+  const blocked = refused(plan.yaml);
   return el("div", {},
     el("details", { class: "agent-plan" },
       el("summary", {}, `The agent's plan: ${PLAN_LABEL[plan.state.toLowerCase()] || plan.state.toLowerCase()}`, plan.message ? el("span", { class: "hint" }, ` · ${plan.message}`) : null),
       el("pre", {}, plan.yaml)),
     marks ? el("p", {}, marks) : null,
     el("div", { class: "row" },
-      state.job && !state.agent.behind && (plan.yaml !== appliedYaml || moved()) ? el("button", { class: "small", title: "Replace the open job's steps with the plan; nothing is saved", onclick: () => apply({ yaml: plan.yaml }) }, "Apply to the open job") : null,
-      el("button", { class: "small", title: "Open the plan as a new job, not saved yet", onclick: async () => { if (await hooks.openPlan(plan.yaml)) settled(); } }, "Open as a new job")));
+      state.job && !state.agent.behind && (plan.yaml !== appliedYaml || moved()) ? el("button", { class: "small", title: "Replace the open job's steps with the plan; nothing is saved", disabled: blocked, "aria-describedby": blocked ? "agent-plan-refused" : null, onclick: () => apply({ yaml: plan.yaml }) }, "Apply to the open job") : null,
+      el("button", { class: "small", title: "Open the plan as a new job, not saved yet", disabled: blocked, "aria-describedby": blocked ? "agent-plan-refused" : null, onclick: async () => { if (await hooks.openPlan(plan.yaml)) settled(); } }, "Open as a new job")),
+    blocked ? el("p", { id: "agent-plan-refused", class: "hint" }, "The check refused this plan, so it neither replaces the steps nor opens as a job",
+      plan.message ? `: ${plan.message}${/[.!?]$/.test(plan.message) ? "" : "."}` : ".", " Ask the agent to correct it.") : null);
 }
 
 async function answer(card, choice) {
