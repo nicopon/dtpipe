@@ -185,6 +185,98 @@ public class PipelineValidatorTests
         Assert.Empty(Validate(new BranchDefinition { Alias = "main", Input = "a.csv", Output = "out.csv" }));
     }
 
+    // ── A branch that writes cannot be read ──────────────────────────────
+
+    /// <summary>
+    /// Two sources that both write are one fault of the reading branch, not two: the rule is the same
+    /// and the fix is the same, and a caller that shows the head of the list must still reach it.
+    /// </summary>
+    [Fact]
+    public void Several_Writing_Sources_Of_One_Branch_Are_One_Refusal_That_Names_Each_Fix()
+    {
+        var errors = Validate(
+            new BranchDefinition { Alias = "customers", Input = "a.csv", Output = "c.csv" },
+            new BranchDefinition { Alias = "sales", Input = "b.csv", Output = "s.csv" },
+            new BranchDefinition
+            {
+                Alias = "joined",
+                ProcessorName = "sql",
+                StreamingAliases = new[] { "sales" },
+                RefAliases = new[] { "customers" },
+                Output = "j.csv"
+            });
+
+        var error = Assert.Single(errors);
+        Assert.Contains("'sales', 'customers'", error);
+        Assert.Contains("'from: sales'", error);
+        Assert.Contains("'from: customers'", error);
+        Assert.Contains("provider-options", error);
+    }
+
+    /// <summary>
+    /// A caller that writes the sources inside the input of a processor branch ('ref: [a, b]') is told
+    /// the input is never read; the next refusal would be that those sources write, so it is named now.
+    /// </summary>
+    [Fact]
+    public void A_Processor_Input_That_Names_Writing_Branches_Says_They_Must_Give_Up_Their_Output()
+    {
+        var errors = Validate(
+            new BranchDefinition { Alias = "customers", Input = "a.csv", Output = "c.csv" },
+            new BranchDefinition { Alias = "sales", Input = "b.csv", Output = "s.csv" },
+            new BranchDefinition
+            {
+                Alias = "joined",
+                Input = "ref: [customers, sales]",
+                ProcessorName = "sql",
+                Output = "j.csv"
+            });
+
+        var error = Assert.Single(errors);
+        Assert.Contains("'customers', 'sales' write to a target", error);
+        Assert.Contains("must give up its 'output:'", error);
+    }
+
+    /// <summary>A source that is read and does not write adds nothing to the refusal.</summary>
+    [Fact]
+    public void A_Processor_Input_That_Names_No_Writing_Branch_Adds_No_Such_Sentence()
+    {
+        var errors = Validate(
+            new BranchDefinition { Alias = "A", Input = "a.csv" },
+            new BranchDefinition { Alias = "consumer", Input = "b.csv", StreamingAliases = new[] { "A" }, ProcessorName = "sql", Output = "out.csv" });
+
+        Assert.DoesNotContain("write to a target", Assert.Single(errors));
+    }
+
+    /// <summary>
+    /// 'from: "ref: [a, b]"' is split on its commas, and each piece reaches the message as an unknown
+    /// source ('ref: [a'); the list or key written inside the string is the thing to name.
+    /// </summary>
+    [Fact]
+    public void A_List_Written_Inside_From_Is_Named_In_The_Unknown_Source_Refusal()
+    {
+        var errors = Validate(
+            new BranchDefinition { Alias = "a", Input = "a.csv" },
+            new BranchDefinition { Alias = "b", Input = "b.csv" },
+            new BranchDefinition { Alias = "merged", StreamingAliases = new[] { "ref: [a", "b]" }, Output = "out.csv" });
+
+        var unknown = errors.Where(e => e.Contains("unknown source")).ToList();
+        Assert.Equal(2, unknown.Count);
+        Assert.All(unknown, e => Assert.Contains("'ref:' is a key of its own", e));
+        Assert.Contains(unknown, e => e.Contains("unknown source 'ref: [a'"));
+    }
+
+    /// <summary>An unknown alias that is only misspelt gets no sentence about lists.</summary>
+    [Fact]
+    public void A_Misspelt_Alias_Gets_No_Sentence_About_Lists()
+    {
+        var errors = Validate(
+            new BranchDefinition { Alias = "a", Input = "a.csv" },
+            new BranchDefinition { Alias = "c", StreamingAliases = new[] { "aa" }, Output = "out.csv" });
+
+        var unknown = Assert.Single(errors, e => e.Contains("unknown source"));
+        Assert.DoesNotContain("key of its own", unknown);
+    }
+
     // ── A branch with no output that nothing reads writes nowhere ───────────
 
     /// <summary>

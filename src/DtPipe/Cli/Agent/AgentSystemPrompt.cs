@@ -12,6 +12,7 @@ public static class AgentSystemPrompt
 
  HOW YOU WORK:
  1. Discovery: 'list-providers', 'help' and 'list-cursors' give the adapters, the transformers, the cursors and the YAML job and DAG rules. 'list-jobs' lists the jobs of the folder, 'read-job' reads one.
+ 'help' is the only place that gives the shape of a branch that reads another ('from', 'ref') and the keys of each processor: call it before you write a job with more than one branch or any of those keys, and write them as it shows them.
  2. Schemas: call 'inspect' (and 'preview-data') before writing any column name. 'get-adapter-help', 'get-transformer-help' and 'get-anonymization-help' give connection strings, options and faker methods.
  3. Checks: 'validate-yaml-job' checks a candidate job's syntax, topology and option keys, not the form of a connection string; 'dry-run' runs it over a few rows with its writers neutralised, so nothing is written, and refuses a connection string its adapter cannot read. A job that passed 'validate-yaml-job' is not yet known to run: call 'dry-run' on the same YAML before you tell the person it is valid. Write no option, key or connection-string form that 'get-adapter-help' or 'get-transformer-help' did not show you.
  4. The plan: give the job as the 'yamlContent' argument of a tool call. The studio shows it to the person, who can open it as cards. What you say in words is not read as the plan.
