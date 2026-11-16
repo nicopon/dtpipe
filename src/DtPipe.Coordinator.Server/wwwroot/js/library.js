@@ -1,6 +1,6 @@
 // Library: the pipelines kept in the coordinator's git repository, their plan and deployment
 // state and their history. A pipeline is written with dtpipe studio and published into it.
-import { ROWS_CROSSED_HINT, ago, api, deploymentOf, esc, healthChip, isActive, lastRunOf, rowsCrossed, toast } from "./core.js";
+import { ROWS_CROSSED_HINT, ago, api, deploymentOf, esc, healthChip, isActive, lastRunOf, rowsCrossed, runStateLabel, toast } from "./core.js";
 import * as detail from "./library-detail.js";
 
 let host = null;
@@ -52,7 +52,7 @@ function runCell(id) {
   if (!run) return `<span class="hint">never run</span>`;
   const rows = rowsCrossed(run);
   const why = run.reason ? ` <span class="hint" title="${esc(run.reason)}">· ${esc(run.reason.length > 90 ? `${run.reason.slice(0, 90)}…` : run.reason)}</span>` : "";
-  return `<span class="outcome-chip ${esc(run.state)}">${esc(run.state)}</span> <span class="hint" title="${esc(ROWS_CROSSED_HINT)}">${isActive(run) ? "" : ago(run.finishedAt)}${rows ? ` · ${rows.toLocaleString("en-US")} rows crossed` : ""}</span>${why}`;
+  return `<span class="outcome-chip ${esc(run.state)}">${esc(runStateLabel(run.state))}</span> <span class="hint" title="${esc(ROWS_CROSSED_HINT)}">${isActive(run) ? "" : ago(run.finishedAt)}${rows ? ` · ${rows.toLocaleString("en-US")} rows crossed` : ""}</span>${why}`;
 }
 
 // Deploy, Run and Undeploy from the list. Deploying arms the pipeline at the commit the library holds, and the server
@@ -147,7 +147,7 @@ async function onClick(e) {
       toast(`${id} deployed: every fragment registered.`, "info");
     } else if (t.dataset.run) {
       const run = await api("/api/runs", { pipelineId: t.dataset.run });
-      toast(`${run.runId} ${run.state}.`, "info");
+      toast(`${run.runId} ${runStateLabel(run.state)}.`, "info");
     } else if (t.dataset.undeploy) {
       await api(`/api/deployments/${encodeURIComponent(t.dataset.undeploy)}`, undefined, "DELETE");
     } else if (t.dataset.delete) {

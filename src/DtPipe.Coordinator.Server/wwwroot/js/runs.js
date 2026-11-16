@@ -1,6 +1,6 @@
 // Runs: what is deployed, the runs in flight and the queue behind them, the journal of finished runs,
 // and the live events of every node.
-import { $, ROWS_CROSSED_HINT, api, duration, endNotes, esc, fmt, nodeColor, cursorsOf, ranPlan, rowsCrossed, shortNode, store, toast } from "./core.js";
+import { $, ROWS_CROSSED_HINT, api, duration, endNotes, esc, fmt, nodeColor, cursorsOf, ranPlan, rowsCrossed, runStateLabel, shortNode, store, toast } from "./core.js";
 
 let host = null;
 let openRun = null;          // runId whose report is unfolded
@@ -64,8 +64,8 @@ function renderQueue() {
   if (!el) return;
   el.innerHTML = store.queue.length ? store.queue.map((r) => {
     const since = r.state === "running" ? `${((Date.now() - new Date(r.startedAt)) / 1000).toFixed(0)} s` : `queued ${((Date.now() - new Date(r.queuedAt)) / 1000).toFixed(0)} s ago`;
-    return `<div class="queue-item"><span class="outcome-chip ${esc(r.state)}">${esc(r.state)}</span> <b>${esc(r.pipelineId)}</b> <code>${esc(r.runId)}</code> <span class="hint">${since}${r.launchedBy ? ` · by ${esc(r.launchedBy)}` : ""}</span>
-      <button class="small ghost danger" data-needs="designer" data-cancel="${esc(r.runId)}">Cancel</button>${r.state === "running" ? awayNotes(r) : ""}</div>`;
+    return `<div class="queue-item"><span class="outcome-chip ${esc(r.state)}">${esc(runStateLabel(r.state))}</span> <b>${esc(r.pipelineId)}</b> <code>${esc(r.runId)}</code> <span class="hint">${since}${r.launchedBy ? ` · by ${esc(r.launchedBy)}` : ""}</span>
+      <button class="small ghost danger" data-needs="designer" data-cancel="${esc(r.runId)}">Stop run</button>${r.state === "running" ? awayNotes(r) : ""}</div>`;
   }).join("") : `<p class="hint">Idle.</p>`;
 }
 
@@ -111,7 +111,7 @@ function renderJournal() {
     ${runs.map((r) => {
       const rows = rowsCrossed(r);
       return `<tr class="clickable" data-open="${esc(r.runId)}"><td><code>${esc(r.runId)}</code></td><td>${esc(r.pipelineId ?? r.planId)}</td>
-        <td><span class="outcome-chip ${esc(r.state)}">${esc(r.state)}</span></td><td class="wrap">${esc(r.launchedBy ?? "")}</td><td>${esc(new Date(r.startedAt).toLocaleTimeString())}</td>
+        <td><span class="outcome-chip ${esc(r.state)}">${esc(runStateLabel(r.state))}</span></td><td class="wrap">${esc(r.launchedBy ?? "")}</td><td>${esc(new Date(r.startedAt).toLocaleTimeString())}</td>
         <td class="num">${esc(duration(r))}</td><td class="num">${rows ? fmt(rows) : ""}</td><td class="wrap">${esc(r.reason ?? (r.result?.cause ? shortNode(r.result.cause) : ""))}</td></tr>
         ${openRun === r.runId ? `<tr><td colspan="8">${report(r)}</td></tr>` : ""}`;
     }).join("")}</table>` : `<p class="hint">No run yet.</p>`;
@@ -133,7 +133,7 @@ async function onClick(e) {
   const row = e.target.closest("[data-open]");
   const b = e.target.closest("button");
   try {
-    if (b?.dataset.run) { const run = await api("/api/runs", { pipelineId: b.dataset.run }); toast(`${run.runId} ${run.state}.`, "info"); }
+    if (b?.dataset.run) { const run = await api("/api/runs", { pipelineId: b.dataset.run }); toast(`${run.runId} ${runStateLabel(run.state)}.`, "info"); }
     else if (b?.dataset.undeploy) await api(`/api/deployments/${encodeURIComponent(b.dataset.undeploy)}`, undefined, "DELETE");
     else if (b?.dataset.cancel) await api("/api/runs/cancel", { runId: b.dataset.cancel });
     else if (row) { openRun = openRun === row.dataset.open ? null : row.dataset.open; renderJournal(); }

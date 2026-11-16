@@ -517,7 +517,8 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   `DeploymentView.State` are a `RunState` and a `DeploymentState`; the pages, the event stream and the journal's documents
   carry the name of the value in lowercase, never as declared. Where no property carries a deployment's state (the
   `deploy` event, the text of a refusal), `StateWords.Word` writes it; `undeployed` is the word of an event, not a
-  state. A journal document whose state is none of the values, or a number, is skipped when the server starts.
+  state. A journal document whose state is none of the values, or a number, is skipped when the server starts. The pages
+  show `cancelled` as "stopped" through `runStateLabel` (`core.js`) and key their styles and tests on the word received.
   `[CI: StateWireTests, RunQueueTests]`
 - **A run is journaled as it goes, and a restart ends what it interrupted.** `RunJournal` keeps the runs in an `IRunStore`, which is
   `SqlRunStore`: the `runs` table (a document per run, whether it is over, its instant), the `owed` table and the `counters` table that draws ids. `RunQueue` draws the id and writes the run when it is queued (under the ledger's lock, before

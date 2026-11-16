@@ -245,7 +245,7 @@ public sealed class NodeChannelHub(
     /// </summary>
     internal static NodeLogLine Classified(NodeLogLine line, bool windingDown) =>
         windingDown && LogCategories.IsTransport(line.Category) && line.Level is "Warning" or "Error" or "Critical"
-            ? line with { Level = "Information", Message = $"{line.Message} (a consequence of the run's cancellation)" }
+            ? line with { Level = "Information", Message = $"{line.Message} (a consequence of stopping the run)" }
             : line;
 
     public override Task OnDisconnectedAsync(Exception? exception)

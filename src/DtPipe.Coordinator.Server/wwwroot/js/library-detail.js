@@ -3,7 +3,7 @@
 // jobs, the job's text read only, and its last run with the plan that run ran. The node of each source and sink branch is
 // chosen here, among the nodes that offer its brick; the runner is never named. The bindings are saved from here, and the
 // pipeline is deployed (armed at the commit the library holds) and run.
-import { $, api, deploymentOf, duration, endNotes, esc, healthChip, cursorsOf, healthOf, isActive, lastRunOf, ranPlan, shortNode, store, toast } from "./core.js";
+import { $, api, deploymentOf, duration, endNotes, esc, healthChip, cursorsOf, healthOf, isActive, lastRunOf, ranPlan, runStateLabel, shortNode, store, toast } from "./core.js";
 import { drawLanes, fragmentJobs, legend, planProblems } from "./placement.js";
 
 let host = null;
@@ -209,7 +209,7 @@ function runPanel(run, current) {
   if (!run) return "";
   const r = run.result;
   return `<section class="card"><div class="card-head"><h2>Last run</h2><a href="#/runs">all runs →</a></div>
-    <div class="outcome ${esc(run.state)}">${esc(run.runId)} · ${esc(run.state)} <span class="hint">${esc(duration(run))}</span></div>
+    <div class="outcome ${esc(run.state)}">${esc(run.runId)} · ${esc(runStateLabel(run.state))} <span class="hint">${esc(duration(run))}</span></div>
     ${current ? "" : `<p class="hint">It ran a plan with other edges than this one.</p>`}
     ${endNotes(run)}
     ${cursorsOf(run)}
@@ -242,7 +242,7 @@ async function onClick(e) {
       await loadPlan();
     } else if (b.id === "x-run") {
       const run = await api("/api/runs", { pipelineId: id });
-      toast(`${run.runId} ${run.state}.`, "info");
+      toast(`${run.runId} ${runStateLabel(run.state)}.`, "info");
     } else if (b.id === "x-undeploy") {
       await api(`/api/deployments/${encodeURIComponent(id)}`, undefined, "DELETE");
     }

@@ -166,6 +166,10 @@ export function refreshHealth() {
   }, 300);
 }
 
+// What a page calls a run's state. The key is the word the server sends and what the pages' styles and tests read;
+// a state with no entry shows as received.
+const RUN_STATE_LABEL = { cancelled: "stopped" };
+export const runStateLabel = (state) => RUN_STATE_LABEL[state] ?? state;
 export const isActive = (run) => run && ["queued", "running"].includes(run.state);
 
 // ---------------------------------------------------------------- live store
@@ -183,7 +187,7 @@ function onRun(run) {
   } else {
     store.queue = store.queue.filter((r) => r.runId !== run.runId);
     store.runs = [run, ...store.runs.filter((r) => r.runId !== run.runId)].slice(0, 200);
-    addLog({ node: "coordinator", level: run.state === "succeeded" ? "Information" : "Warning", message: `${run.runId} ${run.pipelineId ?? ""} ${run.state}${run.refusal ? `: ${run.refusal}` : ""}` });
+    addLog({ node: "coordinator", level: run.state === "succeeded" ? "Information" : "Warning", message: `${run.runId} ${run.pipelineId ?? ""} ${runStateLabel(run.state)}${run.refusal ? `: ${run.refusal}` : ""}` });
   }
   emit("runs");
 }

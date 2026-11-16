@@ -522,7 +522,7 @@ public sealed class RunQueueTests : IDisposable
         var s = _deployments.Enqueue("s");
         await Task.WhenAll(RunningAsync(again.RunId), RunningAsync(s.RunId));
         var ex = Assert.Throws<ConflictException>(() => _deployments.Cancel());
-        Assert.Equal("2 runs are in flight: name the one to cancel.", ex.Message);
+        Assert.Equal("2 runs are in flight: name the one to stop.", ex.Message);
         Assert.Equal(2, _deployments.Queue.Count(r => r.State == RunState.Running));
 
         _deployments.Cancel(s.RunId);
@@ -546,7 +546,7 @@ public sealed class RunQueueTests : IDisposable
         _deployments.Cancel("run-unknown");
 
         var cancelled = Journaled(q.RunId);
-        Assert.Equal((RunState.Cancelled, "Cancelled while queued."), (cancelled.State, cancelled.Refusal));
+        Assert.Equal((RunState.Cancelled, "Stopped while queued."), (cancelled.State, cancelled.Refusal));
         _runs.End(p.RunId, RunOutcome.Succeeded);
         await FinishedAsync(p.RunId);
         await Task.Delay(300);
@@ -642,7 +642,7 @@ public sealed class RunQueueTests : IDisposable
         _deployments.Cancel(first.RunId);
         await FinishedAsync(first.RunId);
         var ended = Journaled(first.RunId);
-        Assert.Equal((RunState.Cancelled, "Cancelled while queued."), (ended.State, ended.Refusal));
+        Assert.Equal((RunState.Cancelled, "Stopped while queued."), (ended.State, ended.Refusal));
         Assert.False(_runs.Saw(first.RunId));
 
         _link.CheckGate.SetResult(new FragmentCheck(true));

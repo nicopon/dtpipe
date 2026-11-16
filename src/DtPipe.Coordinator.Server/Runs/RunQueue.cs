@@ -146,7 +146,7 @@ internal sealed class RunQueue
             {
                 var running = _ledger.Sent.Where(t => t.Running).ToList();
                 if (running.Count > 1)
-                    throw new ConflictException($"{running.Count} runs are in flight: name the one to cancel.");
+                    throw new ConflictException($"{running.Count} runs are in flight: name the one to stop.");
                 if (running.SingleOrDefault() is { } only) RequestCancel(only);
                 return;
             }
@@ -162,7 +162,7 @@ internal sealed class RunQueue
             if (waiting is not null)
             {
                 // Journaled before it leaves the ledger, as Finish does, so a retry of its key finds it in one or the other.
-                cancelled = waiting.View with { State = RunState.Cancelled, StartedAt = DateTimeOffset.UtcNow, FinishedAt = DateTimeOffset.UtcNow, Refusal = "Cancelled while queued." };
+                cancelled = waiting.View with { State = RunState.Cancelled, StartedAt = DateTimeOffset.UtcNow, FinishedAt = DateTimeOffset.UtcNow, Refusal = "Stopped while queued." };
                 _journal.Record(cancelled);
                 _ledger.Queued.Remove(waiting);
             }
@@ -264,7 +264,7 @@ internal sealed class RunQueue
         {
             lock (_ledger.Lock) if (!_ledger.Sent.Contains(ticket)) return;
             var cancelled = ex is OperationCanceledException;
-            Finish(ticket, view with { State = cancelled ? RunState.Cancelled : RunState.Refused, StartedAt = DateTimeOffset.UtcNow, Refusal = cancelled ? "Cancelled while queued." : ex.Message });
+            Finish(ticket, view with { State = cancelled ? RunState.Cancelled : RunState.Refused, StartedAt = DateTimeOffset.UtcNow, Refusal = cancelled ? "Stopped while queued." : ex.Message });
             return;
         }
 
