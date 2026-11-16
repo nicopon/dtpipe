@@ -71,13 +71,15 @@ internal static class PublicationCheck
 
     /// <summary>
     /// The program that runs this dtpipe: the single-file binary or apphost the process is, else the dotnet host with this
-    /// assembly (<c>dotnet DtPipe.dll</c>, a tool package, a test host).
+    /// assembly (<c>dotnet DtPipe.dll</c>, a tool package, a test host). The assembly is looked for beside the application,
+    /// never through <c>Assembly.Location</c>, which is empty in a single-file app: a file that is not there means the
+    /// process is the program.
     /// </summary>
     internal static (string Program, string[] Prefix) Self()
     {
         var self = Environment.ProcessPath;
-        var dll = typeof(PublicationCheck).Assembly.Location;
-        if (string.IsNullOrEmpty(dll)) return (self ?? "dtpipe", []);
+        var dll = Path.Combine(AppContext.BaseDirectory, typeof(PublicationCheck).Assembly.GetName().Name + ".dll");
+        if (!File.Exists(dll)) return (self ?? "dtpipe", []);
         var name = self is null ? "" : Path.GetFileName(self);
         if (name.Equals("dtpipe", StringComparison.OrdinalIgnoreCase) || name.Equals("dtpipe.exe", StringComparison.OrdinalIgnoreCase))
             return (self!, []);

@@ -112,6 +112,18 @@ public sealed class StudioPublicationCheckTests : IAsyncLifetime
     }
 
     [Fact]
+    public void The_child_is_this_dtpipe_started_through_the_host_that_runs_it()
+    {
+        // The test host is neither a single-file binary nor the apphost: the child is the dotnet host and this assembly's file.
+        var (program, prefix) = PublicationCheck.Self();
+
+        var dll = Assert.Single(prefix);
+        Assert.Equal(typeof(PublicationCheck).Assembly.GetName().Name + ".dll", Path.GetFileName(dll));
+        Assert.True(File.Exists(dll));
+        Assert.Equal("dotnet", Path.GetFileNameWithoutExtension(program));
+    }
+
+    [Fact]
     public async Task Signed_out_there_is_no_publication_verdict()
     {
         var (status, body) = await CallAsync(HttpMethod.Post, "/api/publish/check", new { yaml = Job() });
