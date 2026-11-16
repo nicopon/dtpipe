@@ -988,8 +988,10 @@ function renderInspector() {
   const step = cards.selected?.alias ? stepOf(cards.selected.alias) : null;
   if (!step) {
     const errors = cards.result?.errors?.length || 0;
+    const warnings = cards.result?.warnings?.length || 0;
     fill(view, el("h2", {}, "Job"),
-      el("p", { class: "hint" }, `${cards.model.steps.length} step(s). `, errors ? el("span", { class: "bad" }, `${errors} error(s): see Problems.`) : "Composes cleanly."),
+      el("p", { class: "hint" }, `${cards.model.steps.length} step(s). `, errors ? el("span", { class: "bad" }, `${errors} error(s): see Problems.`)
+        : warnings ? ["Composes, ", el("span", { class: "warn" }, `with ${warnings} warning(s): see Problems.`)] : "Composes cleanly."),
       el("p", { class: "hint" }, "Select a step to edit it. A source and an output of their own carry their endpoint as YAML; the server joins a source, its transform and its output back into one branch when nothing else reads between them."),
       cards.model.directives.length ? [el("h3", {}, "Header directives"), el("ul", { class: "inputs" }, cards.model.directives.map((d) => el("li", {}, el("code", {}, d))))] : null);
     return;

@@ -87,7 +87,9 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   read the catalog read last, kept after a sign-out, so a brick card still composes and saves. **Only a branch that is a reference
   is sent** (`ForRecognition`, by `BrickRef.Of`): a branch of this machine, a connection string included, never leaves it.
   A reference never reaches the engine: a sample, a debug run or a real run of a job in which a branch still references a brick that
-  no card bound is refused by name (`RefuseReferences`). The catalog carries no schema, which depends on the rows: a brick card
+  no card bound is refused by name (`RefuseReferences`), and so is a branch that uses the scheme as no reference does
+  (`BrickRef.Misuse`, the coordinator's own judge: one that reads a brick and says more), through `RunnableHere`, which
+  `/api/design/compose` asks too: its refusal is a warning of the composition, so Problems says it before a run. The catalog carries no schema, which depends on the rows: a brick card
   reads its node's first rows when a person asks (`POST /api/bricks/preview`, `CoordinatorLink.PreviewAsync`), kept nowhere.
   `[CI: StudioBrickTests, StudioRunTests]`
 - **A brick samples here through the run's own binding.** `BrickSampling` turns a source brick's

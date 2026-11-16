@@ -217,7 +217,7 @@ public sealed partial class StudioServer : IAsyncDisposable
                     await BrickPreviewAsync(context);
                     break;
                 case ("POST", "/api/design/compose"):
-                    await JsonAsync(context, Design().Compose(await BodyAsync<DesignModel>(context)));
+                    await JsonAsync(context, WithRunHere(Design().Compose(await BodyAsync<DesignModel>(context))));
                     break;
                 case ("POST", "/api/design/decompose"):
                     var decompose = await BodyAsync<DecomposeRequest>(context);
@@ -537,10 +537,7 @@ public sealed partial class StudioServer : IAsyncDisposable
         Func<string, (string Yaml, IReadOnlySet<string> Dropped, IReadOnlySet<string> Unread)>? rewrite, CancellationToken ct)
     {
         // Each brick's branch is read or written on its node: here, its rows come from the coordinator.
-        var sampling = BrickSampling.Of(yaml, bricks, _tools.Coordinator?.Catalog);
-        if (sampling.Sources.Count > 0 && _tools.Coordinator?.Status().State != CoordinatorLink.SignedIn)
-            throw new StudioRefusal(409, "This job reads a node's brick: sign in to the coordinator to sample it.");
-        RefuseReferences(sampling.Yaml, SignedInCatalog());
+        var sampling = RunnableHere(yaml, bricks, "sample");
 
         // Every variable resolves before anything runs, and is named when it would not.
         var launch = _variables.LaunchEnvironment(JobPath(path), sampling.Yaml);
@@ -803,6 +800,53 @@ public sealed partial class StudioServer : IAsyncDisposable
         foreach (var (alias, branch) in JobYaml.Branches(JobYaml.Parse(yaml)))
             if (BrickRef.Of(alias, branch) is not null) kept.Add(alias, JobYaml.CloneBranch(branch));
         return kept.Children.Count == 0 ? "" : JobYaml.Serialize(kept);
+    }
+
+    /// <summary>
+    /// The job a sample or a run gives the engine here, each brick card bound, or the refusal that says why it cannot run here:
+    /// a source brick while nobody is signed in, a branch that uses the brick scheme as no reference does, a reference no card
+    /// binds. The engine has no <c>brick:</c>, and what is left of it fails there before the branch can give a reason. The
+    /// composition the page shows asks it too (<see cref="WithRunHere"/>), so Problems says it before a run does.
+    /// </summary>
+    private BrickSampling RunnableHere(string yaml, List<SampledBrick>? bricks, string gesture)
+    {
+        var sampling = BrickSampling.Of(yaml, bricks, _tools.Coordinator?.Catalog);
+        if (sampling.Sources.Count > 0 && _tools.Coordinator?.Status().State != CoordinatorLink.SignedIn)
+            throw new StudioRefusal(409, $"This job reads a node's brick: sign in to the coordinator to {gesture} it.");
+        RefuseMisusedReferences(sampling.Yaml);
+        RefuseReferences(sampling.Yaml, SignedInCatalog());
+        return sampling;
+    }
+
+    /// <summary>
+    /// The composition of the page's cards, with the refusal a sample or a run here would give among its warnings: the job
+    /// composes, and runs only on a node or once signed in. A composition with errors says those first.
+    /// </summary>
+    private DesignResult WithRunHere(DesignResult composed)
+    {
+        if (!composed.Valid) return composed;
+        var bricks = composed.Model.Steps.Where(s => s.Brick is not null && s.Alias is not null)
+            .Select(s => new SampledBrick(composed.Steps.FirstOrDefault(i => i.Alias == s.Alias)?.Branch ?? s.Alias!, s.Brick!))
+            .ToList();
+        try
+        {
+            RunnableHere(composed.Yaml, bricks, "run");
+            return composed;
+        }
+        catch (StudioRefusal refusal) { return composed with { Warnings = [.. composed.Warnings, refusal.Message] }; }
+        catch (Exception ex) when (ex is FormatException or YamlDotNet.Core.YamlException) { return composed; }
+    }
+
+    /// <summary>
+    /// Refuses a job in which a branch uses the brick scheme as no reference does (<see cref="BrickRef.Misuse"/>): one that
+    /// reads a brick and says more, a malformed reference. No card binds such a branch, here or on a node.
+    /// </summary>
+    internal static void RefuseMisusedReferences(string yaml)
+    {
+        List<string> misuses;
+        try { misuses = JobYaml.Branches(JobYaml.Parse(yaml)).Select(b => BrickRef.Misuse(b.Alias, b.Branch)).OfType<string>().ToList(); }
+        catch (Exception ex) when (ex is FormatException or YamlDotNet.Core.YamlException) { return; }
+        if (misuses.Count > 0) throw new StudioRefusal(409, string.Join(" ", misuses));
     }
 
     /// <summary>

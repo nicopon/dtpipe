@@ -85,10 +85,7 @@ public sealed partial class StudioServer
         var job = _folder.ReadJob(path);
         if (asked.Hash is null || asked.Hash != job.Hash)
             throw new StudioRefusal(409, $"{path} is not the job saved last: save it, then run.");
-        var sampling = BrickSampling.Of(job.Text, asked.Bricks, _tools.Coordinator?.Catalog);
-        if (sampling.Sources.Count > 0 && _tools.Coordinator?.Status().State != CoordinatorLink.SignedIn)
-            throw new StudioRefusal(409, "This job reads a node's brick: sign in to the coordinator to run it.");
-        RefuseReferences(sampling.Yaml, SignedInCatalog());
+        var sampling = RunnableHere(job.Text, asked.Bricks, "run");
         var launch = _variables.LaunchEnvironment(path, sampling.Yaml);
         var staged = asked.Debug == true || asked.Review == true;
         // A suspended run has its rows; any run but its continuation would write the job again and leave them to be written twice.
