@@ -91,10 +91,19 @@ public class OpenAiClient : ILlmClient, IStreamingLlmClient
         return options;
     }
 
-    private ChatClient BuildClient(string baseUrl, string model)
+    /// <summary>
+    /// The key is optional: a server that does not authenticate is a valid target, and model listing
+    /// already sends no header without one. The SDK refuses an empty credential, so a placeholder
+    /// stands in for the missing key; a server that does authenticate answers 401 and the turn
+    /// reports it.
+    /// </summary>
+    internal ChatClient BuildClient(string baseUrl, string model)
     {
-        return new ChatClient(model, new ApiKeyCredential(_apiKey), BuildClientOptions(baseUrl));
+        var key = string.IsNullOrEmpty(_apiKey) ? NoKeyPlaceholder : _apiKey;
+        return new ChatClient(model, new ApiKeyCredential(key), BuildClientOptions(baseUrl));
     }
+
+    private const string NoKeyPlaceholder = "no-key";
 
     private static List<OpenAI.Chat.ChatMessage> MapMessages(List<ChatMessage> messages)
     {

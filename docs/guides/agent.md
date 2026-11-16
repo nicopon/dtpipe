@@ -57,6 +57,9 @@ Ollama it stays on your machine; the panel warns when the address is elsewhere.
 ```bash
 # A remote model: the key is a reference, never the key itself
 dtpipe studio ./jobs --llm-provider openai --llm-model gpt-4o --llm-key keyring://openai
+
+# A local server that does not authenticate: no key
+dtpipe studio ./jobs --llm-provider openai --llm-url http://127.0.0.1:8000 --llm-model my-model
 ```
 
 To use a studio on a server from your machine, forward its port with the same number on both sides:

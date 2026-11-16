@@ -1233,7 +1233,7 @@ dtpipe studio ./jobs --llm-provider ollama --llm-model qwen2.5-coder:7b  # with 
 | `--llm-provider` | Opens the agent's panel on `ollama` or `openai`. Default: no agent |
 | `--llm-url` | The provider's address. Default: `http://localhost:11434` for ollama, `https://api.openai.com` for openai |
 | `--llm-model` | The model the agent starts with; the page may pick another the provider lists. Default: none |
-| `--llm-key` | The provider's API key, as a reference (`${{NAME}}`, `keyring://alias`, `@file`), never the key itself |
+| `--llm-key` | The provider's API key, as a reference (`${{NAME}}`, `keyring://alias`, `@file`), never the key itself. Default: none, which a server that does not authenticate needs |
 | `--llm-timeout` | Seconds with no token before a model call fails. Default: 300 |
 | `--agent-trace` | Records the agent's session as JSON lines; a directory gets a timestamped file. Default: `$DTPIPE_AGENT_TRACE`, else none |
 
