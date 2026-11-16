@@ -39,7 +39,7 @@ public class MemoryCeilingTests
         Assert.SkipUnless(OperatingSystem.IsMacOS(),
             "SIGSTOP/SIGCONT values below are Darwin's; this test needs its own Linux constants first.");
 
-        using var fixture = SplitFixture.Create(rowCount: 2_000_000, cutAt: 1, extraArgs: ["--fake", "noise:random.guid"]);
+        using var fixture = SplitFixture.Create(rowCount: 2_000_000, extraArgs: ["--fake", "noise:random.guid"]);
         await using var host = await NodeTestHost.StartAsync();
 
         await using var producer = await HandWiredNode.StartAsync(
@@ -63,7 +63,7 @@ public class MemoryCeilingTests
         try
         {
             var transferId = await host.TransferInitiator.InitTransferAsync(
-                producer.ClientId, consumer.ClientId, timeoutMs: 20_000).WaitAsync(Bound);
+                producer.ClientId, consumer.ClientId, handshakeTimeout: TimeSpan.FromSeconds(20)).WaitAsync(Bound);
 
             await Task.WhenAll(
                 producer.WireAsync("main", transferId).WaitAsync(Bound),

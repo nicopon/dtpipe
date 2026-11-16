@@ -9,6 +9,16 @@ namespace DtPipe.Cli.Pipeline;
 
 public static class PipelineValidator
 {
+    /// <summary>
+    /// The aliases of a source list are separated by commas and 'ref' is a key of its own: an alias that
+    /// carries a bracket or a colon is a list or a key written inside the string of 'from' or 'input'.
+    /// </summary>
+    private static string MisplacedList(string alias) =>
+        alias.IndexOfAny(['[', ']', ':']) < 0
+            ? string.Empty
+            : " 'from:' takes branch aliases separated by commas, and 'ref:' is a key of its own, a list: "
+            + "neither is written inside 'from:' or 'input:'.";
+
     public static List<string> Validate(JobDagDefinition dag, Dictionary<string, JobDefinition> jobs, IEnumerable<IStreamTransformerFactory> processorFactories)
     {
         var errors = new List<string>();
@@ -20,13 +30,13 @@ public static class PipelineValidator
             foreach (var from in branch.StreamingAliases)
             {
                 if (!definedAliases.Contains(from))
-                    errors.Add($"Branch '{branch.Alias}' depends on unknown source '{from}'.");
+                    errors.Add($"Branch '{branch.Alias}' depends on unknown source '{from}'.{MisplacedList(from)}");
             }
 
             foreach (var @ref in branch.RefAliases)
             {
                 if (!definedAliases.Contains(@ref))
-                    errors.Add($"Branch '{branch.Alias}' refers to unknown branch '{@ref}'.");
+                    errors.Add($"Branch '{branch.Alias}' refers to unknown branch '{@ref}'.{MisplacedList(@ref)}");
             }
         }
 
@@ -39,17 +49,25 @@ public static class PipelineValidator
         //    written by another.
         foreach (var branch in dag.Branches)
         {
-            foreach (var upstream in branch.StreamingAliases.Concat(branch.RefAliases).Distinct(StringComparer.OrdinalIgnoreCase))
-            {
-                if (!definedAliases.Contains(upstream)) continue;   // already reported above
-                if (!jobs.TryGetValue(upstream, out var source) || string.IsNullOrEmpty(source.Output)) continue;
+            var writing = branch.StreamingAliases.Concat(branch.RefAliases)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Where(upstream => definedAliases.Contains(upstream)   // an unknown one is reported above
+                                   && jobs.TryGetValue(upstream, out var source) && !string.IsNullOrEmpty(source.Output))
+                .ToList();
+            if (writing.Count == 0) continue;
 
-                errors.Add($"Branch '{branch.Alias}' reads branch '{upstream}', but '{upstream}' has an "
-                         + $"'output:' of its own and therefore publishes nothing to read. A branch either "
-                         + $"writes to a target or feeds other branches, never both: drop the 'output:' from "
-                         + $"'{upstream}' and add a branch that does the writing ('from: {upstream}' plus the "
-                         + $"'output:').");
-            }
+            // One message per reading branch, however many of its sources write: the same rule
+            // repeated once per source reads as several faults and is cut off first when a caller
+            // shows only the head of the list.
+            var names = string.Join(", ", writing.Select(w => $"'{w}'"));
+            var plural = writing.Count > 1;
+            errors.Add($"Branch '{branch.Alias}' reads {(plural ? "branches" : "branch")} {names}, but "
+                     + $"{(plural ? "each has an" : $"'{writing[0]}' has an")} 'output:' of its own and "
+                     + $"therefore publishes nothing to read. A branch either writes to a target or feeds other "
+                     + $"branches, never both: drop the 'output:' from {(plural ? "each of them" : $"'{writing[0]}'")} and add "
+                     + $"{(plural ? "for each" : "")} a branch that does the writing "
+                     + $"({string.Join(", ", writing.Select(w => $"'from: {w}'"))} plus the 'output:'; the old 'output:' "
+                     + $"and its provider-options move to that branch, so the target is still written).");
         }
 
         // 3. A 'ref' is materialised for a stream processor to query, so a branch declaring one
@@ -80,10 +98,22 @@ public static class PipelineValidator
             if (!branch.HasStreamTransformer || string.IsNullOrEmpty(branch.Input)) continue;
 
             var input = DtPipe.Core.Security.ConnectionStringSanitizer.Redact(branch.Input);
+            // The sources a caller meant to read are often named inside the input it wrote ('ref: [a, b]'):
+            // those that write to a target are the next refusal, so say it now rather than one round later.
+            var written = System.Text.RegularExpressions.Regex.Split(branch.Input, @"[^\w\-]+")
+                .Where(token => token.Length > 0 && jobs.TryGetValue(token, out var named) && !string.IsNullOrEmpty(named.Output)
+                                && !token.Equals(branch.Alias, StringComparison.OrdinalIgnoreCase))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var writes = written.Count == 0 ? string.Empty
+                : $" {string.Join(", ", written.Select(w => $"'{w}'"))} {(written.Count > 1 ? "write" : "writes")} to a target, "
+                + $"so {(written.Count > 1 ? "each" : "it")} must give up its 'output:' to a branch of its own before this branch can read {(written.Count > 1 ? "them" : "it")}.";
+
             errors.Add($"Branch '{branch.Alias}' runs the '{branch.ProcessorName}' processor and also "
                      + $"declares the input '{input}', which a processor branch never reads — it is not "
                      + $"even opened. Give that source a branch of its own and name it here "
-                     + $"(--from <alias> on the command line, 'from:' in a job file), or drop the input.");
+                     + $"(--from <alias> on the command line, 'from:' in a job file), or drop the input.{writes} "
+                     + $"A branch that is read has no 'output:' of its own.");
         }
 
         // 5. Loop detection
@@ -139,20 +169,19 @@ public static class PipelineValidator
     }
 
     /// <summary>
-    /// The processor triggers the catalogue actually carries, with the value each one takes.
-    /// Naming one in a message would be wrong the day a processor is added, renamed or retired,
-    /// and nothing would catch it — the factories already declare their own triggers.
+    /// The ways in to each processor the catalogue actually carries, in YAML and on the command line.
+    /// The validator judges a job whatever surface wrote it, so a message naming only flags misleads a
+    /// job file's author. Naming one processor in a message would be wrong the day one is added,
+    /// renamed or retired: <see cref="ProcessorActivation"/> reads each factory's own declaration.
     /// </summary>
     private static string ProcessorTriggers(IEnumerable<IStreamTransformerFactory> processorFactories)
     {
-        var triggers = processorFactories
-            .SelectMany(f => f.CliTriggerFlags)
-            .Select(t => t.IsBoolean ? t.Flag : $"{t.Flag} <value>")
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(t => t, StringComparer.Ordinal)
+        var ways = processorFactories
+            .OrderBy(f => f.ComponentName, StringComparer.Ordinal)
+            .Select(ProcessorActivation.Describe)
             .ToList();
 
-        return triggers.Count == 0 ? string.Empty : $" ({string.Join(", ", triggers)})";
+        return ways.Count == 0 ? string.Empty : $" ({string.Join("; ", ways)})";
     }
 
     private static bool HasCycle(JobDagDefinition dag)

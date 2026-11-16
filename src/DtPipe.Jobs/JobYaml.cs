@@ -1,6 +1,5 @@
-using System.Text.Json;
-using System.Text.Json.Nodes;
 using YamlDotNet.Core;
+using YamlDotNet.Core.Events;
 using YamlDotNet.RepresentationModel;
 
 namespace DtPipe.Jobs;
@@ -24,6 +23,52 @@ public static class JobYaml
                 throw new FormatException($"Branch '{key}' is not a mapping.");
         }
         return root;
+    }
+
+    /// <summary>
+    /// One branch written as YAML text, a JSON object included (YAML reads JSON): the one reader of a brick its owner declares.
+    /// The tree keeps each scalar's text, the way dtpipe reads a job, and every key is a scalar: a brick's form is read by key.
+    /// Its presentation is a job file's, whatever the text's: block collections and <see cref="Text"/>'s scalars, so a branch
+    /// written as JSON is not written back on one line.
+    /// </summary>
+    public static YamlMappingNode ParseBranch(string text)
+    {
+        var stream = new YamlStream();
+        using (var reader = new StringReader(text)) stream.Load(reader);
+        if (stream.Documents.Count != 1 || stream.Documents[0].RootNode is not YamlMappingNode branch)
+            throw new FormatException("A branch is one mapping.");
+        if (HasComplexKey(branch)) throw new FormatException("Every key of a branch is a scalar.");
+        AsJobFile(branch);
+        return branch;
+    }
+
+    private static bool HasComplexKey(YamlNode node) => node switch
+    {
+        YamlMappingNode m => m.Children.Any(kv => kv.Key is not YamlScalarNode || HasComplexKey(kv.Value)),
+        YamlSequenceNode s => s.Children.Any(HasComplexKey),
+        _ => false,
+    };
+
+    private static void AsJobFile(YamlNode node)
+    {
+        switch (node)
+        {
+            case YamlMappingNode m:
+                m.Style = MappingStyle.Block;
+                foreach (var (key, value) in m.Children)
+                {
+                    AsJobFile(key);
+                    AsJobFile(value);
+                }
+                break;
+            case YamlSequenceNode s:
+                s.Style = SequenceStyle.Block;
+                foreach (var item in s.Children) AsJobFile(item);
+                break;
+            case YamlScalarNode { Value: { } value } scalar:
+                scalar.Style = Text(value).Style;
+                break;
+        }
     }
 
     public static string Serialize(YamlMappingNode root)
@@ -77,32 +122,8 @@ public static class JobYaml
             ? seq.Children.OfType<YamlMappingNode>().ToList()
             : [];
 
-    /// <summary>
-    /// A YAML tree from JSON: how a brick's branch, declared in a node's JSON file, and a designer
-    /// step's transformers reach the job. Every JSON scalar becomes a plain YAML scalar with its
-    /// text; a multi-line string becomes a literal block, so a SQL query stays readable.
-    /// </summary>
-    public static YamlNode FromJson(JsonNode? node) => node switch
-    {
-        JsonObject o => new YamlMappingNode(o.Select(kv => new KeyValuePair<YamlNode, YamlNode>(new YamlScalarNode(kv.Key), FromJson(kv.Value)))),
-        JsonArray a => new YamlSequenceNode(a.Select(FromJson)),
-        JsonValue v when v.GetValueKind() == JsonValueKind.String => Text(v.GetValue<string>()),
-        JsonValue v => new YamlScalarNode(v.ToJsonString()),
-        _ => new YamlScalarNode("~"),
-    };
-
     public static YamlScalarNode Text(string value) =>
         new(value) { Style = value.Contains('\n') ? ScalarStyle.Literal : ScalarStyle.Any };
-
-    /// <summary>The reverse of <see cref="FromJson"/>: every scalar comes back as a string.</summary>
-    public static JsonNode? ToJson(YamlNode node) => node switch
-    {
-        YamlMappingNode m => new JsonObject(m.Children.Select(kv => new KeyValuePair<string, JsonNode?>(((YamlScalarNode)kv.Key).Value!, ToJson(kv.Value)))),
-        YamlSequenceNode s => new JsonArray(s.Children.Select(ToJson).ToArray()),
-        YamlScalarNode { Value: "~" or null } => null,
-        YamlScalarNode s => JsonValue.Create(s.Value),
-        _ => null,
-    };
 
     /// <summary>Environment variables a job text resolves through <c>${{NAME}}</c>: the names of <see cref="VariableTokens"/>.</summary>
     public static IReadOnlyList<string> Variables(string text) =>

@@ -1,8 +1,6 @@
 using System.Collections.Concurrent;
 using System.Security.Claims;
-using TransportR.Identity;
-using TransportR.Interfaces;
-using TransportR.Models;
+using TransportR.Hub;
 
 namespace DtPipe.Coordinator.Tests.Infrastructure;
 

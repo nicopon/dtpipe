@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using DtPipe.Adapters.Common;
+using DtPipe.Adapters.Shared.Abstractions;
 using DtPipe.Core.Attributes;
 using DtPipe.Core.Options;
 
@@ -25,10 +26,16 @@ public class SqliteWriterOptions : DbWriterOptions, IOptionSet, ITableAwareOptio
 
 public enum SqliteWriteStrategy
 {
+    [Description(WriteStrategyDescriptions.Append)]
     Append,
+    [Description(WriteStrategyDescriptions.DeleteThenInsert)]
     DeleteThenInsert,
+    [Description(WriteStrategyDescriptions.Truncate)]
     Truncate,
+    [Description(WriteStrategyDescriptions.Recreate)]
     Recreate,
+    [Description(WriteStrategyDescriptions.Upsert)]
     Upsert,
+    [Description(WriteStrategyDescriptions.Ignore)]
     Ignore
 }

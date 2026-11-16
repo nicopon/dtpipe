@@ -121,6 +121,187 @@ public class DuckDBSqlProcessorTests
     }
 
     /// <summary>
+    /// Two sources that carry a column of the same name are scanned with their own projections: the ref
+    /// is read for <c>Name</c> alone, and is never handed the <c>GenerateIndex</c> the main side reads.
+    /// A scan given a column the plan did not ask for takes it as the next one, here an integer as text,
+    /// and DuckDB faults natively.
+    /// </summary>
+    [Fact]
+    public async Task OpenAsync_SourcesSharingAColumnName_EachScanReadsItsOwnProjection()
+    {
+        var mainSchema = new Schema(new[]
+        {
+            new Field("GenerateIndex", Int64Type.Default, nullable: false),
+            new Field("Product", StringType.Default, nullable: false),
+        }, null);
+        var mainBatch = new RecordBatch(mainSchema, new IArrowArray[]
+        {
+            new Int64Array.Builder().Append(0).Append(1).Build(),
+            new StringArray.Builder().Append("a product name past inline").Append("another product name past inline").Build(),
+        }, 2);
+
+        var refSchema = new Schema(new[]
+        {
+            new Field("GenerateIndex", Int64Type.Default, nullable: false),
+            new Field("Name", StringType.Default, nullable: false),
+        }, null);
+        var refBatch = new RecordBatch(refSchema, new IArrowArray[]
+        {
+            new Int64Array.Builder().Append(7).Append(8).Build(),
+            new StringArray.Builder().Append("a customer name past inline").Append("one more customer name past inline").Build(),
+        }, 2);
+
+        var channelMain = Channel.CreateUnbounded<RecordBatch>();
+        channelMain.Writer.TryWrite(mainBatch);
+        channelMain.Writer.Complete();
+        var channelRef = Channel.CreateUnbounded<RecordBatch>();
+        channelRef.Writer.TryWrite(refBatch);
+        channelRef.Writer.Complete();
+
+        var mock = new Mock<IMemoryChannelRegistry>();
+        mock.Setup(r => r.WaitForArrowChannelSchemaAsync("main", It.IsAny<CancellationToken>())).ReturnsAsync(mainSchema);
+        mock.Setup(r => r.GetArrowChannel("main")).Returns((channelMain, mainSchema));
+        mock.Setup(r => r.WaitForArrowChannelSchemaAsync("ref", It.IsAny<CancellationToken>())).ReturnsAsync(refSchema);
+        mock.Setup(r => r.GetArrowChannel("ref")).Returns((channelRef, refSchema));
+
+        await using var processor = new DuckDBSqlProcessor(
+            mock.Object,
+            "SELECT m.*, r.Name FROM main m JOIN ref r ON true",
+            "main", "main",
+            refAliases: ["ref"], refChannelAliases: ["ref"],
+            NullLogger<DuckDBSqlProcessor>.Instance);
+
+        await processor.OpenAsync();
+        var names = new List<string>();
+        await foreach (var b in processor.ReadRecordBatchesAsync())
+        {
+            using (b)
+            {
+                var column = (StringArray)b.Column("Name");
+                for (var i = 0; i < b.Length; i++) names.Add(column.GetString(i));
+            }
+        }
+
+        Assert.Equal(
+            ["a customer name past inline", "a customer name past inline", "one more customer name past inline", "one more customer name past inline"],
+            names.Order(StringComparer.Ordinal).ToArray());
+    }
+
+    // A main of two rows (GenerateIndex) and a --ref "ref" of three customer names.
+    private static DuckDBSqlProcessor TwoSourceProcessor(string query)
+    {
+        var mainSchema = new Schema(new[] { new Field("GenerateIndex", Int64Type.Default, nullable: false) }, null);
+        var mainBatch = new RecordBatch(mainSchema, new IArrowArray[] { new Int64Array.Builder().Append(0).Append(1).Build() }, 2);
+        var refSchema = new Schema(new[] { new Field("Name", StringType.Default, nullable: false) }, null);
+        var refBatch = new RecordBatch(refSchema, new IArrowArray[]
+        {
+            new StringArray.Builder().Append("a customer name past inline").Append("one more customer name past inline").Append("a third one").Build(),
+        }, 3);
+
+        var channelMain = Channel.CreateUnbounded<RecordBatch>();
+        channelMain.Writer.TryWrite(mainBatch);
+        channelMain.Writer.Complete();
+        var channelRef = Channel.CreateUnbounded<RecordBatch>();
+        channelRef.Writer.TryWrite(refBatch);
+        channelRef.Writer.Complete();
+
+        var mock = new Mock<IMemoryChannelRegistry>();
+        mock.Setup(r => r.WaitForArrowChannelSchemaAsync("main", It.IsAny<CancellationToken>())).ReturnsAsync(mainSchema);
+        mock.Setup(r => r.GetArrowChannel("main")).Returns((channelMain, mainSchema));
+        mock.Setup(r => r.WaitForArrowChannelSchemaAsync("ref", It.IsAny<CancellationToken>())).ReturnsAsync(refSchema);
+        mock.Setup(r => r.GetArrowChannel("ref")).Returns((channelRef, refSchema));
+
+        return new DuckDBSqlProcessor(
+            mock.Object, query, "main", "main",
+            refAliases: ["ref"], refChannelAliases: ["ref"],
+            NullLogger<DuckDBSqlProcessor>.Instance);
+    }
+
+    private static async Task<int> CountRowsAsync(DuckDBSqlProcessor processor)
+    {
+        var rows = 0;
+        await foreach (var b in processor.ReadRecordBatchesAsync())
+            using (b) rows += b.Length;
+        return rows;
+    }
+
+    /// <summary>
+    /// A stream is read to its end by one scan: a --ref the plan scans twice is read once through a CTE put in
+    /// front of the query, and the query's own columns come out as written.
+    /// </summary>
+    [Fact]
+    public async Task OpenAsync_RefScannedTwice_IsReadOnceAndServesEveryScan()
+    {
+        await using var processor = TwoSourceProcessor(
+            "SELECT s.GenerateIndex, a.Name, b.Name FROM main s JOIN ref a ON true JOIN ref b ON true");
+
+        await processor.OpenAsync();
+
+        Assert.Equal(["GenerateIndex", "Name", "Name"], processor.Schema!.FieldsList.Select(f => f.Name).ToArray());
+        Assert.Equal(2 * 3 * 3, await CountRowsAsync(processor));
+    }
+
+    /// <summary>The CTE joins a WITH list the query opens itself, past a leading comment.</summary>
+    [Fact]
+    public async Task OpenAsync_RefScannedTwiceInsideTheQuerysOwnWith_IsReadOnce()
+    {
+        await using var processor = TwoSourceProcessor(
+            "-- pairs\nWITH pairs AS (SELECT a.Name AS A, b.Name AS B FROM ref a JOIN ref b ON a.Name < b.Name) " +
+            "SELECT s.GenerateIndex, p.A, p.B FROM main s JOIN pairs p ON true ORDER BY 1, 2, 3");
+
+        await processor.OpenAsync();
+
+        Assert.Equal(2 * 3, await CountRowsAsync(processor));
+    }
+
+    /// <summary>
+    /// The recursive part of a recursive CTE runs again at each iteration, so a --ref it joins is a source
+    /// scanned more than once: read once, the recursion goes to its end (from 0: 1+3+9+27, from 1: 1+3+9).
+    /// </summary>
+    [Fact]
+    public async Task OpenAsync_RefJoinedInARecursivePart_IsReadOnce()
+    {
+        await using var processor = TwoSourceProcessor(
+            "WITH RECURSIVE t AS (SELECT GenerateIndex AS n FROM main UNION ALL " +
+            "SELECT t.n + 1 FROM t JOIN ref r ON r.Name IS NOT NULL WHERE t.n < 3) SELECT count(*) AS c FROM t");
+
+        await processor.OpenAsync();
+        long count = 0;
+        await foreach (var b in processor.ReadRecordBatchesAsync())
+            using (b) count = ((Int64Array)b.Column(0)).GetValue(0)!.Value;
+
+        Assert.Equal(53, count);
+    }
+
+    /// <summary>The main is a stream, never held whole: a plan that scans it twice is refused, naming it.</summary>
+    [Fact]
+    public async Task OpenAsync_MainScannedTwice_IsRefusedNamingIt()
+    {
+        await using var processor = TwoSourceProcessor(
+            "SELECT a.GenerateIndex, b.GenerateIndex FROM main a JOIN main b ON true");
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => processor.OpenAsync());
+
+        Assert.Contains("'main' more than once", ex.Message);
+    }
+
+    /// <summary>
+    /// EXPLAIN names no source for a scan that reads no column, so a second scan of that kind is caught by the
+    /// stream ending twice: the query fails instead of counting what the first scan left.
+    /// </summary>
+    [Fact]
+    public async Task ReadRecordBatches_ScanReadingNoColumnOfASourceScannedTwice_Fails()
+    {
+        await using var processor = TwoSourceProcessor(
+            "SELECT (SELECT count(*) FROM ref) AS n, r.Name FROM main s JOIN ref r ON true");
+
+        await processor.OpenAsync();
+        var ex = await Assert.ThrowsAnyAsync<Exception>(() => CountRowsAsync(processor));
+
+        Assert.Contains("'ref' was read to its end a second time", ex.ToString());
+    }
+
+    /// <summary>
     /// Regression test: WHERE clauses on CDI streaming sources (duckdb_arrow_scan) must be applied.
     ///
     /// Root cause: duckdb_arrow_scan declares filter_pushdown=true. DuckDB removes the Filter

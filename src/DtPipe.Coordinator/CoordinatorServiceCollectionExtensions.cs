@@ -1,8 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
-using TransportR.FlowControl;
 using TransportR.Hub;
-using TransportR.Hub.Configuration;
-using TransportR.Interfaces;
 
 namespace DtPipe.Coordinator;
 
@@ -14,8 +11,8 @@ public static class CoordinatorServiceCollectionExtensions
     /// no-op default, the hub's refusal of client-opened transfers, and the replica registry, admission and orchestrator that drive runs
     /// over the host's node channel (<see cref="NodeLinkServiceCollectionExtensions.AddNodeLink{THub}"/> names
     /// that hub; <see cref="ReplicaProtocol"/> is what its methods call). Returns TransportR's own builder, so the
-    /// caller finishes it (<c>UseDevMode</c> or a JWT identity provider, then <c>Build()</c>) the same way any
-    /// other TransportR host does: the TransportR hub carries the data plane and nothing else.
+    /// caller finishes it (<c>AddDataHub</c> has registered the identity provider that validates tokens; <c>UseDevMode</c>
+    /// or the host's own provider replaces it) the same way any other TransportR host does: the TransportR hub carries the data plane and nothing else.
     /// </summary>
     public static DataHubBuilder AddCoordinatorHub(
         this IServiceCollection services, Action<FlowControlOptions> configureFlowControl)

@@ -12,7 +12,7 @@ namespace DtPipe.Processors.Sql;
 /// <see cref="OpenAsync"/>), so the <c>inputStream</c> parameter of <see cref="ReadResultsAsync"/>
 /// is intentionally ignored — the underlying processor consumes channels through its own mechanism.
 /// </summary>
-public sealed class SqlStreamTransformer : IStreamTransformer
+public sealed class SqlStreamTransformer : IStreamTransformer, ISqlBearing
 {
     private readonly IColumnarStreamReader _inner;
 
@@ -24,6 +24,7 @@ public sealed class SqlStreamTransformer : IStreamTransformer
     /// <inheritdoc/>
     public IReadOnlyList<PipeColumnInfo>? Columns => _inner.Columns;
     public Schema? Schema => _inner.Schema;
+    public IEnumerable<string?> SqlBearingValues => (_inner as ISqlBearing)?.SqlBearingValues ?? [];
 
     /// <inheritdoc/>
     public async Task OpenAsync(CancellationToken ct = default)

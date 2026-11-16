@@ -137,7 +137,7 @@ the control plane, over each replica's node channel; TransportR carries the data
   sink brick (which holds the column) and its source brick: a change refuses the run by name. A launch beside a run of the same
   pipeline is refused, never queued, once a cursor exists. A value is substituted into the source's SQL, so `CursorValues` is the one
   rule the node, the coordinator and the route apply. `BrickRules` admits `cursor` on a sink, never `state`, never `cursor` on a source
-  (the half of a `dtpipe split` cut that reads advances a cursor before the sink has written), and refuses a `cursor://` token that names a
+  (a fragment that reads advances a cursor before the sink has written), and refuses a `cursor://` token that names a
   file. `[CI: Server.Tests CursorRunTests, CursorRoutesTests, CursorRulesTests; Hosting.Tests FragmentCursorsTests] [local: validate_doc_examples.sh]`
   `[unchecked: an older node, which ignores the value it is handed]` Detail: `src/DtPipe.Coordinator.Server/CLAUDE.md`.
 - **The coordinator issues the tokens of the identities a key verifies, and trusts them by their issuer like any other.**
@@ -164,7 +164,7 @@ the control plane, over each replica's node channel; TransportR carries the data
   library, `DtPipe.PipelineNode`, `DtPipe.Coordinator.Contracts` and `DtPipe.Jobs` from one package, and a dependency on the packages
   they use (TransportR among them), never on a `DtPipe.*` package. The other projects of the family are not packable. A pack is a
   step of its own (`tests/scripts/validate_node_host_package.sh`): the family stays outside `DtPipe.sln`, so the solution's pack never
-  reaches it, and `release.yml` packs and pushes it in a step after the solution's, as a beta of the tag's version.
+  reaches it, and `release.yml` packs and pushes it in a step after the solution's, at the tag's version.
   `[CI: validate_distributed_boundary.sh — one packable project, its references private]`
   `[local: validate_node_host_package.sh — the package's content]` `[unchecked: the release's step, until a tag runs it]`
 - **The CLI hosts a node only through one assembly, and never a hub.** `dtpipe` is the child a node drives, reached through
@@ -173,7 +173,7 @@ the control plane, over each replica's node channel; TransportR carries the data
   is the one file that names it, so the runtime loads it when `dtpipe node` runs and for no other command. The CLI references no
   other project of the family, maps no SignalR hub, and `dtpipe studio` is a client of the coordinator's `/api`, only when it is
   given `--coordinator`. A node started by the CLI takes no setting from a message and no secret from an argument: the client
-  secret is a reference (`keyring://`, `${{NAME}}`) read once at start.
+  secret is a reference (`keyring://`, `${{NAME}}`, `@file`) read once at start.
   `[CI: validate_distributed_boundary.sh — names and references, one file naming the Launcher, no SignalR hub under src/DtPipe;
   NodeCommandTests in DtPipe.Tests — no TransportR loaded after --version, --help or node --help]`
   `[CI: DtPipe.PipelineNode.Tests NodeCommandTests — a node started by the command announces its bricks and shows its secret nowhere]`

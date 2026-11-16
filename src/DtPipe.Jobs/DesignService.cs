@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using YamlDotNet.RepresentationModel;
@@ -137,7 +138,7 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
                     if (step.Transformers is not { Count: > 0 }) warnings.Add($"'{step.Alias}' has no transformer yet: it passes its rows through.");
                     branch = new YamlMappingNode();
                     if (from.Count > 0) branch.Add(JobKeys.From, string.Join(',', from));
-                    if (step.Transformers is { Count: > 0 }) branch.Add("transformers", JobYaml.FromJson(step.Transformers));
+                    if (step.Transformers is { Count: > 0 }) branch.Add("transformers", TransformersYaml(step.Transformers));
                     joinable[step.Alias!] = StepKinds.Transform;
                     break;
 
@@ -212,7 +213,7 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
         try { job = JobYaml.Parse(yaml); }
         catch (Exception ex)
         {
-            return new DesignResult(new DesignModel(title, description, directives, []), yaml, [], [$"The job is not readable: {ex.Message}"], []);
+            return new DesignResult(new DesignModel(title, description, directives, []), yaml, [], [$"The job is not readable: {ShownFailure.Of(ex)}"], []);
         }
 
         var taken = JobYaml.Branches(job).Select(b => b.Alias).ToHashSet(StringComparer.Ordinal);
@@ -341,7 +342,7 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
         {
             if (!middleKeys.Contains("transformers"))
                 return source is not null || sink is not null ? null : NoCard(alias);
-            return new DesignStep(alias, StepKinds.Transform, From: from, Transformers: JobYaml.ToJson(branch["transformers"]) as JsonArray);
+            return new DesignStep(alias, StepKinds.Transform, From: from, Transformers: TransformersJson(branch["transformers"]) as JsonArray);
         }
         if (source is null && rest.SetEquals(["sql"]) && middleKeys.Contains(JobKeys.From) && middleKeys.IsSubsetOf([JobKeys.From, JobKeys.Ref])
             && JobYaml.Mapping(JobYaml.Mapping(branch, JobKeys.ProviderOptions)!, "sql") is { } sql
@@ -370,7 +371,7 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
         var (endpointKey, other) = step.Kind == StepKinds.Source ? (JobKeys.Input, JobKeys.Output) : (JobKeys.Output, JobKeys.Input);
         if (!JobYaml.Has(local, endpointKey)) errors.Add($"'{step.Alias}' is a {step.Kind}: its YAML names no {endpointKey}.");
         var stray = new[] { JobKeys.From, JobKeys.Ref, "transformers", other }.Where(k => JobYaml.Has(local, k)).ToList();
-        if (stray.Count > 0) errors.Add($"'{step.Alias}' is a {step.Kind}: {string.Join(", ", stray)} belong to other cards.");
+        if (stray.Count > 0) errors.Add($"'{step.Alias}' is a {step.Kind}: {string.Join(", ", stray)} belong to other steps.");
 
         if (step.Kind == StepKinds.Source)
         {
@@ -471,7 +472,7 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
         }
         catch (Exception ex)
         {
-            errors.Add($"'{step.Alias}': its YAML is not a branch ({ex.Message}).");
+            errors.Add($"'{step.Alias}': its YAML is not a branch ({ShownFailure.Of(ex)}).");
             return null;
         }
     }
@@ -546,6 +547,27 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
 
     private static string Indent(string text) =>
         string.Join('\n', text.Replace("\r\n", "\n").Split('\n').Select(l => "  " + l));
+
+    // A Transform card's transformers cross the page's edge as JSON, the page's own structure, and these two are their only
+    // conversion. A scalar is its text both ways, as dtpipe reads a transformer's settings: a JSON null is the empty text,
+    // which dtpipe reads the same, and the text ~ comes back as ~, never as a null. A multi-line string becomes a literal
+    // block, so a script stays readable.
+    private static YamlNode TransformersYaml(JsonNode? node) => node switch
+    {
+        JsonObject o => new YamlMappingNode(o.Select(kv => new KeyValuePair<YamlNode, YamlNode>(new YamlScalarNode(kv.Key), TransformersYaml(kv.Value)))),
+        JsonArray a => new YamlSequenceNode(a.Select(TransformersYaml)),
+        JsonValue v when v.GetValueKind() == JsonValueKind.String => JobYaml.Text(v.GetValue<string>()),
+        JsonValue v => new YamlScalarNode(v.ToJsonString()),
+        _ => JobYaml.Text(""),
+    };
+
+    private static JsonNode? TransformersJson(YamlNode node) => node switch
+    {
+        YamlMappingNode m => new JsonObject(m.Children.Select(kv => new KeyValuePair<string, JsonNode?>(((YamlScalarNode)kv.Key).Value!, TransformersJson(kv.Value)))),
+        YamlSequenceNode s => new JsonArray(s.Children.Select(TransformersJson).ToArray()),
+        YamlScalarNode s => JsonValue.Create(s.Value ?? ""),
+        _ => null,
+    };
 
     [GeneratedRegex("^[A-Za-z][A-Za-z0-9_-]*$")]
     private static partial Regex AliasPattern();

@@ -105,8 +105,14 @@ pass "every helper the check lets through is defined over Redact"
 #    `unresolved` is not in the name list below: it is an unset variable token or missing keyring
 #    reference, which only `NodeBricks.ReadSecretAsync` names that way, so the entry is scoped to
 #    that one file rather than to the name everywhere it might appear in `src/`.
+#
+#    `ShownFailure.Of(reason)` and `ShownFailure.Of(failure)` word a failure's text or exception for a
+#    person: the input is the prose or exception named above and the output is prose. `refusal.Message` is
+#    the sentence a `StudioRefusal` carries. `OfFault` and `Reason` are the two local functions of
+#    `RunOutcome.FailureText` that choose between that wording and the raw message, so they are scoped to
+#    `JobRunner.cs` like `unresolved` is to its file.
 # ----------------------------------------------------------------------------
-PROSE_ARGUMENTS='ex\.Message|(outcome\.)?Fault\.Message|reason|text|kv\.Value|f\.Value|report\.SchemaInspectionError|JobYaml\.Serialize\(|WithFileContent\(|\$"'
+PROSE_ARGUMENTS='ex\.Message|(outcome\.)?Fault\.Message|reason|text|kv\.Value|f\.Value|report\.SchemaInspectionError|JobYaml\.Serialize\(|WithFileContent\(|\$"|(DtPipe\.Jobs\.)?ShownFailure\.Of\((reason|failure)\)|refusal\.Message|forPerson \? (DtPipe\.Jobs\.)?ShownFailure\.Of\(ex\.Message\) : ex\.Message'
 
 UNDECLARED=""
 while IFS= read -r line; do
@@ -123,6 +129,11 @@ while IFS= read -r line; do
     if echo "$arg" | grep -qE '^unresolved\b'; then
         case "$file" in
             */Cli/Node/NodeBricks.cs) continue ;;
+        esac
+    fi
+    if echo "$arg" | grep -qE '^(OfFault\(Fault\)|Reason\(kv\.Value\))'; then
+        case "$file" in
+            */Cli/JobRunner.cs) continue ;;
         esac
     fi
     UNDECLARED="${UNDECLARED}${line}"$'\n'

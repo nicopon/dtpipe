@@ -295,7 +295,6 @@ function renderPlan() {
   host.innerHTML = parts.join("");
 
   $("deploy-btn").disabled = !plan.deployable || running;
-  $("deploy-btn").textContent = deployedHere ? "Redeploy" : "Deploy";
   $("run-btn").disabled = !(deployedHere && ready && !running);
   $("run-btn").title = deployedHere ? "" : "Deploy this layout first";
   $("cancel-btn").disabled = !running;

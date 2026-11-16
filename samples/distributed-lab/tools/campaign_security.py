@@ -85,7 +85,7 @@ class ClientRegistration:
 
 def events_path(client_id):
     """The control plane's registration route for a client; the heartbeat is what a refusal must not be mistaken for."""
-    return f"/api/client/{client_id}/events?heartbeatMs=60000"
+    return f"/api/client/{client_id}/events?heartbeatMs=15000"
 
 
 def events_status(base, token, client_id):

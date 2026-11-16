@@ -121,7 +121,7 @@ public sealed class PlanBuilder(
         try { job = JobYaml.Parse(request.Yaml); }
         catch (Exception ex)
         {
-            errors.Add($"The job is not readable: {ex.Message}");
+            errors.Add($"The job is not readable: {ShownFailure.Of(ex)}");
             return Result([]);
         }
 

@@ -82,7 +82,7 @@ Core/Abstractions declare]`
 
 - **`Redact`** parses a connection string and prints only keys on the safe list; every other
   `key=value` is masked, including a key nobody anticipated. Use it wherever the value *is* a
-  connection: a message, the DAG panel, an MCP plan, the agent's approval dialog.
+  connection: a message, the DAG panel, an MCP plan.
 - **`Sanitize`** scans text with no grammar (a driver exception, a YAML excerpt, a tool argument)
   for keys that look sensitive. Best-effort by construction.
 
@@ -93,6 +93,11 @@ is masked by both wherever it stands, under any key or none, and makes `CarriesL
 The coordinator makes it and the studio presents it, both reading its shape from
 `CoordinatorApi.ClientIdOfKey` (`DtPipe.Jobs`), which references no Core, so the shape is written
 twice: change both together.
+
+`CarriesLiteralSecret` takes a value for a reference when nothing is left of it once one pair of
+matching quotes and its `${{…}}` tokens are removed (or it starts with `keyring://`): SQL spells a
+reference as a string literal, `'${{keyring://aws-key}}'`. `'abc'`, `'abc${{X}}'`, `${{X}}abc` and a
+pair that does not close on itself stay literals. One rule, never a case per provider or per syntax.
 
 **Never anchor the sensitive-key pattern on `\b`**: `\b` breaks on neither `_` nor a capital, so it
 finds no `secret` in `s3_secret_access_key`, `SecretAccessKey`, `AccountKey` or

@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using DtPipe.Cli.Split;
 using DtPipe.Core.Infrastructure.Arrow;
+using DtPipe.Jobs;
 using DtPipe.Sessions;
 using Microsoft.AspNetCore.Http;
 
@@ -76,7 +77,7 @@ public sealed partial class StudioServer
         try { return cutter.Plan(yaml, rows, salt); }
         catch (Exception ex) when (ex is InvalidOperationException or FormatException or YamlDotNet.Core.YamlException)
         {
-            throw new StudioRefusal(422, ex.Message);
+            throw new StudioRefusal(422, ShownFailure.Of(ex));
         }
     }
 
@@ -193,7 +194,7 @@ public sealed partial class StudioServer
     private static void RefuseWhileSuspended(DebugState state)
     {
         if (state.Real)
-            throw new StudioRefusal(409, "A real run is suspended before its target is written: continue it, or abandon it to forget its rows.");
+            throw new StudioRefusal(409, "A real run is suspended before its output is written: continue it, or abandon it to forget its rows.");
     }
 
     private static void ForgetCheckpoint(CheckpointStore store, string key)
@@ -279,7 +280,7 @@ public sealed partial class StudioServer
             RefuseWhileSuspended(state);
             Settle(state, plan, []);
             try { cut = cutter.Cut(yaml, state.Watch, upTo, state.Levels.Select(l => new DebugHeld(l.Branch, l.Level, l.Key)).ToList()); }
-            catch (InvalidOperationException ex) { throw new StudioRefusal(422, ex.Message); }
+            catch (InvalidOperationException ex) { throw new StudioRefusal(422, ShownFailure.Of(ex)); }
             SaveDebug(key, state);
             return (cut.Yaml, cut.Dropped, cut.Unread);
         }
@@ -299,6 +300,8 @@ public sealed partial class StudioServer
         {
             report = JsonNode.Parse(reported!),
             rows,
+            // The most rows the engine reads of a source whatever was asked: a stage that reached it may have had more.
+            rowCap = DtPipe.DryRun.SampleTapRecorder.MaxQuota,
             upTo = asked.UpTo,
             view = DebugView(plan, state!, cut!.Pieces, cut, RanOf(reported!)),
             notice = "This is a debug run, not the job's run: every cut passes through Arrow, batches differ and so does the concurrency. "
@@ -354,8 +357,7 @@ public sealed partial class StudioServer
         string? adopted = asked.Adopt is null || asked.Path is null ? null : DebugKey(null, asked.Adopt);
         if (adopted is not null) _local.CheckDebug(adopted);
 
-        if (!await _sampling.WaitAsync(0))
-            throw new StudioRefusal(409, "An action is already running: wait for it to finish.");
+        TakeSlot("A preview");
         try
         {
             if (adopted is not null) _local.AdoptDebug(adopted, key);

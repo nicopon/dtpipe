@@ -5,7 +5,7 @@
     <IsPackable>false</IsPackable>
     <RootNamespace>ArrowSocketSource</RootNamespace>
     <InvariantGlobalization>true</InvariantGlobalization>
-    <!-- The dtpipe release the node runs as a child (the tool package), and the node library's beta. -->
+    <!-- The dtpipe release the node runs as a child (the tool package), and the node library's version. -->
     <DtPipeVersion Condition="'$(DtPipeVersion)' == ''">1.16.0</DtPipeVersion>
     <NodeHostVersion Condition="'$(NodeHostVersion)' == ''">1.16.1-beta.1</NodeHostVersion>
     <!-- Before the library is published, spike-node.sh packs it into this folder and builds with a NodeHostVersion of its own. -->

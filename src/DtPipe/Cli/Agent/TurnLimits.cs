@@ -46,9 +46,8 @@ internal static class TurnLimits
     /// </summary>
     public const string OutputCeilingMessage =
         "The model was still generating when it reached the output ceiling and was stopped, so its "
-        + "answer is cut short. Raise --max-output-tokens if the answer was genuinely long; a model "
-        + "that reaches it without calling a tool is usually rambling, and a different model or a "
-        + "narrower request is the shorter way out.";
+        + "answer is cut short. A model that reaches it without calling a tool is usually rambling: "
+        + "a different model or a narrower request is the shorter way out.";
 
     /// <summary>
     /// The opening of <see cref="CallDeadlineMessage"/>, which carries a duration and so cannot be

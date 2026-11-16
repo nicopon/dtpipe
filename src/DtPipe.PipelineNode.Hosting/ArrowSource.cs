@@ -1,12 +1,13 @@
 using System.IO.Pipes;
-using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Apache.Arrow;
 using Apache.Arrow.Ipc;
 using DtPipe.Coordinator.Contracts;
+using DtPipe.Jobs;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using YamlDotNet.RepresentationModel;
 
 namespace DtPipe.PipelineNode.Hosting;
 
@@ -63,9 +64,9 @@ public static partial class ArrowSourceExtensions
         // The socket path is a variable of the node, never part of the brick: the brick's text is its version, and a path
         // that differs by process would change it. The coordinator learns the variable's name and nothing of its value.
         var variable = "DTPIPE_SRC_" + id.ToUpperInvariant().Replace('-', '_');
-        var branch = new JsonObject { ["input"] = "arrow:pipe://${{" + variable + "}}" };
+        var branch = new YamlMappingNode { { JobKeys.Input, "arrow:pipe://${{" + variable + "}}" } };
         node.WithVariable(variable, socket, $"Local Arrow socket of the source '{id}'");
-        node.AddBrick(id, BrickKind.Source, title, branch.ToJsonString(), description);
+        node.AddBrick(id, BrickKind.Source, title, branch, description);
         node.Services.AddSingleton<IHostedService>(sp =>
             new ArrowSocketServer(id, socket, schema, read, sp.GetRequiredService<ILoggerFactory>().CreateLogger($"DtPipe.ArrowSource.{id}")));
         return node;

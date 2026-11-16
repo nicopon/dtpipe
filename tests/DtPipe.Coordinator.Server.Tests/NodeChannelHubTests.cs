@@ -6,7 +6,7 @@ using DtPipe.Coordinator.Server.Runs;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging.Abstractions;
-using TransportR.Services;
+using TransportR.Hub;
 using Xunit;
 using DtPipe.Tests.Shared;
 

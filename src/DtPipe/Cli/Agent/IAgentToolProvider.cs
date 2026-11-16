@@ -11,30 +11,18 @@ namespace DtPipe.Cli.Agent;
 /// </summary>
 public interface IAgentToolProvider
 {
-    /// <summary>Return all available tool definitions.</summary>
-    List<ToolDefinition> GetToolDefinitions();
-
     /// <summary>
-    /// Return the tool definitions allowed in a given <see cref="AgentMode"/>.
-    /// In <see cref="AgentMode.Plan"/> every tool that declares it writes to a target is
-    /// excluded; the LLM only plans and validates.
+    /// The tool definitions the model is offered. A tool that declares it writes to a target is
+    /// never among them (F1); the model only plans and validates.
     /// </summary>
-    List<ToolDefinition> GetToolDefinitions(AgentMode mode);
+    List<ToolDefinition> GetToolDefinitions();
 
     Task<ToolResult> InvokeToolAsync(string toolName, JsonElement args, CancellationToken ct);
 
     /// <summary>
-    /// True when the tools behind this provider are dtpipe's own, so a validated plan can be handed
-    /// to the execution tool. False for a foreign MCP server: there is no dtpipe engine behind its
-    /// catalogue, and a tool that happens to share the name is a coincidence, not the engine. The
-    /// default is true so a provider says nothing unless it is not dtpipe.
-    /// </summary>
-    bool CanRunDtPipePlans => true;
-
-    /// <summary>
     /// True when <paramref name="toolName"/> executes a run in this process. The agent runs such
-    /// calls one at a time, in the order of the turn (F5). The default is false: a foreign server
-    /// runs its tools in its own process, and a fake has no engine behind it.
+    /// calls one at a time, in the order of the turn (F5). The default is false: a fake has no
+    /// engine behind it.
     /// </summary>
     bool RunsPipeline(string toolName) => false;
 }

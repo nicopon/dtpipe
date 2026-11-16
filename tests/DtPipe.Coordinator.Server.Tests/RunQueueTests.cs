@@ -8,8 +8,7 @@ using DtPipe.Coordinator.Server.Runs;
 using DtPipe.Coordinator.Server.Stores;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using TransportR.Models;
-using TransportR.Services;
+using TransportR.Hub;
 using Xunit;
 using DtPipe.Tests.Shared;
 
@@ -54,12 +53,15 @@ public sealed class RunQueueTests : IDisposable
         public ConcurrentDictionary<string, TaskCompletionSource<RunResult>> Ends { get; } = new();
         public Func<RunSpec, Exception?> Fails { get; set; } = _ => null;
 
+        /// <summary>Runs ignore their token and end only when the test says so, as a run whose teardown is still under way does.</summary>
+        public bool IgnoreToken { get; set; }
+
         public Task<RunResult> RunAsync(RunSpec spec, CancellationToken ct = default)
         {
             Specs.Enqueue(spec);
             if (Fails(spec) is { } failure) return Task.FromException<RunResult>(failure);
             var end = Ends.GetOrAdd(spec.RunId, _ => new(TaskCreationOptions.RunContinuationsAsynchronously));
-            ct.Register(() => end.TrySetResult(Result(RunOutcome.Cancelled)));
+            if (!IgnoreToken) ct.Register(() => end.TrySetResult(Result(RunOutcome.Cancelled)));
             return end.Task;
         }
 
@@ -67,6 +69,9 @@ public sealed class RunQueueTests : IDisposable
 
         public void End(string runId, RunOutcome outcome) =>
             Ends.GetOrAdd(runId, _ => new(TaskCreationOptions.RunContinuationsAsynchronously)).TrySetResult(Result(outcome));
+
+        public void End(string runId, RunResult result) =>
+            Ends.GetOrAdd(runId, _ => new(TaskCreationOptions.RunContinuationsAsynchronously)).TrySetResult(result);
 
         public bool Saw(string runId) => Specs.Any(s => s.RunId == runId);
     }
@@ -375,6 +380,24 @@ public sealed class RunQueueTests : IDisposable
         Assert.Null(_deployments.FindRun("run-999"));
     }
 
+    [Fact]
+    public async Task A_Run_Whose_Fragment_Failed_Says_The_First_Line_Of_Its_Error_And_Keeps_Its_Verdict()
+    {
+        await ReplicaAsync("n");
+        await DeployAsync(DataPlan("p", "n"));
+        var run = _deployments.Enqueue("p");
+        await RunningAsync(run.RunId);
+        var report = new FragmentExitReport("p@n", 1, DtPipe.Coordinator.FaultOrigin.Local, "Conversion Error: could not convert 'boom'\n   at Reader.Next()", new Dictionary<string, long>());
+
+        _runs.End(run.RunId, new RunResult(RunOutcome.Failed, "p@n", [], new Dictionary<string, FragmentExitReport> { ["p@n"] = report }, []));
+        await FinishedAsync(run.RunId);
+
+        var failed = Journaled(run.RunId);
+        Assert.Equal("Conversion Error: could not convert 'boom'", failed.Reason);
+        Assert.Equal((RunState.Failed, RunOutcome.Failed, "p@n"), (failed.State, failed.Result!.Outcome, failed.Result.Cause));
+        Assert.Contains("\"reason\":\"Conversion Error", JsonSerializer.Serialize(failed, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+    }
+
     [Theory]
     [InlineData(RunOutcome.Failed, RunState.Failed)]
     [InlineData(RunOutcome.Cancelled, RunState.Cancelled)]
@@ -447,6 +470,38 @@ public sealed class RunQueueTests : IDisposable
     }
 
     [Fact]
+    public async Task A_Transport_Warning_During_A_Requested_Cancellation_Is_Information_And_Never_Moves_The_Verdict()
+    {
+        await ReplicaAsync("n");
+        await DeployAsync(DataPlan("p", "n"));
+        _runs.IgnoreToken = true;
+        var connection = _connectionsOf["n"].Single();
+        var transport = new NodeLogLine("n", null, "Warning", "Session loop error", "TransportR.Client.Session");
+        var other = transport with { Category = "DtPipe.PipelineNode.Hosting.NodeAgent" };
+
+        var run = _deployments.Enqueue("p");
+        await RunningAsync(run.RunId);
+        Assert.NotNull(_registry.TryReserve(run.RunId, [("p@n", "node-n")], (_, _) => true));
+
+        // Nobody asked for a cancellation: the same line stays a warning.
+        Assert.Equal(transport, NodeChannelHub.Classified(transport, _inventory.IsWindingDown(connection)));
+
+        _deployments.Cancel(run.RunId);
+        var kept = NodeChannelHub.Classified(transport, _inventory.IsWindingDown(connection));
+        Assert.Equal(("Information", transport.Category), (kept.Level, kept.Category));
+        Assert.StartsWith(transport.Message, kept.Message);
+        Assert.Equal(other, NodeChannelHub.Classified(other, _inventory.IsWindingDown(connection)));
+        Assert.Equal(RunState.Running, _deployments.FindRun(run.RunId)!.State);
+
+        // The run ends as its requester asked, and a transport line after it is a warning again.
+        _runs.End(run.RunId, RunOutcome.Cancelled);
+        await FinishedAsync(run.RunId);
+        _registry.Release(run.RunId);
+        Assert.Equal(RunState.Cancelled, Journaled(run.RunId).State);
+        Assert.Equal(transport, NodeChannelHub.Classified(transport, _inventory.IsWindingDown(connection)));
+    }
+
+    [Fact]
     public async Task Cancel_With_No_Id_Cancels_The_Only_Run_In_Flight_And_Refuses_To_Guess_Among_Several()
     {
         await ReplicaAsync("n");
@@ -467,7 +522,7 @@ public sealed class RunQueueTests : IDisposable
         var s = _deployments.Enqueue("s");
         await Task.WhenAll(RunningAsync(again.RunId), RunningAsync(s.RunId));
         var ex = Assert.Throws<ConflictException>(() => _deployments.Cancel());
-        Assert.Equal("2 runs are in flight: name the one to cancel.", ex.Message);
+        Assert.Equal("2 runs are in flight: name the one to stop.", ex.Message);
         Assert.Equal(2, _deployments.Queue.Count(r => r.State == RunState.Running));
 
         _deployments.Cancel(s.RunId);
@@ -491,7 +546,7 @@ public sealed class RunQueueTests : IDisposable
         _deployments.Cancel("run-unknown");
 
         var cancelled = Journaled(q.RunId);
-        Assert.Equal((RunState.Cancelled, "Cancelled while queued."), (cancelled.State, cancelled.Refusal));
+        Assert.Equal((RunState.Cancelled, "Stopped while queued."), (cancelled.State, cancelled.Refusal));
         _runs.End(p.RunId, RunOutcome.Succeeded);
         await FinishedAsync(p.RunId);
         await Task.Delay(300);
@@ -587,7 +642,7 @@ public sealed class RunQueueTests : IDisposable
         _deployments.Cancel(first.RunId);
         await FinishedAsync(first.RunId);
         var ended = Journaled(first.RunId);
-        Assert.Equal((RunState.Cancelled, "Cancelled while queued."), (ended.State, ended.Refusal));
+        Assert.Equal((RunState.Cancelled, "Stopped while queued."), (ended.State, ended.Refusal));
         Assert.False(_runs.Saw(first.RunId));
 
         _link.CheckGate.SetResult(new FragmentCheck(true));

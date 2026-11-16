@@ -22,6 +22,8 @@ function emit(kind) { for (const fn of listeners) { try { fn(kind); } catch (e) 
 
 export const $ = (id) => document.getElementById(id);
 export const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+/** A count with its noun, in the plural unless the count is one. */
+export const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 export const fmt = (n) => (n ?? 0).toLocaleString("en-US");
 export const nodeColor = (node) => (node ? `var(--${node}, var(--muted))` : "var(--muted)");
 // A fragment reads "pipeline@node"; a cause that is a sentence (a refused transfer, a row-count
@@ -30,6 +32,25 @@ export const shortNode = (fragment) => {
   const text = String(fragment ?? "");
   return text.includes(" ") ? text : text.split("@").pop();
 };
+
+/** The rows a run's edges delivered, counted on every edge: a row that crosses two edges counts twice. */
+export const rowsCrossed = (run) => run?.result?.edgeCounts?.reduce((s, e) => s + (e.received ?? 0), 0) || 0;
+export const ROWS_CROSSED_HINT = "Counted on every edge of the run: a row that crosses two edges counts twice.";
+
+/** What a run says of why it ended as it did, and of what it may have left behind: the same words wherever a run is shown. */
+export function endNotes(run) {
+  const r = run.result;
+  const cause = run.reason ?? (r?.cause ? `${shortNode(r.cause)}${r.causeIsUnresponsive ? " (unresponsive)" : ""}` : null);
+  const where = run.reason && r?.cause && run.reason !== r.cause ? ` <span class="hint">(${esc(shortNode(r.cause))})</span>` : "";
+  const started = run.plan != null && ["failed", "cancelled"].includes(run.state);
+  return [
+    run.refusal && run.refusal !== run.reason ? `<p class="mismatch">${esc(run.refusal)}</p>` : "",
+    cause ? `<p><b>Cause:</b> ${esc(cause)}${where}</p>` : "",
+    run.sinkMayBePartial
+      ? `<p class="mismatch">The coordinator restarted while this run was in progress: its outputs may hold part of what it wrote.</p>`
+      : started ? `<p class="hint">It stopped before its end: an output it was writing may hold part of the rows, or none.</p>` : "",
+  ].join("");
+}
 
 export function bytes(b) {
   return b > 1 << 30 ? (b / (1 << 30)).toFixed(2) + " GiB" : b > 1 << 20 ? (b / (1 << 20)).toFixed(1) + " MiB" : b > 1024 ? (b / 1024).toFixed(0) + " KiB" : b + " B";
@@ -49,6 +70,24 @@ export function duration(run) {
   return ((new Date(run.finishedAt) - new Date(run.startedAt)) / 1000).toFixed(1) + " s";
 }
 
+/** Whether the signed-in person's role allows `role`: the server sends every role the person holds, the highest first. */
+export const can = (role) => !store.me || store.me.roles.includes(role);
+
+/** What a refusal for the person's role says, in the words of the pages: the role they have and who can do it instead. */
+export function forbidden() {
+  const role = store.me?.roles?.[0];
+  return `Your role${role ? ` (${role})` : ""} does not allow this: ask ${role === "designer" ? "an administrator" : "a designer or an administrator"}.`;
+}
+
+/** Disables, inside `root`, what the person's role does not allow: an element marked `data-needs="<role>"`, with the reason as its title. */
+export function gate(root) {
+  for (const el of root.querySelectorAll("[data-needs]")) {
+    if (can(el.dataset.needs)) continue;
+    el.disabled = true;
+    el.title = forbidden();
+  }
+}
+
 export async function api(path, body, method) {
   // The CSRF header rides every call: the server refuses a change without it.
   const init = { method: method || (body === undefined ? "GET" : "POST"), headers: { "X-Dtpipe-Csrf": "1" } };
@@ -59,7 +98,7 @@ export async function api(path, body, method) {
   const text = await response.text();
   let data = {};
   try { data = text ? JSON.parse(text) : {}; } catch { data = { error: text }; }
-  if (!response.ok) throw new Error(data.error || data.title || `${response.status} ${response.statusText}`);
+  if (!response.ok) throw new Error(data.error || data.detail || (response.status === 403 ? forbidden() : data.title) || `${response.status} ${response.statusText}`);
   return data;
 }
 
@@ -76,7 +115,7 @@ export function toast(message, kind = "error") {
 
 export function addLog(line) {
   if (/:\s*$/.test(line.message)) return; // a label whose value was empty, e.g. a silent child's stderr
-  store.logs.push({ ...line, at: new Date() });
+  store.logs.push({ at: new Date(), ...line });
   if (store.logs.length > 1500) store.logs.splice(0, store.logs.length - 1500);
   emit("logs");
 }
@@ -129,6 +168,10 @@ export function refreshHealth() {
   }, 300);
 }
 
+// What a page calls a run's state. The key is the word the server sends and what the pages' styles and tests read;
+// a state with no entry shows as received.
+const RUN_STATE_LABEL = { cancelled: "stopped" };
+export const runStateLabel = (state) => RUN_STATE_LABEL[state] ?? state;
 export const isActive = (run) => run && ["queued", "running"].includes(run.state);
 
 // ---------------------------------------------------------------- live store
@@ -146,7 +189,7 @@ function onRun(run) {
   } else {
     store.queue = store.queue.filter((r) => r.runId !== run.runId);
     store.runs = [run, ...store.runs.filter((r) => r.runId !== run.runId)].slice(0, 200);
-    addLog({ node: "coordinator", level: run.state === "succeeded" ? "Information" : "Warning", message: `${run.runId} ${run.pipelineId ?? ""} ${run.state}${run.refusal ? `: ${run.refusal}` : ""}` });
+    addLog({ node: "coordinator", level: run.state === "succeeded" ? "Information" : "Warning", message: `${run.runId} ${run.pipelineId ?? ""} ${runStateLabel(run.state)}${run.refusal ? `: ${run.refusal}` : ""}` });
   }
   emit("runs");
 }
@@ -165,7 +208,7 @@ export async function start() {
   source.onopen = () => { store.connected = true; emit("connection"); };
   source.onerror = () => { store.connected = false; emit("connection"); };
   source.onmessage = (message) => {
-    const { type, data } = JSON.parse(message.data);
+    const { type, data, at } = JSON.parse(message.data);
     switch (type) {
       case "nodes":
         store.nodes = data;
@@ -180,7 +223,7 @@ export async function start() {
         if (data.state === "failed") addLog({ node: "coordinator", level: "Error", message: `${data.pipelineId}: deployment failed: ${data.message}` });
         refreshHealth();
         break;
-      case "log": addLog({ node: data.node, fragment: data.fragment, level: data.level, message: data.message }); break;
+      case "log": addLog({ node: data.node, fragment: data.fragment, level: data.level, message: data.message, ...(at ? { at: new Date(at) } : {}) }); break;
       case "bytes": store.bytes = data; emit("bytes"); break;
       case "library": emit("library"); refreshHealth(); break;
       case "rights":

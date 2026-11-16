@@ -9,29 +9,10 @@ using YamlDotNet.Serialization.NamingConventions;
 
 namespace DtPipe.Cli.Split;
 
-/// <summary>Which half a value of the job ended up on.</summary>
-public enum CutSide
-{
-    Producer,
-    Consumer,
-
-    /// <summary>Carried by neither half, and listed for it rather than disappearing.</summary>
-    Dropped,
-}
-
-/// <summary>
-/// One value the cut placed, as the acknowledgement prints it. <c>Display</c> is already safe to
-/// show: a connection string is redacted where the placement is built, not where it is rendered.
-/// </summary>
-public sealed record CutPlacement(CutSide Side, string Key, string Display);
-
-/// <summary>The two halves, what the cut placed on each, and what it refuses to place.</summary>
+/// <summary>The two halves of a cut. Whether a job may be cut at all is <see cref="JobCutter.Inspect"/>'s answer.</summary>
 public sealed record CutResult(
     Dictionary<string, JobDefinition> Producer,
-    Dictionary<string, JobDefinition> Consumer,
-    IReadOnlyList<CutPlacement> Placements,
-    IReadOnlyList<string> Literals,
-    IReadOnlyList<string> UnplaceableOptionBlocks);
+    Dictionary<string, JobDefinition> Consumer);
 
 /// <summary>
 /// The two grounds on which a job is refused, both of which are properties of the job as written
@@ -56,8 +37,7 @@ public sealed record CutInspection(
 /// <para>
 /// Every field crosses unchanged unless the cut determines its side: what governs reading goes to
 /// the producer, what governs writing to the consumer. The two diagnostic paths go to neither —
-/// one path cannot describe two runs — and the placement list says so rather than letting them
-/// vanish.
+/// one path cannot describe two runs.
 /// </para>
 ///
 /// <para>
@@ -130,65 +110,8 @@ public static class JobCutter
             [alias] = producerJob,
         };
 
-        return new CutResult(
-            producer,
-            consumer,
-            Describe(job, producerJob, consumerJob, upstream, downstream),
-            FindLiterals(jobs),
-            options.Unplaceable);
+        return new CutResult(producer, consumer);
     }
-
-    /// <summary>
-    /// What the cut placed, in the order a reader checks it: the producer's side, the consumer's,
-    /// then what it carried to neither.
-    /// </summary>
-    private static List<CutPlacement> Describe(
-        JobDefinition job,
-        JobDefinition producer,
-        JobDefinition consumer,
-        List<TransformerConfig> upstream,
-        List<TransformerConfig> downstream)
-    {
-        var rows = new List<CutPlacement>();
-
-        void Add(CutSide side, string key, string? value)
-        {
-            if (!string.IsNullOrEmpty(value)) rows.Add(new CutPlacement(side, key, value));
-        }
-
-        Add(CutSide.Producer, JobKeys.Input, ConnectionStringSanitizer.Redact(producer.Input));
-        Add(CutSide.Producer, "transformers", Names(upstream));
-        Add(CutSide.Producer, "cursor", producer.Cursor);
-        Add(CutSide.Producer, "state", producer.State);
-        Add(CutSide.Producer, "from-checkpoint", producer.FromCheckpoint);
-        Add(CutSide.Producer, "from-contract", producer.FromContract);
-        foreach (var block in Blocks(producer.ProviderOptions))
-            rows.Add(new CutPlacement(CutSide.Producer, JobKeys.ProviderOptions, block));
-
-        Add(CutSide.Consumer, JobKeys.Output, ConnectionStringSanitizer.Redact(consumer.Output));
-        Add(CutSide.Consumer, "transformers", Names(downstream));
-        Add(CutSide.Consumer, "prefix", consumer.Prefix);
-        Add(CutSide.Consumer, "checkpoint", consumer.Checkpoint);
-        Add(CutSide.Consumer, "contract-save", consumer.ContractSave);
-        foreach (var block in Blocks(consumer.ProviderOptions))
-            rows.Add(new CutPlacement(CutSide.Consumer, JobKeys.ProviderOptions, block));
-
-        // A cut makes two runs out of one, and a single path cannot hold both their reports: the
-        // second process would overwrite the first. Naming them here is the difference between a
-        // decision and a loss.
-        Add(CutSide.Dropped, "metrics-path", job.MetricsPath);
-
-        return rows;
-    }
-
-    private static string Names(List<TransformerConfig> configs)
-        => configs.Count == 0 ? string.Empty : string.Join(", ", configs.Select(c => c.Type));
-
-    private static IEnumerable<string> Blocks(Dictionary<string, Dictionary<string, object?>>? options)
-        => options is null
-            ? Enumerable.Empty<string>()
-            : options.OrderBy(kv => kv.Key, StringComparer.Ordinal)
-                     .Select(kv => $"{kv.Key}: {string.Join(", ", kv.Value.Keys.OrderBy(k => k, StringComparer.Ordinal))}");
 
     /// <summary>
     /// Every credential the job spells out, across <b>all</b> its branches: the cut copies the

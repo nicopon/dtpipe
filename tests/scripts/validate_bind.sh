@@ -2,12 +2,12 @@
 set -e
 
 # validate_bind.sh
-# --bind-input/--bind-output wire a run-specific location into a fragment's 'arrow:-' boundary
-# (dtpipe split), against the real binary and real named pipes.
+# --bind-input/--bind-output wire a run-specific location into a fragment's 'arrow:-' boundary,
+# against the real binary and real named pipes.
 #
 # Case 1 is the shape a single shell pipe cannot carry: a fragment with TWO links (a lone stage
 # between a producer and a consumer), so one process's stdin and stdout would each have to be "the
-# pipe" at once. Two named pipes stand in for the two neighbours split would produce.
+# pipe" at once. Two named pipes stand in for the two neighbours.
 #
 # Case 2 is the join: two bound inputs feed a --sql join, and the result must equal a monolithic
 # witness's - compared as a set, sorted, since DuckDB does not guarantee row order (CLAUDE.md).
@@ -20,6 +20,12 @@ set -e
 #
 # Case 6 drives arrow:pipe://<name> - client-only by design - through both directions against the
 # real binary.
+#
+# Case 7 needs no binding: two fragments meeting on 'arrow:-' over one shell pipe, cut at every
+# stage boundary of a deterministic job, must replay to what the monolithic run wrote. It is the
+# only check here that exercises the link rather than describing it, and it is built on an
+# ALIASING transformer (--mask) so a link that hands downstream batches which do not obey the
+# ownership contract fails here and not only in the unit suite.
 #
 # The server role every case needs (DtPipe.PipelineNode's own job, out of DtPipe.sln) is stood in
 # for by tools/ArrowPipeServer.cs, a file-based dotnet app.
@@ -200,6 +206,28 @@ wait "$WRITER_SERVER_PID" || fail "the pipe server (relay-in) failed: $(cat pipe
 cmp stream.ipcbytes pipe_written.ipcbytes \
     || fail "bytes written over arrow:pipe:// differ from a direct file write of the same source"
 pass "arrow:pipe://<name> round-trips both directions against a real named-pipe server"
+
+echo ""
+echo "--- Case 7: two fragments over one shell pipe replay to the monolithic run, at every cut ---"
+STAGES=(--compute "domain:row.email.split('@')[1]" --mask email)
+"$DTPIPE" -i csv:people.csv "${STAGES[@]}" -o csv:whole.csv --no-stats > /dev/null 2>&1 \
+    || fail "the monolithic run failed"
+for at in 0 1 2; do
+    n=$((at * 2))
+    "$DTPIPE" -i csv:people.csv "${STAGES[@]:0:$n}" -o arrow:- --export-job "rt$at-producer.yaml" > /dev/null 2>&1 < /dev/null \
+        || fail "could not export the producer fragment cut at $at"
+    "$DTPIPE" -i arrow:- "${STAGES[@]:$n}" -o "csv:replayed$at.csv" --export-job "rt$at-consumer.yaml" > /dev/null 2>&1 < /dev/null \
+        || fail "could not export the consumer fragment cut at $at"
+    rm -f "replayed$at.csv"
+    if ! "$DTPIPE" --job "rt$at-producer.yaml" --no-stats 2>/dev/null \
+       | "$DTPIPE" --job "rt$at-consumer.yaml" --no-stats > /dev/null 2>&1; then
+        fail "the two fragments cut at $at did not run through the pipe"
+    fi
+    [ -f "replayed$at.csv" ] || fail "the consumer cut at $at wrote nothing"
+    diff whole.csv "replayed$at.csv" > /dev/null \
+        || fail "cut at $at: the fragments produced something other than the monolithic run"
+done
+pass "cut at 0, 1 and 2 each replay to the monolithic result"
 
 echo ""
 echo -e "${GREEN}All alias binding checks passed.${NC}"

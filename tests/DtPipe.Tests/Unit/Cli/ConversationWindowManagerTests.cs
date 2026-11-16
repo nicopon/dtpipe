@@ -24,6 +24,34 @@ public class ConversationWindowManagerTests
         Assert.Equal(messages, result);
     }
 
+    /// <summary>
+    /// A forced compaction keeps the person's last message wherever it stands, and never opens the kept
+    /// window on a tool answer whose call it dropped.
+    /// </summary>
+    [Fact]
+    public void Compact_Forced_Keeps_The_Question_And_Opens_On_A_Whole_Exchange()
+    {
+        var manager = new ConversationWindowManager(maxMessages: 40, keepSystemMessages: 1, keepRecentMessages: 3);
+        var call = new List<ToolCall> { new("1", "tool-a", default) };
+        var messages = new List<ChatMessage>
+        {
+            new("system", "sys"),
+            new("user", "the question"),
+            new("assistant", "step-1", ToolCalls: call),
+            new("tool", "result-1", ToolCallId: "1"),
+            new("assistant", "step-2", ToolCalls: call),
+            new("tool", "result-2", ToolCallId: "1"),
+            new("assistant", "step-3"),
+        };
+
+        var result = manager.Compact(messages, force: true);
+
+        Assert.Equal("the question", result[2].Content);
+        Assert.Equal("assistant", result[3].Role);
+        Assert.Equal("step-2", result[3].Content);
+        Assert.Equal(messages[^1], result[^1]);
+    }
+
     [Fact]
     public void Compact_OverThreshold_SummarizesMiddleMessages()
     {

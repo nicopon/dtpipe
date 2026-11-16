@@ -50,7 +50,7 @@ internal static class ToolError
         if (yaml is null) return ConnectionStringSanitizer.Sanitize(reason);
 
         var at = yaml.Start.Line > 0 ? $" (at line {yaml.Start.Line}, column {yaml.Start.Column})" : string.Empty;
-        return ConnectionStringSanitizer.Sanitize($"{reason}{at}{ShapeHint(reason)}{Excerpt(source, yaml.Start)}");
+        return ConnectionStringSanitizer.Sanitize($"{reason}{at}{ShapeHint(reason, KeyAt(source, yaml.Start))}{Excerpt(source, yaml.Start)}");
     }
 
     /// <summary>Longest line quoted whole; past it a window is taken around the column.</summary>
@@ -93,8 +93,28 @@ internal static class ToolError
     /// branch of that name and validated — the wrong guess cost the rest of the turn.
     /// </para>
     /// </summary>
-    private static string ShapeHint(string reason)
+    private static string ShapeHint(string reason, string? key)
     {
+        // A list or a map where the loader reads one string. The error names the type, never the key,
+        // so the key is read off the line it stopped on: 'input:', 'output:' and 'from:' are each one
+        // string, and the answer must be about the one that failed.
+        if (reason.EndsWith("into type String", StringComparison.Ordinal))
+            return string.Equals(key, "from", StringComparison.Ordinal)
+                ? ". 'from:' is one string: the aliases of the branches this branch streams, separated by commas, "
+                + "never a list. A processor streams a fixed number of 'from' branches and loads the others "
+                + "from 'ref:', which is a list. Call 'help': STREAM PROCESSORS gives both numbers for each."
+                : ". A branch's 'input:' and 'output:' are each one string, '<adapter-prefix>:<source>', "
+                + "never a list or a map; an adapter's settings go under 'provider-options:'. "
+                + "Call 'help' for the full shape.";
+
+        // A scalar where the loader reads the options of one component: the block under
+        // 'provider-options:' is a mapping, and the cast error names a CLR dictionary type, neither
+        // the key nor what belongs under it.
+        if (reason.StartsWith("Invalid cast from 'System.String' to 'System.Collections.Generic.Dictionary", StringComparison.Ordinal))
+            return (key is null or "provider-options" ? ". Each entry of 'provider-options:'" : $". '{key}:' under 'provider-options:'")
+                 + " holds the options of one component as a mapping, one option per line below it, "
+                 + "never one value. 'help' gives a processor's options and 'get-adapter-help' an adapter's.";
+
         if (!reason.Contains("JobDefinition", StringComparison.Ordinal)) return string.Empty;
 
         // A key the loader could not place is a different mistake from a shape it could not read:
@@ -124,6 +144,23 @@ internal static class ToolError
             .GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)
             .Select(p => Pipeline.StringExtensions.ToKebabCase(p.Name))
             .OrderBy(n => n, StringComparer.Ordinal));
+
+    /// <summary>
+    /// The key of the line a YAML failure stopped on, or null when the source is not at hand or the
+    /// line holds no <c>key:</c> (a list item, a flow sequence continued on a line of its own).
+    /// </summary>
+    private static string? KeyAt(string? source, Mark at)
+    {
+        if (string.IsNullOrEmpty(source) || at.Line <= 0) return null;
+
+        var lines = source.Replace("\r\n", "\n").Split('\n');
+        if (at.Line > lines.Length) return null;
+
+        var m = KeyOfLine.Match(lines[(int)at.Line - 1]);
+        return m.Success ? m.Groups["key"].Value : null;
+    }
+
+    private static readonly Regex KeyOfLine = new(@"^\s*(?<key>[A-Za-z_][\w-]*)\s*:", RegexOptions.Compiled);
 
     private static YamlException? Find(Exception? ex)
     {

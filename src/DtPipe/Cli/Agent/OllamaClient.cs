@@ -66,9 +66,9 @@ public class OllamaClient : ILlmClient, IStreamingLlmClient
             cts.CancelAfter(TimeSpan.FromSeconds(10));
 
             var url = baseUrl.TrimEnd('/') + "/api/tags";
-            var response = await _http.GetAsync(url, cts.Token);
+            using var response = await _http.GetAsync(url, cts.Token);
             if (!response.IsSuccessStatusCode)
-                return new List<OllamaModelInfo>();
+                throw new HttpRequestException($"{url} answered {(int)response.StatusCode}.");
 
             var json = await response.Content.ReadAsStringAsync(ct);
             using var doc = JsonDocument.Parse(json);
@@ -90,9 +90,9 @@ public class OllamaClient : ILlmClient, IStreamingLlmClient
 
             return models;
         }
-        catch
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            return new List<OllamaModelInfo>();
+            throw new HttpRequestException("no answer in time");
         }
     }
 
@@ -159,7 +159,7 @@ public class OllamaClient : ILlmClient, IStreamingLlmClient
         string model,
         List<ChatMessage> messages,
         List<ToolDefinition> tools,
-        int numCtx = 16384,
+        int numCtx = AgentOptions.DefaultNumCtx,
         double temperature = 0.7,
         int? seed = null,
         CancellationToken ct = default)
@@ -177,7 +177,7 @@ public class OllamaClient : ILlmClient, IStreamingLlmClient
         List<ChatMessage> messages,
         List<ToolDefinition> tools,
         ILlmStreamObserver observer,
-        int numCtx = 16384,
+        int numCtx = AgentOptions.DefaultNumCtx,
         double temperature = 0.7,
         int? seed = null,
         CancellationToken ct = default)

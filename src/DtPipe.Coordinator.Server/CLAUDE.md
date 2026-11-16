@@ -115,6 +115,11 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   never answers. The pages' `api()` helpers send it. Never add a cookie-authenticated route outside
   those groups.
   `[CI: RouteTableTests] [local: the lab's smoke.py rights]`
+- **The pages read the person's role, and a refusal for it is in words.** `store.me.roles` (`/api/me`, highest first) decides what a view
+  offers: an element marked `data-needs="<role>"` is disabled with the reason (`gate`, one observer on the view), the Access view is an
+  administrator's alone, and a 403 with no body of its own reads as the role the person has and who can do it (`forbidden` in `core.js`).
+  An address that names no view says "No such page". The sign-in form words one refusal for every key it turns down (unknown, revoked,
+  expired, a node's, not a key), never telling them apart. `[CI: PersonKeyTests]` `[unchecked: the pages, which no test plays in a browser]`
 - **A route's authorization is the group it is mapped on, and `MapCoordinatorServerAsync` declares the groups.** The reader,
   designer and admin groups of `/api` (their roles, and the CSRF filter they inherit) are built once there. `NodeEndpoints`,
   `LibraryEndpoints`, `RightsEndpoints` and `RunEndpoints` each map their domain on the reader group they extend and on
@@ -155,7 +160,7 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   `Coordinator:Auth:PersonTokenLifetime` (an hour, 5 minutes at least); without a studio's client, or with
   `Coordinator:Auth:PersonKeys=false`, a person's key is refused as any other client is. While `PublicUrl` is plain HTTP the exchange is refused unless
   `Coordinator:Auth:AllowHttpKeys`, and while that setting is in effect the start logs a warning and every page shows a banner
-  (`/api/info` `httpKeys`, `AccessPage`). The metadata lists the issuer after `Authority`, which the studio and a node with no
+  (`/api/info` `httpKeys`, `#http-keys-banner`). The metadata lists the issuer after `Authority`, which the studio and a node with no
   `Oidc:Authority` read first: a node verified by a key sets `Oidc:Authority` to the coordinator's address. **Without `Coordinator:Authority` the issuer is
   the only one: `AddTrustedIdp` registers neither `IdpBearer`, `IdpPerson` nor OpenID Connect, every token goes to the key issuer's
   schemes, the challenge is the cookie's (the form), the metadata lists the issuer alone and `dtpipe_auth` is `key`, the form links to
@@ -259,8 +264,8 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   records): the server maps those routes and writes those records, and the metadata document
   announces `CoordinatorApi.Contract`; a change a deployed studio would misread takes a new number.
   The library's listing and `GET /api/library/{id}` are part of it: the studio opens a pipeline from them.
-  `/api/catalog` lists nodes and bricks with each brick's reference (`CatalogBrick.Branch`: `{input: brick:<node>/<id>}` for a source,
-  `{output: …}` for a sink), never its text and never a schema, which depends on the rows; `/api/bricks/recognize`
+  `/api/catalog` lists nodes and bricks by node, id and kind, from which `BrickRef.Branch` makes the reference a job writes, on
+  either side; never a brick's text and never a schema, which depends on the rows; `/api/bricks/recognize`
   says what each top-level branch of a job is: the brick it references in the direction it references it (`BrickRef.Of` against
   the catalog), so the studio never decides a brick itself; `/api/bricks/{node}/{id}/sample` asks the node for at most
   `MaxSampleRows` rows as Arrow IPC (`SampleBrick`, which the node host bounds in bytes before it
@@ -512,7 +517,8 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   `DeploymentView.State` are a `RunState` and a `DeploymentState`; the pages, the event stream and the journal's documents
   carry the name of the value in lowercase, never as declared. Where no property carries a deployment's state (the
   `deploy` event, the text of a refusal), `StateWords.Word` writes it; `undeployed` is the word of an event, not a
-  state. A journal document whose state is none of the values, or a number, is skipped when the server starts.
+  state. A journal document whose state is none of the values, or a number, is skipped when the server starts. The pages
+  show `cancelled` as "stopped" through `runStateLabel` (`core.js`) and key their styles and tests on the word received.
   `[CI: StateWireTests, RunQueueTests]`
 - **A run is journaled as it goes, and a restart ends what it interrupted.** `RunJournal` keeps the runs in an `IRunStore`, which is
   `SqlRunStore`: the `runs` table (a document per run, whether it is over, its instant), the `owed` table and the `counters` table that draws ids. `RunQueue` draws the id and writes the run when it is queued (under the ledger's lock, before
@@ -531,8 +537,21 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   A reason that goes into `RunView.Refusal` is the server's own text, never a driver's message.
   A run that had started carries `RunView.SinkMayBePartial` (also in `/service/runs`), true: its fragments had been launched and a sink may hold part of
   what they wrote. It is a label only: nothing ranks resumption strategies or reruns the run, and a run that was only queued, or that ended any other way, has none.
+  **A run says why in one line, and saying it changes nothing**: `RunView.Reason` is derived each time it is read from `Result` and `Refusal`
+  (the first line of the failing fragment's own error, the fragment that stopped answering, a refusal without the runner it was tried
+  on), never stored as a verdict and never an input to one: state, `Result` and `Refusal` are what the run reports, and a cancelled
+  or successful run has no reason. The pages show it wherever a run is shown (`endNotes` in `core.js`), and count rows as
+  `rowsCrossed` does, on every edge. An event of `/api/events` carries `at`, when it happened, so a page opened later dates the
+  backlog it replays by it; a replica whose connection dropped carries `awaySince` and `givenUpAt` in the nodes' snapshot.
   `[CI: RunJournalTests (the label), RunQueueTests, OrphanRunsTests, NodeChannelHubTests; SqlStoreTests] [local: tools/campaign.py F4]` `[unchecked: a wired
   child with nothing to write ends only once a relay touches its torn-down transfer]`
+- **A transport line during a requested cancellation is shown as information, and nothing reads it.** `NodeLogLine.Category` is the
+  category of the logger that wrote the line (`NodeLogForwarder` fills it); `NodeChannelHub.ReportLog` shows a warning or an error of
+  `LogCategories.IsTransport` as information, with its label, when the replica that reported it holds runs and the requester asked to
+  cancel every one of them (`NodeInventory.IsWindingDown`, fed by `RunQueue`'s cancel and cleared when the run ends). The category
+  decides, never the message; the line is kept, a run's own teardown (the orchestrator's) is no requested cancellation, and no state,
+  code or verdict reads the classification. `[CI: RunQueueTests; Hosting.Tests NodeLogForwarderTests]`
+  `[unchecked: that a real transfer's lines all arrive before its run ends]`
 - **A run that was placed records the replica of each fragment.** `RunJournal` keeps the `RunResult` whole,
   `RunResult.Replicas` included: an instance id and the `Origin` the replica announced, untrusted text the pages
   escape. A run refused at admission has none, and a document that names none reads as a run with none.

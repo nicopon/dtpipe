@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 using DtPipe.Coordinator.Server.Deployments;
 using DtPipe.Coordinator.Server.Library;
 using DtPipe.Coordinator.Server.Stores;
-using TransportR.Interfaces;
+using TransportR.Hub;
 
 namespace DtPipe.Coordinator.Server.Access;
 

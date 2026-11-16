@@ -21,7 +21,7 @@ disposable hosts of `DtPipe.PipelineNode.Hosting`. They drive the `dtpipe` binar
 ## Quick start
 
 Prerequisites: the .NET 10 SDK, `python3`, a bash shell, network access to nuget.org for the
-TransportR `0.11.1` packages (restored like any other dependency of `DtPipe.Coordinator`) and a
+TransportR `0.12.0` packages (restored like any other dependency of `DtPipe.Coordinator`) and a
 built binary:
 
 ```bash
@@ -223,7 +223,7 @@ python3 tools/idp_check.py          # discovery, both flows, and the refusals th
 `output: brick:<node>/<brick>` with `from` writes a sink, and the node holds what it reads and writes. The
 scenarios of `pipelines/` stay plain dtpipe jobs, since a placement chosen by hand needs the branch's
 text. `smoke.py` runs a library job whole as the witness, with the text its nodes declare (`tools/lab_bricks.py`).
-`dtpipe studio` shows a reference as a card of its own.
+`dtpipe studio` shows a reference as a step of its own.
 
 **Distribution is automatic and happens at each launch**: a brick runs on the node its binding names,
 every other branch on a runner the coordinator picks then, and a source wired straight into a sink

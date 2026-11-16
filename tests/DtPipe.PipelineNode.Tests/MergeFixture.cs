@@ -4,8 +4,8 @@ namespace DtPipe.PipelineNode.Tests;
 /// Two producers merged by a consumer with two inbound edges - isolates the plumbing of a
 /// second, named-pipe edge alongside the primary stdin one from any join semantics, which
 /// <see cref="JoinFixture"/> covers instead. The consumer job is hand-built via <c>--export-job</c>
-/// rather than derived from <c>dtpipe split</c>, which only ever cuts a single linear job at one
-/// point and never produces a two-producer topology.
+/// rather than derived from a single job, which <see cref="SplitFixture"/> cuts at one point into
+/// one producer and one consumer, never a two-producer topology.
 /// </summary>
 internal sealed class MergeFixture : IDisposable
 {

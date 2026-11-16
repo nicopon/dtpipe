@@ -9,11 +9,12 @@ namespace DtPipe.Coordinator.Server.Nodes;
 /// One host carrying a node's identity, as a page shows it. <see cref="Id"/> is the start of its instance id,
 /// <see cref="Origin"/> the text it gave (untrusted: the page escapes it), <see cref="Bricks"/> a hash of the bricks it
 /// announces, which differs from a sibling's while a rolling update is under way, and <see cref="Runs"/> the runs the
-/// coordinator placed on it.
+/// coordinator placed on it. While its connection is dropped, <see cref="AwaySince"/> is when it dropped and
+/// <see cref="GivenUpAt"/> when the coordinator stops waiting for its host to announce again; both are null otherwise.
 /// </summary>
 public sealed record NodeReplica(
     string Id, DateTimeOffset Since, string? Origin, bool Connected, string? DtpipeVersion, string Bricks,
-    IReadOnlyList<string> Capabilities, int Runs);
+    IReadOnlyList<string> Capabilities, int Runs, DateTimeOffset? AwaySince = null, DateTimeOffset? GivenUpAt = null);
 
 public sealed record NodeView(
     string Name, IReadOnlyList<string> Groups, string Description, bool Online, IReadOnlyList<DatasetInfo> Datasets,
@@ -40,6 +41,30 @@ public sealed class NodeInventory(ReplicaRegistry registry)
     // By subject: the identity's client id, which is also the key of its replicas in the registry. A rename changes
     // the name an entry shows when the host announces under it, and never makes a second entry.
     private readonly Dictionary<string, Node> _nodes = new(StringComparer.Ordinal);
+    // The runs whose requester asked for a cancellation and that have not ended: a view of what is being wound down, never a verdict.
+    private readonly HashSet<string> _cancelRequested = new(StringComparer.Ordinal);
+
+    /// <summary>Records that the requester of run <paramref name="runId"/> asked for its cancellation.</summary>
+    public void CancelRequested(string runId)
+    {
+        lock (_lock) _cancelRequested.Add(runId);
+    }
+
+    /// <summary>Forgets the cancellation request of run <paramref name="runId"/>, which has ended.</summary>
+    public void CancelSettled(string runId)
+    {
+        lock (_lock) _cancelRequested.Remove(runId);
+    }
+
+    /// <summary>
+    /// Whether the replica behind <paramref name="connectionId"/> holds runs and the requester of every one of them asked for its
+    /// cancellation: what it logs now belongs to that teardown. A replica that also holds a run nobody asked to cancel is not winding down.
+    /// </summary>
+    public bool IsWindingDown(string connectionId)
+    {
+        if (registry.OfConnection(connectionId) is not { Leases.Count: > 0 } replica) return false;
+        lock (_lock) return replica.Leases.All(l => _cancelRequested.Contains(l.RunId));
+    }
 
     /// <summary>Records what a replica announced, once the registry took it.</summary>
     public void Announced(string name, string subject, NodeAnnouncement announcement, IReadOnlyList<string> groups)
@@ -102,7 +127,8 @@ public sealed class NodeInventory(ReplicaRegistry registry)
             var announcement = reference?.Announcement ?? n.Value.Announcement;
             var views = replicas.Select(r => new NodeReplica(
                 r.Key.Short, r.FirstAnnouncedAt, r.Announcement.Origin, r.Connected, r.Announcement.DtpipeVersion,
-                BricksHash(r.Announcement.Bricks), r.Announcement.Capabilities ?? [], r.Leases.Count)).ToList();
+                BricksHash(r.Announcement.Bricks), r.Announcement.Capabilities ?? [], r.Leases.Count,
+                r.AwaySince, r.AwaySince + registry.DisconnectGrace)).ToList();
             return new NodeView(
                 n.Value.Name, reference?.Groups ?? n.Value.Groups, announcement.Description, connected.Count > 0, announcement.Datasets,
                 announcement.Role, announcement.Bricks ?? [], announcement.Capabilities ?? [], announcement.DtpipeVersion, views,
@@ -208,9 +234,19 @@ public sealed class NodeChannelHub(
     public Task ReportLog(NodeLogLine line)
     {
         if (inventory.NodeOf(Context.ConnectionId) is not { } node) return Task.CompletedTask;
-        bus.Publish("log", line with { Node = node });
+        bus.Publish("log", Classified(line with { Node = node }, inventory.IsWindingDown(Context.ConnectionId)));
         return Task.CompletedTask;
     }
+
+    /// <summary>
+    /// A warning or an error of the transport library, logged by a replica whose runs are all being cancelled at their requester's
+    /// asking, is how a transfer ends under that cancellation: it is shown as information and says so. The category decides, never the
+    /// message; the line is kept, and no run, branch or cancellation verdict reads it.
+    /// </summary>
+    internal static NodeLogLine Classified(NodeLogLine line, bool windingDown) =>
+        windingDown && LogCategories.IsTransport(line.Category) && line.Level is "Warning" or "Error" or "Critical"
+            ? line with { Level = "Information", Message = $"{line.Message} (a consequence of stopping the run)" }
+            : line;
 
     public override Task OnDisconnectedAsync(Exception? exception)
     {

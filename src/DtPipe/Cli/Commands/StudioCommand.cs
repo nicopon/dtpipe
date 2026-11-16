@@ -1,5 +1,8 @@
 using System.CommandLine;
+using System.Net.Sockets;
+using DtPipe.Cli.Agent;
 using DtPipe.Cli.Expressions;
+using DtPipe.Cli.Mcp;
 using DtPipe.Cli.Node;
 using DtPipe.Cli.Pipeline;
 using DtPipe.Cli.Split;
@@ -39,10 +42,40 @@ public sealed class StudioCommand : Command
         {
             Description = "Sign in to the coordinator with a key it made for you, as a reference: ${{NAME}}, keyring://alias or @file (default: through the browser)",
         };
+        var llmProviderOption = new Option<string?>("--llm-provider")
+        {
+            Description = "Open the agent's panel on this model provider: ollama or openai (default: no agent)",
+        };
+        var llmUrlOption = new Option<string?>("--llm-url")
+        {
+            Description = "The model provider's address (default: http://localhost:11434 for ollama, https://api.openai.com for openai)",
+        };
+        var llmModelOption = new Option<string?>("--llm-model")
+        {
+            Description = "The model the agent starts with; the page may choose another the provider lists (default: none)",
+        };
+        var llmKeyOption = new Option<string?>("--llm-key")
+        {
+            Description = "The provider's API key, as a reference: ${{NAME}}, keyring://alias or @file (default: none)",
+        };
+        var llmTimeoutOption = new Option<int?>("--llm-timeout")
+        {
+            Description = "Seconds with no token before a model call fails (default: 300)",
+        };
+        var agentTraceOption = new Option<string?>("--agent-trace")
+        {
+            Description = "Record the agent's session as JSON lines; a directory gets a timestamped file (default: $DTPIPE_AGENT_TRACE, else none)",
+        };
         Arguments.Add(folderArgument);
         Options.Add(portOption);
         Options.Add(coordinatorOption);
         Options.Add(keyOption);
+        Options.Add(llmProviderOption);
+        Options.Add(llmUrlOption);
+        Options.Add(llmModelOption);
+        Options.Add(llmKeyOption);
+        Options.Add(llmTimeoutOption);
+        Options.Add(agentTraceOption);
 
         this.SetAction(async (parseResult, ct) =>
         {
@@ -52,6 +85,12 @@ public sealed class StudioCommand : Command
             catch (DirectoryNotFoundException ex)
             {
                 Console.Error.WriteLine(ex.Message);
+                return 1;
+            }
+            var port = parseResult.GetValue(portOption);
+            if (port is < 0 or > 65535)
+            {
+                Console.Error.WriteLine($"[ERROR] --port is a port number from 0 to 65535, not {port}.");
                 return 1;
             }
             CoordinatorLink? link = null;
@@ -82,6 +121,50 @@ public sealed class StudioCommand : Command
                 }
             }
             using var _ = link;
+            StudioAgentSetup? agent = null;
+            var provider = parseResult.GetValue(llmProviderOption);
+            if (provider is null)
+            {
+                if (new Option[] { llmUrlOption, llmModelOption, llmKeyOption, llmTimeoutOption, agentTraceOption }.FirstOrDefault(o => parseResult.GetResult(o) is not null) is { } orphan)
+                {
+                    Console.Error.WriteLine($"[ERROR] {orphan.Name} sets up the agent: name its provider with --llm-provider.");
+                    return 1;
+                }
+            }
+            else
+            {
+                string? llmKey = null;
+                if (parseResult.GetValue(llmKeyOption) is { } keyReference)
+                {
+                    string? refusal;
+                    (llmKey, refusal) = NodeBricks.IsSecretReference(keyReference)
+                        ? await NodeBricks.ReadSecretAsync(keyReference, "key", serviceProvider.GetRequiredService<ISecretsManager>(), ct)
+                        : (null, NodeBricks.NotAReference("--llm-key", "key", "DTPIPE_LLM_KEY"));
+                    if (refusal is not null)
+                    {
+                        Console.Error.WriteLine($"[ERROR] {refusal}");
+                        return 1;
+                    }
+                }
+                var timeout = TimeSpan.FromSeconds(parseResult.GetValue(llmTimeoutOption) is { } seconds and > 0 ? seconds : (int)AgentOptions.DefaultLlmTimeout.TotalSeconds);
+                ILlmClient? client = provider.ToLowerInvariant() switch
+                {
+                    "ollama" => new OllamaClient(timeout),
+                    "openai" => new OpenAiClient(llmKey, timeout),
+                    _ => null,
+                };
+                if (client is null)
+                {
+                    Console.Error.WriteLine($"[ERROR] --llm-provider is ollama or openai, not '{provider}'.");
+                    return 1;
+                }
+                var url = parseResult.GetValue(llmUrlOption) ?? (client is OpenAiClient ? "https://api.openai.com" : "http://localhost:11434");
+                var trace = AgentTrace.Open(parseResult.GetValue(agentTraceOption) ?? Environment.GetEnvironmentVariable("DTPIPE_AGENT_TRACE"), out var traceFailure);
+                if (traceFailure is not null) Console.Error.WriteLine($"[WARN] The agent's trace cannot be written: {traceFailure}");
+                agent = new StudioAgentSetup(client, url, parseResult.GetValue(llmModelOption),
+                    new McpToolProvider(serviceProvider.GetRequiredService<DtPipeMcpTools>()), trace);
+            }
+            using var __ = agent?.Trace;
             // With a key the studio signs in at once; a refusal leaves it signed out with the reason, which the page shows too.
             if (link is { ByKey: true })
             {
@@ -106,15 +189,16 @@ public sealed class StudioCommand : Command
                 serviceProvider.GetRequiredService<ISecretsManager>(),
                 link,
                 lookup => new DesignService(lookup, endpoints),
-                args => CommandLineJob.Export(serviceProvider, args));
+                args => CommandLineJob.Export(serviceProvider, args),
+                agent);
             StudioServer server;
             try
             {
-                server = await StudioServer.StartAsync(folder, parseResult.GetValue(portOption), tools, ct);
+                server = await StudioServer.StartAsync(folder, port, tools, ct);
             }
-            catch (IOException ex)
+            catch (Exception ex) when (ex is IOException or SocketException)
             {
-                Console.Error.WriteLine($"dtpipe studio could not listen: {ex.Message}");
+                Console.Error.WriteLine($"[ERROR] {ListenFailure(port, ex)}");
                 return 1;
             }
 
@@ -134,6 +218,14 @@ public sealed class StudioCommand : Command
             }
         });
     }
+
+    /// <summary>Why the studio could not listen at <paramref name="port"/>: the cause, with the option that changes it.</summary>
+    private static string ListenFailure(int port, Exception failure) =>
+        failure.GetBaseException() is SocketException { SocketErrorCode: var code } && port != 0 && code is SocketError.AddressAlreadyInUse or SocketError.AccessDenied
+            ? code == SocketError.AddressAlreadyInUse
+                ? $"Port {port} is already in use: give another with --port, or leave it out to take any free port."
+                : $"This user may not listen on port {port}: give another with --port, or leave it out to take any free port."
+            : $"dtpipe studio could not listen: {ShownFailure.Of(failure)}";
 
     /// <summary>
     /// The key <paramref name="reference"/> names, read once (<c>${{NAME}}</c>, <c>keyring://alias</c> or <c>@file</c>), or why not. A

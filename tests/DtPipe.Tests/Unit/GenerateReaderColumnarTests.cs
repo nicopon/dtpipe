@@ -36,6 +36,19 @@ public class GenerateReaderColumnarTests
         options.RowCount.Should().Be(expected);
     }
 
+    /// <summary>
+    /// A bare 'generate' reaches the reader as "-": the count then comes from the options, as the
+    /// adapter's help says, instead of being refused as a count that is not one.
+    /// </summary>
+    [Fact]
+    public void A_Bare_Generate_Keeps_The_Row_Count_Of_Its_Options()
+    {
+        var options = new GenerateReaderOptions { RowCount = 1000 };
+        _ = new GenerateReader("-", "", options);
+
+        options.RowCount.Should().Be(1000);
+    }
+
     [Fact]
     public async Task ReadRecordBatchesAsync_YieldsCorrectData()
     {

@@ -163,8 +163,8 @@ public sealed class LocalEndpointCardTests
 
     [Theory]
     [InlineData(StepKinds.Source, "output: csv:x.csv\n", "names no input")]
-    [InlineData(StepKinds.Source, "input: csv:x.csv\ntransformers: []\n", "transformers belong to other cards")]
-    [InlineData(StepKinds.Sink, "input: csv:x.csv\noutput: csv:y.csv\n", "input belong to other cards")]
+    [InlineData(StepKinds.Source, "input: csv:x.csv\ntransformers: []\n", "transformers belong to other steps")]
+    [InlineData(StepKinds.Sink, "input: csv:x.csv\noutput: csv:y.csv\n", "input belong to other steps")]
     [InlineData(StepKinds.Sink, "", "neither a brick nor an endpoint")]
     public void An_Endpoint_Card_Holds_Only_Its_Own_Side(string kind, string yaml, string expected)
     {

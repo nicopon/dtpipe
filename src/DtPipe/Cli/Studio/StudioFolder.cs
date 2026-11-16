@@ -44,6 +44,7 @@ public sealed class StudioFolder
     public StudioFolder(string path)
     {
         Root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+        if (File.Exists(Root)) throw new DirectoryNotFoundException($"{Root} is a file, not a folder: give the folder that holds the jobs.");
         if (!Directory.Exists(Root)) throw new DirectoryNotFoundException($"No folder at {Root}.");
     }
 
@@ -293,6 +294,22 @@ public sealed class StudioLocalFiles(StudioFolder folder)
         return path;
     }
 
+    /// <summary>
+    /// A new throwaway directory under <c>.dtpipe/studio/samples/</c>, reached by its owner only: the working directory of a
+    /// publication's check, which writes its job and its samples there. The caller deletes it.
+    /// </summary>
+    public string CheckDirectory()
+    {
+        RefuseLinks(SamplesDirectory);
+        SessionStore.EnsureIgnored(DtpipeDirectory);
+        Directory.CreateDirectory(SamplesDirectory);
+        RefuseLinks(SamplesDirectory);
+        var path = Path.Combine(SamplesDirectory, Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(16)));
+        if (OperatingSystem.IsWindows()) Directory.CreateDirectory(path);
+        else Directory.CreateDirectory(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        return path;
+    }
+
     /// <summary>Removes what a studio that stopped short left under <c>.dtpipe/studio/samples/</c>; never through a link.</summary>
     public void PurgeSamples()
     {
@@ -302,6 +319,8 @@ public sealed class StudioLocalFiles(StudioFolder folder)
             if (!Directory.Exists(SamplesDirectory)) return;
             foreach (var file in Directory.EnumerateFiles(SamplesDirectory))
                 if ((File.GetAttributes(file) & FileAttributes.ReparsePoint) == 0) File.Delete(file);
+            foreach (var directory in Directory.EnumerateDirectories(SamplesDirectory))
+                if ((File.GetAttributes(directory) & FileAttributes.ReparsePoint) == 0) Directory.Delete(directory, recursive: true);
         }
         catch (Exception ex) when (ex is StudioRefusal or IOException or UnauthorizedAccessException) { }
     }
@@ -313,8 +332,8 @@ public sealed class StudioLocalFiles(StudioFolder folder)
 
     /// <summary>
     /// The page's own preferences, kept in one file for the folder (<c>.dtpipe/studio/view.json</c>): the sizes of its
-    /// panes, and for each job the drawer's tab, the rows asked and the card selected. Nothing in it is true of a
-    /// job: the page draws the same without it.
+    /// panes, the job open, and for each job the drawer's tab, the rows asked and the card selected. Nothing in it is
+    /// true of a job: the page draws the same without it.
     /// </summary>
     public JsonObject ReadView()
     {
@@ -330,15 +349,17 @@ public sealed class StudioLocalFiles(StudioFolder folder)
     }
 
     /// <summary>
-    /// Replaces the sizes, and a job's preferences, when given. The jobs kept are the last <see cref="MaxViewJobs"/>
-    /// written, so the file does not grow with every job ever opened.
+    /// Replaces the sizes, the side panel, the job open and a job's preferences, when given. The jobs kept are the last
+    /// <see cref="MaxViewJobs"/> written, so the file does not grow with every job ever opened.
     /// </summary>
-    public void UpdateView(JsonObject? sizes, string? job, JsonObject? jobView)
+    public void UpdateView(JsonObject? sizes, string? job, JsonObject? jobView, string? open = null, string? side = null)
     {
         lock (_viewLock)
         {
             var view = ReadViewLocked();
             if (sizes is not null) view["sizes"] = sizes;
+            if (side is not null) view["side"] = side;
+            if (open is not null) view["open"] = open;
             if (job is not null && jobView is not null)
             {
                 var jobs = view["jobs"] as JsonObject ?? [];

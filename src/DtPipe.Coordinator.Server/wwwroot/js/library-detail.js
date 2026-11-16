@@ -3,7 +3,7 @@
 // jobs, the job's text read only, and its last run with the plan that run ran. The node of each source and sink branch is
 // chosen here, among the nodes that offer its brick; the runner is never named. The bindings are saved from here, and the
 // pipeline is deployed (armed at the commit the library holds) and run.
-import { $, api, deploymentOf, duration, esc, healthChip, cursorsOf, healthOf, isActive, lastRunOf, ranPlan, shortNode, store, toast } from "./core.js";
+import { $, api, deploymentOf, duration, endNotes, esc, healthChip, cursorsOf, healthOf, isActive, lastRunOf, ranPlan, runStateLabel, shortNode, store, toast } from "./core.js";
 import { drawLanes, fragmentJobs, legend, planProblems } from "./placement.js";
 
 let host = null;
@@ -104,9 +104,9 @@ function bindingsCard() {
       ${pin ? `<span class="hint">checked at brick ${esc(pin.version.slice(0, 12))}</span>` : ""}${problemOf(a)}</td></tr>`;
   }).join("");
   const strays = stray.map((a) => `<tr><td class="mono">${esc(a)}</td><td>${problemOf(a) || `<span class="hint">no brick branch of this job</span>`}
-      <button class="small ghost" data-drop="${esc(a)}" ${busy ? "disabled" : ""}>Remove</button></td></tr>`).join("");
+      <button class="small ghost" data-needs="designer" data-drop="${esc(a)}" ${busy ? "disabled" : ""}>Remove</button></td></tr>`).join("");
   return `<section class="card"><div class="card-head"><h2>Bindings</h2>
-      <span class="actions"><button id="x-bind" class="primary" ${bindingsDirty() && !busy ? "" : "disabled"}>Save bindings</button></span></div>
+      <span class="actions"><button data-needs="designer" id="x-bind" class="primary" ${bindingsDirty() && !busy ? "" : "disabled"}>Save bindings</button></span></div>
     <p class="hint">The node each source and sink runs on, and how its brick may change. Saving checks the bindings against the nodes and pins what
       the check saw. Every other step runs on the runner, which is never named.</p>
     <table class="library">${rows}${strays}</table></section>`;
@@ -148,13 +148,13 @@ function render() {
   host.innerHTML = `
     <div class="view-head">
       <h1>${esc(doc.yaml.split("\n")[0].replace(/^#\s*/, ""))} <span class="mono muted">${esc(id)}</span></h1>
-      <p class="hint">Planned at each launch: every brick on the node it is bound to, every other step on a runner chosen then. A source wired straight into a sink crosses no runner. A launch of the version the library holds ${plan.deployable ? `would run${runner ? ` on ${esc(runner)}` : ""} now` : armable ? "would be refused until Deploy pins the bricks no check has pinned" : "would be refused now"}.</p>
+      <p class="hint">Planned at each launch: every brick on the node it is bound to, every other step on a runner chosen then. A source wired straight into an output crosses no runner. A launch of the version the library holds ${plan.deployable ? `would run${runner ? ` on ${esc(runner)}` : ""} now` : armable ? "would be refused until Deploy pins the bricks no check has pinned" : "would be refused now"}.</p>
       <div class="row">${status}
         <span class="actions">
           <a class="button" href="#/library">← Library</a>
-          <button id="x-deploy" ${canDeploy && !busy && !bindingsDirty() ? "" : "disabled"} title="${bindingsDirty() ? "Save the bindings first" : ""}">${current ? "Deploy again" : "Deploy"}</button>
-          <button id="x-run" class="primary" ${canRun && !busy ? "" : "disabled"}>Run</button>
-          ${deployment ? `<button id="x-undeploy" class="ghost danger" ${isActive(run) || busy ? "disabled" : ""}>Undeploy</button>` : ""}
+          <button data-needs="designer" id="x-deploy" ${canDeploy && !busy && !bindingsDirty() ? "" : "disabled"} title="${bindingsDirty() ? "Save the bindings first" : ""}">Deploy</button>
+          <button data-needs="designer" id="x-run" class="primary" ${canRun && !busy ? "" : "disabled"}>Run</button>
+          ${deployment ? `<button data-needs="designer" id="x-undeploy" class="ghost danger" ${isActive(run) || busy ? "disabled" : ""}>Undeploy</button>` : ""}
         </span>
       </div>
     </div>
@@ -209,13 +209,11 @@ function runPanel(run, current) {
   if (!run) return "";
   const r = run.result;
   return `<section class="card"><div class="card-head"><h2>Last run</h2><a href="#/runs">all runs →</a></div>
-    <div class="outcome ${esc(run.state)}">${esc(run.runId)} · ${esc(run.state)} <span class="hint">${esc(duration(run))}</span></div>
+    <div class="outcome ${esc(run.state)}">${esc(run.runId)} · ${esc(runStateLabel(run.state))} <span class="hint">${esc(duration(run))}</span></div>
     ${current ? "" : `<p class="hint">It ran a plan with other edges than this one.</p>`}
-    ${run.refusal ? `<p class="mismatch">${esc(run.refusal)}</p>` : ""}
-    ${run.sinkMayBePartial ? `<p class="mismatch">The coordinator restarted while this run was in progress: its sinks may hold part of what it wrote.</p>` : ""}
+    ${endNotes(run)}
     ${cursorsOf(run)}
     ${ranPlan(run.plan)}
-    ${r?.cause ? `<p><b>Cause:</b> ${esc(shortNode(r.cause))}${r.causeIsUnresponsive ? " (unresponsive)" : ""}</p>` : ""}
     ${r?.consequences?.length ? `<p><b>Consequences:</b> ${r.consequences.map((c) => esc(shortNode(c))).join(", ")}</p>` : ""}
   </section>`;
 }
@@ -244,7 +242,7 @@ async function onClick(e) {
       await loadPlan();
     } else if (b.id === "x-run") {
       const run = await api("/api/runs", { pipelineId: id });
-      toast(`${run.runId} ${run.state}.`, "info");
+      toast(`${run.runId} ${runStateLabel(run.state)}.`, "info");
     } else if (b.id === "x-undeploy") {
       await api(`/api/deployments/${encodeURIComponent(id)}`, undefined, "DELETE");
     }

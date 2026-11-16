@@ -1,12 +1,10 @@
-using System.Text.Json.Nodes;
 using DtPipe.Coordinator.Contracts;
 using DtPipe.Coordinator.Server.Access;
 using DtPipe.Coordinator.Server.Deployments;
 using DtPipe.Coordinator.Server.Library;
 using DtPipe.Coordinator.Server.Nodes;
 using DtPipe.Jobs.Coordinator;
-using TransportR.FlowControl;
-using TransportR.Services;
+using TransportR.Hub;
 using Xunit;
 using DtPipe.Tests.Shared;
 
@@ -356,7 +354,7 @@ public sealed class BindingTests : IDisposable
         Announce("node-a", SourceBrick());
         Announce("node-b", SourceBrick());
         var validator = new DesignValidator(new BrickCatalog(_inventory), null!);
-        YamlDotNet.RepresentationModel.YamlMappingNode Branch(string text) => (YamlDotNet.RepresentationModel.YamlMappingNode)DtPipe.Jobs.JobYaml.FromJson(JsonNode.Parse(text));
+        YamlDotNet.RepresentationModel.YamlMappingNode Branch(string text) => DtPipe.Jobs.JobYaml.ParseBranch(text);
 
         Assert.Equal("node-b/customers", validator.BrickOf("customers", Branch("""{"input":"brick:node-b/customers"}"""))!.Key);
         Assert.Equal("node-a/customers", validator.BrickOf("customers", Branch("""{"input":"brick:node-a/customers"}"""))!.Key);

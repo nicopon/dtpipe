@@ -5,6 +5,7 @@ using System.Text.Json;
 using Xunit;
 using DtPipe.Coordinator;
 using DtPipe.Coordinator.Contracts;
+using DtPipe.Jobs;
 using DtPipe.Coordinator.Tests.Infrastructure;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -68,8 +69,8 @@ public sealed class NodeCommandTests
             Assert.Equal(["kept", "numbers", "tokens", "totals"], bricks.Select(b => b.Id));
             Assert.Equal([BrickKind.Sink, BrickKind.Source, BrickKind.Source, BrickKind.Sink], bricks.Select(b => b.Kind));
             // A reference in the node's file is announced as written: the version hashes the token, never its value.
-            Assert.Equal(BrickRules.VersionOf(BrickKind.Source, "{\"input\":\"generate:${{NODE_COMMAND_ROWS}}\",\"batch-size\":32768,\"sampling-rate\":1}"), bricks.Single(b => b.Id == "tokens").Version);
-            Assert.Equal(BrickRules.VersionOf(BrickKind.Sink, "{\"output\":\"csv:keyring://node-command-alias.csv\",\"batch-size\":32768,\"sampling-rate\":1}"), bricks.Single(b => b.Id == "kept").Version);
+            Assert.Equal(BrickRules.VersionOf(BrickKind.Source, JobYaml.ParseBranch("{\"input\":\"generate:${{NODE_COMMAND_ROWS}}\",\"batch-size\":32768,\"sampling-rate\":1}")), bricks.Single(b => b.Id == "tokens").Version);
+            Assert.Equal(BrickRules.VersionOf(BrickKind.Sink, JobYaml.ParseBranch("{\"output\":\"csv:keyring://node-command-alias.csv\",\"batch-size\":32768,\"sampling-rate\":1}")), bricks.Single(b => b.Id == "kept").Version);
             Assert.DoesNotContain(RowsValue, JsonSerializer.Serialize(replica.Announcement), StringComparison.Ordinal);
             Assert.All(bricks, b => Assert.Matches("^[0-9a-f]{12}$", b.Version));
             Assert.DoesNotContain(Secret, JsonSerializer.Serialize(replica.Announcement), StringComparison.Ordinal);

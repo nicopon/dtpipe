@@ -74,7 +74,7 @@ main:
 ## In a distributed pipeline
 
 The coordinator keeps the cursor instead of a state file, and the source filters with a token that
-names no file: `${{cursor://|DEFAULT}}`. This is experimental: the rules are in
+names no file: `${{cursor://|DEFAULT}}`. The rules are in
 [REFERENCE.md](../../REFERENCE.md#incremental-loading-in-a-distributed-pipeline).
 
 ---

@@ -44,8 +44,8 @@ internal sealed class LibraryArming(PipelineLibrary library, DesignValidator val
     {
         DesignCheck check;
         try { check = await validator.ValidateAsync(doc.Yaml, doc.Bindings, ct); }
-        catch (Exception ex) when (ex is not OperationCanceledException) { check = new DesignCheck(false, $"The job is not readable: {ex.Message}"); }
-        if (!check.Ok) throw new ConflictException($"'{doc.Id}' could not be armed: the designer's check refused its job.\n{check.Report}");
+        catch (Exception ex) when (ex is not OperationCanceledException) { check = new DesignCheck(false, $"The job is not readable: {ShownFailure.Of(ex)}"); }
+        if (!check.Ok) throw new ConflictException($"'{doc.Id}' could not be armed: the coordinator's check refused its job.\n{check.Report}");
 
         var referenced = BrickReferences.In(doc.Yaml).Keys.ToHashSet(StringComparer.Ordinal);
         var pinned = Bindings.Pinned(doc.Bindings, check.Pins, referenced);

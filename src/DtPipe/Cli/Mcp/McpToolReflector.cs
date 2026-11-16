@@ -105,9 +105,25 @@ public static class McpToolReflector
            .Select(n => n!)
            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>A tool name reduced to what carries meaning: its letters, in one case.</summary>
-    private static string Normalise(string name) =>
+    /// <summary>
+    /// A tool name reduced to what carries meaning: its letters, in one case. The one comparison
+    /// of tool names: the dispatch here and the executor's refusal of a tool that was not offered
+    /// both go through it, so a spelling that reaches a tool is a spelling the refusal recognises.
+    /// </summary>
+    internal static string Normalise(string name) =>
         name.Replace("-", string.Empty).Replace("_", string.Empty).ToLowerInvariant();
+
+    /// <summary>
+    /// The answer to a call naming no tool the caller can use: the name asked for and the names it
+    /// can use, sorted. Naming what is there is the difference between one wasted call and several:
+    /// a model told only that its guess was wrong has nothing to go on but another guess.
+    /// </summary>
+    internal static string UnknownToolAnswer(string toolName, IEnumerable<string> available) =>
+        JsonSerializer.Serialize(new
+        {
+            error = $"Unknown tool '{toolName}'.",
+            availableTools = available.OrderBy(n => n, StringComparer.Ordinal).ToArray(),
+        });
 
     /// <summary>
     /// Dynamically invokes an [McpServerTool] method on the target instance by tool name,
@@ -130,16 +146,7 @@ public static class McpToolReflector
             .Method;
 
         if (method == null)
-        {
-            // Naming what does exist is the difference between one wasted call and several: a model
-            // told only that its guess was wrong has nothing to go on but another guess.
-            var available = candidates.Select(x => x.Name!).OrderBy(n => n, StringComparer.Ordinal).ToArray();
-            return JsonSerializer.Serialize(new
-            {
-                error = $"Unknown tool '{toolName}'.",
-                availableTools = available,
-            });
-        }
+            return UnknownToolAnswer(toolName, candidates.Select(x => x.Name!));
 
         var parameters = method.GetParameters();
         var paramValues = new object?[parameters.Length];

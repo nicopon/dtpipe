@@ -8,8 +8,7 @@ namespace DtPipe.Cli.Infrastructure;
 /// <summary>
 /// Builds the shared <see cref="IAnsiConsole"/>. It detects the terminal once against the real
 /// <c>Console.Error</c>, then writes through a <see cref="RedirectingTextWriter"/> so that a later
-/// <see cref="Console.SetError"/> — the agent's full-screen surface holding engine output back
-/// while the toolkit owns the terminal — redirects every Spectre write too, not just direct
+/// <see cref="Console.SetError"/> redirects every Spectre write too, not just direct
 /// <c>Console.Error</c> calls. Detection is pinned to what the real stream reported, so the wrapper
 /// cannot shift it: Spectre keys ANSI/colour off whether the writer <em>is</em> a standard stream,
 /// and a wrapped one no longer is.

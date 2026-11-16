@@ -40,8 +40,8 @@ public static class CoreFlagRegistry
         // -i / --from.
         registry.Register(new FlagDef("--session", new string[] { }, FlagArity.Scalar, FlagScope.Global, "Name the session materialised artefacts belong to", FlagStage.All));
 
-        // Alias binding — wires a run-specific location into a fragment's arrow:- boundary
-        // (dtpipe split). Value is a comma-separated alias=location list, one occurrence each:
+        // Alias binding — wires a run-specific location into a fragment's arrow:- boundary.
+        // Value is a comma-separated alias=location list, one occurrence each:
         // a list is written with commas, not by repeating the flag.
         registry.Register(new FlagDef("--bind-input", new string[] { }, FlagArity.Scalar, FlagScope.Global, "Bind a branch's 'arrow:-' input to a location (alias=location[,alias=location...])", FlagStage.All));
         registry.Register(new FlagDef("--bind-output", new string[] { }, FlagArity.Scalar, FlagScope.Global, "Bind a branch's 'arrow:-' output to a location (alias=location[,alias=location...])", FlagStage.All));

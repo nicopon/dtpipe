@@ -22,6 +22,21 @@ public class MergeTransformerFactory : IStreamTransformerFactory, IStreamProcess
     public int MinLookups => 0;
     public int MaxLookups => 0;
 
+    public string Description => "Concatenate the rows of several branches into one stream.";
+
+    public string UsageNotes =>
+        """
+        'from' lists the branches to concatenate, comma-separated.
+        Their schemas must agree on column count, names and structural types: the merge refuses
+        channels that differ and never converts.
+        Example:
+          main:
+            from: "north,south"
+            provider-options:
+              merge: {}
+            output: "<adapter>:<target>"
+        """;
+
     public IReadOnlyList<(string Flag, bool IsBoolean)> CliTriggerFlags => [("--merge", true)];
 
     public bool IsApplicable(string[] branchArgs)

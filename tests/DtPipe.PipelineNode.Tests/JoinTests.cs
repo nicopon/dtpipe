@@ -31,7 +31,7 @@ public class JoinTests
     {
         using var fixture = MergeFixture.Create(rowCountA: 4_000, rowCountB: 3_000);
         await using var host = await CoordinatorTestHost.StartAsync(
-            o => o.Groups["test"] = new TransportR.FlowControl.GroupAccess { CanSendTo = ["test"] });
+            o => o.Groups["test"] = new TransportR.Hub.GroupAccess { CanSendTo = ["test"] });
         var orchestrator = host.Host.Services.GetRequiredService<IRunOrchestrator>();
 
         await using var a = await ConnectNode(host, fixture.ProducerAJobPath, "A", new EdgeBinding("main", EdgeDirection.Outbound));
@@ -59,7 +59,7 @@ public class JoinTests
     {
         using var fixture = JoinFixture.Create(rowCount: 2_000);
         await using var host = await CoordinatorTestHost.StartAsync(
-            o => o.Groups["test"] = new TransportR.FlowControl.GroupAccess { CanSendTo = ["test"] });
+            o => o.Groups["test"] = new TransportR.Hub.GroupAccess { CanSendTo = ["test"] });
         var orchestrator = host.Host.Services.GetRequiredService<IRunOrchestrator>();
 
         await using var a = await ConnectNode(host, fixture.ProducerOrdersJobPath, "A", new EdgeBinding("main", EdgeDirection.Outbound));
@@ -91,7 +91,7 @@ public class JoinTests
     {
         using var fixture = JoinFixture.Create(rowCount: 1_000_000, "--throttle", "100000");
         await using var host = await CoordinatorTestHost.StartAsync(
-            o => o.Groups["test"] = new TransportR.FlowControl.GroupAccess { CanSendTo = ["test"] });
+            o => o.Groups["test"] = new TransportR.Hub.GroupAccess { CanSendTo = ["test"] });
         var orchestrator = host.Host.Services.GetRequiredService<IRunOrchestrator>();
 
         await using var a = await ConnectNode(host, fixture.ProducerOrdersJobPath, "A", new EdgeBinding("main", EdgeDirection.Outbound));

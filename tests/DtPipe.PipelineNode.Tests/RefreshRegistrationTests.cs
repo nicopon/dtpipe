@@ -1,11 +1,8 @@
 using DtPipe.Coordinator.Tests.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using TransportR.Abstractions;
-using TransportR.FlowControl;
-using TransportR.Identity;
-using TransportR.Interfaces;
-using TransportR.Models;
+using TransportR;
+using TransportR.Hub;
 using Xunit;
 
 namespace DtPipe.PipelineNode.Tests;
@@ -136,8 +133,8 @@ public class RefreshRegistrationTests
         await using var dropped = await ConnectAsync(host, jwt, "dropped");
         var initiator = host.Host.Services.GetRequiredService<ITransferInitiator>();
         var store = host.Host.Services.GetRequiredService<IStateStore>();
-        var allowedTransfer = await initiator.InitTransferAsync(sender.ClientId, kept.ClientId, timeoutMs: 60_000);
-        var refusedTransfer = await initiator.InitTransferAsync(sender.ClientId, dropped.ClientId, timeoutMs: 60_000);
+        var allowedTransfer = await initiator.InitTransferAsync(sender.ClientId, kept.ClientId, handshakeTimeout: TimeSpan.FromSeconds(60));
+        var refusedTransfer = await initiator.InitTransferAsync(sender.ClientId, dropped.ClientId, handshakeTimeout: TimeSpan.FromSeconds(60));
 
         rights.BySubject["sender"] = ["new"];
         await sender.RefreshRegistrationAsync();

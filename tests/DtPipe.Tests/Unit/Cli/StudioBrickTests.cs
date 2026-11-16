@@ -289,4 +289,18 @@ public sealed class StudioBrickTests : IAsyncLifetime
         Assert.All(spy.Asked, asked => Assert.Contains(asked, branches));
         Assert.Equal(1, spy.Asked.Count(a => a == JobYaml.Serialize(JobYaml.Branches(JobYaml.Parse(job)).First().Branch)));
     }
+
+    [Fact]
+    public void A_reference_the_signed_in_catalog_lacks_is_named_as_no_brick_never_as_a_sign_in()
+    {
+        const string job = "a:\n  input: brick:files/nope\nb:\n  from: a\n  output: csv:o.csv\n";
+        var catalog = new BrickCatalogView([], [new CatalogBrick("n1/orders", "n1", "orders", StepKinds.Source, "Orders", "", "v1", true)]);
+
+        var signedIn = Assert.Throws<StudioRefusal>(() => StudioServer.RefuseReferences(job, catalog));
+        var signedOut = Assert.Throws<StudioRefusal>(() => StudioServer.RefuseReferences(job));
+
+        Assert.Contains("No node offers", signedIn.Message);
+        Assert.DoesNotContain("Sign in", signedIn.Message);
+        Assert.Contains("Sign in", signedOut.Message);
+    }
 }

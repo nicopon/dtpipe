@@ -49,6 +49,13 @@ public static class BrickRef
         return null;
     }
 
+    /// <summary>
+    /// The branch that references the brick <paramref name="brick"/> of <paramref name="node"/>, the one <see cref="Of"/> reads: a
+    /// source's <c>input</c>, or a sink's <c>output</c>, whose <c>from</c> the job adds.
+    /// </summary>
+    public static YamlMappingNode Branch(string node, string brick, bool isSink) =>
+        new() { { isSink ? JobKeys.Output : JobKeys.Input, Format(node, brick) } };
+
     /// <summary>Every branch of <paramref name="job"/> that references a brick, by alias.</summary>
     public static IReadOnlyDictionary<string, BrickReference> In(YamlMappingNode job) =>
         JobYaml.Branches(job).Select(b => Of(b.Alias, b.Branch)).OfType<BrickReference>()

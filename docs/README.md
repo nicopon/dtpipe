@@ -18,6 +18,8 @@ databases, files and object storage, and can anonymize, join, filter and reshape
 | Save a pipeline and run it from CI or every night | [Jobs and production](guides/production.md) |
 | Keep credentials out of the command line | [Secrets](guides/secrets.md) |
 | Let an AI assistant design a pipeline | [The agent](guides/agent.md) |
+| Design and preview a job in a local page | [The studio](distributed.md#the-studio) |
+| Run one pipeline across several hosts | [Distributed pipelines](distributed.md) |
 | Use dtpipe's libraries from .NET code | [dtpipe and .NET](dotnet.md) |
 | Understand an error | [Troubleshooting](troubleshooting.md) |
 
@@ -27,10 +29,6 @@ databases, files and object storage, and can anonymize, join, filter and reshape
 [Oracle](connections/oracle.md) · [PostgreSQL](connections/postgresql.md) ·
 [MySQL / MariaDB](connections/mysql.md) · [DuckDB](connections/duckdb.md) ·
 [Files](connections/files.md) · [Object storage](connections/object-storage.md)
-
-## Experimental
-
-[Experimentation](experimentation.md): one pipeline across several hosts, and `dtpipe studio`.
 
 ---
 

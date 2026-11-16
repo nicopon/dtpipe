@@ -21,10 +21,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- TransportR.FlowControl (DefaultFlowControlService, the plan's edge check) ships inside
-         this package's assembly now; there is no separate TransportR.FlowControl package. -->
-    <PackageReference Include="TransportR" Version="0.11.1" />
-    <PackageReference Include="TransportR.Hub" Version="0.11.1" />
+    <!-- DefaultFlowControlService, the plan's edge check, is in the TransportR.Hub package's assembly,
+         namespace TransportR.Hub. -->
+    <PackageReference Include="TransportR" Version="0.12.0" />
+    <PackageReference Include="TransportR.Hub" Version="0.12.0" />
   </ItemGroup>
 
 </Project>

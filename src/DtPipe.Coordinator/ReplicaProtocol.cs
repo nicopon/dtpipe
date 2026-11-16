@@ -1,6 +1,6 @@
 using DtPipe.Coordinator.Contracts;
 using Microsoft.Extensions.Logging;
-using TransportR.Interfaces;
+using TransportR.Hub;
 
 namespace DtPipe.Coordinator;
 

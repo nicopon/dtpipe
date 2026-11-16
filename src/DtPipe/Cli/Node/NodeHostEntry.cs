@@ -14,6 +14,6 @@ internal static class NodeHostEntry
         IReadOnlyList<DeclaredBrick> bricks, CancellationToken ct) =>
         NodeLauncher.RunAsync(
             new LaunchSettings(name, coordinator, description, clientSecret, dtpipe, runner),
-            [.. bricks.Select(b => new LaunchedBrick(b.Id, b.IsSource, b.BranchJson))],
+            [.. bricks.Select(b => new LaunchedBrick(b.Id, b.IsSource, b.Yaml))],
             ct);
 }

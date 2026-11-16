@@ -33,7 +33,8 @@ public sealed class ReplicaRegistryOptions
 /// </summary>
 public sealed record ReplicaView(
     ReplicaKey Key, string? ConnectionId, NodeAnnouncement Announcement, IReadOnlyList<string> Groups,
-    DateTimeOffset FirstAnnouncedAt, IReadOnlyList<(string RunId, string Fragment)> Leases, long LastChosen)
+    DateTimeOffset FirstAnnouncedAt, IReadOnlyList<(string RunId, string Fragment)> Leases, long LastChosen,
+    DateTimeOffset? AwaySince = null)
 {
     public bool Connected => ConnectionId is not null;
     public Guid? DataPlaneClientId => Announcement.DataPlaneClientId;
@@ -58,6 +59,7 @@ public sealed class ReplicaRegistry
         public readonly HashSet<(string RunId, string Fragment)> Leases = [];
         public long LastChosen;
         public CancellationTokenSource? Grace;
+        public DateTimeOffset? AwaySince;
     }
 
     private readonly object _lock = new();
@@ -65,6 +67,9 @@ public sealed class ReplicaRegistry
     private readonly Dictionary<string, ReplicaKey> _byConnection = new(StringComparer.Ordinal);
     private readonly ReplicaRegistryOptions _options;
     private long _sequence;
+
+    /// <summary>How long a replica whose connection dropped is kept for its host to announce again, before it is lost and its runs end.</summary>
+    public TimeSpan DisconnectGrace => _options.DisconnectGracePeriod;
 
     public ReplicaRegistry(ReplicaRegistryOptions? options = null)
     {
@@ -93,6 +98,7 @@ public sealed class ReplicaRegistry
                 existing.Grace?.Cancel();
                 existing.Grace?.Dispose();
                 existing.Grace = null;
+                existing.AwaySince = null;
                 if (existing.ConnectionId is { } previous && previous != connectionId)
                 {
                     _byConnection.Remove(previous);
@@ -195,6 +201,7 @@ public sealed class ReplicaRegistry
             if (!_byConnection.Remove(connectionId, out key)) return;
             if (!_replicas.TryGetValue(key, out var replica) || replica.ConnectionId != connectionId) return;
             replica.ConnectionId = null;
+            replica.AwaySince = DateTimeOffset.UtcNow;
             immediately = _options.DisconnectGracePeriod <= TimeSpan.Zero;
             if (immediately) _replicas.Remove(key);
             else replica.Grace = grace = new CancellationTokenSource();
@@ -296,5 +303,5 @@ public sealed class ReplicaRegistry
     }
 
     private static ReplicaView ViewOf(Replica r) =>
-        new(r.Key, r.ConnectionId, r.Announcement, r.Groups, r.FirstAnnouncedAt, r.Leases.ToList(), r.LastChosen);
+        new(r.Key, r.ConnectionId, r.Announcement, r.Groups, r.FirstAnnouncedAt, r.Leases.ToList(), r.LastChosen, r.AwaySince);
 }

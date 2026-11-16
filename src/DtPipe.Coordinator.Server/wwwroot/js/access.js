@@ -1,7 +1,7 @@
 // Access: who may send what to whom. Identities (who: verified by a key this coordinator makes or by the IdP it trusts, a node's
 // name and groups, a person's role), their keys, the hosts waiting for approval, the flow matrix between groups (to whom, enforced
 // by the hub on every transfer), and the audit of every change.
-import { api, esc, nodeColor, store, toast } from "./core.js";
+import { api, can, esc, nodeColor, plural, store, toast } from "./core.js";
 
 let host = null;
 let rights = null;
@@ -13,12 +13,18 @@ const keysOf = {};           // client id -> its keys as GET …/keys lists them
 
 export function mount(el) {
   host = el;
+  // Rights are an administrator's: any other role is told so here rather than met by a refusal of each request.
+  if (!can("admin")) {
+    host.innerHTML = `<h2>Access</h2><p>Who may send what to whom is for administrators. Your role is ${esc(store.me?.roles?.[0] || "none")}: ask an administrator.</p>`;
+    return;
+  }
   host.addEventListener("click", onClick);
   host.addEventListener("change", onChange);
   load();
 }
 
 export function update(kind) {
+  if (!can("admin")) return;
   if (kind === "rights") load();
   else if (["nodes", "bricks"].includes(kind)) render();
 }
@@ -395,7 +401,7 @@ async function onClick(e) {
       toast(`${id} saved.`, "info");
     } else if (b.dataset.reconnect !== undefined) {
       const { disconnected } = await api(`/api/rights/identities/${encodeURIComponent(row.dataset.identity)}/reconnect`, {});
-      toast(`${disconnected} control connection(s) dropped: the host reconnects with a new token.`, "info");
+      toast(`${plural(disconnected, "control connection")} dropped: the host reconnects with a new token.`, "info");
     } else if (b.dataset.removeIdentity !== undefined) {
       const id = row.dataset.identity;
       if (!confirm(`Remove ${id}? It obtains no more tokens, and its node is disconnected.`)) return;

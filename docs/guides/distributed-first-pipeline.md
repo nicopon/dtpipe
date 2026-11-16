@@ -1,7 +1,6 @@
 # Your first distributed pipeline
 
-> **Experimental.** May change or disappear without notice, and not meant for production. What the
-> pieces are and their limits: [Experimentation](../experimentation.md).
+What the pieces are and their limits: [Distributed pipelines](../distributed.md).
 
 You will start a coordinator and a runner, declare a small database as a **node**, allow the rows
 to flow, and run a pipeline that reads the database, counts on the runner, and writes the result
@@ -27,7 +26,7 @@ dtpipe keygen admin --out admin.key
 dtpipe keygen runner-1 --out runner-1.key
 ```
 
-The coordinator takes its first library from a folder. Write the pipeline this page runs: it
+The coordinator takes its first library from a folder. Write the job this page runs: it
 reads the brick `orders` of a node `shop`, and writes its brick `report`.
 
 ```bash
@@ -144,7 +143,7 @@ Stay in this folder for the rest of the page.
 
 ## 3. Allow the node and the flows
 
-In **Access**, press **Add an identity**: client id `shop`, kind `node`, group `data`, then
+In **Access**, on the **Nodes** tab, press **Add an identity**: client id `shop`, group `data`, then
 **Create**. A window shows the node's key once. Read it into a variable in the terminal where the
 node will run (paste, then Enter):
 
@@ -189,8 +188,8 @@ mkdir jobs
 dtpipe studio ./jobs --coordinator "$COORDINATOR_URL" --key '${{DTPIPE_KEY}}'
 ```
 
-The studio offers the nodes' bricks. **Open from library** writes `shop-orders-by-country` into
-`./jobs` to edit; **Publish** saves it back.
+The studio offers the nodes' bricks. In the **Library** list under the jobs, click
+`shop-orders-by-country`: it is written into `./jobs` to edit, and **Publish** saves it back.
 
 ## 6. Arm it, run it
 
@@ -222,8 +221,9 @@ diff witness.csv report.csv && echo identical
 
 ## 7. Start the run from a script
 
-A **launcher** may start the pipelines it lists, and nothing else. In **Access**, add an identity:
-client id `launcher-1`, kind `launcher`, pipeline `shop-orders-by-country`. Read its key:
+A **launcher** may start the pipelines it lists, and nothing else. In **Access**, on the
+**Launchers** tab, add an identity: client id `launcher-1`, pipeline
+`shop-orders-by-country`. Read its key:
 
 ```bash
 read -rs LAUNCHER_KEY
@@ -248,8 +248,9 @@ until it is `succeeded` or `failed`.
 
 - **The step ran on the runner**, not on the node: a node only reads and writes its own data.
 - **A brick's version is the hash of its text.** Change `bricks.yaml` and restart the node, and the
-  armed pipeline is refused with `brick-changed` until you deploy it again.
-- **A key is shown once.** If you lose it, **Access** → **Keys** → **Rotate** makes another.
+  armed pipeline is refused with `brick-changed` until you press **Deploy** once more.
+- **A key is shown once.** If you lose it, open the identity's **Keys** in **Access**, press
+  **Rotate: make a second key**, then **Revoke** the lost one: it stays valid until then.
 - **The rights survive a restart.** Delete `coordinator-state` (or `docker compose … down -v`) to
   start again with new keys.
 - **Keep passwords out of `bricks.yaml`** with `${{NAME}}` or `keyring://`.
@@ -281,7 +282,7 @@ docker compose -f deploy/compose.yaml down -v       # with Docker
 
 | | |
 |:---|:---|
-| Every setting of the coordinator and the nodes | [REFERENCE.md](../../REFERENCE.md#distributed-pipeline-experimental) |
+| Every setting of the coordinator and the nodes | [REFERENCE.md](../../REFERENCE.md#distributed-pipeline) |
 | Declare bricks on a real database | [`dtpipe node`](../../REFERENCE.md#a-node-from-the-cli-dtpipe-node) |
 | Make your own .NET service a node | [`AddDtPipeNode`](../../src/DtPipe.PipelineNode.Hosting/CLAUDE.md) |
 | Four data nodes, joins across them, rights and faults | [The distributed lab](../../samples/distributed-lab/README.md) |

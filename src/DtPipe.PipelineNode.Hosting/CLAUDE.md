@@ -71,8 +71,8 @@ none. One node per process, which is one replica of its node's identity; a secon
   a `PackageReference`, never a reference to `Apache.Arrow.Serialization`. No solution packs the library, so the solution's pack never
   reaches it; `tests/scripts/validate_node_host_package.sh` packs it, outside every pack glob, and reads the result, and `release.yml`
   runs that script in a step of its own after the solution's push. A host built against a version not yet published takes a local one
-  (`-p:PackageVersion`), since a restore serves the cached copy of a version it has. The package is a beta (`<Version>-beta.1`, set in
-  the project; the release gives the tag's own suffix when it has one): the family is experimental.
+  (`-p:PackageVersion`), since a restore serves the cached copy of a version it has. The package takes the repository's `<Version>`
+  like the solution's, and the release packs it at the tag's version.
   `[local: validate_node_host_package.sh, spike-node.sh] [CI: validate_distributed_boundary.sh — one packable project, bundled projects private]`
   `[unchecked: the release's step, until a tag runs it]`
 - **A source of the host's own is served on a socket the host owns.** `AddArrowSource` declares a source brick that reads
@@ -85,14 +85,22 @@ none. One node per process, which is one replica of its node's identity; a secon
   is never stopped by it. An I/O error of a write alone means the reader left (`--limit`, a sample, a failed run): leaving the loop
   disposes the callback's enumerator. The socket lives in a folder of the process that only the current user reaches, set before the
   socket exists. Registration refuses an id that is no word, two ids that name one variable, and a path longer than a Unix socket takes.
-  `[CI: Hosting.Tests ArrowSourceTests] [local: samples/arrow-socket-source/spike-node.sh, probe]`
+  `[CI: Hosting.Tests ArrowSourceTests; PipelineNode.Tests ArrowSourceReadTests — the real binary reads the socket]`
+`[local: samples/arrow-socket-source/spike-node.sh]`
   `[unchecked: Windows; a reader that leaves while the callback waits, which the next write finds]`
 - **`BrickRules` (`DtPipe.Coordinator.Contracts`) over `JobYaml` (`DtPipe.Jobs`) is the one
   reading of a branch**, shared with the coordinator, so a studio never calls something a brick
   the node then declines. `BrickHost` does not announce a declared brick that fails the structure rule.
   `[unchecked: a declared brick that fails the structure rule]`
+- **A declaration is a YAML tree, read once where the host adds it; JSON is accepted, never carried.** `AddBrick` takes the
+  branch as YAML text, a JSON object included, and reads it with `JobYaml.ParseBranch`, the one reader of a declaration;
+  configuration (`AddBricks`) and `AddArrowSource` build the tree themselves, and `dtpipe node` hands the launcher its branches as
+  YAML text. `BrickDeclaration` holds the tree and nothing writes to it: `BrickHost` gives whatever runs a brick a copy
+  (`DeclaredBranch`, the sample's and the check's own run), since a run sets its endpoints on the branch it gets and a replica
+  serves several runs at once. A scalar is matched by the text dtpipe reads, so a brick written as YAML or as JSON has one version.
+  `[CI: Server.Tests BrickFormTests; Hosting.Tests BrickPreviewTests, DtPipeNodeBuilderTests]`
 - **A brick is announced by its version.** `BrickHost` announces each brick without its text and with
-  `BrickRules.VersionOf(kind, text)`, the SHA-256 of its canonical text, so two replicas of a node that declare the same bricks announce
+  `BrickRules.VersionOf(kind, branch)`, the SHA-256 of its canonical text, so two replicas of a node that declare the same bricks announce
   the same versions. The text is the owner's: a secret written into it would let anyone who sees the version test guesses offline, so a
   brick holds `${{NAME}}` or `keyring://` references, never a value. `dtpipe node` refuses a brick that holds one; a host built on
   this library keeps the rule itself, since the library cannot read the connection-string grammar. `[CI: Hosting.Tests
@@ -108,12 +116,16 @@ none. One node per process, which is one replica of its node's identity; a secon
   A provider that answers and refuses the client is a `TokenRefusedException`: the connect loop logs it as a refusal that names the
   provider and the client to add or enable, and only a coordinator that does not answer reads as not reachable.
   `[CI: Hosting.Tests KeyTokenTests]` `[unchecked: the fresh token on retry; the refusal's text]`
-- **A secret is the host's value or a file's, read once.** `Oidc:ClientSecret` is the secret, or `@path` to the file that holds it
-  (a coordinator's key mounted in a container), read once when `OidcTokenClient` is made (`SecretReference`, the one place): a file
-  that cannot be read, or is empty, stops the start by the setting's name, never by its path or its content. A secret that begins
-  with `@` is given in a file. `dtpipe node` resolves its own references (`src/DtPipe/CLAUDE.md`) and hands the value over, so
-  such a secret cannot pass through it (a coordinator's key never begins with `@`).
-  `[CI: Hosting.Tests KeyTokenTests]`
+- **The node's secret has one source: a value, a file, or a provider.** `Oidc:ClientSecret` is the secret itself or, when it begins with
+  `@`, the path of the file that holds it (a coordinator's key mounted in a container); `Oidc:ClientSecretFile` names that file without
+  the `@`; `UseClientSecret` (`NodeOidcOptions.ClientSecretProvider`) is a host's own code, a vault or an environment variable. Setting
+  two is a start refused by name. A value and a file are read once when `OidcTokenClient` is made (`SecretReference`, the one place): a
+  file that cannot be read, or is empty, stops the start by the setting's name, never by its path or its content. A provider is asked each
+  time a token is requested, a retry after a 401 included, so a rotated key is the next one presented; what it throws is the inner
+  exception of the failure, never its message, and the text it returns is used as it is, so only a provider carries a secret that
+  begins with `@`. `dtpipe node` resolves its own references (`src/DtPipe/CLAUDE.md`) and hands the value over, so such a secret cannot
+  pass through it (a coordinator's key never begins with `@`).
+  `[CI: Hosting.Tests KeyTokenTests, DtPipeNodeBuilderTests]`
 - **A node the coordinator disconnects connects again.** SignalR's automatic reconnect does not
   cover a connection the server closes (a reconnect the coordinator asked for, an announcement it
   refused), so `hub.Closed` only signals and `ReconnectLoopAsync` starts the connection again and

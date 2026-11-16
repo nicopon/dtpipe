@@ -6,9 +6,7 @@ using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using TransportR.Abstractions;
 using TransportR.Hub;
-using TransportR.Interfaces;
 
 namespace DtPipe.PipelineNode.Tests.Infrastructure;
 
@@ -62,7 +60,6 @@ public sealed class NodeTestHost : IAsyncDisposable
                                     });
                             services.AddAuthorization();
                         }
-                        hub.Build();
                     })
                     .Configure(app =>
                     {

@@ -1,7 +1,7 @@
 using DtPipe.Coordinator.Contracts;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
-using TransportR.Interfaces;
+using TransportR.Hub;
 
 namespace DtPipe.Coordinator;
 

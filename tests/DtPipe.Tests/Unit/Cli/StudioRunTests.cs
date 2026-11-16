@@ -342,6 +342,22 @@ public sealed class StudioRunTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_branch_that_references_a_brick_and_says_more_is_refused_by_name_and_said_by_the_composition()
+    {
+        await StartAsync(coordinator: true);
+        const string yaml = "small:\n  input: \"brick:n1/orders\"\n  output: \"null:\"\n";
+        var hash = await SaveAsync(yaml);
+
+        var (status, body) = await CallAsync(HttpMethod.Post, "/api/run/prepare", new { path = "job.yaml", hash });
+        var (_, cards) = await CallAsync(HttpMethod.Post, "/api/design/decompose", new { yaml });
+        var (_, composed) = await CallAsync(HttpMethod.Post, "/api/design/compose", cards.GetProperty("model"));
+
+        Assert.Equal(HttpStatusCode.Conflict, status);
+        Assert.Contains("'small' references a brick and says more", body.GetProperty("error").GetString());
+        Assert.Contains(composed.GetProperty("warnings").EnumerateArray(), w => w.GetString()!.Contains("'small' references a brick and says more"));
+    }
+
+    [Fact]
     public async Task A_sink_brick_is_written_to_a_throwaway_file_and_the_confirmation_says_so()
     {
         await StartAsync(coordinator: true);

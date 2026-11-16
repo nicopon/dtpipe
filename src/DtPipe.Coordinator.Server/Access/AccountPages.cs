@@ -49,7 +49,7 @@ internal static class AccountPages
     /// <summary>
     /// A key for a session, mapped only where <see cref="CoordinatorServerOptions.SignsPeopleInByKey"/>, so over HTTPS or where HTTP is
     /// allowed. Every refusal of the key reads the same, whether it names no identity, is wrong, revoked or expired, opens a disabled
-    /// identity or one that is no person; the form is checked as the issuer's token endpoint is (its refusals counted per source and per
+    /// identity or one that is no person, and its words name every one of those causes without saying which; the form is checked as the issuer's token endpoint is (its refusals counted per source and per
     /// identity, bounded in size) and carries its antiforgery token. The session holds the identity's id and the key's
     /// (<see cref="TrustedIdp.KeyPersonSession"/>), never the key, and no log carries the key or a part of it.
     /// </summary>
@@ -76,7 +76,7 @@ internal static class AccountPages
         {
             if (!limits.Refused(source, named ?? "")) return TooMany(http, server);
             logger.LogWarning("A sign-in with a key for {ClientId} from {Source} was refused", named ?? "a text that is no key", source);
-            return LoginForm(http, server, returnUrl, "This key signs nobody in here.", StatusCodes.Status400BadRequest);
+            return LoginForm(http, server, returnUrl, "No person signs in to this coordinator with this key: it is unknown, revoked, expired, or made for a node or a runner.", StatusCodes.Status400BadRequest);
         }
         await http.SignInAsync(TrustedIdp.CookieScheme, TrustedIdp.KeyPersonSession(server, person.ClientId, key.Id));
         return Results.Redirect(returnUrl);

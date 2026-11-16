@@ -50,8 +50,10 @@ A first pipeline in six steps, with no database to set up:
 | [REFERENCE.md](./REFERENCE.md) | The flags in common use, the YAML job schema, provider options, the MCP tools. `dtpipe --help` lists every flag |
 | [EXTENDING.md](./EXTENDING.md) | Writing a new adapter or transformer |
 
-Running one pipeline across several hosts, and `dtpipe studio`, are experimental and outside the
-versioning promise: see [docs/experimentation.md](./docs/experimentation.md).
+Beyond the command line: one pipeline across several hosts
+([docs/distributed.md](./docs/distributed.md)), `dtpipe studio` to design and preview jobs in a
+local page, with an AI assistant if you give it a model, and `dtpipe mcp` for an assistant you
+already use.
 
 ## License
 

@@ -26,17 +26,31 @@ public class ConversationWindowManager
     /// is supplied, a structured FACTS block (inspected schemas, sample rows, recent errors)
     /// is emitted instead of a lossy one-line summary, so no facts are discarded (F4).
     /// The full journal is always preserved separately in <see cref="AgentTrajectory"/>.
+    ///
+    /// <para>
+    /// <paramref name="force"/> compacts below the message count too: the caller reads the window's
+    /// use in tokens, which a count does not see. What is kept is the system messages, the last
+    /// messages from a whole exchange on (a tool answer never opens the window without the call it
+    /// answers), and the person's last message wherever it stands, since the turn in flight is
+    /// what the model must still know it was asked.
+    /// </para>
     /// </summary>
-    public List<ChatMessage> Compact(List<ChatMessage> messages, AgentContextStore? contextStore = null)
+    public List<ChatMessage> Compact(List<ChatMessage> messages, AgentContextStore? contextStore = null, bool force = false)
     {
-        if (messages.Count <= _maxMessages) return messages;
+        if (!force && messages.Count <= _maxMessages) return messages;
+        if (messages.Count <= _keepSystemMessages + _keepRecentMessages) return messages;
+
+        int recentStart = messages.Count - _keepRecentMessages;
+        while (recentStart > _keepSystemMessages && messages[recentStart].Role == "tool") recentStart--;
 
         var systemMessages = messages.Take(_keepSystemMessages).ToList();
-        var recentMessages = messages.TakeLast(_keepRecentMessages).ToList();
+        var recentMessages = messages.Skip(recentStart).ToList();
         var middleMessages = messages
              .Skip(_keepSystemMessages)
-             .Take(messages.Count - _keepSystemMessages - _keepRecentMessages)
+             .Take(recentStart - _keepSystemMessages)
              .ToList();
+        var lastUser = messages.FindLastIndex(m => m.Role == "user");
+        var askedMessage = lastUser >= _keepSystemMessages && lastUser < recentStart ? messages[lastUser] : null;
 
         var result = new List<ChatMessage>();
         result.AddRange(systemMessages);
@@ -63,6 +77,7 @@ public class ConversationWindowManager
             result.Add(new ChatMessage("assistant", summary));
         }
 
+        if (askedMessage is not null) result.Add(askedMessage);
         result.AddRange(recentMessages);
         return result;
     }

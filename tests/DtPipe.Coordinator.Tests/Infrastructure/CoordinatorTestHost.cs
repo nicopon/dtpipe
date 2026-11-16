@@ -9,8 +9,6 @@ using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using TransportR.Client;
-using TransportR.Client.Services;
-using TransportR.FlowControl;
 using TransportR.Hub;
 
 namespace DtPipe.Coordinator.Tests.Infrastructure;
@@ -134,7 +132,6 @@ public sealed class CoordinatorTestHost : IAsyncDisposable
                                     });
                             services.AddAuthorization();
                         }
-                        hub.Build();
                         services.AddSingleton<AnnouncementGate>();
                         services.AddNodeLink<TestNodeHub>();
                         // After AddCoordinatorHub: lets a test override ReplicaRegistryOptions or

@@ -36,7 +36,7 @@ deliberate, understood shift.
 ## No magic conversions in the engine core
 
 Core, Processors and the DAG orchestrator never convert types implicitly to work around an adapter.
-On a type mismatch, prefer in order: (1) adapter parameterisation (`--column-type "Id:uuid"`), (2) a
+On a type mismatch, prefer in order: (1) adapter parameterisation (`--column-types "Id:uuid"`), (2) a
 transformer (`--compute`), (3) the SQL processor (`CAST(... AS UUID)`). Forbidden:
 - detecting a source format and silently converting in a type mapper or schema factory;
 - changing `ArrowTypeMapper` / `PipeColumnInfo` to compensate for an adapter;
@@ -134,10 +134,12 @@ checkpoint.
 
 Safety is a **read-side** problem: a source can mutate (`DELETE … RETURNING`, `--duck-init`,
 `ATTACH`). `SampleModeSafetyGate` classifies the resolved source SQL; `ReadOnlySessionSql` lets the
-server refuse. **Never report a guarantee that is sometimes absent as always there.**
+server refuse. **The verdict is read before the reader opens**: opening it plays the source's own init
+(`--duck-init`), so a refusal given after the open reports a statement that already ran. **Never report
+a guarantee that is sometimes absent as always there.**
 
-`[CI: SampleModeEquivalenceTests, SampleModeDagTests, SampleModeSafetyGateTests, validate_single_engine.sh,
-validate_sample_safety.sh]` Detail: `src/DtPipe/CLAUDE.md`.
+`[CI: SampleModeEquivalenceTests, SampleModeDagTests, SampleModeSafetyGateTests, SampleModeRefusalOrderTests,
+validate_single_engine.sh, validate_sample_safety.sh]` Detail: `src/DtPipe/CLAUDE.md`.
 
 ## Checkpoints
 

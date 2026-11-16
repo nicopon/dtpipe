@@ -9,10 +9,10 @@
 // pointer while it is dragged and the highlight of the card it selects (redrawing the card would drop the drag),
 // the wire being drawn, a pane's size while its handle moves, and the status line.
 
-/** @typedef {"palette" | "canvas" | "inspector" | "drawer" | "bar" | "jobs" | "coordinator"} Zone */
+/** @typedef {"palette" | "canvas" | "inspector" | "drawer" | "bar" | "jobs" | "coordinator" | "agent"} Zone */
 
 /** @type {Zone[]} */
-const ORDER = ["palette", "canvas", "inspector", "drawer", "bar", "jobs", "coordinator"];
+const ORDER = ["palette", "canvas", "inspector", "drawer", "bar", "jobs", "coordinator", "agent"];
 
 /** @type {Map<Zone, Array<() => void>>} */
 const renderers = new Map();

@@ -31,7 +31,7 @@ public sealed class StudioBricks : IBrickLookup
     public DesignBrick? Find(string key) => _bricks.TryGetValue(key, out var b) ? new DesignBrick(b.Key, b.Kind, b.Node, b.Version, b.Title, b.Online) : null;
 
     public YamlMappingNode BranchOf(DesignBrick brick) => _bricks.TryGetValue(brick.Key, out var b)
-        ? (YamlMappingNode)JobYaml.FromJson(b.Branch)
+        ? BrickRef.Branch(b.Node, b.Id, b.Kind == StepKinds.Sink)
         : throw new InvalidOperationException($"No brick '{brick.Key}' is in the catalog read last.");
 
     public DesignBrick? Match(YamlMappingNode branch) => Answer(branch)?.Match is { } key ? Find(key) : null;

@@ -1,6 +1,6 @@
 // Library: the pipelines kept in the coordinator's git repository, their plan and deployment
 // state and their history. A pipeline is written with dtpipe studio and published into it.
-import { ago, api, deploymentOf, esc, healthChip, isActive, lastRunOf, toast } from "./core.js";
+import { ROWS_CROSSED_HINT, ago, api, deploymentOf, esc, healthChip, isActive, lastRunOf, rowsCrossed, runStateLabel, toast } from "./core.js";
 import * as detail from "./library-detail.js";
 
 let host = null;
@@ -50,8 +50,9 @@ function deploymentChip(e) {
 function runCell(id) {
   const run = lastRunOf(id);
   if (!run) return `<span class="hint">never run</span>`;
-  const rows = run.result?.edgeCounts?.reduce((s, e) => s + (e.received ?? 0), 0);
-  return `<span class="outcome-chip ${esc(run.state)}">${esc(run.state)}</span> <span class="hint">${isActive(run) ? "" : ago(run.finishedAt)}${rows ? ` · ${rows.toLocaleString("en-US")} rows` : ""}</span>`;
+  const rows = rowsCrossed(run);
+  const why = run.reason ? ` <span class="hint" title="${esc(run.reason)}">· ${esc(run.reason.length > 90 ? `${run.reason.slice(0, 90)}…` : run.reason)}</span>` : "";
+  return `<span class="outcome-chip ${esc(run.state)}">${esc(runStateLabel(run.state))}</span> <span class="hint" title="${esc(ROWS_CROSSED_HINT)}">${isActive(run) ? "" : ago(run.finishedAt)}${rows ? ` · ${rows.toLocaleString("en-US")} rows crossed` : ""}</span>${why}`;
 }
 
 // Deploy, Run and Undeploy from the list. Deploying arms the pipeline at the commit the library holds, and the server
@@ -62,9 +63,9 @@ function deployRowActions(e) {
   const unbound = (e.bindingProblems || []).some((p) => p.blocking);
   const deploy = !active && !unbound;
   const run = deployment && deployment.state !== "failed";
-  return `<button class="small" data-deploy="${esc(e.id)}" ${deploy ? "" : "disabled"} title="${unbound ? "Its bindings do not hold" : ""}">${deployment ? "Redeploy" : "Deploy"}</button>
-        <button class="small primary" data-run="${esc(e.id)}" ${run ? "" : "disabled"}>Run</button>
-        ${deployment ? `<button class="small ghost danger" data-undeploy="${esc(e.id)}" ${active ? "disabled" : ""}>Undeploy</button>` : ""}`;
+  return `<button class="small" data-needs="designer" data-deploy="${esc(e.id)}" ${deploy ? "" : "disabled"} title="${unbound ? "Its bindings do not hold" : ""}">Deploy</button>
+        <button class="small primary" data-needs="designer" data-run="${esc(e.id)}" ${run ? "" : "disabled"}>Run</button>
+        ${deployment ? `<button class="small ghost danger" data-needs="designer" data-undeploy="${esc(e.id)}" ${active ? "disabled" : ""}>Undeploy</button>` : ""}`;
 }
 
 function render() {
@@ -79,8 +80,8 @@ function render() {
       <td class="actions-cell">
         <a class="button small" href="#/library/${encodeURIComponent(e.id)}" title="The plan a launch would make, and its runs">Open</a>
         ${deployRowActions(e)}
-        <button class="small ghost" data-history="${esc(e.id)}">${historyOf === e.id ? "Hide history" : "History"}</button>
-        <button class="small ghost danger" data-delete="${esc(e.id)}">Delete</button>
+        <button class="small ghost" data-history="${esc(e.id)}">${historyOf === e.id ? "Hide versions" : "Versions"}</button>
+        <button class="small ghost danger" data-needs="designer" data-delete="${esc(e.id)}">Delete</button>
       </td>
     </tr>
     ${historyOf === e.id ? `<tr class="history-row"><td colspan="6">${historyPanel(e.id)}</td></tr>` : ""}`).join("");
@@ -105,7 +106,7 @@ function historyPanel(id) {
     <div class="commit ${shown?.commit === c.hash ? "active" : ""}">
       <code>${esc(c.hash.slice(0, 8))}</code> <span>${esc(c.message)}</span> <span class="hint">${esc(new Date(c.date).toLocaleString())}</span>
       <span class="actions"><button class="small ghost" data-show="${esc(c.hash)}">show</button>
-      <button class="small ghost" data-restore="${esc(c.hash)}" data-id="${esc(id)}">restore</button></span>
+      <button class="small ghost" data-needs="designer" data-restore="${esc(c.hash)}" data-id="${esc(id)}">restore</button></span>
     </div>`).join("");
   return `<div class="history-panel"><div>${list || `<p class="hint">No commit.</p>`}</div>
     ${shown ? `<div class="grid2"><div><h3>Change</h3><pre class="diff">${diffHtml(shown.diff)}</pre></div><div><h3>Job at ${esc(shown.commit.slice(0, 8))}</h3><pre>${esc(shown.yaml)}</pre></div></div>` : ""}</div>`;
@@ -146,12 +147,12 @@ async function onClick(e) {
       toast(`${id} deployed: every fragment registered.`, "info");
     } else if (t.dataset.run) {
       const run = await api("/api/runs", { pipelineId: t.dataset.run });
-      toast(`${run.runId} ${run.state}.`, "info");
+      toast(`${run.runId} ${runStateLabel(run.state)}.`, "info");
     } else if (t.dataset.undeploy) {
       await api(`/api/deployments/${encodeURIComponent(t.dataset.undeploy)}`, undefined, "DELETE");
     } else if (t.dataset.delete) {
       const id = t.dataset.delete;
-      if (!confirm(`Delete ${id} from the library? Its history stays in the repository.`)) return;
+      if (!confirm(`Delete ${id} from the library? Its versions stay in the repository.`)) return;
       await api(`/api/library/${encodeURIComponent(id)}`, undefined, "DELETE");
       if (historyOf === id) historyOf = null;
       await load();

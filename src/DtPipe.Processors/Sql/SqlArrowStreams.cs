@@ -81,21 +81,50 @@ internal sealed class StaticArrowStream : IArrowArrayStream
 
 internal interface IProjectableArrowStream : IArrowArrayStream
 {
+    /// <summary>What every exported column name starts with: it names this stream in a plan.</summary>
+    string Prefix { get; }
+
+    /// <summary>The schema of the data the stream carries, under its own column names.</summary>
+    Schema SourceSchema { get; }
+
     void SetProjectedColumns(IReadOnlyList<string>? columns);
 }
 
+/// <summary>
+/// A stream DuckDB scans through the C Data Interface, which hands the scan only the columns the plan
+/// uses, in the plan's order. The exported schema names each column behind <see cref="Prefix"/>, so the
+/// projection a plan lists for a scan names the stream it belongs to: two streams that carry a column of
+/// the same name are told apart, and a stream is never handed a column another scan asked for.
+/// A scan ends on the stream's end, so a second end means a second scan, which found nothing or part of the
+/// rows: it fails the query rather than let it finish on them. EXPLAIN cannot name a scan that reads no
+/// column, so this is what catches one.
+/// </summary>
 internal sealed class ProjectedArrowStream : IProjectableArrowStream
 {
     private readonly IArrowArrayStream _underlying;
+    private readonly Schema _exportedSchema;
     private List<string>? _projections;
     private Schema? _projectedSchema;
+    private readonly string _alias;
+    private int _ends;
 
-    public ProjectedArrowStream(IArrowArrayStream underlying)
+    public ProjectedArrowStream(IArrowArrayStream underlying, string prefix, string alias)
     {
         _underlying = underlying;
+        _alias = alias;
+        Prefix = prefix;
+        var source = underlying.Schema;
+        var fields = source.FieldsList
+            .Select(f => new Field(prefix + f.Name, f.DataType, f.IsNullable, f.HasMetadata ? f.Metadata : null))
+            .ToList();
+        _exportedSchema = new Schema(fields, source.HasMetadata ? source.Metadata : null);
     }
 
-    public Schema Schema => _underlying.Schema;
+    public string Prefix { get; }
+
+    public Schema SourceSchema => _underlying.Schema;
+
+    public Schema Schema => _exportedSchema;
 
     public void SetProjectedColumns(IReadOnlyList<string>? columns)
     {
@@ -124,7 +153,13 @@ internal sealed class ProjectedArrowStream : IProjectableArrowStream
     public async ValueTask<RecordBatch?> ReadNextRecordBatchAsync(CancellationToken cancellationToken = default)
     {
         var batch = await _underlying.ReadNextRecordBatchAsync(cancellationToken);
-        if (batch == null) return null;
+        if (batch == null)
+        {
+            if (Interlocked.Exchange(ref _ends, 1) != 0)
+                throw new InvalidOperationException(
+                    $"'{_alias}' was read to its end a second time: the query scans it more than once, and a source is a stream a scan reads to its end. Read '{_alias}' once in a CTE (WITH c AS MATERIALIZED (SELECT * FROM {_alias}) ...) and select from that.");
+            return null;
+        }
 
         if (_projections == null || _projections.Count == 0 || _projectedSchema == null)
             return batch;

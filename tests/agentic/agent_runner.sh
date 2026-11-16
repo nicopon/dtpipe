@@ -316,21 +316,6 @@ Before calling any tool or giving a final answer, state in text:
 
     record_benchmark_row "$MODEL" "$MISSION_NAME" "$VALIDATION_SUCCESS" "$ITERATION" "$TOOL_COUNTS_JSON"
 
-     # (F3) Determinism variance is deliberately NOT recorded here.
-     #
-     # This runner drives its own ReAct loop in bash (curl -> Ollama, FIFO -> dtpipe mcp);
-     # it never invokes `dtpipe agent`, so no DeterminismReport is produced and there is no
-     # observed distinct-YAML count to report. An earlier version wrote a row using
-     # ${AGENT_REPEATED_VARIANCE:-0} — a variable nothing ever exported — so every row said
-     # "variance: 0" by construction and the gate's variance criterion could never fire.
-     #
-     # analyze-traces.sh treats absent variance data as "not a failure", so writing nothing is
-     # both honest and safe: the criterion simply does not apply to these missions.
-     #
-     # To produce real variance data, the mission must run `dtpipe agent --repeat N` (which does
-     # replicate the planning loop from a fresh conversation — AgentExecutor.cs) and emit the
-     # resulting DeterminismReport.Variance into variance_results.jsonl.
-
     echo "📊 Execution Stats:"
     echo "  - Model: $MODEL"
     echo "  - Success: $VALIDATION_SUCCESS"

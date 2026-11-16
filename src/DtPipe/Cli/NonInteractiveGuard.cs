@@ -4,17 +4,18 @@ using System.Threading;
 namespace DtPipe.Cli;
 
 /// <summary>
-/// Ambient flag: true while execution is inside a tool call the agent's LLM made, as opposed to a
-/// human typing at the CLI. A terminal-capability check alone cannot tell the two apart: <c>dtpipe
-/// agent</c>'s own TUI and the MCP tools it invokes in-process (<see cref="Agent.McpToolProvider"/>)
-/// share the exact same real console and stdin, so <c>Console.IsInputRedirected</c> is false and
+/// Ambient flag: true while execution is inside a call nobody is watching — a tool call the
+/// agent's LLM made, a studio run — as opposed to a human typing at the CLI. A terminal-capability
+/// check alone cannot tell the two apart: the MCP tools the agent invokes in-process
+/// (<see cref="Agent.McpToolProvider"/>) share the exact same real console and stdin as the person
+/// who started the process, so <c>Console.IsInputRedirected</c> is false and
 /// <c>IAnsiConsole.Profile.Capabilities.Interactive</c> is true in both cases. Only the caller knows
 /// which one it is — hence an explicit scope rather than another capability probe.
 ///
 /// Every console path that would otherwise block on a keypress (<c>Console.ReadKey</c>, a Spectre
 /// <c>SelectionPrompt</c>) because the terminal *looks* interactive must check <see cref="IsSuppressed"/>
-/// first. Without it, an LLM-driven tool call — nobody is watching for a prompt — hangs forever, and
-/// the CLI's own timeout machinery never fires because nothing is wrong with the LLM call itself.
+/// first. Without it, an unattended call hangs forever, and the CLI's own timeout machinery never
+/// fires because nothing is wrong with the LLM call itself.
 /// </summary>
 public static class NonInteractiveGuard
 {

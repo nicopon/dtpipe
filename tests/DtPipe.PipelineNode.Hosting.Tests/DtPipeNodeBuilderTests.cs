@@ -1,5 +1,6 @@
 using System.Text;
 using DtPipe.Coordinator.Contracts;
+using DtPipe.Jobs;
 using DtPipe.PipelineNode.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -38,7 +39,7 @@ public class DtPipeNodeBuilderTests
 
         var brick = Assert.Single(DefinitionOf(services).Bricks);
         Assert.Equal(BrickKind.Source, brick.Kind);
-        Assert.Equal(BrickRules.Declared(BrickKind.Source, BrickBranch), BrickRules.Declared(brick.Kind, brick.BranchJson));
+        Assert.Equal(BrickRules.Declared(BrickKind.Source, JobYaml.ParseBranch(BrickBranch)), BrickRules.Declared(brick.Kind, brick.Branch));
     }
 
     [Fact]
@@ -49,8 +50,8 @@ public class DtPipeNodeBuilderTests
         services.AddDtPipeNode(_ => { }).AddBricks(file.GetSection("bricks"));
 
         var brick = Assert.Single(DefinitionOf(services).Bricks);
-        Assert.Equal(BrickRules.Declared(BrickKind.Sink, """{ "output": "csv:out.csv", "keys": ["a", "b"] }"""),
-                     BrickRules.Declared(brick.Kind, brick.BranchJson));
+        Assert.Equal(BrickRules.Declared(BrickKind.Sink, JobYaml.ParseBranch("""{ "output": "csv:out.csv", "keys": ["a", "b"] }""")),
+                     BrickRules.Declared(brick.Kind, brick.Branch));
     }
 
     [Fact]
@@ -62,11 +63,15 @@ public class DtPipeNodeBuilderTests
         Assert.Contains("'x'", error.Message);
     }
 
-    [Fact]
-    public void A_branch_that_is_not_an_object_is_refused()
+    [Theory]
+    [InlineData("[1, 2]")]
+    [InlineData("""{"input": "a",""")]
+    [InlineData("input: a\ninput: b\n")]
+    public void A_branch_that_is_not_one_mapping_is_refused_where_it_is_added(string branch)
     {
         var builder = new ServiceCollection().AddDtPipeNode(_ => { });
-        Assert.Throws<ArgumentException>(() => builder.AddBrick("x", BrickKind.Source, "x", "[1, 2]"));
+        var error = Assert.Throws<ArgumentException>(() => builder.AddBrick("x", BrickKind.Source, "x", branch));
+        Assert.Contains("'x'", error.Message);
     }
 
     [Fact]
@@ -139,6 +144,31 @@ public class DtPipeNodeBuilderTests
         var error = await Assert.ThrowsAsync<OptionsValidationException>(() => host.StartAsync(TestContext.Current.CancellationToken));
         Assert.Contains("DtPipeNode: Name is required.", error.Failures);
         Assert.Contains("DtPipeNode: CoordinatorUrl must be an absolute URL.", error.Failures);
-        Assert.Contains("DtPipeNode: Oidc:ClientSecret is required.", error.Failures);
+        Assert.Contains("DtPipeNode: Oidc:ClientSecret is required (or Oidc:ClientSecretFile, or a secret provider).", error.Failures);
+    }
+
+    [Fact]
+    public void The_secret_comes_from_one_source_a_value_a_file_or_a_provider()
+    {
+        static DtPipeNodeOptions Resolve(Action<NodeOidcOptions> secret, Action<DtPipeNodeBuilder>? builder = null)
+        {
+            var services = new ServiceCollection();
+            var node = services.AddDtPipeNode(o =>
+            {
+                o.Name = "crm";
+                o.CoordinatorUrl = "http://coordinator:8080";
+                secret(o.Oidc);
+            });
+            builder?.Invoke(node);
+            return services.BuildServiceProvider().GetRequiredService<IOptions<DtPipeNodeOptions>>().Value;
+        }
+
+        Assert.Equal("secret", Resolve(o => o.ClientSecret = "secret").Oidc.ClientSecret);
+        Assert.Equal("/run/secrets/crm", Resolve(o => o.ClientSecretFile = "/run/secrets/crm").Oidc.ClientSecretFile);
+        Assert.NotNull(Resolve(_ => { }, node => node.UseClientSecret(_ => ValueTask.FromResult("secret"))).Oidc.ClientSecretProvider);
+
+        var both = Assert.Throws<OptionsValidationException>(() => Resolve(o => { o.ClientSecret = "secret"; o.ClientSecretFile = "/run/secrets/crm"; }));
+        Assert.Contains("DtPipeNode: Oidc:ClientSecret, Oidc:ClientSecretFile and a secret provider are exclusive: set one.", both.Failures);
+        Assert.Throws<OptionsValidationException>(() => Resolve(o => o.ClientSecret = "secret", node => node.UseClientSecret(_ => ValueTask.FromResult("other"))));
     }
 }

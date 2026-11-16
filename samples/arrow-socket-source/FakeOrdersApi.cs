@@ -20,21 +20,13 @@ public sealed class FakeOrdersApi(int totalOrders, int pageSize, TimeSpan pageDe
 {
     private static readonly string[] Countries = ["fr", "de", "es", "it", "be", "nl", "pt", "pl"];
 
-    private int _pagesFetched;
-
-    public int TotalOrders => totalOrders;
-
-    /// <summary>How many pages the API has served since the process started: what a reader that left early must not make grow.</summary>
-    public int PagesFetched => Volatile.Read(ref _pagesFetched);
-
     public async IAsyncEnumerable<IReadOnlyList<RawOrder>> FetchPagesAsync(
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct, bool delay = true)
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
         for (var start = 0; start < totalOrders; start += pageSize)
         {
-            if (delay && pageDelay > TimeSpan.Zero) await Task.Delay(pageDelay, ct);
+            if (pageDelay > TimeSpan.Zero) await Task.Delay(pageDelay, ct);
             ct.ThrowIfCancellationRequested();
-            Interlocked.Increment(ref _pagesFetched);
             var count = Math.Min(pageSize, totalOrders - start);
             var page = new List<RawOrder>(count);
             for (var i = start; i < start + count; i++) page.Add(Order(i));

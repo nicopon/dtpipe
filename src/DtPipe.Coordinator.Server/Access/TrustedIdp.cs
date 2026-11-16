@@ -10,9 +10,7 @@ using Microsoft.AspNetCore.DataProtection.Repositories;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
-using TransportR.Identity;
-using TransportR.Interfaces;
-using TransportR.Models;
+using TransportR.Hub;
 
 namespace DtPipe.Coordinator.Server.Access;
 

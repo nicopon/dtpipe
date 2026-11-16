@@ -60,8 +60,10 @@ one of their types reached through another assembly's signature.
 
 ## Options
 
-Provider wiring: `RegisterReader<T>()` / `RegisterWriter<T>()` / `RegisterStreamTransformer<T>()` in
-`Program.cs`. `CliProviderFactory<T>` wraps descriptors; `CliOptionBuilder.GenerateFlagDefsForType`
+Provider wiring: `ComponentCatalog.Discover` finds every descriptor and factory of the four
+component assemblies by its interface, and `Program.cs` wraps each one; a new component needs no
+registration. A name taken twice in one category stops the start (`Validate`), and a descriptor
+needs a parameterless constructor. `CliProviderFactory<T>` wraps descriptors; `CliOptionBuilder.GenerateFlagDefsForType`
 reflects on `[ComponentOption]`; `FlagBinder.Bind(options, args, registry)` binds at execution.
 Options live scoped in `OptionsRegistry`, keyed by type.
 
@@ -117,15 +119,24 @@ hooks** (SQL on the target connection), the cursor and the metrics file.
 
 A reader can mutate: `DELETE … RETURNING`, `… OUTPUT`, `--duck-init`, an `ATTACH` inside `--sql`.
 `--limit` bounds what the client reads, never what the server already destroyed.
-`SampleModeSafetyGate` classifies the **resolved** pipeline's source SQL (so a `@file` query is
-covered), and `ISqlDialect.ReadOnlySessionSql` lets the server refuse
-instead of a regex guessing.
+`SampleModeSafetyGate` classifies the source's SQL by what it designates: the reader's options and what
+a stream processor runs itself (`ISqlBearing`: its query and its `duck-init`), each resolved through
+`IStringContentResolver` before it is judged, since the reader and the processor resolve an `@file`,
+`${{NAME}}` or `keyring://` only at their open. The gate therefore reads a file or a secret a few
+moments before the source would; a value that names a reference it does not resolve is judged as
+written. `ISqlDialect.ReadOnlySessionSql` lets the server refuse instead of a regex guessing.
 
-Never classify writer hooks: they are already suppressed, so refusing them adds no safety and trains
-users to pass `--allow-destructive` by reflex, which unlocks the source side too.
+Never classify writer hooks in a sample: they are already suppressed, so refusing them adds no
+safety and trains whoever unlocks the check (`allowDestructive` of `execute-yaml-job`) to do it by
+reflex, which unlocks the source side too.
 
 SQL Server returns `null` for `ReadOnlySessionSql`: `ApplicationIntent=ReadOnly` routes to a replica
 and does not make a session read-only. The report states which guarantee the run had.
+
+`ExportRunState.RunAsync` reads the verdict (`RefuseSourceThatCouldMutateAsync`) between `ReaderFactory.Create`
+and `Reader.OpenAsync`: it needs the SQL of the options and no schema. `PrepareWriterAsync` records the
+run's `Enforcement` afterwards (`ReportSampleEnforcement`), since the dialect that answers it is the
+writer's and the writer is built after the open. A real run reaches neither.
 
 A real run (`execute-yaml-job`, the studio's run) is checked by `JobSqlSafety` on the **parsed** job,
 with the same rule and policy: the SQL of each provider block (a reader's query, a writer's hooks, a
@@ -133,7 +144,7 @@ stream processor's text values) and the network reach of each endpoint, never th
 comment or a transformer option. A real run executes the writer's hooks, so they are classified there.
 The "what is SQL" rule lives once, in `SampleModeSafetyGate.SqlBearingValues`.
 
-`[CI: SampleModeSafetyGateTests, SampleModeDagTests, JobSqlSafetyTests, validate_sample_safety.sh]` `[unchecked: a query that writes
+`[CI: SampleModeSafetyGateTests, SampleModeDagTests, SampleModeRefusalOrderTests, JobSqlSafetyTests, validate_sample_safety.sh]` `[unchecked: a query that writes
 through a function — SELECT my_function() passes a verb scan, hence the server-enforced form]`
 
 ## `dtpipe node`
@@ -167,8 +178,9 @@ would not read back, prints nothing else on stdout, and with `--out` creates the
   secret, and a file that cannot be read is named by its exception's type, never its path, which may be a key pasted after the
   `@`. `NodeBricks.ReadSecretAsync` is the one reading, which `dtpipe studio --key` shares.
   `[CI: PipelineNode.Tests NodeCommandTests; DtPipe.Tests StudioKeyTests]` `[unchecked: the refusals of an unset variable, an absent alias and an unreadable file]`
-- **A brick holds no credential as a value.** Its version is the hash of its text; `ConnectionStringSanitizer.CarriesLiteralSecret`
-  judges every scalar of the branch as written, with its key, and a hit stops the start by naming the branch. Best-effort by
+- **A brick holds no credential as a value.** Its version is the hash of its text; `JobSecrets` (the one walk of
+  `ConnectionStringSanitizer.CarriesLiteralSecret`, which the studio's agent shares) judges every scalar of the branch as
+  written, with its key, and a hit stops the start by naming the branch. Best-effort by
   construction, in both directions (the vocabulary is the one `Sanitize` uses): an unknown key passes, a query comparing a
   column named like a credential is refused. The rule a brick's owner keeps is the reference.
   `[CI: NodeCommandTests — a literal refused, a reference passing, a query]` `[unchecked: a credential under a key the vocabulary does not know]`
@@ -206,39 +218,43 @@ for the caller of `Compute`, BranchFingerprintTests]`
 
 `dtpipe mcp` (STDIO) exposes schema discovery, validation and execution (`execute-yaml-job` is
 dry-run by default). Tool table: `REFERENCE.md#model-context-protocol-mcp-server`; options:
-`REFERENCE.md#agent-guardrails-isqlsafetypolicy--iapprovalgate`.
-`dtpipe agent` runs an interactive loop against Ollama/OpenAI (`AgentExecutor`, `AgentTui`,
-`OllamaClient`). Agent classes live under `Cli/Agent/`.
+`REFERENCE.md#mcp-guardrails-isqlsafetypolicy--iapprovalgate`. The agent (`AgentExecutor`,
+`OllamaClient`, `OpenAiClient`) lives under `Cli/Agent/`: a loop over a model and the tools of
+`McpToolProvider`, with no command of its own; `dtpipe studio --llm-provider` hosts it
+(`src/DtPipe/Cli/Studio/CLAUDE.md`). It names no console and no toolkit: a turn tells its
+host through `ITurnView` and `TurnSummaryModel`, and the host shows them. `[CI: validate_agent_boundary.sh]`
 
 The agentic CI (`.github/workflows/agentic-ci.yml`, `tests/agentic/run-all.sh --gate`, which calls
-`analyze-traces.sh --gate`) fails on an unhandled MCP error or a failed mission; its variance
-criterion applies only when `variance_results.jsonl` holds replication data, which the shipped
-missions do not produce. It is an integration check driven by a real model, not a regression gate:
-a red run does not tell a regression from a bad sample. The unit suite is the authoritative signal
-for F1–F7.
+`analyze-traces.sh --gate`) fails on an unhandled MCP error or a failed mission. It is an
+integration check driven by a real model, not a regression gate: a red run does not tell a
+regression from a bad sample. The unit suite is the authoritative signal for F1–F7.
 
 Hardening invariants — fail-closed, non-negotiable:
-- **F1 Planner/Executor split** — `--mode plan` (default) hides every tool marked `[WritesToTarget]`.
-  The set is reflected off the attribute, never listed. `dry-run` stays unmarked: it runs the real
-  pipeline with the writer neutralised, and the planner's role prompt tells it to call it.
-  `[CI: AgentModeTests — whole catalogue]`
-- **F2 Guardrails** — `ISqlSafetyPolicy` (destructive verbs / network) + `IApprovalGate`; a write
-  needs `apply` + approval + a clean check.
-- **F3 Determinism** — available, not default: `--temperature 0 --seed N --repeat N`;
-  `DeterminismReport` variance = distinct YAML − 1. Default temperature stays `1`: greedy decoding
-  degenerates weak quantised models. `--seed` keeps a run replayable at any temperature.
-- **F4 Non-destructive context** — fact cache + `ConversationWindowManager.Compact`.
+- **F1 No writing tool is offered** — `McpToolProvider` leaves out every tool marked
+  `[WritesToTarget]`. The set is reflected off the attribute, never listed. `dry-run` stays
+  unmarked: it runs the real pipeline with the writer neutralised, and the role prompt tells the
+  model to call it. The catalogue is not the only guard: `RunPlanningLoopAsync` answers a call to a
+  tool it did not offer (compared through `McpToolReflector.Normalise`, so `_` and `-` agree) with
+  an unknown-tool error and never dispatches it; the provider checks nothing.
+  `[CI: AgentCatalogueTests — whole catalogue; AgentExecutorCatalogueTests — the call]`
+- **F2 Guardrails** — `ISqlSafetyPolicy` (destructive verbs / network) + `IApprovalGate`;
+  `execute-yaml-job` writes only with `apply` + approval + a clean check, and the agent is never
+  offered it (F1).
+- **F4 Non-destructive context** — fact cache + `ConversationWindowManager.Compact`, which folds on the
+  message count and, once the use the provider reports reaches `AgentOptions.CompactFrom` of `num_ctx`, stays
+  folded for the conversation. `AgentExecutor.ContextNotice` tells the person (studio notice, trace `context`),
+  and a window nearly full is told even when nothing more can be folded: the provider drops the start of an
+  overflowing prompt in silence. `[CI: AgentContextWindowTests, ConversationWindowManagerTests]`
 - **F5 Every call of a turn runs** — the calls that run no pipeline in parallel (`Task.WhenAll`), then
   the tools marked `[RunsPipeline]` one at a time, in the order the model emitted them; results keep
-  the turn's order, and `--sequential` forces everything serial. The set is reflected off the
-  attribute, never listed; a tool that only parses, validates or reads a source stays unmarked.
-  `[CI: AgentParallelToolsTests, AgentModeTests — whole catalogue]`
+  the turn's order. The set is reflected off the attribute, never listed; a tool that only parses,
+  validates or reads a source stays unmarked.
+  `[CI: AgentParallelToolsTests, AgentCatalogueTests — whole catalogue]`
 - **F6 Single YAML path** — the `yamlContent` tool argument is the sole plan source.
 - **F7 CI gate** — `tests/agentic/analyze-traces.sh --gate` fails on unhandled MCP errors or a failed
-  mission. Its variance criterion applies only when `variance_results.jsonl` holds real replication
-  data, which the shipped missions do not produce. **Never record a placeholder variance**: a
-  criterion that cannot fire is worse than none. The authoritative signal for F1–F7 is the unit
-  suite (`Unit/Cli/Agent*Tests`, `Unit/Cli/Mcp*Tests`).
+  mission. **Never add a criterion nothing can trigger**: it reads as a guard and guards nothing. The
+  authoritative signal for F1, F2 and F4–F7 is the unit suite (`Unit/Cli/Agent*Tests`,
+  `Unit/Cli/Mcp*Tests`). `[CI: test-gate-smoke.sh]`
 
 Mandatory MCP directives:
 1. Reflect help from `[Description]` / `[ComponentHelp]`; never hardcode it. `[unchecked — nothing
@@ -254,11 +270,11 @@ Mandatory MCP directives:
 A process runs one pipeline at a time (`.claude/rules/engine-invariants.md`), so a run started beside another waits for
 it at `JobExecutor.ExecuteAsync`, behind `JobService.ExecutePipelineAsync`. The agent orders its own runs before they reach that gate
 (F5); `dtpipe mcp` relies on the gate alone, since the SDK handles a client's requests concurrently. `JobRunner` is the only caller-facing way to run a resolved job
-(MCP's sample and real write, `split`, `contract`, the studio): it arms a `RunReports` for the run
+(MCP's sample and real write, `contract`, the studio): it arms a `RunReports` for the run
 through `SampleReportCollector.Begin`, around the whole `ExecutePipelineAsync`, and returns a
 `RunOutcome` (exit code, branch failures, reports, checkpoint keys). A caller that answers a model words
 a failed run through `RunOutcome.FailureText` alone (the sample and the real write of `execute-yaml-job`
-share it), since a failed branch throws nothing and the console that would show its reason is silenced. `SampleReportCollector` is the
+share it; the studio asks it `forPerson`, which gives the cause alone), since a failed branch throws nothing and the console that would show its reason is silenced. `SampleReportCollector` is the
 singleton the engine and the observer publish to; it forwards to the collection the calling async flow
 armed, branches included, and drops everything when none is armed. Never read it from a caller, and
 never arm it from an `async` method that returns before the run ends: the value is gone with the frame.
@@ -273,10 +289,10 @@ ExecuteYamlJobRealRunTests]`
 
 ### The session trace
 
-`dtpipe agent --trace <path>` (or `$DTPIPE_AGENT_TRACE`) records a session as JSON lines: what the
-model was **given** (the role prompt the mode selected, the tool catalogue as offered), every step,
-each turn's verdict, and any `/note` left by the person watching. Keep the first two: without them a
-wrong tool call cannot be told apart from a tool never offered, or one whose description misled.
+`--agent-trace <path>` (or `$DTPIPE_AGENT_TRACE`) records a session as JSON lines: what the
+model was **given** (the role prompt, the tool catalogue as offered), every step, each turn's
+verdict, and the person's verdict on a turn (a thumb or a comment). Keep the first two: without them a wrong tool
+call cannot be told apart from a tool never offered, or one whose description misled.
 
 Never gate on its verdict: a fail-closed criterion over an LLM loop needs an attributable signal this
 file does not provide. Arguments and results pass through `ConnectionStringSanitizer`, which blanks

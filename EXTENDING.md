@@ -18,10 +18,13 @@ DtPipe.
 
 ### Where to put new code
 
-| What | Implementation | Descriptor / Registration |
+| What | Implementation | Descriptor / factory |
 |---|---|---|
-| **New reader/writer** | `src/DtPipe.Adapters/Adapters/<Provider>/` | `src/DtPipe.Adapters/Adapters/<Provider>/` |
-| **New transformer** | `src/DtPipe.Transformers/<Category>/<Name>/` | `src/DtPipe/Program.cs` |
+| **New reader/writer** | `src/DtPipe.Adapters/Adapters/<Provider>/` | beside it |
+| **New transformer** | `src/DtPipe.Transformers/<Category>/<Name>/` | beside it |
+
+Nothing is registered: at start, the CLI finds every descriptor and factory of its four component
+assemblies by the interface it implements.
 
 ---
 
@@ -56,17 +59,16 @@ public class MyProviderWriterOptions : IProviderOptions, IKeyAwareOptions
 
     public string? Key { get; set; }  // propagated by ProviderConfigurationService
 
-    [ComponentOption(Description = "Target table name", Hidden = true)]
-    public string Table { get; set; } = "export";
+    [ComponentOption("--table", Aliases = new[] { "-t" }, Description = "Target table name", Required = true)]
+    public string Table { get; set; } = string.Empty;
 
-    [ComponentOption(Description = "Write strategy", Hidden = true)]
+    [ComponentOption("--strategy", Aliases = new[] { "-s" }, Description = "Write strategy")]
     public MyProviderWriteStrategy? Strategy { get; set; }
 }
 ```
 
-> **Why `Hidden = true`?** Generic options (`--table`, `--strategy`, `--insert-mode`) appear once in
-> the CLI help under "Core". Provider-specific versions of these options are hidden to keep help
-> output clean while retaining backward compatibility.
+> Each writer declares its own `--table` and `--strategy`: the help lists every option under the
+> heading of the provider that takes it.
 
 ### Step 2 — IStreamReader / IDataWriter (in DtPipe.Adapters)
 
@@ -130,14 +132,11 @@ public class MyProviderReaderDescriptor : IProviderDescriptor<IStreamReader>
 }
 ```
 
-### Step 4 — Register in DI
+### Step 4 — Nothing to register
 
-In `src/DtPipe/Program.cs`:
-
-```csharp
-RegisterReader<MyProviderReaderDescriptor>(services);
-RegisterWriter<MyProviderWriterDescriptor>(services);
-```
+The descriptor is found at start by `ComponentCatalog`, which scans `DtPipe.Adapters` and the other
+component assemblies. It needs a parameterless constructor, and its `ComponentName` must be unique
+among readers (or among writers): a duplicate stops the start.
 
 ### Step 5 — (Optional) Type mapping
 
@@ -176,7 +175,7 @@ public class MyTransformerOptions : ITransformerOptions
 }
 ```
 
-`[ComponentOption]` supports `Name`, `Description`, `Aliases`, `Hidden`, and `Required`.
+`[ComponentOption]` supports `Name`, `Description`, `Aliases` and `Required`.
 If `Name` is omitted, the flag name is derived automatically from the property name and the prefix
 (e.g. property `Mode` with prefix `my` → `--my-mode`).
 
@@ -190,81 +189,62 @@ public class MyTransformer : IDataTransformer
     public MyTransformer(MyTransformerOptions options) => _options = options;
 
     public ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(
-        IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct)
+        IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
     {
         // Optionally add, remove, or rename columns in the schema.
         return ValueTask.FromResult(columns);
     }
 
-    public object?[] Transform(object?[] row)
+    public object?[]? Transform(IReadOnlyList<object?> row)
     {
-        // Transform and return the row.
-        // Avoid allocations in the hot path — reuse the input array when possible.
-        return row;
+        // Transform and return the row, or return null to drop it.
+        // Avoid allocations in the hot path — the row is usually already an array.
+        return row as object?[] ?? row.ToArray();
     }
 
-    public ValueTask<IReadOnlyList<object?[]>> FlushAsync()
-    {
-        // Called at end-of-stream. Return any buffered rows (stateful transformers only).
-        return ValueTask.FromResult<IReadOnlyList<object?[]>>(Array.Empty<object?[]>());
-    }
+    // Stateful transformers also implement Flush(): called at end-of-stream, it returns the buffered
+    // rows. The default returns none.
+    // public IEnumerable<object?[]> Flush() { ... }
 }
 ```
 
 ### Step 3 — IDataTransformerFactory
 
-The factory has three creation paths:
+Derive from `TransformerFactoryBase<TOptions>` (`DtPipe.Transformers.Abstract`), which supplies
+`CanHandle` and `CreateFromOptions`. Three members remain:
 
-- `CreateFromOptions(object)` — called by the CLI pipeline builder (main path since refactoring).
-- `CreateFromConfiguration(...)` — legacy path kept for compatibility; can delegate to
-  `CreateFromOptions`.
-- `CreateFromYamlConfig(TransformerConfig)` — YAML job file path.
+- `CreateFromTypedOptions(options)` — a transformer from options already bound, whether they came
+  from the command line or a job file.
+- `CreateFromConfiguration(...)` — the `(flag, value)` pairs of one step, in the order written.
+- `CreateOptionsFromYaml(TransformerConfig)` — the options a job file's `mappings:` describe, or
+  `null` when there is nothing to build. The caller binds the block's `options:` onto the object
+  you return, by property name.
 
 ```csharp
-using DtPipe.Configuration;
 using DtPipe.Core.Abstractions;
-using DtPipe.Core.Options;
 using DtPipe.Core.Pipelines;
+using DtPipe.Transformers.Abstract;
 
-public class MyTransformerFactory : IDataTransformerFactory
+public class MyTransformerFactory : TransformerFactoryBase<MyTransformerOptions>
 {
-    private readonly OptionsRegistry _registry;
+    public override string ComponentName => "my";
+    public override string Category => "Transformers";
 
-    public MyTransformerFactory(OptionsRegistry registry) => _registry = registry;
-
-    public string ComponentName => "my";
-    public string Category => "Transformers";
-    public Type OptionsType => typeof(MyTransformerOptions);
-    public bool CanHandle(string connectionString) => false;
-
-    // Main CLI path: options pre-bound by TransformerArgsBinder
-    public IDataTransformer? CreateFromOptions(object options) =>
-        options is MyTransformerOptions o ? CreateFromOptions(o) : null;
-
-    public IDataTransformer CreateFromOptions(MyTransformerOptions options) =>
+    protected override IDataTransformer? CreateFromTypedOptions(MyTransformerOptions options) =>
         new MyTransformer(options);
 
-    // Legacy path — kept for backward compatibility
-    public IDataTransformer CreateFromConfiguration(IEnumerable<(string Option, string Value)> config)
-    {
-        var options = new MyTransformerOptions
+    public override IDataTransformer CreateFromConfiguration(
+        IEnumerable<(string Option, string Value)> configuration) =>
+        new MyTransformer(new MyTransformerOptions
         {
-            Columns = config.Select(x => x.Value).ToArray()
-        };
-        return new MyTransformer(options);
-    }
+            Columns = configuration.Where(x => x.Option == "--my-column")
+                                   .Select(x => x.Value).ToArray()
+        });
 
-    // YAML path
-    public IDataTransformer? CreateFromYamlConfig(TransformerConfig config)
-    {
-        if (config.Mappings == null || config.Mappings.Count == 0) return null;
-        var options = new MyTransformerOptions
-        {
-            Columns = config.Mappings.Keys.ToArray()
-        };
-        if (config.Options != null) ConfigurationBinder.Bind(options, config.Options);
-        return new MyTransformer(options);
-    }
+    public override object? CreateOptionsFromYaml(TransformerConfig config) =>
+        config.Mappings is { Count: > 0 }
+            ? new MyTransformerOptions { Columns = config.Mappings.Keys.ToArray() }
+            : null;
 }
 ```
 
@@ -274,15 +254,12 @@ public class MyTransformerFactory : IDataTransformerFactory
 > need to customize flag definitions beyond what `[ComponentOption]` provides (e.g. non-standard
 > arity or complex aliases).
 
-### Step 4 — Register in DI
+### Step 4 — Nothing to register
 
-In `src/DtPipe/Program.cs`, add one line in `ConfigureServices`:
-
-```csharp
-RegisterTransformer<MyTransformerFactory>(services);
-```
-
-This wraps the factory in `CliDataTransformerFactory` and registers it as `IDataTransformerFactory`.
+`ComponentCatalog` finds the factory at start, and the CLI wraps it in `CliDataTransformerFactory`.
+Its `ComponentName` must be unique among transformers (a duplicate stops the start). The catalog
+reads the name by constructing the factory without services, so a factory whose constructor needs
+anything beyond what `ComponentCatalog.TryGetComponentName` supplies is skipped without a message.
 
 ### Step 5 — YAML syntax
 
@@ -334,25 +311,8 @@ Adapters that can emit Arrow `RecordBatch` directly should implement `IColumnarS
 This enables the columnar fast-path: when source and destination both support it, data passes
 through without row conversion.
 
-### Using ExportService Programmatically (Library Mode)
+### Driving the pieces from your own code
 
-```csharp
-var pipelineOptions = new PipelineOptions
-{
-    BatchSize    = 10_000,
-    // Schema options, sampling, dry-run — all optional
-};
-
-await exportService.RunExportAsync(
-    options:       pipelineOptions,
-    providerName:  "myprovider",    // display only — used in logs/UI
-    outputPath:    "output.parquet", // display only
-    ct:            cancellationToken,
-    pipeline:      new List<IDataTransformer>(),
-    readerFactory: myReaderFactory,
-    writerFactory: myWriterFactory,
-    registry:      optionsRegistry);
-```
-
-> `providerName` and `outputPath` are display-only strings forwarded to the `IExportObserver`.
-> Connection strings, queries, and strategies are passed via the `OptionsRegistry`.
+The loop that runs a reader through the transformers into a writer (`ExportService`) is part of
+the `dtpipe` tool, not of a package you can reference. To run your adapter or transformer from
+.NET code, write that loop: [dtpipe and .NET](docs/dotnet.md).

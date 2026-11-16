@@ -4,7 +4,7 @@
 // (POST /api/design/decompose); this page never writes YAML itself. Built with DOM calls only: the
 // page's policy forbids inline script and style, and every value is set as text.
 
-import { $, api, el, fill, status, svg, targetOf } from "./dom.js";
+import { $, api, el, fill, plural, status, svg, targetOf } from "./dom.js";
 import { KEPT_TABS } from "./prefs.js";
 import { flush, invalidate, onZone } from "./render.js";
 import { sequence, state } from "./state.js";
@@ -29,10 +29,11 @@ const TRANSFORMERS = {
   project: { hint: "options: project \"a,b\", drop \"c\", rename \"Old:New\"", mapping: null, value: null },
 };
 
-const KIND_LABEL = { source: "source", sink: "sink", transform: "transform", sql: "sql", merge: "merge", branch: "branch" };
+const KIND_LABEL = { source: "source", sink: "output", transform: "transform", sql: "sql", merge: "merge", branch: "branch" };
 
 // The panels' sizes, kept across visits.
-const SIZE_LIMITS = { pal: [160, 420], insp: [240, 640], drawer: [100, 640] };
+const SIZE_LIMITS = { pal: [160, 420], insp: [240, 640], drawer: [100, 640], agent: [260, 720] };
+const SIZE_VARS = { pal: "--pal-w", insp: "--insp-w", drawer: "--drawer-h", agent: "--agent-w" };
 
 const cards = state.cards;
 let host = null;
@@ -50,7 +51,8 @@ let composeTimer = null;
 
 /**
  * Builds the designer in `root`. The host gives what only it knows: `toolbar` (the bar's buttons), `onComposed`,
- * `cardTools`, `cardBadge` and `cardTool` (what a card shows and does), `previewView` (the Preview tab) and `extraTabs`.
+ * `cardTools`, `cardBadge` and `cardTool` (what a card shows and does), `previewView` (the Preview tab), `publicationProblems`
+ * (the second verdict of Problems) and `extraTabs`.
  */
 export function mountDesigner(root, options = {}) {
   host = root;
@@ -60,35 +62,118 @@ export function mountDesigner(root, options = {}) {
 
 /**
  * Opens a job: its text taken apart into cards by the server, with the layout it was saved with. A job not on disk opens
- * as unsaved changes. `kept` is how the page was left on it: the tab and the card, where they are still there.
+ * as unsaved changes. `kept` is how the page was left on it: the tab and the card, where they are still there. `replacing`
+ * names a text that replaces the open job's cards (a plan, a file the agent saved), which Undo puts back; any other open
+ * starts the history afresh.
  * @param {string} yaml @param {any} layout @param {boolean} [unsaved] @param {{ tab?: string, card?: string } | null} [kept]
+ * @param {string | null} [replacing]
  */
-export async function openJob(yaml, layout, unsaved = false, kept = null) {
+export async function openJob(yaml, layout, unsaved = false, kept = null, replacing = null) {
   const ticket = opening.begin();
   reading.cancel();
   state.brickRows = null;
   const answer = await api("/api/design/decompose", { yaml, layout: layout || null });
   // Another job was asked for meanwhile: its cards are the ones to show.
   if (opening.stale(ticket)) return false;
-  cards.model = normalize(answer.model);
-  cards.model.layout = Object.fromEntries(Object.entries(cards.model.layout).filter(([a]) => stepOf(a)));
-  if (cards.model.steps.some((s) => !cards.model.layout[s.alias])) autoLayout(false);
-  cards.result = answer;
-  cards.selected = kept?.card && stepOf(kept.card) ? { alias: kept.card } : null;
-  cards.zoom = null; cards.dirty = false;
-  // A job that does not compose opens on its problems, whatever was kept.
-  state.view.drawer = cards.result.errors?.length ? "problems" : kept?.tab && KEPT_TABS.includes(kept.tab) ? kept.tab : "yaml";
-  renderShell();
+  const show = () => {
+    const model = normalize(answer.model);
+    // A text with no header comment says nothing of the job's title, description or directives: the cards it replaces keep theirs.
+    if (replacing && cards.model && !yaml.startsWith("#")) Object.assign(model, { title: cards.model.title, description: cards.model.description, directives: cards.model.directives });
+    putCards(model, answer, kept);
+  };
+  if (replacing && cards.model) remember(replacing, show);
+  else { cards.history = []; show(); }
   await compose();
   if (!opening.stale(ticket)) cards.dirty = unsaved;
   return !opening.stale(ticket);
 }
 
+/**
+ * Puts a model on the cards and draws them, the one step opening a job and undoing share. `kept` is the tab and the card to
+ * keep, where they are still there; `tab`, when given, stays the drawer's tab whatever it is.
+ * @param {Model} model @param {Composed | null} result @param {{ tab?: string, card?: string } | null} kept @param {string | null} [tab]
+ */
+function putCards(model, result, kept, tab = null) {
+  cards.model = model;
+  cards.model.layout = Object.fromEntries(Object.entries(cards.model.layout).filter(([a]) => stepOf(a)));
+  if (cards.model.steps.some((s) => !cards.model.layout[s.alias])) autoLayout(false);
+  cards.result = result;
+  cards.selected = kept?.card && stepOf(kept.card) ? { alias: kept.card } : null;
+  cards.zoom = null; cards.dirty = false; cards.text = null;
+  // A job that does not compose opens on its problems, whatever was kept.
+  state.view.drawer = tab ?? (cards.result?.errors?.length ? "problems" : kept?.tab && KEPT_TABS.includes(kept.tab) ? kept.tab : "yaml");
+  renderShell();
+}
+
+// ---------------------------------------------------------------- the cards' history
+
+const HISTORY_LIMIT = 20;
+
+/** A value as text with its keys sorted, so two models the server and the inspector built alike read alike. @param {any} value */
+const canonical = (value) => JSON.stringify(value, (_, v) => (v && typeof v === "object" && !Array.isArray(v)
+  ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) : v));
+
+/** What a model holds besides where its cards sit. @param {Model} model */
+const fingerprint = ({ layout, ...rest }) => canonical(rest);
+
+/**
+ * Runs `change`, which removes or replaces cards, after keeping the cards as they were: Undo puts them back. The history lives
+ * in the page only (never saved, never sent), holds the last few changes, and an open of another job empties it.
+ * @param {string} label what Undo undoes, as its title says it @param {() => void} change
+ */
+function remember(label, change) {
+  const entry = { label, model: structuredClone(cards.model), dirty: cards.dirty, hash: state.job?.hash ?? null, after: "" };
+  change();
+  entry.after = fingerprint(/** @type {Model} */ (cards.model));
+  cards.history = [...cards.history.slice(1 - HISTORY_LIMIT), entry];
+  invalidate("bar");
+}
+
+/** The change Undo would undo, and whether it can: only while the cards are as that change left them, so no edit made since is lost. */
+function undoable() {
+  const entry = cards.history.at(-1);
+  return { entry, ready: !!entry && !!cards.model && fingerprint(cards.model) === entry.after };
+}
+
+/**
+ * Puts back the cards the last change removed or replaced, through the step an open takes. They are unsaved unless they were
+ * saved when the change came and the file has not been written since.
+ */
+export async function undo() {
+  const { entry, ready } = undoable();
+  if (!entry || !ready || editingText()) return;
+  cards.history = cards.history.slice(0, -1);
+  const ticket = opening.begin();
+  reading.cancel();
+  state.brickRows = null;
+  putCards(entry.model, null, { card: cards.selected?.alias }, state.view.drawer);
+  invalidate("agent");
+  await compose();
+  if (!opening.stale(ticket)) cards.dirty = entry.dirty || entry.hash !== (state.job?.hash ?? null);
+  invalidate("bar");
+}
+
+/**
+ * The cards `after` adds, changes and removes against `before`, by alias, where they sit left aside. Both models should come
+ * from the server's decomposition, so that a card reads alike on both sides.
+ * @param {any} before @param {any} after
+ */
+export function cardChanges(before, after) {
+  const of = (/** @type {any} */ m) => new Map((m?.steps || []).map((/** @type {any} */ s) => [s.alias, canonical(s)]));
+  const was = of(before), now = of(after);
+  return {
+    added: [...now.keys()].filter((a) => !was.has(a)),
+    changed: [...now.keys()].filter((a) => was.has(a) && was.get(a) !== now.get(a)),
+    removed: [...was.keys()].filter((a) => !now.has(a)),
+  };
+}
+
 /** Starts from no card at all. */
 export async function openBlank(title) {
   opening.cancel();
+  cards.history = [];
   cards.model = normalize({ title, steps: [], layout: {} });
-  cards.result = null; cards.selected = null; cards.zoom = null; cards.dirty = true; state.view.drawer = "yaml";
+  cards.result = null; cards.selected = null; cards.zoom = null; cards.dirty = true; cards.text = null; state.view.drawer = "yaml";
   renderShell();
   await compose();
 }
@@ -140,9 +225,15 @@ export function restoreSizes(sizes) {
 
 export function markSaved() { cards.dirty = false; invalidate("bar"); }
 
+/** Whether the YAML tab holds a text the cards do not: they are held until it is applied or reverted. */
+export const editingText = () => cards.text !== null && cards.text !== (cards.result?.yaml ?? "");
+
+/** Whether leaving the job loses what the person did: cards not saved, or a YAML text not applied. */
+export const holdsEdits = () => cards.dirty || editingText();
+
 function normalize(m) {
   return {
-    title: m.title || "Untitled pipeline", description: m.description || "", directives: m.directives || [],
+    title: m.title || "Untitled job", description: m.description || "", directives: m.directives || [],
     steps: (m.steps || []).map((s) => ({ ...s, from: s.from || [], ref: s.ref || [] })),
     layout: m.layout || {},
   };
@@ -163,9 +254,14 @@ export async function compose() {
     if (composing.stale(seq)) return cards.result;
     cards.result = answer;
   } catch (e) {
+    // A studio that does not answer composed nothing: the cards are not wrong and the last verdict stays, but what asked
+    // (a save, a preview) is told no verdict came.
+    if (e.transport) { if (!composing.stale(seq)) status(e.message, "bad"); return { ...cards.result, unanswered: true }; }
     if (!composing.stale(seq)) cards.result = { yaml: "", steps: [], errors: [e.message], warnings: [] };
   }
   invalidate("canvas", "drawer", "bar");
+  // With no wire and no card of the job selected the inspector shows the job's steps, and holds no field a redraw would take.
+  if (!cards.selected?.edge && !(cards.selected?.alias && cards.model && stepOf(cards.selected.alias))) invalidate("inspector");
   hooks.onComposed?.(cards.result);
   return cards.result;
 }
@@ -199,7 +295,7 @@ function addStep(kind, component, x, y, brick) {
   if (kind === "source" && !brick) step.yaml = `input: "${component}:"\n`;
   if (kind === "sink" && !brick) step.yaml = `output: "${component}:"\n`;
   if (kind === "transform") step.transformers = [];
-  if (kind === "sql") step.query = "SELECT *\nFROM input";
+  if (kind === "sql") step.query = starterQuery(null);
   cards.model.steps.push(step);
   cards.model.layout[alias] = { x: Math.max(10, Math.round(x)), y: Math.max(10, Math.round(y)) };
   cards.selected = { alias };
@@ -207,9 +303,11 @@ function addStep(kind, component, x, y, brick) {
 }
 
 function removeStep(alias) {
-  cards.model.steps = cards.model.steps.filter((s) => s.alias !== alias);
-  for (const s of cards.model.steps) { s.from = s.from.filter((a) => a !== alias); s.ref = s.ref.filter((a) => a !== alias); }
-  delete cards.model.layout[alias];
+  remember(`deleting step '${alias}'`, () => {
+    cards.model.steps = cards.model.steps.filter((s) => s.alias !== alias);
+    for (const s of cards.model.steps) { s.from = s.from.filter((a) => a !== alias); s.ref = s.ref.filter((a) => a !== alias); }
+    delete cards.model.layout[alias];
+  });
   if (cards.zoom === alias) cards.zoom = null;
   cards.selected = null;
   touch({ inspector: true });
@@ -234,28 +332,69 @@ function renameStep(from, to) {
   touch({ inspector: true });
 }
 
+/**
+ * The query a new SQL card starts with: it reads its main input by that input's alias, which is the table the SQL
+ * processor exposes. Until one is wired it names a placeholder, which composing refuses for want of an input anyway.
+ * @param {string | null} from
+ */
+const starterQuery = (from) => `SELECT *\nFROM ${from || "input"}`;
+
+/** Wires `fromAlias`'s output into `toAlias`: the one write both the drag and the inspector's Connect make. Answers whether it wired. */
 function connect(fromAlias, toAlias, port) {
   const target = stepOf(toAlias);
-  if (!target || fromAlias === toAlias) return;
-  if (target.kind === "source") { status("A source reads its own input: it takes no other.", "bad"); return; }
+  if (!target || fromAlias === toAlias) return false;
+  if (target.kind === "source") { status("A source reads its own input: it takes no other.", "bad"); return false; }
   if (port === "ref") {
     if (!target.ref.includes(fromAlias) && !target.from.includes(fromAlias)) target.ref.push(fromAlias);
   } else if (target.kind === "merge" || target.kind === "branch") {
     if (!target.from.includes(fromAlias)) target.from.push(fromAlias);
   } else {
+    // A query nobody has edited follows the input it reads; one the person wrote is theirs.
+    if (target.kind === "sql" && target.query === starterQuery(target.from[0] ?? null)) target.query = starterQuery(fromAlias);
     target.from = [fromAlias];
     target.ref = target.ref.filter((a) => a !== fromAlias);
   }
   touch({ inspector: cards.selected?.alias === toAlias });
+  status(`Wired ${fromAlias} → ${toAlias}${port === "ref" ? " as a join" : ""}.`);
+  return true;
 }
 
 function disconnect(edge) {
   const target = stepOf(edge.to);
   if (!target) return;
+  const fromInspector = !!document.activeElement && !!$("d-inspector")?.contains(document.activeElement);
   if (edge.port === "ref") target.ref = target.ref.filter((a) => a !== edge.from);
   else target.from = target.from.filter((a) => a !== edge.from);
-  cards.selected = null;
+  // A wire selected goes with its selection; a card whose input is removed stays chosen, to be wired again.
+  if (cards.selected?.edge) cards.selected = null;
   touch({ inspector: true });
+  status(`Wire ${edge.from} → ${edge.to} removed.`);
+  if (fromInspector) focusAfterDraw("#i-connect-from", `.dcard[data-alias="${CSS.escape(edge.to)}"]`);
+}
+
+/** Puts the focus on the first of these that exists once the zones are drawn: a control the person was on is gone when its zone is. */
+function focusAfterDraw(...selectors) {
+  flush();
+  for (const selector of selectors) {
+    const node = document.querySelector(selector);
+    if (node) { /** @type {HTMLElement} */ (node).focus(); return; }
+  }
+}
+
+/** Chooses a card: marks it in place (the node under the pointer or the focus is never redrawn), shows its inspector and what it delivers. @param {string} alias */
+function selectCard(alias) {
+  if (cards.selected?.alias === alias) return;
+  cards.selected = { alias };
+  invalidate("inspector");
+  for (const c of $("d-inner").querySelectorAll(".dcard")) {
+    const chosen = c.dataset.alias === alias;
+    c.classList.toggle("selected", chosen);
+    if (chosen) c.setAttribute("aria-current", "true"); else c.removeAttribute("aria-current");
+  }
+  drawEdges();
+  // Choosing a card shows what it delivers, unless the person is reading another tab.
+  if (state.view.drawer === "yaml") state.view.drawer = "preview";
+  if (state.view.drawer === "preview") invalidate("drawer");
 }
 
 function autoLayout(render = true) {
@@ -352,22 +491,26 @@ function renderShell() {
       el("input", { id: "d-description", class: "grow", value: cards.model.description, placeholder: "What this job does", "aria-label": "Description" }),
       el("span", { id: "d-dirty", class: "pill warn", hidden: true }, "unsaved"),
       el("span", { class: "actions" },
-        seg("d-layout", "Arrange", "Arrange the cards in columns, sources first"),
+        seg("d-undo", "Undo", "Nothing to undo"),
+        seg("d-layout", "Arrange", "Arrange the steps in columns, sources first"),
         hooks.toolbar?.() || null)),
     el("div", { class: "designer-body" },
-      el("aside", { class: "palette card", id: "d-palette" }),
       el("div", { class: "canvas card", id: "d-canvas" },
         el("div", { class: "canvas-inner", id: "d-inner" }, svg("svg", { id: "d-svg" })),
         el("div", { class: "chain-view", id: "d-chain", hidden: true })),
       el("aside", { class: "inspector card", id: "d-inspector" }),
-      el("div", { class: "split split-col split-pal", "data-split": "pal", role: "separator", "aria-orientation": "vertical", "aria-label": "Resize the palette", tabindex: "0" }),
-      el("div", { class: "split split-col split-insp", "data-split": "insp", role: "separator", "aria-orientation": "vertical", "aria-label": "Resize the inspector", tabindex: "0" })),
+      el("div", { class: "split split-col split-insp", "data-split": "insp", role: "separator", "aria-orientation": "vertical", "aria-label": "Resize the inspector", tabindex: "0" }),
+      el("p", { id: "d-held", class: "held-note", hidden: true }, "The steps are held: the YAML tab has a text not applied. ",
+        el("button", { class: "small", onclick: () => showTab("yaml") }, "Show the YAML"))),
     el("div", { class: "split split-row", "data-split": "drawer", role: "separator", "aria-orientation": "horizontal", "aria-label": "Resize the drawer", tabindex: "0" }),
     el("div", { class: "drawer card", id: "d-drawer" }));
+  // The palette lives in the page's side panel (Steps), a new one for each job like the rest of the designer.
+  fill($("side-steps-view"), el("div", { class: "palette", id: "d-palette" }));
 
   $("d-title").addEventListener("input", (e) => { cards.model.title = targetOf(e).value; touch({ canvas: !!cards.zoom }); });
   $("d-description").addEventListener("input", (e) => { cards.model.description = targetOf(e).value; touch({ canvas: false }); });
   $("d-layout").addEventListener("click", () => autoLayout());
+  $("d-undo").addEventListener("click", () => { undo().catch((e) => status(e.message, "bad")); });
   applySizes();
   bindSplits();
   bindCanvas();
@@ -379,10 +522,11 @@ function renderShell() {
   flush();
 }
 
-function applySizes() {
+/** Applies every size to the element that lays its pane out: the side panel's and the agent's widths belong to the page's grid, not the designer's. */
+export function applySizes() {
   for (const [name, [lo, hi]] of Object.entries(SIZE_LIMITS)) {
     state.view.sizes[name] = Math.min(hi, Math.max(lo, Math.round(+state.view.sizes[name] || lo)));
-    host.style.setProperty(name === "pal" ? "--pal-w" : name === "insp" ? "--insp-w" : "--drawer-h", `${state.view.sizes[name]}px`);
+    (name === "agent" || name === "pal" ? document.querySelector("main") : host)?.style.setProperty(SIZE_VARS[name], `${state.view.sizes[name]}px`);
   }
 }
 
@@ -393,42 +537,57 @@ function resize(name, value, persist) {
   if (persist) invalidate("bar");
 }
 
-// A handle is dragged with the pointer, or moved with the arrow keys; the size is clamped to its limits.
+// The designer's handles; the side panel's and the agent's lie in their own panels, which bind them through bindSplit.
 function bindSplits() {
   const body = host.querySelector(".designer-body");
   for (const handle of host.querySelectorAll(".split")) {
     const name = handle.dataset.split;
-    const target = (e) => {
-      if (name === "pal") return e.clientX - body.getBoundingClientRect().left - 6;
+    bindSplit(/** @type {HTMLElement} */ (handle), name, (e) => {
       if (name === "insp") return body.getBoundingClientRect().right - e.clientX - 6;
       return host.getBoundingClientRect().bottom - e.clientY - 12;
-    };
-    handle.addEventListener("pointerdown", (e) => { handle.setPointerCapture(e.pointerId); handle.classList.add("dragging"); e.preventDefault(); });
-    handle.addEventListener("pointermove", (e) => { if (handle.hasPointerCapture(e.pointerId)) resize(name, target(e), false); });
-    const end = (e) => { if (handle.hasPointerCapture(e.pointerId)) { handle.releasePointerCapture(e.pointerId); handle.classList.remove("dragging"); resize(name, state.view.sizes[name], true); } };
-    handle.addEventListener("pointerup", end);
-    handle.addEventListener("pointercancel", end);
-    handle.addEventListener("keydown", (e) => {
-      const grow = { pal: "ArrowRight", insp: "ArrowLeft", drawer: "ArrowUp" }[name];
-      const shrink = { pal: "ArrowLeft", insp: "ArrowRight", drawer: "ArrowDown" }[name];
-      if (e.key !== grow && e.key !== shrink) return;
-      resize(name, state.view.sizes[name] + (e.key === grow ? 16 : -16), true);
-      e.preventDefault();
     });
   }
+}
+
+const SPLIT_KEYS = { pal: ["ArrowRight", "ArrowLeft"], insp: ["ArrowLeft", "ArrowRight"], drawer: ["ArrowUp", "ArrowDown"], agent: ["ArrowLeft", "ArrowRight"] };
+
+/**
+ * A handle dragged with the pointer, or moved with the arrow keys; the size is clamped to its limits.
+ * @param {HTMLElement} handle @param {string} name @param {(e: PointerEvent) => number} target the size the pointer asks for
+ */
+export function bindSplit(handle, name, target) {
+  handle.addEventListener("pointerdown", (e) => { handle.setPointerCapture(e.pointerId); handle.classList.add("dragging"); e.preventDefault(); });
+  handle.addEventListener("pointermove", (e) => { if (handle.hasPointerCapture(e.pointerId)) resize(name, target(e), false); });
+  const end = (e) => { if (handle.hasPointerCapture(e.pointerId)) { handle.releasePointerCapture(e.pointerId); handle.classList.remove("dragging"); resize(name, state.view.sizes[name], true); } };
+  handle.addEventListener("pointerup", end);
+  handle.addEventListener("pointercancel", end);
+  handle.addEventListener("keydown", (e) => {
+    const [grow, shrink] = SPLIT_KEYS[name];
+    if (e.key !== grow && e.key !== shrink) return;
+    resize(name, state.view.sizes[name] + (e.key === grow ? 16 : -16), true);
+    e.preventDefault();
+  });
 }
 
 function renderToolbarState() {
   const flag = $("d-dirty");
   if (flag) flag.hidden = !cards.dirty;
-  }
+  const button = /** @type {HTMLButtonElement | null} */ ($("d-undo"));
+  if (!button) return;
+  const { entry, ready } = undoable();
+  button.disabled = !ready;
+  button.title = !entry ? "Nothing to undo"
+    : ready ? `Undo ${entry.label}`
+    : `Undo ${entry.label}: the steps changed since, and undoing would lose that change`;
+}
 
 function renderPalette() {
   const view = $("d-palette");
-  if (!view) return;
+  // A panel that does not show the palette leaves it as it is: opening Steps draws it again.
+  if (!view || view.closest("[hidden]")) return;
   const item = (kind, label, hint, component) => el("div",
     { class: `pal-item kind-${kind}`, draggable: "true", "data-kind": kind, "data-component": component, title: hint },
-    el("span", {}, label), el("button", { class: "small ghost", "data-add": true, title: "Add to the canvas" }, "+"));
+    el("span", {}, label), el("button", { class: "small ghost", "data-add": true, "aria-label": `Add ${label} to the canvas`, title: "Add to the canvas" }, "+"));
   const endpoints = (list, kind) => list.length
     ? list.map((c) => item(kind, c.name, `${c.category} · ${kind === "source" ? "reads" : "writes"} through the ${c.name} component`, c.name))
     : el("p", { class: "hint" }, "none");
@@ -436,7 +595,7 @@ function renderPalette() {
     const node = el("div",
       { class: `pal-item kind-${b.kind}${b.online ? "" : " offline"}`, draggable: "true", "data-kind": b.kind, "data-brick": b.key,
         title: `${b.kind} brick of ${b.node} · version ${b.version}${b.online ? "" : " · its node is offline"}${b.description ? "\n" + b.description : ""}` },
-      el("span", {}, b.title || b.id), el("button", { class: "small ghost", "data-add": true, title: "Add to the canvas" }, "+"));
+      el("span", {}, b.title || b.id), el("button", { class: "small ghost", "data-add": true, "aria-label": `Add ${b.title || b.id} to the canvas`, title: "Add to the canvas" }, "+"));
     return node;
   };
   const nodes = state.catalog.nodes.filter((n) => state.catalog.bricks.some((b) => b.node === n.name));
@@ -454,7 +613,7 @@ function renderPalette() {
     item("transform", "Transform", "An ordered list of transformers over one input"),
     item("sql", "SQL", "A DuckDB query over one main input, joined to others as ref"),
     item("merge", "Merge", "UNION ALL of several inputs with the same schema"),
-    el("h3", {}, "Sinks"), endpoints(state.components.writers, "sink"),
+    el("h3", {}, "Outputs"), endpoints(state.components.writers, "sink"),
     el("p", { class: "hint" }, "Drag a component or a step onto the canvas, then wire an output port (right) to an input port (left). Drag a wire's end off its input port to move it or, dropped in the void, to remove it."),
     versions());
 }
@@ -470,7 +629,7 @@ function versions() {
       el("li", {}, "this studio: ", el("code", {}, state.catalog.studioVersion || "unknown")),
       state.catalog.nodes.map((n) => el("li", { class: n.dtpipeVersion === state.catalog.studioVersion ? "" : "warn" },
         `${n.name}: `, el("code", {}, n.dtpipeVersion || "unknown")))),
-    differ.length ? el("p", { class: "hint warn" }, `${differ.length} node(s) run another dtpipe: a sample here may differ from a run there. The coordinator checks a pipeline again when it is published.`) : null,
+    differ.length ? el("p", { class: "hint warn" }, `${plural(differ.length, "node")} ${differ.length === 1 ? "runs" : "run"} another dtpipe: a sample here may differ from a run there. The coordinator checks a pipeline again when it is published.`) : null,
   ];
 }
 
@@ -488,7 +647,7 @@ function cardInfo(step) {
   else if (isEndpoint(step)) subtitle = step.brick || endpointOf(step) || `no ${step.kind === "source" ? "input" : "output"} yet`;
   else if (step.kind === "transform") subtitle = step.transformers?.length ? step.transformers.map((t) => t.type).join(" → ") : "no transformer yet";
   else if (step.kind === "sql") subtitle = (step.query || "").replace(/\s+/g, " ").slice(0, 60);
-  else if (step.kind === "merge") subtitle = `UNION ALL of ${step.from.length} input(s)`;
+  else if (step.kind === "merge") subtitle = `UNION ALL of ${plural(step.from.length, "input")}`;
   else subtitle = "branch, as written";
   // A card the server joined into another branch says which: the job dtpipe runs has that branch.
   const branch = info?.branch && info.branch !== step.alias ? `in branch ${info.branch}` : "";
@@ -503,6 +662,9 @@ function renderCanvas() {
   $("d-palette").classList.toggle("dimmed", !!cards.zoom);
   if (cards.zoom) { renderChain(); return; }
   const problems = new Set((cards.result?.errors || []).flatMap((e) => [...e.matchAll(/'([^']+)'/g)].map((m) => m[1])));
+  // The cards are drawn again; a card or a tool of one that holds the focus gets it back.
+  const held = document.activeElement?.closest?.(".dcard") ? document.activeElement : null;
+  const heldAt = held ? { alias: held.closest(".dcard").dataset.alias, tool: held.dataset.cardTool ?? null, self: held.classList.contains("dcard") } : null;
   inner.querySelectorAll(".dcard, .canvas-empty").forEach((c) => c.remove());
   let width = 900, height = 520;
   for (const step of cards.model.steps) {
@@ -510,10 +672,11 @@ function renderCanvas() {
     const { subtitle, branch } = cardInfo(step);
     const card = el("div", {
       class: `dcard kind-${step.kind} ${cards.selected?.alias === step.alias ? "selected" : ""} ${problems.has(step.alias) ? "problem" : ""}`,
-      "data-alias": step.alias,
+      "data-alias": step.alias, tabindex: "0", role: "group", "aria-label": `${KIND_LABEL[step.kind] || step.kind} ${step.alias}`,
+      "aria-current": cards.selected?.alias === step.alias ? "true" : null,
     },
       el("div", { class: "dcard-head" }, el("span", { class: "kind" }, KIND_LABEL[step.kind] || step.kind), el("span", { class: "alias" }, step.alias)),
-      step.kind === "transform" ? el("button", { class: "dcard-zoom", title: "Zoom into the transformers (or double-click the card)", "aria-label": `Zoom into ${step.alias}` }, "⌕") : null,
+      step.kind === "transform" ? el("button", { class: "dcard-zoom", title: "Zoom into the transformers (or double-click the step)", "aria-label": `Zoom into ${step.alias}` }, "⌕") : null,
       hooks.cardTools?.(step.alias) || null,
       el("div", { class: "dcard-sub" }, subtitle),
       hooks.cardBadge?.(step.alias) || null,
@@ -527,10 +690,14 @@ function renderCanvas() {
     width = Math.max(width, pos.x + CARD_W + 200);
     height = Math.max(height, pos.y + CARD_H + 160);
   }
+  if (heldAt && (heldAt.self || heldAt.tool)) {
+    const card = `.dcard[data-alias="${CSS.escape(heldAt.alias)}"]`;
+    /** @type {HTMLElement | null} */ (inner.querySelector(heldAt.self ? card : `${card} [data-card-tool="${CSS.escape(heldAt.tool)}"]`))?.focus();
+  }
   inner.style.width = `${width}px`;
   inner.style.height = `${height}px`;
   drawEdges();
-  if (!cards.model.steps.length) inner.appendChild(el("p", { class: "canvas-empty hint" }, "Drag sources, steps and sinks here from the palette."));
+  if (!cards.model.steps.length) inner.appendChild(el("p", { class: "canvas-empty hint" }, "Drag sources, steps and outputs here from Steps, on the left."));
 }
 
 function portPoint(alias, port) {
@@ -568,7 +735,7 @@ function drawEdges(temp) {
   inner.querySelector(".edge-delete")?.remove();
   if (selectedHit && !temp) {
     const mid = selectedHit.getPointAtLength(selectedHit.getTotalLength() / 2);
-    const button = el("button", { class: "edge-delete", title: "Remove this wire (Delete)" }, "×");
+    const button = el("button", { class: "edge-delete", "aria-label": "Remove this wire", title: "Remove this wire (Delete)" }, "×");
     button.style.left = `${mid.x}px`;
     button.style.top = `${mid.y}px`;
     inner.appendChild(button);
@@ -632,15 +799,7 @@ function bindCanvas() {
       const pos = cards.model.layout[card.dataset.alias];
       const p = canvasPoint(e);
       drag = { type: "move", alias: card.dataset.alias, dx: p.x - pos.x, dy: p.y - pos.y, moved: false };
-      if (cards.selected?.alias !== card.dataset.alias) {
-        cards.selected = { alias: card.dataset.alias };
-        invalidate("inspector");
-        inner.querySelectorAll(".dcard").forEach((c) => c.classList.toggle("selected", c === card));
-        drawEdges();
-        // Clicking a card shows what it delivers, unless the person is reading another tab.
-        if (state.view.drawer === "yaml") state.view.drawer = "preview";
-        if (state.view.drawer === "preview") invalidate("drawer");
-      }
+      selectCard(card.dataset.alias);
       inner.setPointerCapture(e.pointerId);
     } else if (edge) {
       cards.selected = { edge: { from: edge.dataset.from, to: edge.dataset.to, port: edge.dataset.port } };
@@ -690,6 +849,13 @@ function bindCanvas() {
     }
   });
 
+  // A card is chosen with Enter or Space, as a click chooses it; its wires are the inspector's.
+  inner.addEventListener("keydown", (e) => {
+    const card = targetOf(e);
+    if (!card.classList?.contains("dcard") || (e.key !== "Enter" && e.key !== " ")) return;
+    e.preventDefault();
+    selectCard(card.dataset.alias);
+  });
   inner.addEventListener("dblclick", (e) => {
     const card = targetOf(e).closest(".dcard");
     if (card && !targetOf(e).closest(".port")) enterZoom(card.dataset.alias);
@@ -746,7 +912,7 @@ function bindPalette() {
 }
 
 function onKey(e) {
-  if (!cards.model || !host?.isConnected) return;
+  if (!cards.model || !host?.isConnected || editingText()) return;
   if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) return;
   if (cards.zoom) {
     // Zoomed, Delete removes the selected transformer, never the step.
@@ -767,19 +933,42 @@ function onKey(e) {
 // ---------------------------------------------------------------- inspector
 
 function kvRows(obj, section, index, placeholders) {
+  const names = (section === "mappings" ? [`Mapping ${placeholders[0]}`, `Mapping ${placeholders[1]}`] : ["Option name", "Option value"]).map((n) => `${n} of transformer ${index + 1}`);
   return el("div", { class: "kv", "data-section": section, "data-index": index },
     Object.entries(obj || {}).map(([k, v], row) => el("div", { class: "kv-row", "data-row": row },
-      el("input", { class: "mono", "data-kv": "key", value: k, placeholder: placeholders[0] }),
-      el("input", { class: "mono", "data-kv": "value", value: v ?? "", placeholder: placeholders[1] }),
-      el("button", { class: "small ghost", "data-kv-remove": true, title: "Remove" }, "×"))),
+      el("input", { class: "mono", "data-kv": "key", "aria-label": names[0], value: k, placeholder: placeholders[0] }),
+      el("input", { class: "mono", "data-kv": "value", "aria-label": names[1], value: v ?? "", placeholder: placeholders[1] }),
+      el("button", { class: "small ghost", "data-kv-remove": true, "aria-label": `Remove this ${section === "mappings" ? "mapping" : "option"} of transformer ${index + 1}`, title: "Remove" }, "×"))),
     el("button", { class: "small ghost", "data-kv-add": true }, `+ ${section === "mappings" ? "mapping" : "option"}`));
 }
 
 function inputsList(step) {
   const item = (alias, port) => el("li", {}, el("code", {}, alias), port === "ref" ? [" ", el("span", { class: "chip" }, "ref")] : null, " ",
-    el("button", { class: "small ghost", "data-unwire": alias, "data-port": port, title: "Disconnect" }, "×"));
+    el("button", { class: "small ghost", "data-unwire": alias, "data-port": port, "aria-label": `Disconnect ${alias} from ${step.alias}`, title: "Disconnect" }, "×"));
   const items = [...step.from.map((a) => item(a, "in")), ...step.ref.map((a) => item(a, "ref"))];
-  return [el("h3", {}, "Inputs"), items.length ? el("ul", { class: "inputs" }, items) : el("p", { class: "hint" }, "Not wired yet: drag from another card's output port.")];
+  return [el("h3", {}, "Inputs"), items.length ? el("ul", { class: "inputs" }, items) : el("p", { class: "hint" }, "Not wired yet: drag from another step's output port, or connect one below."), connectControls(step)];
+}
+
+// The keyboard's way to wire a card: the choice of an input and a button, which make the wire the drag makes.
+function connectControls(step) {
+  const others = cards.model.steps.filter((s) => s.alias !== step.alias && s.kind !== "sink");
+  const option = (port, s) => el("option", { value: `${port}:${s.alias}` }, s.alias);
+  const asInput = others.filter((s) => !step.from.includes(s.alias));
+  const groups = step.kind === "sql"
+    ? [el("optgroup", { label: "Main input" }, asInput.map((s) => option("in", s))),
+      el("optgroup", { label: "Joined (ref)" }, asInput.filter((s) => !step.ref.includes(s.alias)).map((s) => option("ref", s)))]
+    : asInput.map((s) => option("in", s));
+  if (!asInput.length) return null;
+  return el("div", { class: "row connect" },
+    el("select", { id: "i-connect-from", "aria-label": `Step to connect to ${step.alias}` }, el("option", { value: "" }, "Connect an input…"), groups),
+    el("button", { id: "i-connect", class: "small", "data-connect": true, "aria-label": `Connect the chosen step to ${step.alias}` }, "Connect"));
+}
+
+function connectChosen(step) {
+  const chosen = $("i-connect-from")?.value ?? "";
+  if (!chosen) { status("Choose the step to connect first.", "warn"); return; }
+  const colon = chosen.indexOf(":");
+  if (connect(chosen.slice(colon + 1), step.alias, chosen.slice(0, colon))) focusAfterDraw("#i-connect-from", `.dcard[data-alias="${CSS.escape(step.alias)}"]`);
 }
 
 // One transformer's editor: its type, order buttons, mappings and options. `data-index` is its place in the step.
@@ -788,11 +977,11 @@ function transformerEditor(step, t, i) {
   const types = Object.keys(TRANSFORMERS).concat(TRANSFORMERS[t.type] ? [] : [t.type]);
   return el("div", { class: "transformer", "data-index": i },
     el("div", { class: "row" },
-      el("select", { "data-ttype": true }, types.map((k) => el("option", { selected: k === t.type }, k))),
+      el("select", { "data-ttype": true, "aria-label": `Type of transformer ${i + 1}` }, types.map((k) => el("option", { selected: k === t.type }, k))),
       el("span", { class: "actions" },
-        el("button", { class: "small ghost", "data-tmove": "-1", disabled: i === 0 }, "↑"),
-        el("button", { class: "small ghost", "data-tmove": "1", disabled: i === step.transformers.length - 1 }, "↓"),
-        el("button", { class: "small ghost danger", "data-tremove": true }, "×"))),
+        el("button", { class: "small ghost", "data-tmove": "-1", "aria-label": `Move transformer ${i + 1} up`, disabled: i === 0 }, "↑"),
+        el("button", { class: "small ghost", "data-tmove": "1", "aria-label": `Move transformer ${i + 1} down`, disabled: i === step.transformers.length - 1 }, "↓"),
+        el("button", { class: "small ghost danger", "data-tremove": true, "aria-label": `Remove transformer ${i + 1}` }, "×"))),
     el("p", { class: "hint" }, spec.hint),
     spec.mapping !== null || t.mappings ? [el("div", { class: "sub" }, "mappings"), kvRows(t.mappings, "mappings", i, [spec.mapping || "key", spec.value ?? "value"])] : null,
     el("div", { class: "sub" }, "options"), kvRows(t.options, "options", i, ["option", "value"]));
@@ -811,10 +1000,10 @@ function renderInspector() {
   }
   const step = cards.selected?.alias ? stepOf(cards.selected.alias) : null;
   if (!step) {
-    const errors = cards.result?.errors?.length || 0;
+    // The composition's verdict is the YAML tab's light, never repeated here.
     fill(view, el("h2", {}, "Job"),
-      el("p", { class: "hint" }, `${cards.model.steps.length} card(s). `, errors ? el("span", { class: "bad" }, `${errors} problem(s)`) : "Composes cleanly."),
-      el("p", { class: "hint" }, "Select a card to edit it. A source and a sink of their own carry their endpoint as YAML; the server joins a source, its transform and its sink back into one branch when nothing else reads between them."),
+      el("p", { class: "hint" }, `${plural(cards.model.steps.length, "step")}.`),
+      el("p", { class: "hint" }, "Select a step to edit it. A source and an output of their own carry their endpoint as YAML; the server joins a source, its transform and its output back into one branch when nothing else reads between them."),
       cards.model.directives.length ? [el("h3", {}, "Header directives"), el("ul", { class: "inputs" }, cards.model.directives.map((d) => el("li", {}, el("code", {}, d))))] : null);
     return;
   }
@@ -827,11 +1016,11 @@ function renderInspector() {
   let body;
   if (isEndpoint(step) && !step.brick) {
     body = [step.kind === "sink" ? inputsList(step) : null,
-      el("h3", {}, step.kind === "source" ? "Its reader" : "Its writer"),
-      el("textarea", { id: "i-yaml", class: "mono", rows: "10", spellcheck: "false", value: step.yaml || "" }),
+      el("h3", {}, step.kind === "source" ? "Its reader" : "Its output"),
+      el("textarea", { id: "i-yaml", "aria-label": `${step.kind === "source" ? "Reader" : "Output"} of ${step.alias}, as YAML`, class: "mono", rows: "10", spellcheck: "false", value: step.yaml || "" }),
       el("p", { class: "hint" }, step.kind === "source"
         ? "input, the keys that bound or sample what it reads (limit, cursor, sampling-rate…), and its reader's provider-options blocks."
-        : "output, the keys that govern what it writes (prefix, checkpoint, contract-save), and its writer's provider-options blocks.")];
+        : "output, the keys that govern what it writes (prefix, checkpoint, contract-save), and its provider-options blocks.")];
   } else if (isEndpoint(step)) {
     body = [step.kind === "sink" ? inputsList(step) : null, brickView(step)];
   } else if (step.kind === "transform") {
@@ -840,16 +1029,16 @@ function renderInspector() {
       el("button", { "data-tadd": true }, "+ transformer")];
   } else if (step.kind === "sql") {
     body = [inputsList(step), el("h3", {}, "Query ", el("span", { class: "hint" }, "DuckDB; each input is a table named by its alias")),
-      el("textarea", { id: "i-query", class: "mono", rows: "10", spellcheck: "false", value: step.query || "" })];
+      el("textarea", { id: "i-query", "aria-label": `Query of ${step.alias}`, class: "mono", rows: "10", spellcheck: "false", value: step.query || "" })];
   } else if (step.kind === "merge") {
     body = [inputsList(step), el("p", { class: "hint" }, "UNION ALL: every input must carry the same columns, with the same types. dtpipe converts nothing on the way.")];
   } else {
     body = [inputsList(step), el("h3", {}, "Branch, as written"),
-      el("textarea", { id: "i-yaml", class: "mono", rows: "12", spellcheck: "false", value: step.yaml || "" }),
-      el("p", { class: "hint" }, "A branch no card describes: kept exactly as dtpipe reads it.")];
+      el("textarea", { id: "i-yaml", "aria-label": `Branch ${step.alias}, as written`, class: "mono", rows: "12", spellcheck: "false", value: step.yaml || "" }),
+      el("p", { class: "hint" }, "A branch no step describes: kept exactly as dtpipe reads it.")];
   }
   fill(view,
-    el("div", { class: "row" }, el("h2", {}, KIND_LABEL[step.kind] || step.kind), el("button", { class: "small ghost danger", "data-remove-step": true }, "Delete card")),
+    el("div", { class: "row" }, el("h2", {}, KIND_LABEL[step.kind] || step.kind), el("button", { class: "small ghost danger", "data-remove-step": true }, "Delete step")),
     el("label", { class: "field" }, "Alias ", el("input", { id: "i-alias", class: "mono", value: step.alias })),
     body);
 }
@@ -946,6 +1135,7 @@ function bindInspector() {
     if (b.dataset.readBrick !== undefined) { readBrick(b.dataset.readBrick); return; }
     if (b.dataset.unwire !== undefined) { disconnect({ from: b.dataset.unwire, to: b.dataset.to || step.alias, port: b.dataset.port }); return; }
     if (!step) return;
+    if (b.dataset.connect !== undefined) { connectChosen(step); return; }
     if (b.dataset.removeStep !== undefined) { removeStep(step.alias); return; }
     if (b.dataset.tadd !== undefined) { addTransformer(step); return; }
     const box = b.closest(".transformer");
@@ -982,34 +1172,91 @@ function bindInspector() {
 function renderDrawer() {
   const view = $("d-drawer");
   if (!view || !cards.result) return;
-  const problems = (cards.result.errors?.length || 0) + (cards.result.warnings?.length || 0);
-  const tab = (name, label, extra) => el("button", { class: state.view.drawer === name ? "active" : "", "data-tab": name }, label, extra || null);
+  const errors = cards.result.errors?.length || 0;
+  const warnings = cards.result.warnings?.length || 0;
+  const problems = errors + warnings;
+  const tab = (name, label, ...extra) => el("button", { class: state.view.drawer === name ? "active" : "", "data-tab": name }, label, ...extra);
   const tabs = el("div", { class: "tabs" },
-    tab("yaml", "YAML"),
-    tab("problems", "Problems ", problems ? el("span", { class: "count" }, problems) : null),
-    tab("edit", "Edit as YAML"),
+    // The light and its name are drawn by drawHold, which typing calls too.
+    el("button", { id: "d-yaml-tab", class: state.view.drawer === "yaml" ? "active" : "", "data-tab": "yaml" }),
+    tab("problems", "Problems ",
+      errors ? el("span", { class: "count", title: plural(errors, "error") }, errors) : null,
+      warnings ? el("span", { class: "count warn", title: plural(warnings, "warning") }, warnings) : null),
     tab("preview", "Preview"),
-    (hooks.extraTabs || []).map((t) => tab(t.name, t.label, t.badge?.())),
-    el("span", { class: "drawer-status" }, cards.result.errors?.length ? el("span", { class: "bad" }, `${cards.result.errors.length} error(s)`) : el("span", { class: "good" }, "composes")));
+    (hooks.extraTabs || []).map((t) => tab(t.name, t.label, t.badge?.())));
+  // A redraw while the person types keeps the text (it is state) and gives the editor back its caret.
+  const typing = document.activeElement?.id === "d-edit" ? /** @type {HTMLTextAreaElement} */ (document.activeElement) : null;
+  const caret = typing ? { start: typing.selectionStart, end: typing.selectionEnd, top: typing.scrollTop } : null;
   let body;
   if (state.view.drawer === "yaml") {
-    body = [el("div", { class: "row" }, el("button", { "data-copy": true }, "Copy"),
-      el("span", { class: "hint" }, "The job the server composed: a plain dtpipe job, runnable whole with dtpipe --job.")),
-    el("pre", { id: "d-yaml" }, cards.result.yaml)];
+    body = [el("div", { class: "row" }, el("span", { id: "d-verdict" })),
+      el("textarea", { id: "d-edit", "aria-label": "The job, as YAML", class: "mono yaml-edit", rows: "16", spellcheck: "false", value: cards.text ?? cards.result.yaml }),
+      el("div", { class: "row" },
+        el("button", { "data-copy": true, title: "Copy the text shown" }, "Copy"),
+        el("button", { id: "d-apply", "data-apply": true, title: "Take this text apart into steps again" }, "Apply"),
+        el("button", { id: "d-revert", "data-revert": true, title: "Show the job the steps compose again, and free the steps" }, "Revert"),
+        el("span", { class: "hint" }, "Apply takes the text apart into steps again: steps that keep their alias keep their place. Until then the steps are held."))];
   } else if (state.view.drawer === "problems") {
-    body = [cards.result.errors?.length ? el("ul", { class: "msgs bad" }, cards.result.errors.map((m) => el("li", {}, m))) : null,
-      cards.result.warnings?.length ? el("ul", { class: "msgs warn" }, cards.result.warnings.map((m) => el("li", {}, m))) : null,
-      problems ? null : el("p", { class: "hint" }, "Nothing to report.")];
-  } else if (state.view.drawer === "edit") {
-    body = [el("textarea", { id: "d-edit", class: "mono", rows: "16", spellcheck: "false", value: cards.result.yaml }),
-      el("div", { class: "row" }, el("button", { "data-apply": true }, "Apply"),
-        el("span", { class: "hint" }, "The job is taken apart into cards again; cards that keep their alias keep their place."))];
+    // Two verdicts, never mixed: what the composition says of a run here, and what a publication would refuse (the host's).
+    body = [el("h3", {}, "Will not run here"),
+      errors ? [el("h4", {}, `Errors (${errors})`), el("ul", { class: "msgs bad" }, cards.result.errors.map((m) => el("li", {}, m)))] : null,
+      warnings ? [el("h4", {}, `Warnings (${warnings})`), el("ul", { class: "msgs warn" }, cards.result.warnings.map((m) => el("li", {}, m)))] : null,
+      problems ? null : el("p", { class: "hint" }, "Nothing to report."),
+      hooks.publicationProblems?.() || null];
   } else if (state.view.drawer === "preview") {
     body = hooks.previewView?.(cards.selected?.alias || null) || null;
   } else {
     body = (hooks.extraTabs || []).find((t) => t.name === state.view.drawer)?.render() || null;
   }
   fill(view, tabs, el("div", { class: "drawer-body" }, body));
+  drawHold();
+  const editor = /** @type {HTMLTextAreaElement | null} */ ($("d-edit"));
+  if (caret && editor) { editor.focus(); editor.setSelectionRange(caret.start, caret.end); editor.scrollTop = caret.top; }
+}
+
+// What the steps hold while the YAML tab has a text they do not: these are greyed and take no input.
+const HELD = ["d-canvas", "d-inspector", "d-palette", "d-title", "d-description", "d-undo", "d-layout"];
+
+/**
+ * The verdict the YAML tab's light gives: the composition's on the cards, unless the tab holds a text not applied, of which
+ * the light says nothing more (a verdict on the cards would vouch for a text not on screen).
+ */
+function verdict() {
+  if (editingText()) return { tone: "held", short: "not applied", words: "Not applied: the steps are held until you apply or revert this text." };
+  const errors = cards.result?.errors?.length || 0;
+  const warnings = cards.result?.warnings?.length || 0;
+  if (errors) return { tone: "bad", short: plural(errors, "error"), words: `${plural(errors, "error")}: the steps do not compose into a job.` };
+  if (warnings) return { tone: "warn", short: plural(warnings, "warning"), words: `Composes, with ${plural(warnings, "warning")}.` };
+  return { tone: "good", short: "composes", words: "Composes cleanly: a plain dtpipe job, runnable whole with dtpipe --job." };
+}
+
+/**
+ * Draws in place what the YAML tab's text decides: the tab's light and its name, the verdict, Apply and Revert, and the steps
+ * held. Typing calls it instead of redrawing the drawer, which would take the editor's caret.
+ */
+function drawHold() {
+  const held = editingText();
+  for (const id of HELD) {
+    const node = $(id);
+    if (!node) continue;
+    node.toggleAttribute("inert", held);
+    node.classList.toggle("held", held);
+  }
+  const note = $("d-held");
+  if (note) note.hidden = !held;
+  const v = verdict();
+  const light = () => el("span", { class: `dot ${v.tone}`, "aria-hidden": "true" });
+  const tabButton = $("d-yaml-tab");
+  // The light is no name on its own: the tab's name carries its words.
+  if (tabButton) { fill(tabButton, light(), " YAML"); tabButton.setAttribute("aria-label", `YAML, ${v.short}`); tabButton.title = v.words; }
+  const line = $("d-verdict");
+  const problems = !held && ((cards.result?.errors?.length || 0) + (cards.result?.warnings?.length || 0)) > 0;
+  if (line) fill(line, light(), " ", el("span", { class: v.tone === "held" ? "hint" : v.tone }, v.words),
+    problems ? [" ", el("button", { class: "ghost small", "data-tab": "problems" }, "See Problems")] : null);
+  for (const id of ["d-apply", "d-revert"]) {
+    const button = /** @type {HTMLButtonElement | null} */ ($(id));
+    if (button) button.disabled = !held;
+  }
 }
 
 export function showTab(name) {
@@ -1018,26 +1265,41 @@ export function showTab(name) {
 }
 
 function bindDrawer() {
+  $("d-drawer").addEventListener("input", (e) => {
+    const t = targetOf(e);
+    if (t.id !== "d-edit") return;
+    // A text typed back to the composed one is no text: kept, it would come back stale once the cards compose another.
+    cards.text = t.value === (cards.result?.yaml ?? "") ? null : t.value;
+    drawHold();
+  });
   $("d-drawer").addEventListener("click", async (e) => {
     const b = targetOf(e).closest("button");
     if (!b) return;
     if (b.dataset.tab) showTab(b.dataset.tab);
     else if (b.dataset.copy !== undefined) {
-      try { await navigator.clipboard.writeText(cards.result.yaml); status("YAML copied."); }
-      catch { window.getSelection().selectAllChildren($("d-yaml")); status("Selected: copy it with your keyboard."); }
+      try { await navigator.clipboard.writeText(cards.text ?? cards.result.yaml); status("YAML copied."); }
+      catch { /** @type {HTMLTextAreaElement} */ ($("d-edit")).select(); status("Selected: copy it with your keyboard."); }
+    } else if (b.dataset.revert !== undefined) {
+      cards.text = null;
+      invalidate("drawer");
+      status("the YAML is the steps' again");
     } else if (b.dataset.apply !== undefined) {
       try {
         const ticket = opening.begin();
-        const answer = await api("/api/design/decompose", { yaml: /** @type {HTMLTextAreaElement} */ ($("d-edit")).value, layout: cards.model.layout });
+        const answer = await api("/api/design/decompose", { yaml: cards.text ?? cards.result.yaml, layout: cards.model.layout });
         if (opening.stale(ticket)) return;
-        const layout = cards.model.layout;
-        cards.model = normalize(answer.model);
-        cards.model.layout = Object.fromEntries(Object.entries(layout).filter(([a]) => stepOf(a)));
-        if (cards.model.steps.some((s) => !cards.model.layout[s.alias])) autoLayout(false);
-        cards.selected = null;
-        cards.zoom = null;
-        state.view.drawer = "yaml";
-        cards.dirty = true;
+        // The text replaces every card: Undo puts back the cards it replaced.
+        remember("applying the YAML", () => {
+          const layout = cards.model.layout;
+          cards.model = normalize(answer.model);
+          cards.model.layout = Object.fromEntries(Object.entries(layout).filter(([a]) => stepOf(a)));
+          if (cards.model.steps.some((s) => !cards.model.layout[s.alias])) autoLayout(false);
+          cards.selected = null;
+          cards.zoom = null;
+          cards.text = null;
+          state.view.drawer = "yaml";
+          cards.dirty = true;
+        });
         renderShell();
         await compose();
       } catch (err) { status(err.message, "bad"); }

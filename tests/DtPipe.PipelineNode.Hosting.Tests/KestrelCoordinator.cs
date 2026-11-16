@@ -4,6 +4,7 @@ using DtPipe.Coordinator.Server;
 using DtPipe.Coordinator.Server.Access;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Logging;
 
 namespace DtPipe.PipelineNode.Hosting.Tests;
 
@@ -13,8 +14,12 @@ namespace DtPipe.PipelineNode.Hosting.Tests;
 /// </summary>
 internal sealed class KestrelCoordinator(string url, string state, bool provider = true, IReadOnlyDictionary<string, string>? bootstrap = null) : WebApplicationFactory<Program>
 {
+    /// <summary>A provider that also receives what the coordinator logs, for a test that reads its log.</summary>
+    internal ILoggerProvider? LogTo { get; init; }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
+        if (LogTo is not null) builder.ConfigureLogging(logging => logging.AddProvider(LogTo));
         if (provider)
         {
             builder.UseSetting("Coordinator:Authority", "http://idp.invalid");

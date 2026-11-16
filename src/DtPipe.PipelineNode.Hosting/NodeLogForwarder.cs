@@ -25,8 +25,8 @@ internal sealed class NodeLogForwarder
 
     private sealed class Factory(ILoggerFactory host, NodeLogForwarder sink, string node, string? fragment) : ILoggerFactory
     {
-        public ILogger CreateLogger(string categoryName) => new Tee(host.CreateLogger(categoryName), sink, node, fragment,
-            categoryName.StartsWith("TransportR", StringComparison.Ordinal) || categoryName.StartsWith("Microsoft", StringComparison.Ordinal)
+        public ILogger CreateLogger(string categoryName) => new Tee(host.CreateLogger(categoryName), sink, node, fragment, categoryName,
+            LogCategories.IsTransport(categoryName) || categoryName.StartsWith("Microsoft", StringComparison.Ordinal)
                 ? LogLevel.Warning
                 : LogLevel.Debug);
 
@@ -34,7 +34,7 @@ internal sealed class NodeLogForwarder
         public void Dispose() { }
     }
 
-    private sealed class Tee(ILogger host, NodeLogForwarder sink, string node, string? fragment, LogLevel forwarded) : ILogger
+    private sealed class Tee(ILogger host, NodeLogForwarder sink, string node, string? fragment, string category, LogLevel forwarded) : ILogger
     {
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => host.BeginScope(state);
         public bool IsEnabled(LogLevel logLevel) => logLevel >= forwarded || host.IsEnabled(logLevel);
@@ -46,7 +46,7 @@ internal sealed class NodeLogForwarder
             if (logLevel < forwarded || logLevel == LogLevel.None) return;
             var message = formatter(state, exception);
             if (exception is not null) message += $" ({exception.GetType().Name}: {exception.Message})";
-            sink._lines.Writer.TryWrite(new NodeLogLine(node, fragment, logLevel.ToString(), message));
+            sink._lines.Writer.TryWrite(new NodeLogLine(node, fragment, logLevel.ToString(), message, category));
         }
     }
 }

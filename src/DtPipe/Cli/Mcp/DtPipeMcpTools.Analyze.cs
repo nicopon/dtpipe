@@ -148,7 +148,7 @@ public partial class DtPipeMcpTools
         [System.ComponentModel.Description("The complete YAML configuration string representing the pipeline")] string yamlContent,
         [System.ComponentModel.Description("Source rows to run through the pipeline (default 10, max 1000)")] int rows = 10,
         CancellationToken ct = default) => _analysis.SampleAsync(yamlContent, rows, shownRows: 10, ct,
-            // Not a pointer to 'execute-yaml-job': in plan mode that tool is hidden and the role
+            // Not a pointer to 'execute-yaml-job': the agent is never offered that tool and its role
             // prompt forbids it, so naming it here sends the reader after something it cannot
             // reach.
             nextStep: "This was a preview: nothing was written to the target. Running the pipeline "

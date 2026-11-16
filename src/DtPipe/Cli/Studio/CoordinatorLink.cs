@@ -15,10 +15,11 @@ public sealed class CoordinatorLinkException(string message) : Exception(message
 
 /// <summary>
 /// What the page is told of the link: the coordinator's address, whether a person is signed in, why
-/// not, and who; <c>ByKey</c> when the studio signs in with a key rather than through the browser. Never a token, never the key.
+/// not, and who; <c>ByKey</c> when the studio signs in with a key rather than through the browser; <c>Unreachable</c>
+/// the words of the last exchange that got no answer (the coordinator or its provider), null once one is answered. Never a token, never the key.
 /// </summary>
 public sealed record CoordinatorStatus(
-    string Url, string State, string? Reason, CoordinatorMe? Me, string StudioVersion, int Contract, bool ByKey = false);
+    string Url, string State, string? Reason, CoordinatorMe? Me, string StudioVersion, int Contract, bool ByKey = false, string? Unreachable = null);
 
 /// <summary>
 /// The studio's link to one coordinator, named on the command line: the page never chooses where a
@@ -40,6 +41,9 @@ public sealed class CoordinatorLink : IDisposable
 
     /// <summary>How long before its expiry an access token is renewed.</summary>
     public static readonly TimeSpan Margin = TimeSpan.FromMinutes(2);
+
+    /// <summary>How long <see cref="ProbeAsync"/> waits for the coordinator.</summary>
+    public static readonly TimeSpan ProbeBound = TimeSpan.FromSeconds(5);
 
     /// <summary>How long a sign-in started from the page may take to come back.</summary>
     public static readonly TimeSpan PendingLifetime = TimeSpan.FromMinutes(10);
@@ -82,6 +86,7 @@ public sealed class CoordinatorLink : IDisposable
     private Tokens? _tokens;
     private CoordinatorMe? _me;
     private string? _reason;
+    private string? _unreachable;
     private BrickCatalogView? _catalog;
 
     /// <param name="coordinator">The coordinator's address: its origin is the only one a token or the key is sent to.</param>
@@ -114,7 +119,7 @@ public sealed class CoordinatorLink : IDisposable
         lock (_lock)
         {
             var state = _tokens is not null ? SignedIn : _pending is not null && _time.GetUtcNow() < _pending.Expires ? SigningIn : SignedOut;
-            return new CoordinatorStatus(Url, state, _reason, _tokens is null ? null : _me, StudioVersion, CoordinatorApi.Contract, ByKey);
+            return new CoordinatorStatus(Url, state, _reason, _tokens is null ? null : _me, StudioVersion, CoordinatorApi.Contract, ByKey, _unreachable);
         }
     }
 
@@ -230,7 +235,11 @@ public sealed class CoordinatorLink : IDisposable
     /// <summary>The coordinator's catalog, read again when a person is signed in; the last one read otherwise.</summary>
     public async Task<BrickCatalogView?> RefreshCatalogAsync(CancellationToken ct)
     {
-        if (!IsSignedIn) return Catalog;
+        if (!IsSignedIn)
+        {
+            await ProbeAsync(ct);
+            return Catalog;
+        }
         using var response = await SendAsync(HttpMethod.Get, CoordinatorApi.Catalog, ct: ct);
         if (!response.IsSuccessStatusCode)
             throw new CoordinatorLinkException($"{Url} did not give its catalog: {await ErrorOf(response, ct)}");
@@ -375,10 +384,19 @@ public sealed class CoordinatorLink : IDisposable
                 request.Content = new ByteArrayContent(body);
                 request.Content.Headers.ContentType = MediaTypeHeaderValue.Parse(contentType);
             }
-            var response = await _http.SendAsync(request, ct);
+            var response = await ExchangeAsync(() => _http.SendAsync(request, ct), Url, ct);
             if (response.StatusCode != HttpStatusCode.Unauthorized) return response;
             response.Dispose();
-            if (attempt > 0) throw SignOut($"{Url} no longer accepts this session: sign in again.");
+            if (attempt > 0)
+            {
+                // A key that was just exchanged and is refused before it has named anyone opened a session for no person: the
+                // coordinator issues a node's or a runner's key a token of their own kind, which no person's page accepts.
+                bool unnamed;
+                lock (_lock) unnamed = ByKey && _me is null;
+                throw SignOut(unnamed
+                    ? $"{Url} took this key but opens no person's session with it: a key made for a node or a runner does not."
+                    : $"{Url} no longer accepts this session: sign in again.");
+            }
         }
     }
 
@@ -388,7 +406,7 @@ public sealed class CoordinatorLink : IDisposable
         try
         {
             Tokens tokens;
-            lock (_lock) tokens = _tokens ?? throw new CoordinatorLinkException(_reason ?? $"Nobody is signed in to {Url}: sign in from the studio.");
+            lock (_lock) tokens = _tokens ?? throw new CoordinatorLinkException(_reason ?? $"Nobody is signed in to {Url}: use the \"{(ByKey ? "Sign in with the key" : "Sign in")}\" button at the top of the studio.");
             if (!fresh && _time.GetUtcNow() < tokens.Expires - Margin) return tokens.Access;
             if (ByKey)
             {
@@ -418,7 +436,7 @@ public sealed class CoordinatorLink : IDisposable
     /// <summary>Tokens from the provider's token endpoint, or null when it refuses the grant.</summary>
     private async Task<Tokens?> RequestTokensAsync(Discovery discovery, Dictionary<string, string> form, CancellationToken ct)
     {
-        using var response = await _http.PostAsync(discovery.TokenEndpoint, new FormUrlEncodedContent(form), ct);
+        using var response = await ExchangeAsync(() => _http.PostAsync(discovery.TokenEndpoint, new FormUrlEncodedContent(form), ct), "The identity provider", ct);
         if (response.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Unauthorized) return null;
         if (!response.IsSuccessStatusCode)
             throw new CoordinatorLinkException($"The identity provider's token endpoint answered {(int)response.StatusCode}.");
@@ -434,17 +452,12 @@ public sealed class CoordinatorLink : IDisposable
     /// </summary>
     private async Task<Tokens> ExchangeKeyAsync(Discovery discovery, CancellationToken ct)
     {
-        HttpResponseMessage response;
-        try
+        var response = await ExchangeAsync(() => _http.PostAsync(discovery.TokenEndpoint, new FormUrlEncodedContent(new Dictionary<string, string>
         {
-            response = await _http.PostAsync(discovery.TokenEndpoint, new FormUrlEncodedContent(new Dictionary<string, string>
-            {
-                ["grant_type"] = "client_credentials",
-                ["client_id"] = _keyClientId!,
-                ["client_secret"] = _key!,
-            }), ct);
-        }
-        catch (HttpRequestException ex) { throw new CoordinatorLinkException($"{Url} does not answer: {ex.Message}"); }
+            ["grant_type"] = "client_credentials",
+            ["client_id"] = _keyClientId!,
+            ["client_secret"] = _key!,
+        }), ct), Url, ct);
         using (response)
         {
             if (response.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Unauthorized or HttpStatusCode.TooManyRequests)
@@ -452,7 +465,9 @@ public sealed class CoordinatorLink : IDisposable
                 TokenError? refusal = null;
                 try { refusal = await response.Content.ReadFromJsonAsync<TokenError>(ct); }
                 catch (JsonException) { }
-                throw SignOut($"{Url} refused this studio's key: {refusal?.Description ?? refusal?.Error ?? $"{(int)response.StatusCode} {response.ReasonPhrase}"}");
+                throw SignOut(refusal?.Description is null && refusal?.Error == "invalid_client"
+                    ? $"{Url} opens no identity with this key: it is unknown to that coordinator, revoked or expired, and the coordinator does not say which."
+                    : $"{Url} refused this studio's key: {refusal?.Description ?? refusal?.Error ?? $"{(int)response.StatusCode} {response.ReasonPhrase}"}");
             }
             if (!response.IsSuccessStatusCode)
                 throw new CoordinatorLinkException($"{Url}'s token endpoint answered {(int)response.StatusCode}.");
@@ -529,9 +544,7 @@ public sealed class CoordinatorLink : IDisposable
 
     private async Task<T> GetJsonAsync<T>(string url, string who, CancellationToken ct)
     {
-        HttpResponseMessage response;
-        try { response = await _http.GetAsync(url, ct); }
-        catch (HttpRequestException ex) { throw new CoordinatorLinkException($"{who} does not answer: {ex.Message}"); }
+        var response = await ExchangeAsync(() => _http.GetAsync(url, ct), who, ct);
         using (response)
         {
             if (!response.IsSuccessStatusCode)
@@ -544,6 +557,44 @@ public sealed class CoordinatorLink : IDisposable
             {
                 throw new CoordinatorLinkException($"{url} is not the document this studio reads.");
             }
+        }
+    }
+
+    /// <summary>
+    /// One exchange with the coordinator or its provider. An answer of any status proves the way is open and clears
+    /// <c>Unreachable</c>; none (refused, unresolved, timed out) is a transport failure: it is kept for the status and thrown
+    /// as a <see cref="CoordinatorLinkException"/> that says who did not answer, never as an error of what was asked.
+    /// A cancellation the caller asked for passes through.
+    /// </summary>
+    private async Task<HttpResponseMessage> ExchangeAsync(Func<Task<HttpResponseMessage>> send, string who, CancellationToken ct)
+    {
+        try
+        {
+            var response = await send();
+            lock (_lock) _unreachable = null;
+            return response;
+        }
+        catch (Exception ex) when (ex is HttpRequestException || ex is OperationCanceledException && !ct.IsCancellationRequested)
+        {
+            var message = $"{who} does not answer: {(ex is HttpRequestException ? ex.Message : "no answer in time")}";
+            lock (_lock) _unreachable = message;
+            throw new CoordinatorLinkException(message);
+        }
+    }
+
+    /// <summary>
+    /// Whether the coordinator answers, asked with the one document a sign-in reads first and bounded by
+    /// <see cref="ProbeBound"/>; the answer is the status's <c>Unreachable</c>. Nothing is signed in or out, and no token is sent.
+    /// </summary>
+    public async Task ProbeAsync(CancellationToken ct)
+    {
+        using var bound = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        bound.CancelAfter(ProbeBound);
+        try { await GetJsonAsync<ResourceMetadata>(new Uri(_origin, CoordinatorApi.Metadata).ToString(), Url, bound.Token); }
+        catch (CoordinatorLinkException) { }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            lock (_lock) _unreachable = $"{Url} does not answer: no answer in time";
         }
     }
 

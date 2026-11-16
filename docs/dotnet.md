@@ -18,8 +18,34 @@ dotnet add package DtPipe.Transformers
 | `DtPipe.Processors` | The SQL stream processors |
 | `DtPipe.Arrow.Ado` | ADO.NET to Arrow, standalone: `AdoToArrow.ReadToArrowBatchesAsync(reader)` turns any `DbDataReader` into record batches, `RecordBatchDataReader` goes back |
 | `DtPipe.Arrow.Serialization` | The CLR/Arrow type map and a POCO serializer, standalone: it depends on `Apache.Arrow` only |
+| `DtPipe.PipelineNode.Hosting` | Makes a .NET service a node of a [distributed pipeline](distributed.md): `AddDtPipeNode`, and `AddArrowSource` to serve the service's own data |
 
 The two Arrow packages have no dtpipe dependency and are useful on their own.
+
+## A service as a node
+
+```bash
+dotnet add package DtPipe.PipelineNode.Hosting
+```
+
+```xml
+<PackageDownload Include="dtpipe" Version="[1.16.0]" />
+```
+
+```csharp
+var node = builder.Services.AddDtPipeNode(o => { /* name, coordinator, key file */ });
+node.AddArrowSource("orders", "Orders of the shop API", OrdersTransform.Schema, (ctx, ct) => OrdersTransform.ReadAsync(api, ct));
+node.AddBrick("numbers", BrickKind.Source, "Generated numbers", "input: generate:1000");
+```
+
+A coordinator sees the service as a data node offering two bricks: `orders`, read from the service's
+own code, and `numbers`, a standard dtpipe source. Each run of a fragment is a `dtpipe` child
+process, taken from the `dtpipe` tool package. A tool package cannot be a `PackageReference`, so it
+is downloaded, and the `PackageDownload` line stays in the service's own project. The machine needs
+the .NET and ASP.NET Core runtimes.
+
+A service you can run is in
+[samples/arrow-socket-source](../samples/arrow-socket-source/README.md).
 
 ## What you write yourself
 

@@ -65,9 +65,9 @@ public class SessionTraceTests : IDisposable
         using (var trace = AgentTrace.Open(path, out _))
         {
             Assert.NotNull(trace);
-            trace!.Session("gpt-oss:20b", "http://localhost:11434", AgentMode.Plan, new AgentOptions(), 25);
-            trace.SystemPrompt(AgentMode.Plan, "you are a planner");
-            trace.Catalogue(AgentMode.Plan, Catalogue);
+            trace!.Session("gpt-oss:20b", "http://localhost:11434", new AgentOptions(), 25);
+            trace.SystemPrompt("you are a planner");
+            trace.Catalogue(Catalogue);
             trace.Turn("build me a pipeline");
             trace.Step(new TrajectoryStep
             {
@@ -75,13 +75,13 @@ public class SessionTraceTests : IDisposable
                 ToolName = "preview_data", ToolArgs = "{}",
                 ToolResult = "{\"code\":-32602,\"message\":\"Unknown tool\"}", IsError = true,
             });
-            trace.Note("it guessed a tool name that does not exist");
+            trace.Feedback(1, "comment", "it guessed a tool name that does not exist");
             trace.Verdict(new TurnSummaryModel(TurnOutcome.MaxIterationsReached, 10, TimeSpan.FromSeconds(48),
                 new Dictionary<string, int> { ["inspect"] = 3 }, Tokens: 1991));
         }
 
         var kinds = Read(path).Select(r => r.GetProperty("kind").GetString()).ToArray();
-        Assert.Equal(new[] { "session", "system-prompt", "tools", "turn", "step", "note", "verdict" }, kinds);
+        Assert.Equal(new[] { "session", "system-prompt", "tools", "turn", "step", "feedback", "verdict" }, kinds);
 
         var records = Read(path);
         Assert.Equal("you are a planner", records[1].GetProperty("text").GetString());

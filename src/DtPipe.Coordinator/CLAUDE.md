@@ -20,8 +20,8 @@ bytes between nodes.
 - TransportR is referenced as NuGet packages (`TransportR`, `TransportR.Hub`). Bumping the
   pinned version is a port, not a copy: check each API change against this project and
   `DtPipe.PipelineNode` before moving it.
-- `DefaultFlowControlService`/`FlowControlOptions` (namespace `TransportR.FlowControl`) ship inside
-  the `TransportR.Hub` package; there is no separate `TransportR.FlowControl` package.
+- `DefaultFlowControlService`/`FlowControlOptions` (namespace `TransportR.Hub`) ship inside
+  the `TransportR.Hub` package.
 - **The coordinator and every `DtPipe.PipelineNode` it drives run the same TransportR version; when they
   cannot move at once, the coordinator, which hosts the hub, moves first.** A node's refresh needs a hub of its
   own release: an older hub writes the connection's older expiry between the call's two steps, and its sweep can
@@ -31,7 +31,8 @@ bytes between nodes.
   every write stream, and a proxy that answers `417` fails all of them. `[unchecked]`
 - **A reverse proxy that filters by path must let `/api/client/*` through**, as it does
   `/api/stream/*`: token renewal travels there, and every connection closes at its token's expiry
-  when it is blocked. `[unchecked]`
+  when it is blocked. The write-transport probe's `GET` and `POST` on `/api/stream/probe/send` are under the
+  second prefix; a proxy that blocks them leaves the probe unanswered, and nothing else. `[unchecked]`
 
 ## Hosting
 
@@ -42,13 +43,19 @@ bytes between nodes.
 - `AddCoordinatorHub` registers the flow-control matrix, `IPlanRegistry`, `LoggingHubProgressMonitor`, the
   `AccessOptions` setting that refuses client-opened transfers, `ReplicaRegistry`, `ReplicaAdmission`, `IRunOrchestrator` and `ReplicaProtocol`. It
   returns TransportR's `DataHubBuilder` over its own hub, which carries the data plane and nothing
-  of dtpipe, and the caller finishes it (identity provider, then `Build()`). `AddNodeLink<THub>` names the hub
+  of dtpipe, and the caller finishes it (`AddDataHub` has registered the identity provider that validates tokens; the caller's
+  `UseDevMode` or its own provider replaces it). `AddNodeLink<THub>` names the hub
   of the node channel, which the orchestrator writes to through `INodeLink`.
 - **The node channel's hub calls `ReplicaProtocol`, one line a method, and extends nothing.** The library finds
   a message's replica through its connection; what it cannot know (the rights, an enrolment queue) is the
   host's, decided before it forwards. `[CI: ReplicaAdmissionSubjectTests, the server's NodeChannelHubTests]`
-- `AddDataHub()` registers a no-op progress monitor only when none is registered; the host's own, registered
-  before `Build()`, is the one the hub uses.
+- `AddDataHub()` registers a no-op progress monitor only when none is registered; a host's own, registered
+  before it, is kept, and one registered after it wins.
+- **A progress monitor implements both write announcements itself.** `OnWriteStreamOpened` and
+  `OnWriteTransportProbed` have an empty default on `IHubProgressMonitor`: a monitor without them compiles and says
+  nothing. `LoggingHubProgressMonitor` writes one `Information` line for each, and `EventProgressMonitor` (the server)
+  delegates to it first, then puts one line on the pages' log, naming the replica that owns the client when the
+  registry knows it. `[CI: EventProgressMonitorTests, WriteAnnouncementTests]`
 - **Peers never address each other.** With `AccessOptions.ClientsMayOpenTransfers` at `false`, the hub refuses a
   client's `GetReceiversAsync` and `InitTransferAsync`. Only the coordinator opens a transfer, through
   `ITransferInitiator`, which the option does not touch. `[CI: PeerTransferRefusalTests]`

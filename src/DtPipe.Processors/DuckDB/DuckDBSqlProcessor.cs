@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading.Channels;
 using Apache.Arrow;
 using Apache.Arrow.C;
@@ -20,10 +21,12 @@ using Microsoft.Extensions.Logging;
 
 namespace DtPipe.Processors.DuckDB;
 
-public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
+public sealed class DuckDBSqlProcessor : IColumnarStreamReader, ISqlBearing, IDisposable
 {
     private readonly IMemoryChannelRegistry _registry;
     private readonly string _query;
+    // The text DuckDB plans and runs: the query, with a CTE in front when a --ref must be read once.
+    private string _statement;
     private readonly string? _initSql;
     private readonly IStringContentResolver? _resolver;
     private readonly string _mainAlias;
@@ -37,6 +40,8 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
     private readonly List<IArrowArrayStream> _activeStreams = new();
     private readonly List<IntPtr> _allocatedPointers = new();
     private readonly Dictionary<string, IProjectableArrowStream> _streamProjections = new();
+    private readonly Dictionary<string, string> _viewBodies = new();
+    private int _streamOrdinal;
 
     private DuckDBConnection? _conn;
     private DuckDbArrowResultReader? _resultReader;
@@ -45,6 +50,7 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
 
     public IReadOnlyList<PipeColumnInfo>? Columns => _columns;
     public Schema? Schema => _resultSchema;
+    public IEnumerable<string?> SqlBearingValues => [_query, _initSql];
 
     public DuckDBSqlProcessor(
         IMemoryChannelRegistry registry,
@@ -60,6 +66,7 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
     {
         _registry = registry;
         _query = query;
+        _statement = query;
         _initSql = initSql;
         _resolver = resolver;
         _mainAlias = mainAlias;
@@ -136,7 +143,7 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
             await ApplyProjectionsFromExplainAsync(ct);
 
             _logger.LogDebug("DuckDBSqlProcessor: Inspecting schema from prepared statement...");
-            _resultReader = new DuckDbArrowResultReader(_conn, _query, _logger);
+            _resultReader = new DuckDbArrowResultReader(_conn, _statement, _logger);
             _resultSchema = _resultReader.Prepare();
 
             _columns = ArrowSchemaFactory.ToPipeColumns(_resultSchema).ToList();
@@ -191,29 +198,27 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
         };
     }
 
+    // A scan is registered under "{alias}__raw_cdi", its columns exported behind the stream's prefix, and
+    // the user's table is a view that names them back (casting an Arrow extension type to its DuckDB
+    // type). A plan then lists a scan's projection by prefixed names, which resolve to exactly one stream.
     private async Task RegisterArrowStreamAsync(string alias, IArrowArrayStream underlyingStream, CancellationToken ct)
     {
-        var stream = new ProjectedArrowStream(underlyingStream);
+        var ordinal = Interlocked.Increment(ref _streamOrdinal);
+        var stream = new ProjectedArrowStream(underlyingStream, $"__dtp_s{ordinal}__", alias);
         _streamProjections[alias] = stream;
 
-        var schema = stream.Schema;
-        var needsView = false;
-        foreach (var f in schema.FieldsList)
+        var source = stream.SourceSchema;
+        foreach (var f in source.FieldsList)
         {
-            if (f.HasMetadata && f.Metadata.TryGetValue("ARROW:extension:name", out var ext))
+            if (f.HasMetadata && f.Metadata.TryGetValue("ARROW:extension:name", out var ext)
+                && GetDuckDBCastForExtension(ext) == null
+                && ext != "arrow.opaque" && ext != "arrow.parquet.variant")
             {
-                if (GetDuckDBCastForExtension(ext) != null)
-                {
-                    needsView = true;
-                }
-                else if (ext != "arrow.opaque" && ext != "arrow.parquet.variant")
-                {
-                    _logger.LogWarning("DuckDBSqlProcessor: Unhandled canonical Arrow extension '{Extension}' on field '{Field}'. Falling back to physical type.", ext, f.Name);
-                }
+                _logger.LogWarning("DuckDBSqlProcessor: Unhandled canonical Arrow extension '{Extension}' on field '{Field}'. Falling back to physical type.", ext, f.Name);
             }
         }
 
-        string scanAlias = needsView ? $"{alias}__raw_cdi" : alias;
+        var scanAlias = $"{alias}__raw_cdi";
 
         unsafe
         {
@@ -232,110 +237,176 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
             }
         }
 
-        if (needsView)
+        var columns = source.FieldsList.Select(f =>
         {
-            var columns = schema.FieldsList.Select(f =>
-            {
-                if (f.HasMetadata && f.Metadata.TryGetValue("ARROW:extension:name", out var ext))
-                {
-                    var castType = GetDuckDBCastForExtension(ext);
-                    if (castType != null)
-                        return $"CAST(\"{f.Name}\" AS {castType}) AS \"{f.Name}\"";
-                }
-                return $"\"{f.Name}\"";
-            });
-            var viewSql = $"CREATE VIEW \"{alias}\" AS SELECT {string.Join(", ", columns)} FROM \"{scanAlias}\"";
+            var exported = QuoteIdentifier(stream.Prefix + f.Name);
+            if (f.HasMetadata && f.Metadata.TryGetValue("ARROW:extension:name", out var ext)
+                && GetDuckDBCastForExtension(ext) is { } castType)
+                return $"CAST({exported} AS {castType}) AS {QuoteIdentifier(f.Name)}";
+            return $"{exported} AS {QuoteIdentifier(f.Name)}";
+        });
+        _viewBodies[alias] = $"SELECT {string.Join(", ", columns)} FROM {QuoteIdentifier(scanAlias)}";
+        var viewSql = $"CREATE VIEW {QuoteIdentifier(alias)} AS {_viewBodies[alias]}";
 
-            _logger.LogDebug("DuckDBSqlProcessor: Restoring Arrow extension semantics via semantic view '{Alias}'", alias);
-            using var cmd = _conn!.CreateCommand();
-            cmd.CommandText = viewSql;
-            await cmd.ExecuteNonQueryAsync(ct);
-        }
+        _logger.LogDebug("DuckDBSqlProcessor: Naming the columns of '{Alias}' back through a view", alias);
+        using var cmd = _conn!.CreateCommand();
+        cmd.CommandText = viewSql;
+        await cmd.ExecuteNonQueryAsync(ct);
     }
+
+    private static string QuoteIdentifier(string name) => "\"" + name.Replace("\"", "\"\"") + "\"";
 
     // ── Schema inspection from prepared statement ────────────────────────────────────
 
+    // DuckDB hands an Arrow scan only the columns its plan uses, in the plan's order, with no say for the
+    // stream. EXPLAIN lists each ARROW_SCAN's projection on its own; a column is named behind its stream's
+    // prefix, so a scan resolves to one stream and its list is that stream's projection. A scan is never
+    // merged with another: two streams that carry the same column name would be handed each other's.
+    //
+    // A stream is read to its end by one scan, so a source scanned twice hands the second scan nothing. A
+    // --ref is already held whole: one the plan scans more than once is read once into a MATERIALIZED CTE put
+    // in front of the query under its own name. The main is a stream and is refused. A table in place of the
+    // CTE would move a join's build side onto the stream, which DuckDB estimates at one row, and a CTE inside
+    // the view is copied again at each reference.
     private async Task ApplyProjectionsFromExplainAsync(CancellationToken ct)
     {
+        List<List<string>> scans;
         try
         {
-            using var cmd = _conn!.CreateCommand();
-            cmd.CommandText = $"EXPLAIN (FORMAT JSON) {_query}";
-
-            using var reader = await cmd.ExecuteReaderAsync(ct);
-
-            // Parse projections as an ORDERED list. The EXPLAIN JSON lists ARROW_SCAN projections
-            // in the same order as DuckDB's internal column_ids vector, which determines the
-            // expected children[] position in each CDI batch (arrow_scan_is_projected = true
-            // hardcoded). Losing this order (e.g. by using a HashSet) would map children[idx]
-            // to the wrong column for any multi-column projection where query order ≠ schema order.
-            var projectedColumnsOrdered = new List<string>();
-
-            while (await reader.ReadAsync(ct))
-            {
-                if (reader.FieldCount < 2 || reader.IsDBNull(1)) continue;
-
-                var json = reader.GetValue(1)?.ToString();
-                if (string.IsNullOrEmpty(json)) continue;
-
-                ParseProjectionsFromJson(json, projectedColumnsOrdered);
-            }
-
-            foreach (var kvp in _streamProjections)
-            {
-                var alias = kvp.Key;
-                var stream = kvp.Value;
-
-                if (stream?.Schema?.FieldsList == null) continue;
-
-                // Build a fast-lookup set of this stream's column names for the membership test,
-                // but iterate the EXPLAIN-ordered list to build the final projection — preserving
-                // the order DuckDB expects in the CDI batch.
-                var streamColSet = new HashSet<string>(
-                    stream.Schema.FieldsList.Select(f => f.Name),
-                    StringComparer.OrdinalIgnoreCase);
-
-                var projectedForStream = new List<string>();
-                foreach (var c in projectedColumnsOrdered)
-                {
-                    if (streamColSet.Contains(c))
-                    {
-                        if (!projectedForStream.Contains(c)) projectedForStream.Add(c);
-                    }
-                    else
-                    {
-                        // Handle DuckDB pushing down nested struct projections (e.g., "ComplexObject._value")
-                        // by projecting the root column ("ComplexObject") to pass the full struct.
-                        var dotIndex = c.IndexOf('.');
-                        if (dotIndex > 0)
-                        {
-                            var rootCol = c.Substring(0, dotIndex);
-                            if (streamColSet.Contains(rootCol))
-                            {
-                                if (!projectedForStream.Contains(rootCol)) projectedForStream.Add(rootCol);
-                            }
-                        }
-                    }
-                }
-
-                if (projectedForStream.Count > 0)
-                {
-                    _logger.LogDebug("DuckDBSqlProcessor: Setting projection for '{Alias}': [{Cols}]", alias, string.Join(", ", projectedForStream));
-                    stream.SetProjectedColumns(projectedForStream);
-                }
-            }
+            scans = await ExplainScansAsync(_statement, ct);
         }
         catch (Exception ex)
         {
             throw new Exception(
                 "DuckDBSqlProcessor: Pre-flight EXPLAIN failed. Aborting query to prevent potential data corruption or native crashes due to DuckDB projection pushdown bugs.", ex);
         }
+
+        var scansByAlias = GroupScansBySource(scans);
+        var rescanned = scansByAlias.Where(kv => kv.Value.Count > 1).Select(kv => kv.Key).ToList();
+        if (rescanned.Contains(_mainAlias))
+            throw ScannedMoreThanOnce(_mainAlias);
+
+        if (rescanned.Count > 0)
+        {
+            _statement = ReadOnceInFront(_query, rescanned);
+            _logger.LogDebug("DuckDBSqlProcessor: the plan scans [{Aliases}] more than once; reading each once through a CTE", string.Join(", ", rescanned));
+            try
+            {
+                scansByAlias = GroupScansBySource(await ExplainScansAsync(_statement, ct));
+            }
+            catch (Exception ex)
+            {
+                throw ScannedMoreThanOnce(rescanned[0], ex);
+            }
+            if (scansByAlias.FirstOrDefault(kv => kv.Value.Count > 1).Key is { } still)
+                throw ScannedMoreThanOnce(still);
+        }
+
+        foreach (var (alias, scansOfSource) in scansByAlias)
+        {
+            var columns = scansOfSource[0];
+            if (columns.Count == 0) continue;
+            _logger.LogDebug("DuckDBSqlProcessor: Setting projection for '{Alias}': [{Cols}]", alias, string.Join(", ", columns));
+            _streamProjections[alias].SetProjectedColumns(columns);
+        }
     }
 
-    // Parses ARROW_SCAN projection lists from a DuckDB EXPLAIN (FORMAT JSON) result.
-    // Projections are appended to `ordered` in the order they appear in the JSON, which
-    // matches DuckDB's column_ids order and therefore the expected CDI children[] position.
-    private void ParseProjectionsFromJson(string json, List<string> ordered)
+    private async Task<List<List<string>>> ExplainScansAsync(string statement, CancellationToken ct)
+    {
+        var scans = new List<List<string>>();
+        using var cmd = _conn!.CreateCommand();
+        cmd.CommandText = $"EXPLAIN (FORMAT JSON) {statement}";
+
+        using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            if (reader.FieldCount < 2 || reader.IsDBNull(1)) continue;
+
+            var json = reader.GetValue(1)?.ToString();
+            if (string.IsNullOrEmpty(json)) continue;
+
+            ParseProjectionsFromJson(json, scans);
+        }
+        return scans;
+    }
+
+    // Each scan's projection, by the source it reads. A scan that reads no column names no source and is not
+    // counted: the stream refuses a second end instead (ProjectedArrowStream).
+    private Dictionary<string, List<List<string>>> GroupScansBySource(List<List<string>> scans)
+    {
+        var bySource = new Dictionary<string, List<List<string>>>();
+        foreach (var scan in scans)
+        {
+            _logger.LogDebug("DuckDBSqlProcessor: ARROW_SCAN projection [{Cols}]", string.Join(", ", scan));
+
+            string? owner = null;
+            var columns = new List<string>();
+            foreach (var exported in scan)
+            {
+                var (alias, column) = ResolveExportedColumn(exported);
+                if (owner is not null && owner != alias)
+                    throw new InvalidOperationException(
+                        $"DuckDBSqlProcessor: one scan of the plan reads columns of two sources ('{exported}' and an earlier column). The plan cannot be told apart from another; refusing the query.");
+                owner = alias;
+                if (!columns.Contains(column)) columns.Add(column);
+            }
+
+            if (owner is null) continue;
+            if (!bySource.TryGetValue(owner, out var list)) bySource[owner] = list = new();
+            list.Add(columns);
+        }
+        return bySource;
+    }
+
+    private static InvalidOperationException ScannedMoreThanOnce(string alias, Exception? inner = null)
+        => new($"DuckDBSqlProcessor: the plan scans '{alias}' more than once, and a source is a stream a scan reads to its end: a second scan would find nothing. Read '{alias}' once in a CTE (WITH c AS MATERIALIZED (SELECT * FROM {alias}) ...) and select from that.", inner);
+
+    // What opens a query's own WITH list, past leading whitespace and comments. A query it misses is planned
+    // with the CTE prefixed, which fails to bind and is refused: a miss costs a refusal, never a value.
+    private static readonly Regex LeadingWith = new(
+        @"\A(?:\s|--[^\n]*|/\*.*?\*/)*WITH(?:\s+RECURSIVE)?\b",
+        RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant);
+
+    // One MATERIALIZED CTE per alias, under the alias's own name and read off its raw scan (never off the view,
+    // which a recursive list would read as the CTE itself), first in the query's own WITH list or in front of
+    // it. The query's SELECT is left as written, so its columns and its order are the user's.
+    private string ReadOnceInFront(string query, IEnumerable<string> aliases)
+    {
+        var ctes = string.Join(", ", aliases.Select(a => $"{QuoteIdentifier(a)} AS MATERIALIZED ({_viewBodies[a]})"));
+        var opening = LeadingWith.Match(query);
+        return opening.Success
+            ? $"{query[..opening.Length]} {ctes},{query[opening.Length..]}"
+            : $"WITH {ctes}\n{query}";
+    }
+
+    // A name in a plan is a column of one stream behind its prefix, or a field of a struct column
+    // ("Col._value"), which stands for the whole column: the stream hands over the struct.
+    private (string Alias, string Column) ResolveExportedColumn(string exported)
+    {
+        foreach (var (alias, stream) in _streamProjections)
+        {
+            if (!exported.StartsWith(stream.Prefix, StringComparison.OrdinalIgnoreCase)) continue;
+
+            var rest = exported[stream.Prefix.Length..];
+            var fields = stream.SourceSchema.FieldsList;
+            var match = fields.FirstOrDefault(f => string.Equals(f.Name, rest, StringComparison.OrdinalIgnoreCase));
+            if (match is null && rest.IndexOf('.') is > 0 and var dot)
+            {
+                var root = rest[..dot];
+                match = fields.FirstOrDefault(f => string.Equals(f.Name, root, StringComparison.OrdinalIgnoreCase));
+            }
+            if (match is not null) return (alias, match.Name);
+        }
+
+        throw new InvalidOperationException(
+            $"DuckDBSqlProcessor: the plan reads the column '{exported}', which no registered source carries. Refusing the query rather than reading it from the wrong source.");
+    }
+
+    // Appends one projection list per ARROW_SCAN of an EXPLAIN (FORMAT JSON) plan, in the order the plan
+    // gives it, which is DuckDB's column_ids order and therefore the position of each column in the batch.
+    // A scan in the recursive part of a recursive CTE (the second child of REC_CTE) runs again at each
+    // iteration, so it is appended twice: it is a source scanned more than once.
+    private void ParseProjectionsFromJson(string json, List<List<string>> scans)
     {
         try
         {
@@ -343,9 +414,9 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
             var root = doc.RootElement;
             if (root.ValueKind == JsonValueKind.Array)
                 foreach (var item in root.EnumerateArray())
-                    TraversePlanForProjections(item, ordered);
+                    TraversePlanForProjections(item, scans);
             else if (root.ValueKind == JsonValueKind.Object)
-                TraversePlanForProjections(root, ordered);
+                TraversePlanForProjections(root, scans);
         }
         catch (Exception ex)
         {
@@ -353,36 +424,45 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, IDisposable
         }
     }
 
-    private static void TraversePlanForProjections(JsonElement element, List<string> ordered)
+    private static void TraversePlanForProjections(JsonElement element, List<List<string>> scans, bool repeated = false)
     {
-        if (element.TryGetProperty("name", out var nameProp) &&
-            nameProp.GetString() == "ARROW_SCAN" &&
+        var name = element.TryGetProperty("name", out var nameProp) ? nameProp.GetString() : null;
+        if (name == "ARROW_SCAN" &&
             element.TryGetProperty("extra_info", out var extraInfo) &&
             extraInfo.TryGetProperty("Projections", out var projProp))
         {
+            var scan = new List<string>();
             if (projProp.ValueKind == JsonValueKind.Array)
             {
                 foreach (var p in projProp.EnumerateArray())
                 {
                     var col = p.GetString();
-                    if (!string.IsNullOrEmpty(col) &&
-                        !ordered.Contains(col, StringComparer.OrdinalIgnoreCase))
-                        ordered.Add(col);
+                    if (!string.IsNullOrEmpty(col) && !scan.Contains(col, StringComparer.OrdinalIgnoreCase))
+                        scan.Add(col);
                 }
             }
             else if (projProp.ValueKind == JsonValueKind.String)
             {
                 var col = projProp.GetString();
-                if (!string.IsNullOrEmpty(col) &&
-                    !ordered.Contains(col, StringComparer.OrdinalIgnoreCase))
-                    ordered.Add(col);
+                if (!string.IsNullOrEmpty(col)) scan.Add(col);
+            }
+            if (scan.Count > 0)
+            {
+                scans.Add(scan);
+                if (repeated) scans.Add(scan);
             }
         }
 
         if (element.TryGetProperty("children", out var children) &&
             children.ValueKind == JsonValueKind.Array)
+        {
+            var index = 0;
             foreach (var child in children.EnumerateArray())
-                TraversePlanForProjections(child, ordered);
+            {
+                TraversePlanForProjections(child, scans, repeated || (name == "REC_CTE" && index > 0));
+                index++;
+            }
+        }
     }
 
     // ── Streaming output ─────────────────────────────────────────────────────────────

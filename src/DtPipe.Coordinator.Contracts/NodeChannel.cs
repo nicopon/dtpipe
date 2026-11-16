@@ -93,7 +93,7 @@ public sealed record BrickColumn(string Name, string Type, bool IsNullable);
 /// <summary>
 /// A read or a write the node's owner preconfigured on one of its databases, as the node announces it: the id, kind, title,
 /// description and <see cref="Version"/>, the hash of the declared text taken on the node
-/// (<see cref="BrickRules.VersionOf(BrickKind, string)"/>). The text, its variables and its schema stay on the node; a job
+/// (<see cref="BrickRules.VersionOf"/>). The text, its variables and its schema stay on the node; a job
 /// references the brick as <c>brick:&lt;node&gt;/&lt;id&gt;</c> and the node composes the branch from its own declarations. A schema
 /// depends on the rows, so it is read on demand (<c>PreviewBrick</c>), never announced.
 /// </summary>
@@ -252,4 +252,19 @@ public static class ExitOrigins
 [JsonConverter(typeof(JsonStringEnumConverter<ExitedAck>))]
 public enum ExitedAck { Accepted, NotAdmitted, UnknownConnection }
 
-public sealed record NodeLogLine(string Node, string? Fragment, string Level, string Message);
+/// <summary>
+/// One log line a node forwards. <see cref="Category"/> is the category of the logger that wrote it, which is how the
+/// coordinator tells a line of the transport library from any other without reading its message; null when the
+/// writer names none.
+/// </summary>
+public sealed record NodeLogLine(string Node, string? Fragment, string Level, string Message, string? Category = null);
+
+/// <summary>What a logger category says about the library that wrote the line.</summary>
+public static class LogCategories
+{
+    /// <summary>The namespace of the transport library: every category a logger of it carries starts with it.</summary>
+    private const string TransportNamespace = "TransportR";
+
+    public static bool IsTransport(string? category) =>
+        category is not null && category.StartsWith(TransportNamespace, StringComparison.Ordinal);
+}

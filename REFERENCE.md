@@ -23,9 +23,9 @@
 - [Sample Mode and Materialisation](#sample-mode-and-materialisation)
 - [Shell Completion](#shell-completion)
 - [Studio](#studio-dtpipe-studio)
+- [Distributed pipeline](#distributed-pipeline)
 - [Model Context Protocol (MCP) Server](#model-context-protocol-mcp-server)
-- [AI Agent Subcommand](#ai-agent-subcommand-dtpipe-agent)
-- [Agent Guardrails](#agent-guardrails-isqlsafetypolicy--iapprovalgate)
+- [MCP Guardrails](#mcp-guardrails-isqlsafetypolicy--iapprovalgate)
 
 ## Synopsis
 
@@ -180,8 +180,8 @@ dtpipe -i duck:memory --duck-init "keyring://s3-init" ...
 | **S3 object storage** | ✅ | ✅ | `s3://` / `s3a://` | — | — | See [Object storage](#object-storage-s3-azure) |
 | **Azure Blob** | ✅ | ✅ | `azure://` / `az://` | — | — | See [Object storage](#object-storage-s3-azure) |
 | **Data Gen** | ✅ | — | `generate:N` | — | — |
-| **Null** | — | ✅ | `null:` | — | — |
-| **Checksum** | — | ✅ | `checksum:` | — | — |
+| **Null** | — | ✅ | `null:` | — | ✅ |
+| **Checksum** | — | ✅ | `checksum:` | — | ✅ |
 
 > `dtpipe providers` lists what the binary carries, as a table on stderr. `dtpipe providers --format
 > json` writes the same inventory to stdout for a script: one object per component with `name`,
@@ -611,9 +611,9 @@ dtpipe -i sales.csv -o azure://reports/sales.parquet --azure-connection-string "
   too, over one directory — see [File globs](#file-globs).
 - `https://`, `gs://` and other schemes are **not** claimed by any provider. Reach them through
   the DuckDB engine (`--duck-init "INSTALL httpfs; …"` + `read_parquet(…)` / `COPY … TO …`).
-- Object-storage connection strings count as network access for the agent guardrails: a job using
-  one needs `--allow-network` (see
-  [Agent Guardrails](#agent-guardrails-isqlsafetypolicy--iapprovalgate)).
+- Object-storage connection strings count as network access for the SQL safety policy: a job using
+  one needs the `allowNetwork` argument of `execute-yaml-job` (see
+  [MCP Guardrails](#mcp-guardrails-isqlsafetypolicy--iapprovalgate)).
 - The `httpfs` / `azure` extensions are installed from DuckDB's extension repository on first use,
   so the host needs access to it once (or an extension directory already holding them).
 
@@ -666,7 +666,9 @@ command line (`--no-stats`, `--log`, `--strict-bindings`, `--export-job`, `--cur
 | `--merge` | UNION ALL of all `--from` sources. Requires at least 2 streaming sources that share one schema: same columns, names and types, else the run is refused before any row moves |
 
 > **`--ref` is read in full into memory** before the query runs; only the `--from` source streams.
-> Filter a large lookup upstream first.
+> Filter a large lookup upstream first. A query may name a `--ref` as often as it needs (a
+> self-join); it may read the `--from` source only once, and one that reads it twice is refused:
+> read it once in a CTE and select from that.
 
 > **An alias list is comma-separated; repeating a flag never adds to it.** Repetition has one
 > meaning in this grammar — `-i` and `--from` open a new branch — so `--from a --from b`
@@ -693,10 +695,10 @@ command line (`--no-stats`, `--log`, `--strict-bindings`, `--export-job`, `--cur
 | `--bind-compression-level N` | Level of that codec; needs `--bind-compression`. Default: the codec's own |
 | `--edges-only` | Refuse every reader and writer that is not an `arrow:-` edge, and run `--sql` without external access |
 
-A fragment written by `dtpipe split` keeps the boundary its text names — a branch whose input or
-output is exactly `arrow:-` — and a single shell pipe wires a two-process chain without either
-flag. Beyond one edge per direction (a fragment with two links, or two producers feeding a join),
-name where each `arrow:-` actually is for this run:
+A fragment keeps the boundary its text names — a branch whose input or output is exactly
+`arrow:-` — and a single shell pipe wires a two-process chain without either flag. Beyond one
+edge per direction (a fragment with two links, or two producers feeding a join), name where each
+`arrow:-` actually is for this run:
 
 ```
 dtpipe --job anonymiser.yaml --bind-input anonymiser=/run/42/in --bind-output anonymiser=/run/42/out
@@ -852,8 +854,8 @@ branch-name:
     - type: project
       mappings:
         id: ~
-          name: ~
-          email: ~
+        name: ~
+        email: ~
 
   # Provider-specific options (keyed by component name)
   provider-options:
@@ -884,6 +886,9 @@ output type is `--compute-types` on the command line and `compute-types` in YAML
 SQL is `--duck-init` and `init-sql`. A key that matches no property gets a warning that lists the
 valid keys, and fails the run under `--strict-bindings`. `--export-job` is the authority on any
 shape this table leaves open.
+
+A key written twice in one mapping is refused, naming the key and the line of its first
+occurrence: two `provider-options` blocks in a branch are one block to write.
 
 ### Environment variable and secret interpolation
 
@@ -1080,7 +1085,7 @@ dtpipe -i pg:"Host=db;Database=app" --query "SELECT * FROM orders" \
 | Hooks | None of `--pre-exec`, `--post-exec`, `--on-error-exec`, `--finally-exec` runs |
 | Column types | Asked of the writer as the run asks; a refusal names every column and the cast that fixes it |
 | Cursor, metrics | Not advanced, not written |
-| The source | A query carrying `DELETE`, `UPDATE`, `DROP`, `TRUNCATE`, `ALTER`, `INSERT` or `ATTACH` is refused. PostgreSQL, Oracle, MySQL (`SET TRANSACTION READ ONLY`) and SQLite (`PRAGMA query_only`) also get a read-only session. SQL Server has none, so there the verb scan is the only guarantee |
+| The source | A query or an init script carrying `DELETE`, `UPDATE`, `DROP`, `TRUNCATE`, `ALTER`, `INSERT` or `ATTACH` is refused, a SQL step's own included. An `@file`, `${{NAME}}` or `keyring://` value is read to be judged by what it holds, just before the source would read it. PostgreSQL, Oracle, MySQL (`SET TRANSACTION READ ONLY`) and SQLite (`PRAGMA query_only`) also get a read-only session. SQL Server has none, so there the verb scan is the only guarantee |
 
 The run states which of the two guarantees it had: a verb scan cannot prove a query read-only
 (`SELECT my_function()` passes it).
@@ -1165,37 +1170,6 @@ Exit `0` when the new contract still satisfies a consumer the old one satisfied,
 A decimal with no declared width is written as `decimal128:38:18` with the field metadata
 `Apache.Arrow.Serialization:decimal-width = undeclared`.
 
-#### Offering the points a job could be cut at
-
-```bash
-dtpipe split producer.yaml
-dtpipe split producer.yaml --branch orders --rows 100
-```
-
-Lists one candidate per stage (`0` is the reader, `1..n` the steps in order), with the schema that
-would cross and the cost: `free` for a columnar stage, `two bridges` for a row stage. The schemas
-come from a sample run. A job with several branches reading a source needs `--branch`.
-
-#### Making the cut
-
-```bash
-dtpipe split producer.yaml --at 1 --out orders
-dtpipe split producer.yaml --at 1 --out orders --acknowledge
-dtpipe --job orders-producer.yaml | dtpipe --job orders-consumer.yaml
-```
-
-| Flag | |
-|:---|:---|
-| `--at <k>` | Cut after stage `k`: the producer keeps stages `1..k`, the consumer the rest |
-| `--out <prefix>` | Writes `<prefix>-producer.yaml` and `<prefix>-consumer.yaml`, meeting on `arrow:-` |
-| `--acknowledge` | Write the files. Without it, the placement is printed and the exit code is `1` |
-
-The source, cursor, `--limit` and sampling go to the producer; the target, `--prefix` and
-`--checkpoint` to the consumer; a `provider-options` block follows the component it configures,
-and a block neither end owns stops the cut. `--metrics-path` goes to neither. A secret written in
-full stops the cut, naming where it is: replace it with `${{ENV_VAR}}` or `${{keyring://alias}}`.
-The halves keep every `${{…}}` as written.
-
 ### Sessions
 
 | A checkpoint belongs to | |
@@ -1241,13 +1215,14 @@ Restart your terminal (or `source ~/.zshrc`) to activate. Completion suggests pr
 ## Studio (`dtpipe studio`)
 
 `dtpipe studio [folder]` opens a local page over the YAML jobs of a folder (default: the current
-directory). Each job shows as cards, one per source, step and sink, which you edit as cards or as
+directory). Each job shows as steps, from its sources to its outputs, which you edit as steps or as
 YAML and preview on the real engine without writing a target.
 
 ```bash
 dtpipe studio ./jobs              # prints the address to open, then serves until stopped
 dtpipe studio ./jobs --port 8765  # a fixed port instead of any free one
 dtpipe studio ./jobs --coordinator https://coordinator.example  # signed in to a coordinator
+dtpipe studio ./jobs --llm-provider ollama --llm-model qwen2.5-coder:7b  # with the agent's panel
 ```
 
 | Option | Description |
@@ -1255,25 +1230,61 @@ dtpipe studio ./jobs --coordinator https://coordinator.example  # signed in to a
 | `--port` | Port on 127.0.0.1. Default: any free port |
 | `--coordinator` | A distributed pipeline's coordinator, by its address: its bricks and its library. Default: none |
 | `--key` | Sign in to the coordinator with a key it made for you, as a reference (`${{NAME}}`, `keyring://alias`, `@file`), never the key itself. Default: through the browser |
+| `--llm-provider` | Opens the agent's panel on `ollama` or `openai`. Default: no agent |
+| `--llm-url` | The provider's address. Default: `http://localhost:11434` for ollama, `https://api.openai.com` for openai |
+| `--llm-model` | The model the agent starts with; the page may pick another the provider lists. Default: none |
+| `--llm-key` | The provider's API key, as a reference (`${{NAME}}`, `keyring://alias`, `@file`), never the key itself. Default: none, which a server that does not authenticate needs |
+| `--llm-timeout` | Seconds with no token before a model call fails. Default: 300 |
+| `--agent-trace` | Records the agent's session as JSON lines; a directory gets a timestamped file. Default: `$DTPIPE_AGENT_TRACE`, else none |
 
 | Action | What it does |
 |:---|:---|
-| **▶ Preview** | Runs the job as `--dry-run` does, over the rows you ask for (up to 100 000 per source; a card shows up to 1 000). Each card then shows its rows, columns and types, and a badge with its state |
-| **Save** | Writes the job composed from the cards. A job written by hand loses its inner comments and key order, and the page says so. Refuses a file changed on disk since it was opened, never creates a folder, and never overwrites another file |
+| **▶ Preview** | Runs the job as `--dry-run` does, over the rows you ask for (up to 100 000 per source; a step shows up to 1 000). Each step then shows its rows, columns and types, and a badge with its state |
+| **Save** | Writes the job composed from the steps. A job written by hand loses its inner comments and key order, and the page says so. Refuses a file changed on disk since it was opened, never creates a folder, and never overwrites another file |
 | **Variables** | Lists every `${{…}}` the job reads. For a preview, give each a keyring alias or a value; a preview with an unresolved variable is refused |
 | **Import** | Turns a dtpipe command line into a new job, as `--export-job` would. `--bind-input` and `--bind-output` are refused |
-| **Write targets…** | Runs the saved job for real, as `dtpipe --job`, after you confirm each target. **Stop** ends it with code 130 |
-| **Review before writing** | An option of **Write targets…**: the run stops before every writing branch and holds the rows; **Write** writes them all, **Abandon** forgets them. A run stopped or failed before every target held its rows can only be abandoned |
-| **▶** on a card | Runs the job up to that card |
-| **📌** on a card | Keeps the card's rows as a checkpoint, so later runs start from there. **Forget pins** clears them all |
+| **Run for real…** | Opens a dialog that lists what the saved job writes; untick an output to leave it out (the job runs without it and what only it needs). **Write N outputs** runs the job for real, as `dtpipe --job`, and writes only the outputs ticked. **Stop** ends it with code 130 |
+| **Review before writing** | An option of **Run for real…**: the run stops before every writing branch it was asked to write and holds the rows; **Write** on an output step opens the same dialog for the held outputs, ticks that one and writes what you confirm, and the others stay held; **Abandon** forgets every row still held (what was already written stays written). A run stopped or failed before every output held its rows can only be abandoned |
+| **▶** on a step | Runs the job up to that step |
+| **📌** on a step | Keeps the step's rows as a checkpoint, so later runs start from there. **Forget pins** clears them all |
 
-Editing a card clears the preview and the checkpoints of every card that depends on it. A preview
+Editing a step clears the preview and the checkpoints of every step that depends on it. A preview
 through pins is not exactly the job's run: every cut passes through Arrow and batches differ.
 
-The studio keeps its own files under `.dtpipe/studio/` in the folder: the cards' layout
-(`<job>-layout.json`), the page's state (`view.json`), the launch values (`<job>-launch.json`,
-aliases and typed values, never a keyring value), and the pins (`<job>-debug.json`). Checkpoints
-live in the session `.dtpipe/sessions/studio-debug/`.
+The studio keeps its own files under `.dtpipe/studio/` in the folder: the steps' layout
+(`<job>-layout.json`), the page's state, the job open included (`view.json`), the launch values
+(`<job>-launch.json`, aliases and typed values, never a keyring value), and the pins
+(`<job>-debug.json`). Checkpoints live in the session `.dtpipe/sessions/studio-debug/`.
+
+### The agent
+
+With `--llm-provider`, the panel on the right talks to a model that uses dtpipe's tools: it inspects
+sources, validates and previews jobs (`dry-run`), reads the jobs of the folder, and the job it gives
+lands on the open job's steps, unsaved, or opens as a new job when none is open. Guide:
+[The agent](./docs/guides/agent.md).
+
+- **A save waits for you.** The agent's `save-job` shows a card (the text the studio composed) and
+  writes nothing until you answer; a file changed since the card refuses the answer. A job that
+  `validate-yaml-job` refuses never reaches a card: the model gets the refusal and corrects it.
+  A turn that checked a job without a dry-run ends with a notice saying the job is not yet known to
+  run. **No tool
+  writes an output**: to run a job for real, save it and use **Run for real…**, which shows what
+  each branch writes and asks first. A job with a brick runs from the page.
+- **A turn has no step limit**: it ends with the model's answer or with **Stop**. The panel shows
+  its turn, its step and the prompt the model last read, against the window on Ollama. Its left
+  edge resizes it, as the other panes' do.
+- **The open job always goes to the model** with the message, as the studio composes it, and what
+  the agent gives lands on its steps, unsaved; a change of yours since it last read them is kept. A
+  job that holds a credential value (`Password=…`) is held behind a card that names where, never the
+  value, and asks whether to send it or stop the turn; `read-job` asks the same. The check is
+  best-effort: a credential under an unknown key passes, and a column named like one is flagged.
+  `${{NAME}}` and `keyring://` references pass.
+- **What the tools read goes to the model's address**, schemas and rows included. The panel shows
+  the provider and the address, read only, and warns when the address is not this machine. The key
+  never reaches the page or the trace.
+- `execute-yaml-job` is never offered to the agent; a call to a tool it was not offered is refused.
+  A turn and a run of yours refuse each other; a preview of yours and the agent's `dry-run` take
+  turns.
 
 ### With a coordinator
 
@@ -1286,11 +1297,11 @@ the studio's memory. The coordinator's administrator must list you, and
 |:---|:---|
 | Palette | Offers the bricks of the coordinator's nodes, an offline node greyed out, with each node's dtpipe version |
 | **Publish** | Sends the saved job to the library under an id you choose. It replaces only the version you last read; if someone else saved since, it asks. A deployed pipeline keeps running its armed version until deployed again |
-| **Open from library** | Writes a library pipeline as a new `<id>.yaml` in the folder, never over a file |
+| **Library** list | Under the jobs once you are signed in. Clicking a pipeline writes it as a new `<id>.yaml` in the folder, never over a file |
 
 A preview with bricks reads at most 100 rows of each source brick through the coordinator; a sink
 brick receives nothing, its rows going to a throwaway file under `.dtpipe/studio/samples/`. A run
-with a source brick is refused unless every output is a sink brick. **Write targets…** also writes a
+with a source brick is refused unless every output is a sink brick. **Run for real…** also writes a
 sink brick to a throwaway file, never to its node. A brick's variables belong to its node and do
 not appear in the Variables tab.
 
@@ -1300,12 +1311,11 @@ of the folder and its own files. Quitting from the page exits 0; Ctrl+C exits 13
 
 ---
 
-## Distributed pipeline (experimental)
+## Distributed pipeline
 
-> **Experimental.** May change or disappear without notice; see
-> [docs/experimentation.md](./docs/experimentation.md). A walkthrough from nothing to a first run is
-> [docs/guides/distributed-first-pipeline.md](./docs/guides/distributed-first-pipeline.md); running
-> the two hosts for real is [deploy/README.md](./deploy/README.md).
+Overview: [docs/distributed.md](./docs/distributed.md). A walkthrough from nothing to a first run is
+[docs/guides/distributed-first-pipeline.md](./docs/guides/distributed-first-pipeline.md); running
+the two hosts for real is [deploy/README.md](./deploy/README.md).
 
 A **coordinator** cuts a pipeline into parts and runs each on a **node**, a host next to its
 data; a **runner** is a node with no data that runs the steps between the bricks. Each release
@@ -1362,7 +1372,7 @@ a setting allows it.
 |---|---|
 | `Name` / `Description` | The name the host proposes. The coordinator names a node from its rights, not from this |
 | `CoordinatorUrl` | The coordinator's base address |
-| `Oidc__Authority` / `__ClientId` / `__ClientSecret` / `__Scope` | The client-credentials client the host authenticates as: `ClientId` is the node's `Name` and `Authority` the first issuer the coordinator names (its own, without a provider), unless given; a node verified by a key beside a provider sets it to the coordinator's address. `ClientSecret` is the key or the provider's secret, `@path` to read it from a file. The client id is the node's identity |
+| `Oidc__Authority` / `__ClientId` / `__ClientSecret` / `__ClientSecretFile` / `__Scope` | The client-credentials client the host authenticates as: `ClientId` is the node's `Name` and `Authority` the first issuer the coordinator names (its own, without a provider), unless given; a node verified by a key beside a provider sets it to the coordinator's address. `ClientSecret` is the key or the provider's secret (`@path` reads it from a file); `ClientSecretFile` names that file without the `@`. A host built on the library may also give it from code (`UseClientSecret`), asked at each token. Set one of the three. The client id is the node's identity |
 | `DtPipe` | The `dtpipe` every fragment runs as a child process: an executable, or the `DtPipe.dll` of the `dtpipe` tool package, which runs through the dotnet host. Default: the tool package placed beside the host by its build, else `dtpipe` on the path; the binary itself under `dtpipe node` |
 | `StateDirectory` | Where fragment jobs are written and run from. Default: a directory under the temp directory |
 | `Policy` | `Bricks` (default: a data node runs only its own bricks) or `AnyFragment` (a runner) |
@@ -1519,7 +1529,7 @@ dtpipe mcp
 
 | Tool Name | Parameters | Description |
 |:---|:---|:---|
-| `list-providers` | *(none)* | List all registered data readers, transformers, and writers |
+| `list-providers` | *(none)* | List all registered data readers, transformers, stream processors (with the YAML key that selects each), and writers |
 | `inspect` | `input`, `query?` | Inspect data source schema or auto-discover database tables if query is omitted |
 | `preview-data` | `input`, `limit?`, `query?` | Preview sample data rows (default: 5 rows) |
 | `validate-yaml-job` | `yamlContent` | Validate a YAML job without running it: syntax, topology, provider-option keys, and every transformer built as the engine builds it |
@@ -1536,91 +1546,21 @@ dtpipe mcp
 
 ---
 
-### AI Agent Subcommand (`dtpipe agent`)
+### MCP Guardrails (`ISqlSafetyPolicy` / `IApprovalGate`)
 
-```bash
-dtpipe agent [<prompt>] [options]
-```
+`execute-yaml-job` writes nothing unless told to, and refuses when in doubt.
 
-A loop in which a model (local Ollama, or OpenAI with `--provider`) uses the tools above to design
-and validate a pipeline. Guide: [The agent](./docs/guides/agent.md).
-
-On an interactive terminal the session runs full screen: the steps, the plan under construction
-and a transcript, with an input line between turns. `Esc` during a turn cancels the model call and
-keeps the session; `Ctrl-C` ends it with code 130. Elsewhere, or with `--no-tui`, the output
-scrolls, streaming the model's answer token by token on an ANSI terminal.
-
-| Command | Effect |
-|:---|:---|
-| `/exec` | Runs the validated plan through `execute-yaml-job` (a preview unless `--apply`, which asks once more) |
-| `/mode` | Cycles the operating mode |
-| `/save [path]` | Writes the plan's YAML |
-| `/note <text>` | Adds a note to the session trace |
-| `/review` | Moves to the steps list |
-| `/quit` | Leaves |
-
-After a turn, a menu offers a review of the session and, when a validated YAML exists, **Execute
-this plan now**, which runs it without the model. A turn that ends says why: an answer, the
-iteration cap, a failed or silent call, an empty answer, or an interruption.
-
-| Option | Alias | Description | Default |
-|:---|:---|:---|:---|
-| `<prompt>` | `-p`, `--prompt` | Task description for the AI agent | *(Interactive prompt if omitted)* |
-| `--provider` | | LLM provider: `ollama` (local) or `openai` | `ollama` |
-| `--api-key` | | API key for the `openai` provider. Falls back to `DTPIPE_LLM_API_KEY` | *(unset)* |
-| `--model` | `-m` | Model name (e.g. `qwen2.5-coder:7b` for Ollama, `gpt-4o` for OpenAI) | *(Auto-discovered from Ollama)* |
-| `--url` | `-u` | API endpoint URL | `http://localhost:11434` (ollama) · `https://api.openai.com` (openai) |
-| `--max-iterations` | | Maximum loop iterations per turn | `25` |
-| `--llm-timeout` | | Seconds with no token before the turn ends with an error. One call also stops after three times this value | `300` |
-| `--max-output-tokens` | | Tokens one response may generate before it is cut | `4096` |
-| `--no-stream` | | One blocking call per step, no streaming | `false` |
-| `--no-tui` | | Scrolling output instead of the full-screen surface | `false` |
-| `--detail` | | What scrolls per step: `compact`, `peek` (+ a preview of the reasoning), `full` (+ all of it) | `compact` |
-| `--show-thinking` | | Alias for `--detail full` (implied by `DEBUG=1`) | `false` |
-| `--num-ctx` | | Context window to request (Ollama `num_ctx`) | `16384` |
-| `--interactive` | `-i` | Force interactive model selection and prompt entry | `false` |
-| `--mode` | | `plan` designs and validates only; `execute` and `autonomous` may run, through the guardrails | `plan` |
-| `--temperature` | | Sampling temperature. `0` is greedy, and weaker models loop on it | `1` |
-| `--seed` | | Fixed seed for reproducible sampling | `0` |
-| `--repeat` | | Replicate the validated plan N times and report the variance | `1` |
-| `--sequential` | | One tool call at a time instead of independent calls in parallel | `false` |
-| `--trace` | | Record the session as JSON lines (a directory gets a timestamped file). Defaults to `$DTPIPE_AGENT_TRACE` | off |
-| `--mcp-server` | | Drive another MCP server's tools instead of dtpipe's: the command that starts it over stdio | *(unset)* |
-| `--apply` | | Perform a real write | `false` (dry-run) |
-| `--allow-destructive` | | Allow destructive SQL verbs | `false` |
-| `--allow-network` | | Allow network access in SQL | `false` |
-
-#### Driving another MCP server (`--mcp-server`)
-
-```bash
-dtpipe agent -p "list the configured connections" \
-  --mcp-server "sometool mcp" --trace ./traces/ --no-tui
-```
-
-The command is split on spaces and started as a child process; its tools are offered to the model
-in place of dtpipe's, and its handshake instructions become the system message. No dtpipe pipeline
-can run (`/exec` refuses), `--mode` does not filter that catalogue, and dtpipe's `--apply` and
-`--allow-*` flags do not apply to its tools. Use it to compare a server's surface under the same
-loop and trace.
-
----
-
-### Agent Guardrails (`ISqlSafetyPolicy` / `IApprovalGate`)
-
-With no flags, the agent can write nothing: mode `plan`, previews only, destructive SQL and network
-access refused.
-
-- **A write** needs `apply=true` (`--apply`), an approval, and a clean SQL check. A context with
-  nobody to approve, such as the MCP server, denies writes.
+- **A write** needs `apply=true`, an approval, and a clean SQL check. A context with nobody to
+  approve, such as the MCP server, denies writes.
 - **The SQL check** refuses `DROP`, `DELETE`, `TRUNCATE`, `UPDATE`, `ALTER`, `INSERT` and `ATTACH`
-  unless `--allow-destructive`, and `LOAD httpfs` / `LOAD azure` or `read_parquet` / `read_csv` /
-  `read_json` over `http(s)://`, `s3://`, `ftp://` or `gs://` unless `--allow-network`. It reads
+  unless `allowDestructive`, and `LOAD httpfs` / `LOAD azure` or `read_parquet` / `read_csv` /
+  `read_json` over `http(s)://`, `s3://`, `ftp://` or `gs://` unless `allowNetwork`. It reads
   every query, hook and SQL step of the job (`@file` contents included) and each connection
-  string; it never reads a key, a comment or a transformer option as SQL.
-- **In plan mode** the tool that writes is not offered to the model at all.
-- **The trace** (`--trace`) records the launch, the role prompt, the tool catalogue as offered,
-  every step, each verdict and your notes, flushed line by line. Connection-string credentials are
-  blanked, but treat a trace as sensitive. It is a diagnostic, never a gate.
-- **Determinism**: `--temperature 0 --seed N --repeat 3` reports the number of distinct plans
-  minus one; `0` means reproducible.
+  string; it never reads a key, a comment or a transformer option as SQL. A refusal comes back as
+  `stage: "safety"`: each `violation` says what the policy refuses, and the `message` names the
+  arguments that would lift it.
+- **The CI gate** (`tests/agentic/analyze-traces.sh --gate`, propagated by `run-all.sh --gate`)
+  fails on an unhandled MCP error or a failed mission. A green run is an integration check of the
+  MCP surface under a real model, not a regression gate: the guardrails themselves are covered by
+  the unit suite.
 

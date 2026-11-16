@@ -80,8 +80,8 @@ public static class SampleModeSafetyGate
     /// (see PrepareSampleWriterAsync), so refusing a pipeline for carrying one would add no
     /// safety and would refuse previews of perfectly ordinary jobs — a pipeline whose real run
     /// truncates its target is exactly the kind a user wants to preview. An over-broad guard
-    /// teaches people to pass --allow-destructive by reflex, which would then unlock the source
-    /// side too; that is worse than no guard.
+    /// teaches whoever can unlock the check (the allowDestructive argument of execute-yaml-job) to
+    /// do it by reflex, which would then unlock the source side too; that is worse than no guard.
     /// </summary>
     public static IEnumerable<string?> CollectSqlBearingValues(OptionsRegistry registry, Type? readerOptionsType)
     {

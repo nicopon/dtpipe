@@ -1,8 +1,13 @@
 #!/usr/bin/env node
 // Plays the studio's page in headless Chrome over the DevTools protocol and checks what a person sees:
 // opening a job, Preview, a click on each card, pins, an edit while a preview or a run holds the engine,
-// Save then Write targets…, review before writing, Write and Abandon from a sink, a run left suspended by an earlier
-// session, Forget pins, typing in the inspector.
+// Save then Run for real…, review before writing, Write and Abandon from a sink, a run left suspended by an earlier
+// session, Forget pins, typing in the inspector; the agent's panel against a scripted endpoint that speaks Ollama's API (a
+// save refused then accepted, a run, a question, a plan put on the cards, a job holding a credential, Stop, a reload mid-turn, an
+// edit made while a save waits, the person's save over the file the agent saved, a turn that fails); Undo of a deleted card and of
+// a plan, and the cards a plan names; a preview stopped
+// while its source is still answering; Tab to a card, a wire made and undone from the keyboard, every control named,
+// the text at 4.5:1 in both themes.
 //
 // Local only: it needs Node 22+ (native WebSocket, no dependency), Chrome, and a built dtpipe. CI never
 // runs it. The page is embedded in the DLL, so build before playing it.
@@ -13,10 +18,12 @@
 //                      (macOS, Windows and Linux are searched)
 // DTPIPE_SMOKE_DLL     the built DtPipe.dll (default: src/DtPipe/bin/Debug/net10.0/DtPipe.dll)
 // DTPIPE_SMOKE_BIN     a dtpipe executable, used instead of the DLL
+// DTPIPE_SMOKE_SHOTS   a folder: the agent's scenario saves screenshots of the page there
 // Exit code 1 on any FAIL and on any script error the page raises.
 
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
+import http from "node:http";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -69,8 +76,8 @@ function kill(child) {
   else child.kill("SIGKILL");
 }
 
-async function startStudio(folder) {
-  const [command, args] = BIN ? [BIN, ["studio", folder]] : ["dotnet", [DLL, "studio", folder]];
+async function startStudio(folder, extra = []) {
+  const [command, args] = BIN ? [BIN, ["studio", folder, ...extra]] : ["dotnet", [DLL, "studio", folder, ...extra]];
   // Started in the job's folder: a job that writes a relative path writes there, never into the directory the test was run from.
   const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], cwd: folder });
   let out = "";
@@ -133,6 +140,23 @@ function session(ws) {
     if (r.result.exceptionDetails) throw new Error(JSON.stringify(r.result.exceptionDetails.exception?.description || r.result.exceptionDetails));
     return r.result.result.value;
   };
+  // A button found by its text and clicked as a person would: the panels name their choices in words.
+  s.clickText = async (selector, text) => {
+    const found = await s.until(`[...document.querySelectorAll(${JSON.stringify(selector)})].some((e) => e.textContent.trim() === ${JSON.stringify(text)})`, 20000);
+    if (!found) throw new Error(`no ${selector} reading ${text}`);
+    const at = await s.ev(`(() => { const e = [...document.querySelectorAll(${JSON.stringify(selector)})].find((e) => e.textContent.trim() === ${JSON.stringify(text)});
+      e.scrollIntoView({ block: "center", inline: "center" }); const b = e.getBoundingClientRect(); return [b.x + b.width / 2, b.y + b.height / 2]; })()`);
+    for (const type of ["mouseMoved", "mousePressed", "mouseReleased"]) {
+      await send("Input.dispatchMouseEvent", { type, x: at[0], y: at[1], button: "left", clickCount: 1, buttons: type === "mousePressed" ? 1 : 0 });
+    }
+    await s.frame();
+  };
+  s.shot = async (name) => {
+    if (!process.env.DTPIPE_SMOKE_SHOTS) return;
+    fs.mkdirSync(process.env.DTPIPE_SMOKE_SHOTS, { recursive: true });
+    const { result } = await send("Page.captureScreenshot", { format: "png" });
+    fs.writeFileSync(path.join(process.env.DTPIPE_SMOKE_SHOTS, `${name}.png`), Buffer.from(result.data, "base64"));
+  };
   // Polls a page expression until it is truthy; the last value tells a failure what it saw.
   s.until = async (expression, ms = 20000) => {
     const start = Date.now();
@@ -185,6 +209,7 @@ function session(ws) {
   s.state = (alias) => s.ev(`document.querySelector('.dcard[data-alias="${alias}"] .dcard-badge')?.dataset.cardState ?? null`);
   s.pinned = (alias) => s.ev(`document.querySelector('.dcard[data-alias="${alias}"] [data-card-tool="pin"]')?.getAttribute("aria-pressed") ?? null`);
   s.drawerText = () => s.ev(`document.querySelector("#d-drawer .drawer-body")?.innerText ?? ""`);
+  s.dialogText = () => s.ev(`document.querySelector("#d-run-dialog")?.innerText ?? ""`);
   s.tab = () => s.ev(`document.querySelector("#d-drawer .tabs button.active")?.dataset.tab ?? null`);
   s.visible = (selector) => s.ev(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); return !!e && !e.hidden; })()`);
   // A reload takes a moment to replace the document: a job asked for before it would be asked of the old page.
@@ -194,6 +219,79 @@ function session(ws) {
   s.pick = (alias) => s.click(`.dcard[data-alias="${alias}"] .dcard-head`);
   s.waitStatus = (pattern, ms) => s.until(`${pattern}.test(document.querySelector("#status")?.textContent ?? "")`, ms);
   // Found and clicked in one evaluation: the list of jobs is drawn again at any moment, and a button found is not one still there.
+  s.key = async (key, code, vk, text) => {
+    const base = { key, code, windowsVirtualKeyCode: vk };
+    await send("Input.dispatchKeyEvent", { type: text ? "keyDown" : "rawKeyDown", ...base, ...(text ? { text } : {}) });
+    await send("Input.dispatchKeyEvent", { type: "keyUp", ...base });
+    await s.frame();
+  };
+  s.tabKey = () => s.key("Tab", "Tab", 9);
+  s.enterKey = () => s.key("Enter", "Enter", 13, "\r");
+  // A drag with the mouse from the centre of one element to the centre of another: the pointer's path, which the keyboard's must not replace.
+  s.drag = async (from, to) => {
+    const centre = (selector) => s.ev(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e) return null; const b = e.getBoundingClientRect(); return [b.x + b.width / 2, b.y + b.height / 2]; })()`);
+    const a = await centre(from);
+    const b = await centre(to);
+    if (!a || !b) throw new Error(`no element ${a ? to : from}`);
+    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: a[0], y: a[1], button: "none", buttons: 0 });
+    await send("Input.dispatchMouseEvent", { type: "mousePressed", x: a[0], y: a[1], button: "left", clickCount: 1, buttons: 1 });
+    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: (a[0] + b[0]) / 2, y: (a[1] + b[1]) / 2, button: "left", buttons: 1 });
+    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: b[0], y: b[1], button: "left", buttons: 1 });
+    await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: b[0], y: b[1], button: "left", clickCount: 1, buttons: 0 });
+    await s.frame();
+  };
+  s.theme = async (name) => {
+    await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: name }] });
+    await s.frame();
+  };
+  // Every control the accessibility tree holds with no name a person could be read: none, or one that is only
+  // a symbol ("+", "×") or only the tooltip or the placeholder, which are neither a label nor a name Chrome
+  // reads the same everywhere. Chrome computes the names, so this is the page as a screen reader gets it.
+  s.unnamed = async () => {
+    await send("DOM.enable");
+    await send("Accessibility.enable");
+    const tree = (await send("Accessibility.getFullAXTree")).result.nodes;
+    const controls = new Set(["button", "textbox", "combobox", "checkbox", "radio", "searchbox", "spinbutton", "slider", "switch", "listbox", "tab", "link", "menuitem", "option"]);
+    const found = [];
+    for (const n of tree) {
+      if (n.ignored || !controls.has(n.role?.value)) continue;
+      const name = String(n.name?.value ?? "").trim();
+      const used = (n.name?.sources ?? []).find((x) => x.value && !x.superseded && x.value.value);
+      const weak = !name || !/[\p{L}\p{N}]/u.test(name) || (used?.type === "attribute" && used.attribute !== "aria-label") || used?.type === "placeholder";
+      if (!weak) continue;
+      const described = (await send("DOM.describeNode", { backendNodeId: n.backendDOMNodeId })).result?.node;
+      const attrs = Object.fromEntries((described?.attributes ?? []).reduce((acc, v, i, a) => (i % 2 ? acc : [...acc, [v, a[i + 1]]]), []));
+      found.push(`${described?.localName}${attrs.id ? `#${attrs.id}` : ""}${attrs.class ? `.${attrs.class.split(" ").join(".")}` : ""} [${name}]`);
+    }
+    return found;
+  };
+  // The text the page draws against its background, as WCAG measures it: relative luminance of the colour and of
+  // what is behind it, both read as drawn (the canvas resolves any colour the CSS writes, color-mix included).
+  // Inactive (disabled) controls are exempt. Answers the worst pairs, each once.
+  s.contrast = (minimum = 4.5) => s.ev(`(() => {
+    const ctx = document.createElement("canvas").getContext("2d", { willReadFrequently: true });
+    const rgba = (css) => { ctx.clearRect(0, 0, 1, 1); ctx.fillStyle = "#000"; ctx.fillStyle = css; ctx.fillRect(0, 0, 1, 1); const d = ctx.getImageData(0, 0, 1, 1).data; return [d[0], d[1], d[2], d[3] / 255]; };
+    const over = (top, bottom) => { const a = top[3] + bottom[3] * (1 - top[3]); return a ? [0, 1, 2].map((i) => (top[i] * top[3] + bottom[i] * bottom[3] * (1 - top[3])) / a).concat(a) : [0, 0, 0, 0]; };
+    const lum = (c) => { const f = (v) => { v /= 255; return v <= .03928 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4; }; return .2126 * f(c[0]) + .7152 * f(c[1]) + .0722 * f(c[2]); };
+    const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + .05) / (y + .05); };
+    const behind = (e) => { let bg = [0, 0, 0, 0]; for (let n = e; n; n = n.parentElement) bg = over(bg, rgba(getComputedStyle(n).backgroundColor)); return over(bg, rgba(getComputedStyle(document.documentElement).backgroundColor)); };
+    const opacityOf = (e) => { let o = 1; for (let n = e; n; n = n.parentElement) o *= Number(getComputedStyle(n).opacity); return o; };
+    const worst = new Map();
+    for (const e of document.querySelectorAll("body *")) {
+      if (![...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())) continue;
+      if (e.closest("[hidden], [disabled]") || !e.getClientRects().length) continue;
+      const style = getComputedStyle(e);
+      if (style.visibility === "hidden") continue;
+      const bg = behind(e);
+      let fg = rgba(style.color);
+      fg = over([fg[0], fg[1], fg[2], fg[3] * opacityOf(e)], bg);
+      const r = ratio(fg, bg);
+      if (r >= ${minimum}) continue;
+      const key = e.tagName.toLowerCase() + (e.className && typeof e.className === "string" ? "." + e.className.trim().split(/\\s+/).join(".") : "") + " " + style.color + " on " + style.backgroundColor;
+      if (!worst.has(key) || worst.get(key).r > r) worst.set(key, { r: Math.round(r * 100) / 100, text: e.textContent.trim().slice(0, 24) });
+    }
+    return [...worst].map(([k, v]) => k + " = " + v.r + " (" + v.text + ")");
+  })()`);
   s.openJob = async (name) => {
     await s.until(`(() => { const b = [...document.querySelectorAll("#jobs button.job")].find((b) => b.textContent === ${JSON.stringify(name)}); if (!b) return false; b.click(); return true; })()`);
     return s.until(`document.querySelectorAll(".dcard").length >= 2 && !!document.querySelector("#d-drawer .tabs")`);
@@ -201,12 +299,300 @@ function session(ws) {
   return s;
 }
 
+// ---------------------------------------------------------------- a model that follows a script
+
+// Speaks the part of Ollama's API the agent uses: /api/tags, and /api/chat streamed as JSON lines. What it answers
+// depends on the conversation it is sent: after a tool's answer it closes the turn quoting it, after a person's message
+// it does what a keyword asks. "slow" streams words that never repeat (the agent ends a turn that loops) until the call
+// is abandoned. `seen` keeps every system message.
+const AGENT_JOB = 'main:\n  input: "generate:5"\n  output: "csv:agent-out.csv"\n';
+const PLAN_JOB = 'main:\n  input: "generate:7"\n  output: "csv:plan-out.csv"\n';
+const REFUSED_PLAN = 'main:\n  input: [\n';
+
+function startFakeLlm() {
+  const llm = { seen: [], open: 0 };
+  const call = (name, args) => ({ role: "assistant", content: "", tool_calls: [{ function: { name, arguments: args } }] });
+  const server = http.createServer((req, res) => {
+    if (req.url === "/api/tags") { res.end(JSON.stringify({ models: [{ name: "fake:1" }, { name: "fake:2" }] })); return; }
+    let body = "";
+    req.on("data", (d) => { body += d; });
+    req.on("end", () => {
+      const { messages } = JSON.parse(body);
+      llm.seen.push(messages[0]?.content ?? "");
+      const last = messages[messages.length - 1];
+      const line = (o) => res.write(JSON.stringify(o) + "\n");
+      if (last.role !== "tool" && /fail/.test(String(last.content))) { res.writeHead(500); res.end("the model is down"); return; }
+      res.writeHead(200, { "Content-Type": "application/x-ndjson" });
+      if (last.role === "tool") { line({ message: { role: "assistant", content: `done: ${String(last.content).slice(0, 60)}` }, done: true }); res.end(); return; }
+      const text = String(last.content);
+      const job = /<open-job>\n/.test(messages[0]?.content ?? "") ? "job seen" : "no job seen";
+      const reply = /save/.test(text) ? call("save-job", { path: "agent.yaml", yamlContent: AGENT_JOB })
+        : /overwrite/.test(text) ? call("save-job", { path: "chain.yaml", yamlContent: /again/.test(text) ? PLAN_JOB : AGENT_JOB })
+        : /ask/.test(text) ? call("ask-user", { question: "Which target?", options: ["a.csv", "b.csv"] })
+        : /refused plan/.test(text) ? call("validate-yaml-job", { yamlContent: REFUSED_PLAN })
+        : /plan/.test(text) ? call("validate-yaml-job", { yamlContent: PLAN_JOB })
+        : /secret/.test(text) ? { role: "assistant", content: job }
+        : null;
+      if (reply) { line({ message: reply, done: false }); line({ done: true }); res.end(); return; }
+      if (/slow/.test(text)) {
+        llm.open++;
+        const timer = setInterval(() => line({ message: { role: "assistant", content: `${Math.random().toString(36).slice(2)} ` }, done: false }), 150);
+        res.on("close", () => { clearInterval(timer); llm.open--; });
+        return;
+      }
+      line({ message: { role: "assistant", content: `ok: ${text}` }, done: true });
+      res.end();
+    });
+  });
+  return new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve({ llm, url: `http://127.0.0.1:${server.address().port}`, stop: () => server.close() })));
+}
+
+const fakeLlm = await startFakeLlm();
+
 // ---------------------------------------------------------------- scenarios
 
 const KEY_OF_B = '#d-inspector .transformer[data-index="0"] .kv[data-section="mappings"] input[data-kv="key"]';
 const stateFile = (folder, job) => path.join(folder, ".dtpipe/studio", `${job}-debug.json`);
 
 const scenarios = {
+  // The agent's panel: every write waits for a card, a refusal writes nothing, the open job reaches the model unless it
+  // holds a credential the person keeps here, Stop ends a turn, a reload finds the conversation again.
+  async agent({ page: p, folder }) {
+    const send = async (text) => {
+      await p.ev(`(() => { const t = document.querySelector("#agent-prompt"); t.value = ${JSON.stringify(text)}; })()`);
+      await p.click("#agent-send");
+    };
+    const idle = () => p.until(`document.querySelector("#agent-stop").hidden && !document.querySelector("#agent-now .agent-card button")`, 30000);
+    const verdicts = () => p.ev(`document.querySelectorAll("#agent-log .verdict").length`);
+    const lastText = () => p.ev(`[...document.querySelectorAll("#agent-log .msg.agent")].pop()?.textContent ?? ""`);
+
+    check("the panel shows", await p.until(`!document.querySelector("#agent-pane").hidden && !!document.querySelector("#agent-prompt")`));
+    check("the model is the one the server lists", await p.until(`document.querySelector("#agent-model")?.value === "fake:1"`));
+    check("a local model raises no warning", (await p.ev(`document.querySelector("#agent-warning").hidden`)) === true);
+    check("the header shows the provider and the address, read only", await p.ev(`document.querySelector("#agent-endpoint")?.textContent === "ollama · ${fakeLlm.url}" && !document.querySelector("#agent-endpoint input")`));
+    await p.shot("1-panel");
+    const width = () => p.ev(`document.querySelector("#agent-pane").getBoundingClientRect().width`);
+    const before0 = await width();
+    await p.ev(`document.querySelector('.split[data-split="agent"]').focus()`);
+    await p.send("Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowLeft", code: "ArrowLeft", windowsVirtualKeyCode: 37 });
+    await p.send("Input.dispatchKeyEvent", { type: "keyUp", key: "ArrowLeft", code: "ArrowLeft", windowsVirtualKeyCode: 37 });
+    check("the agent's panel resizes like the others", await p.until(`document.querySelector("#agent-pane").getBoundingClientRect().width > ${before0 + 8}`), String(await width()));
+
+    await send("please save it");
+    check("a save waits on a card", await p.until(`/asks to save agent.yaml/.test(document.querySelector("#agent-now")?.textContent ?? "")`));
+    check("the card shows the text the studio composed", /generate:5/.test(await p.ev(`document.querySelector("#agent-now pre")?.textContent ?? ""`)));
+    check("nothing is written before the answer", !fs.existsSync(path.join(folder, "agent.yaml")));
+    await p.shot("2-save-card");
+    await p.clickText("#agent-now button", "Refuse");
+    check("a refused save ends the turn", await idle());
+    check("the meter counts the turn and its steps", await p.until(`/^turn 1 · \\d+ steps?/.test(document.querySelector("#agent-meter").textContent)`), await p.ev(`document.querySelector("#agent-meter").textContent`));
+    check("a refused save writes nothing", !fs.existsSync(path.join(folder, "agent.yaml")));
+    check("the model reads the refusal", /refused/.test(await lastText()), await lastText());
+
+    await send("please save it");
+    await p.clickText("#agent-now button", "Save");
+    check("an accepted save ends the turn", await idle());
+    check("an accepted save writes the job", fs.existsSync(path.join(folder, "agent.yaml")));
+    check("the folder lists the saved job", await p.until(`[...document.querySelectorAll("#jobs button.job")].some((b) => b.textContent === "agent.yaml")`));
+
+    // The agent has no tool that writes a target: what it says of a run is text.
+    await send("now run it");
+    check("a request to run writes no target and waits on no card", await idle() && !fs.existsSync(path.join(folder, "agent-out.csv")));
+
+    await send("ask me");
+    check("a question shows its choices", await p.until(`[...document.querySelectorAll("#agent-now button")].some((b) => b.textContent === "b.csv")`));
+    await p.shot("4-question");
+    await p.clickText("#agent-now button", "b.csv");
+    check("a choice is the next message", await p.until(`[...document.querySelectorAll("#agent-log .msg.user")].pop()?.textContent === "b.csv"`));
+    check("the answer comes back", await p.until(`/ok: b\.csv/.test([...document.querySelectorAll("#agent-log .msg.agent")].pop()?.textContent ?? "")`));
+
+    check("a job opens", await p.openJob("chain.yaml"));
+    await send("make a plan");
+    check("the plan shows once the turn ends", await p.until(`!!document.querySelector("#agent-now .agent-plan")`, 30000));
+    await p.ev(`document.querySelector("#agent-now .agent-plan").open = true`);
+    await p.shot("5-plan");
+    check("the plan is on the steps", await p.waitStatus(/plan is on the steps/, 15000), await p.status());
+    check("the cards are the plan's", await p.until(`document.querySelectorAll(".dcard").length === 2`), JSON.stringify(await p.badges()));
+    check("the job is still the one open", (await p.ev(`document.querySelector("#job-name").textContent`)).startsWith("chain.yaml"));
+
+    fs.writeFileSync(path.join(folder, "secret.yaml"), 'main:\n  input: "pg:Host=h;Username=u;Password=abc"\n  output: "csv:s.csv"\n');
+    await p.reload();
+    check("the conversation survives a reload", await p.until(`document.querySelectorAll("#agent-log .msg.user").length >= 5`), String(await p.ev(`document.querySelectorAll("#agent-log .msg.user").length`)));
+    check("the secret job opens", await p.openJob("secret.yaml") || await p.until(`/secret\.yaml/.test(document.querySelector("#job-name").textContent)`));
+    await send("look at this secret");
+    check("a credential in the open job waits on a card", await p.until(`/main\.input/.test(document.querySelector("#agent-now .agent-card")?.textContent ?? "")`));
+    check("the card never shows the value", !/abc/.test(await p.ev(`document.querySelector("#agent-now").textContent`)));
+    await p.shot("6-secret-card");
+    const calls = fakeLlm.llm.seen.length;
+    check("the model is not called before the answer", fakeLlm.llm.seen.length === calls);
+    check("the card offers no way to leave the job out", !(await p.ev(`[...document.querySelectorAll("#agent-now button")].some((b) => /without/i.test(b.textContent))`)));
+    await p.clickText("#agent-now button", "Stop the turn");
+    check("a stopped turn calls no model", await idle() && fakeLlm.llm.seen.length === calls);
+    check("the credential never reached the model", fakeLlm.llm.seen.every((m) => !/Password=abc/.test(m)));
+    await send("one more secret");
+    check("the job holds every turn that carries it", await p.until(`/main\.input/.test(document.querySelector("#agent-now .agent-card")?.textContent ?? "")`));
+    check("the last message stays in sight above the card", await p.ev(`(() => { const log = document.querySelector("#agent-log"); const m = [...log.querySelectorAll(".msg.user")].pop();
+      return m.textContent === "one more secret" && m.getBoundingClientRect().bottom <= log.getBoundingClientRect().bottom + 1; })()`));
+    await p.clickText("#agent-now button", "Stop the turn");
+    check("a second stopped turn calls no model", await idle() && fakeLlm.llm.seen.length === calls);
+    check("the panel has no way to leave the job out", await p.ev(`!document.querySelector("#agent-attach")`));
+    await p.openJob("chain.yaml");
+
+    const before = await verdicts();
+    await send("slow down");
+    check("a turn shows what the model streams", await p.until(`/answering/.test(document.querySelector("#agent-now")?.textContent ?? "")`));
+    await p.shot("7-streaming");
+    await p.reload();
+    check("a reload mid-turn finds the turn running", await p.until(`!document.querySelector("#agent-stop").hidden`));
+    await p.click("#agent-stop");
+    check("Stop ends the turn", await idle());
+    check("Stop leaves a verdict", await p.until(`document.querySelectorAll("#agent-log .verdict").length === ${before + 1}`));
+    const lastVerdict = () => p.ev(`[...document.querySelectorAll("#agent-log .verdict")].pop()?.textContent ?? ""`);
+    check("a turn the person stopped says stopped", /^stopped\b/.test(await lastVerdict()), await lastVerdict());
+    check("Stop abandons the model call", await p.until(`${fakeLlm.llm.open} === 0`) && fakeLlm.llm.open === 0);
+    await p.shot("8-stopped");
+  },
+
+  // What the person changed is never replaced without a word: an edit made while a save card waits survives the save, which
+  // waits behind the notice's Apply; Apply clears the notice; a turn that fails gives the text typed back.
+  async "agent-edit"({ page: p, folder }) {
+    const send = async (text) => {
+      await p.ev(`(() => { const t = document.querySelector("#agent-prompt"); t.value = ${JSON.stringify(text)}; })()`);
+      await p.click("#agent-send");
+    };
+    const idle = () => p.until(`document.querySelector("#agent-stop").hidden && !document.querySelector("#agent-now .agent-card button")`, 30000);
+
+    check("the job opens", await p.openJob("chain.yaml"));
+    // At 1280 px with the agent's panel open, the canvas still shows a whole step: a card is 210 px wide at x = 30.
+    await p.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+    const canvas = () => p.ev(`Math.round(document.querySelector("#d-canvas").getBoundingClientRect().width)`);
+    check("at 1280 px beside the agent the canvas holds a whole step", await p.until(`document.querySelector("#d-canvas").getBoundingClientRect().width >= 260`), String(await canvas()));
+    await p.send("Emulation.clearDeviceMetricsOverride");
+    await p.frame();
+    await send("overwrite it");
+    check("a save over the open job waits on a card", await p.until(`/asks to save chain\\.yaml/.test(document.querySelector("#agent-now")?.textContent ?? "")`));
+    const cards = await p.ev(`document.querySelectorAll(".dcard").length`);
+    await p.pick("b");
+    const since = p.seen.length;
+    await p.type(KEY_OF_B, " && true");
+    check("the edit is composed while the card waits", await p.waitSeen("/api/design/compose", since));
+    await p.clickText("#agent-now button", "Save");
+    check("the save ends the turn", await idle());
+    check("the save writes the file the person approved", /generate:5/.test(fs.readFileSync(path.join(folder, "chain.yaml"), "utf8")));
+    check("the notice says the saved file waits", await p.until(`!document.querySelector("#agent-behind").hidden`));
+    check("the edit made while the card waited survives the save",
+      await p.ev(`document.querySelectorAll(".dcard").length === ${cards} && (document.querySelector(${JSON.stringify(KEY_OF_B)})?.value ?? "").endsWith("&& true")`),
+      String(await p.ev(`document.querySelectorAll(".dcard").length`)));
+    check("Apply is in sight with the notice", await p.ev(`(document.querySelector("#agent-behind button")?.offsetWidth ?? 0) > 0`));
+    await p.clickText("#agent-behind button", "Apply");
+    check("Apply puts the saved file on the cards", await p.until(`document.querySelectorAll(".dcard").length === 2`));
+    check("Apply clears the notice", await p.until(`document.querySelector("#agent-behind").hidden`));
+
+    await send("overwrite it again");
+    check("a second save waits on a card", await p.until(`/asks to save chain\\.yaml/.test(document.querySelector("#agent-now")?.textContent ?? "")`));
+    const before = p.seen.length;
+    await p.type("#d-title", " kept");
+    check("the title is composed while the card waits", await p.waitSeen("/api/design/compose", before));
+    await p.clickText("#agent-now button", "Save");
+    check("the second save ends the turn", await idle());
+    check("the notice says the saved file waits again", await p.until(`!document.querySelector("#agent-behind").hidden`));
+    check("the agent's second save is on disk", /generate:7/.test(fs.readFileSync(path.join(folder, "chain.yaml"), "utf8")));
+    await p.click("#d-save");
+    check("Save replaces the agent's file once the person agrees", await p.waitStatus(/^saved$/, 15000), await p.status());
+    const saved = fs.readFileSync(path.join(folder, "chain.yaml"), "utf8");
+    check("the file holds the person's cards", /kept/.test(saved) && /generate:5/.test(saved), saved);
+    check("the replaced file leaves no notice to apply", await p.until(`document.querySelector("#agent-behind").hidden`));
+
+    await send("fail now");
+    check("a failed turn ends", await idle() && await p.until(`[...document.querySelectorAll("#agent-log .verdict")].length > 1`));
+    check("a failed turn gives the text typed back", await p.until(`document.querySelector("#agent-prompt").value === "fail now"`), await p.ev(`document.querySelector("#agent-prompt").value`));
+
+    await send("a refused plan");
+    check("a plan the check refused neither replaces the steps nor opens, and says why", await idle() && await p.until(`(() => {
+      const buttons = [...document.querySelectorAll("#agent-now button")];
+      const apply = buttons.find((b) => b.textContent === "Apply to the open job");
+      const open = buttons.find((b) => b.textContent === "Open as a new job");
+      return !!apply?.disabled && !!open?.disabled && /refused this plan/.test(document.querySelector("#agent-plan-refused")?.textContent ?? "");
+    })()`), await p.ev(`document.querySelector("#agent-now")?.textContent ?? ""`));
+  },
+
+  // What removes or replaces cards is undone: a configured card deleted comes back with what it held, and so do the cards an
+  // agent's plan replaced, which the plan names; undone back to the file, the job is saved again; another job has nothing to undo.
+  async undo({ page: p }) {
+    const send = async (text) => {
+      await p.ev(`(() => { const t = document.querySelector("#agent-prompt"); t.value = ${JSON.stringify(text)}; })()`);
+      await p.click("#agent-send");
+    };
+    const keyOfB = () => p.ev(`document.querySelector(${JSON.stringify(KEY_OF_B)})?.value ?? null`);
+    const hasB = `!!document.querySelector('.dcard[data-alias="b"]')`;
+
+    check("the job opens", await p.openJob("chain.yaml"));
+    check("a job opens with nothing to undo", (await p.disabled("#d-undo")) === true);
+    await p.pick("b");
+    check("the card holds a mapping", await p.until(`!!document.querySelector(${JSON.stringify(KEY_OF_B)})?.value`));
+    check("the page says step, never card", await p.ev(`(() => { const attrs = [...document.querySelectorAll("[title], [aria-label]")].map((e) => e.title + " " + (e.getAttribute("aria-label") ?? "")); return !/\\bcards?\\b/i.test([document.body.innerText, ...attrs].join("\\n")); })()`));
+    const key = await keyOfB();
+    await p.clickText("#d-inspector button", "Delete step");
+    check("Delete step removes the step", await p.until(`document.querySelectorAll(".dcard").length === 2 && !${hasB}`));
+    await p.click("#d-undo");
+    check("Undo brings the deleted card back", await p.until(`document.querySelectorAll(".dcard").length === 3 && ${hasB}`));
+    await p.pick("b");
+    check("the card comes back with what it held", await p.until(`(document.querySelector(${JSON.stringify(KEY_OF_B)})?.value ?? null) === ${JSON.stringify(key)}`), String(await keyOfB()));
+    check("undone back to the file, the job is not unsaved", await p.until(`document.querySelector("#d-dirty").hidden`));
+
+    await send("make a plan");
+    check("the plan names the cards it changes", await p.until(`/b removed/.test(document.querySelector("#agent-now .plan-marks")?.textContent ?? "")`, 30000),
+      await p.ev(`document.querySelector("#agent-now")?.textContent ?? ""`));
+    check("the plan is on the steps", await p.until(`document.querySelectorAll(".dcard").length === 2 && !${hasB}`));
+    await p.click("#d-undo");
+    check("Undo brings back the cards the plan replaced", await p.until(`document.querySelectorAll(".dcard").length === 3 && ${hasB}`));
+
+    await p.click('#d-drawer button[data-tab="yaml"]');
+    await p.until(`!!document.querySelector("#d-edit")`);
+    await p.ev(`(() => { const t = document.querySelector("#d-edit"); t.value = ${JSON.stringify('a:\n  input: generate:20\nc:\n  from: a\n  output: "null:"\n')}; t.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+    await send("look at it");
+    check("a message waits for the YAML text to be applied", await p.waitStatus(/not applied/, 5000), await p.status());
+    await p.click("#d-drawer button[data-apply]");
+    check("Apply puts the text on the steps", await p.until(`document.querySelectorAll(".dcard").length === 2 && !${hasB}`));
+    await p.click("#d-undo");
+    check("Undo brings back the cards the YAML replaced", await p.until(`document.querySelectorAll(".dcard").length === 3 && ${hasB}`));
+
+    check("another job opens", await p.openJob("whole.yaml"));
+    check("another job has nothing to undo", await p.until(`document.querySelector("#d-undo")?.disabled === true`));
+  },
+
+  // The panel draws the server's last answer: a conversation the server reset (new, or another model) leaves
+  // no entry of the old one, and the next turn is drawn.
+  async "agent-reset"({ page: p }) {
+    const send = async (text) => {
+      await p.ev(`(() => { const t = document.querySelector("#agent-prompt"); t.value = ${JSON.stringify(text)}; })()`);
+      await p.click("#agent-send");
+    };
+    const idle = () => p.until(`document.querySelector("#agent-stop").hidden && !document.querySelector("#agent-now .agent-card button")`, 30000);
+    const users = () => p.ev(`[...document.querySelectorAll("#agent-log .msg.user")].map((e) => e.textContent)`);
+    const quiet = async () => !/bad/.test(await p.ev(`document.querySelector("#status").className`));
+
+    check("the panel shows", await p.until(`!document.querySelector("#agent-pane").hidden && document.querySelector("#agent-model")?.value === "fake:1"`));
+    await send("first");
+    check("a turn is drawn", await p.until(`/ok: first/.test(document.querySelector("#agent-log")?.textContent ?? "")`) && await idle());
+
+    await p.clickText("#agent-pane .agent-head button", "new");
+    check("new empties the log", await p.until(`document.querySelectorAll("#agent-log .turn").length === 0`));
+    check("new raises nothing in the status line", await quiet(), await p.status());
+    await send("second");
+    check("the turn after new is drawn", await p.until(`/ok: second/.test(document.querySelector("#agent-log")?.textContent ?? "")`), JSON.stringify(await users()));
+    check("the log holds the new conversation only", (await users()).join() === "second", JSON.stringify(await users()));
+    await idle();
+
+    await p.ev(`(() => { const s = document.querySelector("#agent-model"); s.value = "fake:2"; s.dispatchEvent(new Event("change")); })()`);
+    check("another model empties the log like new", await p.until(`document.querySelectorAll("#agent-log .turn").length === 0`));
+    await send("third");
+    check("the turn after another model is drawn", await p.until(`/ok: third/.test(document.querySelector("#agent-log")?.textContent ?? "")`), JSON.stringify(await users()));
+    check("the log holds the new conversation only, again", (await users()).join() === "third", JSON.stringify(await users()));
+    check("the status line stays quiet", await quiet(), await p.status());
+    check("the last turn can end and be followed", await idle());
+  },
+
   // Opening, Preview, a click on each card, pin, ▶ that pins nothing, an edit, ▶ on the pin, Save then Run, unpin.
   async journey({ page: p, folder }) {
     const file = stateFile(folder, "chain.yaml");
@@ -245,9 +631,10 @@ const scenarios = {
     check("▶ finishes", await p.waitStatus(/ran up to/, 30000));
     check("▶ on another card pins nothing", JSON.parse(fs.readFileSync(file)).watch.length === 1, fs.readFileSync(file, "utf8"));
 
-    await p.click('#d-drawer button[data-tab="edit"]');
+    await p.click('#d-drawer button[data-tab="yaml"]');
     await p.until(`!!document.querySelector("#d-edit")`);
-    await p.ev(`(() => { const t = document.querySelector("#d-edit"); t.value = t.value.replace("% 2 == 0", "% 3 == 0"); })()`);
+    await p.ev(`(() => { const t = document.querySelector("#d-edit"); t.value = t.value.replace("% 2 == 0", "% 3 == 0"); t.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+    check("a YAML text not applied holds the steps", await p.ev(`document.querySelector("#d-canvas").inert && /not applied/.test(document.querySelector("#d-yaml-tab").getAttribute("aria-label"))`));
     await p.click("#d-drawer button[data-apply]");
     check("an edit through YAML marks the cards it touches", await p.until(`[...document.querySelectorAll(".dcard-badge")].some((e) => /edited since preview/.test(e.textContent))`), JSON.stringify(await p.badges()));
 
@@ -263,16 +650,17 @@ const scenarios = {
     check("▶ on the pin finishes", await p.waitStatus(/ran up to/, 30000));
     b = await p.badges();
     check("▶ on the pin reads its checkpoint back", JSON.parse(fs.readFileSync(file)).levels[0]?.key === key);
-    // Edit as YAML recomposes the job, so the cards carry new names: the first one is the source.
+    // Applying the YAML recomposes the job, so the cards carry new names: the first one is the source.
     check("the card upstream keeps its rows", /20 rows/.test(b[Object.keys(b)[0]]), JSON.stringify(b));
     check("the pinned card reads 7 rows", /7 rows/.test(b[mid]), JSON.stringify(b));
 
     await p.click("#d-save");
     check("Save writes the job", await p.waitStatus(/saved/, 15000), await p.status());
     await p.click("#d-run");
-    check("Run opens its confirmation", await p.until(`document.querySelector("#d-drawer .tabs button.active")?.dataset.tab === "run"`));
-    const text = await p.drawerText();
-    check("Run is the plain real run", /This run is real: its writers write/.test(text) && !/stops at/.test(text), text.slice(0, 200));
+    check("Run opens its confirmation", await p.until(`!!document.querySelector("#d-run-dialog[open]")`));
+    const text = await p.dialogText();
+    check("Run is the plain real run", /This run is real: its outputs are written/.test(text) && !/stops at/.test(text), text.slice(0, 200));
+    await p.click("#d-run-cancel");
 
     await p.click(`.dcard[data-alias="${mid}"] [data-card-tool="pin"]`);
     check("unpinning removes the pin and the state file", await p.until(`document.querySelector('.dcard[data-alias="${mid}"] [data-card-tool="pin"]')?.getAttribute("aria-pressed") === "false"`) && !fs.existsSync(file));
@@ -287,12 +675,10 @@ const scenarios = {
     check("the bar has no Abandon and no Continue", await p.ev(`!document.querySelector("#d-abandon, #d-continue")`));
     check("Preview is held back", await p.until(`document.querySelector("#d-preview")?.disabled === true`));
     check("the verb that writes is held back", (await p.disabled("#d-run")) === true);
-    check("the verb that writes is named Write targets…", (await p.ev(`document.querySelector("#d-run")?.textContent`)) === "Write targets…");
+    check("the verb that writes is named Run for real…", (await p.ev(`document.querySelector("#d-run")?.textContent`)) === "Run for real…");
     check("the sink says the run waits on it", await p.until(`/⏸/.test(document.querySelector('.dcard[data-alias="c"] .dcard-badge')?.textContent ?? "")`), JSON.stringify(await p.badges()));
-    check("the sink offers Write and Abandon", await p.ev(`!!document.querySelector('.dcard[data-alias="c"] [data-card-tool="write"]') && !!document.querySelector('.dcard[data-alias="c"] [data-card-tool="abandon"]')`));
+    check("the sink that holds no rows offers Abandon and no Write", await p.ev(`!document.querySelector('.dcard[data-alias="c"] [data-card-tool="write"]') && !!document.querySelector('.dcard[data-alias="c"] [data-card-tool="abandon"]')`));
     check("a card that is no sink offers neither", await p.ev(`!document.querySelector('.dcard[data-alias="b"] [data-card-tool="write"], .dcard[data-alias="b"] [data-card-tool="abandon"]')`));
-    await p.cardTool("c", "write");
-    check("Write on a run that holds nothing of its target is refused", await p.waitStatus(/does not hold the rows/i, 10000), await p.status());
     await p.cardTool("c", "abandon");
     check("Abandon hands the page back", await p.until(`document.querySelector("#d-suspended").hidden && document.querySelector("#d-run").disabled === false && document.querySelector("#d-preview").disabled === false`));
     await p.click("#d-preview");
@@ -304,18 +690,32 @@ const scenarios = {
     check("Forget pins leaves no state file", !fs.existsSync(file));
   },
 
-  // Write targets… without the case ticked writes at once, after the confirmation, to every sink.
+  // Run for real… without the case ticked writes at once, after the confirmation, to every sink.
   async "write-plain"({ page: p, folder }) {
     check("the job opens", await p.openJob("review.yaml"));
     await p.click("#d-run");
     check("the confirmation opens", await p.until(`!!document.querySelector("#d-run-confirm")`));
     check("the case is not ticked", (await p.ev(`document.querySelector("#d-review")?.checked`)) === false);
-    check("the confirmation says the targets are written", /reaches the end|real: its writers write/.test(await p.drawerText()), (await p.drawerText()).slice(0, 200));
+    check("the confirmation says the targets are written", /reaches the end|real: its outputs are written/.test(await p.dialogText()), (await p.dialogText()).slice(0, 200));
     check("nothing is written before the confirmation", !fs.existsSync(path.join(folder, "c.csv")) && !fs.existsSync(path.join(folder, "e.csv")));
     await p.click("#d-run-confirm");
     check("the run succeeds", await p.waitStatus(/run succeeded/, 30000), await p.status());
     check("both targets are written", fs.existsSync(path.join(folder, "c.csv")) && fs.existsSync(path.join(folder, "e.csv")));
     check("no sink is left waiting", await p.ev(`document.querySelector("#d-suspended").hidden && !document.querySelector("[data-card-tool='write']")`));
+  },
+
+  // Run for real… with a target unticked writes the others only, and the confirmation names the number it writes.
+  async "write-choose"({ page: p, folder }) {
+    check("the job opens", await p.openJob("review.yaml"));
+    await p.click("#d-run");
+    check("the confirmation lists both targets", await p.until(`!!document.querySelector("#d-target-c") && !!document.querySelector("#d-target-e")`));
+    check("it offers to write both", /Write 2 outputs/.test(await p.ev(`document.querySelector("#d-run-confirm")?.innerText ?? ""`)));
+    await p.click("#d-target-e");
+    check("the choice re-prepares for one target", await p.until(`/Write 1 output$/.test(document.querySelector("#d-run-confirm")?.innerText ?? "")`));
+    check("the target ticked keeps its box", (await p.ev(`document.querySelector("#d-target-c")?.checked`)) === true && (await p.ev(`document.querySelector("#d-target-e")?.checked`)) === false);
+    await p.click("#d-run-confirm");
+    check("the run succeeds", await p.waitStatus(/run succeeded/, 30000), await p.status());
+    check("only the chosen target is written", fs.existsSync(path.join(folder, "c.csv")) && !fs.existsSync(path.join(folder, "e.csv")));
   },
 
   // Review first: nothing is written, every sink says what waits, a sink writes the whole run.
@@ -325,14 +725,14 @@ const scenarios = {
     await p.click("#d-run");
     check("the confirmation opens", await p.until(`!!document.querySelector("#d-review")`));
     await p.click("#d-review");
-    check("the case re-prepares the run as a review", await p.until(`/stops before every writer/.test(document.querySelector("#d-drawer .drawer-body")?.innerText ?? "")`), (await p.drawerText()).slice(0, 200));
+    check("the case re-prepares the run as a review", await p.until(`/stops before every writer/.test(document.querySelector("#d-run-dialog")?.innerText ?? "")`), (await p.drawerText()).slice(0, 200));
     check("the case stays ticked", (await p.ev(`document.querySelector("#d-review")?.checked`)) === true);
     await p.click("#d-run-confirm");
     check("the review ends", await p.waitStatus(/run succeeded/, 30000), await p.status());
     check("nothing is written", files().every((f) => !f), JSON.stringify(files()));
     check("the sinks say what waits", await p.until(`/⏸ 10 rows queued/.test(document.querySelector('.dcard[data-alias="c"] .dcard-badge')?.textContent ?? "") && /⏸ 20 rows queued/.test(document.querySelector('.dcard[data-alias="e"] .dcard-badge')?.textContent ?? "")`), JSON.stringify(await p.badges()));
     check("the bar says a run is suspended", await p.visible("#d-suspended"));
-    check("Preview and Write targets… are held back", (await p.disabled("#d-preview")) === true && (await p.disabled("#d-run")) === true);
+    check("Preview and Run for real… are held back", (await p.disabled("#d-preview")) === true && (await p.disabled("#d-run")) === true);
     const held = JSON.parse(fs.readFileSync(stateFile(folder, "review.yaml"), "utf8"));
     check("the review pinned nothing", held.watch.length === 0 && held.levels.length === 2, JSON.stringify(held));
     await p.pick("c");
@@ -340,10 +740,16 @@ const scenarios = {
     await p.cardTool("c", "write");
     check("Write opens the confirmation of the continuation", await p.until(`!!document.querySelector("#d-run-confirm")`));
     check("the continuation has no case", await p.ev(`!document.querySelector("#d-review")`));
-    check("the continuation reads the held rows", /Held from before/.test(await p.drawerText()), (await p.drawerText()).slice(0, 300));
+    check("the continuation reads the held rows", /Held from before/.test(await p.dialogText()), (await p.dialogText()).slice(0, 300));
     check("nothing is written before the confirmation", files().every((f) => !f));
     await p.click("#d-run-confirm");
     check("the continuation succeeds", await p.waitStatus(/run succeeded/, 30000), await p.status());
+    check("only the sink that was written is written", files()[0] === true && files()[1] === false, JSON.stringify(files()));
+    check("the other sink still waits", await p.until(`!!document.querySelector('.dcard[data-alias="e"] [data-card-tool="write"]') && !document.querySelector("#d-suspended").hidden`));
+    await p.cardTool("e", "write");
+    await p.until(`!!document.querySelector("#d-run-confirm")`);
+    await p.click("#d-run-confirm");
+    for (let i = 0; i < 150 && !files()[1]; i++) await new Promise((r) => setTimeout(r, 200));
     check("both targets are written", files().every(Boolean), JSON.stringify(files()));
     check("the targets hold the reviewed rows", fs.readFileSync(path.join(folder, "c.csv"), "utf8").trim().split("\n").length === 11 && fs.readFileSync(path.join(folder, "e.csv"), "utf8").trim().split("\n").length === 21);
     check("the page is handed back", await p.until(`document.querySelector("#d-suspended").hidden && document.querySelector("#d-run").disabled === false && !document.querySelector("[data-card-tool='write']")`));
@@ -356,7 +762,7 @@ const scenarios = {
     await p.click("#d-run");
     await p.until(`!!document.querySelector("#d-review")`);
     await p.click("#d-review");
-    await p.until(`/stops before every writer/.test(document.querySelector("#d-drawer .drawer-body")?.innerText ?? "")`);
+    await p.until(`/stops before every writer/.test(document.querySelector("#d-run-dialog")?.innerText ?? "")`);
     await p.click("#d-run-confirm");
     check("the review ends", await p.waitStatus(/run succeeded/, 30000), await p.status());
     check("the sinks wait", await p.until(`document.querySelectorAll("[data-card-tool='abandon']").length === 2`));
@@ -373,12 +779,12 @@ const scenarios = {
     await p.click("#d-run");
     await p.until(`!!document.querySelector("#d-review")`);
     await p.click("#d-review");
-    await p.until(`/stops before every writer/.test(document.querySelector("#d-drawer .drawer-body")?.innerText ?? "")`);
+    await p.until(`/stops before every writer/.test(document.querySelector("#d-run-dialog")?.innerText ?? "")`);
     await p.click("#d-run-confirm");
     check("the review ends", await p.waitStatus(/run succeeded/, 30000), await p.status());
     await p.until(`!!document.querySelector("[data-card-tool='write']")`);
     await p.reload();
-    check("the job opens again", await p.openJob("review.yaml"));
+    check("the job opens again", await p.until(`document.querySelector("#job-name")?.textContent === "review.yaml" && document.querySelectorAll(".dcard").length >= 2 && !!document.querySelector("#d-drawer .tabs")`));
     check("the sinks still wait, with their rows", await p.until(`/⏸ 10 rows queued/.test(document.querySelector('.dcard[data-alias="c"] .dcard-badge')?.textContent ?? "") && /⏸ 20 rows queued/.test(document.querySelector('.dcard[data-alias="e"] .dcard-badge')?.textContent ?? "")`), JSON.stringify(await p.badges()));
     check("the bar says a run is suspended", await p.until(`!document.querySelector("#d-suspended")?.hidden`));
     check("the rows that wait are shown on a sink", await p.until(`!!document.querySelector("#d-drawer .drawer-body table")`), (await p.drawerText()).slice(0, 200));
@@ -386,7 +792,13 @@ const scenarios = {
     await p.cardTool("e", "write");
     await p.until(`!!document.querySelector("#d-run-confirm")`);
     await p.click("#d-run-confirm");
-    check("Write finishes the run", await p.waitStatus(/run succeeded/, 30000), await p.status());
+    check("Write finishes the run of that target", await p.waitStatus(/run succeeded/, 30000), await p.status());
+    check("that target is written and the other still waits", fs.existsSync(path.join(folder, "e.csv")) && !fs.existsSync(path.join(folder, "c.csv"))
+      && await p.until(`!!document.querySelector('.dcard[data-alias="c"] [data-card-tool="write"]')`));
+    await p.cardTool("c", "write");
+    await p.until(`!!document.querySelector("#d-run-confirm")`);
+    await p.click("#d-run-confirm");
+    for (let i = 0; i < 150 && !fs.existsSync(path.join(folder, "c.csv")); i++) await new Promise((r) => setTimeout(r, 200));
     check("both targets are written", fs.existsSync(path.join(folder, "c.csv")) && fs.existsSync(path.join(folder, "e.csv")));
   },
 
@@ -479,11 +891,24 @@ const scenarios = {
     check("the browser kept nothing", (await p.ev(`localStorage.length`)) === 0);
 
     await p.reload();
-    check("the job opens again", await p.openJob("chain.yaml"));
+    check("the studio kept the job open", kept().open === "chain.yaml", JSON.stringify(kept()));
+    check("the job opens again by itself", await p.until(`document.querySelector("#job-name")?.textContent === "chain.yaml" && document.querySelectorAll(".dcard").length >= 2 && !!document.querySelector("#d-drawer .tabs")`));
     check("the tab is the one left", (await p.tab()) === "preview", await p.tab());
     check("the card is the one left", await p.ev(`document.querySelector('.dcard[data-alias="b"]')?.classList.contains("selected")`));
     check("the rows are the ones asked", (await p.ev(`document.querySelector("#d-watch-rows")?.value`)) === "7");
-    check("the pane has the size it was left at", (await p.ev(`document.querySelector("#designer").style.getPropertyValue("--pal-w")`)) === "236px", await p.ev(`document.querySelector("#designer").style.getPropertyValue("--pal-w")`));
+    check("the pane has the size it was left at", (await p.ev(`document.querySelector("main").style.getPropertyValue("--pal-w")`)) === "236px", await p.ev(`document.querySelector("main").style.getPropertyValue("--pal-w")`));
+  },
+
+  // A preview over a source that answers one row at a time slowly: Stop abandons the request, the page is free again at
+  // once and says so, and the engine stops at its next batch instead of reading the thousand rows.
+  async "cancel-preview"({ page: p }) {
+    check("the job opens", await p.openJob("cancel.yaml"));
+    check("Stop is hidden while nothing runs", !(await p.visible("#d-preview-cancel")));
+    await p.click("#d-preview");
+    check("Stop shows while the preview runs", await p.until(`!document.querySelector("#d-preview-cancel").hidden`));
+    await p.click("#d-preview-cancel");
+    check("the preview says it was stopped", await p.waitStatus(/preview stopped/, 15000), await p.status());
+    check("Preview is available again and Stop is gone", await p.until(`!document.querySelector("#d-preview").disabled && document.querySelector("#d-preview-cancel").hidden`));
   },
 
   // Typing in the inspector across the page's own timers: the field keeps its focus, its text and its caret.
@@ -500,11 +925,140 @@ const scenarios = {
     check("the field keeps what was typed", field.tail === "# note", JSON.stringify(field));
     check("the caret stays at the end", field.caret, JSON.stringify(field));
   },
+
+  // What a pointer does, the keyboard does: Tab reaches every card, a card is chosen with Enter, and a wire is undone and
+  // made again from its inspector; the drag of a wire still works. Every control has a name, and the text reads at 4.5:1
+  // in both themes, across the screens a person opens.
+  async keyboard({ page: p }) {
+    const wires = () => p.ev(`[...document.querySelectorAll(".dedge-hit")].map((e) => e.dataset.from + ">" + e.dataset.to).sort().join(",")`);
+    const focused = () => p.ev(`(() => { const e = document.activeElement; return e?.classList?.contains("dcard") ? e.dataset.alias : null; })()`);
+    const wired = (from, to) => p.until(`[...document.querySelectorAll(".dedge-hit")].some((e) => e.dataset.from === "${from}" && e.dataset.to === "${to}")`);
+    const unwired = (to) => p.until(`[...document.querySelectorAll(".dedge-hit")].every((e) => e.dataset.to !== "${to}")`);
+    check("the job opens", await p.openJob("chain.yaml"));
+    check("the cards are wired a, b, c", (await wires()) === "a>b,b>c", await wires());
+    await p.click("#d-preview");
+    check("Preview finishes", await p.waitStatus(/preview (done|failed)/, 30000));
+
+    // The screens a person opens, visited once per question: the designer, each card, the zoom into a step, each tab of the drawer.
+    const visit = async (look) => {
+      const tabs = await p.ev(`[...document.querySelectorAll("#d-drawer .tabs button")].map((b) => b.dataset.tab)`);
+      for (const card of ["a", "b", "c"]) {
+        await p.pick(card);
+        for (const tab of tabs) { await p.click(`#d-drawer .tabs button[data-tab="${tab}"]`); await look(); }
+      }
+      await p.ev(`document.querySelector("#d-inner").click()`);
+      await look();
+      await p.ev(`document.querySelector('.dcard[data-alias="b"] .dcard-zoom').click()`);
+      await p.until(`!document.querySelector("#d-chain").hidden`);
+      await p.ev(`document.querySelector("#d-chain .chain-item")?.click()`);
+      await p.frame();
+      await look();
+      await p.ev(`document.querySelector("[data-crumb]")?.click()`);
+      await p.until(`!document.querySelector("#d-inner").hidden`);
+    };
+
+    // Every control has a name.
+    const unnamed = new Set();
+    await visit(async () => { for (const u of await p.unnamed()) unnamed.add(u); });
+    check("the page's controls all have a name", unnamed.size === 0, [...unnamed].join(" | "));
+
+    // The text reads at 4.5:1 in each theme.
+    for (const theme of ["light", "dark"]) {
+      await p.theme(theme);
+      const low = new Set();
+      await visit(async () => { for (const line of await p.contrast()) low.add(line); });
+      check(`the text reads at 4.5:1 in the ${theme} theme`, low.size === 0, [...low].join(" | "));
+    }
+    await p.theme("light");
+
+    // Tab alone reaches each card.
+    await p.ev(`document.activeElement?.blur()`);
+    const reached = new Set();
+    for (let i = 0; i < 120 && reached.size < 3; i++) {
+      await p.tabKey();
+      const at = await focused();
+      if (at) reached.add(at);
+    }
+    check("Tab reaches every card", ["a", "b", "c"].every((a) => reached.has(a)), [...reached].join(","));
+
+    // Choose c, then unwire and wire it again, with keys alone.
+    await p.ev(`document.querySelector("#d-inner").click()`);
+    await p.ev(`document.querySelector('.dcard[data-alias="c"]')?.focus()`);
+    check("a focused card shows where the focus is", (await focused()) === "c" && await p.ev(`(() => { const s = getComputedStyle(document.activeElement); return s.outlineStyle !== "none" && parseFloat(s.outlineWidth) > 0; })()`));
+    await p.enterKey();
+    check("Enter chooses the card", await p.until(`document.querySelector('.dcard[data-alias="c"]')?.classList.contains("selected") && !!document.querySelector("#d-inspector [data-unwire]")`));
+    await p.ev(`document.querySelector('#d-inspector [data-unwire="b"]')?.focus()`);
+    await p.enterKey();
+    check("a wire is undone from the inspector", await unwired("c"), await wires());
+    check("the status says so", /removed/i.test(await p.status()) && /b/.test(await p.status()) && /c/.test(await p.status()), await p.status());
+    await p.until(`!!document.querySelector("#i-connect-from")`);
+    await p.ev(`(() => { const s = document.querySelector("#i-connect-from"); s.focus(); s.value = "in:a"; s.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+    await p.ev(`document.querySelector("#i-connect")?.focus()`);
+    await p.enterKey();
+    check("a wire is made from the inspector", await wired("a", "c"), await wires());
+    check("the status says so too", /wired/i.test(await p.status()) && /a/.test(await p.status()), await p.status());
+    check("the focus stays in the inspector", await p.until(`document.activeElement?.closest("#d-inspector") !== null`));
+
+    // The pointer's drag is still there: b's output onto c's input.
+    await p.ev(`document.querySelector('#d-inspector [data-unwire="a"]')?.click()`);
+    check("the wire is undone", await unwired("c"), await wires());
+
+    // A card with no input is a problem the page counts and colours: those read at 4.5:1 too.
+    check("the problem is counted", await p.until(`!!document.querySelector("#d-drawer .tabs .count")`));
+    for (const theme of ["light", "dark"]) {
+      await p.theme(theme);
+      const low = new Set();
+      for (const tab of ["problems", "yaml"]) {
+        await p.click(`#d-drawer .tabs button[data-tab="${tab}"]`);
+        for (const line of await p.contrast()) low.add(line);
+      }
+      check(`a job with a problem reads at 4.5:1 in the ${theme} theme`, low.size === 0, [...low].join(" | "));
+    }
+    await p.theme("light");
+    await p.drag('.dcard[data-alias="b"] .port.out', '.dcard[data-alias="c"] .port.in');
+    check("a drag still wires two cards", await wired("b", "c"), await wires());
+  },
+
+  // The header says each link and why: a studio that stops is never a problem of the cards, and a save is not offered anyway.
+  async "link-studio"({ page: p, studio }) {
+    check("the job opens", await p.openJob("chain.yaml"));
+    check("the header says the agent is off and the studio answers", await p.ev(`document.querySelector("#agent-link")?.textContent.includes("agent: off") && document.querySelector("#studio-link").hidden`));
+    await p.ev(`(() => { window.__asked = []; window.confirm = (m) => { window.__asked.push(m); return true; }; })()`);
+    studio.stop();
+    await sleep(500);
+    await p.click("#d-save");
+    check("Save says the studio does not answer", await p.waitStatus(/studio does not answer/, 15000), await p.status());
+    check("the header keeps saying it", await p.ev(`!document.querySelector("#studio-link").hidden && /not answering/.test(document.querySelector("#studio-link").textContent)`));
+    check("no question of saving anyway is asked", (await p.ev(`window.__asked.length`)) === 0, await p.ev(`JSON.stringify(window.__asked)`));
+    check("no problem is laid on the cards", (await p.ev(`document.querySelector("#d-drawer")?.textContent.includes("Failed to fetch") ?? false`)) === false);
+  },
+
+  // A coordinator the command line names that does not answer: the header says so from the opening, not "not signed in".
+  async "link-coordinator"({ page: p }) {
+    check("the header names the coordinator and that it does not answer", await p.until(`/unreachable: .*does not answer/.test(document.querySelector("#coordinator")?.textContent ?? "")`, 20000), await p.ev(`document.querySelector("#coordinator")?.textContent ?? "none"`));
+    check("it no longer says the person is not signed in", !/not signed in/.test(await p.ev(`document.querySelector("#coordinator").textContent`)));
+  },
+
+  // The agent's provider does not answer, or lacks the configured model: said at the opening, in the header and the panel's warning.
+  async "link-agent-down"({ page: p }) {
+    check("the header says the model's server does not answer", await p.until(`/model's server not answering/.test(document.querySelector("#agent-link")?.textContent ?? "")`, 20000), await p.ev(`document.querySelector("#agent-link")?.textContent ?? "none"`));
+    check("the panel's warning says why", await p.ev(`!document.querySelector("#agent-warning").hidden && /did not list its models/.test(document.querySelector("#agent-warning").textContent)`));
+  },
+  async "link-agent-model"({ page: p }) {
+    check("the header says the model is not listed", await p.until(`/model not listed/.test(document.querySelector("#agent-link")?.textContent ?? "")`, 20000), await p.ev(`document.querySelector("#agent-link")?.textContent ?? "none"`));
+    check("the panel's warning names the model", await p.ev(`/absent:9/.test(document.querySelector("#agent-warning").textContent)`));
+  },
 };
 
 // ---------------------------------------------------------------- the runner
 
 async function seed(name, folder) {
+  if (name === "cancel-preview") {
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(path.join(folder, "slow.db"));
+    db.exec("create table t(a integer)");
+    db.close();
+  }
   if (name === "real-state") {
     fs.mkdirSync(path.join(folder, ".dtpipe/studio"), { recursive: true });
     fs.writeFileSync(stateFile(folder, "chain.yaml"), JSON.stringify({
@@ -513,9 +1067,23 @@ async function seed(name, folder) {
   }
 }
 
+const closedUrl = async () => `http://127.0.0.1:${await freePort()}`;
+const argsOf = {
+  "link-coordinator": async () => ["--coordinator", await closedUrl()],
+  "link-agent-down": async () => ["--llm-provider", "ollama", "--llm-url", await closedUrl()],
+  "link-agent-model": () => ["--llm-provider", "ollama", "--llm-url", fakeLlm.url, "--llm-model", "absent:9"],
+  agent: () => ["--llm-provider", "ollama", "--llm-url", fakeLlm.url],
+  "agent-reset": () => ["--llm-provider", "ollama", "--llm-url", fakeLlm.url],
+  "agent-edit": () => ["--llm-provider", "ollama", "--llm-url", fakeLlm.url],
+  undo: () => ["--llm-provider", "ollama", "--llm-url", fakeLlm.url],
+  keyboard: () => ["--llm-provider", "ollama", "--llm-url", fakeLlm.url],
+};
+
 const fixturesOf = {
+  undo: ["chain.yaml", "whole.yaml"],
   "whole-branch": ["whole.yaml"], "edit-during-run": ["slow.yaml"], "open-race": ["chain.yaml", "whole.yaml"],
-  "write-plain": ["review.yaml"], "review-write": ["review.yaml"], "review-abandon": ["review.yaml"], "review-reload": ["review.yaml"],
+  "cancel-preview": ["cancel.yaml"],
+  "write-plain": ["review.yaml"], "write-choose": ["review.yaml"], "review-write": ["review.yaml"], "review-abandon": ["review.yaml"], "review-reload": ["review.yaml"],
 };
 
 const wanted = process.argv.slice(2);
@@ -538,9 +1106,9 @@ for (const name of names) {
   const logsBefore = page.logs.length;
   try {
     await seed(name, folder);
-    studio = await startStudio(folder);
+    studio = await startStudio(folder, (await argsOf[name]?.()) ?? []);
     await page.send("Page.navigate", { url: studio.url });
-    await scenarios[name]({ page, folder });
+    await scenarios[name]({ page, folder, studio });
   } catch (e) {
     check(`${name} runs to its end`, false, e.stack || String(e));
   } finally {
@@ -552,5 +1120,6 @@ for (const name of names) {
 }
 
 chrome.stop();
+fakeLlm.stop();
 console.log(`\n${pass} PASS, ${fail} FAIL`);
 process.exit(fail ? 1 : 0);

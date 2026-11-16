@@ -146,15 +146,15 @@ internal sealed class RunQueue
             {
                 var running = _ledger.Sent.Where(t => t.Running).ToList();
                 if (running.Count > 1)
-                    throw new ConflictException($"{running.Count} runs are in flight: name the one to cancel.");
-                running.SingleOrDefault()?.Cancel.Cancel();
+                    throw new ConflictException($"{running.Count} runs are in flight: name the one to stop.");
+                if (running.SingleOrDefault() is { } only) RequestCancel(only);
                 return;
             }
             // A run sent ends through its token: the orchestrator cancels it in flight, and a wait on
             // its deployment's gate ends it before it starts.
             if (_ledger.Sent.FirstOrDefault(t => t.View.RunId == runId) is { } sent)
             {
-                sent.Cancel.Cancel();
+                RequestCancel(sent);
                 return;
             }
             // Out of the queue under the lock, so the dispatcher can no longer send it.
@@ -162,12 +162,19 @@ internal sealed class RunQueue
             if (waiting is not null)
             {
                 // Journaled before it leaves the ledger, as Finish does, so a retry of its key finds it in one or the other.
-                cancelled = waiting.View with { State = RunState.Cancelled, StartedAt = DateTimeOffset.UtcNow, FinishedAt = DateTimeOffset.UtcNow, Refusal = "Cancelled while queued." };
+                cancelled = waiting.View with { State = RunState.Cancelled, StartedAt = DateTimeOffset.UtcNow, FinishedAt = DateTimeOffset.UtcNow, Refusal = "Stopped while queued." };
                 _journal.Record(cancelled);
                 _ledger.Queued.Remove(waiting);
             }
         }
         if (waiting is not null && cancelled is not null) Finish(waiting, cancelled);
+    }
+
+    /// <summary>Ends the run through its token and records the request, which the node channel reads to tell a teardown the requester asked for.</summary>
+    private void RequestCancel(Ticket ticket)
+    {
+        _inventory.CancelRequested(ticket.View.RunId);
+        ticket.Cancel.Cancel();
     }
 
     /// <summary>
@@ -257,7 +264,7 @@ internal sealed class RunQueue
         {
             lock (_ledger.Lock) if (!_ledger.Sent.Contains(ticket)) return;
             var cancelled = ex is OperationCanceledException;
-            Finish(ticket, view with { State = cancelled ? RunState.Cancelled : RunState.Refused, StartedAt = DateTimeOffset.UtcNow, Refusal = cancelled ? "Cancelled while queued." : ex.Message });
+            Finish(ticket, view with { State = cancelled ? RunState.Cancelled : RunState.Refused, StartedAt = DateTimeOffset.UtcNow, Refusal = cancelled ? "Stopped while queued." : ex.Message });
             return;
         }
 
@@ -303,6 +310,7 @@ internal sealed class RunQueue
     private void Finish(Ticket ticket, RunView final)
     {
         final = final with { FinishedAt = DateTimeOffset.UtcNow };
+        _inventory.CancelSettled(final.RunId);
         lock (_ledger.Lock)
         {
             // Journaled before it leaves the ledger, under the one lock, so a launch, a find or a key's retry sees the run in one or the other.

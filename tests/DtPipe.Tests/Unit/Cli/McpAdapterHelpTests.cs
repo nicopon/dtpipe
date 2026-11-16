@@ -49,7 +49,11 @@ public partial class McpAdapterHelpTests
                 (IProviderDescriptor<IDataWriter>)Activator.CreateInstance(e.ImplementationType)!, registry, sp))
             .ToList();
 
-        _help = new McpHelpService(readers, Array.Empty<IDataTransformerFactory>(), writers);
+        var processors = catalog.StreamTransformers
+            .Select(e => (IStreamTransformerFactory)Activator.CreateInstance(e.ImplementationType)!)
+            .ToList();
+
+        _help = new McpHelpService(readers, Array.Empty<IDataTransformerFactory>(), writers, processors);
         _readerNames = readers.Select(r => r.ComponentName).ToArray();
 
         _roles = readers.Select(r => (Adapter: r.ComponentName, Role: "Reader", r.OptionsType))

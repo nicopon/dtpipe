@@ -1,0 +1,41 @@
+# Distributed pipelines
+
+[← Documentation](README.md)
+
+A distributed pipeline runs one pipeline across several hosts, with the rows streaming between
+them.
+
+| Piece | What it does |
+|:---|:---|
+| **Coordinator** | Holds a library of pipelines, decides which part runs where, starts each run and gives it one verdict. It says which host may send rows to which |
+| **Node** | A host next to its own data. It offers **bricks**: reads and writes its owner declared on that data, so the coordinator never holds a connection string |
+| **Runner** | A node with no data. It runs the steps between the bricks: a join, a SQL query, an anonymization |
+
+A node is `dtpipe node`, or any .NET host that calls `AddDtPipeNode`. The coordinator and the runner
+are published as container images.
+
+To try it: [Your first distributed pipeline](guides/distributed-first-pipeline.md). To run it for
+real: [deploy/README.md](../deploy/README.md). Every setting:
+[REFERENCE.md](../REFERENCE.md#distributed-pipeline). A demonstrator with four data nodes, joins
+across them and injected faults: [the lab](../samples/distributed-lab/README.md).
+
+## The studio
+
+`dtpipe studio ./jobs` opens a local page over the YAML jobs of a folder. Each job shows as steps
+that you edit and preview on the real engine, without writing to the target. It needs no
+coordinator; with `--coordinator`, it also offers the nodes' bricks and publishes jobs to the
+coordinator's library. With `--llm-provider`, a panel lets a model design the job with you: see
+[The agent](guides/agent.md). Details: [REFERENCE.md](../REFERENCE.md#studio-dtpipe-studio).
+
+## Limits
+
+- **The coordinator is one process.** Its state survives a restart; a run in flight does not, and
+  ends as an error. On PostgreSQL or SQL Server a second instance can wait as a standby and take
+  over. Storage and backup: [deploy/README.md](../deploy/README.md).
+- **Tried on one machine.** As local processes and as Linux containers, on macOS. It has not been
+  run on Windows.
+
+---
+
+How a fragment's boundary is bound to a run is in the
+[reference](../REFERENCE.md#binding-a-fragments-boundary).

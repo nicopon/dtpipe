@@ -18,15 +18,18 @@ public class McpHelpService : IMcpHelpService
     private readonly IEnumerable<IStreamReaderFactory> _readerFactories;
     private readonly IEnumerable<IDataTransformerFactory> _transformerFactories;
     private readonly IEnumerable<IDataWriterFactory> _writerFactories;
+    private readonly IEnumerable<IStreamTransformerFactory> _processorFactories;
 
     public McpHelpService(
         IEnumerable<IStreamReaderFactory> readerFactories,
         IEnumerable<IDataTransformerFactory> transformerFactories,
-        IEnumerable<IDataWriterFactory> writerFactories)
+        IEnumerable<IDataWriterFactory> writerFactories,
+        IEnumerable<IStreamTransformerFactory> processorFactories)
     {
         _readerFactories = readerFactories;
         _transformerFactories = transformerFactories;
         _writerFactories = writerFactories;
+        _processorFactories = processorFactories;
     }
 
     public string GetGeneralHelp()
@@ -78,8 +81,8 @@ public class McpHelpService : IMcpHelpService
         sw.WriteLine("    from: \"branch1\"            # Streaming alias source");
         sw.WriteLine("    ref: [ \"branch2\" ]         # Preloaded lookup references");
         sw.WriteLine("    provider-options:");
-        sw.WriteLine("      sql:");
-        sw.WriteLine("        query: \"SELECT * FROM branch1 JOIN branch2 ON branch1.id = branch2.id\"");
+        sw.WriteLine("      <processor-key>:           # a branch with 'ref' runs a stream processor: see STREAM PROCESSORS");
+        sw.WriteLine("        <processor-option>: <value>");
         sw.WriteLine("    output: \"<adapter3>:<target>\"");
         // The rule that decides whether a topology can exist at all, and the one the grammar above
         // does not show: branch1 and branch2 are readable precisely because neither has an output.
@@ -89,6 +92,7 @@ public class McpHelpService : IMcpHelpService
         sw.WriteLine("    products:        { input: \"...\" }                    # produces, writes nothing");
         sw.WriteLine("    write_products:  { from: products, output: \"...\" }   # writes it");
         sw.WriteLine("    sales:           { from: seed, ref: [products], ... } # joins on it");
+        WriteStreamProcessors(sw);
         sw.WriteLine();
         sw.WriteLine("VALUE RESOLUTION & INLINE INTERPOLATION:");
         sw.WriteLine("  Values are resolved sequentially prior to execution:");
@@ -171,6 +175,47 @@ public class McpHelpService : IMcpHelpService
             .Select(f => new ComponentSummary(f.ComponentName.ToLowerInvariant(), "transformer", Describe(f.OptionsType)))
             .OrderBy(c => c.Name, StringComparer.Ordinal)
             .ToList();
+
+    /// <inheritdoc />
+    public IReadOnlyList<ProcessorSummary> Processors()
+        => _processorFactories
+            .GroupBy(f => f.ComponentName, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.First())
+            .OrderBy(f => f.ComponentName, StringComparer.Ordinal)
+            .Select(f => new ProcessorSummary(
+                f.ComponentName.ToLowerInvariant(),
+                f.Description,
+                ProcessorActivation.YamlKey(f),
+                ProcessorActivation.CliForms(f),
+                ProcessorActivation.Arity(f.MinStreams, f.MaxStreams),
+                ProcessorActivation.Arity(f.MinLookups, f.MaxLookups),
+                f.UsageNotes))
+            .ToList();
+
+    /// <summary>
+    /// The processors' section of the general help, read off each factory: what selects it, what it
+    /// asks of the branches around it, and the notes it owns. Nothing here names a processor.
+    /// </summary>
+    private void WriteStreamProcessors(TextWriter sw)
+    {
+        var processors = Processors();
+        if (processors.Count == 0) return;
+
+        sw.WriteLine();
+        sw.WriteLine("STREAM PROCESSORS (what a branch with 'from'/'ref' runs; the provider-options key selects it):");
+        sw.WriteLine("  Write ONE 'provider-options:' mapping per branch: the processor's key sits beside the adapter keys,");
+        sw.WriteLine("  and a second 'provider-options:' in the same branch is refused.");
+        foreach (var p in processors)
+        {
+            sw.WriteLine();
+            sw.WriteLine($"  {p.Name}{(p.Description.Length == 0 ? string.Empty : " - " + p.Description)}");
+            sw.WriteLine($"    YAML key: provider-options.{p.YamlKey}" +
+                         (p.CliFlags.Count == 0 ? string.Empty : $"    CLI: {string.Join(", ", p.CliFlags)}"));
+            sw.WriteLine($"    'from' (streamed): {p.Streams}    'ref' (loaded in memory): {p.Lookups}");
+            foreach (var line in p.UsageNotes.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+                sw.WriteLine("    " + line.TrimEnd('\r'));
+        }
+    }
 
     private static string Describe(Type? optionsType)
         => optionsType?.GetCustomAttribute<DescriptionAttribute>()?.Description ?? string.Empty;
@@ -432,10 +477,29 @@ public class McpHelpService : IMcpHelpService
 
             writer.WriteLine($"{indent}{kebabName}: {ValuePlaceholder(prop.PropertyType)}");
             writer.WriteLine($"{indent}  # {desc}");
+            WriteEnumMembers(writer, prop.PropertyType, indent);
             wrote = true;
         }
 
         return wrote;
+    }
+
+    /// <summary>
+    /// What each member of an enum option does, when the enum documents its members with
+    /// <see cref="DescriptionAttribute"/>. Generic: any option whose members carry a description gets
+    /// the lines, and one whose members carry none gets nothing.
+    /// </summary>
+    private static void WriteEnumMembers(TextWriter writer, Type propertyType, string indent)
+    {
+        var underlying = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
+        if (!underlying.IsEnum) return;
+
+        foreach (var name in Enum.GetNames(underlying))
+        {
+            var description = underlying.GetField(name)?.GetCustomAttribute<DescriptionAttribute>()?.Description;
+            if (!string.IsNullOrWhiteSpace(description))
+                writer.WriteLine($"{indent}  #   {name}: {description}");
+        }
     }
 
     /// <summary>

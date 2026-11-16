@@ -25,7 +25,7 @@ Each rule ends with its guard: `[CI: check]`, `[local: check]` (runs only when s
   surface.
 - The micro perf gate stays out of CI: shared runners are no stable measure.
 - Checkpoint encryption has no opt-out.
-- The agent session trace (`--trace`) is a diagnostic, never a gate.
+- The agent session trace (`--agent-trace`) is a diagnostic, never a gate.
 - TransportR stays a transport library: no dtpipe concept (plan, fragment, edge, node) enters it;
   `DtPipe.Coordinator` owns them.
 
@@ -101,7 +101,7 @@ What the site shows, what `REFERENCE.md` enumerates and the checks its pages pas
 
 | Project | Role |
 |---|---|
-| `src/DtPipe` | CLI entry, DI wiring, the engine (`Engine/`, namespace `DtPipe.Engine`), `JobService` (its CLI host), MCP server, AI agent, studio |
+| `src/DtPipe` | CLI entry, DI wiring, the engine (`Engine/`, namespace `DtPipe.Engine`), `JobService` (its CLI host), MCP server, the agent loop (no command of its own), studio |
 | `src/DtPipe.Core` | Abstractions, DAG engine, pipeline models, helpers |
 | `src/DtPipe.Adapters` | Readers and writers (`Adapters/<Name>/`) |
 | `src/DtPipe.Adapters.Shared` | Infrastructure shared by adapters and processors (DuckDB read path) |
@@ -126,8 +126,8 @@ Key interfaces: `IStreamReader` / `IColumnarStreamReader`; `IDataWriter` / `IRow
 `IColumnarDataWriter`; `IDataTransformer` / `IDataTransformerFactory`; `IStreamTransformerFactory`
 (multi-input, receives `BranchChannelContext`); `ICliContributor` / `OptionsRegistry`.
 
-Providers implement `IProviderDescriptor<TService>`, registered in `Program.cs`; options come from
-`[ComponentOption]` via reflection. Detail: `src/DtPipe/CLAUDE.md`.
+Providers implement `IProviderDescriptor<TService>`, found by `ComponentCatalog` (no registration
+list); options come from `[ComponentOption]` via reflection. Detail: `src/DtPipe/CLAUDE.md`.
 
 ### DAG grammar
 
@@ -178,5 +178,5 @@ Detail: `src/DtPipe.Core/CLAUDE.md`.
 
 ## MCP server and agent
 
-`dtpipe mcp` and `dtpipe agent`: their hardening invariants (F1–F7) and directives are in
+`dtpipe mcp` and the agent loop: their hardening invariants (F1, F2, F4–F7) and directives are in
 `.claude/rules/mcp-and-agent.md`, loaded under `src/DtPipe/Cli/Mcp/` and `src/DtPipe/Cli/Agent/`.

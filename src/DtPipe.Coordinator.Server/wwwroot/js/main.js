@@ -1,5 +1,5 @@
 // The coordinator's page: a hash router over its views, and the status pills of the top bar.
-import { $, addLog, bytes, start, store, subscribe, toast } from "./core.js";
+import { $, addLog, bytes, esc, gate, start, store, subscribe, toast } from "./core.js";
 import * as nodes from "./nodes.js";
 import * as library from "./library.js";
 import * as runs from "./runs.js";
@@ -11,15 +11,22 @@ let current = null;
 
 function route() {
   const [name, ...params] = location.hash.replace(/^#\/?/, "").split("/").map(decodeURIComponent);
+  // An address that names no view says so: the library is the page of an empty address only.
+  const unknown = name && !views[name];
   const view = views[name] ? name : "library";
   if (current?.leave && current.leave() === false) return;
   // A fresh element per visit: a view's listeners never outlive it.
   const host = document.createElement("div");
   host.className = `view-body view-${view}`;
   $("view").replaceChildren(host);
-  current = views[view];
-  for (const a of document.querySelectorAll("#nav a[data-view]")) a.classList.toggle("active", a.dataset.view === view);
-  current.mount(host, params.filter(Boolean));
+  for (const a of document.querySelectorAll("#nav a[data-view]")) a.classList.toggle("active", !unknown && a.dataset.view === view);
+  if (unknown) {
+    current = null;
+    host.innerHTML = `<h2>No such page</h2><p>There is no page at <code>#/${esc(name)}</code>. <a href="#/library">Back to the library</a></p>`;
+  } else {
+    current = views[view];
+    current.mount(host, params.filter(Boolean));
+  }
   window.scrollTo(0, 0);
 }
 
@@ -43,6 +50,9 @@ subscribe((kind) => {
   renderPills();
   current?.update?.(kind);
 });
+
+// What the person's role does not allow is disabled as a view draws it, and says so.
+new MutationObserver(() => gate($("view"))).observe($("view"), { childList: true, subtree: true });
 
 window.addEventListener("hashchange", route);
 window.addEventListener("beforeunload", (e) => { if (current?.dirty?.()) { e.preventDefault(); e.returnValue = ""; } });

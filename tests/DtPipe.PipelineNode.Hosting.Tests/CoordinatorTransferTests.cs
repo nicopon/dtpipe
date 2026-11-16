@@ -1,9 +1,7 @@
 using DtPipe.Coordinator.Server.Access;
 using Microsoft.Extensions.DependencyInjection;
-using TransportR.Abstractions;
 using TransportR.Client;
-using TransportR.Client.Services;
-using TransportR.Interfaces;
+using TransportR.Hub;
 using Xunit;
 
 namespace DtPipe.PipelineNode.Hosting.Tests;
@@ -50,7 +48,7 @@ public sealed class CoordinatorTransferTests
             await sender.ConnectAsync();
             await receiver.ConnectAsync();
             var initiator = coordinator.Services.GetRequiredService<ITransferInitiator>();
-            await initiator.InitTransferAsync(sender.ClientId, receiver.ClientId, timeoutMs: 20_000);
+            await initiator.InitTransferAsync(sender.ClientId, receiver.ClientId, handshakeTimeout: TimeSpan.FromSeconds(20));
 
             await using var send = await sendHandle.Task.WaitAsync(TimeSpan.FromSeconds(30), Ct);
             await using var receive = await receiveHandle.Task.WaitAsync(TimeSpan.FromSeconds(30), Ct);

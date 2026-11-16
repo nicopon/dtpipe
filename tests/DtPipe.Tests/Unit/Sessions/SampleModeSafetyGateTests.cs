@@ -30,6 +30,22 @@ public class SampleModeSafetyGateTests
         verdict.Violations.Should().NotBeEmpty();
     }
 
+    /// <summary>
+    /// The verdict says what the gate refuses and nothing about how to lift it: a command line has no
+    /// way to, so a flag named here would send the reader after one that does not exist.
+    /// </summary>
+    [Theory]
+    [InlineData("DROP TABLE audit", "Destructive SQL verb(s) detected: DROP.")]
+    [InlineData("SELECT * FROM read_parquet('s3://bucket/data.parquet')", "Network access detected")]
+    public void A_Refusal_Names_What_Is_Refused_And_No_Flag(string sql, string refused)
+    {
+        var verdict = Evaluate(null, sql);
+
+        verdict.Allowed.Should().BeFalse();
+        verdict.Violations.Should().ContainSingle().Which.Should().Contain(refused);
+        verdict.Violations.Should().OnlyContain(v => !v.Contains("--"));
+    }
+
     [Theory]
     [InlineData("UPDATE orders SET total = 0 OUTPUT inserted.*")]
     [InlineData("TRUNCATE TABLE staging")]
@@ -53,7 +69,7 @@ public class SampleModeSafetyGateTests
     /// <summary>
     /// The gate covers the source, not the writer. All four hooks are suppressed in sample mode,
     /// so refusing a pipeline for carrying one would add no safety while refusing previews of
-    /// ordinary jobs — and a guard that cries wolf teaches people to pass --allow-destructive by
+    /// ordinary jobs — and a guard that cries wolf teaches whoever can unlock the check to do it by
     /// reflex, which would unlock the source side as well.
     /// </summary>
     [Fact]

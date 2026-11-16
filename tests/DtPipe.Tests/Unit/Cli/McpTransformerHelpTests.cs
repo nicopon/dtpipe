@@ -33,7 +33,7 @@ public class McpTransformerHelpTests
             .OfType<IDataTransformerFactory>()
             .ToList();
 
-        _help = new McpHelpService(Array.Empty<IStreamReaderFactory>(), _factories, Array.Empty<IDataWriterFactory>());
+        _help = new McpHelpService(Array.Empty<IStreamReaderFactory>(), _factories, Array.Empty<IDataWriterFactory>(), Array.Empty<IStreamTransformerFactory>());
     }
 
     private static IDataTransformerFactory? TryCreate(Type type, object?[] shape)

@@ -3,16 +3,17 @@
 // wires the screens together and owns the job open and the list of jobs; each screen keeps its own part of the
 // state (state.js) and its own module.
 
-import { $, api, el, fill, forgetToken, status, token } from "./dom.js";
+import { $, api, el, fill, forgetToken, plural, status, svg, token } from "./dom.js";
 import { onCoordinator, refreshCoordinator } from "./coordinator.js";
-import { compose, markSaved, mountDesigner, openBlank, openJob, restoreSizes, setCatalog } from "./designer.js";
+import { bindSplit, compose, editingText, holdsEdits, markSaved, mountDesigner, openBlank, openJob, restoreSizes, setCatalog, showTab } from "./designer.js";
 import { readView, rememberView, sizesRead, viewRestored } from "./prefs.js";
 import { afterFlush, invalidate, onZone } from "./render.js";
 import { sequence, state } from "./state.js";
-import { adoptDraft, cardBadge, cardTool, cardTools, debugComposed, forgetPins, forgetPreview, previewView, restoreRows, runPreview, setDebugRows } from "./preview.js";
+import { adoptDraft, cancelPreview, cardBadge, cardTool, cardTools, debugComposed, forgetPins, forgetPreview, heldBranch, heldTargets, previewView, restoreRows, runPreview, setDebugRows } from "./preview.js";
 import { forgetRun, prepareRun, restoreReview, runView } from "./run.js";
-import { forgetPublication, publicationView, publish } from "./publish.js";
+import { forgetPublication, publicationProblems, publicationView, publish } from "./publish.js";
 import { loadVariables, onLaunchChanged, unreadyCount, variablesView } from "./variables.js";
+import { fileReplaced, mountAgent } from "./agent.js";
 
 const MAX_DEBUG_ROWS = 100000;
 const opening = sequence();
@@ -39,6 +40,12 @@ async function loadLibrary() {
     library.error = e.message;
   }
   invalidate("jobs");
+  await linkRead();
+}
+
+// What an exchange with the coordinator met, read again from the studio once it is done: the header says the answer or its absence.
+async function linkRead() {
+  if (state.coordinator) await refreshCoordinator().catch(() => {});
 }
 
 function renderJobs() {
@@ -48,12 +55,57 @@ function renderJobs() {
   fill($("jobs"), paths.length
     ? paths.map((path) => el("li", {}, el("button", { class: path === state.job?.path ? "job open" : "job", onclick: () => open(path) }, path)))
     : el("li", { class: "muted" }, "No .yaml or .yml file in this folder."));
+  renderSide();
   $("library-pane").hidden = !library.shown;
   if (!library.shown) return;
   fill($("library"), library.error ? el("li", { class: "warn" }, library.error)
     : library.pipelines?.length
       ? library.pipelines.map((p) => el("li", {}, el("button", { class: "job", title: p.description || p.title || p.id, onclick: () => openFromLibrary(p.id) }, p.id)))
       : el("li", { class: "muted" }, "The library holds no pipeline."));
+}
+
+// ---------------------------------------------------------------- the side panel
+
+// One panel beside the icons holds the jobs or the steps to place, or nothing. Until the person picks an icon it follows the
+// page: the jobs while no job is open, the steps once one is. A click on the icon shown closes the panel; the choice is kept.
+const SIDES = /** @type {const} */ (["jobs", "steps"]);
+const SIDE_ICONS = {
+  jobs: ["M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z", "M14 3v6h6"],
+  steps: ["M3 3h7v7H3z", "M14 3h7v7h-7z", "M14 14h7v7h-7z", "M3 14h7v7H3z"],
+};
+let sideDrawn = null;
+
+const sideShown = () => state.view.side ?? (state.job ? "steps" : "jobs");
+
+function renderSide() {
+  const side = sideShown();
+  document.querySelector("main")?.classList.toggle("side-closed", side === "none");
+  $("side-pane").hidden = side === "none";
+  for (const name of SIDES) {
+    $(`side-${name}-view`).hidden = side !== name;
+    $(`side-${name}`).setAttribute("aria-pressed", String(side === name));
+  }
+  // The palette is not drawn while hidden: it is drawn when it shows.
+  if (side === "steps" && sideDrawn !== "steps") invalidate("palette");
+  sideDrawn = side;
+}
+
+/** @param {"jobs" | "steps"} name */
+function chooseSide(name) {
+  state.view.side = sideShown() === name ? "none" : name;
+  invalidate("jobs");
+}
+
+function mountSide() {
+  for (const name of SIDES) {
+    const icon = svg("svg", { viewBox: "0 0 24 24", width: "20", height: "20", fill: "none", stroke: "currentColor", "stroke-width": "1.8", "stroke-linejoin": "round", "aria-hidden": "true" });
+    for (const d of SIDE_ICONS[name]) icon.append(svg("path", { d }));
+    $(`side-${name}`).append(icon);
+    $(`side-${name}`).addEventListener("click", () => chooseSide(name));
+  }
+  const pane = $("side-pane");
+  bindSplit(/** @type {HTMLElement} */ (document.querySelector(".split-pal")), "pal", (e) => e.clientX - pane.getBoundingClientRect().left);
+  renderSide();
 }
 
 async function openFromLibrary(id) {
@@ -75,27 +127,31 @@ function forgetResults() {
   forgetRun();
 }
 
-const leaveCurrent = () => !state.cards.dirty || confirm(`${state.job?.path || "This job"} has changes that are not saved. Leave it anyway?`);
+const leaveCurrent = () => !holdsEdits() || confirm(`${state.job?.path || "This job"} has changes that are not saved. Leave it anyway?`);
 
-async function open(path, left = false) {
-  if (!left && !leaveCurrent()) return;
+// True once the job is on the cards. `replacing` names a reading of the open job that replaces its cards, which Undo puts back.
+async function open(path, left = false, replacing = null) {
+  if (!left && !leaveCurrent()) return false;
+  const replaces = state.job?.path === path ? replacing : null;
   // A job asked for while another is still being read replaces it: only the last one asked for is opened.
   const ticket = opening.begin();
   try {
     const [job, view] = await Promise.all([api(`/api/job?path=${encodeURIComponent(path)}`), readView(path)]);
-    if (opening.stale(ticket)) return;
+    if (opening.stale(ticket)) return false;
     state.job = { path, hash: job.hash, rewrites: job.rewrites };
     forgetResults();
     invalidate("jobs");
     // The rows asked are the person's last, unless the job kept its own.
     if (view.job?.rows) restoreRows(view.job.rows);
     restoreReview(view.job?.review === true);
-    if (!(await openJob(job.yaml, job.layout, false, view.job))) return;
+    if (!(await openJob(job.yaml, job.layout, false, view.job, replaces))) return false;
     viewRestored(path, view.job);
     status(job.rewrites ? "saving rewrites this file" : "", job.rewrites ? "warn" : "");
     await loadJobs();
+    return true;
   } catch (e) {
     status(e.message, "bad");
+    return false;
   }
 }
 
@@ -168,12 +224,27 @@ async function importCommand() {
 async function save() {
   const job = state.job;
   if (!job) return;
+  // A save writes the cards: a text the YAML tab holds would be left out of the file without a word.
+  if (editingText()) { showTab("yaml"); status("The YAML is not applied: apply or revert it, then save.", "bad"); return; }
   const result = await compose();
+  if (result.unanswered) return;
   if (job.rewrites && !confirm("Saving writes this job as the studio composes it: comments inside it and the order of its keys are not kept. Save anyway?")) return;
   const acceptErrors = result.errors?.length > 0;
-  if (acceptErrors && !confirm(`${result.errors.length} problem(s) remain: the job written may not run. Save anyway?`)) return;
+  if (acceptErrors && !confirm(`${plural(result.errors.length, "problem")} ${result.errors.length === 1 ? "remains" : "remain"}: the job written may not run. Save anyway?`)) return;
+  const write = (hash) => api("/api/job", { path: job.path, hash, model: state.cards.model, acceptErrors }, "PUT");
   try {
-    const answer = await api("/api/job", { path: job.path, hash: job.hash, model: state.cards.model, acceptErrors }, "PUT");
+    let answer;
+    try {
+      answer = await write(job.hash);
+    } catch (e) {
+      // The agent saved this file while the cards kept the person's edit: saving them replaces the agent's text, once the
+      // person agrees, against the file as it is now. Any other conflict is said as the server words it.
+      if (e.status !== 409 || !job.hash || state.agent.behind?.saved !== job.path) throw e;
+      const disk = await api(`/api/job?path=${encodeURIComponent(job.path)}`);
+      if (!confirm(`The agent saved ${job.path} after you opened it. Saving replaces the agent's text with your steps: what the agent wrote is lost (its notice's Apply shows it on the steps instead). Replace it?`)) throw e;
+      answer = await write(disk.hash);
+      fileReplaced(job.path);
+    }
     state.job = { path: job.path, hash: answer.hash, rewrites: false };
     // What a preview pinned before the first save belongs to the job now.
     if (!job.hash) await adoptDraft();
@@ -195,6 +266,7 @@ async function loadBricks() {
   } catch (e) {
     status(e.message, "bad");
   }
+  await linkRead();
 }
 
 // ---------------------------------------------------------------- the bar
@@ -206,6 +278,7 @@ function renderBar() {
   const set = (id, props) => { const node = $(id); if (node) Object.assign(node, props); };
   const suspended = dbg.real;
   set("d-preview", { disabled: dbg.running || suspended, title: suspended ? SUSPENDED : PREVIEW_TITLE });
+  set("d-preview-cancel", { hidden: !dbg.running });
   set("d-suspended", { hidden: !suspended });
   // The rows are typed here: a drawing never rewrites what the person is typing.
   set("d-watch-rows", { disabled: dbg.running || dbg.real, ...(document.activeElement === $("d-watch-rows") ? {} : { value: String(dbg.rows) }) });
@@ -213,25 +286,37 @@ function renderBar() {
   set("d-run", { disabled: dbg.running || suspended, title: suspended ? SUSPENDED : RUN_TITLE });
 }
 
-const SUSPENDED = "A real run is suspended before its targets are written: write it or abandon it from the sink cards.";
-const PREVIEW_TITLE = "Run the whole job over the first source rows, with the writers neutralised: every card shows the rows it delivers";
-const RUN_TITLE = "Run the saved job here and write its targets, after you confirm what it writes";
+/** A sink writes the rows held for it, and for it only: the dialog lists the other held outputs to tick. @param {string} alias */
+function writeHeld(alias) {
+  const branch = heldBranch(alias);
+  return branch ? prepareRun(true, heldTargets(), [branch]) : undefined;
+}
+const SUSPENDED = "A real run is suspended before its outputs are written: write it or abandon it from the output steps.";
+const PREVIEW_TITLE = "Run the whole job over the first source rows, with the writers neutralised: every step shows the rows it delivers";
+const RUN_TITLE = "Run the saved job here and write its outputs, after you confirm what it writes";
+
+/** A publication changes the coordinator's library: the list beside the jobs is read again once the job is published. */
+async function publishAndRead() {
+  await publish();
+  if (state.publication.outcome?.saved) await loadLibrary();
+}
 
 function barButtons() {
   return [
     el("button", { id: "d-save", title: "Write the job and its layout (Ctrl+S)", onclick: () => save() }, "Save"),
     el("button", { id: "d-preview", class: "primary", title: PREVIEW_TITLE, onclick: () => runPreview(null) }, "▶ Preview"),
-    el("label", { id: "d-watch-rows-label", class: "rows", title: "Source rows each source reads (each card shows at most 1000 of them)" },
+    el("button", { id: "d-preview-cancel", class: "ghost danger", hidden: true, title: "Stop the preview: the engine stops at its next batch of rows", onclick: cancelPreview }, "Stop"),
+    el("label", { id: "d-watch-rows-label", class: "rows", title: "Source rows each source reads, up to the preview's cap: a step says when a source stopped there" },
       "rows ", el("input", { id: "d-watch-rows", type: "number", min: "1", max: String(MAX_DEBUG_ROWS), value: String(state.preview.rows), onchange: setDebugRows })),
-    el("button", { id: "d-forget-pins", class: "ghost small", hidden: true, title: "Unpin every card and forget the checkpoints they kept", onclick: forgetPins }, "Forget pins"),
-    el("span", { id: "d-suspended", class: "suspended", hidden: true, title: SUSPENDED }, "⏸ run suspended: write or abandon it on the sink cards"),
-    el("button", { id: "d-run", class: "danger", title: RUN_TITLE, onclick: () => prepareRun() }, "Write targets…"),
-    state.coordinator ? el("button", { id: "d-publish", title: "Send the saved job to the coordinator's library", onclick: () => publish() }, "Publish") : null,
+    el("button", { id: "d-forget-pins", class: "ghost small", hidden: true, title: "Unpin every step and forget the checkpoints they kept", onclick: forgetPins }, "Forget pins"),
+    el("span", { id: "d-suspended", class: "suspended", hidden: true, title: SUSPENDED }, "⏸ run suspended: write or abandon it on the output steps"),
+    el("button", { id: "d-run", class: "danger", title: RUN_TITLE, onclick: () => prepareRun() }, "Run for real…"),
+    state.coordinator ? el("button", { id: "d-publish", title: "Send the saved job to the coordinator's library", onclick: () => publishAndRead() }, "Publish") : null,
   ];
 }
 
 async function quit() {
-  if (state.cards.dirty && !confirm("Changes are not saved. Quit anyway?")) return;
+  if (holdsEdits() && !confirm("Changes are not saved. Quit anyway?")) return;
   try {
     await api("/api/quit", {});
   } catch (e) {
@@ -254,8 +339,9 @@ async function start() {
     cardTools,
     cardBadge,
     // A sink writes the run it waits on; the rest of the card's tools belong to the preview.
-    cardTool: (alias, name) => (name === "write" ? prepareRun(true) : cardTool(alias, name)),
+    cardTool: (alias, name) => (name === "write" ? writeHeld(alias) : cardTool(alias, name)),
     previewView,
+    publicationProblems,
     extraTabs: [{
       name: "variables",
       label: "Variables ",
@@ -274,13 +360,60 @@ async function start() {
   // The panes come back as they were left, before anything is kept of them.
   const kept = await readView();
   if (kept.sizes) restoreSizes(kept.sizes);
+  if (["jobs", "steps", "none"].includes(kept.side)) state.view.side = kept.side;
+  mountSide();
   sizesRead();
   await loadJobs();
+  // The job that was open comes back, when the folder still lists it.
+  if (typeof kept.open === "string" && state.jobs.paths.includes(kept.open)) await open(kept.open, true);
   onCoordinator(loadBricks);
   onCoordinator(loadLibrary);
   await refreshCoordinator();
   await loadBricks();
   await loadLibrary();
+  await mountAgent($("agent-pane"), { applyPlan, openPlan, reopen: (path, ask = false) => open(path, !ask, "the file the agent saved"), jobsChanged: loadJobs, followPlan });
+}
+
+// ---------------------------------------------------------------- the agent's plans
+
+// A plan replaces the open job's cards, unsaved: the job keeps its path and the hash a save must find. True once it has.
+async function applyPlan(yaml) {
+  if (!state.job || !leaveCurrent()) return false;
+  if (!(await openJob(yaml, state.cards.model?.layout, true, null, "the agent's plan"))) return false;
+  status("the agent's plan is on the steps: save it to keep it", "good");
+  return true;
+}
+
+// The plan the agent just gave, on the cards as the person's message left them: unsaved, with the card and the tab kept. With
+// no job open it opens as a new one under a free name. A text that does not take apart into cards is left to the button.
+async function followPlan(yaml) {
+  const probe = await api("/api/design/decompose", { yaml, layout: null });
+  if (probe.errors?.length) return false;
+  if (state.job) return openJob(yaml, state.cards.model?.layout, true, { card: state.cards.selected?.alias, tab: state.view.drawer }, "the agent's plan");
+  const taken = new Set(state.jobs.paths);
+  let path = "agent-job.yaml";
+  for (let n = 2; taken.has(path); n++) path = `agent-job-${n}.yaml`;
+  opening.cancel();
+  state.job = { path, hash: null, rewrites: false };
+  forgetResults();
+  viewRestored(path);
+  return openJob(yaml, null, true);
+}
+
+// A plan opened as a new job, not saved yet, as an imported command line opens. True once it is open.
+async function openPlan(yaml) {
+  if (!leaveCurrent()) return false;
+  const path = prompt("The new job's path in the folder (its folder must exist):", "agent-plan.yaml");
+  if (!path) return false;
+  if (!/\.ya?ml$/i.test(path)) { status("A job is a .yaml or .yml file.", "bad"); return false; }
+  opening.cancel();
+  state.job = { path, hash: null, rewrites: false };
+  forgetResults();
+  viewRestored(path);
+  const opened = await openJob(yaml, null, true);
+  status("the agent's plan: save it to keep it", "good");
+  await loadJobs();
+  return opened;
 }
 
 $("quit").addEventListener("click", quit);
@@ -290,7 +423,7 @@ $("library-refresh").addEventListener("click", loadLibrary);
 document.addEventListener("keydown", (e) => {
   if (e.key === "s" && (e.ctrlKey || e.metaKey) && state.job) { e.preventDefault(); save(); }
 });
-window.addEventListener("beforeunload", (e) => { if (state.cards.dirty) e.preventDefault(); });
+window.addEventListener("beforeunload", (e) => { if (holdsEdits()) e.preventDefault(); });
 
 if (!token) status("Open the address dtpipe studio printed: it carries this session's token.", "bad");
 else start().catch((e) => status(e.message, "bad"));

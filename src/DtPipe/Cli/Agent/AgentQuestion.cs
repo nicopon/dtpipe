@@ -58,12 +58,12 @@ public sealed record AgentQuestion
 
     /// <summary>
     /// The question and its choices as display lines, the choices numbered so a reader can refer to
-    /// one by number. Shared by both surfaces so they cannot number them differently.
+    /// one by number.
     ///
     /// <para>
-    /// A multi-line question contributes one entry per line, not one entry containing newlines: the
-    /// full-screen band is a list widget that splits on them anyway, so a count that disagreed with
-    /// what is on screen would make <see cref="OptionAtLine"/> pick the wrong choice.
+    /// A multi-line question contributes one entry per line, not one entry containing newlines: a
+    /// count that disagreed with the lines shown would make <see cref="OptionAtLine"/> pick the
+    /// wrong choice.
     /// </para>
     /// </summary>
     public IReadOnlyList<string> Lines()

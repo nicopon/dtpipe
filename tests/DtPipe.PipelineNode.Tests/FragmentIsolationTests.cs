@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -14,6 +15,7 @@ public class FragmentIsolationTests : IDisposable
 
     public void Dispose() => _dir.Delete(recursive: true);
 
+    [UnsupportedOSPlatform("windows")]
     private async Task<Dictionary<string, List<string>>> RecordAsync(string runDirectory, bool edgesOnly)
     {
         var record = Path.Combine(_dir.FullName, "record.txt");

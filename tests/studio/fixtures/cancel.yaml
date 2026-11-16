@@ -1,0 +1,9 @@
+a:
+  input: sqlite:slow.db
+  batch-size: 10
+  provider-options:
+    sqlite-reader:
+      query: with recursive c(x) as (select 1 union all select x+1 from c where x < 1000) select x, (with recursive d(y) as (select 1 union all select y+1 from d where y < 300000 + x - x) select count(*) from d) as k from c
+b:
+  from: a
+  output: "null:"

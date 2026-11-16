@@ -2,8 +2,8 @@ namespace DtPipe.Jobs;
 
 /// <summary>
 /// Which keys of a branch concern its reader and which its writer, as a job file names them. What
-/// <c>dtpipe split</c> moves to each half of a cut, and what the designer gives a source card and a
-/// sink card: one list, so the two never place a key differently.
+/// a cut moves to each half, and what the designer gives a source card and a sink card: one list,
+/// so the two never place a key differently.
 /// </summary>
 public static class BranchSides
 {

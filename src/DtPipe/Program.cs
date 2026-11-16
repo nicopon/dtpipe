@@ -89,12 +89,7 @@ class Program
             if (args.Length > 0 && IsSubcommand(jobService, args[0]))
             {
                 var rootCommand = jobService.BuildSubcommands();
-                // `dtpipe node` hands its tokens to the pipeline lexer, which reads @file itself: a response-file replacer
-                // would expand them first (a secret reference, a query file) and the lexer would never see the reference.
-                var parsed = args[0].Equals("node", StringComparison.OrdinalIgnoreCase)
-                    ? rootCommand.Parse(args, new System.CommandLine.ParserConfiguration { ResponseFileTokenReplacer = null })
-                    : rootCommand.Parse(args);
-                return await parsed.InvokeAsync();
+                return await ParseSubcommand(rootCommand, args).InvokeAsync();
             }
 
             // 3. Help Interception
@@ -152,6 +147,14 @@ class Program
             await Log.CloseAndFlushAsync();
         }
     }
+
+    /// <summary>
+    /// Parses a subcommand's line. <c>@file</c> is dtpipe's own reference to a value (a secret, a query), read by the component
+    /// that owns the value: a response-file replacer would expand it into arguments first and the owner would never see it.
+    /// No subcommand takes a response file, so none is read.
+    /// </summary>
+    internal static System.CommandLine.ParseResult ParseSubcommand(System.CommandLine.RootCommand rootCommand, string[] args)
+        => rootCommand.Parse(args, new System.CommandLine.ParserConfiguration { ResponseFileTokenReplacer = null });
 
     private static bool IsSubcommand(JobService jobService, string arg)
     {

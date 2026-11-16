@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using DtPipe.Adapters.Common;
+using DtPipe.Adapters.Shared.Abstractions;
 using DtPipe.Core.Attributes;
 using DtPipe.Core.Options;
 
@@ -34,10 +35,16 @@ public enum MySqlInsertMode
 
 public enum MySqlWriteStrategy
 {
+    [Description(WriteStrategyDescriptions.Append)]
     Append,
+    [Description(WriteStrategyDescriptions.Truncate)]
     Truncate,
+    [Description(WriteStrategyDescriptions.DeleteThenInsert)]
     DeleteThenInsert,
+    [Description(WriteStrategyDescriptions.Recreate)]
     Recreate,
+    [Description(WriteStrategyDescriptions.Upsert)]
     Upsert,
+    [Description(WriteStrategyDescriptions.Ignore)]
     Ignore
 }

@@ -17,4 +17,5 @@ internal sealed record ExportRunServices(
     SchemaValidationService SchemaValidator,
     PipelineExecutor PipelineExecutor,
     IMemoryChannelRegistry? ChannelRegistry,
-    DtPipe.DryRun.SampleReportCollector? Reports);
+    DtPipe.DryRun.SampleReportCollector? Reports,
+    DtPipe.Core.Expressions.IStringContentResolver? Resolver);

@@ -1,4 +1,3 @@
-using System.Text.Json.Nodes;
 using DtPipe.Coordinator.Contracts;
 using DtPipe.Coordinator.Server.Deployments;
 using DtPipe.Coordinator.Server.Library;
@@ -71,7 +70,7 @@ public sealed class MinimalBrickTests : IDisposable
         Assert.Equal(("node-a/customers", brick.Version), (listed.Key, listed.Version));
         Assert.DoesNotContain("sqlite", listed.Yaml);
         Assert.DoesNotContain("DB", listed.Yaml);
-        Assert.Equal("brick:node-a/customers", Assert.Single(_catalog.Catalog()).Branch["input"]!.GetValue<string>());
+        Assert.Equal("brick:node-a/customers", JobYaml.Scalar(_catalog.BranchOf(listed), JobKeys.Input));
     }
 
     [Fact]
@@ -120,7 +119,7 @@ public sealed class MinimalBrickTests : IDisposable
 
         var reference = BrickRef.Of("mirror", (YamlMappingNode)JobYaml.Parse(SinkJob).Children[new YamlScalarNode("mirror")]);
         Assert.Equal(("node-a/mirror", true), (reference!.Key, reference.IsSink));
-        Assert.Equal("brick:node-a/mirror", Assert.Single(_catalog.Catalog(), b => b.Id == "mirror").Branch["output"]!.GetValue<string>());
+        Assert.Equal("brick:node-a/mirror", JobYaml.Scalar(_catalog.BranchOf(_catalog.Find("node-a/mirror")!), JobKeys.Output));
         Assert.Equal(BindingCauses.Unchecked, Assert.Single(_placer.Check(SinkJob, new Dictionary<string, Binding> { ["customers"] = new("", null, null, new BindingPin(source.Version)) })).Cause);
 
         // A strict binding keeps the version, never the contract the sink was judged against.
@@ -128,6 +127,18 @@ public sealed class MinimalBrickTests : IDisposable
         var bindings = Bindings.Pinned(BrickReferences.Expand(SinkJob, new Dictionary<string, Binding>()), pins, new HashSet<string> { "mirror" });
         Assert.Equal(new BindingPin(sink.Version), bindings["mirror"].Pin);
         Assert.Empty(_placer.Check(SinkJob, new Dictionary<string, Binding> { ["customers"] = new("", null, null, new BindingPin(source.Version)), ["mirror"] = bindings["mirror"] }));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void The_Branch_That_References_A_Brick_Is_The_One_A_Reference_Is_Read_From(bool isSink)
+    {
+        var branch = BrickRef.Branch("node-a", "orders", isSink);
+        if (isSink) branch.Add(JobKeys.From, "upstream");
+
+        Assert.Equal(new BrickReference("b", "node-a", "orders", isSink), BrickRef.Of("b", branch));
+        Assert.Null(BrickRef.Misuse("b", branch));
     }
 
     [Theory]

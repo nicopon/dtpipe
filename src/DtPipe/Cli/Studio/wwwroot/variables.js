@@ -11,6 +11,10 @@ const loading = sequence();
 /** Reads the variables of a composed job. @param {{ yaml?: string } | null} result */
 export async function loadVariables(result) {
   const ticket = loading.begin();
+  // Until the server answers, an empty list says it is reading, never that the job reads no variable: the answer can
+  // wait on the keyring.
+  state.vars = { variables: state.vars.variables, aliases: state.vars.aliases, pending: true };
+  invalidate("drawer");
   try {
     const answer = await api("/api/variables", { path: state.job?.path || null, yaml: result?.yaml || "", bricks: brickBranches() });
     if (loading.stale(ticket)) return;
@@ -79,6 +83,7 @@ function variableRow(v) {
 export function variablesView() {
   const vars = state.vars;
   if (vars.error) return el("p", { class: "bad" }, vars.error);
+  if (vars.pending && !vars.variables.length) return el("p", { class: "hint" }, "Reading the job's ${{…}} variables… The first read can wait several seconds on the keyring.");
   if (!vars.variables.length) return el("p", { class: "hint" }, "This job reads no ${{…}} variable.");
   return [
     el("p", { class: "hint" }, "The job keeps each ${{NAME}}; what the studio launches it with stays on this machine, under .dtpipe/, outside git. A keyring value is read when a sample runs and never shown."),

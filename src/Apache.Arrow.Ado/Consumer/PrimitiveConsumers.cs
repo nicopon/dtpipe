@@ -150,12 +150,12 @@ public sealed class BinaryConsumer : BaseAdoConsumer<BinaryArray.Builder, Binary
     protected override void ConsumeValue(DbDataReader reader)
     {
         var obj = reader.GetValue(ColumnIndex);
-        if (obj is byte[] bytes)
-        {
-            Builder.Append((ReadOnlySpan<byte>)bytes);
-            AddVariableByteSize(bytes.Length);
-        }
-        else
-            Builder.AppendNull();
+        // A value that is not bytes is a value this column cannot hold, never an absent one: turning it
+        // into NULL lost the cell and reported success. The composite consumer names the column.
+        if (obj is not byte[] bytes)
+            throw new InvalidCastException($"A {obj.GetType().Name} cannot be read as binary.");
+
+        Builder.Append((ReadOnlySpan<byte>)bytes);
+        AddVariableByteSize(bytes.Length);
     }
 }

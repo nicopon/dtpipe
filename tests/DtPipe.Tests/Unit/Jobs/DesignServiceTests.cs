@@ -84,6 +84,26 @@ public sealed class DesignServiceTests
     }
 
     [Fact]
+    public void A_Transformers_Settings_Come_Back_As_The_Text_Dtpipe_Reads()
+    {
+        var transformers = new JsonArray(new JsonObject
+        {
+            ["type"] = "overwrite",
+            ["mappings"] = new JsonObject { ["email"] = "~", ["phone"] = null, ["age"] = 5 },
+        });
+        var composed = WithBricks.Compose(new DesignModel("T", null, [],
+        [
+            new DesignStep("people", StepKinds.Source, "a/people"),
+            new DesignStep("masked", StepKinds.Transform, From: ["people"], Transformers: transformers),
+            new DesignStep("archive", StepKinds.Sink, "b/archive", From: ["masked"]),
+        ]));
+
+        var back = WithBricks.Decompose(composed.Yaml).Model.Steps.Single(s => s.Alias == "masked").Transformers!;
+
+        Assert.Equal("""[{"type":"overwrite","mappings":{"email":"~","phone":"","age":"5"}}]""", back.ToJsonString());
+    }
+
+    [Fact]
     public void A_Reference_That_Says_More_Or_Names_No_Offered_Brick_Stays_A_Raw_Branch_And_Composes_Back()
     {
         const string job = """

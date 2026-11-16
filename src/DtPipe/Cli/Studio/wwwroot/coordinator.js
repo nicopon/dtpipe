@@ -2,7 +2,7 @@
 // The coordinator the command line named, if any: who is signed in, and signing in through the
 // browser. The page never sees a token: it asks the studio, which keeps them, and reads a status.
 
-import { $, api, el, fill, status } from "./dom.js";
+import { $, api, el, fill, onLinkDoubt, status } from "./dom.js";
 import { invalidate, onZone } from "./render.js";
 import { state } from "./state.js";
 
@@ -20,11 +20,16 @@ export async function refreshCoordinator() {
   const next = await api("/api/coordinator");
   state.coordinator = next.url ? next : null;
   invalidate("coordinator");
+  // The drawer's Problems and Publish say what a publication would refuse only while signed in; a poll that changes
+  // nothing leaves the drawer, and what is typed in it, alone.
+  if (state.coordinator?.state !== before) invalidate("drawer");
   if (state.coordinator && state.coordinator.state !== before) for (const listener of listeners) listener(state.coordinator);
   return state.coordinator;
 }
 
 onZone("coordinator", render);
+// A request the coordinator's side failed: what the link last met is read again, so the header says it.
+onLinkDoubt(() => { refreshCoordinator().catch(() => {}); });
 
 function render() {
   const link = state.coordinator;
@@ -32,7 +37,13 @@ function render() {
   if (!link) { host.hidden = true; return; }
   host.hidden = false;
   const name = new URL(link.url).host;
-  if (link.state === "signed-in") {
+  // The last exchange got no answer: the header says so in place of the state it can no longer vouch for, and keeps the
+  // button the state offers.
+  const silent = link.unreachable ? el("span", { title: link.unreachable }, "unreachable: ", link.unreachable) : null;
+  if (link.state === "signed-in" && silent) {
+    fill(host, el("span", { class: "dot warn" }), " ", name, " · ", silent,
+      " ", el("button", { class: "small ghost", onclick: signOut, title: "Forget this studio's tokens" }, "Sign out"));
+  } else if (link.state === "signed-in") {
     fill(host, el("span", { class: "dot good" }), " ", name, " · ", link.me?.email || link.me?.name || "signed in",
       " ", el("button", { class: "small ghost", onclick: signOut, title: "Forget this studio's tokens" }, "Sign out"));
   } else if (link.state === "signing-in") {
@@ -40,7 +51,7 @@ function render() {
       " ", el("button", { class: "small ghost", onclick: signIn }, "Open again"));
   } else {
     const label = link.byKey ? "Sign in with the key" : link.reason ? "Sign in again" : "Sign in";
-    fill(host, el("span", { class: "dot bad" }), " ", name, " · ", link.reason || "not signed in", " ",
+    fill(host, el("span", { class: "dot bad" }), " ", name, " · ", silent ?? (link.reason || "not signed in"), " ",
       el("button", { class: "small", onclick: signIn }, label));
   }
 }

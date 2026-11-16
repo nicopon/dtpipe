@@ -9,6 +9,7 @@
   --ok: #1f8a4c;
   --warn: #b7791f;
   --bad: #c53030;
+  --on-solid: #ffffff;
   --memory: #9aa5b4;
   --network: #2f6fde;
   --node-1: #0e9f8e;
@@ -31,6 +32,7 @@
     --ok: #4ccb82;
     --warn: #e5a93a;
     --bad: #f07272;
+    --on-solid: #11151c;
     --memory: #5b6676;
     --network: #6a9cf5;
     --node-1: #2dd4bf;
@@ -61,7 +63,7 @@ button, select, input, textarea {
 button { cursor: pointer; }
 button:hover:not(:disabled) { border-color: var(--accent); }
 button:disabled { opacity: .45; cursor: default; }
-button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-solid); }
 button.danger { color: var(--bad); }
 button.ghost { background: transparent; }
 button.small { padding: 1px 7px; font-size: 12px; }
@@ -70,7 +72,7 @@ input.grow { flex: 1; min-width: 200px; }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .check { display: inline-flex; gap: 4px; align-items: center; color: var(--muted); font-size: 12.5px; }
 
-.warning-banner { background: var(--bad); color: #fff; text-align: center; padding: 6px 18px; font-size: 13px; font-weight: 600; }
+.warning-banner { background: var(--bad); color: var(--on-solid); text-align: center; padding: 6px 18px; font-size: 13px; font-weight: 600; }
 .topbar {
   display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
   padding: 10px 18px; background: var(--surface); border-bottom: 1px solid var(--border);
@@ -179,8 +181,17 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .history-item .muted { color: var(--muted); }
 
 /* Log */
-.log { height: 240px; overflow: auto; background: var(--surface-2); border-radius: 6px; padding: 6px 8px; }
-.log div { white-space: pre-wrap; word-break: break-word; }
+/* The box grows with the window, and a shadow at an edge says there is more to scroll to. */
+.log {
+  height: clamp(240px, 45vh, 520px); overflow: auto; border-radius: 6px; padding: 6px 8px;
+  background:
+    linear-gradient(var(--surface-2) 30%, transparent) 0 0 / 100% 16px no-repeat local,
+    linear-gradient(transparent, var(--surface-2) 70%) 0 100% / 100% 16px no-repeat local,
+    radial-gradient(farthest-side at 50% 0, var(--border), transparent) 0 0 / 100% 8px no-repeat scroll,
+    radial-gradient(farthest-side at 50% 100%, var(--border), transparent) 0 100% / 100% 8px no-repeat scroll,
+    var(--surface-2);
+}
+.log div { white-space: pre-wrap; word-break: break-word; padding-left: 2ch; text-indent: -2ch; }
 .log .t { color: var(--muted); }
 .log .Warning { color: var(--warn); }
 .log .Error, .log .Critical { color: var(--bad); }

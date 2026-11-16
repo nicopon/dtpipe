@@ -71,6 +71,35 @@ public sealed record RunView(
     bool SinkMayBePartial = false, IReadOnlyList<CursorOutcome>? Cursors = null)
 {
     [JsonIgnore] public bool IsOver => State is not (RunState.Queued or RunState.Running);
+
+    /// <summary>
+    /// Why the run did not succeed, in one line a person reads: the first line of the failing fragment's own error, the
+    /// fragment that stopped answering, or the refusal without the runner it was tried on. It is presentation, derived from
+    /// <see cref="Result"/> and <see cref="Refusal"/> each time it is read: it changes no state, code or verdict, and is null
+    /// for a run that succeeded or that its requester cancelled.
+    /// </summary>
+    public string? Reason => State switch
+    {
+        RunState.Failed when Result is { Cause: { } cause } result => FailureLine(result, cause),
+        RunState.Refused or RunState.Error => RefusalLine(Refusal),
+        _ => null,
+    };
+
+    private static string? FailureLine(RunResult result, string cause)
+    {
+        if (result.Reports.TryGetValue(cause, out var report))
+            return FirstLine(report.FirstFault);
+        return result.CauseIsUnresponsive ? $"{cause} stopped answering." : cause;
+    }
+
+    private static string? RefusalLine(string? refusal)
+    {
+        var line = FirstLine(refusal);
+        return line is null ? null : System.Text.RegularExpressions.Regex.Replace(line, @"^Runner \S+: ", "");
+    }
+
+    private static string? FirstLine(string? text) =>
+        text?.Split('\n').Select(l => l.Trim()).FirstOrDefault(l => l.Length > 0);
 }
 
 /// <summary>

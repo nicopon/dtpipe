@@ -1,9 +1,7 @@
-using System.Text.Json.Nodes;
 using DtPipe.Coordinator.Contracts;
 using DtPipe.Jobs;
 using Xunit;
 using YamlDotNet.RepresentationModel;
-using DtPipe.Tests.Shared;
 
 namespace DtPipe.PipelineNode.Hosting.Tests;
 
@@ -11,8 +9,8 @@ public class FragmentIntakeTests
 {
     private const string Sink = """{ "output": "duck:${{WAREHOUSE}}", "provider-options": { "duck-writer": { "table": "dim" } } }""";
 
-    private static YamlMappingNode? Declared(string id, BrickKind kind, string json = Sink) =>
-        id == "dim" && kind == BrickKind.Sink ? (YamlMappingNode)JobYaml.FromJson(JsonNode.Parse(json)) : null;
+    private static YamlMappingNode? Declared(string id, BrickKind kind, string branch = Sink) =>
+        id == "dim" && kind == BrickKind.Sink ? JobYaml.ParseBranch(branch) : null;
 
     private static readonly FragmentUnit[] Units = [new("anonymize", FragmentUnitKind.Inbound), new("load", FragmentUnitKind.Sink, "dim", "anonymize")];
 
@@ -23,7 +21,7 @@ public class FragmentIntakeTests
         FragmentJob.BranchOfBrick? branch = null, FragmentJob.VersionOfBrick? version = null) =>
         FragmentIntake.JobOf(fragment, policy, gate, branch ?? ((id, kind) => Declared(id, kind)), version ?? VersionOf, []);
 
-    private static string? VersionOf(string id, BrickKind kind) => Declared(id, kind) is { } b ? TestBricks.VersionOf(kind, JobYaml.ToJson(b)!.ToJsonString()) : null;
+    private static string? VersionOf(string id, BrickKind kind) => Declared(id, kind) is { } b ? BrickRules.VersionOf(kind, b) : null;
 
     [Fact]
     public void A_data_node_composes_the_job_the_coordinator_planned_from_its_own_bricks()
@@ -39,7 +37,7 @@ public class FragmentIntakeTests
     {
         var changed = Sink.Replace("\"dim\"", "\"dim2\"");
         var (yaml, reason) = Resolve(Planned(), branch: (id, kind) => Declared(id, kind, changed),
-            version: (id, kind) => Declared(id, kind, changed) is { } b ? TestBricks.VersionOf(kind, JobYaml.ToJson(b)!.ToJsonString()) : null);
+            version: (id, kind) => Declared(id, kind, changed) is { } b ? BrickRules.VersionOf(kind, b) : null);
 
         Assert.Null(yaml);
         Assert.Contains("a brick of p@node-4 (dim) changed since the plan was made", reason);

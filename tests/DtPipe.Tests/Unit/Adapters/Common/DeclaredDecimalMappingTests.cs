@@ -17,52 +17,58 @@ namespace DtPipe.Tests.Unit.Adapters.Common;
 /// </summary>
 public class DeclaredDecimalMappingTests
 {
-    public static TheoryData<string, ITypeMapper, bool> Dialects => new()
+    /// <summary>One dialect under test; <see cref="ToString"/> names it in the test's display name.</summary>
+    public sealed record DialectCase(string Name, ITypeMapper Mapper, bool HonoursDeclaration)
     {
-        { "postgresql", PostgreSqlTypeConverter.Instance, true },
-        { "mysql", MySqlTypeConverter.Instance, true },
-        { "sqlserver", SqlServerTypeConverter.Instance, true },
-        { "oracle", OracleTypeConverter.Instance, true },
-        { "duckdb", DuckDbTypeConverter.Instance, true },
-        { "sqlite", SqliteTypeConverter.Instance, false },
+        public override string ToString() => Name;
+    }
+
+    public static TheoryData<DialectCase> Dialects => new()
+    {
+        new DialectCase("postgresql", PostgreSqlTypeConverter.Instance, true),
+        new DialectCase("mysql", MySqlTypeConverter.Instance, true),
+        new DialectCase("sqlserver", SqlServerTypeConverter.Instance, true),
+        new DialectCase("oracle", OracleTypeConverter.Instance, true),
+        new DialectCase("duckdb", DuckDbTypeConverter.Instance, true),
+        new DialectCase("sqlite", SqliteTypeConverter.Instance, false),
     };
 
     [Theory]
     [MemberData(nameof(Dialects))]
-    public void A_Declared_Decimal_Is_Created_At_Its_Width(string dialect, ITypeMapper mapper, bool honoursDeclaration)
+    public void A_Declared_Decimal_Is_Created_At_Its_Width(DialectCase d)
     {
-        var type = mapper.MapToProviderType(Column(typeof(decimal), 18, 9));
+        var type = d.Mapper.MapToProviderType(Column(typeof(decimal), 18, 9));
 
-        if (honoursDeclaration)
+        if (d.HonoursDeclaration)
             Assert.Contains("(18,9)", type.Replace(" ", ""));
         else
-            Assert.Equal(mapper.MapToProviderType(typeof(decimal)), type);
+            Assert.Equal(d.Mapper.MapToProviderType(typeof(decimal)), type);
     }
 
     [Theory]
     [MemberData(nameof(Dialects))]
-    public void A_Nullable_Declared_Decimal_Is_Treated_Like_A_Decimal(string dialect, ITypeMapper mapper, bool honoursDeclaration)
+    public void A_Nullable_Declared_Decimal_Is_Treated_Like_A_Decimal(DialectCase d)
     {
-        var type = mapper.MapToProviderType(Column(typeof(decimal?), 10, 2));
+        var type = d.Mapper.MapToProviderType(Column(typeof(decimal?), 10, 2));
 
-        Assert.Equal(honoursDeclaration, type.Replace(" ", "").Contains("(10,2)"));
+        Assert.Equal(d.HonoursDeclaration, type.Replace(" ", "").Contains("(10,2)"));
     }
 
     [Theory]
     [MemberData(nameof(Dialects))]
-    public void An_Undeclared_Decimal_Takes_The_Type_Of_The_Clr_Decimal(string dialect, ITypeMapper mapper, bool honoursDeclaration)
-        => Assert.Equal(mapper.MapToProviderType(typeof(decimal)), mapper.MapToProviderType(Column(typeof(decimal), null, null)));
+    public void An_Undeclared_Decimal_Takes_The_Type_Of_The_Clr_Decimal(DialectCase d)
+        => Assert.Equal(d.Mapper.MapToProviderType(typeof(decimal)), d.Mapper.MapToProviderType(Column(typeof(decimal), null, null)));
 
     [Theory]
     [MemberData(nameof(Dialects))]
-    public void A_Declaration_Out_Of_Range_Takes_The_Type_Of_The_Clr_Decimal(string dialect, ITypeMapper mapper, bool honoursDeclaration)
+    public void A_Declaration_Out_Of_Range_Takes_The_Type_Of_The_Clr_Decimal(DialectCase d)
     {
-        var fallback = mapper.MapToProviderType(typeof(decimal));
+        var fallback = d.Mapper.MapToProviderType(typeof(decimal));
 
-        Assert.Equal(fallback, mapper.MapToProviderType(Column(typeof(decimal), 0, 0)));
-        Assert.Equal(fallback, mapper.MapToProviderType(Column(typeof(decimal), 10, 11)));
-        Assert.Equal(fallback, mapper.MapToProviderType(Column(typeof(decimal), 10, -1)));
-        Assert.Equal(fallback, mapper.MapToProviderType(Column(typeof(decimal), 10, null)));
+        Assert.Equal(fallback, d.Mapper.MapToProviderType(Column(typeof(decimal), 0, 0)));
+        Assert.Equal(fallback, d.Mapper.MapToProviderType(Column(typeof(decimal), 10, 11)));
+        Assert.Equal(fallback, d.Mapper.MapToProviderType(Column(typeof(decimal), 10, -1)));
+        Assert.Equal(fallback, d.Mapper.MapToProviderType(Column(typeof(decimal), 10, null)));
     }
 
     [Fact]
@@ -83,8 +89,8 @@ public class DeclaredDecimalMappingTests
 
     [Theory]
     [MemberData(nameof(Dialects))]
-    public void A_Declaration_On_Another_Type_Changes_Nothing(string dialect, ITypeMapper mapper, bool honoursDeclaration)
-        => Assert.Equal(mapper.MapToProviderType(typeof(long)), mapper.MapToProviderType(Column(typeof(long), 18, 9)));
+    public void A_Declaration_On_Another_Type_Changes_Nothing(DialectCase d)
+        => Assert.Equal(d.Mapper.MapToProviderType(typeof(long)), d.Mapper.MapToProviderType(Column(typeof(long), 18, 9)));
 
     private static PipeColumnInfo Column(Type clr, int? precision, int? scale)
         => new("c", clr, true, Precision: precision, Scale: scale);

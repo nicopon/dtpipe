@@ -1,8 +1,9 @@
 :root {
-  --bg: #f7f7f8; --panel: #ffffff; --ink: #1d1f23; --muted: #6b7079; --line: #e2e4e8;
-  --accent: #2f6fdb; --good: #1f8a4c; --bad: #c2362f; --warn: #a76a00; --code: #f1f2f4;
+  --bg: #f7f7f8; --panel: #ffffff; --ink: #1d1f23; --muted: #646a73; --line: #e2e4e8;
+  --accent: #2f6fdb; --good: #1a7a43; --bad: #c2362f; --warn: #9a6200; --code: #f1f2f4;
+  --on-solid: #ffffff;
   --wire: #8a93a3; --shadow: 0 1px 3px rgba(0, 0, 0, .08);
-  --source: #14a58a; --sink: #2f6fdb; --step: #8a93a3;
+  --source: #0c7a64; --sink: #2f6fdb; --step: #5f6878;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -10,7 +11,8 @@
     --bg: #15171b; --panel: #1d2026; --ink: #e6e8eb; --muted: #9097a1; --line: #2c3038;
     --accent: #6c9cff; --good: #4cc27f; --bad: #ff7a70; --warn: #e3ac43; --code: #23262d;
     --wire: #6b7383; --shadow: 0 1px 3px rgba(0, 0, 0, .4);
-    --source: #2fc6a6; --sink: #6c9cff; --step: #7d8696;
+    --source: #2fc6a6; --sink: #6c9cff; --step: #8a93a3;
+    --on-solid: #15171b;
     color-scheme: dark;
   }
 }
@@ -19,20 +21,34 @@
 body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--ink); background: var(--bg); }
 header { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
 header #quit { margin-left: auto; }
-header #coordinator { margin-left: auto; font-size: 12.5px; }
-header #coordinator:not([hidden]) + #quit { margin-left: 0; }
-main { display: grid; grid-template-columns: 220px minmax(0, 1fr); height: calc(100vh - 49px); }
-.jobs-pane { border-right: 1px solid var(--line); padding: 12px; overflow: auto; background: var(--panel); }
+header .links { margin-left: auto; display: flex; align-items: center; gap: 14px; font-size: 12.5px; }
+header .links + #quit { margin-left: 0; }
+header .links a { color: var(--muted); }
+/* The icons choose what the one side panel holds, beside them; a panel closed gives its width to the canvas. */
+main {
+  --pal-w: 220px;
+  display: grid; grid-template-columns: 40px var(--pal-w) minmax(0, 1fr); height: calc(100vh - 49px);
+}
+main.side-closed { grid-template-columns: 40px minmax(0, 1fr); }
+.activity { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 0; border-right: 1px solid var(--line); background: var(--panel); }
+.activity-icon { width: 32px; height: 32px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted); display: grid; place-items: center; line-height: 0; }
+.activity-icon:hover { color: var(--ink); background: var(--code); }
+.activity-icon[aria-pressed="true"] { color: var(--ink); background: var(--code); box-shadow: inset 2px 0 0 var(--accent); }
+.side-pane { position: relative; border-right: 1px solid var(--line); background: var(--panel); min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.side-pane > .jobs-pane, .side-pane > .steps-pane { flex: 1; min-height: 0; overflow: auto; }
+.split-pal { right: 0; width: 8px; }
+.steps-pane > .hint { margin: 12px; }
+.jobs-pane { padding: 12px; }
 .jobs-pane .row { justify-content: space-between; margin-bottom: 8px; }
 .jobs-pane h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0; }
 .jobs-pane ul { list-style: none; margin: 0; padding: 0; }
 .job { width: 100%; text-align: left; border: 0; background: none; color: var(--ink); padding: 5px 8px; border-radius: 6px; font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; cursor: pointer; overflow-wrap: anywhere; }
 .job:hover { background: var(--code); }
-.job.open { background: var(--accent); color: #fff; }
+.job.open { background: var(--accent); color: var(--on-solid); }
 .intro { margin: 24px; max-width: 640px; }
 button, input, select, textarea { font: inherit; color: inherit; }
 button { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 4px 12px; cursor: pointer; }
-button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-solid); }
 button.ghost { background: none; }
 button.small { padding: 1px 7px; font-size: 12px; }
 button.danger { color: var(--bad); }
@@ -57,7 +73,7 @@ textarea { width: 100%; resize: vertical; }
 
 /* The designer */
 .designer {
-  --pal-w: 220px; --insp-w: 330px; --drawer-h: 260px;
+  --insp-w: 330px; --drawer-h: 260px;
   display: flex; flex-direction: column; gap: 10px; padding: 10px; min-width: 0; min-height: 0; overflow: hidden;
 }
 .designer-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; flex: none; }
@@ -65,14 +81,14 @@ textarea { width: 100%; resize: vertical; }
 .designer-bar .actions { display: flex; gap: 8px; align-items: center; margin-left: auto; }
 .designer-bar .rows input { width: 70px; }
 .title-input { font-weight: 700; min-width: 220px; }
-.designer-body { position: relative; display: grid; grid-template-columns: var(--pal-w) minmax(0, 1fr) var(--insp-w); gap: 12px; flex: 1; min-height: 0; }
+.designer-body { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) var(--insp-w); gap: 12px; flex: 1; min-height: 0; }
 .designer-body > .card { min-height: 0; }
-/* The handles lie over the 12px gaps beside the palette and the inspector, and over the drawer's top edge. */
+/* The handles lie over the side panel's edge, the 12px gap beside the inspector, and the drawer's top edge. */
 .split { position: absolute; z-index: 4; background: transparent; touch-action: none; }
 .split:hover, .split.dragging, .split:focus-visible { background: var(--accent); opacity: .35; outline: none; }
 .split-col { top: 0; bottom: 0; width: 12px; cursor: col-resize; }
-.split-pal { left: var(--pal-w); }
 .split-insp { right: var(--insp-w); }
+.split-agent { left: -6px; }
 .split-row { flex: none; height: 6px; margin: -8px 0; position: relative; cursor: row-resize; }
 .palette { padding: 10px; overflow: auto; }
 .palette h3 { margin: 10px 0 4px; font-size: 13px; }
@@ -99,6 +115,7 @@ textarea { width: 100%; resize: vertical; }
   cursor: move; user-select: none;
 }
 .dcard.selected { outline: 2px solid var(--accent); outline-offset: 1px; }
+.dcard:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
 .dcard.problem { border-color: var(--bad); }
 .dcard-head { display: flex; gap: 6px; align-items: baseline; padding: 5px 10px 0; }
 .dcard-head .kind { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
@@ -126,6 +143,17 @@ textarea { width: 100%; resize: vertical; }
 .ctool.wide.danger { color: var(--bad); }
 .designer-bar .suspended { color: var(--warn); font-size: 12px; }
 label.review { display: block; margin: 0 0 8px; }
+/* The confirmation of a real run: a modal dialog, so what is about to be written is what the person is reading. */
+.run-dialog { width: min(640px, calc(100vw - 32px)); max-height: calc(100vh - 64px); padding: 16px 20px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--ink); box-shadow: 0 8px 32px rgba(0, 0, 0, .3); }
+.run-dialog::backdrop { background: rgba(0, 0, 0, .45); }
+.run-dialog h3 { margin: 0 0 4px; font-size: 16px; }
+.run-dialog p { margin: 6px 0; }
+.run-targets { margin: 10px 0; }
+.run-dialog .run-write { margin: 6px 0; }
+.run-dialog .run-write label { display: block; }
+.run-dialog details { margin: 2px 0 0 22px; }
+.run-dialog summary { cursor: pointer; color: var(--muted); font-size: 12.5px; }
+.run-dialog .run-actions { justify-content: flex-end; margin-top: 14px; }
 .ctool.pin.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
 .ctool[aria-disabled="true"] { opacity: .35; cursor: not-allowed; }
 .port {
@@ -147,7 +175,7 @@ label.review { display: block; margin: 0 0 8px; }
   position: absolute; transform: translate(-50%, -50%); z-index: 3; width: 22px; height: 22px; padding: 0;
   border-radius: 50%; border: 1px solid var(--bad); background: var(--panel); color: var(--bad); font-weight: 700; line-height: 1;
 }
-.edge-delete:hover { background: var(--bad); color: #fff; }
+.edge-delete:hover { background: var(--bad); color: var(--on-solid); }
 /* The chain: a Transform step's transformers, in order, between its input and its output. */
 .chain-view { padding: 14px 18px; min-height: 100%; }
 .crumbs { display: flex; gap: 8px; align-items: baseline; margin-bottom: 18px; }
@@ -183,9 +211,15 @@ label.review { display: block; margin: 0 0 8px; }
 .tabs { display: flex; gap: 4px; align-items: center; border-bottom: 1px solid var(--line); margin-bottom: 8px; flex-wrap: wrap; flex: none; }
 .tabs button { border: none; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; padding: 6px 10px; }
 .tabs button.active { border-bottom-color: var(--accent); color: var(--accent); }
-.tabs .count { background: var(--bad); color: #fff; border-radius: 999px; padding: 0 6px; font-size: 11px; margin-left: 4px; }
-.drawer-status { margin-left: auto; font-size: 12.5px; }
+.tabs .count { background: var(--bad); color: var(--on-solid); border-radius: 999px; padding: 0 6px; font-size: 11px; margin-left: 4px; }
+.tabs .count.warn { background: var(--warn); }
+.yaml-edit { display: block; background: var(--code); margin: 6px 0; }
+/* The steps while the YAML tab holds a text not applied: greyed, and inert in the page. */
+.held { opacity: .45; filter: grayscale(1); }
+.held-note { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 5; margin: 0; padding: 6px 10px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 2px 8px rgba(0, 0, 0, .15); }
 .msgs { margin: 4px 0; padding-left: 20px; }
+.msgs li, .agent-log .verdict { white-space: pre-wrap; overflow-wrap: anywhere; }
 .vars td { font-family: inherit; font-size: 12.5px; vertical-align: middle; white-space: nowrap; max-width: none; }
 .vars td.wrap { white-space: normal; }
 .vars input { width: 220px; margin-left: 6px; }
@@ -194,6 +228,7 @@ label.review { display: block; margin: 0 0 8px; }
 .dot.good { background: var(--good); }
 .dot.bad { background: var(--bad); }
 .dot.warn { background: var(--warn); }
+.dot.held { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); }
 
 /* A sample's report */
 .branch { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; margin: 10px 0; }
@@ -212,8 +247,11 @@ td.null { color: var(--muted); font-style: italic; }
 .notes.warn { color: var(--warn); }
 
 @media (max-width: 1100px) {
-  main { grid-template-columns: minmax(0, 1fr); height: auto; }
-  .jobs-pane { border-right: 0; border-bottom: 1px solid var(--line); max-height: 30vh; }
+  header { flex-wrap: wrap; row-gap: 4px; }
+  header b, header #job-name, header #agent-link { white-space: nowrap; }
+  main, main.side-closed { grid-template-columns: minmax(0, 1fr); height: auto; }
+  .activity { flex-direction: row; padding: 4px 8px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .side-pane { border-right: 0; border-bottom: 1px solid var(--line); max-height: 30vh; }
   .designer-body { grid-template-columns: minmax(0, 1fr); flex: none; }
   .designer-body > .canvas { height: 60vh; }
   .split { display: none; }
@@ -225,3 +263,44 @@ td.null { color: var(--muted); font-style: italic; }
 .palette h4.offline, .pal-item.offline { opacity: .55; }
 .versions { margin: 4px 0; padding-left: 18px; font-size: 12.5px; }
 .versions li.warn { color: var(--warn); }
+
+/* The agent's panel */
+main.with-agent { grid-template-columns: 40px var(--pal-w) minmax(0, 1fr) var(--agent-w, 360px); }
+main.with-agent.side-closed { grid-template-columns: 40px minmax(0, 1fr) var(--agent-w, 360px); }
+.agent-pane { position: relative; border-left: 1px solid var(--line); background: var(--panel); padding: 10px; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.agent-head h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0; }
+.agent-head select { flex: 1; min-width: 0; }
+.agent-pane #agent-endpoint { margin: 0; overflow-wrap: anywhere; }
+.agent-log { flex: 1; min-height: 120px; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
+.agent-log .turn { display: flex; flex-direction: column; gap: 6px; }
+.agent-log .msg { padding: 6px 8px; border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.agent-log .msg.user { background: var(--code); border-left: 3px solid var(--accent); }
+/* A turn's question stays at the top while the turn scrolls; the next turn's takes its place, since each is sticky within its own block. */
+.agent-log .turn > .msg.user { position: sticky; top: 0; z-index: 1; max-height: 6em; overflow: auto; box-shadow: 0 -4px 0 var(--panel); }
+.agent-log .verdict-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.agent-log .verdict-row .verdict { flex: 1; min-width: 0; }
+.feedback-icons { display: inline-flex; gap: 2px; }
+.feedback-icons button.icon { background: none; border: 0; padding: 2px 4px; color: var(--muted); opacity: .7; cursor: pointer; line-height: 0; }
+.feedback-icons button.icon:hover:not(:disabled) { opacity: 1; }
+.feedback-icons button.icon.on { color: var(--accent); opacity: 1; }
+.feedback-icons button.icon:disabled { opacity: .3; cursor: not-allowed; }
+.feedback-comment { flex-basis: 100%; display: flex; gap: 4px; }
+.feedback-comment input { flex: 1; min-width: 0; }
+.agent-log .step summary { cursor: pointer; font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.agent-log .verdict { font-size: 12px; }
+.agent-pane pre { max-height: 220px; overflow: auto; background: var(--code); padding: 6px; margin: 4px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.agent-card { border: 1px solid var(--accent); border-radius: 8px; padding: 8px; margin: 4px 0; }
+.agent-card p { margin: 0 0 6px; }
+.agent-card ul { margin: 0 0 6px; padding-left: 18px; }
+.plan-marks .mark { display: inline-block; font-size: 12px; padding: 0 6px; margin: 0 4px 2px 0; border-radius: 8px; border: 1px solid currentColor; }
+.plan-marks .mark-added { color: var(--good); }
+.plan-marks .mark-changed { color: var(--warn); }
+.plan-marks .mark-removed { color: var(--bad); }
+.row.wrap { flex-wrap: wrap; }
+.agent-input .row { margin-top: 4px; }
+.agent-input #agent-send { margin-left: auto; }
+@media (max-width: 1100px) {
+  main.with-agent, main.with-agent.side-closed { grid-template-columns: minmax(0, 1fr); }
+  .agent-pane { border-left: 0; border-top: 1px solid var(--line); }
+  .split-agent { display: none; }
+}

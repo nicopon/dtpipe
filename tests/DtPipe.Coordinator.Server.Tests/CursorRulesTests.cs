@@ -1,4 +1,3 @@
-using System.Text.Json.Nodes;
 using DtPipe.Coordinator.Contracts;
 using DtPipe.Jobs;
 using Xunit;
@@ -33,7 +32,7 @@ public sealed class CursorRulesTests
         Assert.NotNull(CursorValues.Refusal("string", ""));
     }
 
-    private static string? Declared(string json) => BrickRules.DeclaredRefusal("b", json);
+    private static string? Declared(string branch) => BrickRules.DeclaredRefusal("b", JobYaml.ParseBranch(branch));
 
     [Fact]
     public void A_Sink_May_Set_A_Cursor_Column_And_A_Source_May_Not()
@@ -61,13 +60,13 @@ public sealed class CursorRulesTests
     [Fact]
     public void A_Composed_Sink_Keeps_Its_Cursor_Column_And_The_Version_Follows_It()
     {
-        var one = BrickRules.VersionOf(BrickKind.Sink, """{"output":"sqlite:b","cursor":"id"}""");
-        var other = BrickRules.VersionOf(BrickKind.Sink, """{"output":"sqlite:b","cursor":"updated_at"}""");
+        var one = BrickRules.VersionOf(BrickKind.Sink, JobYaml.ParseBranch("""{"output":"sqlite:b","cursor":"id"}"""));
+        var other = BrickRules.VersionOf(BrickKind.Sink, JobYaml.ParseBranch("""{"output":"sqlite:b","cursor":"updated_at"}"""));
         Assert.NotEqual(one, other);
 
         var composed = FragmentJob.Compose(
             [new("snk", FragmentUnitKind.Sink, "snk", "src"), new("src", FragmentUnitKind.Source, "src")],
-            (id, kind) => (YamlMappingNode)JobYaml.FromJson(JsonNode.Parse(id == "snk" ? """{"output":"sqlite:b","cursor":"id"}""" : """{"input":"sqlite:a"}"""))).Yaml;
+            (id, kind) => JobYaml.ParseBranch(id == "snk" ? """{"output":"sqlite:b","cursor":"id"}""" : """{"input":"sqlite:a"}""")).Yaml;
         Assert.Contains("cursor: id", composed);
     }
 }

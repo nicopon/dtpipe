@@ -8,11 +8,13 @@ using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using DtPipe.Engine;
 using DtPipe.Services;
+using DtPipe.Tests.Helpers;
 using Moq;
 using Xunit;
 
 namespace DtPipe.Tests.Unit.Configuration;
 
+[Collection(SessionStateCollection.Name)]
 public sealed class SchemaPersistenceTests : IDisposable
 {
     private readonly string _schemaName = "test_schema_" + Guid.NewGuid().ToString("N");

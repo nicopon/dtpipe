@@ -70,6 +70,64 @@ public class ToolErrorTests
         Assert.DoesNotContain("The top level of a job", described);
     }
 
+    /// <summary>
+    /// A caller that writes 'input:' as a list of source objects is told only that a String could not be
+    /// read: the error names the type, never the key, so it resubmits the same shape.
+    /// </summary>
+    [Fact]
+    public void A_List_Where_A_String_Is_Read_Says_What_Input_And_Output_Are()
+    {
+        var described = ToolError.Describe(Yaml(
+            "No node deserializer was able to deserialize the node into type String", line: 3, column: 5));
+
+        Assert.Contains("'input:' and 'output:' are each one string", described);
+        Assert.Contains("provider-options", described);
+    }
+
+    /// <summary>
+    /// A list written as the value of 'from:' fails with the same error as one written as 'input:'; the
+    /// answer is about 'from:', the key read off the failing line.
+    /// </summary>
+    [Fact]
+    public void A_List_Where_From_Is_Read_Says_What_From_Is()
+    {
+        const string source = "merged:\n  from: [customers, sales]\n";
+
+        var described = ToolError.Describe(Yaml(
+            "No node deserializer was able to deserialize the node into type String", line: 2, column: 9), source);
+
+        Assert.Contains("'from:' is one string", described);
+        Assert.Contains("'ref:'", described);
+        Assert.DoesNotContain("'input:' and 'output:'", described);
+    }
+
+    /// <summary>Without the source the key is unknown and the answer stays the one about input and output.</summary>
+    [Fact]
+    public void Without_The_Source_The_String_Hint_Stays_The_Input_And_Output_One()
+    {
+        var described = ToolError.Describe(Yaml(
+            "No node deserializer was able to deserialize the node into type String", line: 2, column: 9));
+
+        Assert.Contains("'input:' and 'output:' are each one string", described);
+    }
+
+    /// <summary>
+    /// A processor's options given as one value ('sql: "SELECT …"') fail with a cast to a CLR dictionary,
+    /// which names neither the key nor what belongs under it.
+    /// </summary>
+    [Fact]
+    public void A_Scalar_Where_A_Components_Options_Are_Read_Names_The_Key_And_The_Shape()
+    {
+        const string source = "joined:\n  provider-options:\n    sql: \"SELECT 1\"\n";
+
+        var described = ToolError.Describe(Yaml(
+            "Invalid cast from 'System.String' to 'System.Collections.Generic.Dictionary`2[[System.String],[System.Object]]'.",
+            line: 3, column: 10), source);
+
+        Assert.Contains("'sql:' under 'provider-options:' holds the options of one component as a mapping", described);
+        Assert.Contains("never one value", described);
+    }
+
     /// <summary>The hint belongs to that one failure; every other message stays as it is.</summary>
     [Fact]
     public void Another_Failure_Gets_No_Shape_Hint()
