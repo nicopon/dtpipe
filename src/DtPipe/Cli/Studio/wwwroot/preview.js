@@ -244,7 +244,7 @@ async function runPreviewNow(place) {
     if (place?.card) focusCard(place.card); else showTab("preview");
     status(answer.report.success ? (place?.card ? `ran up to ${place.card}` : "preview done") : "preview failed", answer.report.success ? "good" : "bad");
   } catch (e) {
-    if (e.name === "AbortError") status("preview cancelled: the engine stops at its next batch of rows, and a query that has not answered yet runs on until it does", "warn");
+    if (e.name === "AbortError") status("preview stopped: the engine stops at its next batch of rows, and a query that has not answered yet runs on until it does", "warn");
     else {
       if (e.status === 422 && state.vars.variables.some((v) => !v.ready)) showTab("variables");
       status(e.message, "bad");
@@ -345,7 +345,7 @@ export async function forgetPins() {
 export function previewView(alias) {
   const place = alias ? cardWatch(alias) : null;
   const parts = [];
-  if (dbg.running) parts.push(el("p", { class: "warn" }, "Running… ", el("button", { class: "ghost small", onclick: cancelPreview }, "Cancel")));
+  if (dbg.running) parts.push(el("p", { class: "warn" }, "Running… ", el("button", { class: "ghost small", onclick: cancelPreview }, "Stop")));
   const waiting = alias && !place ? queueOf(alias) : null;
   if (waiting) {
     const held = dbg.held.get(waiting.branch);

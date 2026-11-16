@@ -12,10 +12,10 @@ import { state } from "./state.js";
 const POLL_MS = 800;
 const CHOICE_LABEL = {
   save: "Save", run: "Run", refuse: "Refuse",
-  send: "Send anyway", cancel: "Cancel the turn", withhold: "Keep it here",
+  send: "Send anyway", cancel: "Stop the turn", withhold: "Keep it here",
 };
 
-const STATUS_LABEL = { completed: "completed", awaitinginput: "awaiting your answer", incomplete: "incomplete" };
+const STATUS_LABEL = { completed: "completed", awaitinginput: "awaiting your answer", incomplete: "incomplete", cancelled: "stopped", interrupted: "stopped" };
 
 // How far the agent's plan has got, said as a sentence: the server's state is an identifier, never a label.
 const PLAN_LABEL = {

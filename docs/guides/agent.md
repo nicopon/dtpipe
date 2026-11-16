@@ -45,7 +45,7 @@ the Run tab. If you change the steps while it works, your changes stay: what it 
 box: **Send** tries it again.
 
 When the job holds a credential written as a value, such as `Password=secret` in a connection
-string, a card names where it is, never the value, and asks what to do: send anyway, or cancel the
+string, a card names where it is, never the value, and asks what to do: send anyway, or stop the
 turn. Reading a job of the folder asks the same, and you may keep it here. Write credentials as
 `${{NAME}}` or `keyring://alias` and the question never comes up: see [Secrets](secrets.md).
 

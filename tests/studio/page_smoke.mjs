@@ -5,7 +5,7 @@
 // session, Forget pins, typing in the inspector; the agent's panel against a scripted endpoint that speaks Ollama's API (a
 // save refused then accepted, a run, a question, a plan put on the cards, a job holding a credential, Stop, a reload mid-turn, an
 // edit made while a save waits, the person's save over the file the agent saved, a turn that fails); Undo of a deleted card and of
-// a plan, and the cards a plan names; a preview cancelled
+// a plan, and the cards a plan names; a preview stopped
 // while its source is still answering; Tab to a card, a wire made and undone from the keyboard, every control named,
 // the text at 4.5:1 in both themes.
 //
@@ -424,15 +424,15 @@ const scenarios = {
     const calls = fakeLlm.llm.seen.length;
     check("the model is not called before the answer", fakeLlm.llm.seen.length === calls);
     check("the card offers no way to leave the job out", !(await p.ev(`[...document.querySelectorAll("#agent-now button")].some((b) => /without/i.test(b.textContent))`)));
-    await p.clickText("#agent-now button", "Cancel the turn");
-    check("a cancelled turn calls no model", await idle() && fakeLlm.llm.seen.length === calls);
+    await p.clickText("#agent-now button", "Stop the turn");
+    check("a stopped turn calls no model", await idle() && fakeLlm.llm.seen.length === calls);
     check("the credential never reached the model", fakeLlm.llm.seen.every((m) => !/Password=abc/.test(m)));
     await send("one more secret");
     check("the job holds every turn that carries it", await p.until(`/main\.input/.test(document.querySelector("#agent-now .agent-card")?.textContent ?? "")`));
     check("the last message stays in sight above the card", await p.ev(`(() => { const log = document.querySelector("#agent-log"); const m = [...log.querySelectorAll(".msg.user")].pop();
       return m.textContent === "one more secret" && m.getBoundingClientRect().bottom <= log.getBoundingClientRect().bottom + 1; })()`));
-    await p.clickText("#agent-now button", "Cancel the turn");
-    check("a second cancelled turn calls no model", await idle() && fakeLlm.llm.seen.length === calls);
+    await p.clickText("#agent-now button", "Stop the turn");
+    check("a second stopped turn calls no model", await idle() && fakeLlm.llm.seen.length === calls);
     check("the panel has no way to leave the job out", await p.ev(`!document.querySelector("#agent-attach")`));
     await p.openJob("chain.yaml");
 
@@ -870,16 +870,16 @@ const scenarios = {
     check("the pane has the size it was left at", (await p.ev(`document.querySelector("#designer").style.getPropertyValue("--pal-w")`)) === "236px", await p.ev(`document.querySelector("#designer").style.getPropertyValue("--pal-w")`));
   },
 
-  // A preview over a source that answers one row at a time slowly: Cancel abandons the request, the page is free again at
+  // A preview over a source that answers one row at a time slowly: Stop abandons the request, the page is free again at
   // once and says so, and the engine stops at its next batch instead of reading the thousand rows.
   async "cancel-preview"({ page: p }) {
     check("the job opens", await p.openJob("cancel.yaml"));
-    check("Cancel is hidden while nothing runs", !(await p.visible("#d-preview-cancel")));
+    check("Stop is hidden while nothing runs", !(await p.visible("#d-preview-cancel")));
     await p.click("#d-preview");
-    check("Cancel shows while the preview runs", await p.until(`!document.querySelector("#d-preview-cancel").hidden`));
+    check("Stop shows while the preview runs", await p.until(`!document.querySelector("#d-preview-cancel").hidden`));
     await p.click("#d-preview-cancel");
-    check("the preview says it was cancelled", await p.waitStatus(/preview cancelled/, 15000), await p.status());
-    check("Preview is available again and Cancel is gone", await p.until(`!document.querySelector("#d-preview").disabled && document.querySelector("#d-preview-cancel").hidden`));
+    check("the preview says it was stopped", await p.waitStatus(/preview stopped/, 15000), await p.status());
+    check("Preview is available again and Stop is gone", await p.until(`!document.querySelector("#d-preview").disabled && document.querySelector("#d-preview-cancel").hidden`));
   },
 
   // Typing in the inspector across the page's own timers: the field keeps its focus, its text and its caret.

@@ -171,7 +171,7 @@ public class AgentTurnOutcomeTests
 
         // The work done before the interrupt is kept — the tool call from the first iteration.
         Assert.Contains(executor.Trajectory.Steps, s => s.ToolName == "inspect");
-        Assert.Contains(executor.Trajectory.Steps, s => s.Reasoning.Contains("Interrupted"));
+        Assert.Contains(executor.Trajectory.Steps, s => s.Reasoning.Contains("Stopped"));
     }
 
     [Fact]

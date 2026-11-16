@@ -170,7 +170,7 @@ internal sealed class StudioAgent : IAsyncDisposable
                 var send = await MaySendAsync(job.Path, job.Text, ["send", "cancel"], stop);
                 if (send != "send")
                 {
-                    Log(new { kind = "verdict", status = "cancelled", reason = "You cancelled the turn before the open job was sent." });
+                    Log(new { kind = "verdict", status = "cancelled", reason = "You stopped the turn before the open job was sent." });
                     return;
                 }
                 context = OpenJobBlock(job);

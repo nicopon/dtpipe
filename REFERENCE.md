@@ -1274,7 +1274,7 @@ lands on the open job's steps, unsaved, or opens as a new job when none is open.
 - **The open job always goes to the model** with the message, as the studio composes it, and what
   the agent gives lands on its steps, unsaved; a change of yours since it last read them is kept. A
   job that holds a credential value (`Password=…`) is held behind a card that names where, never the
-  value, and asks whether to send it or cancel the turn; `read-job` asks the same. The check is
+  value, and asks whether to send it or stop the turn; `read-job` asks the same. The check is
   best-effort: a credential under an unknown key passes, and a column named like one is flagged.
   `${{NAME}}` and `keyring://` references pass.
 - **What the tools read goes to the model's address**, schemas and rows included. The panel shows
