@@ -191,6 +191,8 @@ export function fileReplaced(path) {
 /** A plan on the open job's cards, unless the person changed them since the agent last saw them: the notice keeps it then. @param {string} yaml */
 async function follow(yaml) {
   await mark(yaml);
+  // The plan's state is the server's: one its check refused, or whose try failed, waits for a click and lands on the steps by none.
+  if (refused(yaml) || failed(yaml)) return;
   if (moved()) { hold({ yaml }); return; }
   if (!(await hooks.followPlan(yaml))) return;
   appliedYaml = yaml;
@@ -405,7 +407,13 @@ function questionView(question) {
  * Whether the check refused this text of the plan: then nothing puts it on the steps or opens it, since what it would give is no
  * job. The verdict is the server's (the plan's state), never judged again here. @param {string} [yaml]
  */
-const refused = (yaml) => !!yaml && state.agent.status?.plan?.yaml === yaml && state.agent.status.plan.state?.toLowerCase() === "invalid";
+const refused = (yaml) => planIs(yaml, "invalid");
+
+/** Whether the agent's try of this text of the plan (a sample, a save) failed: it does not arrive on the steps by itself, a click puts it there. @param {string} [yaml] */
+const failed = (yaml) => planIs(yaml, "failed");
+
+/** @param {string | undefined} yaml @param {string} wanted */
+const planIs = (yaml, wanted) => !!yaml && state.agent.status?.plan?.yaml === yaml && state.agent.status.plan.state?.toLowerCase() === wanted;
 
 /** The plan, its text folded and its buttons in sight; Apply is the notice's while the person's cards hold it back. */
 function planView(plan) {
@@ -420,7 +428,8 @@ function planView(plan) {
       state.job && !state.agent.behind && (plan.yaml !== appliedYaml || moved()) ? el("button", { class: "small", title: "Replace the open job's steps with the plan; nothing is saved", disabled: blocked, "aria-describedby": blocked ? "agent-plan-refused" : null, onclick: () => apply({ yaml: plan.yaml }) }, "Apply to the open job") : null,
       el("button", { class: "small", title: "Open the plan as a new job, not saved yet", disabled: blocked, "aria-describedby": blocked ? "agent-plan-refused" : null, onclick: async () => { if (await hooks.openPlan(plan.yaml)) settled(); } }, "Open as a new job")),
     blocked ? el("p", { id: "agent-plan-refused", class: "hint" }, "The check refused this plan, so it neither replaces the steps nor opens as a job",
-      plan.message ? `: ${plan.message}${/[.!?]$/.test(plan.message) ? "" : "."}` : ".", " Ask the agent to correct it.") : null);
+      plan.message ? `: ${plan.message}${/[.!?]$/.test(plan.message) ? "" : "."}` : ".", " Ask the agent to correct it.")
+      : failed(plan.yaml) && plan.yaml !== appliedYaml ? el("p", { class: "hint" }, "The agent's try of this plan failed, so it is not on the steps: it waits here until you apply it or open it.") : null);
 }
 
 async function answer(card, choice) {

@@ -75,7 +75,12 @@ export async function openJob(yaml, layout, unsaved = false, kept = null, replac
   const answer = await api("/api/design/decompose", { yaml, layout: layout || null });
   // Another job was asked for meanwhile: its cards are the ones to show.
   if (opening.stale(ticket)) return false;
-  const show = () => putCards(normalize(answer.model), answer, kept);
+  const show = () => {
+    const model = normalize(answer.model);
+    // A text with no header comment says nothing of the job's title, description or directives: the cards it replaces keep theirs.
+    if (replacing && cards.model && !yaml.startsWith("#")) Object.assign(model, { title: cards.model.title, description: cards.model.description, directives: cards.model.directives });
+    putCards(model, answer, kept);
+  };
   if (replacing && cards.model) remember(replacing, show);
   else { cards.history = []; show(); }
   await compose();

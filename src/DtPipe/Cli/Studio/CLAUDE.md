@@ -286,8 +286,11 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   `GET /api/agent?rev=N` answers its text only above `N`, and the page puts it on the open job's cards unsaved
   (`followPlan`), or opens it as a new job; a person's edit since the agent last read the cards is never overwritten, by a
   plan or by a save read back (`moved` in `agent.js`, the one comparison): what the agent gave then waits behind the notice's
-  Apply, which asks before it replaces an unsaved edit. A turn that ends without a result gives the person's text back to an
-  empty prompt. A text that `JobSecrets.Literals` flags reaches the model, open job or `read-job`, only
+  Apply, which asks before it replaces an unsaved edit. A plan whose state the server gives as refused or failed never lands on
+  the cards by itself (`follow` reads the server's `plan.state` and never revalidates the text): its buttons stay, the refused
+  one disabled. `[unchecked: that guard, which no page_smoke scenario plays: its refused plan does not take apart into cards]`
+  A plan with no header comment keeps the title of the cards it replaces (`openJob`). A turn that ends without a result gives
+  the person's text back to an empty prompt. A text that `JobSecrets.Literals` flags reaches the model, open job or `read-job`, only
   after a card that names `branch.path`, never the value; the answer holds for that text, by hash, for the session.
   **The panel shows what the trace holds, never more**: every text of the conversation the page reads (the person's message, the
   model's words and question, a call's arguments and results, the plan's message) goes through `AgentTrace.Safe`, the trace's own
