@@ -58,7 +58,7 @@ const refusalView = (check) => [
   el("p", { class: "warn" }, "The runner's dry run refuses this job, as a publication would:"),
   el("pre", {}, check.report || ""),
   brickBranches().length ? null
-    : el("p", { class: "hint" }, "None of these cards is a coordinator's brick, and a published job reads and writes bricks."),
+    : el("p", { class: "hint" }, "None of these steps is a coordinator's brick, and a published job reads and writes bricks."),
 ];
 
 /**
@@ -80,7 +80,7 @@ export function publicationProblems() {
       check?.pending ? "Checking…" : current ? "Check again" : "Check publication"),
     el("span", { class: "hint" }, "The runner's dry run over one row of each brick: it starts a process, so it runs when asked and before Publish, never as you edit."));
   if (check?.pending) return [title, ask, el("p", { class: "hint" }, "The runner's dry run is running…")];
-  if (!current) return [title, ask, check ? el("p", { class: "hint" }, "The cards changed since the last check.") : null];
+  if (!current) return [title, ask, check ? el("p", { class: "hint" }, "The steps changed since the last check.") : null];
   if (current.error) return [title, ask, el("p", { class: "warn" }, `The check did not run: ${current.error}`)];
   if (current.ok) {
     return [title, ask, el("p", { class: "good" }, "Nothing: the runner's dry run takes this job."),
@@ -105,7 +105,7 @@ export async function publish(replace) {
   // What the studio can already tell is said before a question: the coordinator's own check of the job runs at publication.
   if (state.cards.result?.errors?.length) {
     showTab("problems");
-    status("The cards do not compose into a job: see Problems before publishing.", "bad");
+    status("The steps do not compose into a job: see Problems before publishing.", "bad");
     return;
   }
   if (replace === undefined) {

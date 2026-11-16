@@ -73,7 +73,7 @@ export async function mountAgent(pane, host) {
     el("div", { class: "agent-input" },
       el("textarea", { id: "agent-prompt", "aria-label": "Message to the agent", rows: "3", placeholder: "Ask the agent… (Ctrl+Enter sends)", onkeydown: onPromptKey }),
       el("div", { class: "row" },
-        el("span", { class: "hint", title: "The open job goes with every message, and what the agent gives lands on its cards, unsaved" }, "works on the open job"),
+        el("span", { class: "hint", title: "The open job goes with every message, and what the agent gives lands on its steps, unsaved" }, "works on the open job"),
         el("button", { id: "agent-send", class: "primary", onclick: () => send() }, "Send"),
         el("button", { id: "agent-stop", class: "danger", hidden: true, onclick: stop }, "Stop"))));
   // Its width is the pane's own: the pointer's distance to the pane's right edge.
@@ -195,7 +195,7 @@ async function follow(yaml) {
   if (!(await hooks.followPlan(yaml))) return;
   appliedYaml = yaml;
   settled();
-  status("the agent's plan is on the cards: save it to keep it", "good");
+  status("the agent's plan is on the steps: save it to keep it", "good");
 }
 
 /**
@@ -340,10 +340,10 @@ function renderBehind(given) {
   notice.hidden = !given;
   fill(notice, !given ? null : [
     given.saved
-      ? `You changed the job while the agent saved ${given.saved}: your cards are kept, and the saved file replaces them only if you apply it. `
-      : "You changed the job while the agent worked: your cards are kept, and its plan replaces them only if you apply it. ",
+      ? `You changed the job while the agent saved ${given.saved}: your steps are kept, and the saved file replaces them only if you apply it. `
+      : "You changed the job while the agent worked: your steps are kept, and its plan replaces them only if you apply it. ",
     given.yaml ? marksView(given.yaml, false) : null,
-    el("button", { class: "small", title: "Replace the open job's cards with what the agent gave", onclick: () => apply(given) }, "Apply")]);
+    el("button", { class: "small", title: "Replace the open job's steps with what the agent gave", onclick: () => apply(given) }, "Apply")]);
 }
 
 /**
@@ -354,14 +354,14 @@ function renderBehind(given) {
 function marksView(yaml, applied) {
   const marks = state.agent.marks;
   if (!marks || marks.yaml !== yaml) return null;
-  if (marks.unknown) return el("span", { class: "plan-marks hint" }, "The cards it changes cannot be named: the open job or the plan does not take apart into cards. ");
+  if (marks.unknown) return el("span", { class: "plan-marks hint" }, "The steps it changes cannot be named: the open job or the plan does not take apart into steps. ");
   const items = [
     ...marks.added.map((a) => el("span", { class: "mark mark-added" }, `${a} added`)),
     ...marks.changed.map((a) => el("span", { class: "mark mark-changed" }, `${a} changed`)),
     ...marks.removed.map((a) => el("span", { class: "mark mark-removed" }, `${a} removed`)),
   ];
   return el("span", { class: "plan-marks" },
-    items.length ? [applied ? "Cards it changed: " : "Cards it would change: ", items, " "] : "It changes no card. ");
+    items.length ? [applied ? "Steps it changed: " : "Steps it would change: ", items, " "] : "It changes no step. ");
 }
 
 const tokens = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
@@ -409,7 +409,7 @@ function planView(plan) {
       el("pre", {}, plan.yaml)),
     marks ? el("p", {}, marks) : null,
     el("div", { class: "row" },
-      state.job && !state.agent.behind && (plan.yaml !== appliedYaml || moved()) ? el("button", { class: "small", title: "Replace the open job's cards with the plan; nothing is saved", onclick: () => apply({ yaml: plan.yaml }) }, "Apply to the open job") : null,
+      state.job && !state.agent.behind && (plan.yaml !== appliedYaml || moved()) ? el("button", { class: "small", title: "Replace the open job's steps with the plan; nothing is saved", onclick: () => apply({ yaml: plan.yaml }) }, "Apply to the open job") : null,
       el("button", { class: "small", title: "Open the plan as a new job, not saved yet", onclick: async () => { if (await hooks.openPlan(plan.yaml)) settled(); } }, "Open as a new job")));
 }
 

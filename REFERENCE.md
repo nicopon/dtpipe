@@ -1213,7 +1213,7 @@ Restart your terminal (or `source ~/.zshrc`) to activate. Completion suggests pr
 ## Studio (`dtpipe studio`)
 
 `dtpipe studio [folder]` opens a local page over the YAML jobs of a folder (default: the current
-directory). Each job shows as cards, one per source, step and sink, which you edit as cards or as
+directory). Each job shows as steps, from its sources to its outputs, which you edit as steps or as
 YAML and preview on the real engine without writing a target.
 
 ```bash
@@ -1237,19 +1237,19 @@ dtpipe studio ./jobs --llm-provider ollama --llm-model qwen2.5-coder:7b  # with 
 
 | Action | What it does |
 |:---|:---|
-| **▶ Preview** | Runs the job as `--dry-run` does, over the rows you ask for (up to 100 000 per source; a card shows up to 1 000). Each card then shows its rows, columns and types, and a badge with its state |
-| **Save** | Writes the job composed from the cards. A job written by hand loses its inner comments and key order, and the page says so. Refuses a file changed on disk since it was opened, never creates a folder, and never overwrites another file |
+| **▶ Preview** | Runs the job as `--dry-run` does, over the rows you ask for (up to 100 000 per source; a step shows up to 1 000). Each step then shows its rows, columns and types, and a badge with its state |
+| **Save** | Writes the job composed from the steps. A job written by hand loses its inner comments and key order, and the page says so. Refuses a file changed on disk since it was opened, never creates a folder, and never overwrites another file |
 | **Variables** | Lists every `${{…}}` the job reads. For a preview, give each a keyring alias or a value; a preview with an unresolved variable is refused |
 | **Import** | Turns a dtpipe command line into a new job, as `--export-job` would. `--bind-input` and `--bind-output` are refused |
 | **Run for real…** | Opens a dialog that lists what the saved job writes; untick an output to leave it out (the job runs without it and what only it needs). **Write N outputs** runs the job for real, as `dtpipe --job`, and writes only the outputs ticked. **Stop** ends it with code 130 |
-| **Review before writing** | An option of **Run for real…**: the run stops before every writing branch it was asked to write and holds the rows; **Write** on an output card opens the same dialog for the held outputs, ticks that one and writes what you confirm, and the others stay held; **Abandon** forgets every row still held (what was already written stays written). A run stopped or failed before every output held its rows can only be abandoned |
-| **▶** on a card | Runs the job up to that card |
-| **📌** on a card | Keeps the card's rows as a checkpoint, so later runs start from there. **Forget pins** clears them all |
+| **Review before writing** | An option of **Run for real…**: the run stops before every writing branch it was asked to write and holds the rows; **Write** on an output step opens the same dialog for the held outputs, ticks that one and writes what you confirm, and the others stay held; **Abandon** forgets every row still held (what was already written stays written). A run stopped or failed before every output held its rows can only be abandoned |
+| **▶** on a step | Runs the job up to that step |
+| **📌** on a step | Keeps the step's rows as a checkpoint, so later runs start from there. **Forget pins** clears them all |
 
-Editing a card clears the preview and the checkpoints of every card that depends on it. A preview
+Editing a step clears the preview and the checkpoints of every step that depends on it. A preview
 through pins is not exactly the job's run: every cut passes through Arrow and batches differ.
 
-The studio keeps its own files under `.dtpipe/studio/` in the folder: the cards' layout
+The studio keeps its own files under `.dtpipe/studio/` in the folder: the steps' layout
 (`<job>-layout.json`), the page's state, the job open included (`view.json`), the launch values
 (`<job>-launch.json`, aliases and typed values, never a keyring value), and the pins
 (`<job>-debug.json`). Checkpoints live in the session `.dtpipe/sessions/studio-debug/`.
@@ -1258,7 +1258,7 @@ The studio keeps its own files under `.dtpipe/studio/` in the folder: the cards'
 
 With `--llm-provider`, the panel on the right talks to a model that uses dtpipe's tools: it inspects
 sources, validates and previews jobs (`dry-run`), reads the jobs of the folder, and the job it gives
-lands on the open job's cards, unsaved, or opens as a new job when none is open. Guide:
+lands on the open job's steps, unsaved, or opens as a new job when none is open. Guide:
 [The agent](./docs/guides/agent.md).
 
 - **A save waits for you.** The agent's `save-job` shows a card (the text the studio composed) and
@@ -1272,7 +1272,7 @@ lands on the open job's cards, unsaved, or opens as a new job when none is open.
   its turn, its step and the prompt the model last read, against the window on Ollama. Its left
   edge resizes it, as the other panes' do.
 - **The open job always goes to the model** with the message, as the studio composes it, and what
-  the agent gives lands on its cards, unsaved; a change of yours since it last read them is kept. A
+  the agent gives lands on its steps, unsaved; a change of yours since it last read them is kept. A
   job that holds a credential value (`Password=…`) is held behind a card that names where, never the
   value, and asks whether to send it or cancel the turn; `read-job` asks the same. The check is
   best-effort: a credential under an unknown key passes, and a column named like one is flagged.

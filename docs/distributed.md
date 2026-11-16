@@ -21,7 +21,7 @@ across them and injected faults: [the lab](../samples/distributed-lab/README.md)
 
 ## The studio
 
-`dtpipe studio ./jobs` opens a local page over the YAML jobs of a folder. Each job shows as cards
+`dtpipe studio ./jobs` opens a local page over the YAML jobs of a folder. Each job shows as steps
 that you edit and preview on the real engine, without writing to the target. It needs no
 coordinator; with `--coordinator`, it also offers the nodes' bricks and publishes jobs to the
 coordinator's library. With `--llm-provider`, a panel lets a model design the job with you: see

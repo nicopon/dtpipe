@@ -194,7 +194,7 @@ async function save() {
       // person agrees, against the file as it is now. Any other conflict is said as the server words it.
       if (e.status !== 409 || !job.hash || state.agent.behind?.saved !== job.path) throw e;
       const disk = await api(`/api/job?path=${encodeURIComponent(job.path)}`);
-      if (!confirm(`The agent saved ${job.path} after you opened it. Saving replaces the agent's text with your cards: what the agent wrote is lost (its notice's Apply shows it on the cards instead). Replace it?`)) throw e;
+      if (!confirm(`The agent saved ${job.path} after you opened it. Saving replaces the agent's text with your steps: what the agent wrote is lost (its notice's Apply shows it on the steps instead). Replace it?`)) throw e;
       answer = await write(disk.hash);
       fileReplaced(job.path);
     }
@@ -244,8 +244,8 @@ function writeHeld(alias) {
   const branch = heldBranch(alias);
   return branch ? prepareRun(true, heldTargets(), [branch]) : undefined;
 }
-const SUSPENDED = "A real run is suspended before its outputs are written: write it or abandon it from the output cards.";
-const PREVIEW_TITLE = "Run the whole job over the first source rows, with the writers neutralised: every card shows the rows it delivers";
+const SUSPENDED = "A real run is suspended before its outputs are written: write it or abandon it from the output steps.";
+const PREVIEW_TITLE = "Run the whole job over the first source rows, with the writers neutralised: every step shows the rows it delivers";
 const RUN_TITLE = "Run the saved job here and write its outputs, after you confirm what it writes";
 
 /** A publication changes the coordinator's library: the list beside the jobs is read again once the job is published. */
@@ -259,10 +259,10 @@ function barButtons() {
     el("button", { id: "d-save", title: "Write the job and its layout (Ctrl+S)", onclick: () => save() }, "Save"),
     el("button", { id: "d-preview", class: "primary", title: PREVIEW_TITLE, onclick: () => runPreview(null) }, "▶ Preview"),
     el("button", { id: "d-preview-cancel", class: "ghost danger", hidden: true, title: "Stop the preview: the engine stops at its next batch of rows", onclick: cancelPreview }, "Cancel"),
-    el("label", { id: "d-watch-rows-label", class: "rows", title: "Source rows each source reads, up to the preview's cap: a card says when a source stopped there" },
+    el("label", { id: "d-watch-rows-label", class: "rows", title: "Source rows each source reads, up to the preview's cap: a step says when a source stopped there" },
       "rows ", el("input", { id: "d-watch-rows", type: "number", min: "1", max: String(MAX_DEBUG_ROWS), value: String(state.preview.rows), onchange: setDebugRows })),
-    el("button", { id: "d-forget-pins", class: "ghost small", hidden: true, title: "Unpin every card and forget the checkpoints they kept", onclick: forgetPins }, "Forget pins"),
-    el("span", { id: "d-suspended", class: "suspended", hidden: true, title: SUSPENDED }, "⏸ run suspended: write or abandon it on the output cards"),
+    el("button", { id: "d-forget-pins", class: "ghost small", hidden: true, title: "Unpin every step and forget the checkpoints they kept", onclick: forgetPins }, "Forget pins"),
+    el("span", { id: "d-suspended", class: "suspended", hidden: true, title: SUSPENDED }, "⏸ run suspended: write or abandon it on the output steps"),
     el("button", { id: "d-run", class: "danger", title: RUN_TITLE, onclick: () => prepareRun() }, "Run for real…"),
     state.coordinator ? el("button", { id: "d-publish", title: "Send the saved job to the coordinator's library", onclick: () => publishAndRead() }, "Publish") : null,
   ];
@@ -331,7 +331,7 @@ async function start() {
 async function applyPlan(yaml) {
   if (!state.job || !leaveCurrent()) return false;
   if (!(await openJob(yaml, state.cards.model?.layout, true, null, "the agent's plan"))) return false;
-  status("the agent's plan is on the cards: save it to keep it", "good");
+  status("the agent's plan is on the steps: save it to keep it", "good");
   return true;
 }
 

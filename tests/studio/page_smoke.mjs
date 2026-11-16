@@ -409,7 +409,7 @@ const scenarios = {
     check("the plan shows once the turn ends", await p.until(`!!document.querySelector("#agent-now .agent-plan")`, 30000));
     await p.ev(`document.querySelector("#agent-now .agent-plan").open = true`);
     await p.shot("5-plan");
-    check("the plan is on the cards", await p.waitStatus(/plan is on the cards/, 15000), await p.status());
+    check("the plan is on the steps", await p.waitStatus(/plan is on the steps/, 15000), await p.status());
     check("the cards are the plan's", await p.until(`document.querySelectorAll(".dcard").length === 2`), JSON.stringify(await p.badges()));
     check("the job is still the one open", (await p.ev(`document.querySelector("#job-name").textContent`)).startsWith("chain.yaml"));
 
@@ -512,9 +512,10 @@ const scenarios = {
     check("a job opens with nothing to undo", (await p.disabled("#d-undo")) === true);
     await p.pick("b");
     check("the card holds a mapping", await p.until(`!!document.querySelector(${JSON.stringify(KEY_OF_B)})?.value`));
+    check("the page says step, never card", await p.ev(`(() => { const attrs = [...document.querySelectorAll("[title], [aria-label]")].map((e) => e.title + " " + (e.getAttribute("aria-label") ?? "")); return !/\\bcards?\\b/i.test([document.body.innerText, ...attrs].join("\\n")); })()`));
     const key = await keyOfB();
-    await p.clickText("#d-inspector button", "Delete card");
-    check("Delete card removes the card", await p.until(`document.querySelectorAll(".dcard").length === 2 && !${hasB}`));
+    await p.clickText("#d-inspector button", "Delete step");
+    check("Delete step removes the step", await p.until(`document.querySelectorAll(".dcard").length === 2 && !${hasB}`));
     await p.click("#d-undo");
     check("Undo brings the deleted card back", await p.until(`document.querySelectorAll(".dcard").length === 3 && ${hasB}`));
     await p.pick("b");
@@ -524,7 +525,7 @@ const scenarios = {
     await send("make a plan");
     check("the plan names the cards it changes", await p.until(`/b removed/.test(document.querySelector("#agent-now .plan-marks")?.textContent ?? "")`, 30000),
       await p.ev(`document.querySelector("#agent-now")?.textContent ?? ""`));
-    check("the plan is on the cards", await p.until(`document.querySelectorAll(".dcard").length === 2 && !${hasB}`));
+    check("the plan is on the steps", await p.until(`document.querySelectorAll(".dcard").length === 2 && !${hasB}`));
     await p.click("#d-undo");
     check("Undo brings back the cards the plan replaced", await p.until(`document.querySelectorAll(".dcard").length === 3 && ${hasB}`));
 

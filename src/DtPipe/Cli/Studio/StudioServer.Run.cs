@@ -93,7 +93,7 @@ public sealed partial class StudioServer
         var staged = asked.Debug == true || asked.Review == true;
         // A suspended run has its rows; any run but its continuation would write the job again and leave them to be written twice.
         if (!staged && LoadDebug(DebugKey(path, null)).Real)
-            throw new StudioRefusal(409, "A real run is suspended before its outputs are written: write it or abandon it from the output cards first.");
+            throw new StudioRefusal(409, "A real run is suspended before its outputs are written: write it or abandon it from the output steps first.");
 
         var writes = new List<RunWrite>();
         foreach (var (alias, branch) in JobYaml.Branches(JobYaml.Parse(sampling.Yaml)))

@@ -221,7 +221,7 @@ async function runPreviewNow(place) {
   if (!state.job || dbg.running) return;
   const result = await compose();
   if (result.unanswered) return;
-  if (result.errors?.length) { showTab("problems"); status("The cards do not compose into a job yet: see Problems.", "bad"); return; }
+  if (result.errors?.length) { showTab("problems"); status("The steps do not compose into a job yet: see Problems.", "bad"); return; }
   const forJob = state.job;
   clearTimeout(debugTimer);
   dbg.running = true;
@@ -284,7 +284,7 @@ export function cardBadge(alias) {
   const watcher = watcherOf(alias);
   const place = cardWatch(alias);
   const title = cardState_.name === "held" ? "A real run is suspended before its outputs are written: Write writes the rows held for this output, Abandon forgets the rows still held."
-    : wholeBranch(place) && place.at === "read" ? "This card runs whole with its branch: its rows are those of its read, and it cannot be pinned inside." : cardState_.text;
+    : wholeBranch(place) && place.at === "read" ? "This step runs whole with its branch: its rows are those of its read, and it cannot be pinned inside." : cardState_.text;
   return el("div", { class: `dcard-badge ${cardState_.name}`, "data-card-state": cardState_.name, title },
     `${cardState_.glyph} ${cardState_.text}${watcher ? " · 📌" : ""}`);
 }
@@ -305,10 +305,10 @@ export function cardTools(alias) {
   const tool = (name, glyph, title, extra = {}) => el("button",
     { class: "ctool", "data-card-tool": name, title, "aria-label": title, ...extra }, glyph);
   return el("div", { class: "dcard-tools" },
-    tool("play", "▶", "Run the job up to this card"),
-    tool("pin", "📌", whole ? "This card runs whole with its branch: it cannot be pinned" : watcher
+    tool("play", "▶", "Run the job up to this step"),
+    tool("pin", "📌", whole ? "This step runs whole with its branch: it cannot be pinned" : watcher
       ? "Pinned: it keeps its rows and a checkpoint of them. Click to unpin and forget them"
-      : "Pin: keep this card's rows and a checkpoint of them, so a later run reads them back instead of rereading the source",
+      : "Pin: keep this step's rows and a checkpoint of them, so a later run reads them back instead of rereading the source",
     { class: watcher ? "ctool pin on" : "ctool pin", "aria-pressed": String(!!watcher), "aria-disabled": whole ? "true" : null }));
 }
 
@@ -363,8 +363,8 @@ export function previewView(alias) {
     parts.push(el("p", { class: "hint" }, "Write writes the rows held for this output, after you confirm; Abandon forgets the rows held for every output."));
   } else if (!place) {
     parts.push(el("p", { class: "hint" }, alias
-      ? `${alias} is an output and holds no rows of its own: select the card before it.`
-      : "Select a card to see the rows it delivers. Preview runs the whole job; ▶ on a card runs it up to that card. The outputs are neutralised: nothing is written."));
+      ? `${alias} is an output and holds no rows of its own: select the step before it.`
+      : "Select a step to see the rows it delivers. Preview runs the whole job; ▶ on a step runs it up to that step. The outputs are neutralised: nothing is written."));
   } else {
     if (place.at === "read" && wholeBranch(place)) {
       parts.push(el("p", { class: "hint" }, `${alias} belongs to the branch ${place.branch}, which runs whole (a stream processor or a job the cut refuses): `
@@ -384,7 +384,7 @@ export function previewView(alias) {
     } else if (dbg.real && watcher?.key) {
       parts.push(el("p", { class: "hint" }, `${alias} holds the rows of a real run: loading them…`));
     } else {
-      parts.push(el("p", { class: "hint" }, `No preview of ${alias} yet: Preview in the bar runs the whole job, ▶ on the card runs it up to there.`));
+      parts.push(el("p", { class: "hint" }, `No preview of ${alias} yet: Preview in the bar runs the whole job, ▶ on the step runs it up to there.`));
     }
     if (watcher) {
       parts.push(el("p", { class: "hint" }, watcher.key

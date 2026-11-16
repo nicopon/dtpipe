@@ -24,7 +24,7 @@ saved, the job runs without a model: you run it with **Run for real…**.
 |:---|:---|
 | reads sources, adapter and transformer help, the folder's jobs | no |
 | validates a job and previews it (`dry-run`): nothing is written | no |
-| gives a job to check or preview: it lands on the open job's cards, unsaved, as soon as the call returns | no, nothing saved |
+| gives a job to check or preview: it lands on the open job's steps, unsaved, as soon as the call returns | no, nothing saved |
 | saves a job into the folder | **yes**: the card shows the text the studio will write |
 | tells you to run a saved job with **Run for real…** | no: it writes no output itself |
 
@@ -37,10 +37,10 @@ the coordinator stay your gestures.
 ## The open job
 
 The open job always goes with your message, as the studio composes it, so you can ask "fix the
-filter of this job"; the agent works on what you see, and what it gives lands on the same cards,
+filter of this job"; the agent works on what you see, and what it gives lands on the same steps,
 unsaved, until you save. With no job open, what it gives opens as a new job (`agent-job.yaml`). A
-job it saves under the open job's path is read back into the cards, and a run it starts shows in
-the Run tab. If you change the cards while it works, your changes stay: what it gives waits behind
+job it saves under the open job's path is read back into the steps, and a run it starts shows in
+the Run tab. If you change the steps while it works, your changes stay: what it gives waits behind
 **Apply**, in the notice above the conversation. When a turn fails, your message comes back in the
 box: **Send** tries it again.
 

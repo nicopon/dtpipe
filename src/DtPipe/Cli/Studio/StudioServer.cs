@@ -418,10 +418,10 @@ public sealed partial class StudioServer : IAsyncDisposable
     private async Task SaveAsync(HttpContext context)
     {
         var save = await BodyAsync<SaveRequest>(context);
-        if (save.Model is null) throw new StudioRefusal(400, "A save carries the cards as 'model'.");
+        if (save.Model is null) throw new StudioRefusal(400, "A save carries the steps as 'model'.");
         var composed = Design().Compose(save.Model);
         if (!composed.Valid && !save.AcceptErrors)
-            throw new StudioRefusal(422, "The cards do not compose into a job: " + string.Join(" ", composed.Errors));
+            throw new StudioRefusal(422, "The steps do not compose into a job: " + string.Join(" ", composed.Errors));
         _folder.ResolveForWrite(save.Path ?? "");
         if (save.Model.Layout is not null) _local.CheckLayout(save.Path!);
         var hash = _folder.WriteJob(save.Path!, composed.Yaml, save.Hash);
@@ -485,7 +485,7 @@ public sealed partial class StudioServer : IAsyncDisposable
         {
             if (kept.Tab is not null && !ViewTabs.Contains(kept.Tab)) throw new StudioRefusal(400, $"'{kept.Tab}' is no tab to keep.");
             if (kept.Rows is not null && !(kept.Rows is >= 1 and <= DebugMaxRows)) throw new StudioRefusal(400, "The rows asked are out of range.");
-            if (kept.Card is { Length: > 200 }) throw new StudioRefusal(400, "The card's name is too long.");
+            if (kept.Card is { Length: > 200 }) throw new StudioRefusal(400, "The step's name is too long.");
             jobView = [];
             if (kept.Tab is not null) jobView["tab"] = kept.Tab;
             if (kept.Rows is not null) jobView["rows"] = kept.Rows;

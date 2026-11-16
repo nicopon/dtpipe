@@ -292,7 +292,7 @@ function addStep(kind, component, x, y, brick) {
 }
 
 function removeStep(alias) {
-  remember(`deleting card '${alias}'`, () => {
+  remember(`deleting step '${alias}'`, () => {
     cards.model.steps = cards.model.steps.filter((s) => s.alias !== alias);
     for (const s of cards.model.steps) { s.from = s.from.filter((a) => a !== alias); s.ref = s.ref.filter((a) => a !== alias); }
     delete cards.model.layout[alias];
@@ -481,7 +481,7 @@ function renderShell() {
       el("span", { id: "d-dirty", class: "pill warn", hidden: true }, "unsaved"),
       el("span", { class: "actions" },
         seg("d-undo", "Undo", "Nothing to undo"),
-        seg("d-layout", "Arrange", "Arrange the cards in columns, sources first"),
+        seg("d-layout", "Arrange", "Arrange the steps in columns, sources first"),
         hooks.toolbar?.() || null)),
     el("div", { class: "designer-body" },
       el("aside", { class: "palette card", id: "d-palette" }),
@@ -566,7 +566,7 @@ function renderToolbarState() {
   button.disabled = !ready;
   button.title = !entry ? "Nothing to undo"
     : ready ? `Undo ${entry.label}`
-    : `Undo ${entry.label}: the cards changed since, and undoing would lose that change`;
+    : `Undo ${entry.label}: the steps changed since, and undoing would lose that change`;
 }
 
 function renderPalette() {
@@ -663,7 +663,7 @@ function renderCanvas() {
       "aria-current": cards.selected?.alias === step.alias ? "true" : null,
     },
       el("div", { class: "dcard-head" }, el("span", { class: "kind" }, KIND_LABEL[step.kind] || step.kind), el("span", { class: "alias" }, step.alias)),
-      step.kind === "transform" ? el("button", { class: "dcard-zoom", title: "Zoom into the transformers (or double-click the card)", "aria-label": `Zoom into ${step.alias}` }, "⌕") : null,
+      step.kind === "transform" ? el("button", { class: "dcard-zoom", title: "Zoom into the transformers (or double-click the step)", "aria-label": `Zoom into ${step.alias}` }, "⌕") : null,
       hooks.cardTools?.(step.alias) || null,
       el("div", { class: "dcard-sub" }, subtitle),
       hooks.cardBadge?.(step.alias) || null,
@@ -933,7 +933,7 @@ function inputsList(step) {
   const item = (alias, port) => el("li", {}, el("code", {}, alias), port === "ref" ? [" ", el("span", { class: "chip" }, "ref")] : null, " ",
     el("button", { class: "small ghost", "data-unwire": alias, "data-port": port, "aria-label": `Disconnect ${alias} from ${step.alias}`, title: "Disconnect" }, "×"));
   const items = [...step.from.map((a) => item(a, "in")), ...step.ref.map((a) => item(a, "ref"))];
-  return [el("h3", {}, "Inputs"), items.length ? el("ul", { class: "inputs" }, items) : el("p", { class: "hint" }, "Not wired yet: drag from another card's output port, or connect one below."), connectControls(step)];
+  return [el("h3", {}, "Inputs"), items.length ? el("ul", { class: "inputs" }, items) : el("p", { class: "hint" }, "Not wired yet: drag from another step's output port, or connect one below."), connectControls(step)];
 }
 
 // The keyboard's way to wire a card: the choice of an input and a button, which make the wire the drag makes.
@@ -947,13 +947,13 @@ function connectControls(step) {
     : asInput.map((s) => option("in", s));
   if (!asInput.length) return null;
   return el("div", { class: "row connect" },
-    el("select", { id: "i-connect-from", "aria-label": `Card to connect to ${step.alias}` }, el("option", { value: "" }, "Connect an input…"), groups),
-    el("button", { id: "i-connect", class: "small", "data-connect": true, "aria-label": `Connect the chosen card to ${step.alias}` }, "Connect"));
+    el("select", { id: "i-connect-from", "aria-label": `Step to connect to ${step.alias}` }, el("option", { value: "" }, "Connect an input…"), groups),
+    el("button", { id: "i-connect", class: "small", "data-connect": true, "aria-label": `Connect the chosen step to ${step.alias}` }, "Connect"));
 }
 
 function connectChosen(step) {
   const chosen = $("i-connect-from")?.value ?? "";
-  if (!chosen) { status("Choose the card to connect first.", "warn"); return; }
+  if (!chosen) { status("Choose the step to connect first.", "warn"); return; }
   const colon = chosen.indexOf(":");
   if (connect(chosen.slice(colon + 1), step.alias, chosen.slice(0, colon))) focusAfterDraw("#i-connect-from", `.dcard[data-alias="${CSS.escape(step.alias)}"]`);
 }
@@ -989,8 +989,8 @@ function renderInspector() {
   if (!step) {
     const errors = cards.result?.errors?.length || 0;
     fill(view, el("h2", {}, "Job"),
-      el("p", { class: "hint" }, `${cards.model.steps.length} card(s). `, errors ? el("span", { class: "bad" }, `${errors} error(s): see Problems.`) : "Composes cleanly."),
-      el("p", { class: "hint" }, "Select a card to edit it. A source and an output of their own carry their endpoint as YAML; the server joins a source, its transform and its output back into one branch when nothing else reads between them."),
+      el("p", { class: "hint" }, `${cards.model.steps.length} step(s). `, errors ? el("span", { class: "bad" }, `${errors} error(s): see Problems.`) : "Composes cleanly."),
+      el("p", { class: "hint" }, "Select a step to edit it. A source and an output of their own carry their endpoint as YAML; the server joins a source, its transform and its output back into one branch when nothing else reads between them."),
       cards.model.directives.length ? [el("h3", {}, "Header directives"), el("ul", { class: "inputs" }, cards.model.directives.map((d) => el("li", {}, el("code", {}, d))))] : null);
     return;
   }
@@ -1022,10 +1022,10 @@ function renderInspector() {
   } else {
     body = [inputsList(step), el("h3", {}, "Branch, as written"),
       el("textarea", { id: "i-yaml", "aria-label": `Branch ${step.alias}, as written`, class: "mono", rows: "12", spellcheck: "false", value: step.yaml || "" }),
-      el("p", { class: "hint" }, "A branch no card describes: kept exactly as dtpipe reads it.")];
+      el("p", { class: "hint" }, "A branch no step describes: kept exactly as dtpipe reads it.")];
   }
   fill(view,
-    el("div", { class: "row" }, el("h2", {}, KIND_LABEL[step.kind] || step.kind), el("button", { class: "small ghost danger", "data-remove-step": true }, "Delete card")),
+    el("div", { class: "row" }, el("h2", {}, KIND_LABEL[step.kind] || step.kind), el("button", { class: "small ghost danger", "data-remove-step": true }, "Delete step")),
     el("label", { class: "field" }, "Alias ", el("input", { id: "i-alias", class: "mono", value: step.alias })),
     body);
 }
@@ -1188,7 +1188,7 @@ function renderDrawer() {
   } else if (state.view.drawer === "edit") {
     body = [el("textarea", { id: "d-edit", "aria-label": "The job, as YAML", class: "mono", rows: "16", spellcheck: "false", value: cards.result.yaml }),
       el("div", { class: "row" }, el("button", { "data-apply": true }, "Apply"),
-        el("span", { class: "hint" }, "The job is taken apart into cards again; cards that keep their alias keep their place."))];
+        el("span", { class: "hint" }, "The job is taken apart into steps again; steps that keep their alias keep their place."))];
   } else if (state.view.drawer === "preview") {
     body = hooks.previewView?.(cards.selected?.alias || null) || null;
   } else {
