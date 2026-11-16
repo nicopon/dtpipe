@@ -349,15 +349,16 @@ public sealed class StudioLocalFiles(StudioFolder folder)
     }
 
     /// <summary>
-    /// Replaces the sizes, the job open and a job's preferences, when given. The jobs kept are the last <see cref="MaxViewJobs"/>
-    /// written, so the file does not grow with every job ever opened.
+    /// Replaces the sizes, the side panel, the job open and a job's preferences, when given. The jobs kept are the last
+    /// <see cref="MaxViewJobs"/> written, so the file does not grow with every job ever opened.
     /// </summary>
-    public void UpdateView(JsonObject? sizes, string? job, JsonObject? jobView, string? open = null)
+    public void UpdateView(JsonObject? sizes, string? job, JsonObject? jobView, string? open = null, string? side = null)
     {
         lock (_viewLock)
         {
             var view = ReadViewLocked();
             if (sizes is not null) view["sizes"] = sizes;
+            if (side is not null) view["side"] = side;
             if (open is not null) view["open"] = open;
             if (job is not null && jobView is not null)
             {

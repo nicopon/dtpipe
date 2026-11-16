@@ -463,6 +463,12 @@ const scenarios = {
     const idle = () => p.until(`document.querySelector("#agent-stop").hidden && !document.querySelector("#agent-now .agent-card button")`, 30000);
 
     check("the job opens", await p.openJob("chain.yaml"));
+    // At 1280 px with the agent's panel open, the canvas still shows a whole step: a card is 210 px wide at x = 30.
+    await p.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+    const canvas = () => p.ev(`Math.round(document.querySelector("#d-canvas").getBoundingClientRect().width)`);
+    check("at 1280 px beside the agent the canvas holds a whole step", await p.until(`document.querySelector("#d-canvas").getBoundingClientRect().width >= 260`), String(await canvas()));
+    await p.send("Emulation.clearDeviceMetricsOverride");
+    await p.frame();
     await send("overwrite it");
     check("a save over the open job waits on a card", await p.until(`/asks to save chain\\.yaml/.test(document.querySelector("#agent-now")?.textContent ?? "")`));
     const cards = await p.ev(`document.querySelectorAll(".dcard").length`);
@@ -879,7 +885,7 @@ const scenarios = {
     check("the tab is the one left", (await p.tab()) === "preview", await p.tab());
     check("the card is the one left", await p.ev(`document.querySelector('.dcard[data-alias="b"]')?.classList.contains("selected")`));
     check("the rows are the ones asked", (await p.ev(`document.querySelector("#d-watch-rows")?.value`)) === "7");
-    check("the pane has the size it was left at", (await p.ev(`document.querySelector("#designer").style.getPropertyValue("--pal-w")`)) === "236px", await p.ev(`document.querySelector("#designer").style.getPropertyValue("--pal-w")`));
+    check("the pane has the size it was left at", (await p.ev(`document.querySelector("main").style.getPropertyValue("--pal-w")`)) === "236px", await p.ev(`document.querySelector("main").style.getPropertyValue("--pal-w")`));
   },
 
   // A preview over a source that answers one row at a time slowly: Stop abandons the request, the page is free again at

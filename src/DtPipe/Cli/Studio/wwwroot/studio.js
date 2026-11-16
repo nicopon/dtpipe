@@ -3,9 +3,9 @@
 // wires the screens together and owns the job open and the list of jobs; each screen keeps its own part of the
 // state (state.js) and its own module.
 
-import { $, api, el, fill, forgetToken, status, token } from "./dom.js";
+import { $, api, el, fill, forgetToken, status, svg, token } from "./dom.js";
 import { onCoordinator, refreshCoordinator } from "./coordinator.js";
-import { compose, markSaved, mountDesigner, openBlank, openJob, restoreSizes, setCatalog } from "./designer.js";
+import { bindSplit, compose, markSaved, mountDesigner, openBlank, openJob, restoreSizes, setCatalog } from "./designer.js";
 import { readView, rememberView, sizesRead, viewRestored } from "./prefs.js";
 import { afterFlush, invalidate, onZone } from "./render.js";
 import { sequence, state } from "./state.js";
@@ -55,12 +55,57 @@ function renderJobs() {
   fill($("jobs"), paths.length
     ? paths.map((path) => el("li", {}, el("button", { class: path === state.job?.path ? "job open" : "job", onclick: () => open(path) }, path)))
     : el("li", { class: "muted" }, "No .yaml or .yml file in this folder."));
+  renderSide();
   $("library-pane").hidden = !library.shown;
   if (!library.shown) return;
   fill($("library"), library.error ? el("li", { class: "warn" }, library.error)
     : library.pipelines?.length
       ? library.pipelines.map((p) => el("li", {}, el("button", { class: "job", title: p.description || p.title || p.id, onclick: () => openFromLibrary(p.id) }, p.id)))
       : el("li", { class: "muted" }, "The library holds no pipeline."));
+}
+
+// ---------------------------------------------------------------- the side panel
+
+// One panel beside the icons holds the jobs or the steps to place, or nothing. Until the person picks an icon it follows the
+// page: the jobs while no job is open, the steps once one is. A click on the icon shown closes the panel; the choice is kept.
+const SIDES = /** @type {const} */ (["jobs", "steps"]);
+const SIDE_ICONS = {
+  jobs: ["M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z", "M14 3v6h6"],
+  steps: ["M3 3h7v7H3z", "M14 3h7v7h-7z", "M14 14h7v7h-7z", "M3 14h7v7H3z"],
+};
+let sideDrawn = null;
+
+const sideShown = () => state.view.side ?? (state.job ? "steps" : "jobs");
+
+function renderSide() {
+  const side = sideShown();
+  document.querySelector("main")?.classList.toggle("side-closed", side === "none");
+  $("side-pane").hidden = side === "none";
+  for (const name of SIDES) {
+    $(`side-${name}-view`).hidden = side !== name;
+    $(`side-${name}`).setAttribute("aria-pressed", String(side === name));
+  }
+  // The palette is not drawn while hidden: it is drawn when it shows.
+  if (side === "steps" && sideDrawn !== "steps") invalidate("palette");
+  sideDrawn = side;
+}
+
+/** @param {"jobs" | "steps"} name */
+function chooseSide(name) {
+  state.view.side = sideShown() === name ? "none" : name;
+  invalidate("jobs");
+}
+
+function mountSide() {
+  for (const name of SIDES) {
+    const icon = svg("svg", { viewBox: "0 0 24 24", width: "20", height: "20", fill: "none", stroke: "currentColor", "stroke-width": "1.8", "stroke-linejoin": "round", "aria-hidden": "true" });
+    for (const d of SIDE_ICONS[name]) icon.append(svg("path", { d }));
+    $(`side-${name}`).append(icon);
+    $(`side-${name}`).addEventListener("click", () => chooseSide(name));
+  }
+  const pane = $("side-pane");
+  bindSplit(/** @type {HTMLElement} */ (document.querySelector(".split-pal")), "pal", (e) => e.clientX - pane.getBoundingClientRect().left);
+  renderSide();
 }
 
 async function openFromLibrary(id) {
@@ -313,6 +358,8 @@ async function start() {
   // The panes come back as they were left, before anything is kept of them.
   const kept = await readView();
   if (kept.sizes) restoreSizes(kept.sizes);
+  if (["jobs", "steps", "none"].includes(kept.side)) state.view.side = kept.side;
+  mountSide();
   sizesRead();
   await loadJobs();
   // The job that was open comes back, when the folder still lists it.

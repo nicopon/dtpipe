@@ -21,16 +21,24 @@
     <button id="quit" class="ghost">Quit</button>
   </header>
   <main>
-    <aside class="jobs-pane">
-      <div class="row"><h2>Jobs</h2><button id="new-job" class="small ghost" title="Start a job from no step">+ new</button><button id="import-command" class="small ghost" title="Start a job from a dtpipe command line">import</button></div>
-      <ul id="jobs"></ul>
-      <div id="library-pane" hidden>
-        <div class="row"><h2>Library</h2><button id="library-refresh" class="small ghost" title="Read the coordinator's library again">refresh</button></div>
-        <ul id="library"></ul>
+    <nav class="activity" aria-label="Side panel">
+      <button id="side-jobs" class="activity-icon" aria-pressed="false" aria-label="Jobs" title="Jobs: the folder's jobs and the coordinator's library"></button>
+      <button id="side-steps" class="activity-icon" aria-pressed="false" aria-label="Steps" title="Steps: the sources, steps and outputs to place on the canvas"></button>
+    </nav>
+    <aside id="side-pane" class="side-pane">
+      <div id="side-jobs-view" class="jobs-pane">
+        <div class="row"><h2>Jobs</h2><button id="new-job" class="small ghost" title="Start a job from no step">+ new</button><button id="import-command" class="small ghost" title="Start a job from a dtpipe command line">import</button></div>
+        <ul id="jobs"></ul>
+        <div id="library-pane" hidden>
+          <div class="row"><h2>Library</h2><button id="library-refresh" class="small ghost" title="Read the coordinator's library again">refresh</button></div>
+          <ul id="library"></ul>
+        </div>
       </div>
+      <div id="side-steps-view" class="steps-pane" hidden><p class="hint">Open a job: its sources, steps and outputs are placed from here.</p></div>
+      <div class="split split-col split-pal" data-split="pal" role="separator" aria-orientation="vertical" aria-label="Resize the side panel" tabindex="0"></div>
     </aside>
     <section id="designer" class="designer">
-      <p class="muted intro">Open a job on the left. It opens as steps, from its sources to its outputs. Preview
+      <p class="muted intro">Open a job from Jobs, on the left. It opens as steps, from its sources to its outputs. Preview
         runs it through the real engine over the first source rows, with the outputs neutralised, and every step shows
         the rows it delivers: nothing is written. Save writes the job the studio composes, and keeps where its steps are under .dtpipe/, outside git.</p>
     </section>

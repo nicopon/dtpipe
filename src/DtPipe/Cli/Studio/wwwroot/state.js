@@ -23,8 +23,9 @@
  */
 
 /**
- * The drawer's tab and the panes' sizes. A tab is yaml, problems, edit, preview, or one a host adds.
- * @typedef {{ drawer: string, sizes: Record<string, number> }} View
+ * The drawer's tab, the panes' sizes and the side panel the person chose: jobs, steps or none (closed); null until they choose,
+ * and the panel then follows the page. A tab is yaml, problems, edit, preview, or one a host adds.
+ * @typedef {{ drawer: string, sizes: Record<string, number>, side: "jobs" | "steps" | "none" | null }} View
  */
 
 /**
@@ -75,7 +76,7 @@ export const state = {
   /** @type {Cards} */
   cards: { model: null, result: null, selected: null, zoom: null, dirty: false, history: [] },
   /** @type {View} */
-  view: { drawer: "yaml", sizes: { pal: 220, insp: 330, drawer: 260, agent: 360 } },
+  view: { drawer: "yaml", sizes: { pal: 220, insp: 330, drawer: 260, agent: 360 }, side: null },
   preview: freshPreview(),
   /** @type {Run | null} */
   run: null,

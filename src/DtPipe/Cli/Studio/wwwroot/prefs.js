@@ -1,5 +1,5 @@
 // @ts-check
-// How the page was left: the sizes of its panes, the job open and, for each saved job, the drawer's tab, the rows asked and the
+// How the page was left: the sizes of its panes, the side panel the person chose, the job open and, for each saved job, the drawer's tab, the rows asked and the
 // selected card, and whether writing the targets reviews first. The server keeps them beside the folder's other local files (/api/view), so they survive any
 // port and any browser. Nothing here is true of a job and nothing is read back as such: the page draws the same
 // without them, and a read or a write that fails is dropped. Rows, checkpoints and tokens never come here.
@@ -17,7 +17,7 @@ let keptTab = "yaml";
 let last = "";
 let timer = null;
 
-/** What was kept for a job, with the panes' sizes and the job that was open. @param {string} [path] @returns {Promise<{ sizes: Record<string, number> | null, open?: string | null, job: { tab?: string, rows?: number, card?: string, review?: boolean } | null }>} */
+/** What was kept for a job, with the panes' sizes, the side panel and the job that was open. @param {string} [path] @returns {Promise<{ sizes: Record<string, number> | null, side?: string | null, open?: string | null, job: { tab?: string, rows?: number, card?: string, review?: boolean } | null }>} */
 export async function readView(path) {
   try { return await api(path ? `/api/view?path=${encodeURIComponent(path)}` : "/api/view"); } catch { return { sizes: null, job: null }; }
 }
@@ -39,7 +39,7 @@ function snapshot() {
   const job = state.job;
   if (state.view.drawer && KEPT_TABS.includes(state.view.drawer)) keptTab = state.view.drawer;
   return {
-    ...(sizesKnown ? { sizes: { ...state.view.sizes } } : {}),
+    ...(sizesKnown ? { sizes: { ...state.view.sizes }, ...(state.view.side ? { side: state.view.side } : {}) } : {}),
     // A job not saved yet, or one whose kept preferences are not read yet, keeps none: they would overwrite what was kept.
     ...(job?.hash && restoredFor === job.path
       ? { path: job.path, open: job.path, job: { tab: keptTab, rows: state.preview.rows, card: state.cards.selected?.alias ?? null, review: state.writing.review } }

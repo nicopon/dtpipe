@@ -484,15 +484,15 @@ function renderShell() {
         seg("d-layout", "Arrange", "Arrange the steps in columns, sources first"),
         hooks.toolbar?.() || null)),
     el("div", { class: "designer-body" },
-      el("aside", { class: "palette card", id: "d-palette" }),
       el("div", { class: "canvas card", id: "d-canvas" },
         el("div", { class: "canvas-inner", id: "d-inner" }, svg("svg", { id: "d-svg" })),
         el("div", { class: "chain-view", id: "d-chain", hidden: true })),
       el("aside", { class: "inspector card", id: "d-inspector" }),
-      el("div", { class: "split split-col split-pal", "data-split": "pal", role: "separator", "aria-orientation": "vertical", "aria-label": "Resize the palette", tabindex: "0" }),
       el("div", { class: "split split-col split-insp", "data-split": "insp", role: "separator", "aria-orientation": "vertical", "aria-label": "Resize the inspector", tabindex: "0" })),
     el("div", { class: "split split-row", "data-split": "drawer", role: "separator", "aria-orientation": "horizontal", "aria-label": "Resize the drawer", tabindex: "0" }),
     el("div", { class: "drawer card", id: "d-drawer" }));
+  // The palette lives in the page's side panel (Steps), a new one for each job like the rest of the designer.
+  fill($("side-steps-view"), el("div", { class: "palette", id: "d-palette" }));
 
   $("d-title").addEventListener("input", (e) => { cards.model.title = targetOf(e).value; touch({ canvas: !!cards.zoom }); });
   $("d-description").addEventListener("input", (e) => { cards.model.description = targetOf(e).value; touch({ canvas: false }); });
@@ -509,11 +509,11 @@ function renderShell() {
   flush();
 }
 
-/** Applies every size to the element that lays its pane out: the agent's width belongs to the page's grid, not the designer's. */
+/** Applies every size to the element that lays its pane out: the side panel's and the agent's widths belong to the page's grid, not the designer's. */
 export function applySizes() {
   for (const [name, [lo, hi]] of Object.entries(SIZE_LIMITS)) {
     state.view.sizes[name] = Math.min(hi, Math.max(lo, Math.round(+state.view.sizes[name] || lo)));
-    (name === "agent" ? document.querySelector("main") : host)?.style.setProperty(SIZE_VARS[name], `${state.view.sizes[name]}px`);
+    (name === "agent" || name === "pal" ? document.querySelector("main") : host)?.style.setProperty(SIZE_VARS[name], `${state.view.sizes[name]}px`);
   }
 }
 
@@ -524,13 +524,12 @@ function resize(name, value, persist) {
   if (persist) invalidate("bar");
 }
 
-// The designer's handles; the agent's lies in its own panel, which binds it through bindSplit.
+// The designer's handles; the side panel's and the agent's lie in their own panels, which bind them through bindSplit.
 function bindSplits() {
   const body = host.querySelector(".designer-body");
   for (const handle of host.querySelectorAll(".split")) {
     const name = handle.dataset.split;
     bindSplit(/** @type {HTMLElement} */ (handle), name, (e) => {
-      if (name === "pal") return e.clientX - body.getBoundingClientRect().left - 6;
       if (name === "insp") return body.getBoundingClientRect().right - e.clientX - 6;
       return host.getBoundingClientRect().bottom - e.clientY - 12;
     });
@@ -571,7 +570,8 @@ function renderToolbarState() {
 
 function renderPalette() {
   const view = $("d-palette");
-  if (!view) return;
+  // A panel that does not show the palette leaves it as it is: opening Steps draws it again.
+  if (!view || view.closest("[hidden]")) return;
   const item = (kind, label, hint, component) => el("div",
     { class: `pal-item kind-${kind}`, draggable: "true", "data-kind": kind, "data-component": component, title: hint },
     el("span", {}, label), el("button", { class: "small ghost", "data-add": true, "aria-label": `Add ${label} to the canvas`, title: "Add to the canvas" }, "+"));
@@ -684,7 +684,7 @@ function renderCanvas() {
   inner.style.width = `${width}px`;
   inner.style.height = `${height}px`;
   drawEdges();
-  if (!cards.model.steps.length) inner.appendChild(el("p", { class: "canvas-empty hint" }, "Drag sources, steps and outputs here from the palette."));
+  if (!cards.model.steps.length) inner.appendChild(el("p", { class: "canvas-empty hint" }, "Drag sources, steps and outputs here from Steps, on the left."));
 }
 
 function portPoint(alias, port) {

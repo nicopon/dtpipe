@@ -237,7 +237,7 @@ public sealed partial class StudioServer : IAsyncDisposable
                 case ("GET", "/api/view"):
                     var viewed = _local.ReadView();
                     var viewedJob = JobPath(request.Query["path"].ToString());
-                    await JsonAsync(context, new { sizes = viewed["sizes"], open = viewed["open"], job = viewedJob is null ? null : viewed["jobs"]?[viewedJob] });
+                    await JsonAsync(context, new { sizes = viewed["sizes"], side = viewed["side"], open = viewed["open"], job = viewedJob is null ? null : viewed["jobs"]?[viewedJob] });
                     break;
                 case ("PUT", "/api/view"):
                     await ViewAsync(context);
@@ -460,9 +460,11 @@ public sealed partial class StudioServer : IAsyncDisposable
 
     private static readonly string[] PaneNames = ["pal", "insp", "drawer", "agent"];
     private static readonly string[] ViewTabs = ["yaml", "preview", "variables"];
+    private static readonly string[] ViewSides = ["jobs", "steps", "none"];
 
     /// <summary>
-    /// Keeps how the page was left: the sizes of its panes, the job open and, for a job, its tab, the rows asked and the selected card.
+    /// Keeps how the page was left: the sizes of its panes, the side panel chosen, the job open and, for a job, its tab, the rows
+    /// asked and the selected card.
     /// Each value is checked and rewritten, so the file holds nothing the page did not mean as a preference.
     /// </summary>
     private async Task ViewAsync(HttpContext context)
@@ -479,6 +481,8 @@ public sealed partial class StudioServer : IAsyncDisposable
             }
         }
 
+        if (view.Side is not null && !ViewSides.Contains(view.Side)) throw new StudioRefusal(400, $"'{view.Side}' is no side panel.");
+
         JsonObject? jobView = null;
         var job = JobPath(view.Path);
         if (job is not null && view.Job is { } kept)
@@ -494,7 +498,7 @@ public sealed partial class StudioServer : IAsyncDisposable
         }
 
         // The job open is a path of the folder like any other the page names: the one the studio opens again at its start.
-        _local.UpdateView(sizes, job, jobView, JobPath(view.Open));
+        _local.UpdateView(sizes, job, jobView, JobPath(view.Open), view.Side);
         context.Response.StatusCode = StatusCodes.Status204NoContent;
     }
 
@@ -959,7 +963,7 @@ public sealed partial class StudioServer : IAsyncDisposable
 
     private sealed record ViewJobRequest(string? Tab, int? Rows, string? Card, bool? Review = null);
 
-    private sealed record ViewRequest(Dictionary<string, double>? Sizes, string? Path, ViewJobRequest? Job, string? Open = null);
+    private sealed record ViewRequest(Dictionary<string, double>? Sizes, string? Path, ViewJobRequest? Job, string? Open = null, string? Side = null);
 
     private sealed record SaveRequest(string? Path, string? Hash, DesignModel? Model, bool AcceptErrors);
 
