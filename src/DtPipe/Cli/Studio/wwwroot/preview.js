@@ -258,6 +258,27 @@ async function runPreviewNow(place) {
   }
 }
 
+/**
+ * What the last real run did to a writer card, while the job on disk and the cards are the text it ran: written, or failed.
+ * Nothing for a run that wrote nothing here (a sample, a review that holds its rows, a stop), a branch the run did not
+ * target, or a sink brick's throwaway file.
+ * @param {string} alias @returns {{ name: string, glyph: string, text: string } | null}
+ */
+function realRunOf(alias) {
+  const run = state.run;
+  const job = state.job;
+  if (!run || run.phase !== "done" || !run.status || !job || run.path !== job.path || run.hash !== job.hash || state.cards.dirty) return null;
+  const { prepared, confirmed } = run;
+  if (!prepared || prepared.sample || confirmed?.review) return null;
+  const branch = cardBranch(alias) ?? alias;
+  const write = (prepared.writes || []).find((w) => w.alias === branch);
+  if (!write || write.throwaway) return null;
+  if (confirmed?.targets && !confirmed.targets.includes(branch)) return null;
+  if (confirmed?.continuation && run.asked?.held && !run.asked.held.includes(branch)) return null;
+  if (run.status.failures?.[branch]) return { name: "error", glyph: "✕", text: "write failed" };
+  return run.status.code === 0 ? { name: "fresh", glyph: "●", text: "written" } : null;
+}
+
 // The state of a card, for its badge: what it shows, and whether that is still true of the text.
 function cardState(alias) {
   const sameText = composedYaml() === dbg.ranYaml;
@@ -267,7 +288,10 @@ function cardState(alias) {
   if (!place) {
     const waiting = queueOf(alias);
     if (waiting) return { name: "held", glyph: "⏸", text: waiting.rows != null ? `${waiting.rows} rows queued` : waiting.key ? "rows queued" : "no rows held" };
-    // A writer holds no rows: it says only whether the last preview, run on this very text, reached it.
+    // A real run of the text on disk says what became of the writer; a writer holds no rows, so otherwise it says only
+    // whether the last preview, run on this very text, reached it.
+    const ran = realRunOf(alias);
+    if (ran) return ran;
     return sameText && dbg.report?.success ? { name: "fresh", glyph: "●", text: "not written" } : { name: "never", glyph: "○", text: "no preview" };
   }
   const shown = dbg.shown.get(alias);

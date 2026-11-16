@@ -207,6 +207,8 @@ function pollRun() {
       if (!now.running) {
         clearInterval(runTimer);
         status(`run ${runLabel(now.code)}`, now.code === 0 ? "good" : "warn");
+        // The writers' badges say what the run did to them.
+        invalidate("canvas");
         // A run that stopped holding rows shows them, if its job is the one open; the verdict is in the status line.
         if (now.view && run.path === state.job?.path && await showHeld(now.view)) return;
       }
