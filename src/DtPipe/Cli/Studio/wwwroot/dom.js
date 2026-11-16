@@ -97,6 +97,8 @@ export async function api(path, body, method, signal) {
 /** The element an event was aimed at: the page's listeners all sit on elements. @param {Event} e @returns {any} */
 export const targetOf = (e) => /** @type {any} */ (e.target);
 
+/** A count with its noun, in the plural unless the count is one. @param {number} n @param {string} word */
+export const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 export function status(text, kind = "") {
   $("status").textContent = text;
   $("status").className = `pill ${kind}`;

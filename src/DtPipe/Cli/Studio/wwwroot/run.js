@@ -2,7 +2,7 @@
 // The real run of the saved job: what it would write, confirmed first; then the run, polled until it ends. A run that
 // reviews first stops before every writer and is left suspended; the sink cards write it or abandon it.
 
-import { api, el, fill, status, targetOf } from "./dom.js";
+import { api, el, fill, plural, status, targetOf } from "./dom.js";
 import { brickBranches, showTab } from "./designer.js";
 import { invalidate } from "./render.js";
 import { showHeld } from "./preview.js";
@@ -30,7 +30,6 @@ export function restoreReview(review) {
 let dialog = null;
 // One counter for the confirmations asked: the answer to an earlier choice never replaces the one to the latest.
 const preparing = sequence();
-const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /** The targets the confirmation lists: each one that writes, or, for a continuation, each one that holds rows. @param {any} run */
 function listedOf(run) {
@@ -238,7 +237,7 @@ function stagedView(staged, sample) {
     staged.held.length ? el("p", { class: "hint" }, "Held from before: ", staged.held.map((h) =>
       `${h.card || h.branch} (${size(h.bytes)}, read ${h.readAt ? new Date(h.readAt).toLocaleString() : "earlier"})`).join("; "),
       ". Continuing writes these rows, not a new read of the source.") : null,
-    staged.discards ? el("p", { class: "warn" }, `${staged.discards} held checkpoint(s) no longer match the job or the values it reads with, or come from a sample: they are forgotten.`) : null,
+    staged.discards ? el("p", { class: "warn" }, `${plural(staged.discards, "held checkpoint")} forgotten: no longer matching the job or the values it reads with, or coming from a sample.`) : null,
   ];
 }
 

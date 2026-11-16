@@ -421,14 +421,15 @@ function planView(plan) {
   const blocked = refused(plan.yaml);
   return el("div", {},
     el("details", { class: "agent-plan" },
-      el("summary", {}, `The agent's plan: ${PLAN_LABEL[plan.state.toLowerCase()] || plan.state.toLowerCase()}`, plan.message ? el("span", { class: "hint" }, ` · ${plan.message}`) : null),
+      el("summary", {}, `The agent's plan: ${PLAN_LABEL[plan.state.toLowerCase()] || plan.state.toLowerCase()}`, plan.message ? el("span", { class: "hint" }, ` · ${plan.message.split("\n")[0]}`) : null),
       el("pre", {}, plan.yaml)),
     marks ? el("p", {}, marks) : null,
     el("div", { class: "row" },
       state.job && !state.agent.behind && (plan.yaml !== appliedYaml || moved()) ? el("button", { class: "small", title: "Replace the open job's steps with the plan; nothing is saved", disabled: blocked, "aria-describedby": blocked ? "agent-plan-refused" : null, onclick: () => apply({ yaml: plan.yaml }) }, "Apply to the open job") : null,
       el("button", { class: "small", title: "Open the plan as a new job, not saved yet", disabled: blocked, "aria-describedby": blocked ? "agent-plan-refused" : null, onclick: async () => { if (await hooks.openPlan(plan.yaml)) settled(); } }, "Open as a new job")),
-    blocked ? el("p", { id: "agent-plan-refused", class: "hint" }, "The check refused this plan, so it neither replaces the steps nor opens as a job",
-      plan.message ? `: ${plan.message}${/[.!?]$/.test(plan.message) ? "" : "."}` : ".", " Ask the agent to correct it.")
+    // The check's words keep their lines: a parser's error carries the line it read and a caret under the column.
+    blocked ? el("div", { id: "agent-plan-refused", class: "hint" }, "The check refused this plan, so it neither replaces the steps nor opens as a job",
+      plan.message ? [":", el("pre", {}, plan.message)] : ".", " Ask the agent to correct it.")
       : failed(plan.yaml) && plan.yaml !== appliedYaml ? el("p", { class: "hint" }, "The agent's try of this plan failed, so it is not on the steps: it waits here until you apply it or open it.") : null);
 }
 

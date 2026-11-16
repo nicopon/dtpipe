@@ -4,7 +4,7 @@
 // (POST /api/design/decompose); this page never writes YAML itself. Built with DOM calls only: the
 // page's policy forbids inline script and style, and every value is set as text.
 
-import { $, api, el, fill, status, svg, targetOf } from "./dom.js";
+import { $, api, el, fill, plural, status, svg, targetOf } from "./dom.js";
 import { KEPT_TABS } from "./prefs.js";
 import { flush, invalidate, onZone } from "./render.js";
 import { sequence, state } from "./state.js";
@@ -621,7 +621,7 @@ function versions() {
       el("li", {}, "this studio: ", el("code", {}, state.catalog.studioVersion || "unknown")),
       state.catalog.nodes.map((n) => el("li", { class: n.dtpipeVersion === state.catalog.studioVersion ? "" : "warn" },
         `${n.name}: `, el("code", {}, n.dtpipeVersion || "unknown")))),
-    differ.length ? el("p", { class: "hint warn" }, `${differ.length} node(s) run another dtpipe: a sample here may differ from a run there. The coordinator checks a pipeline again when it is published.`) : null,
+    differ.length ? el("p", { class: "hint warn" }, `${plural(differ.length, "node")} ${differ.length === 1 ? "runs" : "run"} another dtpipe: a sample here may differ from a run there. The coordinator checks a pipeline again when it is published.`) : null,
   ];
 }
 
@@ -639,7 +639,7 @@ function cardInfo(step) {
   else if (isEndpoint(step)) subtitle = step.brick || endpointOf(step) || `no ${step.kind === "source" ? "input" : "output"} yet`;
   else if (step.kind === "transform") subtitle = step.transformers?.length ? step.transformers.map((t) => t.type).join(" → ") : "no transformer yet";
   else if (step.kind === "sql") subtitle = (step.query || "").replace(/\s+/g, " ").slice(0, 60);
-  else if (step.kind === "merge") subtitle = `UNION ALL of ${step.from.length} input(s)`;
+  else if (step.kind === "merge") subtitle = `UNION ALL of ${plural(step.from.length, "input")}`;
   else subtitle = "branch, as written";
   // A card the server joined into another branch says which: the job dtpipe runs has that branch.
   const branch = info?.branch && info.branch !== step.alias ? `in branch ${info.branch}` : "";
@@ -995,8 +995,8 @@ function renderInspector() {
     const errors = cards.result?.errors?.length || 0;
     const warnings = cards.result?.warnings?.length || 0;
     fill(view, el("h2", {}, "Job"),
-      el("p", { class: "hint" }, `${cards.model.steps.length} step(s). `, errors ? el("span", { class: "bad" }, `${errors} error(s): see Problems.`)
-        : warnings ? ["Composes, ", el("span", { class: "warn" }, `with ${warnings} warning(s): see Problems.`)] : "Composes cleanly."),
+      el("p", { class: "hint" }, `${plural(cards.model.steps.length, "step")}. `, errors ? el("span", { class: "bad" }, `${plural(errors, "error")}: see Problems.`)
+        : warnings ? ["Composes, ", el("span", { class: "warn" }, `with ${plural(warnings, "warning")}: see Problems.`)] : "Composes cleanly."),
       el("p", { class: "hint" }, "Select a step to edit it. A source and an output of their own carry their endpoint as YAML; the server joins a source, its transform and its output back into one branch when nothing else reads between them."),
       cards.model.directives.length ? [el("h3", {}, "Header directives"), el("ul", { class: "inputs" }, cards.model.directives.map((d) => el("li", {}, el("code", {}, d))))] : null);
     return;
@@ -1173,13 +1173,13 @@ function renderDrawer() {
   const tabs = el("div", { class: "tabs" },
     tab("yaml", "YAML"),
     tab("problems", "Problems ",
-      errors ? el("span", { class: "count", title: `${errors} error(s)` }, errors) : null,
-      warnings ? el("span", { class: "count warn", title: `${warnings} warning(s)` }, warnings) : null),
+      errors ? el("span", { class: "count", title: plural(errors, "error") }, errors) : null,
+      warnings ? el("span", { class: "count warn", title: plural(warnings, "warning") }, warnings) : null),
     tab("edit", "Edit as YAML"),
     tab("preview", "Preview"),
     (hooks.extraTabs || []).map((t) => tab(t.name, t.label, t.badge?.())),
-    el("span", { class: "drawer-status" }, errors ? el("span", { class: "bad" }, `${errors} error(s)`) : el("span", { class: "good" }, "composes"),
-      warnings ? el("span", { class: "warn" }, ` · ${warnings} warning(s)`) : null));
+    el("span", { class: "drawer-status" }, errors ? el("span", { class: "bad" }, plural(errors, "error")) : el("span", { class: "good" }, "composes"),
+      warnings ? el("span", { class: "warn" }, ` · ${plural(warnings, "warning")}`) : null));
   let body;
   if (state.view.drawer === "yaml") {
     body = [el("div", { class: "row" }, el("button", { "data-copy": true }, "Copy"),

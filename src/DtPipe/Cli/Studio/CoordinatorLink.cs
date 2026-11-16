@@ -406,7 +406,7 @@ public sealed class CoordinatorLink : IDisposable
         try
         {
             Tokens tokens;
-            lock (_lock) tokens = _tokens ?? throw new CoordinatorLinkException(_reason ?? $"Nobody is signed in to {Url}: sign in from the studio.");
+            lock (_lock) tokens = _tokens ?? throw new CoordinatorLinkException(_reason ?? $"Nobody is signed in to {Url}: use the \"{(ByKey ? "Sign in with the key" : "Sign in")}\" button at the top of the studio.");
             if (!fresh && _time.GetUtcNow() < tokens.Expires - Margin) return tokens.Access;
             if (ByKey)
             {

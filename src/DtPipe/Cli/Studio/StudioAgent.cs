@@ -67,7 +67,16 @@ internal sealed class StudioAgent : IAsyncDisposable
     private AgentExecutor NewExecutor()
     {
         var executor = new AgentExecutor(_tools, _setup.Client, trace: _setup.Trace);
-        executor.Trajectory.StepAdded += step => { lock (_gate) { _log.Add(StepEntry(step)); OfferPlan(step); Meter(step); } };
+        executor.Trajectory.StepAdded += step =>
+        {
+            lock (_gate)
+            {
+                // The verdict of a stopped turn says it stopped: the step that notes it would say so twice.
+                if (step.ToolName is not null || step.Reasoning != AgentExecutor.StoppedStep) _log.Add(StepEntry(step));
+                OfferPlan(step);
+                Meter(step);
+            }
+        };
         executor.ContextNotice += text => Log(new { kind = "notice", text });
         return executor;
     }

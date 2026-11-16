@@ -22,6 +22,8 @@ function emit(kind) { for (const fn of listeners) { try { fn(kind); } catch (e) 
 
 export const $ = (id) => document.getElementById(id);
 export const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+/** A count with its noun, in the plural unless the count is one. */
+export const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 export const fmt = (n) => (n ?? 0).toLocaleString("en-US");
 export const nodeColor = (node) => (node ? `var(--${node}, var(--muted))` : "var(--muted)");
 // A fragment reads "pipeline@node"; a cause that is a sentence (a refused transfer, a row-count

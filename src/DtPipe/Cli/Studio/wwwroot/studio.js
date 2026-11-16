@@ -3,7 +3,7 @@
 // wires the screens together and owns the job open and the list of jobs; each screen keeps its own part of the
 // state (state.js) and its own module.
 
-import { $, api, el, fill, forgetToken, status, svg, token } from "./dom.js";
+import { $, api, el, fill, forgetToken, plural, status, svg, token } from "./dom.js";
 import { onCoordinator, refreshCoordinator } from "./coordinator.js";
 import { bindSplit, compose, markSaved, mountDesigner, openBlank, openJob, restoreSizes, setCatalog } from "./designer.js";
 import { readView, rememberView, sizesRead, viewRestored } from "./prefs.js";
@@ -228,7 +228,7 @@ async function save() {
   if (result.unanswered) return;
   if (job.rewrites && !confirm("Saving writes this job as the studio composes it: comments inside it and the order of its keys are not kept. Save anyway?")) return;
   const acceptErrors = result.errors?.length > 0;
-  if (acceptErrors && !confirm(`${result.errors.length} problem(s) remain: the job written may not run. Save anyway?`)) return;
+  if (acceptErrors && !confirm(`${plural(result.errors.length, "problem")} ${result.errors.length === 1 ? "remains" : "remain"}: the job written may not run. Save anyway?`)) return;
   const write = (hash) => api("/api/job", { path: job.path, hash, model: state.cards.model, acceptErrors }, "PUT");
   try {
     let answer;

@@ -397,7 +397,7 @@ export function previewView(alias) {
     // A failure that came back with no reason says so, never a bare "failed" a person reads as the whole story.
     parts.push(el("p", { class: "bad" }, `The last preview failed${dbg.report.stage ? ` (${dbg.report.stage})` : ""}.`),
       errors.length ? el("ul", { class: "msgs bad" }, errors.map((m) => el("li", {}, m)))
-        : el("p", { class: "hint" }, "The engine returned no reason. Check each endpoint's address and component; dtpipe --job on the saved file prints the error."));
+        : el("p", { class: "hint" }, `The engine returned no reason. Check each endpoint's address and component; dtpipe --job on the saved file${state.job ? ` (${state.job.path}, in the folder ${state.jobs.folder})` : ""} prints the error.`));
   }
   if (dbg.notice) parts.push(el("p", { class: "hint warn" }, dbg.notice));
   return parts;

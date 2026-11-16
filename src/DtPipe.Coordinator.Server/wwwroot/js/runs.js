@@ -1,6 +1,6 @@
 // Runs: what is deployed, the runs in flight and the queue behind them, the journal of finished runs,
 // and the live events of every node.
-import { $, ROWS_CROSSED_HINT, api, duration, endNotes, esc, fmt, nodeColor, cursorsOf, ranPlan, rowsCrossed, runStateLabel, shortNode, store, toast } from "./core.js";
+import { $, ROWS_CROSSED_HINT, api, duration, endNotes, esc, fmt, nodeColor, plural, cursorsOf, ranPlan, rowsCrossed, runStateLabel, shortNode, store, toast } from "./core.js";
 
 let host = null;
 let openRun = null;          // runId whose report is unfolded
@@ -52,7 +52,7 @@ function renderDeployments() {
       <td>${d.origin === "library" ? `<a href="#/library/${encodeURIComponent(d.pipelineId)}">${esc(d.pipelineId)}</a>` : esc(d.pipelineId)}</td>
       <td>${esc(d.origin)}</td>
       <td><span class="chip ${d.state === "ready" ? "ok" : d.state === "failed" ? "bad" : "warn"}" title="${esc(d.message || "")}">${esc(d.state)}</span>${d.commit ? ` <span class="hint mono" title="The commit it is armed at">${esc(d.commit.slice(0, 8))}</span>` : ""}</td>
-      <td class="wrap">${d.fragments.length ? "" : (d.nodes || []).map((n) => `<span class="chip" style="color:${nodeColor(n)}" title="Bound by this deployment; planned at each launch">${esc(n)}</span>`).join(" ")}${d.fragments.map((f) => `<span class="chip" style="color:${nodeColor(f.node)}" title="${esc(f.name)} · ${esc(f.version.slice(0, 12))} · ${f.replicas ?? 0} replica(s) could run it now">${esc(f.node)}${f.replicas != null ? ` · ${f.replicas}` : ""}</span>`).join(" ")}</td>
+      <td class="wrap">${d.fragments.length ? "" : (d.nodes || []).map((n) => `<span class="chip" style="color:${nodeColor(n)}" title="Bound by this deployment; planned at each launch">${esc(n)}</span>`).join(" ")}${d.fragments.map((f) => `<span class="chip" style="color:${nodeColor(f.node)}" title="${esc(f.name)} · ${esc(f.version.slice(0, 12))} · ${plural(f.replicas ?? 0, "replica")} could run it now">${esc(f.node)}${f.replicas != null ? ` · ${f.replicas}` : ""}</span>`).join(" ")}</td>
       <td class="num">${d.edges}</td><td class="num">${d.queued || ""}</td>
       <td class="actions-cell"><button class="small" data-needs="designer" data-run="${esc(d.pipelineId)}" ${d.state === "failed" ? "disabled" : ""}>Run</button>
         <button class="small ghost danger" data-needs="designer" data-undeploy="${esc(d.pipelineId)}" ${d.runningRunId || d.queued ? "disabled" : ""}>Undeploy</button></td>

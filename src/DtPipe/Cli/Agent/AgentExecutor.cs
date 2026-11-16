@@ -69,6 +69,9 @@ public class AgentExecutor
     /// </summary>
     internal const int Unbounded = int.MaxValue;
 
+    /// <summary>The trajectory's own note of a model call the person stopped; a host that tells the stop itself leaves it out.</summary>
+    internal const string StoppedStep = "Stopped — you stopped the agent here, and it took no further step.";
+
     public AgentExecutor(IAgentToolProvider toolProvider, ILlmClient llmClient, AgentContextStore? contextStore = null, AgentTrace? trace = null)
     {
         _toolProvider = toolProvider;
@@ -254,7 +257,7 @@ public class AgentExecutor
                 // The person stopped the model call. The session lives on, so this must not escape
                 // as the cancellation a host turns into exit 130 — it is a stated outcome like any
                 // other, and the steps taken so far stay in the trajectory.
-                Trajectory.AddStep(currentStepNum, "Stopped — you stopped the agent here, and it took no further step.");
+                Trajectory.AddStep(currentStepNum, StoppedStep);
                 success = false;
                 turnOutcome = TurnOutcome.UserInterrupted;
                 break;
