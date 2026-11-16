@@ -242,6 +242,8 @@ td.null { color: var(--muted); font-style: italic; }
 .notes.warn { color: var(--warn); }
 
 @media (max-width: 1100px) {
+  header { flex-wrap: wrap; row-gap: 4px; }
+  header b, header #job-name, header #agent-link { white-space: nowrap; }
   main, main.side-closed { grid-template-columns: minmax(0, 1fr); height: auto; }
   .activity { flex-direction: row; padding: 4px 8px; border-right: 0; border-bottom: 1px solid var(--line); }
   .side-pane { border-right: 0; border-bottom: 1px solid var(--line); max-height: 30vh; }
