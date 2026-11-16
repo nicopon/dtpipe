@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using DtPipe.Cli.Expressions;
+using DtPipe.Cli.Node;
 using DtPipe.Cli.Security;
 using DtPipe.Cli.Split;
 using DtPipe.Core.Security;
@@ -602,6 +603,12 @@ public sealed partial class StudioServer : IAsyncDisposable
         var job = _folder.ReadJob(path);
         if (asked.Hash is null || asked.Hash != job.Hash)
             throw new StudioRefusal(409, $"{path} is not the job saved last: save it, then publish.");
+        if (SecretsRefusal(job.Text) is { } secrets)
+        {
+            context.Response.StatusCode = StatusCodes.Status422UnprocessableEntity;
+            await JsonAsync(context, new { error = "the job holds a credential as a value.", report = secrets });
+            return;
+        }
 
         var origin = link.Origin.ToString();
         var last = _local.ReadPublication(path) is { } p && p.Coordinator == origin && p.Id == asked.Id ? p : null;
@@ -625,6 +632,20 @@ public sealed partial class StudioServer : IAsyncDisposable
         var saved = outcome.Saved!;
         _local.WritePublication(path, new StudioPublication(origin, saved.Id, saved.Commit));
         await JsonAsync(context, saved);
+    }
+
+    /// <summary>
+    /// What a library keeps for good is no place for a credential: the places of the job that spell one out as a value, never the
+    /// value, and what to write instead. Judged by <see cref="JobSecrets"/>, best-effort in both directions, as a brick's own refusal
+    /// is. Null when the job holds none.
+    /// </summary>
+    internal static string? SecretsRefusal(string yaml)
+    {
+        var at = JobSecrets.Literals(yaml);
+        if (at.Count == 0) return null;
+        const int Named = 8;
+        var places = string.Join(", ", at.Take(Named)) + (at.Count > Named ? $" and {at.Count - Named} more" : "");
+        return $"{places}: a library is shared and its history is kept, so a credential published there cannot be taken back. {NodeBricks.UseAReference}";
     }
 
     /// <summary>

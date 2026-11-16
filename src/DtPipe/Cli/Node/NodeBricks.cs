@@ -52,8 +52,11 @@ internal static class NodeBricks
     /// </summary>
     private static string? SecretRefusal(string alias, YamlMappingNode branch) =>
         JobSecrets.InBranch(branch).FirstOrDefault() is { } path
-            ? $"Branch '{alias}' holds a credential as a value ({path}): a brick's version is a hash of its text. Use ${{{{NAME}}}} or keyring://alias."
+            ? $"Branch '{alias}' holds a credential as a value ({path}): a brick's version is a hash of its text. {UseAReference}"
             : null;
+
+    /// <summary>What a refusal of a credential written as a value tells to do instead, in the words every host of the rule uses.</summary>
+    public const string UseAReference = "Use ${{NAME}} or keyring://alias.";
 
     /// <summary>A reference to a secret rather than a value: <c>keyring://alias</c>, <c>${{NAME}}</c> or <c>@file</c>.</summary>
     public static bool IsSecretReference(string text) =>

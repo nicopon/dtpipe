@@ -85,6 +85,36 @@ public sealed class StudioPublishTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_literal_that_looks_like_a_secret_is_refused_by_its_place_and_never_its_value()
+    {
+        await SignInAsync();
+        const string Value = "AKIAEXAMPLE0123456";
+        string Job(string comparison) =>
+            $"src:\n  input: arrow:-\nby:\n  from: src\n  provider-options:\n    sql:\n      query: \"SELECT * FROM src WHERE {comparison}\"\n  output: arrow:-\n";
+        var file = Path.Combine(_dir, "orders.yaml");
+
+        File.WriteAllText(file, Job($"api_key = '{Value}'"));
+        var (status, refused) = await PublishAsync(await HashAsync());
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, status);
+        Assert.DoesNotContain(Value, refused.GetRawText());
+        Assert.Contains("by.provider-options.sql.query", refused.GetProperty("report").GetString());
+        Assert.Contains("${{NAME}}", refused.GetProperty("report").GetString());
+        Assert.Empty(_fakes.Library);
+
+        // A reference is what the refusal asks for, bare or in the quotes SQL writes it in, and a comparison that names no
+        // credential is no refusal.
+        File.WriteAllText(file, Job("api_key = ${{API_KEY}}"));
+        Assert.Equal(HttpStatusCode.OK, (await PublishAsync(await HashAsync())).Status);
+        File.WriteAllText(file, Job("s3_access_key_id = '${{keyring://aws-key}}'"));
+        Assert.Equal(HttpStatusCode.OK, (await PublishAsync(await HashAsync())).Status);
+        File.WriteAllText(file, Job("api_key = '${{API_KEY}}'"));
+        Assert.Equal(HttpStatusCode.OK, (await PublishAsync(await HashAsync())).Status);
+        File.WriteAllText(file, Job("country = 'FR'"));
+        Assert.Equal(HttpStatusCode.OK, (await PublishAsync(await HashAsync())).Status);
+    }
+
+    [Fact]
     public async Task A_job_not_saved_as_the_page_has_it_is_refused()
     {
         await SignInAsync();

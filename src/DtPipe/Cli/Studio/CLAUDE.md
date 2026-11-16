@@ -128,6 +128,11 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   later one replaces only the commit published last from here (`<job>-publish.json`, under
   `.dtpipe/studio/`), and a 412 is replaced only when the person names the commit in place. A 422 is
   the coordinator's check refusing the job: the report is shown and nothing was published.
+  **A credential written as a value is refused before anything is sent** (`SecretsRefusal`, through `JobSecrets.Literals`):
+  a 422 with the same `{ error, report }` shape, the report naming each `branch.path` and never the value, and advising
+  `NodeBricks.UseAReference`. A library is shared and keeps its history, so a published secret cannot be taken back. The judge is
+  best-effort in both directions, and the coordinator does not repeat the check.
+  `[CI: StudioPublishTests]` `[unchecked: a client that publishes without the studio]`
 - **A command line imports through `--export-job`'s own path.** `POST /api/import` takes the
   arguments as the array the page split (never one string to cut here) and answers the text
   `CommandLineJob.Export` gives, which `Program.cs` shares for its refusal of `--bind-input`/
