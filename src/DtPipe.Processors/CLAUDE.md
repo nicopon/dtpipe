@@ -21,6 +21,17 @@ projection to exactly one stream. Never merge the projections of two scans: two 
 column of the same name hand each other's column to DuckDB, which reads it as another type and faults
 natively. `[CI: DuckDBSqlProcessorTests — SourcesSharingAColumnName]`
 
+**A stream is read by one scan.** Each scan ends on the stream's end, so a source scanned twice
+hands the second scan nothing, in code 0. A `--ref` the plan scans more than once (a scan in the
+recursive part of a recursive CTE counts twice: it runs at each iteration) is read once into a
+`MATERIALIZED` CTE put in front of the query under its alias (first in the query's own `WITH` list),
+off the raw scan, and the plan is checked again; the main (`--from`) is refused. Never a table in
+place of the CTE: its known size moves a join's build side onto the stream, which DuckDB estimates
+at one row. Never a CTE inside the view: a view is copied again at each reference. A scan that reads
+no column names no source in EXPLAIN, so `ProjectedArrowStream` fails the query on a second end.
+`[CI: DuckDBSqlProcessorTests — RefScannedTwice, RefJoinedInARecursivePart, MainScannedTwice,
+ScanReadingNoColumn]`
+
 - `DuckHubConnectionParser` parses `duck+{provider}:` strings and issues `INSTALL` / `LOAD` /
   `ATTACH`.
 - `--duck-init` / `--compute` / `--expand` values resolve through `IStringContentResolver`

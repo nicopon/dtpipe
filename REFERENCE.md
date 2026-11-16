@@ -666,7 +666,9 @@ command line (`--no-stats`, `--log`, `--strict-bindings`, `--export-job`, `--cur
 | `--merge` | UNION ALL of all `--from` sources. Requires at least 2 streaming sources that share one schema: same columns, names and types, else the run is refused before any row moves |
 
 > **`--ref` is read in full into memory** before the query runs; only the `--from` source streams.
-> Filter a large lookup upstream first.
+> Filter a large lookup upstream first. A query may name a `--ref` as often as it needs (a
+> self-join); it may read the `--from` source only once, and one that reads it twice is refused:
+> read it once in a CTE and select from that.
 
 > **An alias list is comma-separated; repeating a flag never adds to it.** Repetition has one
 > meaning in this grammar — `-i` and `--from` open a new branch — so `--from a --from b`
