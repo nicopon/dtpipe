@@ -83,7 +83,7 @@ function variableRow(v) {
 export function variablesView() {
   const vars = state.vars;
   if (vars.error) return el("p", { class: "bad" }, vars.error);
-  if (vars.pending && !vars.variables.length) return el("p", { class: "hint" }, "Reading the job's ${{…}} variables…");
+  if (vars.pending && !vars.variables.length) return el("p", { class: "hint" }, "Reading the job's ${{…}} variables… The first read can wait several seconds on the keyring.");
   if (!vars.variables.length) return el("p", { class: "hint" }, "This job reads no ${{…}} variable.");
   return [
     el("p", { class: "hint" }, "The job keeps each ${{NAME}}; what the studio launches it with stays on this machine, under .dtpipe/, outside git. A keyring value is read when a sample runs and never shown."),
