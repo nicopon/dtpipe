@@ -26,7 +26,7 @@ dtpipe keygen admin --out admin.key
 dtpipe keygen runner-1 --out runner-1.key
 ```
 
-The coordinator takes its first library from a folder. Write the pipeline this page runs: it
+The coordinator takes its first library from a folder. Write the job this page runs: it
 reads the brick `orders` of a node `shop`, and writes its brick `report`.
 
 ```bash

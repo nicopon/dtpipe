@@ -222,7 +222,7 @@ export function markSaved() { cards.dirty = false; invalidate("bar"); }
 
 function normalize(m) {
   return {
-    title: m.title || "Untitled pipeline", description: m.description || "", directives: m.directives || [],
+    title: m.title || "Untitled job", description: m.description || "", directives: m.directives || [],
     steps: (m.steps || []).map((s) => ({ ...s, from: s.from || [], ref: s.ref || [] })),
     layout: m.layout || {},
   };
