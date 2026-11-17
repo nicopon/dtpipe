@@ -5,7 +5,8 @@ Writes one screenshot per step.
   0. Sign in: the coordinator's page sends the browser to the IdP's form, filled and submitted as
      the lab's admin, and comes back naming them with the admin role.
   1. Lab view: every catalog pipeline selected in turn, its graph and plan drawn.
-  2. Coordinator: each view rendered (nodes, library, a pipeline's page with its job read only, runs, access).
+  2. Coordinator: each view rendered (nodes, library, a pipeline's page with its job read only, runs, the page of the latest
+     run when there is one, events, access).
   2b. Library: the row actions agree with the plans and deployments, and Open shows the pipeline's page.
   3. No designer: no Designer entry in the navigation, no Design button, and no New or Import on the library.
   4. Waiting for approval: a host the rights do not know proposes a name and a description made of HTML;
@@ -67,12 +68,15 @@ def lab_view(browser):
 def coordinator_views(browser):
     library = SESSION.call("/api/library")
     pid = library[0]["id"] if library else ""
+    last = SESSION.call("/api/runs/last")
     checks = [
         ("nodes", "document.querySelectorAll('.node-card').length > 0 && document.querySelectorAll('.brick').length > 0"),
         ("library", f"document.querySelectorAll('.lib-item').length === {len(library)}"),
         (f"library/{pid}", "document.querySelectorAll('.xbox').length > 0 && (document.querySelectorAll('.lanes svg path').length > 0 || document.querySelectorAll('ul.msgs.errors li').length > 0)"
                            " && (document.getElementById('x-job')?.textContent || '').length > 0"),
-        ("runs", "!!document.getElementById('r-journal') && !!document.getElementById('r-deployments')"),
+        ("runs", "!!document.getElementById('r-journal') && !!document.getElementById('r-queue')"),
+        *([(f"runs/{last[0]['runId']}", "!!document.getElementById('run-head') && !!document.querySelector('#run-report .run-report')")] if last else []),
+        ("events", "!!document.getElementById('ev-log') && !!document.getElementById('ev-node')"),
         ("access", "document.querySelectorAll('table.matrix.edit input').length > 0 && document.querySelectorAll('[data-identity]').length > 0"),
     ]
     browser.goto(URL + "/#/nodes", 1)
@@ -81,7 +85,7 @@ def coordinator_views(browser):
         browser.js(f"location.hash = {json.dumps('#/' + view)}")
         rendered = browser.wait_for(predicate, 20)
         errors = page_errors(browser)
-        shot = browser.shot(os.path.join(OUT, "app-library-detail.png" if view.startswith("library/") else "app-" + view.split("/")[0] + ".png"))
+        shot = browser.shot(os.path.join(OUT, "app-" + view.split("/")[0] + ("-detail" if "/" in view else "") + ".png"))
         report(rendered and not errors, "view " + view, "rendered" if rendered else "not rendered" + (f"  errors: {errors}" if errors else ""), shot)
 
 

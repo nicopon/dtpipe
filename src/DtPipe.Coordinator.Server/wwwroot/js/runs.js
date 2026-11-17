@@ -1,12 +1,15 @@
 // Runs: the runs in flight and the queue behind them, the journal of finished runs (filtered by pipeline and by state at the
-// server, counted, paged), and the deployments that are no library pipeline's. A run opens its own page.
+// server, counted, paged), and the deployments that are no library pipeline's. A run opens its own page, `run.js`:
+// the address `#/runs/<runId>` is this view's too, and it hands the page over.
 import { $, ROWS_CROSSED_HINT, api, apiPage, duration, esc, fmt, nodeColor, plural, rowsCrossed, runHref, runStateLabel, shortNode, store, toast } from "./core.js";
+import * as runPage from "./run.js";
 
 const PAGE = 50;       // what the journal asks for first and what Show more adds
 const MAX_PAGE = 500;  // the most one request may ask for: the server's page bound
 // The states a journaled run ends in, as the server writes them: a run in flight is in the queue, never in the journal.
 const ENDED = ["succeeded", "failed", "cancelled", "refused", "error"];
 
+let page = null;             // the page of one run, while the address names a run
 let host = null;
 let filter = { pipeline: "", state: "" };
 let limit = PAGE;
@@ -31,7 +34,9 @@ export const countLabel = (shown, total) => `${shown} of ${total}`;
 /** How many runs the next page asks for, never more than the server gives. */
 export const nextLimit = (n) => Math.min(n + PAGE, MAX_PAGE);
 
-export function mount(el, _params, query) {
+export function mount(el, params, query) {
+  page = params.length ? runPage : null;
+  if (page) { page.mount(el, params, query); return; }
   host = el;
   filter = { pipeline: query?.get("pipeline") ?? "", state: query?.get("state") ?? "" };
   limit = PAGE;
@@ -59,6 +64,7 @@ export function mount(el, _params, query) {
 }
 
 export function leave() {
+  if (page) { page.leave(); page = null; return; }
   clearInterval(ticker);
   asking++;
   host = null;
@@ -66,6 +72,7 @@ export function leave() {
 
 // Each event redraws what it touches: a node's event never rebuilds the journal or its selects.
 export function update(kind) {
+  if (page) { page.update(kind); return; }
   if (!host) return;
   if (kind === "all") { renderQueue(); renderOutside(); renderSelectors(); loadJournal(); }
   else if (kind === "nodes" || kind === "runs") renderQueue();

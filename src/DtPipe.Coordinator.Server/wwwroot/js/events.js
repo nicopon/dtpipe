@@ -23,9 +23,9 @@ export function visible(lines, f) {
     && (!text || [l.message, l.node, l.fragment, l.runId].some((v) => v && String(v).toLowerCase().includes(text))));
 }
 
-/** One line of the box. Everything a node or a run wrote is escaped; the run id, the node's word, links to `#/runs/<id encoded>`. */
-export function lineHtml(l) {
-  const run = l.runId ? ` <a class="run-link" href="${esc(runHref(l.runId))}" title="The page of this run">${esc(l.runId)}</a>` : "";
+/** One line of the box. Everything a node or a run wrote is escaped; the run id, the node's word, links to `#/runs/<id encoded>` unless `withRun` is false. */
+export function lineHtml(l, withRun = true) {
+  const run = withRun && l.runId ? ` <a class="run-link" href="${esc(runHref(l.runId))}" title="The page of this run">${esc(l.runId)}</a>` : "";
   return `<div class="${esc(l.level)}"><span class="t">${esc(l.at.toLocaleTimeString())}</span> <span class="n" style="color:${esc(nodeColor(l.node))}">${esc(l.node)}</span>${l.fragment ? ` <span class="t">${esc(l.fragment)}</span>` : ""}${run} ${esc(l.message)}</div>`;
 }
 
@@ -94,7 +94,7 @@ function draw(force) {
   if (!following && !force) { label(); return; }
   const stick = force || el.scrollTop + el.clientHeight >= el.scrollHeight - 20;
   const lines = visible(store.logs, filters);
-  el.innerHTML = lines.map(lineHtml).join("");
+  el.innerHTML = lines.map((l) => lineHtml(l)).join("");
   $("ev-count").textContent = `${lines.length} of ${store.logs.length} lines`;
   shownUpTo = store.logs.at(-1)?.n ?? 0;
   if (stick) el.scrollTop = el.scrollHeight;

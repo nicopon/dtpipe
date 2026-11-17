@@ -154,6 +154,9 @@ export function addLog(line) {
   emit("logs");
 }
 
+/** The lines this page holds that name run `runId`. The id is the node's word, never checked: a line is attached by equality and nothing else. */
+export const linesOfRun = (runId) => store.logs.filter((l) => l.runId === runId);
+
 /** The errors and the warnings among the lines that arrived since the Events view was last open (never opened: every line held). */
 export function unseenLogs() {
   let errors = 0, warnings = 0;
