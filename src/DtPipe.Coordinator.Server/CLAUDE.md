@@ -532,7 +532,8 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   that left the library are kept like any other. A store that cannot erase leaves the documents until the next start cuts them. The
   pages read a pipeline's last run at `GET /api/runs/last` (the latest run that is over of each pipeline, however long ago it ended)
   and its journal at `GET /api/runs?pipeline=&state=`, whose `limit` is a page of at most 500 and whose `X-Total-Count` is how many runs
-  answer the two filters before the page cuts them, counted in the same pass as the page (`RunJournal.Page`). A run has an address,
+  answer the two filters before the page cuts them, counted in the same pass as the page (`RunJournal.Page`); a pipeline's page lists
+  its runs in flight from the queue and its latest five from that journal. A run has an address,
   `GET /api/runs/{id}` (in flight, queued or journaled; 404 once the retention let it go), which the literal `last` and `queue` outrank.
   The Events view is the page's own memory of `/api/events` (`LOG_CAPACITY` lines in `core.js`), a run id on a line is the node's word
   and only ever a link to `#/runs/<id>`, and the view keeps nothing.
