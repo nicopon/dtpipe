@@ -25,7 +25,7 @@ public class FailedLaunchTests : IDisposable
         await using var runs = new ReplicaRuns(
             host.CreateNodeChannel(), node, "A", Path.Combine(_dir.FullName, "no-such-dtpipe"), new Dictionary<string, string>(), _dir.FullName,
             spec => FragmentIntake.JobOf(spec, FragmentPolicy.Bricks, (_, _) => null, (_, _) => null, (_, _) => null, []),
-            _ => NullLogger.Instance, NullLogger.Instance, TimeSpan.FromMinutes(5));
+            (_, _) => NullLogger.Instance, NullLogger.Instance, TimeSpan.FromMinutes(5));
 
         var result = await runs.LaunchAsync(new LaunchRequest("r1", new FragmentSpec("A", "v", [], Yaml: "a:\n  input: generate:1\n  output: arrow:-\n"), "token-1"));
 

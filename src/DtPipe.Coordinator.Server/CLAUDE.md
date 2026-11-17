@@ -557,7 +557,10 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   `LogCategories.IsTransport` as information, with its label, when the replica that reported it holds runs and the requester asked to
   cancel every one of them (`NodeInventory.IsWindingDown`, fed by `RunQueue`'s cancel and cleared when the run ends). The category
   decides, never the message; the line is kept, a run's own teardown (the orchestrator's) is no requested cancellation, and no state,
-  code or verdict reads the classification. `[CI: RunQueueTests; Hosting.Tests NodeLogForwarderTests]`
+  code or verdict reads the classification. `NodeChannelHub.ReportLog` sets `Node` to the name the rights gave the connection and keeps
+  the rest as the node wrote it, `NodeLogLine.RunId` included (the run of the fragment that logged, null outside one): no lookup per
+  line, a label for reading that no state or verdict reads. A line the coordinator writes itself has no run.
+  `[CI: RunQueueTests, NodeChannelHubTests; Hosting.Tests NodeLogForwarderTests]`
   `[unchecked: that a real transfer's lines all arrive before its run ends]`
 - **A run that was placed records the replica of each fragment.** `RunJournal` keeps the `RunResult` whole,
   `RunResult.Replicas` included: an instance id and the `Origin` the replica announced, untrusted text the pages

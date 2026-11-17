@@ -41,7 +41,7 @@ internal sealed class ReplicaRuns : IAsyncDisposable
     private readonly IReadOnlyDictionary<string, string> _environment;
     private readonly string _jobsDirectory;
     private readonly Func<FragmentSpec, (string? Yaml, string? Reason)> _intake;
-    private readonly Func<string, ILogger> _loggerOf;
+    private readonly Func<string, string, ILogger> _loggerOf;
     private readonly ILogger _logger;
     private readonly TimeSpan _unwiredTimeout;
     private readonly bool _faultInjection;
@@ -68,7 +68,7 @@ internal sealed class ReplicaRuns : IAsyncDisposable
 
     public ReplicaRuns(
         HubConnection channel, PipelineNode node, string name, string dtpipe, IReadOnlyDictionary<string, string> environment, string jobsDirectory,
-        Func<FragmentSpec, (string? Yaml, string? Reason)> intake, Func<string, ILogger> loggerOf, ILogger logger, TimeSpan unwiredTimeout,
+        Func<FragmentSpec, (string? Yaml, string? Reason)> intake, Func<string, string, ILogger> loggerOf, ILogger logger, TimeSpan unwiredTimeout,
         bool faultInjection = false, string arrowCompression = "lz4", int? arrowCompressionLevel = null, int readChunkBytes = 262144,
         bool edgesOnly = false, int maxRuns = 0)
     {
@@ -196,7 +196,7 @@ internal sealed class ReplicaRuns : IAsyncDisposable
                     .Select(e => new EdgeBinding(e.Alias, e.Direction == FragmentEdgeDirection.Inbound ? EdgeDirection.Inbound : EdgeDirection.Outbound))
                     .ToList(),
             };
-            var entry = new Entry(node.Launch(launch, _loggerOf(spec.Fragment)), spec, jobPath, node, request.LaunchToken, cursorFiles);
+            var entry = new Entry(node.Launch(launch, _loggerOf(request.RunId, spec.Fragment)), spec, jobPath, node, request.LaunchToken, cursorFiles);
             if (!_runs.TryAdd(key, entry))
             {
                 await entry.Run.DisposeAsync();

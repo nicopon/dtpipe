@@ -75,7 +75,7 @@ internal sealed class NodeAgent : BackgroundService
             .ToList();
 
         _hostLoggers = loggers;
-        _logger = _forwarder.For(loggers, _options.Name, fragment: null).CreateLogger(typeof(NodeAgent).FullName!);
+        _logger = _forwarder.For(loggers, _options.Name, fragment: null, runId: null).CreateLogger(typeof(NodeAgent).FullName!);
         _dtpipePath = DtPipeLocation.Resolve(_options.DtPipe);
         var dtpipe = new DtPipeCommand(_dtpipePath, _stateDir, _environment);
         _bricks = new BrickHost(_options.Name, definition.Bricks, dtpipe, _logger);
@@ -249,7 +249,7 @@ internal sealed class NodeAgent : BackgroundService
                 AccessTokenProvider = () => _tokens.GetAsync(fresh: true),
                 BatchBytes = _options.BatchBytes,
                 MaxInFlightBatches = _options.MaxInFlightBatches,
-            }, _forwarder.For(_hostLoggers, _options.Name, fragment: null), ct);
+            }, _forwarder.For(_hostLoggers, _options.Name, fragment: null, runId: null), ct);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
@@ -263,7 +263,7 @@ internal sealed class NodeAgent : BackgroundService
             var runs = new ReplicaRuns(
                 _hub!, node, _options.Name, _dtpipePath, _environment, _fragmentsDir,
                 spec => FragmentIntake.JobOf(spec, _policy, _gate, _bricks.DeclaredBranch, _bricks.DeclaredVersion, _bricks.Forms),
-                fragment => _forwarder.For(_hostLoggers, _options.Name, fragment).CreateLogger(typeof(FragmentRun).FullName!),
+                (runId, fragment) => _forwarder.For(_hostLoggers, _options.Name, fragment, runId).CreateLogger(typeof(FragmentRun).FullName!),
                 _logger, _options.UnwiredRunTimeout, _options.FaultInjection, _options.ArrowCompression, _options.ArrowCompressionLevel,
                 _options.ReadChunkBytes, edgesOnly: _policy == FragmentPolicy.AnyFragment, maxRuns: _options.MaxRuns);
             runs.Bind();

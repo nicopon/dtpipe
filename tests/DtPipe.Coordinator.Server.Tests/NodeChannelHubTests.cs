@@ -126,10 +126,11 @@ public sealed class NodeChannelHubTests : IDisposable
     {
         var (hub, _) = Connect("c1", "known");
         await hub.Announce(Proposing("some-other-name"));
-        await hub.ReportLog(new NodeLogLine("some-other-name", "p@node-known", "Information", "running"));
+        await hub.ReportLog(new NodeLogLine("some-other-name", "p@node-known", "Information", "running", RunId: "run-7"));
         var line = Assert.Single(LogLines());
         Assert.Equal("node-known", line.Node);
         Assert.Equal("running", line.Message);
+        Assert.Equal("run-7", line.RunId);
     }
 
     [Fact]

@@ -203,7 +203,8 @@ none. One node per process, which is one replica of its node's identity; a secon
   outlives the host. `[local: samples/distributed-lab smoke.py replicas — Leave of an idle replica]` `[unchecked: runs in flight at an orderly stop, children that outlive the host]`
 - Logs reach the host's own loggers and the coordinator (`NodeLogForwarder`, bounded and lossy: a
   slow coordinator never blocks a relay that logs). The coordinator gets Debug and up, TransportR
-  and the framework from Warning.
+  and the framework from Warning. A fragment's lines carry its fragment and the run it belongs to
+  (`LaunchRequest.RunId`), which the coordinator keeps as written; the node's own lines carry neither.
 
 `tests/DtPipe.PipelineNode.Hosting.Tests` covers the builder and the options; the lab's `smoke.py`
 drives the agent against a real coordinator.
