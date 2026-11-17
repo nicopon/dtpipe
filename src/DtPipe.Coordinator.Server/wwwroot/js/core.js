@@ -269,52 +269,99 @@ function onRun(run) {
   if (!isActive(run)) emit("journal");
 }
 
+// What the page reads of the server to hold its state: at start, and again each time the stream opens after a cut. Each entry is a
+// path and where its answer lands in the store. `me` and `info` are read at start alone: no event of the stream moves them.
+const STATE_READS = [
+  ["/api/nodes", (nodes) => ({ nodes })],
+  ["/api/bricks", (bricks) => ({ bricks })],
+  ["/api/flow-matrix", (matrix) => ({ matrix: matrix.groups })],
+  ["/api/deployments", (deployments) => ({ deployments })],
+  ["/api/runs/last", (last) => ({ last: new Map(last.map((r) => [r.pipelineId, r])) })],
+  ["/api/runs/queue", (queue) => ({ queue })],
+];
+
+/** The store's fields as the server holds them now. */
+async function readState() {
+  return Object.assign({}, ...(await Promise.all(STATE_READS.map(async ([path, put]) => put(await api(path))))));
+}
+
+// A cut leaves the page as it was when the stream dropped: a run that ended meanwhile still shows in flight. When the stream opens again the
+// page reads its state again, and holds the events that arrive meanwhile, for an answer may be older than an event it overlaps and would
+// undo it. The held events are applied over the answers in the order they arrived; a log line is no state and never waits. One resync owns
+// the held events at a time: a stream that opens again while one is reading hands them to the newer, whose answers alone are applied.
+// A read that does not answer in time or fails leaves the state as the events made it, and says so.
+const RESYNC_TIMEOUT = 15000;
+// What the views are told once the state is read again. A view that loads its own data (the library, the rights, the journal) does it on its kind.
+const RESYNC_KINDS = ["nodes", "bricks", "deployments", "runs", "journal", "library", "rights"];
+let held = null;
+let resyncs = 0;
+
+async function resync() {
+  const mine = ++resyncs;
+  held ??= [];
+  let patch = null, failure = null, timer;
+  try {
+    patch = await Promise.race([readState(), new Promise((_, no) => { timer = setTimeout(no, RESYNC_TIMEOUT, new Error("no answer in time")); })]);
+  } catch (e) { failure = e; } finally { clearTimeout(timer); }
+  if (mine !== resyncs) return;
+  const events = held;
+  held = null;
+  if (patch) Object.assign(store, patch);
+  for (const event of events) onEvent(event);
+  if (failure) toast(`The page could not read the coordinator's state again, and may show what it missed: ${failure.message}`);
+  for (const kind of RESYNC_KINDS) emit(kind);
+  refreshHealth();
+}
+
 export async function start() {
-  const [me, info, nodes, bricks, matrix, deployments, last, queue] = await Promise.all([
-    api("/api/me"), api("/api/info"), api("/api/nodes"), api("/api/bricks"), api("/api/flow-matrix"), api("/api/deployments"), api("/api/runs/last"), api("/api/runs/queue"),
-  ]);
-  Object.assign(store, {
-    me, httpKeys: info.httpKeys, version: info.version, nodes, bricks, matrix: matrix.groups, deployments, queue,
-    last: new Map(last.map((r) => [r.pipelineId, r])),
-  });
+  const [me, info, state] = await Promise.all([api("/api/me"), api("/api/info"), readState()]);
+  Object.assign(store, { me, httpKeys: info.httpKeys, version: info.version, ...state });
   emit("all");
   refreshHealth();
   // ?static renders once without the live stream (a headless browser waits on it forever).
   if (new URLSearchParams(location.search).has("static")) return;
 
   const source = new EventSource("/api/events");
-  source.onopen = () => { opened++; store.connected = true; emit("connection"); };
+  source.onopen = () => {
+    store.connected = true;
+    emit("connection");
+    if (++opened > 1) resync();
+  };
   source.onerror = () => { store.connected = false; emit("connection"); };
   source.onmessage = (message) => {
-    const { type, data, at, seq, boot, replay } = JSON.parse(message.data);
-    switch (type) {
-      case "nodes":
-        store.nodes = data;
-        clearTimeout(bricksTimer);
-        bricksTimer = setTimeout(refreshBricks, 300);
-        emit("nodes");
-        refreshHealth();
-        break;
-      case "deployments": store.deployments = data; emit("deployments"); refreshHealth(); break;
-      case "run": onRun(data); break;
-      case "deploy":
-        if (data.state === "failed") addLog({ node: "coordinator", level: "Error", message: `${data.pipelineId}: deployment failed: ${data.message}` });
-        refreshHealth();
-        break;
-      case "log":
-        if (!isNewLine({ seq, boot })) break;
-        // `runId` is the run of the fragment that logged, as its node said it; a line the coordinator writes has none.
-        // The lines replayed to the page's first connection are its backfill: held, never counted as news.
-        addLog({ node: data.node, fragment: data.fragment, level: data.level, message: data.message, ...(typeof data.runId === "string" && data.runId ? { runId: data.runId } : {}), ...(at ? { at: new Date(at) } : {}), ...(replay === true && opened === 1 ? { backfill: true } : {}) });
-        break;
-      case "bytes": store.bytes = data; emit("bytes"); break;
-      case "library": emit("library"); refreshHealth(); break;
-      case "rights":
-        api("/api/flow-matrix").then((m) => { store.matrix = m.groups; emit("rights"); }).catch(() => emit("rights"));
-        refreshHealth();
-        break;
-    }
+    const event = JSON.parse(message.data);
+    if (held && event.type !== "log") held.push(event); else onEvent(event);
   };
+}
+
+function onEvent({ type, data, at, seq, boot, replay }) {
+  switch (type) {
+    case "nodes":
+      store.nodes = data;
+      clearTimeout(bricksTimer);
+      bricksTimer = setTimeout(refreshBricks, 300);
+      emit("nodes");
+      refreshHealth();
+      break;
+    case "deployments": store.deployments = data; emit("deployments"); refreshHealth(); break;
+    case "run": onRun(data); break;
+    case "deploy":
+      if (data.state === "failed") addLog({ node: "coordinator", level: "Error", message: `${data.pipelineId}: deployment failed: ${data.message}` });
+      refreshHealth();
+      break;
+    case "log":
+      if (!isNewLine({ seq, boot })) break;
+      // `runId` is the run of the fragment that logged, as its node said it; a line the coordinator writes has none.
+      // The lines replayed to the page's first connection are its backfill: held, never counted as news.
+      addLog({ node: data.node, fragment: data.fragment, level: data.level, message: data.message, ...(typeof data.runId === "string" && data.runId ? { runId: data.runId } : {}), ...(at ? { at: new Date(at) } : {}), ...(replay === true && opened === 1 ? { backfill: true } : {}) });
+      break;
+    case "bytes": store.bytes = data; emit("bytes"); break;
+    case "library": emit("library"); refreshHealth(); break;
+    case "rights":
+      api("/api/flow-matrix").then((m) => { store.matrix = m.groups; emit("rights"); }).catch(() => emit("rights"));
+      refreshHealth();
+      break;
+  }
 }
 
 /** What became of the cursors a run reported: the value each kept, or why one did not advance. */

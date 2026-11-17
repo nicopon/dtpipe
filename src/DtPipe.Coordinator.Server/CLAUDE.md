@@ -568,6 +568,14 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   always did: a line is lost never, and a duplicate is possible only when `boot` changes. The mark lives beside `store.logs`, which Clear
   and the capacity cut would let a line back into. The Events tab's badge counts what is news to the page: a line replayed to its first
   connection is not, any other is, a line replayed after a cut that the page did not hold included.
+  **The stream sends only `log` lines again, so a page that reconnects reads its state again**: every opening after the first reads
+  `STATE_READS` (`core.js`, the one list `start()` reads too, `me` and `info` aside), holds the events that arrive meanwhile (all but
+  `log` lines, which are no state) and applies them over the answers in the order they came, so an answer older than an event never
+  undoes it; a stream that opens again while a read is pending hands the held events to the newer read, and only that one's answers are
+  applied. It then tells the views `nodes`, `bricks`, `deployments`, `runs`, `journal`, `library` and `rights`, those that load their own
+  data included. A read that fails or does not answer in 15 seconds is said in a toast, and the page keeps what the events made: it
+  stays stale until the next cut. The "run over" line the Events view writes for a `run` event is written for an event the page
+  received: a run that ended during a cut has none.
   `[CI: StateWireTests (the frame)] [unchecked: the pages, which no test plays in a browser]`
 - **A transport line during a requested cancellation is shown as information, and nothing reads it.** `NodeLogLine.Category` is the
   category of the logger that wrote the line (`NodeLogForwarder` fills it); `NodeChannelHub.ReportLog` shows a warning or an error of
