@@ -9,7 +9,6 @@ export const store = {
   bricks: [],
   matrix: {},
   deployments: [],
-  runs: [],          // the journal, newest first: the latest page, whatever the pipeline
   last: new Map(),   // the latest run that is over of each pipeline, by pipeline id: /api/runs/last, however far back it ended
   queue: [],         // the runs in flight, then the queued ones
   logs: [],
@@ -237,19 +236,20 @@ function onRun(run) {
         : a.state === "running" ? new Date(a.startedAt) - new Date(b.startedAt) : new Date(a.queuedAt) - new Date(b.queuedAt));
   } else {
     store.queue = store.queue.filter((r) => r.runId !== run.runId);
-    store.runs = [run, ...store.runs.filter((r) => r.runId !== run.runId)].slice(0, 200);
     if (run.pipelineId) store.last.set(run.pipelineId, run);
     addLog({ node: "coordinator", level: run.state === "succeeded" ? "Information" : "Warning", message: `${run.runId} ${run.pipelineId ?? ""} ${runStateLabel(run.state)}${run.refusal ? `: ${run.refusal}` : ""}`, runId: run.runId });
   }
   emit("runs");
+  // A run that is over is in the journal, which the Runs view reads from the server again.
+  if (!isActive(run)) emit("journal");
 }
 
 export async function start() {
-  const [me, info, nodes, bricks, matrix, deployments, runs, last, queue] = await Promise.all([
-    api("/api/me"), api("/api/info"), api("/api/nodes"), api("/api/bricks"), api("/api/flow-matrix"), api("/api/deployments"), api("/api/runs"), api("/api/runs/last"), api("/api/runs/queue"),
+  const [me, info, nodes, bricks, matrix, deployments, last, queue] = await Promise.all([
+    api("/api/me"), api("/api/info"), api("/api/nodes"), api("/api/bricks"), api("/api/flow-matrix"), api("/api/deployments"), api("/api/runs/last"), api("/api/runs/queue"),
   ]);
   Object.assign(store, {
-    me, httpKeys: info.httpKeys, version: info.version, nodes, bricks, matrix: matrix.groups, deployments, runs, queue,
+    me, httpKeys: info.httpKeys, version: info.version, nodes, bricks, matrix: matrix.groups, deployments, queue,
     last: new Map(last.map((r) => [r.pipelineId, r])),
   });
   emit("all");
