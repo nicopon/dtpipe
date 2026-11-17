@@ -28,8 +28,8 @@ its contracts and the job reader, and depends on TransportR and Apache.Arrow. `A
 Each run of a fragment is a `dtpipe` child process. The csproj gets the program from the `dtpipe` tool package:
 
 ```xml
-<PackageReference Include="DtPipe.PipelineNode.Hosting" Version="1.16.1-beta.1" />
-<PackageDownload Include="dtpipe" Version="[1.16.0]" />
+<PackageReference Include="DtPipe.PipelineNode.Hosting" Version="1.17.0" />
+<PackageDownload Include="dtpipe" Version="[1.17.0]" />
 ```
 
 A tool package cannot be a `PackageReference`, so it is downloaded; the node library writes its folder into the
@@ -58,8 +58,6 @@ samples/arrow-socket-source/spike-node.sh     # port 18080 by default
 ```
 
 `DTPIPE_DLL=src/DtPipe/bin/Debug/net10.0/DtPipe.dll` makes the node run a local build instead of the package.
-The published 1.16.0 does not refuse a stream that ends before its schema in words: use a local build to see
-the case read `is truncated: it ends before its schema`.
 
 ## What `AddArrowSource` holds
 

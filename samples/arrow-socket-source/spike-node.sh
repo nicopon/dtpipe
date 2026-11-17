@@ -33,13 +33,13 @@ echo "Work directory: $WORK"
 say "Build the service"
 # The node library is not published yet: pack it into dist/node-host under a version of its own, so a restore never serves an
 # older copy of the same version from the NuGet cache.
-NODE_HOST_VERSION="1.16.0-local.$(date +%s)"
+NODE_HOST_VERSION="1.17.0-local.$(date +%s)"
 rm -f "$ROOT"/dist/node-host/*-local.*.nupkg
 "$ROOT/tests/scripts/validate_node_host_package.sh" --version "$NODE_HOST_VERSION" >/dev/null
 dotnet build "$HERE/ArrowSocketSource.csproj" -p:NodeHostVersion="$NODE_HOST_VERSION" -v q -nologo | tail -1
 SERVICE_EXE="$HERE/bin/Debug/net10.0/ArrowSocketSource"
 # The dtpipe the node runs, for the witness: the local build when given, else the package the build downloaded.
-TOOL="${DTPIPE_DLL:-$(ls "${NUGET_PACKAGES:-$HOME/.nuget/packages}"/dtpipe/1.16.0/tools/*/any/DtPipe.dll | head -1)}"
+TOOL="${DTPIPE_DLL:-$(ls "${NUGET_PACKAGES:-$HOME/.nuget/packages}"/dtpipe/1.17.0/tools/*/any/DtPipe.dll | head -1)}"
 echo "dtpipe of the node: $TOOL"
 NODE_DTPIPE=()
 [ -n "${DTPIPE_DLL:-}" ] && NODE_DTPIPE=(--dtpipe "$DTPIPE_DLL")
