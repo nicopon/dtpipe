@@ -1,15 +1,11 @@
-// Runs: what is deployed, the runs in flight and the queue behind them, the journal of finished runs,
-// and the live events of every node.
+// Runs: what is deployed, the runs in flight and the queue behind them, and the journal of finished runs.
 import { $, ROWS_CROSSED_HINT, api, duration, endNotes, esc, fmt, nodeColor, plural, cursorsOf, ranPlan, rowsCrossed, runStateLabel, shortNode, store, toast } from "./core.js";
 
 let host = null;
 let openRun = null;          // runId whose report is unfolded
 let filter = "";             // pipeline id filter of the journal
 let filtered = [];           // the runs of that pipeline, as the server lists them
-let logNode = "";
-let logDebug = false;
 let ticker = null;
-let logTimer = null;
 
 export function mount(el) {
   host = el;
@@ -17,15 +13,9 @@ export function mount(el) {
     <div class="view-head"><h1>Runs</h1><p class="hint">Runs that share no data node are in flight together; a run that shares one waits its turn, in the order runs came, until that run ends and its own fragments are registered again. The runner never counts.</p></div>
     <section class="card"><h2>Deployments</h2><div id="r-deployments"></div></section>
     <section class="card"><h2>In flight and queued</h2><div id="r-queue"></div></section>
-    <section class="card"><div class="card-head"><h2>Runs log</h2><select id="r-filter"></select></div><div id="r-journal"></div></section>
-    <section class="card"><div class="card-head"><h2>Events</h2>
-      <div class="actions"><select id="r-lognode"></select><label class="check"><input type="checkbox" id="r-debug"> child stderr</label><button id="r-clear" class="ghost small">Clear</button></div></div>
-      <div id="r-log" class="log mono"></div></section>`;
+    <section class="card"><div class="card-head"><h2>Runs log</h2><select id="r-filter"></select></div><div id="r-journal"></div></section>`;
   host.addEventListener("click", onClick);
   $("r-filter").addEventListener("change", (e) => { filter = e.target.value; filtered = []; renderJournal(); loadFiltered(); });
-  $("r-lognode").addEventListener("change", (e) => { logNode = e.target.value; renderLog(); });
-  $("r-debug").addEventListener("change", (e) => { logDebug = e.target.checked; renderLog(); });
-  $("r-clear").addEventListener("click", () => { store.logs = []; renderLog(); });
   clearInterval(ticker);
   ticker = setInterval(() => { if (host?.isConnected) renderQueue(); else clearInterval(ticker); }, 1000);
   renderAll();
@@ -33,7 +23,6 @@ export function mount(el) {
 }
 
 export function update(kind) {
-  if (kind === "logs") { clearTimeout(logTimer); logTimer = setTimeout(renderLog, 200); return; }
   if (["all", "deployments", "runs", "nodes"].includes(kind)) renderAll();
   if (kind === "runs") loadFiltered();
 }
@@ -55,7 +44,6 @@ function renderAll() {
   renderQueue();
   renderJournal();
   renderSelectors();
-  renderLog();
 }
 
 function renderDeployments() {
@@ -97,8 +85,6 @@ function renderSelectors() {
   const f = $("r-filter");
   const ids = [...store.last.keys()].sort();
   f.innerHTML = `<option value="">every pipeline</option>` + ids.map((i) => `<option ${i === filter ? "selected" : ""}>${esc(i)}</option>`).join("");
-  const n = $("r-lognode");
-  n.innerHTML = `<option value="">every node</option>` + [...store.nodes.map((x) => x.name), "coordinator"].map((x) => `<option ${x === logNode ? "selected" : ""}>${esc(x)}</option>`).join("");
 }
 
 function report(r) {
@@ -130,18 +116,6 @@ function renderJournal() {
         <td class="num">${esc(duration(r))}</td><td class="num">${rows ? fmt(rows) : ""}</td><td class="wrap">${esc(r.reason ?? (r.result?.cause ? shortNode(r.result.cause) : ""))}</td></tr>
         ${openRun === r.runId ? `<tr><td colspan="8">${report(r)}</td></tr>` : ""}`;
     }).join("")}</table>` : `<p class="hint">No run yet.</p>`;
-}
-
-function renderLog() {
-  const el = $("r-log");
-  if (!el) return;
-  const stick = el.scrollTop + el.clientHeight >= el.scrollHeight - 20;
-  el.innerHTML = store.logs
-    .filter((l) => (!logNode || l.node === logNode) && (logDebug || l.level !== "Debug"))
-    .slice(-500)
-    .map((l) => `<div class="${esc(l.level)}"><span class="t">${l.at.toLocaleTimeString()}</span> <span class="n" style="color:${nodeColor(l.node)}">${esc(l.node)}</span>${l.fragment ? ` <span class="t">${esc(l.fragment)}</span>` : ""} ${esc(l.message)}</div>`)
-    .join("");
-  if (stick) el.scrollTop = el.scrollHeight;
 }
 
 async function onClick(e) {

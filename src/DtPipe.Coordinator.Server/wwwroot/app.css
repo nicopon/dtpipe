@@ -6,6 +6,9 @@ body.app { min-height: 100vh; }
 .nav a:hover { color: var(--text); background: var(--surface-2); }
 .nav a.active { color: var(--accent); background: var(--surface-2); }
 .nav a.external { font-weight: 400; }
+.nav .count { margin-left: 6px; padding: 0 6px; border-radius: 999px; font-size: 11px; font-weight: 700; color: var(--on-solid); }
+.nav .count.bad { background: var(--bad); }
+.nav .count.warn { background: var(--warn); }
 
 .view { padding: 16px; }
 .view-body { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
@@ -161,6 +164,11 @@ pre.usage { white-space: pre-wrap; overflow-wrap: anywhere; }
 .audit { font-size: 12.5px; padding: 2px 0; border-bottom: 1px dashed var(--border); }
 
 /* Runs */
+/* Events: the stream takes the window's height, and the box takes what the toolbar leaves. */
+.view-events { height: calc(100vh - 130px); min-height: 360px; }
+.view-events .events-card { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.view-events .log { flex: 1 1 auto; height: auto; min-height: 0; }
+.log a.run-link { color: var(--accent); }
 .queue-item { display: flex; gap: 10px; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--border); }
 .queue-item button { margin-left: auto; }
 .run-report { padding: 6px 0; }

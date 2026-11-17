@@ -534,6 +534,8 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   and its journal at `GET /api/runs?pipeline=&state=`, whose `limit` is a page of at most 500 and whose `X-Total-Count` is how many runs
   answer the two filters before the page cuts them, counted in the same pass as the page (`RunJournal.Page`). A run has an address,
   `GET /api/runs/{id}` (in flight, queued or journaled; 404 once the retention let it go), which the literal `last` and `queue` outrank.
+  The Events view is the page's own memory of `/api/events` (`LOG_CAPACITY` lines in `core.js`), a run id on a line is the node's word
+  and only ever a link to `#/runs/<id>`, and the view keeps nothing.
   **A run not yet over that the store cannot keep
   throws `StoreUnavailableException`** (503 from the middleware of `CoordinatorServer`), so none is queued or started
   without its record; a run that is over is kept in memory whatever the store says and only logged, and a store that missed it

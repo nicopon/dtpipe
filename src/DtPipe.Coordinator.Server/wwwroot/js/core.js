@@ -144,12 +144,30 @@ export function toast(message, kind = "error") {
   if (kind === "error") addLog({ node: "coordinator", level: "Error", message });
 }
 
+// `n` numbers the lines in the order the page received them, which `markLogsSeen` and the Events badge read.
+let logSeq = 0;
+let seenSeq = 0;
+
 export function addLog(line) {
   if (/:\s*$/.test(line.message)) return; // a label whose value was empty, e.g. a silent child's stderr
-  store.logs.push({ at: new Date(), ...line });
+  store.logs.push({ at: new Date(), ...line, n: ++logSeq });
   if (store.logs.length > LOG_CAPACITY) store.logs.splice(0, store.logs.length - LOG_CAPACITY);
   emit("logs");
 }
+
+/** The errors and the warnings among the lines that arrived since the Events view was last open (never opened: every line held). */
+export function unseenLogs() {
+  let errors = 0, warnings = 0;
+  for (const l of store.logs) {
+    if (l.n <= seenSeq) continue;
+    if (l.level === "Error" || l.level === "Critical") errors++;
+    else if (l.level === "Warning") warnings++;
+  }
+  return { errors, warnings };
+}
+
+/** Every line held so far counts as seen: the Events view is open, or has just been left. */
+export function markLogsSeen() { seenSeq = logSeq; }
 
 export function parseCsv(text) {
   const rows = [];

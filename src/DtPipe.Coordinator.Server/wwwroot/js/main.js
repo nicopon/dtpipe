@@ -1,11 +1,12 @@
 // The coordinator's page: a hash router over its views, and the status pills of the top bar.
-import { $, addLog, bytes, esc, gate, parseAddress, start, store, subscribe, tagOf, toast } from "./core.js";
+import { $, addLog, bytes, esc, gate, parseAddress, start, store, subscribe, tagOf, toast, unseenLogs } from "./core.js";
 import * as nodes from "./nodes.js";
 import * as library from "./library.js";
 import * as runs from "./runs.js";
+import * as events from "./events.js";
 import * as access from "./access.js";
 
-const views = { nodes, library, runs, access };
+const views = { nodes, library, runs, events, access };
 
 let current = null;
 
@@ -30,6 +31,18 @@ function route() {
     current.mount(host, params, query);
   }
   window.scrollTo(0, 0);
+  renderBadge();
+}
+
+// The Events tab counts the errors and the warnings that arrived since the view was last open; the view marks them seen while it is.
+function renderBadge() {
+  const { errors, warnings } = unseenLogs();
+  const el = $("events-badge");
+  const total = errors + warnings;
+  el.hidden = total === 0;
+  el.textContent = total > 99 ? "99+" : String(total);
+  el.className = `count ${errors ? "bad" : "warn"}`;
+  el.title = `${errors} error${errors === 1 ? "" : "s"} and ${warnings} warning${warnings === 1 ? "" : "s"} since Events was last open`;
 }
 
 function renderPills() {
@@ -51,6 +64,7 @@ function renderPills() {
 subscribe((kind) => {
   renderPills();
   current?.update?.(kind);
+  renderBadge();
 });
 
 // What the person's role does not allow is disabled as a view draws it, and says so.
