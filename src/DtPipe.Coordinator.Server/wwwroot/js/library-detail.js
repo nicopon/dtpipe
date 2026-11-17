@@ -25,10 +25,15 @@ let versionsError = "";
 let shown = null;         // { commit, yaml, diff }: the commit being looked at
 let reading = 0;          // the newest read of the commits
 let showing = 0;          // the newest read of one commit
+// The reads of the job and of its plan share one ticket. `mount`, `leave` and each `load` take the next; a read of the plan alone,
+// or of the job after a Deploy, keeps the one it found when it began, so a page left or a `load` begun after it retires it and it never
+// retires a `load`. A read that is not its page's newest writes nothing and shows nothing, whatever its answer.
+let reads = 0;
 
 export function mount(el, params) {
   host = el;
   id = params[0];
+  reads++;
   doc = null; plan = null;
   journaled = null; journalError = "";
   versionsOpen = false; commits = null; versionsError = ""; shown = null;
@@ -38,42 +43,57 @@ export function mount(el, params) {
   loadRecent();
 }
 
-// An answer that comes after the page is left draws nothing: `render` and `load` leave a page with no host alone.
+// An answer in flight when the page is left is dropped by its ticket, and `render` leaves a page with no host alone.
 export function leave() {
-  asking++; reading++; showing++;
+  reads++; asking++; reading++; showing++;
   host = null;
 }
 
 export function update(kind) {
   if (kind === "library") load();
   // A change of the rights can change the plan (its groups, what the matrix allows between them), never the bindings drafted here.
-  else if (kind === "rights" && doc) loadPlan().then(render, (e) => toast(e.message));
+  else if (kind === "rights" && doc) loadPlan(id, reads).then((kept) => kept && render(), (e) => toast(e.message));
   // A run that is over is in the journal: the runs listed are read again then, and drawn from the queue meanwhile.
   else if (kind === "journal") loadRecent();
   else if (["deployments", "runs", "nodes", "all", "health"].includes(kind)) render();
 }
 
 async function load() {
+  const pipeline = id;
+  const mine = ++reads;
   try {
-    doc = await api(`/api/library/${encodeURIComponent(id)}`);
-    await loadPlan();
+    const read = await api(`/api/library/${encodeURIComponent(pipeline)}`);
+    if (mine !== reads) return;
+    doc = read;
+    if (!(await loadPlan(pipeline, mine))) return;
     draft = draftOf(doc.bindings);
   } catch (e) {
-    if (host) host.innerHTML = `<p class="mismatch">${esc(e.message)}</p>`;
+    if (mine === reads && host) host.innerHTML = `<p class="mismatch">${esc(e.message)}</p>`;
     return;
   }
   // A save adds a commit: an unfolded section reads them again.
   if (versionsOpen) await readCommits(++reading);
-  render();
+  if (mine === reads) render();
 }
 
-async function loadPlan() {
-  const answer = await api(`/api/library/${encodeURIComponent(id)}/plan`);
+// Reads the plan of `pipeline` for the read that began at ticket `mine`. True when the plan is kept; false when that read is no
+// longer its page's newest, whether it answered or failed.
+async function loadPlan(pipeline, mine) {
+  if (mine !== reads) return false;
+  let answer;
+  try {
+    answer = await api(`/api/library/${encodeURIComponent(pipeline)}/plan`);
+  } catch (e) {
+    if (mine !== reads) return false;
+    throw e;
+  }
+  if (mine !== reads) return false;
   plan = answer.plan;
   armable = !!answer.armable;
   runner = answer.runner;
   brickOfUnit = answer.bricks || {};
   offers = answer.offers || {};
+  return true;
 }
 
 // The page chooses a binding's node and mode. A strict binding's brick is resolved by the server from the job's text; one in
@@ -339,6 +359,8 @@ async function onClick(e) {
   const b = e.target.closest("button");
   if (!b || b.disabled) return;
   if (b.id === "x-versions" || b.dataset.show) return onVersions(b);
+  // What a click reads again after its own request names the pipeline and the ticket it began with.
+  const pipeline = id, mine = reads;
   busy = true;
   render();
   try {
@@ -352,12 +374,13 @@ async function onClick(e) {
       toast(`Deploying ${id}…`, "info");
       await api(`/api/library/${encodeURIComponent(id)}/deploy`, {});
       toast(`${id} deployed: every fragment registered.`, "info");
-      doc = await api(`/api/library/${encodeURIComponent(id)}`);
+      const read = await api(`/api/library/${encodeURIComponent(pipeline)}`);
+      if (mine === reads) doc = read;
     } else if (b.id === "x-allow-edges") {
       const edges = missingEdges();
       await api("/api/rights/matrix/edges", { edges });
       toast(`Allowed in the flow matrix: ${edges.map((e) => `${e.from} → ${e.to}`).join(", ")}.`, "info");
-      await loadPlan();
+      await loadPlan(pipeline, mine);
     } else if (b.id === "x-run") {
       const run = await api("/api/runs", { pipelineId: id });
       toast(`${run.runId} ${runStateLabel(run.state)}.`, "info");
@@ -374,7 +397,7 @@ async function onClick(e) {
   } catch (err) {
     toast(err.message);
     // A refused Deploy is read again: the plan then shows what the matrix lacks now.
-    if (b.id === "x-deploy") await loadPlan().catch(() => {});
+    if (b.id === "x-deploy") await loadPlan(pipeline, mine).catch(() => {});
   }
   busy = false;
   render();
