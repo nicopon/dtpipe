@@ -11,7 +11,8 @@ internal sealed class FailingRunStore(IRunStore inner) : IRunStore
 
     public long NextSequence() => Guard(inner.NextSequence);
     public void RaiseSequenceTo(long floor) => Guard(() => { inner.RaiseSequenceTo(floor); return 0; });
-    public void Put(StoredRun run) => Guard(() => { inner.Put(run); return 0; });
+    public void Put(StoredRun run, IReadOnlyCollection<string> forget) => Guard(() => { inner.Put(run, forget); return 0; });
+    public void Forget(IReadOnlyCollection<string> runIds) => Guard(() => { inner.Forget(runIds); return 0; });
     public StoredRuns Load() => Guard(inner.Load);
     public void AddOwed(IReadOnlyCollection<OwedFragment> owed, DateTimeOffset until) => Guard(() => { inner.AddOwed(owed, until); return 0; });
     public IReadOnlyList<OwedFragment> ReadOwed(DateTimeOffset now) => Guard(() => inner.ReadOwed(now));

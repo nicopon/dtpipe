@@ -248,7 +248,7 @@ the answer is the `runId` (202): the scheduler asks `GET /service/runs/{id}` unt
 (`POST /service/runs/{id}/cancel`; a run of another identity or of a person is not its to cancel). An `Idempotency-Key` header
 (1 to 128 letters, digits, `.`, `_`, `:` or `-`) makes a retry safe: a second request of the same identity with the same key
 answers the first run (200) and queues none, whatever became of it, and the same key for another pipeline is a 409. The key lives
-with the run in the journal, which keeps the latest 200 finished runs; a run still in flight when the server stops is ended as an
+with the run in the journal, which keeps the latest ten finished runs of each pipeline; a run still in flight when the server stops is ended as an
 error at the next start and answers its key as that run. A run names who started it (`launchedBy`: a person's email, a service's client id) and the pages show
 it. A launcher reaches nothing else: not `/api`, not `/health`, not the node channel.
 
@@ -390,7 +390,7 @@ sign a person in and out. `/health` is not under `/api` and takes a service's to
 | `GET /api/rights` · `PUT /api/rights/matrix` | rights, the flow matrix |
 | `POST /api/rights/identities` · `PUT`/`DELETE /api/rights/identities/{id}` · `POST …/{id}/reconnect` | identities; reconnect drops a node's control connection so it fetches a new token |
 | `POST /api/rights/pending/{subject}/accept` (`{name, groups, description?}`) · `…/ignore` | a host waiting for approval: accept it as an identity, or set it aside for 24 hours |
-| `POST /api/runs` · `GET /api/runs`, `/api/runs/queue` | `{pipelineId?}` queues a run; the journal; in flight and queued |
+| `POST /api/runs` · `GET /api/runs`, `/api/runs/last`, `/api/runs/queue` | `{pipelineId?}` queues a run; the journal (`?pipeline=`, `?limit=`); the latest finished run of each pipeline; in flight and queued |
 | `POST /api/runs/cancel` | `{runId?}`: a run in flight or queued; with no id, the one in flight (409 when several are) |
 | `POST /api/fragments/{name}/kill` | fault injection: ends the fragment's child on every replica of its node whose host enabled it (every lab host does) |
 | `GET /api/events` | server-sent events: nodes, deployments, logs, bytes, runs |

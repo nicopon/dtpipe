@@ -1,20 +1,20 @@
+using System.Data.Common;
+
 namespace DtPipe.Coordinator.Server.Stores;
 
 /// <summary>
 /// <see cref="IRunStore"/> in the coordinator's database: the <c>runs</c> table (a document, whether the run is over, and when it
 /// ended), the <c>counters</c> table (the counter that draws ids) and the <c>owed</c> table (the abandonments, with when each falls
-/// due). A write, and the cut of the history it triggers, are one transaction. The counter has one writer, the coordinator that holds
+/// due). A write, and the erasure of the runs it names, are one transaction. The counter has one writer, the coordinator that holds
 /// the database, so it is read and written in two statements of one transaction. It borrows the coordinator's <see cref="SqlDatabase"/>.
 /// </summary>
 internal sealed class SqlRunStore(SqlDatabase database) : IRunStore
 {
     private const string Counter = "run";
+    private const string Erase = "DELETE FROM runs WHERE is_over = 1 AND id = @id";
 
     private readonly string _put = database.Dialect.Upsert("runs", ["id"], ["doc", "is_over", "at_ms"]);
     private readonly string _owe = database.Dialect.Upsert("owed", ["run_id", "fragment", "node"], ["until_ms"]);
-    private readonly string _history = $"SELECT doc FROM runs WHERE is_over = 1 ORDER BY at_ms DESC, id DESC {database.Dialect.First("@window")}";
-    private readonly string _cut =
-        $"DELETE FROM runs WHERE is_over = 1 AND id NOT IN (SELECT id FROM runs WHERE is_over = 1 ORDER BY at_ms DESC, id DESC {database.Dialect.First("@window")})";
 
     public long NextSequence() => database.Call("the run journal", (c, t) =>
     {
@@ -37,17 +37,27 @@ internal sealed class SqlRunStore(SqlDatabase database) : IRunStore
         });
     }
 
-    public void Put(StoredRun run) => database.Call("the run journal", (c, t) =>
+    public void Put(StoredRun run, IReadOnlyCollection<string> forget) => database.Call("the run journal", (c, t) =>
     {
         SqlDatabase.Run(c, t, _put, ("@id", run.RunId), ("@doc", run.Document), ("@is_over", run.Over ? 1 : 0), ("@at_ms", run.At.ToUnixTimeMilliseconds()));
-        // The runs past the window go with their documents.
-        if (run.Over) SqlDatabase.Run(c, t, _cut, ("@window", IRunStore.Window));
+        Forget(c, t, forget);
         return 0;
     });
 
+    public void Forget(IReadOnlyCollection<string> runIds) => database.Call("the run journal", (c, t) =>
+    {
+        Forget(c, t, runIds);
+        return 0;
+    });
+
+    private static void Forget(DbConnection c, DbTransaction? t, IReadOnlyCollection<string> runIds)
+    {
+        foreach (var id in runIds) SqlDatabase.Run(c, t, Erase, ("@id", id));
+    }
+
     public StoredRuns Load() => database.Call("the run journal", (c, t) => new StoredRuns(
         SqlDatabase.Rows(c, t, "SELECT doc FROM runs WHERE is_over = 0 ORDER BY at_ms, id", r => r.GetString(0)),
-        SqlDatabase.Rows(c, t, _history, r => r.GetString(0), ("@window", IRunStore.Window))));
+        SqlDatabase.Rows(c, t, "SELECT doc FROM runs WHERE is_over = 1 ORDER BY at_ms DESC, id DESC", r => r.GetString(0))));
 
     public void AddOwed(IReadOnlyCollection<OwedFragment> owed, DateTimeOffset until) => database.Call("the run journal", (c, t) =>
     {

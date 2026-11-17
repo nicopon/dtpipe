@@ -1,4 +1,6 @@
 using System.Security.Cryptography;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using DtPipe.Coordinator.Contracts;
 using DtPipe.Coordinator.Server.Access;
 using DtPipe.Coordinator.Server.Nodes;
@@ -51,8 +53,8 @@ public sealed class SqlStoreTests : IDisposable
         return seed;
     }
 
-    private static RunView Over(string id, DateTimeOffset at, string? key = null) =>
-        new(id, "plan", RunState.Succeeded, at, at, null, null, null, "p", at, LaunchedBy: "cron", IdempotencyKey: key);
+    private static RunView Over(string id, DateTimeOffset at, string? key = null, string pipeline = "p") =>
+        new(id, "plan", RunState.Succeeded, at, at, null, null, null, pipeline, at, LaunchedBy: "cron", IdempotencyKey: key);
 
     private RunJournal Journal(SqlTestBed bed, bool initialize = true) => new(new SqlRunStore(bed.Start(initialize)), NullLogger<RunJournal>.Instance);
 
@@ -168,18 +170,36 @@ public sealed class SqlStoreTests : IDisposable
 
     [Theory]
     [MemberData(nameof(Providers))]
-    public void The_History_Keeps_The_Latest_Two_Hundred_And_Drops_The_Documents_It_Cuts(string provider)
+    public void The_History_Keeps_The_Latest_Ten_Of_Each_Pipeline_And_Drops_The_Documents_It_Cuts(string provider)
     {
         var bed = Bed(provider);
         var journal = Journal(bed);
         var start = DateTimeOffset.UtcNow;
-        for (var i = 1; i <= 205; i++) journal.Record(Over($"run-{i}", start.AddSeconds(i)));
+        for (var i = 1; i <= 12; i++) journal.Record(Over($"run-{i}", start.AddSeconds(i), pipeline: "busy"));
+        for (var i = 13; i <= 15; i++) journal.Record(Over($"run-{i}", start.AddSeconds(i), pipeline: "quiet"));
 
         var again = Journal(bed, initialize: false);
 
-        Assert.Equal(200, again.List(limit: 1000).Count);
-        Assert.Null(again.Find(r => r.RunId == "run-5"));
-        Assert.Equal("run-205", again.List(limit: 1).Single().RunId);
+        Assert.Equal(10, again.List("busy", 1000).Count);
+        Assert.Equal(3, again.List("quiet", 1000).Count);
+        Assert.Null(again.Find(r => r.RunId == "run-2"));
+        Assert.Equal("run-12", again.List("busy", 1).Single().RunId);
+        Assert.Equal(13, new SqlRunStore(bed.Start(initialize: false)).Load().History.Count);
+
+        // A database that holds more than a pipeline keeps shrinks at start, the documents with it.
+        var json = new JsonSerializerOptions(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } };
+        var store = new SqlRunStore(bed.Start(initialize: false));
+        for (var i = 16; i <= 24; i++)
+        {
+            var run = Over($"run-{i}", start.AddSeconds(i), pipeline: "quiet");
+            store.Put(new StoredRun(run.RunId, JsonSerializer.Serialize(run, json), true, run.FinishedAt!.Value), []);
+        }
+
+        var restarted = Journal(bed, initialize: false);
+
+        Assert.Equal(10, restarted.List("quiet", 1000).Count);
+        Assert.Equal("run-24", restarted.List("quiet", 1).Single().RunId);
+        Assert.Equal(20, new SqlRunStore(bed.Start(initialize: false)).Load().History.Count);
     }
 
     [Theory]

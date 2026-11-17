@@ -15,6 +15,9 @@ internal static partial class RunEndpoints
     [GeneratedRegex(@"^[A-Za-z][A-Za-z0-9_-]*\z")]
     private static partial Regex AliasPattern();
 
+    private const int DefaultPage = 50;
+    private const int MaxPage = 500;
+
     private static CursorView ViewOf(CursorRecord c) => new(c.Alias, c.Column, c.Type, c.Value, c.RunId, c.UpdatedAt, c.SetBy);
 
     public static void MapRuns(this RouteGroupBuilder api, RouteGroupBuilder designer)
@@ -42,7 +45,10 @@ internal static partial class RunEndpoints
                 return Results.BadRequest(new { error = "Name a pipeline, a branch and a value: {\"value\": \"…\"}." });
             return Results.Ok(ViewOf(deployments.SetCursor(id, alias, request.Type, request.Value, TrustedIdp.CallerOf(http) ?? "")));
         });
-        api.MapGet("/runs", (string? pipeline, RunJournal journal) => journal.List(pipeline));
+        // The journal, newest first: a page of `limit` runs (50 when it is not given, at most MaxPage), of one pipeline when it is named.
+        api.MapGet("/runs", (string? pipeline, int? limit, RunJournal journal) => journal.List(pipeline, Math.Clamp(limit ?? DefaultPage, 1, MaxPage)));
+        // The latest run that is over of each pipeline, whole, however long ago it ended.
+        api.MapGet("/runs/last", (RunJournal journal) => journal.Latest());
         api.MapGet("/runs/queue", (DeploymentManager deployments) => deployments.Queue);
         designer.MapPost("/runs/cancel", (CancelRequest? request, DeploymentManager deployments) =>
         {

@@ -510,7 +510,8 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   ledger's lock where the run is queued, and a run is journaled before it leaves the ledger, so a retry that races the end of the
   first finds it in one or the other. A repeat answers the first run whatever became of it (a new attempt takes a new key), the same
   key for another pipeline is a conflict, and a request with no key is never a repeat. The key lives as long as its run is
-  journaled (`IRunStore.Window`, applied at start as when recording); a run in flight when the server stops is ended at the next
+  journaled, which is among the latest ten that are over of its pipeline (`RunJournal.KeptPerPipeline`, applied at start as when
+  recording): ten later runs of that pipeline end it. A run in flight when the server stops is ended at the next
   start (`RunJournal.RestartedRefusal`) and answers its key as that run. `RunJournal.Find` scans every kept run, `List`'s limit being a page.
   `[CI: RunQueueTests, RunJournalTests, ServiceRoutesTests] [local: the lab's smoke.py bricks - a service launches a run]`
 - **A state is written as a lowercase word, by the converter on the property that carries it.** `RunView.State` and
@@ -523,8 +524,14 @@ holds what a host calls and what no domain owns. The rules below name classes, n
 - **A run is journaled as it goes, and a restart ends what it interrupted.** `RunJournal` keeps the runs in an `IRunStore`, which is
   `SqlRunStore`: the `runs` table (a document per run, whether it is over, its instant), the `owed` table and the `counters` table that draws ids. `RunQueue` draws the id and writes the run when it is queued (under the ledger's lock, before
   the ticket is visible), when it starts and when it ends. History (`List`, `Find`, `PipelineHealth`) holds the runs that are over and
-  is read from memory, loaded at start: one coordinator writes the store, so the window in memory is the store's, and a key's
-  lookup `(LaunchedBy, key)` costs no call to the store under the ledger's lock. **A run not yet over that the store cannot keep
+  is read from memory, loaded at start: one coordinator writes the store, so the history in memory is the store's, and a key's
+  lookup `(LaunchedBy, key)` costs no call to the store under the ledger's lock. **The history keeps the latest ten runs that are over
+  of each pipeline** (`RunJournal.KeptPerPipeline`, a constant): the journal decides and names the runs it drops, and the store erases
+  them by id, in the write that ends the run that pushed them out (`IRunStore.Put`) and, for what `Load` returned, at start
+  (`IRunStore.Forget`), so a database that holds more shrinks. The runs of no pipeline share one bucket, and the runs of a pipeline
+  that left the library are kept like any other. A store that cannot erase leaves the documents until the next start cuts them. The
+  pages read a pipeline's last run at `GET /api/runs/last` (the latest run that is over of each pipeline, however long ago it ended)
+  and its journal at `GET /api/runs?pipeline=`, whose `limit` is a page of at most 500. **A run not yet over that the store cannot keep
   throws `StoreUnavailableException`** (503 from the middleware of `CoordinatorServer`), so none is queued or started
   without its record; a run that is over is kept in memory whatever the store says and only logged, and a store that missed it
   leaves it in flight for the next start to end. A call that finds the connection lost fails at once. At start `RunJournal` gives each run it finds queued or running the state `error` and `RestartedRefusal`, and owes
@@ -543,7 +550,7 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   or successful run has no reason. The pages show it wherever a run is shown (`endNotes` in `core.js`), and count rows as
   `rowsCrossed` does, on every edge. An event of `/api/events` carries `at`, when it happened, so a page opened later dates the
   backlog it replays by it; a replica whose connection dropped carries `awaySince` and `givenUpAt` in the nodes' snapshot.
-  `[CI: RunJournalTests (the label), RunQueueTests, OrphanRunsTests, NodeChannelHubTests; SqlStoreTests] [local: tools/campaign.py F4]` `[unchecked: a wired
+  `[CI: RunJournalTests (the label), RunQueueTests, OrphanRunsTests, NodeChannelHubTests; SqlStoreTests; RouteTableTests] [local: tools/campaign.py F4]` `[unchecked: a wired
   child with nothing to write ends only once a relay touches its torn-down transfer]`
 - **A transport line during a requested cancellation is shown as information, and nothing reads it.** `NodeLogLine.Category` is the
   category of the logger that wrote the line (`NodeLogForwarder` fills it); `NodeChannelHub.ReportLog` shows a warning or an error of

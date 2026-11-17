@@ -76,6 +76,7 @@ public sealed class RouteTableTests
         "GET /api/rights [reader]",
         "GET /api/rights/identities/{id}/keys [reader > admin]",
         "GET /api/runs [reader]",
+        "GET /api/runs/last [reader]",
         "GET /api/runs/queue [reader]",
         "GET /api/state [reader]",
         "GET /health/pipelines [monitor]",
