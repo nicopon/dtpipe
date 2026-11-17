@@ -1,6 +1,9 @@
 // What every view shares: the API client, the live store fed by /api/events, and small helpers.
 // The coordinator decides everything; the views only draw the store and send requests.
 
+// What this page keeps of the events it received: the lines of the Events view and of a run's page, the oldest dropped first.
+export const LOG_CAPACITY = 1500;
+
 export const store = {
   nodes: [],
   bricks: [],
@@ -91,7 +94,7 @@ export function gate(root) {
   }
 }
 
-export async function api(path, body, method) {
+async function request(path, body, method) {
   // The CSRF header rides every call: the server refuses a change without it.
   const init = { method: method || (body === undefined ? "GET" : "POST"), headers: { "X-Dtpipe-Csrf": "1" } };
   if (body !== undefined) { init.headers["Content-Type"] = "application/json"; init.body = JSON.stringify(body); }
@@ -101,9 +104,34 @@ export async function api(path, body, method) {
   const text = await response.text();
   let data = {};
   try { data = text ? JSON.parse(text) : {}; } catch { data = { error: text }; }
-  if (!response.ok) throw new Error(data.error || data.detail || (response.status === 403 ? forbidden() : data.title) || `${response.status} ${response.statusText}`);
-  return data;
+  if (!response.ok) {
+    const error = new Error(data.error || data.detail || (response.status === 403 ? forbidden() : data.title) || `${response.status} ${response.statusText}`);
+    error.status = response.status;
+    throw error;
+  }
+  return { data, response };
 }
+
+export async function api(path, body, method) { return (await request(path, body, method)).data; }
+
+/** A list the server counts: its items and how many match the filters before the page cut them (`X-Total-Count`; the items' own count when the header is absent). */
+export async function apiPage(path) {
+  const { data, response } = await request(path);
+  const header = response.headers.get("X-Total-Count");
+  const total = header === null ? NaN : Number(header);
+  return { items: data, total: Number.isInteger(total) && total >= 0 ? total : data.length };
+}
+
+/** The address after `#/`: its view, the segments after it (decoded), and the `?…` that may end it as URLSearchParams. */
+export function parseAddress(hash) {
+  const [path, ...rest] = String(hash ?? "").replace(/^#\/?/, "").split("?");
+  const decode = (segment) => { try { return decodeURIComponent(segment); } catch { return segment; } };
+  const [name, ...params] = path.split("/").map(decode);
+  return { name, params: params.filter(Boolean), query: new URLSearchParams(rest.join("?")) };
+}
+
+/** The address of a run's page. A run id on a line is the node's word: it is encoded here and escaped where it enters a document. */
+export const runHref = (runId) => `#/runs/${encodeURIComponent(runId)}`;
 
 let toastTimer = null;
 export function toast(message, kind = "error") {
@@ -119,7 +147,7 @@ export function toast(message, kind = "error") {
 export function addLog(line) {
   if (/:\s*$/.test(line.message)) return; // a label whose value was empty, e.g. a silent child's stderr
   store.logs.push({ at: new Date(), ...line });
-  if (store.logs.length > 1500) store.logs.splice(0, store.logs.length - 1500);
+  if (store.logs.length > LOG_CAPACITY) store.logs.splice(0, store.logs.length - LOG_CAPACITY);
   emit("logs");
 }
 
@@ -193,7 +221,7 @@ function onRun(run) {
     store.queue = store.queue.filter((r) => r.runId !== run.runId);
     store.runs = [run, ...store.runs.filter((r) => r.runId !== run.runId)].slice(0, 200);
     if (run.pipelineId) store.last.set(run.pipelineId, run);
-    addLog({ node: "coordinator", level: run.state === "succeeded" ? "Information" : "Warning", message: `${run.runId} ${run.pipelineId ?? ""} ${runStateLabel(run.state)}${run.refusal ? `: ${run.refusal}` : ""}` });
+    addLog({ node: "coordinator", level: run.state === "succeeded" ? "Information" : "Warning", message: `${run.runId} ${run.pipelineId ?? ""} ${runStateLabel(run.state)}${run.refusal ? `: ${run.refusal}` : ""}`, runId: run.runId });
   }
   emit("runs");
 }
@@ -230,7 +258,10 @@ export async function start() {
         if (data.state === "failed") addLog({ node: "coordinator", level: "Error", message: `${data.pipelineId}: deployment failed: ${data.message}` });
         refreshHealth();
         break;
-      case "log": addLog({ node: data.node, fragment: data.fragment, level: data.level, message: data.message, ...(at ? { at: new Date(at) } : {}) }); break;
+      case "log":
+        // `runId` is the run of the fragment that logged, as its node said it; a line the coordinator writes has none.
+        addLog({ node: data.node, fragment: data.fragment, level: data.level, message: data.message, ...(typeof data.runId === "string" && data.runId ? { runId: data.runId } : {}), ...(at ? { at: new Date(at) } : {}) });
+        break;
       case "bytes": store.bytes = data; emit("bytes"); break;
       case "library": emit("library"); refreshHealth(); break;
       case "rights":

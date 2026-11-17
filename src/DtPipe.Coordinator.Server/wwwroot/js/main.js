@@ -1,5 +1,5 @@
 // The coordinator's page: a hash router over its views, and the status pills of the top bar.
-import { $, addLog, bytes, esc, gate, start, store, subscribe, tagOf, toast } from "./core.js";
+import { $, addLog, bytes, esc, gate, parseAddress, start, store, subscribe, tagOf, toast } from "./core.js";
 import * as nodes from "./nodes.js";
 import * as library from "./library.js";
 import * as runs from "./runs.js";
@@ -10,10 +10,12 @@ const views = { nodes, library, runs, access };
 let current = null;
 
 function route() {
-  const [name, ...params] = location.hash.replace(/^#\/?/, "").split("/").map(decodeURIComponent);
+  // The segments after the view are its parameters; a `?…` ending the address is its query.
+  const { name, params, query } = parseAddress(location.hash);
   // An address that names no view says so: the library is the page of an empty address only.
-  const unknown = name && !views[name];
-  const view = views[name] ? name : "library";
+  const known = Object.hasOwn(views, name);
+  const unknown = name && !known;
+  const view = known ? name : "library";
   if (current?.leave && current.leave() === false) return;
   // A fresh element per visit: a view's listeners never outlive it.
   const host = document.createElement("div");
@@ -25,7 +27,7 @@ function route() {
     host.innerHTML = `<h2>No such page</h2><p>There is no page at <code>#/${esc(name)}</code>. <a href="#/library">Back to the library</a></p>`;
   } else {
     current = views[view];
-    current.mount(host, params.filter(Boolean));
+    current.mount(host, params, query);
   }
   window.scrollTo(0, 0);
 }
