@@ -563,8 +563,12 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   snapshots written first (`nodes`, `state`, `deployments`) come from no event and carry neither. A `log` line sent from the backlog (the last
   150) carries `replay: true`, a live one carries no flag: `Subscribe` takes the backlog and the subscription under one lock, so an event is in
   one and never in both, and on a connection under one `boot` a `seq` never follows a larger one. The stream has no `id:` and honours no
-  `Last-Event-ID`: a reader that needs more asks the routes. A reader ignores a member it does not know.
-  `[CI: StateWireTests (the frame)]`
+  `Last-Event-ID`: a reader that needs more asks the routes. A reader ignores a member it does not know. The pages (`core.js`) take a `log`
+  line when its `boot` is not the one they hold or its `seq` is past the greatest they took under it, and a frame with neither as they
+  always did: a line is lost never, and a duplicate is possible only when `boot` changes. The mark lives beside `store.logs`, which Clear
+  and the capacity cut would let a line back into. The Events tab's badge counts what is news to the page: a line replayed to its first
+  connection is not, any other is, a line replayed after a cut that the page did not hold included.
+  `[CI: StateWireTests (the frame)] [unchecked: the pages, which no test plays in a browser]`
 - **A transport line during a requested cancellation is shown as information, and nothing reads it.** `NodeLogLine.Category` is the
   category of the logger that wrote the line (`NodeLogForwarder` fills it); `NodeChannelHub.ReportLog` shows a warning or an error of
   `LogCategories.IsTransport` as information, with its label, when the replica that reported it holds runs and the requester asked to

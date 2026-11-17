@@ -157,11 +157,15 @@ export function addLog(line) {
 /** The lines this page holds that name run `runId`. The id is the node's word, never checked: a line is attached by equality and nothing else. */
 export const linesOfRun = (runId) => store.logs.filter((l) => l.runId === runId);
 
-/** The errors and the warnings among the lines that arrived since the Events view was last open (never opened: every line held). */
+/**
+ * The errors and the warnings among the lines that arrived since the Events view was last open (never opened: every line held),
+ * but the backfill: a line the server replayed when the page first connected is not news, and one it replays after a cut that
+ * the page did not hold is.
+ */
 export function unseenLogs() {
   let errors = 0, warnings = 0;
   for (const l of store.logs) {
-    if (l.n <= seenSeq) continue;
+    if (l.n <= seenSeq || l.backfill) continue;
     if (l.level === "Error" || l.level === "Critical") errors++;
     else if (l.level === "Warning") warnings++;
   }
@@ -232,6 +236,24 @@ async function refreshBricks() {
 }
 
 let bricksTimer = null;
+
+// What the stream numbers: each line it sends carries a `seq` under the `boot` of the process that numbered it, and each connection
+// replays the last lines of its backlog. A line is new to the page when its `boot` is another, or its `seq` is past the greatest the
+// page took under this one; a line of a server that numbers nothing is always new. This lives here, not in `store.logs`, which
+// Clear empties and the capacity cuts: a line dropped from there must not come back at the next connection.
+let streamBoot = null;
+let streamSeq = 0;
+function isNewLine({ seq, boot }) {
+  if (!Number.isSafeInteger(seq) || typeof boot !== "string" || !boot) return true;
+  if (boot !== streamBoot) { streamBoot = boot; streamSeq = seq; return true; }
+  if (seq <= streamSeq) return false;
+  streamSeq = seq;
+  return true;
+}
+
+// How many times the stream opened: the first is the page's first connection, each later one follows a cut.
+let opened = 0;
+
 function onRun(run) {
   if (isActive(run)) {
     store.queue = [...store.queue.filter((r) => r.runId !== run.runId), run]
@@ -261,10 +283,10 @@ export async function start() {
   if (new URLSearchParams(location.search).has("static")) return;
 
   const source = new EventSource("/api/events");
-  source.onopen = () => { store.connected = true; emit("connection"); };
+  source.onopen = () => { opened++; store.connected = true; emit("connection"); };
   source.onerror = () => { store.connected = false; emit("connection"); };
   source.onmessage = (message) => {
-    const { type, data, at } = JSON.parse(message.data);
+    const { type, data, at, seq, boot, replay } = JSON.parse(message.data);
     switch (type) {
       case "nodes":
         store.nodes = data;
@@ -280,8 +302,10 @@ export async function start() {
         refreshHealth();
         break;
       case "log":
+        if (!isNewLine({ seq, boot })) break;
         // `runId` is the run of the fragment that logged, as its node said it; a line the coordinator writes has none.
-        addLog({ node: data.node, fragment: data.fragment, level: data.level, message: data.message, ...(typeof data.runId === "string" && data.runId ? { runId: data.runId } : {}), ...(at ? { at: new Date(at) } : {}) });
+        // The lines replayed to the page's first connection are its backfill: held, never counted as news.
+        addLog({ node: data.node, fragment: data.fragment, level: data.level, message: data.message, ...(typeof data.runId === "string" && data.runId ? { runId: data.runId } : {}), ...(at ? { at: new Date(at) } : {}), ...(replay === true && opened === 1 ? { backfill: true } : {}) });
         break;
       case "bytes": store.bytes = data; emit("bytes"); break;
       case "library": emit("library"); refreshHealth(); break;

@@ -35,6 +35,7 @@ function route() {
 }
 
 // The Events tab counts the errors and the warnings that arrived since the view was last open; the view marks them seen while it is.
+// What the server replayed to the page's first connection is not counted: `unseenLogs` holds the rule.
 function renderBadge() {
   const { errors, warnings } = unseenLogs();
   const el = $("events-badge");
