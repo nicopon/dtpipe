@@ -251,7 +251,8 @@ function isNewLine({ seq, boot }) {
   return true;
 }
 
-// How many times the stream opened: the first is the page's first connection, each later one follows a cut.
+// How many times the stream opened. Every opening reads the state again; `opened` only tells the first, the page's first connection,
+// whose replayed log lines are its backfill, from the ones after a cut.
 let opened = 0;
 
 function onRun(run) {
@@ -269,7 +270,7 @@ function onRun(run) {
   if (!isActive(run)) emit("journal");
 }
 
-// What the page reads of the server to hold its state: at start, and again each time the stream opens after a cut. Each entry is a
+// What the page reads of the server to hold its state: at start, and again each time the stream opens. Each entry is a
 // path and where its answer lands in the store. `me` and `info` are read at start alone: no event of the stream moves them.
 const STATE_READS = [
   ["/api/nodes", (nodes) => ({ nodes })],
@@ -285,13 +286,16 @@ async function readState() {
   return Object.assign({}, ...(await Promise.all(STATE_READS.map(async ([path, put]) => put(await api(path))))));
 }
 
-// A cut leaves the page as it was when the stream dropped: a run that ended meanwhile still shows in flight. When the stream opens again the
-// page reads its state again, and holds the events that arrive meanwhile, for an answer may be older than an event it overlaps and would
-// undo it. The held events are applied over the answers in the order they arrived; a log line is no state and never waits. One resync owns
-// the held events at a time: a stream that opens again while one is reading hands them to the newer, whose answers alone are applied.
+// The state the page holds can be older than the server's: `start()` reads it before the stream exists, and a cut leaves it as it was when
+// the stream dropped, so a run that ended meanwhile still shows in flight. Every opening of the stream reads the state again, the first
+// included: the server subscribes to its bus before it writes the stream's first byte, so an event published after the opening's
+// subscription arrives on the stream and one published before it is in the answers. The page holds the events that arrive meanwhile, for
+// an answer may be older than an event it overlaps and would undo it. The held events are applied over the answers in the order they
+// arrived; a log line is no state and never waits. One resync owns the held events at a time: a stream that opens again while one is
+// reading hands them to the newer, whose answers alone are applied.
 // A read that does not answer in time or fails leaves the state as the events made it, and says so.
 const RESYNC_TIMEOUT = 15000;
-// What the views are told once the state is read again. A view that loads its own data (the library, the rights, the journal) does it on its kind.
+// What the views are told once the state is read again, at each opening of the stream. A view that loads its own data (the library, the rights, the journal) does it on its kind.
 const RESYNC_KINDS = ["nodes", "bricks", "deployments", "runs", "journal", "library", "rights"];
 let held = null;
 let resyncs = 0;
@@ -325,7 +329,8 @@ export async function start() {
   source.onopen = () => {
     store.connected = true;
     emit("connection");
-    if (++opened > 1) resync();
+    opened++;
+    resync();
   };
   source.onerror = () => { store.connected = false; emit("connection"); };
   source.onmessage = (message) => {

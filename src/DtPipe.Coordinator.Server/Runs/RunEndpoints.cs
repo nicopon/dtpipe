@@ -99,6 +99,8 @@ internal static partial class RunEndpoints
             // The backlog and the live events are split under the lock of `Subscribe`: an event is in one and never in both.
             EventFrame FrameOf(ServerEvent evt, bool replay) => new(evt.Type, evt.Data, evt.At, evt.Seq, bus.Boot, replay ? true : null);
 
+            // The subscription precedes the response's first byte because the page reads its state again when the stream opens: a response
+            // started before it would reopen the window in which an event reaches neither that read nor the stream.
             var (backlog, live, unsubscribe) = bus.Subscribe();
             try
             {
