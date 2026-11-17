@@ -24,6 +24,8 @@ export const $ = (id) => document.getElementById(id);
 export const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 /** A count with its noun, in the plural unless the count is one. */
 export const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+// A version without its build metadata: "1.17.0+<commit>" reads "1.17.0".
+export const tagOf = (version) => (version ? String(version).split("+")[0] : "");
 export const fmt = (n) => (n ?? 0).toLocaleString("en-US");
 export const nodeColor = (node) => (node ? `var(--${node}, var(--muted))` : "var(--muted)");
 // A fragment reads "pipeline@node"; a cause that is a sentence (a refused transfer, a row-count

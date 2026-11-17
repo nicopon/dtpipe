@@ -98,6 +98,17 @@ export async function api(path, body, method, signal) {
 export const targetOf = (e) => /** @type {any} */ (e.target);
 
 /** A count with its noun, in the plural unless the count is one. @param {number} n @param {string} word */
+/**
+ * A version without its build metadata: "1.17.0+<commit>" reads "1.17.0". A version that differs
+ * from `other` only by that metadata keeps a short commit so the two never read alike.
+ * @param {string | undefined} version
+ * @param {string} [other]
+ */
+export function tagOf(version, other) {
+  if (!version) return "";
+  const [tag, build] = version.split("+");
+  return other && other !== version && other.split("+")[0] === tag && build ? `${tag}+${build.slice(0, 7)}` : tag;
+}
 export const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 export function status(text, kind = "") {
   $("status").textContent = text;

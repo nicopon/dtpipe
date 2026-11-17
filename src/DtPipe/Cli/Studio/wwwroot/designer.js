@@ -4,7 +4,7 @@
 // (POST /api/design/decompose); this page never writes YAML itself. Built with DOM calls only: the
 // page's policy forbids inline script and style, and every value is set as text.
 
-import { $, api, el, fill, plural, status, svg, targetOf } from "./dom.js";
+import { $, api, el, fill, plural, status, svg, tagOf, targetOf } from "./dom.js";
 import { KEPT_TABS } from "./prefs.js";
 import { flush, invalidate, onZone } from "./render.js";
 import { sequence, state } from "./state.js";
@@ -626,9 +626,9 @@ function versions() {
   return [
     el("h3", {}, "Versions"),
     el("ul", { class: "versions" },
-      el("li", {}, "this studio: ", el("code", {}, state.catalog.studioVersion || "unknown")),
+      el("li", {}, "this studio: ", el("code", { title: state.catalog.studioVersion }, tagOf(state.catalog.studioVersion) || "unknown")),
       state.catalog.nodes.map((n) => el("li", { class: n.dtpipeVersion === state.catalog.studioVersion ? "" : "warn" },
-        `${n.name}: `, el("code", {}, n.dtpipeVersion || "unknown")))),
+        `${n.name}: `, el("code", { title: n.dtpipeVersion || "" }, tagOf(n.dtpipeVersion, state.catalog.studioVersion) || "unknown")))),
     differ.length ? el("p", { class: "hint warn" }, `${plural(differ.length, "node")} ${differ.length === 1 ? "runs" : "run"} another dtpipe: a sample here may differ from a run there. The coordinator checks a pipeline again when it is published.`) : null,
   ];
 }

@@ -1,6 +1,6 @@
 // Nodes: every node and runner, the bricks each offers by the reference a job makes to them, a preview read by
 // the node itself when asked, the replicas that carry it, and the flow matrix.
-import { api, csvTable, esc, nodeColor, store } from "./core.js";
+import { api, csvTable, esc, nodeColor, store, tagOf } from "./core.js";
 
 let host = null;
 const open = new Set();      // brick keys whose details are unfolded
@@ -55,7 +55,7 @@ function render() {
         ${replicas.length ? `<h3 title="A replica is one host carrying this node's identity: a run is placed on one of them that can run its fragment.">Replicas (${replicas.filter((r) => r.connected).length}/${replicas.length})</h3>
         ${n.replicasDisagree ? `<p class="hint mismatch">The replicas do not offer the same bricks: usually a rolling update, or two hosts started under the same name. A run goes to a replica that composes its plan.</p>` : ""}
         ${replicas.map((r) => `
-          <div class="frag-line" title="${esc(r.origin ?? "")}"><span><code>${esc(r.id)}</code>${r.dtpipeVersion ? ` <span class="chip">dtpipe ${esc(r.dtpipeVersion)}</span>` : ""} <span class="hint">${esc(r.origin ?? "")}</span></span>
+          <div class="frag-line" title="${esc(r.origin ?? "")}"><span><code>${esc(r.id)}</code>${r.dtpipeVersion ? ` <span class="chip" title="${esc(r.dtpipeVersion)}">dtpipe ${esc(tagOf(r.dtpipeVersion))}</span>` : ""} <span class="hint">${esc(r.origin ?? "")}</span></span>
           <span class="state ${r.connected ? "Registered" : "Failed"}">${r.connected ? "connected" : "away"}${r.runs ? ` · ${r.runs} run${r.runs > 1 ? "s" : ""}` : ""}</span></div>`).join("")}`
           : `<p class="hint">No replica of this node has announced itself.</p>`}
       </section>`;

@@ -1,5 +1,5 @@
 // The coordinator's page: a hash router over its views, and the status pills of the top bar.
-import { $, addLog, bytes, esc, gate, start, store, subscribe, toast } from "./core.js";
+import { $, addLog, bytes, esc, gate, start, store, subscribe, tagOf, toast } from "./core.js";
 import * as nodes from "./nodes.js";
 import * as library from "./library.js";
 import * as runs from "./runs.js";
@@ -61,7 +61,7 @@ window.addEventListener("unhandledrejection", (e) => addLog({ node: "coordinator
 
 start().then(() => {
   $("http-keys-banner").hidden = !store.httpKeys;
-  const ver = store.version?.split("+")[0] || store.version;
+  const ver = tagOf(store.version);
   if ($("version")) {
     $("version").textContent = ver ? `v${ver}` : "";
     if (store.version && store.version !== ver) $("version").title = `Coordinator v${store.version}`;
