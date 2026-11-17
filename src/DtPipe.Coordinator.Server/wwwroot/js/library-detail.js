@@ -1,9 +1,9 @@
 // A library pipeline's page: the plan a launch would make now, which the coordinator computes with no help from the user (every
 // brick on its node, every other step on a runner it picks at the launch), drawn in lanes, its refusals, its fragments'
-// jobs, the job's text read only, and its last run with the plan that run ran. The node of each source and sink branch is
+// jobs, the job's text read only, its latest runs and its versions. The node of each source and sink branch is
 // chosen here, among the nodes that offer its brick; the runner is never named. The bindings are saved from here, and the
 // pipeline is deployed (armed at the commit the library holds) and run.
-import { $, api, deploymentOf, duration, endNotes, esc, healthChip, cursorsOf, healthOf, isActive, lastRunOf, ranPlan, runStateLabel, shortNode, store, toast } from "./core.js";
+import { $, ROWS_CROSSED_HINT, api, apiPage, deploymentOf, duration, esc, fmt, healthChip, healthOf, isActive, lastRunOf, rowsCrossed, runHref, runStateLabel, shortNode, store, toast } from "./core.js";
 import { drawLanes, fragmentJobs, legend, planProblems } from "./placement.js";
 
 let host = null;
@@ -16,18 +16,31 @@ let brickOfUnit = {};
 let offers = {};          // alias -> the nodes that offer the brick of that branch
 let draft = {};           // alias -> the node chosen on the page, saved or not
 let busy = false;
+let journaled = null;     // the latest runs of this pipeline that are over, as the server journals them, once read
+let journalError = "";    // what the read of them said when it failed
+let asking = 0;           // the newest read of those runs: an older answer is dropped
+let versionsOpen = false; // the Versions section is unfolded; its commits are read when it opens, never at a drawing
+let commits = null;       // the pipeline's commits, newest first, once read
+let versionsError = "";
+let shown = null;         // { commit, yaml, diff }: the commit being looked at
+let reading = 0;          // the newest read of the commits
+let showing = 0;          // the newest read of one commit
 
 export function mount(el, params) {
   host = el;
   id = params[0];
   doc = null; plan = null;
+  journaled = null; journalError = "";
+  versionsOpen = false; commits = null; versionsError = ""; shown = null;
   host.addEventListener("click", onClick);
   host.addEventListener("change", onChange);
   load();
+  loadRecent();
 }
 
 // An answer that comes after the page is left draws nothing: `render` and `load` leave a page with no host alone.
 export function leave() {
+  asking++; reading++; showing++;
   host = null;
 }
 
@@ -35,6 +48,8 @@ export function update(kind) {
   if (kind === "library") load();
   // A change of the rights can change the plan (its groups, what the matrix allows between them), never the bindings drafted here.
   else if (kind === "rights" && doc) loadPlan().then(render, (e) => toast(e.message));
+  // A run that is over is in the journal: the runs listed are read again then, and drawn from the queue meanwhile.
+  else if (kind === "journal") loadRecent();
   else if (["deployments", "runs", "nodes", "all", "health"].includes(kind)) render();
 }
 
@@ -47,6 +62,8 @@ async function load() {
     if (host) host.innerHTML = `<p class="mismatch">${esc(e.message)}</p>`;
     return;
   }
+  // A save adds a commit: an unfolded section reads them again.
+  if (versionsOpen) await readCommits(++reading);
   render();
 }
 
@@ -172,11 +189,13 @@ function render() {
         ${legend}</div>
       <div class="lanes-head"><span>sources</span><span>runner</span><span>sinks</span></div>
       <div class="lanes" id="x-lanes"></div>
+      ${run?.result && !runMatches ? `<p class="hint">The last run's row counts are not drawn on the edges. It ran a plan with other edges than this one.</p>` : ""}
     </section>
-    ${runPanel(run, runMatches || !run?.result)}
+    ${recentRunsCard()}
     <section class="card"><h2>Fragment jobs</h2>${fragmentJobs(plan)}</section>
     <section class="card"><div class="card-head"><h2>Job</h2><span class="hint">Read only: write it with <code>dtpipe studio</code> and publish it.</span></div>
-      <pre id="x-job">${esc(doc.yaml)}</pre></section>`;
+      <pre id="x-job">${esc(doc.yaml)}</pre></section>
+    ${versionsCard()}`;
   drawLanes($("x-lanes"), plan, brickOfUnit, { run, running, current: runMatches });
 }
 
@@ -210,22 +229,116 @@ function healthCard() {
     <ul class="msgs">${rows}</ul></section>`;
 }
 
-function runPanel(run, current) {
-  if (!run) return "";
-  const r = run.result;
-  return `<section class="card"><div class="card-head"><h2>Last run</h2><a href="#/runs">all runs →</a></div>
-    <div class="outcome ${esc(run.state)}">${esc(run.runId)} · ${esc(runStateLabel(run.state))} <span class="hint">${esc(duration(run))}</span></div>
-    ${current ? "" : `<p class="hint">It ran a plan with other edges than this one.</p>`}
-    ${endNotes(run)}
-    ${cursorsOf(run)}
-    ${ranPlan(run.plan)}
-    ${r?.consequences?.length ? `<p><b>Consequences:</b> ${r.consequences.map((c) => esc(shortNode(c))).join(", ")}</p>` : ""}
-  </section>`;
+const RECENT = 5;
+
+/** The runs the page lists: those in flight or queued, in the queue's order, then the latest that are over; at most five. */
+export function recentRuns(inFlight, over) {
+  const seen = new Set();
+  return [...inFlight, ...(over ?? [])].filter((r) => !seen.has(r.runId) && seen.add(r.runId)).slice(0, RECENT);
+}
+
+// The journal is the server's: its latest runs of this pipeline are read when the page opens and when a run ends.
+async function loadRecent() {
+  const mine = ++asking;
+  try {
+    const answer = await apiPage(`/api/runs?pipeline=${encodeURIComponent(id)}&limit=${RECENT}`);
+    if (mine !== asking) return;
+    journaled = answer.items;
+    journalError = "";
+  } catch (err) {
+    if (mine !== asking) return;
+    journalError = err.message;
+  }
+  render();
+}
+
+function recentRow(r) {
+  const rows = rowsCrossed(r);
+  const at = r.state === "queued" ? r.queuedAt : r.startedAt;
+  const href = esc(runHref(r.runId));
+  return `<tr><td><a href="${href}"><code>${esc(r.runId)}</code></a></td>
+    <td><span class="outcome-chip ${esc(r.state)}">${esc(runStateLabel(r.state))}</span></td>
+    <td title="${esc(at ?? "")}">${at ? esc(new Date(at).toLocaleString()) : ""}</td>
+    <td class="num">${esc(duration(r))}</td><td class="num">${rows ? fmt(rows) : ""}</td>
+    <td class="wrap">${esc(r.reason ?? (r.result?.cause ? shortNode(r.result.cause) : ""))}</td></tr>`;
+}
+
+// The latest runs of this pipeline, each linked to its page, which holds the report.
+function recentRunsCard() {
+  const rows = recentRuns(store.queue.filter((r) => r.pipelineId === id), journaled);
+  const waiting = journaled === null && !journalError;
+  return `<section class="card"><div class="card-head"><h2>Recent runs</h2><a href="#/runs?pipeline=${esc(encodeURIComponent(id))}">all runs →</a></div>
+    ${rows.length ? `<table class="journal">
+      <tr><th>run</th><th>outcome</th><th>started</th><th>duration</th><th title="${esc(ROWS_CROSSED_HINT)}">rows crossed</th><th>cause</th></tr>
+      ${rows.map(recentRow).join("")}</table>` : `<p class="hint">${waiting ? "Reading the runs…" : "No run yet."}</p>`}
+    ${journalError ? `<p class="mismatch">${esc(journalError)}</p>` : ""}</section>`;
+}
+
+function diffHtml(diff) {
+  return esc(diff || "(no change to this pipeline)").split("\n").map((l) =>
+    l.startsWith("+") && !l.startsWith("+++") ? `<span class="add">${l}</span>` : l.startsWith("-") && !l.startsWith("---") ? `<span class="del">${l}</span>` : l).join("\n");
+}
+
+// The commits of the pipeline: what a commit changed and the job it left, and restoring one, which writes a new commit.
+function versionsCard() {
+  const list = (commits || []).map((c) => `
+    <div class="commit ${shown?.commit === c.hash ? "active" : ""}">
+      <code>${esc(c.hash.slice(0, 8))}</code> <span>${esc(c.message)}</span> <span class="hint">${esc(new Date(c.date).toLocaleString())}</span>
+      <span class="actions"><button class="small ghost" data-show="${esc(c.hash)}">show</button>
+      <button class="small ghost" data-needs="designer" data-restore="${esc(c.hash)}" ${busy ? "disabled" : ""}>restore</button></span>
+    </div>`).join("");
+  const panel = !versionsOpen ? ""
+    : versionsError ? `<p class="mismatch">${esc(versionsError)}</p>`
+    : commits === null ? `<p class="hint">Reading the versions…</p>`
+    : `<div class="history-panel"><div>${list || `<p class="hint">No commit.</p>`}</div>
+      ${shown ? `<div class="grid2"><div><h3>Change</h3><pre class="diff">${diffHtml(shown.diff)}</pre></div><div><h3>Job at ${esc(shown.commit.slice(0, 8))}</h3><pre>${esc(shown.yaml)}</pre></div></div>` : ""}</div>`;
+  return `<section class="card"><div class="card-head"><h2>Versions</h2>
+      <span class="actions"><button id="x-versions" class="small ghost">${versionsOpen ? "Hide versions" : "Show versions"}</button></span></div>
+    <p class="hint">Each save is a commit: show what it changed and the job it left, or restore it.</p>
+    ${panel}</section>`;
+}
+
+async function readCommits(mine) {
+  try {
+    const list = await api(`/api/library/${encodeURIComponent(id)}/history`);
+    if (mine !== reading) return;
+    commits = list;
+    versionsError = "";
+  } catch (err) {
+    if (mine !== reading) return;
+    versionsError = err.message;
+  }
+  render();
+}
+
+// Unfolding and looking at a commit only read: they leave the page as it is, and draw the section again.
+async function onVersions(b) {
+  try {
+    if (b.id === "x-versions") {
+      versionsOpen = !versionsOpen;
+      shown = null;
+      versionsError = "";
+      commits = null;
+      const mine = ++reading;
+      render();
+      if (versionsOpen) await readCommits(mine);
+    } else {
+      const commit = b.dataset.show;
+      const mine = ++showing;
+      const at = await api(`/api/library/${encodeURIComponent(id)}/at/${encodeURIComponent(commit)}`);
+      if (mine !== showing) return;
+      shown = { commit, ...at };
+      render();
+    }
+  } catch (err) {
+    toast(err.message);
+  }
 }
 
 async function onClick(e) {
   const b = e.target.closest("button");
   if (!b || b.disabled) return;
+  if (b.id === "x-versions" || b.dataset.show) return onVersions(b);
   busy = true;
   render();
   try {
@@ -250,6 +363,13 @@ async function onClick(e) {
       toast(`${run.runId} ${runStateLabel(run.state)}.`, "info");
     } else if (b.id === "x-undeploy") {
       await api(`/api/deployments/${encodeURIComponent(id)}`, undefined, "DELETE");
+    } else if (b.dataset.restore) {
+      const commit = b.dataset.restore;
+      const at = await api(`/api/library/${encodeURIComponent(id)}/at/${encodeURIComponent(commit)}`);
+      await api(`/api/library/${encodeURIComponent(id)}`, { yaml: at.yaml, message: `Restore ${commit.slice(0, 8)}` }, "PUT");
+      shown = null;
+      toast(`${id} restored to ${commit.slice(0, 8)}.`, "info");
+      await load();
     }
   } catch (err) {
     toast(err.message);
