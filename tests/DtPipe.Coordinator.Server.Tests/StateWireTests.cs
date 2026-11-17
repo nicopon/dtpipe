@@ -1,5 +1,6 @@
 using System.Net.Http.Json;
 using System.Text.Json;
+using DtPipe.Coordinator.Contracts;
 using DtPipe.Coordinator.Server.Deployments;
 using DtPipe.Coordinator.Server.Runs;
 using Microsoft.Extensions.DependencyInjection;
@@ -12,7 +13,7 @@ namespace DtPipe.Coordinator.Server.Tests;
 /// <summary>
 /// The words a run's state and a deployment's state are written with, by the serializers that write them: the server's
 /// own, for what the pages and the event stream read, and the run journal's, for the files it keeps and reads back at
-/// start. Every state of both is pinned, in lowercase.
+/// start. Every state of both is pinned, in lowercase. The frame the event stream wraps an event in is pinned beside them.
 /// </summary>
 public sealed class StateWireTests : IDisposable
 {
@@ -97,6 +98,68 @@ public sealed class StateWireTests : IDisposable
         Assert.Equal(System.Net.HttpStatusCode.NotFound, gone.StatusCode);
         foreach (var literal in new[] { "/api/runs/queue", "/api/runs/last" })
             Assert.Equal(JsonValueKind.Array, (await client.GetFromJsonAsync<JsonElement>(literal, Ct)).ValueKind);
+    }
+
+    /// <summary>An event of the bus leaves with its number and the bus's id, a line replayed from the backlog says so and a live one does not, and the id is the same from one connection to the next.</summary>
+    [Fact]
+    public async Task The_Event_Stream_Numbers_The_Events_Of_The_Bus_And_Marks_The_Lines_It_Replays()
+    {
+        using var host = new CoordinatorHost();
+        var bus = host.Services.GetRequiredService<EventBus>();
+        var client = host.Bearer(CoordinatorHost.Person(CoordinatorHost.Reader));
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+        timeout.CancelAfter(TimeSpan.FromSeconds(30));
+
+        async Task<JsonElement> Next(StreamReader reader)
+        {
+            while (await reader.ReadLineAsync(timeout.Token) is { } line)
+                if (line.StartsWith("data: ", StringComparison.Ordinal)) return JsonSerializer.Deserialize<JsonElement>(line["data: ".Length..]);
+            throw new EndOfStreamException("The stream ended before the frame this test waits for.");
+        }
+
+        async Task<JsonElement> LogLine(StreamReader reader, string message)
+        {
+            while (true)
+            {
+                var frame = await Next(reader);
+                if (frame.GetProperty("type").GetString() == "log" && frame.GetProperty("data").GetProperty("message").GetString() == message) return frame;
+            }
+        }
+
+        bus.Publish("log", new NodeLogLine("coordinator", null, "Information", "before"));
+
+        string boot;
+        long beforeSeq;
+        using (var first = await client.GetAsync("/api/events", HttpCompletionOption.ResponseHeadersRead, timeout.Token))
+        using (var reader = new StreamReader(await first.Content.ReadAsStreamAsync(timeout.Token)))
+        {
+            // The three snapshots come from no event of the bus.
+            foreach (var type in new[] { "nodes", "state", "deployments" })
+            {
+                var snapshot = await Next(reader);
+                Assert.Equal(type, snapshot.GetProperty("type").GetString());
+                Assert.False(snapshot.TryGetProperty("seq", out _) || snapshot.TryGetProperty("boot", out _) || snapshot.TryGetProperty("replay", out _));
+            }
+
+            var replayed = await LogLine(reader, "before");
+            Assert.True(replayed.GetProperty("replay").GetBoolean());
+            boot = replayed.GetProperty("boot").GetString()!;
+            Assert.False(string.IsNullOrEmpty(boot));
+            beforeSeq = replayed.GetProperty("seq").GetInt64();
+
+            bus.Publish("log", new NodeLogLine("coordinator", null, "Information", "after"));
+            var live = await LogLine(reader, "after");
+            Assert.False(live.TryGetProperty("replay", out _));
+            Assert.Equal(boot, live.GetProperty("boot").GetString());
+            Assert.True(live.GetProperty("seq").GetInt64() > beforeSeq);
+        }
+
+        using var second = await client.GetAsync("/api/events", HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+        using var again = new StreamReader(await second.Content.ReadAsStreamAsync(timeout.Token));
+        var replayedAgain = await LogLine(again, "before");
+        Assert.Equal(boot, replayedAgain.GetProperty("boot").GetString());
+        Assert.Equal(beforeSeq, replayedAgain.GetProperty("seq").GetInt64());
+        Assert.True(replayedAgain.GetProperty("replay").GetBoolean());
     }
 
     [Fact]

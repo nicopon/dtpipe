@@ -557,6 +557,14 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   backlog it replays by it; a replica whose connection dropped carries `awaySince` and `givenUpAt` in the nodes' snapshot.
   `[CI: RunJournalTests (the label, the page and its total), StateWireTests (the filter, the header, a run's address), RunQueueTests, OrphanRunsTests, NodeChannelHubTests; SqlStoreTests; RouteTableTests] [local: tools/campaign.py F4]` `[unchecked: a wired
   child with nothing to write ends only once a relay touches its torn-down transfer]`
+- **A frame of the event stream says which event it is and which process sent it.** A frame of `/api/events` that comes from `EventBus` carries
+  `seq`, its number (one more than the last, in the order every subscriber receives them), and `boot`, the id of the bus: `Seq` restarts at 1
+  with each process, so two processes are told apart by `boot`, which a coordinator that takes over behind the same address changes. The three
+  snapshots written first (`nodes`, `state`, `deployments`) come from no event and carry neither. A `log` line sent from the backlog (the last
+  150) carries `replay: true`, a live one carries no flag: `Subscribe` takes the backlog and the subscription under one lock, so an event is in
+  one and never in both, and on a connection under one `boot` a `seq` never follows a larger one. The stream has no `id:` and honours no
+  `Last-Event-ID`: a reader that needs more asks the routes. A reader ignores a member it does not know.
+  `[CI: StateWireTests (the frame)]`
 - **A transport line during a requested cancellation is shown as information, and nothing reads it.** `NodeLogLine.Category` is the
   category of the logger that wrote the line (`NodeLogForwarder` fills it); `NodeChannelHub.ReportLog` shows a warning or an error of
   `LogCategories.IsTransport` as information, with its label, when the replica that reported it holds runs and the requester asked to

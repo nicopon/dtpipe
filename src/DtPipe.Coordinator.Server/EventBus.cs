@@ -7,11 +7,15 @@ public sealed record ServerEvent(long Seq, string Type, object Data, DateTimeOff
 /// <summary>
 /// Fans the server's events out to every open <c>/api/events</c> stream. Keeps a short backlog so a page
 /// opened mid-run sees what already happened. A slow subscriber loses its oldest events rather than
-/// slowing the publisher.
+/// slowing the publisher. <c>Seq</c> grows by one with each event, in the order every subscriber receives them, and restarts at 1 with each
+/// process: <see cref="Boot"/> tells one instance from another, as <c>Seq</c> alone cannot.
 /// </summary>
 public sealed class EventBus
 {
     private const int BacklogSize = 400;
+
+    /// <summary>Names this instance, which is one process: the identity a <see cref="ServerEvent.Seq"/> is read under.</summary>
+    public string Boot { get; } = Guid.NewGuid().ToString("N");
 
     private readonly object _lock = new();
     private readonly LinkedList<ServerEvent> _backlog = new();
