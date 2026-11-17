@@ -69,7 +69,7 @@ def coordinator_views(browser):
     pid = library[0]["id"] if library else ""
     checks = [
         ("nodes", "document.querySelectorAll('.node-card').length > 0 && document.querySelectorAll('.brick').length > 0"),
-        ("library", f"document.querySelectorAll('table.library tr').length === {len(library) + 1}"),
+        ("library", f"document.querySelectorAll('.lib-item').length === {len(library)}"),
         (f"library/{pid}", "document.querySelectorAll('.xbox').length > 0 && (document.querySelectorAll('.lanes svg path').length > 0 || document.querySelectorAll('ul.msgs.errors li').length > 0)"
                            " && (document.getElementById('x-job')?.textContent || '').length > 0"),
         ("runs", "!!document.getElementById('r-journal') && !!document.getElementById('r-deployments')"),
@@ -92,7 +92,7 @@ def library_page(browser):
     queue = SESSION.call("/api/runs/queue")
     browser.console.clear()
     browser.js("location.hash = '#/library'")
-    browser.wait_for(f"document.querySelectorAll('table.library [data-run]').length === {len(entries)}", 20)
+    browser.wait_for(f"document.querySelectorAll('.lib-list [data-run]').length === {len(entries)}", 20)
     wrong = []
     for e in entries:
         deployment = deployments.get(e["id"])
@@ -111,8 +111,8 @@ def library_page(browser):
         SESSION.call(f"/api/library/{probe}/deploy", {})
     try:
         armed = {h["id"]: h["status"] for h in SESSION.call("/api/health")["pipelines"]}
-        chips = ("Object.fromEntries([...document.querySelectorAll('table.library tr')].filter(r => r.querySelector('a.strong'))"
-                 ".map(r => [r.querySelector('td .hint.mono').textContent, ([...r.querySelectorAll('.chip')].find(c => c.textContent.startsWith('health:'))?.textContent ?? '').slice(8) || null]))")
+        chips = ("Object.fromEntries([...document.querySelectorAll('.lib-item')]"
+                 ".map(r => [r.querySelector('.lib-title .mono').textContent, ([...r.querySelectorAll('.chip')].find(c => c.textContent.startsWith('health:'))?.textContent ?? '').slice(8) || null]))")
         browser.js("location.hash = '#/library'")
         shown = {}
         for _ in range(60):
@@ -127,7 +127,7 @@ def library_page(browser):
         if armed_here:
             SESSION.call(f"/api/deployments/{probe}", None, "DELETE")
     pid = entries[0]["id"]
-    browser.js(f"document.querySelector('table.library a[href=\"#/library/{pid}\"]').click()")
+    browser.js(f"document.querySelector('.lib-list a[href=\"#/library/{pid}\"]').click()")
     opened = browser.wait_for("document.querySelectorAll('.xbox').length > 0 && !!document.getElementById('x-deploy') && !!document.getElementById('x-run')", 20)
     gone = browser.js("!document.querySelector('#nav a[data-view=\"distribution\"]')")
     errors = page_errors(browser)
@@ -140,7 +140,7 @@ def no_designer(browser):
     entries = SESSION.call("/api/library")
     browser.console.clear()
     browser.js("location.hash = '#/library'")
-    browser.wait_for(f"document.querySelectorAll('table.library [data-run]').length === {len(entries)}", 20)
+    browser.wait_for(f"document.querySelectorAll('.lib-list [data-run]').length === {len(entries)}", 20)
     on_list = browser.js("({nav: !!document.querySelector('#nav a[data-view=\"designer\"]'),"
                          " design: !![...document.querySelectorAll('a, button')].find(e => /^design$/i.test(e.textContent.trim())),"
                          " creation: !!document.querySelector('[data-new], [data-import]')})")

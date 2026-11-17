@@ -1,6 +1,6 @@
 // Library: the pipelines kept in the coordinator's git repository, their plan and deployment
 // state and their history. A pipeline is written with dtpipe studio and published into it.
-import { ROWS_CROSSED_HINT, ago, api, deploymentOf, esc, healthChip, isActive, lastRunOf, rowsCrossed, runStateLabel, toast } from "./core.js";
+import { ROWS_CROSSED_HINT, ago, api, deploymentOf, esc, healthChip, healthOf, isActive, lastRunOf, rowsCrossed, runStateLabel, toast } from "./core.js";
 import * as detail from "./library-detail.js";
 
 let host = null;
@@ -15,6 +15,7 @@ export function mount(el, params) {
   page = params[0] ? detail : null;
   if (page) { page.mount(el, params); return; }
   host.addEventListener("click", onClick);
+  host.addEventListener("keydown", (ev) => { if (ev.key === "Escape") closeMenus(null); });
   load();
 }
 
@@ -51,54 +52,83 @@ function runCell(id) {
   const run = lastRunOf(id);
   if (!run) return `<span class="hint">never run</span>`;
   const rows = rowsCrossed(run);
-  const why = run.reason ? ` <span class="hint" title="${esc(run.reason)}">· ${esc(run.reason.length > 90 ? `${run.reason.slice(0, 90)}…` : run.reason)}</span>` : "";
-  return `<span class="outcome-chip ${esc(run.state)}">${esc(runStateLabel(run.state))}</span> <span class="hint" title="${esc(ROWS_CROSSED_HINT)}">${isActive(run) ? "" : ago(run.finishedAt)}${rows ? ` · ${rows.toLocaleString("en-US")} rows crossed` : ""}</span>${why}`;
+  const label = esc(runStateLabel(run.state));
+  const chip = run.reason
+    ? `<span class="tip"><span class="outcome-chip ${esc(run.state)} tip-t" tabindex="0">${label}</span><span class="tip-b"><b>Why</b>${esc(run.reason)}</span></span>`
+    : `<span class="outcome-chip ${esc(run.state)}">${label}</span>`;
+  return `${chip}<span title="${esc(ROWS_CROSSED_HINT)}">${isActive(run) ? "" : esc(ago(run.finishedAt))}${rows ? ` · ${rows.toLocaleString("en-US")} rows crossed` : ""}</span>`;
 }
 
-// Deploy, Run and Undeploy from the list. Deploying arms the pipeline at the commit the library holds, and the server
-// decides in every case: it refuses bindings that do not hold and a plan no node could run.
+// Deploy and Run stay in the bar; Undeploy and Delete, rare and destructive, sit in the menu. Deploying arms the pipeline at
+// the commit the library holds, and the server decides in every case: it refuses bindings that do not hold and a plan no node could run.
 function deployRowActions(e) {
   const deployment = deploymentOf(e.id);
   const active = isActive(lastRunOf(e.id));
   const unbound = (e.bindingProblems || []).some((p) => p.blocking);
   const deploy = !active && !unbound;
   const run = deployment && deployment.state !== "failed";
-  return `<button class="small" data-needs="designer" data-deploy="${esc(e.id)}" ${deploy ? "" : "disabled"} title="${unbound ? "Its bindings do not hold" : ""}">Deploy</button>
-        <button class="small primary" data-needs="designer" data-run="${esc(e.id)}" ${run ? "" : "disabled"}>Run</button>
-        ${deployment ? `<button class="small ghost danger" data-needs="designer" data-undeploy="${esc(e.id)}" ${active ? "disabled" : ""}>Undeploy</button>` : ""}`;
+  return `<button class="small primary" data-needs="designer" data-run="${esc(e.id)}" ${run ? "" : "disabled"}>Run</button>
+        <button class="small" data-needs="designer" data-deploy="${esc(e.id)}" ${deploy ? "" : "disabled"} title="${unbound ? "Its bindings do not hold" : ""}">Deploy</button>`;
+}
+
+function moreMenu(e) {
+  const deployment = deploymentOf(e.id);
+  const active = isActive(lastRunOf(e.id));
+  return `<details class="menu"><summary aria-label="More actions for ${esc(e.title)}" title="More actions">⋯</summary>
+    <div class="menu-pop">
+      ${deployment ? `<button class="small" data-needs="designer" data-undeploy="${esc(e.id)}" ${active ? "disabled" : ""}>Undeploy</button><div class="sep"></div>` : ""}
+      <button class="small danger" data-needs="designer" data-delete="${esc(e.id)}">Delete…</button>
+    </div></details>`;
+}
+
+// The stripe says what needs a look: a run that did not go through, a problem reported, or nothing.
+function severity(e) {
+  const run = lastRunOf(e.id);
+  if (run && ["failed", "error", "refused"].includes(run.state)) return "bad";
+  const d = deploymentOf(e.id);
+  if (d && d.state === "failed") return "bad";
+  const h = healthOf(e.id);
+  if ((e.bindingProblems || []).length || (h && h.status !== "ok")) return "warn";
+  return "";
+}
+
+// The description and the reason of the last run: a popover where a pointer hovers, a printed line where none does.
+function descriptionTip(e) {
+  if (!e.description) return "";
+  return `<span class="tip"><span class="info-dot tip-t" tabindex="0" role="note" aria-label="Description">i</span><span class="tip-b"><b>Description</b>${esc(e.description)}</span></span>`;
 }
 
 function render() {
   if (!host) return;
-  const rows = entries.map((e) => `
-    <tr class="pipeline-row">
-      <td class="col-pipeline"><span class="col-label">pipeline</span><a href="#/library/${encodeURIComponent(e.id)}" class="strong">${esc(e.title)}</a><div class="hint mono">${esc(e.id)}</div></td>
-      <td class="col-desc wrap hint"><span class="col-label">description</span>${esc(e.description || "")}</td>
-      <td class="col-state"><span class="col-label">state</span><div class="chips-wrap">${deploymentChip(e)} ${healthChip(e.id)} ${bindingsChip(e)}</div></td>
-      <td class="col-run"><span class="col-label">last run</span>${runCell(e.id)}</td>
-      <td class="col-change hint"><span class="col-label">last change</span>${esc(e.message || "")}<div>${esc(ago(e.updatedAt))}</div></td>
-      <td class="actions-cell">
+  const items = entries.map((e) => {
+    const run = lastRunOf(e.id);
+    const printed = [e.description ? `<div class="lib-printed">${esc(e.description)}</div>` : "",
+      run && run.reason ? `<div class="lib-printed bad">${esc(run.reason)}</div>` : ""].join("");
+    return `
+    <article class="lib-item ${severity(e)}">
+      <div class="lib-facts">
+        <div class="lib-title"><a href="#/library/${encodeURIComponent(e.id)}" title="${esc(e.title)}">${esc(e.title)}</a>${descriptionTip(e)}<span class="mono">${esc(e.id)}</span></div>
+        <div class="chips-wrap">${deploymentChip(e)} ${healthChip(e.id)} ${bindingsChip(e)}</div>
+        <div class="lib-run">${runCell(e.id)}</div>
+      </div>
+      ${printed}
+      <div class="lib-actions">
         <a class="button small" href="#/library/${encodeURIComponent(e.id)}" title="The plan a launch would make, and its runs">Open</a>
         ${deployRowActions(e)}
         <button class="small ghost" data-history="${esc(e.id)}">${historyOf === e.id ? "Hide versions" : "Versions"}</button>
-        <button class="small ghost danger" data-needs="designer" data-delete="${esc(e.id)}">Delete</button>
-      </td>
-    </tr>
-    ${historyOf === e.id ? `<tr class="history-row"><td colspan="6">${historyPanel(e.id)}</td></tr>` : ""}`).join("");
+        ${moreMenu(e)}
+        <span class="lib-when" title="${esc(e.message || "")}">${esc(e.message || "")}${e.message ? " · " : ""}${esc(ago(e.updatedAt))}</span>
+      </div>
+      ${historyOf === e.id ? `<div class="lib-history">${historyPanel(e.id)}</div>` : ""}
+    </article>`;
+  }).join("");
 
   host.innerHTML = `
     <div class="view-head">
       <h1>Library</h1>
       <p class="hint">Pipelines kept in the coordinator's own git repository. Each save is a commit; each one is a plain dtpipe job that also runs whole on one machine. Write one with <code>dtpipe studio --coordinator</code> and publish it here.</p>
     </div>
-    <section class="card library-card">
-      <table class="library pipelines-table">
-        <thead><tr class="head-row"><th>pipeline</th><th>description</th><th>state</th><th>last run</th><th>last change</th><th class="actions-head"></th></tr></thead>
-        <tbody>
-          ${rows || `<tr class="empty-row"><td colspan="6" class="hint">The library is empty.</td></tr>`}
-        </tbody>
-      </table>
-    </section>`;
+    <section class="lib-list">${items || `<p class="hint" style="padding:12px 14px">The library is empty.</p>`}</section>`;
 }
 
 function historyPanel(id) {
@@ -117,9 +147,16 @@ function diffHtml(diff) {
     l.startsWith("+") && !l.startsWith("+++") ? `<span class="add">${l}</span>` : l.startsWith("-") && !l.startsWith("---") ? `<span class="del">${l}</span>` : l).join("\n");
 }
 
+// One menu open at a time; a click elsewhere, a choice in it or Escape closes it.
+function closeMenus(except) {
+  for (const m of host.querySelectorAll("details.menu[open]")) if (m !== except) m.open = false;
+}
+
 async function onClick(e) {
+  closeMenus(e.target.closest("details.menu"));
   const t = e.target.closest("button");
   if (!t) return;
+  t.closest("details.menu")?.removeAttribute("open");
   try {
     if (t.dataset.history) {
       const id = t.dataset.history;
