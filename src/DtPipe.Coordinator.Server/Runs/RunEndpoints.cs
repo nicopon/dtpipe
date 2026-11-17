@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using DtPipe.Coordinator.Contracts;
@@ -45,11 +46,28 @@ internal static partial class RunEndpoints
                 return Results.BadRequest(new { error = "Name a pipeline, a branch and a value: {\"value\": \"…\"}." });
             return Results.Ok(ViewOf(deployments.SetCursor(id, alias, request.Type, request.Value, TrustedIdp.CallerOf(http) ?? "")));
         });
-        // The journal, newest first: a page of `limit` runs (50 when it is not given, at most MaxPage), of one pipeline when it is named.
-        api.MapGet("/runs", (string? pipeline, int? limit, RunJournal journal) => journal.List(pipeline, Math.Clamp(limit ?? DefaultPage, 1, MaxPage)));
+        // The journal, newest first: a page of `limit` runs (50 when it is not given, at most MaxPage), of one pipeline and of one state
+        // when they are named. X-Total-Count is how many runs answer those two filters before the page cuts them, from the page's snapshot.
+        api.MapGet("/runs", (string? pipeline, string? state, int? limit, RunJournal journal, HttpContext http) =>
+        {
+            RunState? only = null;
+            if (!string.IsNullOrEmpty(state))
+            {
+                // A table of the words, not Enum.TryParse, which takes "1" for a value.
+                only = Enum.GetValues<RunState>().Cast<RunState?>().FirstOrDefault(s => string.Equals(s!.Value.Word(), state, StringComparison.OrdinalIgnoreCase));
+                if (only is null)
+                    return Results.BadRequest(new { error = $"'{state}' is no run state: {string.Join(", ", Enum.GetValues<RunState>().Select(s => s.Word()))}." });
+            }
+            var (runs, total) = journal.Page(pipeline, Math.Clamp(limit ?? DefaultPage, 1, MaxPage), only);
+            http.Response.Headers["X-Total-Count"] = total.ToString(CultureInfo.InvariantCulture);
+            return Results.Ok(runs);
+        });
         // The latest run that is over of each pipeline, whole, however long ago it ended.
         api.MapGet("/runs/last", (RunJournal journal) => journal.Latest());
         api.MapGet("/runs/queue", (DeploymentManager deployments) => deployments.Queue);
+        // One run, in flight, queued or journaled; the literal routes above take their own segment before this one.
+        api.MapGet("/runs/{id}", (string id, DeploymentManager deployments) =>
+            deployments.FindRun(id) is { } run ? Results.Ok(run) : Results.NotFound(new { error = $"'{id}' is no run the coordinator keeps." }));
         designer.MapPost("/runs/cancel", (CancelRequest? request, DeploymentManager deployments) =>
         {
             deployments.Cancel(request?.RunId);

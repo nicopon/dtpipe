@@ -228,9 +228,20 @@ public sealed class RunJournal
         }
     }
 
-    public IReadOnlyList<RunView> List(string? pipelineId = null, int limit = 50)
+    public IReadOnlyList<RunView> List(string? pipelineId = null, int limit = 50, RunState? state = null) => Page(pipelineId, limit, state).Runs;
+
+    /// <summary>
+    /// The newest <paramref name="limit"/> runs of <paramref name="pipelineId"/> (every pipeline when it is null) that ended in
+    /// <paramref name="state"/> (any when it is null), and how many runs answer those two filters before the limit cuts them,
+    /// both read from one snapshot.
+    /// </summary>
+    public (IReadOnlyList<RunView> Runs, int Total) Page(string? pipelineId, int limit, RunState? state = null)
     {
-        lock (_lock) return _runs.Where(r => pipelineId is null || r.PipelineId == pipelineId).Take(limit).ToList();
+        lock (_lock)
+        {
+            var matching = _runs.Where(r => (pipelineId is null || r.PipelineId == pipelineId) && (state is null || r.State == state)).ToList();
+            return (matching.Take(limit).ToList(), matching.Count);
+        }
     }
 
     /// <summary>The latest run that is over of each pipeline, newest first; a run of no pipeline is no pipeline's latest.</summary>

@@ -44,11 +44,12 @@ public sealed class RunJournalTests
     {
         var journal = Open();
         var start = DateTimeOffset.UtcNow;
-        RunView Over(int i, string pipeline) =>
-            new($"run-{i}", "plan", RunState.Succeeded, start.AddSeconds(i), start.AddSeconds(i), null, null, null, pipeline, start);
+        RunView Over(int i, string pipeline, RunState state = RunState.Succeeded) =>
+            new($"run-{i}", "plan", state, start.AddSeconds(i), start.AddSeconds(i), null, null, null, pipeline, start);
         // One pipeline runs often and another seldom: the first pushes out its own history and leaves the second's whole.
         for (var i = 1; i <= RunJournal.KeptPerPipeline + 2; i++) journal.Record(Over(i, "busy"));
-        for (var i = 13; i <= 15; i++) journal.Record(Over(i, "quiet"));
+        for (var i = 13; i <= 14; i++) journal.Record(Over(i, "quiet"));
+        journal.Record(Over(15, "quiet", RunState.Failed));
 
         var again = Open();
 
@@ -59,6 +60,13 @@ public sealed class RunJournalTests
         Assert.Null(again.Find(r => r.RunId == "run-2"));
         Assert.Equal("run-12", again.List("busy", 1).Single().RunId);
         Assert.Equal(["quiet", "busy"], again.Latest().Select(r => r.PipelineId));
+        // A page and its total are one pass: the total counts what the pipeline and the state match, before the limit cuts the page.
+        var (succeeded, succeededTotal) = again.Page(null, 1, RunState.Succeeded);
+        Assert.Equal(("run-14", RunJournal.KeptPerPipeline + 2), (Assert.Single(succeeded).RunId, succeededTotal));
+        var (failed, failedTotal) = again.Page("quiet", 1000, RunState.Failed);
+        Assert.Equal(("run-15", 1), (Assert.Single(failed).RunId, failedTotal));
+        Assert.Equal(0, again.Page("busy", 1000, RunState.Failed).Total);
+        Assert.Equal(RunJournal.KeptPerPipeline + 3, again.Page(null, 1).Total);
         Assert.Equal("run-16", again.NextRunId());
         // The store drops the documents with the runs the journal let go.
         Assert.Null(MemoryRunStore.At(_dir).Document("run-2"));

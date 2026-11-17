@@ -80,6 +80,23 @@ public sealed class StateWireTests : IDisposable
 
         var snapshot = await client.GetFromJsonAsync<JsonElement>("/api/state", Ct);
         Assert.Equal(over, snapshot.GetProperty("history").EnumerateArray().Select(r => r.GetProperty("state").GetString()!).Order());
+
+        // The journal's filter is a state's word and its total counts the runs that answer the filters, whatever the page holds.
+        using var failed = await client.GetAsync("/api/runs?state=failed&limit=1", Ct);
+        Assert.Equal("1", Assert.Single(failed.Headers.GetValues("X-Total-Count")));
+        Assert.Equal(["failed"], (await failed.Content.ReadFromJsonAsync<JsonElement>(Ct)).EnumerateArray().Select(r => r.GetProperty("state").GetString()));
+        using var page = await client.GetAsync("/api/runs?limit=2", Ct);
+        Assert.Equal($"{over.Count()}", Assert.Single(page.Headers.GetValues("X-Total-Count")));
+        using var nonsense = await client.GetAsync("/api/runs?state=1", Ct);
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, nonsense.StatusCode);
+
+        // A run has an address, and the literal routes beside it keep theirs.
+        var one = await client.GetFromJsonAsync<JsonElement>("/api/runs/run-3", Ct);
+        Assert.Equal("run-3", one.GetProperty("runId").GetString());
+        using var gone = await client.GetAsync("/api/runs/run-99", Ct);
+        Assert.Equal(System.Net.HttpStatusCode.NotFound, gone.StatusCode);
+        foreach (var literal in new[] { "/api/runs/queue", "/api/runs/last" })
+            Assert.Equal(JsonValueKind.Array, (await client.GetFromJsonAsync<JsonElement>(literal, Ct)).ValueKind);
     }
 
     [Fact]

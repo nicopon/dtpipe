@@ -531,7 +531,10 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   (`IRunStore.Forget`), so a database that holds more shrinks. The runs of no pipeline share one bucket, and the runs of a pipeline
   that left the library are kept like any other. A store that cannot erase leaves the documents until the next start cuts them. The
   pages read a pipeline's last run at `GET /api/runs/last` (the latest run that is over of each pipeline, however long ago it ended)
-  and its journal at `GET /api/runs?pipeline=`, whose `limit` is a page of at most 500. **A run not yet over that the store cannot keep
+  and its journal at `GET /api/runs?pipeline=&state=`, whose `limit` is a page of at most 500 and whose `X-Total-Count` is how many runs
+  answer the two filters before the page cuts them, counted in the same pass as the page (`RunJournal.Page`). A run has an address,
+  `GET /api/runs/{id}` (in flight, queued or journaled; 404 once the retention let it go), which the literal `last` and `queue` outrank.
+  **A run not yet over that the store cannot keep
   throws `StoreUnavailableException`** (503 from the middleware of `CoordinatorServer`), so none is queued or started
   without its record; a run that is over is kept in memory whatever the store says and only logged, and a store that missed it
   leaves it in flight for the next start to end. A call that finds the connection lost fails at once. At start `RunJournal` gives each run it finds queued or running the state `error` and `RestartedRefusal`, and owes
@@ -550,7 +553,7 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   or successful run has no reason. The pages show it wherever a run is shown (`endNotes` in `core.js`), and count rows as
   `rowsCrossed` does, on every edge. An event of `/api/events` carries `at`, when it happened, so a page opened later dates the
   backlog it replays by it; a replica whose connection dropped carries `awaySince` and `givenUpAt` in the nodes' snapshot.
-  `[CI: RunJournalTests (the label), RunQueueTests, OrphanRunsTests, NodeChannelHubTests; SqlStoreTests; RouteTableTests] [local: tools/campaign.py F4]` `[unchecked: a wired
+  `[CI: RunJournalTests (the label, the page and its total), StateWireTests (the filter, the header, a run's address), RunQueueTests, OrphanRunsTests, NodeChannelHubTests; SqlStoreTests; RouteTableTests] [local: tools/campaign.py F4]` `[unchecked: a wired
   child with nothing to write ends only once a relay touches its torn-down transfer]`
 - **A transport line during a requested cancellation is shown as information, and nothing reads it.** `NodeLogLine.Category` is the
   category of the logger that wrote the line (`NodeLogForwarder` fills it); `NodeChannelHub.ReportLog` shows a warning or an error of
