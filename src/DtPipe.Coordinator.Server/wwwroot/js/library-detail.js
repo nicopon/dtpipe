@@ -26,6 +26,11 @@ export function mount(el, params) {
   load();
 }
 
+// An answer that comes after the page is left draws nothing: `render` and `load` leave a page with no host alone.
+export function leave() {
+  host = null;
+}
+
 export function update(kind) {
   if (kind === "library") load();
   // A change of the rights can change the plan (its groups, what the matrix allows between them), never the bindings drafted here.
@@ -39,7 +44,7 @@ async function load() {
     await loadPlan();
     draft = draftOf(doc.bindings);
   } catch (e) {
-    host.innerHTML = `<p class="mismatch">${esc(e.message)}</p>`;
+    if (host) host.innerHTML = `<p class="mismatch">${esc(e.message)}</p>`;
     return;
   }
   render();
