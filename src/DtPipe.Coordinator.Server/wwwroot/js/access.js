@@ -9,10 +9,18 @@ let matrixDraft = null;      // group -> Set(targets), while edited
 let adding = false;
 let activeTab = null;        // node, launcher, monitor, person
 const openKeys = new Set();  // the identities whose keys are listed
-const keysOf = {};           // client id -> its keys as GET …/keys lists them: ids, last characters and dates, never a key
+let keysOf = {};             // client id -> its keys as GET …/keys lists them: ids, last characters and dates, never a key
 
 export function mount(el) {
   host = el;
+  // What the page holds belongs to a visit and starts from nothing: the matrix draft (`leave` says it is lost, and Apply sends the whole
+  // matrix, so a draft kept would undo what another administrator changed since), the form to add an identity, the tab and the keys
+  // listed. `keysOf` is a new object, so a read still in flight from the visit left fills no cache of this one.
+  matrixDraft = null;
+  adding = false;
+  activeTab = null;
+  openKeys.clear();
+  keysOf = {};
   // Rights are an administrator's: any other role is told so here rather than met by a refusal of each request.
   if (!can("admin")) {
     host.innerHTML = `<h2>Access</h2><p>Who may send what to whom is for administrators. Your role is ${esc(store.me?.roles?.[0] || "none")}: ask an administrator.</p>`;
