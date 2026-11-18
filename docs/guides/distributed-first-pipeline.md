@@ -194,8 +194,8 @@ The studio offers the nodes' bricks. In the **Library** list under the jobs, cli
 ## 6. Arm it, run it
 
 In the library, open `shop-orders-by-country` and press **Deploy**: the coordinator checks the
-bricks and the flows, and arms that version. Press **Run**. **Runs** lists the run: open it to see each
-part, the host it ran on and the rows that crossed. Then:
+bricks and the flows, and arms that version. Press **Run**. **Runs** lists the run: open it to see
+each part, the host it ran on and the rows that crossed. Then:
 
 ```bash
 cat report.csv
