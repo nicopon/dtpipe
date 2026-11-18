@@ -10,12 +10,18 @@ let adding = false;
 let activeTab = null;        // node, launcher, monitor, person
 const openKeys = new Set();  // the identities whose keys are listed
 let keysOf = {};             // client id -> its keys as GET …/keys lists them: ids, last characters and dates, never a key
+// The visit on screen: `mount` and a `leave` that lets the person go are the only ones to advance it. A click keeps the visit it began
+// on, and once its request answers it writes the page's state and draws only while that visit is still on screen.
+let visit = 0;
 
 export function mount(el) {
   host = el;
-  // What the page holds belongs to a visit and starts from nothing: the matrix draft (`leave` says it is lost, and Apply sends the whole
-  // matrix, so a draft kept would undo what another administrator changed since), the form to add an identity, the tab and the keys
-  // listed. `keysOf` is a new object, so a read still in flight from the visit left fills no cache of this one.
+  visit++;
+  // What the page holds belongs to a visit and starts from nothing: the rights read (a draw before this visit's first read shows nothing,
+  // and the tab is chosen on the rights of this visit), the matrix draft (`leave` says it is lost, and Apply sends the whole matrix, so a
+  // draft kept would undo what another administrator changed since), the form to add an identity, the tab and the keys listed. `keysOf`
+  // is a new object, so a read still in flight from the visit left fills no cache of this one.
+  rights = null;
   matrixDraft = null;
   adding = false;
   activeTab = null;
@@ -37,8 +43,11 @@ export function update(kind) {
   else if (["nodes", "bricks"].includes(kind)) render();
 }
 
+// A person who refuses to lose the draft stays on the visit, its clicks in flight included.
 export function leave() {
-  return !matrixDraft || confirm("Unsaved rights changes will be lost. Leave anyway?");
+  if (matrixDraft && !confirm("Unsaved rights changes will be lost. Leave anyway?")) return false;
+  visit++;
+  return true;
 }
 
 async function load() {
@@ -377,7 +386,7 @@ function usageOf(identity) {
 
 // The key a call made is shown here once, in the one element the Copy button copies, and nowhere else: not in a command, not in
 // storage, not in the address. Closing the window empties that element and removes the window.
-function showKey(identity, made) {
+function showKey(identity, made, usage) {
   const dialog = document.createElement("dialog");
   dialog.className = "key-window";
   dialog.innerHTML = `
@@ -386,7 +395,7 @@ function showKey(identity, made) {
     <code class="mono key-secret" data-key-secret></code>
     <div class="row"><button class="primary" data-copy-key>Copy the key</button></div>
     <h3>How to use it</h3>
-    <pre class="usage">${esc(usageOf(identity))}</pre>
+    <pre class="usage">${esc(usage)}</pre>
     <div class="row"><button data-close-key>Close</button></div>`;
   const secret = dialog.querySelector("[data-key-secret]");
   secret.textContent = made.key;
@@ -399,8 +408,10 @@ function showKey(identity, made) {
   dialog.showModal();
 }
 
-async function makeKey(identity, label, expires) {
-  showKey(identity, await api(`/api/rights/identities/${encodeURIComponent(identity.clientId)}/keys`, { label: label || null, expires: expires || null }));
+// The window opens whichever visit is on screen when the key arrives: it is the one place a key made ever appears. Its usage is worded
+// before the request, from the rights the click found, since the visit may be left, and its rights dropped, before the answer.
+async function makeKey(identity, usage, label, expires) {
+  showKey(identity, await api(`/api/rights/identities/${encodeURIComponent(identity.clientId)}/keys`, { label: label || null, expires: expires || null }), usage);
 }
 
 async function onClick(e) {
@@ -409,6 +420,10 @@ async function onClick(e) {
   const row = b.closest("[data-identity]");
   const keys = b.closest("[data-keys-of]");
   const waiting = b.closest("[data-pending]");
+  // The visit the click began on: when its request answers on another one, the tab, the form, the keys listed, the matrix draft and
+  // the fields are the new visit's, and the click neither writes them nor draws nor reads the rights again. Its toasts stay (they
+  // name the object), and so does the window of a key it made.
+  const page = visit;
   try {
     if (b.dataset.kindTab !== undefined) {
       activeTab = b.dataset.kindTab;
@@ -420,7 +435,7 @@ async function onClick(e) {
         name: waiting.querySelector('[data-field="name"]').value.trim(),
         groups: groupsOf(waiting.querySelector('[data-field="groups"]').value),
       });
-      activeTab = "node";
+      if (page === visit) activeTab = "node";
       toast(`${subject} accepted: its host joins on its next attempt.`, "info");
     } else if (b.dataset.ignore !== undefined) {
       await api(`/api/rights/pending/${encodeURIComponent(waiting.dataset.pending)}/ignore`, {});
@@ -432,26 +447,27 @@ async function onClick(e) {
       if (identity.kind === "node") Object.assign(identity, { groups: groupsOf(v("a-groups")) });
       if (identity.kind === "launcher") identity.pipelines = groupsOf(v("a-pipelines"));
       if (identity.kind === "person") Object.assign(identity, { role: v("a-role"), account: identity.auth === "idp" ? v("a-account") : null });
+      const usage = usageOf(identity);
       await api("/api/rights/identities", identity);
-      activeTab = identity.kind;
-      adding = false;
+      if (page === visit) { activeTab = identity.kind; adding = false; }
       if (identity.auth === "key") {
-        openKeys.add(identity.clientId);
-        await makeKey(identity);
+        if (page === visit) openKeys.add(identity.clientId);
+        await makeKey(identity, usage);
       } else toast(`${identity.clientId} created: the identity provider verifies it.`, "info");
     } else if (b.dataset.keys !== undefined) {
       const id = row.dataset.identity;
       if (openKeys.delete(id)) { render(); return; }
       openKeys.add(id);
       await listKeys(id);
-      render();
+      if (page === visit) render();
       return;
     } else if (b.dataset.makeKey !== undefined) {
       const id = keys.dataset.keysOf;
       const expires = keys.querySelector("[data-key-expires]").value;
       const sent = slotsIn(keys);
-      await makeKey(rights.identities.find((i) => i.clientId === id), keys.querySelector("[data-key-label]").value.trim(), expires ? new Date(expires).toISOString() : null);
-      settle(sent);
+      const identity = rights.identities.find((i) => i.clientId === id);
+      await makeKey(identity, usageOf(identity), keys.querySelector("[data-key-label]").value.trim(), expires ? new Date(expires).toISOString() : null);
+      if (page === visit) settle(sent);
     } else if (b.dataset.revokeKey !== undefined) {
       const id = keys.dataset.keysOf;
       if (!confirm(`Revoke key ${b.dataset.revokeKey} of ${id}? It opens nothing more, its hosts are disconnected and a session it opened ends.`)) return;
@@ -469,7 +485,7 @@ async function onClick(e) {
         role: row.querySelector('[data-field="role"]')?.value ?? null,
         enabled: row.querySelector('[data-field="enabled"]').checked,
       }, "PUT");
-      settle(sent);
+      if (page === visit) settle(sent);
       toast(`${id} saved.`, "info");
     } else if (b.dataset.reconnect !== undefined) {
       const { disconnected } = await api(`/api/rights/identities/${encodeURIComponent(row.dataset.identity)}/reconnect`, {});
@@ -478,12 +494,13 @@ async function onClick(e) {
       const id = row.dataset.identity;
       if (!confirm(`Remove ${id}? It obtains no more tokens, and its node is disconnected.`)) return;
       await api(`/api/rights/identities/${encodeURIComponent(id)}`, undefined, "DELETE");
-      openKeys.delete(id);
+      if (page === visit) openKeys.delete(id);
     } else if (b.dataset.matrixSave !== undefined) {
       await api("/api/rights/matrix", { matrix: Object.fromEntries(Object.entries(matrixDraft).map(([g, s]) => [g, [...s]])) }, "PUT");
-      matrixDraft = null;
+      if (page === visit) matrixDraft = null;
       toast("Flow matrix applied: the hub uses it from the next transfer.", "info");
     } else if (b.dataset.matrixReset !== undefined) { matrixDraft = null; render(); return; }
+    if (page !== visit) return;
     await load();
   } catch (err) {
     toast(err.message);
