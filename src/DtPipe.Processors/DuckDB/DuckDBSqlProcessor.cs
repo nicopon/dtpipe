@@ -276,6 +276,7 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, ISqlBearing, IDi
 
             if (DuckDbArrowNative.DuckDBArrowScan(_conn!.NativeConnection, scanAlias, ffiStreamPtr) != DuckDBState.Success)
             {
+                // A refused scan left DuckDB no view on the struct, so the stream is released at once.
                 _activeStreams.Remove(stream);
                 CArrowArrayStreamImporter.ImportArrayStream(ffiStreamPtr).Dispose();
                 _allocatedPointers.Remove((IntPtr)ffiStreamPtr);
@@ -537,21 +538,20 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, ISqlBearing, IDi
 
     // ── Disposal ──────────────────────────────────────────────────────────────────────
 
+    // DuckDB goes before the streams it scans. The prepared statement and a streaming result each hold the
+    // connection's context, and the context holds the in-memory database: once the read loop has destroyed its
+    // result, closing the connection after the reader drops the last of them, which waits for the query's tasks
+    // and stops the database's threads. From then on no scan can enter an exported stream. A stream released
+    // before that is a freed handle a running scan still calls into, a native fault.
     public void Dispose()
     {
         _resultReader?.Dispose();
         _resultReader = null;
 
-        foreach (var ptr in _allocatedPointers)
-            Marshal.FreeHGlobal(ptr);
-
-        foreach (var stream in _activeStreams)
-            stream.Dispose();
-
-        _allocatedPointers.Clear();
-        _activeStreams.Clear();
-
         _conn?.Dispose();
+        _conn = null;
+
+        ReleaseStreams();
     }
 
     public async ValueTask DisposeAsync()
@@ -559,16 +559,28 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, ISqlBearing, IDi
         _resultReader?.Dispose();
         _resultReader = null;
 
+        if (_conn is not null) { await _conn.DisposeAsync(); _conn = null; }
+
+        ReleaseStreams();
+    }
+
+    // DuckDB never calls the release of an exported stream: a scan reads a copy of the struct whose release does
+    // nothing. Importing the struct and disposing the import calls it, which frees the exporter's handle and
+    // disposes the stream; without it the handle keeps the stream and every batch it holds reachable for the
+    // life of the process. The struct is freed after its release, which reads it. A stream's dispose runs once
+    // whoever calls it, so the pass over _activeStreams finds the released ones done.
+    private unsafe void ReleaseStreams()
+    {
         foreach (var ptr in _allocatedPointers)
+        {
+            CArrowArrayStreamImporter.ImportArrayStream((CArrowArrayStream*)ptr).Dispose();
             Marshal.FreeHGlobal(ptr);
+        }
+        _allocatedPointers.Clear();
 
         foreach (var stream in _activeStreams)
             stream.Dispose();
-
-        _allocatedPointers.Clear();
         _activeStreams.Clear();
-
-        if (_conn is not null) { await _conn.DisposeAsync(); _conn = null; }
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────────────
