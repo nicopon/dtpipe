@@ -216,8 +216,8 @@ python3 tools/idp_check.py          # discovery, both flows, and the refusals th
 |---|---|
 | Nodes | every node, its bricks (reference, version, preview), the fragments it hosts, the flow matrix |
 | Library | the pipelines kept, searched by title or id and filtered (all, needs a look, deployed, not deployed), their deployment (a failed one says why), **health** (whether the armed version can be launched, and why not) and last run, linked to its page; a pipeline's page shows its health, its bindings, the plan a launch would make now drawn in lanes (sources, runner, sinks), its fragments, its job read only, its recent runs, and its versions (git history, diff, restore). A pipeline is written with `dtpipe studio --coordinator` and published here |
-| Runs | the runs in flight and the queue; the journal, by pipeline and outcome, counted (N of M) and paged, each run opening its page; the deployments that are no library pipeline's, when there are any |
-| Events | the coordinator's stream as the page remembers it (the nodes' lines and their children's stderr), by node, level and text; nothing is kept once the page is closed |
+| Runs | the runs in flight and the queue; the journal (the latest finished runs of each pipeline), by pipeline and outcome, counted (N of M) and paged, each run opening its page; the deployments that are no library pipeline's, when there are any |
+| Events | the coordinator's stream as the page remembers it (the nodes' lines and their children's stderr), by node, level and text; the coordinator keeps its latest events in memory and replays the log lines among them to a page that opens, until it restarts: a live view, no history |
 | Access | the trusted IdP, the hosts waiting for approval, identities (node, monitor or launcher; name, groups or pipelines, enabled, reconnect), the editable flow matrix, the audit |
 
 **A library pipeline names a brick by reference**: `input: brick:<node>/<brick>` reads a source,
