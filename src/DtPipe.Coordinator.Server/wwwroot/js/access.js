@@ -10,8 +10,9 @@ let adding = false;
 let activeTab = null;        // node, launcher, monitor, person
 const openKeys = new Set();  // the identities whose keys are listed
 let keysOf = {};             // client id -> its keys as GET …/keys lists them: ids, last characters and dates, never a key
-// The visit on screen: `mount` and a `leave` that lets the person go are the only ones to advance it. A click keeps the visit it began
-// on, and once its request answers it writes the page's state and draws only while that visit is still on screen.
+// The visit on screen: `mount` and a `leave` that lets the person go are the only ones to advance it. A click and a read of the
+// rights keep the visit they began on, and once their request answers they write the page's state and draw only while that visit is
+// still on screen.
 let visit = 0;
 
 export function mount(el) {
@@ -50,11 +51,17 @@ export function leave() {
   return true;
 }
 
+// A read belongs to the visit that began it: once that visit is left, its answer writes no rights, lists no keys and draws nothing,
+// so the first draw of a visit shows only its own rights and its tab is chosen on them. A read that fails still says so.
 async function load() {
+  const page = visit;
   try {
-    rights = await api("/api/rights");
+    const read = await api("/api/rights");
+    if (page !== visit) return;
+    rights = read;
     await Promise.all([...openKeys].map(listKeys));
   } catch (e) { toast(e.message); return; }
+  if (page !== visit) return;
   render();
 }
 
