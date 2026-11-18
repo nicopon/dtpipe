@@ -29,7 +29,7 @@ dotnet add package DtPipe.PipelineNode.Hosting
 ```
 
 ```xml
-<PackageDownload Include="dtpipe" Version="[1.17.0]" />
+<PackageDownload Include="dtpipe" Version="[1.18.0]" />
 ```
 
 ```csharp

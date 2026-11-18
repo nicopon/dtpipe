@@ -28,8 +28,8 @@ its contracts and the job reader, and depends on TransportR and Apache.Arrow. `A
 Each run of a fragment is a `dtpipe` child process. The csproj gets the program from the `dtpipe` tool package:
 
 ```xml
-<PackageReference Include="DtPipe.PipelineNode.Hosting" Version="1.17.0" />
-<PackageDownload Include="dtpipe" Version="[1.17.0]" />
+<PackageReference Include="DtPipe.PipelineNode.Hosting" Version="1.18.0" />
+<PackageDownload Include="dtpipe" Version="[1.18.0]" />
 ```
 
 A tool package cannot be a `PackageReference`, so it is downloaded; the node library writes its folder into the
