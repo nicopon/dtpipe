@@ -202,6 +202,8 @@ function render() {
     </tr>`;
   }).join("");
 
+  const kept = typed();
+  const focused = focusOf();
   host.innerHTML = `
     <div class="view-head"><h1>Access</h1>
       <p class="hint">Who may send what to whom. Every identity is verified by a key this coordinator makes or by an identity provider it trusts, which says who it is; the coordinator decides its name, its groups and its role, never the token or the node.</p></div>
@@ -256,7 +258,65 @@ function render() {
     <section class="card"><h2>Audit</h2>
       ${(rights.audit || []).slice(0, 40).map((a) => `<div class="audit"><span class="hint">${esc(new Date(a.at).toLocaleString())}${a.by ? ` · ${esc(a.by)}` : ""}</span> ${esc(a.change)}</div>`).join("") || `<p class="hint">No change yet.</p>`}
     </section>`;
+  restore(kept, focused);
   shapeForm();
+}
+
+// What a person types in a field and has not sent is theirs: a draw leaves it where it is. A field is theirs while its value differs
+// from the one it was drawn with, so a field they left alone takes the server's. A field is named by the row (or the add form) that
+// holds it, so the text of a row that is gone goes with it, and a row that comes back starts from what it is drawn with.
+function slotOf(el) {
+  const owner = el.closest("[data-pending], [data-identity], [data-keys-of], .add-identity");
+  if (!owner) return null;
+  const who = owner.matches(".add-identity") ? ["add"] : owner.matches("[data-pending]") ? ["pending", owner.dataset.pending]
+    : owner.matches("[data-identity]") ? ["identity", owner.dataset.identity] : ["keys", owner.dataset.keysOf];
+  const field = el.dataset.field ?? (el.hasAttribute("data-key-label") ? "label" : el.hasAttribute("data-key-expires") ? "expires" : el.id);
+  return field ? JSON.stringify([...who, field]) : null;
+}
+
+const fieldsOf = (scope) => scope.querySelectorAll("input, select");
+const baseline = (el) => el.type === "checkbox" ? el.defaultChecked : el.tagName === "SELECT" ? ([...el.options].find((o) => o.defaultSelected) ?? el.options[0])?.value : el.defaultValue;
+const current = (el) => (el.type === "checkbox" ? el.checked : el.value);
+const put = (el, value) => { if (el.type === "checkbox") el.checked = value; else el.value = value; };
+
+// The text typed in the fields now on the page, by slot; a draw reads it before it replaces them. Only what this draw puts back
+// in the DOM is kept: no module variable holds a field's text.
+function typed() {
+  const kept = new Map();
+  for (const el of fieldsOf(host)) {
+    const slot = slotOf(el);
+    if (slot && current(el) !== baseline(el)) kept.set(slot, { value: current(el), proposed: el.dataset.proposed });
+  }
+  return kept;
+}
+
+function focusOf() {
+  const el = document.activeElement;
+  if (!el || !host.contains(el) || !el.matches("input, select")) return null;
+  let start = null, end = null;
+  try { start = el.selectionStart; end = el.selectionEnd; } catch { /* a field with no caret */ }
+  return { slot: slotOf(el), start, end };
+}
+
+// Puts the typed text back through the fields' properties, never through markup, and the focus where it was.
+function restore(kept, focused) {
+  for (const el of fieldsOf(host)) {
+    const slot = slotOf(el);
+    const text = kept.get(slot);
+    if (text && (el.tagName !== "SELECT" || [...el.options].some((o) => o.value === text.value))) put(el, text.value);
+    if (text?.proposed !== undefined) el.dataset.proposed = text.proposed;
+    if (focused && slot && slot === focused.slot) {
+      el.focus({ preventScroll: true });
+      if (focused.start !== null) try { el.setSelectionRange(focused.start, focused.end); } catch { /* a field with no caret */ }
+    }
+  }
+}
+
+// What a click sent is no longer typed and unsent: those fields go back to the value they were drawn with, so the draw that follows
+// takes the server's. The slots are read before the request, since a draw in the meantime replaces the elements.
+const slotsIn = (scope) => new Set([...fieldsOf(scope)].map(slotOf).filter(Boolean));
+function settle(sent) {
+  for (const el of fieldsOf(host)) if (sent.has(slotOf(el))) put(el, baseline(el));
 }
 
 // The fields of the form that apply to the kind and the verification chosen; the others are hidden, never sent.
@@ -381,7 +441,9 @@ async function onClick(e) {
     } else if (b.dataset.makeKey !== undefined) {
       const id = keys.dataset.keysOf;
       const expires = keys.querySelector("[data-key-expires]").value;
+      const sent = slotsIn(keys);
       await makeKey(rights.identities.find((i) => i.clientId === id), keys.querySelector("[data-key-label]").value.trim(), expires ? new Date(expires).toISOString() : null);
+      settle(sent);
     } else if (b.dataset.revokeKey !== undefined) {
       const id = keys.dataset.keysOf;
       if (!confirm(`Revoke key ${b.dataset.revokeKey} of ${id}? It opens nothing more, its hosts are disconnected and a session it opened ends.`)) return;
@@ -389,6 +451,7 @@ async function onClick(e) {
       toast(`Key ${b.dataset.revokeKey} of ${id} revoked.`, "info");
     } else if (b.dataset.saveIdentity !== undefined) {
       const id = row.dataset.identity;
+      const sent = slotsIn(row);
       await api(`/api/rights/identities/${encodeURIComponent(id)}`, {
         clientId: id,
         name: row.querySelector('[data-field="name"]').value.trim(),
@@ -398,6 +461,7 @@ async function onClick(e) {
         role: row.querySelector('[data-field="role"]')?.value ?? null,
         enabled: row.querySelector('[data-field="enabled"]').checked,
       }, "PUT");
+      settle(sent);
       toast(`${id} saved.`, "info");
     } else if (b.dataset.reconnect !== undefined) {
       const { disconnected } = await api(`/api/rights/identities/${encodeURIComponent(row.dataset.identity)}/reconnect`, {});
