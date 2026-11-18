@@ -129,12 +129,7 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, ISqlBearing, IDi
             ValidateAliases();
 
             if (_refAliases.Length > 0)
-            {
-                var tasks = _refAliases
-                    .Select((alias, i) => RegisterRefTableAsync(alias, _refChannelAliases[i], ct))
-                    .ToList();
-                await Task.WhenAll(tasks);
-            }
+                await RegisterRefTablesAsync(ct);
 
             if (!string.IsNullOrEmpty(_mainAlias))
                 await RegisterStreamingTableAsync(_mainAlias, _mainChannelAlias, ct);
@@ -157,10 +152,54 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, ISqlBearing, IDi
 
     // ── Input registration ───────────────────────────────────────────────────────────
 
-    // Materialises a --ref source fully into an in-memory list of RecordBatches,
-    // then registers it as a zero-copy Arrow scan in DuckDB.
+    // The --ref sources are drained together (the wait on the sources is the cost), then registered one after
+    // the other in the order of _refAliases. A registration writes the maps of the sources (_streamProjections,
+    // _viewBodies, _activeStreams, _allocatedPointers) and uses the one connection, so it is one registration
+    // at a time on both: two at once lose an entry of the maps, and the query is refused or faults.
+    // A source drained and not taken by a registration (a sibling drain failed, an earlier registration
+    // failed, the run was cancelled) is no scan's stream, so nothing else releases its batches: they are
+    // disposed here, and a source a registration took is left to _activeStreams and Dispose.
+    private async Task RegisterRefTablesAsync(CancellationToken ct)
+    {
+        var drains = _refAliases.Select((_, i) => DrainRefAsync(_refChannelAliases[i], ct)).ToArray();
+        try
+        {
+            await Task.WhenAll(drains);
+        }
+        catch
+        {
+            DisposeDrained(drains, from: 0);
+            throw;
+        }
+
+        for (var i = 0; i < drains.Length; i++)
+        {
+            var (schema, batches) = drains[i].Result;
+            try
+            {
+                await RegisterArrowStreamAsync(_refAliases[i], new StaticArrowStream(schema, batches), ct);
+            }
+            catch
+            {
+                DisposeDrained(drains, from: i + 1);
+                throw;
+            }
+        }
+    }
+
+    private static void DisposeDrained(Task<(Schema Schema, List<RecordBatch> Batches)>[] drains, int from)
+    {
+        for (var i = from; i < drains.Length; i++)
+        {
+            if (!drains[i].IsCompletedSuccessfully) continue;
+            foreach (var batch in drains[i].Result.Batches)
+                batch.Dispose();
+        }
+    }
+
+    // Materialises a --ref source fully into an in-memory list of RecordBatches.
     // Draining is required because ref tables are often joined multiple times.
-    private async Task RegisterRefTableAsync(string alias, string channelAlias, CancellationToken ct)
+    private async Task<(Schema Schema, List<RecordBatch> Batches)> DrainRefAsync(string channelAlias, CancellationToken ct)
     {
         var schema = await _registry.WaitForArrowChannelSchemaAsync(channelAlias, ct);
         ValidateSchema(channelAlias, schema);
@@ -168,11 +207,19 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, ISqlBearing, IDi
             ?? throw new Exception($"Arrow channel '{channelAlias}' not found");
 
         var batches = new List<RecordBatch>();
-        await foreach (var batch in channelTuple.Channel.Reader.ReadAllAsync(ct))
-            batches.Add(batch);
+        try
+        {
+            await foreach (var batch in channelTuple.Channel.Reader.ReadAllAsync(ct))
+                batches.Add(batch);
+        }
+        catch
+        {
+            foreach (var batch in batches)
+                batch.Dispose();
+            throw;
+        }
 
-        var stream = new StaticArrowStream(schema, batches);
-        await RegisterArrowStreamAsync(alias, stream, ct);
+        return (schema, batches);
     }
 
     // Registers the main source as a streaming Arrow scan in DuckDB (zero-copy).

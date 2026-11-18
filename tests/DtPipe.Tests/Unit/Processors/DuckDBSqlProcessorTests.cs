@@ -121,6 +121,106 @@ public class DuckDBSqlProcessorTests
     }
 
     /// <summary>
+    /// The --ref sources are drained together and registered one after the other: a registration writes the
+    /// maps of the sources and uses the one connection, neither of which takes two threads. The channels end
+    /// at the same instant while OpenAsync waits on them, which is when registrations would overlap and one
+    /// would lose an entry of the maps. A round is a few milliseconds; the race shows in about one round in
+    /// eight, so the rounds together leave it no chance to hide.
+    /// </summary>
+    [Fact]
+    public async Task OpenAsync_RefsEndingTogether_AreRegisteredOneAtATime()
+    {
+        const int refs = 16;
+        const int rounds = 40;
+
+        for (var round = 0; round < rounds; round++)
+            await OpenWithRefsEndingTogetherAsync(refs);
+    }
+
+    private static async Task OpenWithRefsEndingTogetherAsync(int refs)
+    {
+        var schema = new Schema(new[] { new Field("v", Int64Type.Default, nullable: false) }, null);
+        RecordBatch BatchOf(long value) => new(schema, new IArrowArray[] { new Int64Array.Builder().Append(value).Build() }, 1);
+
+        var mainChannel = Channel.CreateUnbounded<RecordBatch>();
+        mainChannel.Writer.TryWrite(BatchOf(0));
+        mainChannel.Writer.Complete();
+
+        var registry = new Mock<IMemoryChannelRegistry>();
+        registry.Setup(r => r.WaitForArrowChannelSchemaAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(schema);
+        registry.Setup(r => r.GetArrowChannel("main")).Returns((mainChannel, schema));
+
+        var aliases = Enumerable.Range(0, refs).Select(i => $"r{i}").ToArray();
+        var channels = new Channel<RecordBatch>[refs];
+        var draining = new TaskCompletionSource[refs];
+        for (var i = 0; i < refs; i++)
+        {
+            var channel = channels[i] = Channel.CreateUnbounded<RecordBatch>();
+            var reached = draining[i] = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var alias = aliases[i];
+            registry.Setup(r => r.GetArrowChannel(alias)).Returns(() =>
+            {
+                reached.TrySetResult();
+                return (channel, schema);
+            });
+        }
+
+        var query = $"SELECT main.v + {string.Join(" + ", aliases.Select(a => $"{a}.v"))} AS total FROM main, {string.Join(", ", aliases)}";
+        var processor = new DuckDBSqlProcessor(
+            registry.Object, query, "main", "main", aliases, aliases, NullLogger<DuckDBSqlProcessor>.Instance);
+
+        using var cts = new CancellationTokenSource();
+        var open = processor.OpenAsync(cts.Token);
+        var threads = new List<Thread>();
+        try
+        {
+            // Every drain is waiting on its channel before any of them ends: without it the drains would
+            // not overlap, and the round would pass without having exercised the race.
+            var allDraining = Task.WhenAll(draining.Select(d => d.Task));
+            if (await Task.WhenAny(allDraining, open, Task.Delay(TimeSpan.FromSeconds(10))) != allDraining)
+            {
+                if (open.IsCompleted) await open;
+                throw new TimeoutException($"The {refs} --ref sources were not all being drained within 10 s.");
+            }
+
+            var barrier = new Barrier(refs);
+            for (var i = 0; i < refs; i++)
+            {
+                var (channel, value) = (channels[i], i + 1);
+                var thread = new Thread(() =>
+                {
+                    barrier.SignalAndWait();
+                    channel.Writer.TryWrite(BatchOf(value));
+                    channel.Writer.Complete();
+                })
+                { IsBackground = true };
+                threads.Add(thread);
+                thread.Start();
+            }
+
+            await open.WaitAsync(TimeSpan.FromSeconds(30));
+
+            long total = 0;
+            await foreach (var batch in processor.ReadRecordBatchesAsync(cts.Token))
+                using (batch)
+                    total += ((Int64Array)batch.Column(0)).GetValue(0)!.Value;
+            Assert.Equal(Enumerable.Range(1, refs).Sum(v => (long)v), total);
+        }
+        catch
+        {
+            cts.Cancel();
+            try { await processor.DisposeAsync(); } catch { /* the fault above is the one to report */ }
+            throw;
+        }
+        finally
+        {
+            foreach (var thread in threads) thread.Join();
+        }
+
+        await processor.DisposeAsync();
+    }
+
+    /// <summary>
     /// Two sources that carry a column of the same name are scanned with their own projections: the ref
     /// is read for <c>Name</c> alone, and is never handed the <c>GenerateIndex</c> the main side reads.
     /// A scan given a column the plan did not ask for takes it as the next one, here an integer as text,
