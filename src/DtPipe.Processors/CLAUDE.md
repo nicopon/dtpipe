@@ -32,6 +32,23 @@ no column names no source in EXPLAIN, so `ProjectedArrowStream` fails the query 
 `[CI: DuckDBSqlProcessorTests — RefScannedTwice, RefJoinedInARecursivePart, MainScannedTwice,
 ScanReadingNoColumn]`
 
+**The `--ref` sources are drained together, then registered one after the other.** The drains
+overlap, since the wait on the sources is the cost; a registration writes the processor's maps of the
+sources and uses the one connection, so two registrations at once lose an entry and the query is
+refused or faults. `[CI: DuckDBSqlProcessorTests — RefsEndingTogether]`
+
+**The processor closes DuckDB, then releases each stream it exported, then frees its struct.** DuckDB
+never calls an exported stream's release (a scan reads a copy whose release does nothing), so the
+processor's dispose imports the struct and disposes the import: the exporter's handle is freed and the
+stream disposed, which disposes the `--ref` batches no scan read. A stream's dispose runs once, whoever
+calls it. Released while the connection is open, a stream is a freed handle a running scan still calls
+into, a native fault; never released, it keeps the stream and all its batches reachable.
+`[CI: DuckDBSqlProcessorTests — RefBatchesNoScanRead]` `[unchecked: the release itself and its order]`
+
+**A batch DuckDB has read is not disposed by its stream; its finalizer takes it back**, for a `--ref`
+as for the `--from`. The export reaches a buffer with no handle only by pinning it, so a stream that
+disposed a batch it returned would free memory a scan still reads. `[unchecked]`
+
 - `DuckHubConnectionParser` parses `duck+{provider}:` strings and issues `INSTALL` / `LOAD` /
   `ATTACH`.
 - `--duck-init` / `--compute` / `--expand` values resolve through `IStringContentResolver`

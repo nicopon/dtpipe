@@ -40,31 +40,48 @@ public sealed class RunJournalTests
     }
 
     [Fact]
-    public void The_Journal_Keeps_The_Same_Window_At_Start_As_When_It_Records()
+    public void The_Journal_Keeps_The_Latest_Ten_Runs_Of_Each_Pipeline_At_Start_As_When_It_Records()
     {
         var journal = Open();
         var start = DateTimeOffset.UtcNow;
-        for (var i = 1; i <= 205; i++)
-            journal.Record(new RunView($"run-{i}", "plan", RunState.Succeeded, start.AddSeconds(i), start.AddSeconds(i), null, null, null, "p", start));
+        RunView Over(int i, string pipeline, RunState state = RunState.Succeeded) =>
+            new($"run-{i}", "plan", state, start.AddSeconds(i), start.AddSeconds(i), null, null, null, pipeline, start);
+        // One pipeline runs often and another seldom: the first pushes out its own history and leaves the second's whole.
+        for (var i = 1; i <= RunJournal.KeptPerPipeline + 2; i++) journal.Record(Over(i, "busy"));
+        for (var i = 13; i <= 14; i++) journal.Record(Over(i, "quiet"));
+        journal.Record(Over(15, "quiet", RunState.Failed));
 
         var again = Open();
 
-        Assert.Equal(200, again.List(limit: 1000).Count);
-        Assert.Equal(200, journal.List(limit: 1000).Count);
-        Assert.Null(again.Find(r => r.RunId == "run-5"));
-        Assert.Equal("run-205", again.List(limit: 1).Single().RunId);
-        Assert.Equal("run-206", again.NextRunId());
+        Assert.Equal(RunJournal.KeptPerPipeline, journal.List("busy", 1000).Count);
+        Assert.Equal(3, journal.List("quiet", 1000).Count);
+        Assert.Equal(RunJournal.KeptPerPipeline, again.List("busy", 1000).Count);
+        Assert.Equal(3, again.List("quiet", 1000).Count);
+        Assert.Null(again.Find(r => r.RunId == "run-2"));
+        Assert.Equal("run-12", again.List("busy", 1).Single().RunId);
+        Assert.Equal(["quiet", "busy"], again.Latest().Select(r => r.PipelineId));
+        // A page and its total are one pass: the total counts what the pipeline and the state match, before the limit cuts the page.
+        var (succeeded, succeededTotal) = again.Page(null, 1, RunState.Succeeded);
+        Assert.Equal(("run-14", RunJournal.KeptPerPipeline + 2), (Assert.Single(succeeded).RunId, succeededTotal));
+        var (failed, failedTotal) = again.Page("quiet", 1000, RunState.Failed);
+        Assert.Equal(("run-15", 1), (Assert.Single(failed).RunId, failedTotal));
+        Assert.Equal(0, again.Page("busy", 1000, RunState.Failed).Total);
+        Assert.Equal(RunJournal.KeptPerPipeline + 3, again.Page(null, 1).Total);
+        Assert.Equal("run-16", again.NextRunId());
+        // The store drops the documents with the runs the journal let go.
+        Assert.Null(MemoryRunStore.At(_dir).Document("run-2"));
+        Assert.NotNull(MemoryRunStore.At(_dir).Document("run-3"));
     }
 
     [Fact]
-    public void The_Next_Id_Never_Goes_Back_Even_When_The_Run_That_Held_The_Highest_Fell_Out_Of_The_Window()
+    public void The_Next_Id_Never_Goes_Back_Even_When_The_Run_That_Held_The_Highest_Fell_Out_Of_Its_Pipelines_History()
     {
         var journal = Open();
         for (var i = 0; i < 999; i++) journal.NextRunId();
         var start = DateTimeOffset.UtcNow;
-        // The highest id started first: it is the oldest by start time, and the one the window drops.
+        // The highest id started first: it is the oldest by start time, and the one its pipeline's history drops.
         journal.Record(new RunView("run-999", "plan", RunState.Succeeded, start, start, null, null, null, "p", start));
-        for (var i = 1; i <= 200; i++)
+        for (var i = 1; i <= RunJournal.KeptPerPipeline; i++)
             journal.Record(new RunView($"run-{i}", "plan", RunState.Succeeded, start.AddSeconds(i), start.AddSeconds(i), null, null, null, "p", start));
 
         var again = Open();

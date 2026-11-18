@@ -1,12 +1,15 @@
 // What every view shares: the API client, the live store fed by /api/events, and small helpers.
 // The coordinator decides everything; the views only draw the store and send requests.
 
+// What this page keeps of the events it received: the lines of the Events view and of a run's page, the oldest dropped first.
+export const LOG_CAPACITY = 1500;
+
 export const store = {
   nodes: [],
   bricks: [],
   matrix: {},
   deployments: [],
-  runs: [],          // the journal, newest first
+  last: new Map(),   // the latest run that is over of each pipeline, by pipeline id: /api/runs/last, however far back it ended
   queue: [],         // the runs in flight, then the queued ones
   logs: [],
   bytes: { total: 0 },
@@ -90,7 +93,7 @@ export function gate(root) {
   }
 }
 
-export async function api(path, body, method) {
+async function request(path, body, method) {
   // The CSRF header rides every call: the server refuses a change without it.
   const init = { method: method || (body === undefined ? "GET" : "POST"), headers: { "X-Dtpipe-Csrf": "1" } };
   if (body !== undefined) { init.headers["Content-Type"] = "application/json"; init.body = JSON.stringify(body); }
@@ -100,9 +103,34 @@ export async function api(path, body, method) {
   const text = await response.text();
   let data = {};
   try { data = text ? JSON.parse(text) : {}; } catch { data = { error: text }; }
-  if (!response.ok) throw new Error(data.error || data.detail || (response.status === 403 ? forbidden() : data.title) || `${response.status} ${response.statusText}`);
-  return data;
+  if (!response.ok) {
+    const error = new Error(data.error || data.detail || (response.status === 403 ? forbidden() : data.title) || `${response.status} ${response.statusText}`);
+    error.status = response.status;
+    throw error;
+  }
+  return { data, response };
 }
+
+export async function api(path, body, method) { return (await request(path, body, method)).data; }
+
+/** A list the server counts: its items and how many match the filters before the page cut them (`X-Total-Count`; the items' own count when the header is absent). */
+export async function apiPage(path) {
+  const { data, response } = await request(path);
+  const header = response.headers.get("X-Total-Count");
+  const total = header === null ? NaN : Number(header);
+  return { items: data, total: Number.isInteger(total) && total >= 0 ? total : data.length };
+}
+
+/** The address after `#/`: its view, the segments after it (decoded), and the `?…` that may end it as URLSearchParams. */
+export function parseAddress(hash) {
+  const [path, ...rest] = String(hash ?? "").replace(/^#\/?/, "").split("?");
+  const decode = (segment) => { try { return decodeURIComponent(segment); } catch { return segment; } };
+  const [name, ...params] = path.split("/").map(decode);
+  return { name, params: params.filter(Boolean), query: new URLSearchParams(rest.join("?")) };
+}
+
+/** The address of a run's page. A run id on a line is the node's word: it is encoded here and escaped where it enters a document. */
+export const runHref = (runId) => `#/runs/${encodeURIComponent(runId)}`;
 
 let toastTimer = null;
 export function toast(message, kind = "error") {
@@ -115,12 +143,37 @@ export function toast(message, kind = "error") {
   if (kind === "error") addLog({ node: "coordinator", level: "Error", message });
 }
 
+// `n` numbers the lines in the order the page received them, which `markLogsSeen` and the Events badge read.
+let logSeq = 0;
+let seenSeq = 0;
+
 export function addLog(line) {
   if (/:\s*$/.test(line.message)) return; // a label whose value was empty, e.g. a silent child's stderr
-  store.logs.push({ at: new Date(), ...line });
-  if (store.logs.length > 1500) store.logs.splice(0, store.logs.length - 1500);
+  store.logs.push({ at: new Date(), ...line, n: ++logSeq });
+  if (store.logs.length > LOG_CAPACITY) store.logs.splice(0, store.logs.length - LOG_CAPACITY);
   emit("logs");
 }
+
+/** The lines this page holds that name run `runId`. The id is the node's word, never checked: a line is attached by equality and nothing else. */
+export const linesOfRun = (runId) => store.logs.filter((l) => l.runId === runId);
+
+/**
+ * The errors and the warnings among the lines that arrived since the Events view was last open (never opened: every line held),
+ * but the backfill: a line the server replayed when the page first connected is not news, and one it replays after a cut that
+ * the page did not hold is.
+ */
+export function unseenLogs() {
+  let errors = 0, warnings = 0;
+  for (const l of store.logs) {
+    if (l.n <= seenSeq || l.backfill) continue;
+    if (l.level === "Error" || l.level === "Critical") errors++;
+    else if (l.level === "Warning") warnings++;
+  }
+  return { errors, warnings };
+}
+
+/** Every line held so far counts as seen: the Events view is open, or has just been left. */
+export function markLogsSeen() { seenSeq = logSeq; }
 
 export function parseCsv(text) {
   const rows = [];
@@ -150,7 +203,7 @@ export function csvTable(csv, limit = 200, types = null) {
 
 export function deploymentOf(pipelineId) { return store.deployments.find((d) => d.pipelineId === pipelineId) || null; }
 export function lastRunOf(pipelineId) {
-  return store.queue.find((r) => r.pipelineId === pipelineId) || store.runs.find((r) => r.pipelineId === pipelineId) || null;
+  return store.queue.find((r) => r.pipelineId === pipelineId) || store.last.get(pipelineId) || null;
 }
 export const healthOf = (pipelineId) => store.health.pipelines.find((p) => p.id === pipelineId) || null;
 
@@ -183,6 +236,25 @@ async function refreshBricks() {
 }
 
 let bricksTimer = null;
+
+// What the stream numbers: each line it sends carries a `seq` under the `boot` of the process that numbered it, and each connection
+// replays the last lines of its backlog. A line is new to the page when its `boot` is another, or its `seq` is past the greatest the
+// page took under this one; a line of a server that numbers nothing is always new. This lives here, not in `store.logs`, which
+// Clear empties and the capacity cuts: a line dropped from there must not come back at the next connection.
+let streamBoot = null;
+let streamSeq = 0;
+function isNewLine({ seq, boot }) {
+  if (!Number.isSafeInteger(seq) || typeof boot !== "string" || !boot) return true;
+  if (boot !== streamBoot) { streamBoot = boot; streamSeq = seq; return true; }
+  if (seq <= streamSeq) return false;
+  streamSeq = seq;
+  return true;
+}
+
+// How many times the stream opened. Every opening reads the state again; `opened` only tells the first, the page's first connection,
+// whose replayed log lines are its backfill, from the ones after a cut.
+let opened = 0;
+
 function onRun(run) {
   if (isActive(run)) {
     store.queue = [...store.queue.filter((r) => r.runId !== run.runId), run]
@@ -190,50 +262,111 @@ function onRun(run) {
         : a.state === "running" ? new Date(a.startedAt) - new Date(b.startedAt) : new Date(a.queuedAt) - new Date(b.queuedAt));
   } else {
     store.queue = store.queue.filter((r) => r.runId !== run.runId);
-    store.runs = [run, ...store.runs.filter((r) => r.runId !== run.runId)].slice(0, 200);
-    addLog({ node: "coordinator", level: run.state === "succeeded" ? "Information" : "Warning", message: `${run.runId} ${run.pipelineId ?? ""} ${runStateLabel(run.state)}${run.refusal ? `: ${run.refusal}` : ""}` });
+    if (run.pipelineId) store.last.set(run.pipelineId, run);
+    addLog({ node: "coordinator", level: run.state === "succeeded" ? "Information" : "Warning", message: `${run.runId} ${run.pipelineId ?? ""} ${runStateLabel(run.state)}${run.refusal ? `: ${run.refusal}` : ""}`, runId: run.runId });
   }
   emit("runs");
+  // A run that is over is in the journal, which the Runs view reads from the server again.
+  if (!isActive(run)) emit("journal");
+}
+
+// What the page reads of the server to hold its state: at start, and again each time the stream opens. Each entry is a
+// path and where its answer lands in the store. `me` and `info` are read at start alone: no event of the stream moves them.
+const STATE_READS = [
+  ["/api/nodes", (nodes) => ({ nodes })],
+  ["/api/bricks", (bricks) => ({ bricks })],
+  ["/api/flow-matrix", (matrix) => ({ matrix: matrix.groups })],
+  ["/api/deployments", (deployments) => ({ deployments })],
+  ["/api/runs/last", (last) => ({ last: new Map(last.map((r) => [r.pipelineId, r])) })],
+  ["/api/runs/queue", (queue) => ({ queue })],
+];
+
+/** The store's fields as the server holds them now. */
+async function readState() {
+  return Object.assign({}, ...(await Promise.all(STATE_READS.map(async ([path, put]) => put(await api(path))))));
+}
+
+// The state the page holds can be older than the server's: `start()` reads it before the stream exists, and a cut leaves it as it was when
+// the stream dropped, so a run that ended meanwhile still shows in flight. Every opening of the stream reads the state again, the first
+// included: the server subscribes to its bus before it writes the stream's first byte, so an event published after the opening's
+// subscription arrives on the stream and one published before it is in the answers. The page holds the events that arrive meanwhile, for
+// an answer may be older than an event it overlaps and would undo it. The held events are applied over the answers in the order they
+// arrived; a log line is no state and never waits. One resync owns the held events at a time: a stream that opens again while one is
+// reading hands them to the newer, whose answers alone are applied.
+// A read that does not answer in time or fails leaves the state as the events made it, and says so.
+const RESYNC_TIMEOUT = 15000;
+// What the views are told once the state is read again, at each opening of the stream. A view that loads its own data (the library, the rights, the journal) does it on its kind.
+const RESYNC_KINDS = ["nodes", "bricks", "deployments", "runs", "journal", "library", "rights"];
+let held = null;
+let resyncs = 0;
+
+async function resync() {
+  const mine = ++resyncs;
+  held ??= [];
+  let patch = null, failure = null, timer;
+  try {
+    patch = await Promise.race([readState(), new Promise((_, no) => { timer = setTimeout(no, RESYNC_TIMEOUT, new Error("no answer in time")); })]);
+  } catch (e) { failure = e; } finally { clearTimeout(timer); }
+  if (mine !== resyncs) return;
+  const events = held;
+  held = null;
+  if (patch) Object.assign(store, patch);
+  for (const event of events) onEvent(event);
+  if (failure) toast(`The page could not read the coordinator's state again, and may show what it missed: ${failure.message}`);
+  for (const kind of RESYNC_KINDS) emit(kind);
+  refreshHealth();
 }
 
 export async function start() {
-  const [me, info, nodes, bricks, matrix, deployments, runs, queue] = await Promise.all([
-    api("/api/me"), api("/api/info"), api("/api/nodes"), api("/api/bricks"), api("/api/flow-matrix"), api("/api/deployments"), api("/api/runs"), api("/api/runs/queue"),
-  ]);
-  Object.assign(store, { me, httpKeys: info.httpKeys, version: info.version, nodes, bricks, matrix: matrix.groups, deployments, runs, queue });
+  const [me, info, state] = await Promise.all([api("/api/me"), api("/api/info"), readState()]);
+  Object.assign(store, { me, httpKeys: info.httpKeys, version: info.version, ...state });
   emit("all");
   refreshHealth();
   // ?static renders once without the live stream (a headless browser waits on it forever).
   if (new URLSearchParams(location.search).has("static")) return;
 
   const source = new EventSource("/api/events");
-  source.onopen = () => { store.connected = true; emit("connection"); };
+  source.onopen = () => {
+    store.connected = true;
+    emit("connection");
+    opened++;
+    resync();
+  };
   source.onerror = () => { store.connected = false; emit("connection"); };
   source.onmessage = (message) => {
-    const { type, data, at } = JSON.parse(message.data);
-    switch (type) {
-      case "nodes":
-        store.nodes = data;
-        clearTimeout(bricksTimer);
-        bricksTimer = setTimeout(refreshBricks, 300);
-        emit("nodes");
-        refreshHealth();
-        break;
-      case "deployments": store.deployments = data; emit("deployments"); refreshHealth(); break;
-      case "run": onRun(data); break;
-      case "deploy":
-        if (data.state === "failed") addLog({ node: "coordinator", level: "Error", message: `${data.pipelineId}: deployment failed: ${data.message}` });
-        refreshHealth();
-        break;
-      case "log": addLog({ node: data.node, fragment: data.fragment, level: data.level, message: data.message, ...(at ? { at: new Date(at) } : {}) }); break;
-      case "bytes": store.bytes = data; emit("bytes"); break;
-      case "library": emit("library"); refreshHealth(); break;
-      case "rights":
-        api("/api/flow-matrix").then((m) => { store.matrix = m.groups; emit("rights"); }).catch(() => emit("rights"));
-        refreshHealth();
-        break;
-    }
+    const event = JSON.parse(message.data);
+    if (held && event.type !== "log") held.push(event); else onEvent(event);
   };
+}
+
+function onEvent({ type, data, at, seq, boot, replay }) {
+  switch (type) {
+    case "nodes":
+      store.nodes = data;
+      clearTimeout(bricksTimer);
+      bricksTimer = setTimeout(refreshBricks, 300);
+      emit("nodes");
+      refreshHealth();
+      break;
+    case "deployments": store.deployments = data; emit("deployments"); refreshHealth(); break;
+    case "run": onRun(data); break;
+    case "deploy":
+      if (data.state === "failed") addLog({ node: "coordinator", level: "Error", message: `${data.pipelineId}: deployment failed: ${data.message}` });
+      refreshHealth();
+      break;
+    case "log":
+      if (!isNewLine({ seq, boot })) break;
+      // `runId` is the run of the fragment that logged, as its node said it; a line the coordinator writes has none.
+      // The lines replayed to the page's first connection are its backfill: held, never counted as news.
+      addLog({ node: data.node, fragment: data.fragment, level: data.level, message: data.message, ...(typeof data.runId === "string" && data.runId ? { runId: data.runId } : {}), ...(at ? { at: new Date(at) } : {}), ...(replay === true && opened === 1 ? { backfill: true } : {}) });
+      break;
+    case "bytes": store.bytes = data; emit("bytes"); break;
+    case "library": emit("library"); refreshHealth(); break;
+    case "rights":
+      api("/api/flow-matrix").then((m) => { store.matrix = m.groups; emit("rights"); }).catch(() => emit("rights"));
+      refreshHealth();
+      break;
+  }
 }
 
 /** What became of the cursors a run reported: the value each kept, or why one did not advance. */

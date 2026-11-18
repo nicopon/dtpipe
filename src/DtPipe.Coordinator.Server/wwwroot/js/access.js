@@ -9,10 +9,25 @@ let matrixDraft = null;      // group -> Set(targets), while edited
 let adding = false;
 let activeTab = null;        // node, launcher, monitor, person
 const openKeys = new Set();  // the identities whose keys are listed
-const keysOf = {};           // client id -> its keys as GET …/keys lists them: ids, last characters and dates, never a key
+let keysOf = {};             // client id -> its keys as GET …/keys lists them: ids, last characters and dates, never a key
+// The visit on screen: `mount` and a `leave` that lets the person go are the only ones to advance it. A click and a read of the
+// rights keep the visit they began on, and once their request answers they write the page's state and draw only while that visit is
+// still on screen.
+let visit = 0;
 
 export function mount(el) {
   host = el;
+  visit++;
+  // What the page holds belongs to a visit and starts from nothing: the rights read (a draw before this visit's first read shows nothing,
+  // and the tab is chosen on the rights of this visit), the matrix draft (`leave` says it is lost, and Apply sends the whole matrix, so a
+  // draft kept would undo what another administrator changed since), the form to add an identity, the tab and the keys listed. `keysOf`
+  // is a new object, so a read still in flight from the visit left fills no cache of this one.
+  rights = null;
+  matrixDraft = null;
+  adding = false;
+  activeTab = null;
+  openKeys.clear();
+  keysOf = {};
   // Rights are an administrator's: any other role is told so here rather than met by a refusal of each request.
   if (!can("admin")) {
     host.innerHTML = `<h2>Access</h2><p>Who may send what to whom is for administrators. Your role is ${esc(store.me?.roles?.[0] || "none")}: ask an administrator.</p>`;
@@ -29,15 +44,24 @@ export function update(kind) {
   else if (["nodes", "bricks"].includes(kind)) render();
 }
 
+// A person who refuses to lose the draft stays on the visit, its clicks in flight included.
 export function leave() {
-  return !matrixDraft || confirm("Unsaved rights changes will be lost. Leave anyway?");
+  if (matrixDraft && !confirm("Unsaved rights changes will be lost. Leave anyway?")) return false;
+  visit++;
+  return true;
 }
 
+// A read belongs to the visit that began it: once that visit is left, its answer writes no rights, lists no keys and draws nothing,
+// so the first draw of a visit shows only its own rights and its tab is chosen on them. A read that fails still says so.
 async function load() {
+  const page = visit;
   try {
-    rights = await api("/api/rights");
+    const read = await api("/api/rights");
+    if (page !== visit) return;
+    rights = read;
     await Promise.all([...openKeys].map(listKeys));
   } catch (e) { toast(e.message); return; }
+  if (page !== visit) return;
   render();
 }
 
@@ -202,6 +226,8 @@ function render() {
     </tr>`;
   }).join("");
 
+  const kept = typed();
+  const focused = focusOf();
   host.innerHTML = `
     <div class="view-head"><h1>Access</h1>
       <p class="hint">Who may send what to whom. Every identity is verified by a key this coordinator makes or by an identity provider it trusts, which says who it is; the coordinator decides its name, its groups and its role, never the token or the node.</p></div>
@@ -256,7 +282,65 @@ function render() {
     <section class="card"><h2>Audit</h2>
       ${(rights.audit || []).slice(0, 40).map((a) => `<div class="audit"><span class="hint">${esc(new Date(a.at).toLocaleString())}${a.by ? ` · ${esc(a.by)}` : ""}</span> ${esc(a.change)}</div>`).join("") || `<p class="hint">No change yet.</p>`}
     </section>`;
+  restore(kept, focused);
   shapeForm();
+}
+
+// What a person types in a field and has not sent is theirs: a draw leaves it where it is. A field is theirs while its value differs
+// from the one it was drawn with, so a field they left alone takes the server's. A field is named by the row (or the add form) that
+// holds it, so the text of a row that is gone goes with it, and a row that comes back starts from what it is drawn with.
+function slotOf(el) {
+  const owner = el.closest("[data-pending], [data-identity], [data-keys-of], .add-identity");
+  if (!owner) return null;
+  const who = owner.matches(".add-identity") ? ["add"] : owner.matches("[data-pending]") ? ["pending", owner.dataset.pending]
+    : owner.matches("[data-identity]") ? ["identity", owner.dataset.identity] : ["keys", owner.dataset.keysOf];
+  const field = el.dataset.field ?? (el.hasAttribute("data-key-label") ? "label" : el.hasAttribute("data-key-expires") ? "expires" : el.id);
+  return field ? JSON.stringify([...who, field]) : null;
+}
+
+const fieldsOf = (scope) => scope.querySelectorAll("input, select");
+const baseline = (el) => el.type === "checkbox" ? el.defaultChecked : el.tagName === "SELECT" ? ([...el.options].find((o) => o.defaultSelected) ?? el.options[0])?.value : el.defaultValue;
+const current = (el) => (el.type === "checkbox" ? el.checked : el.value);
+const put = (el, value) => { if (el.type === "checkbox") el.checked = value; else el.value = value; };
+
+// The text typed in the fields now on the page, by slot; a draw reads it before it replaces them. Only what this draw puts back
+// in the DOM is kept: no module variable holds a field's text.
+function typed() {
+  const kept = new Map();
+  for (const el of fieldsOf(host)) {
+    const slot = slotOf(el);
+    if (slot && current(el) !== baseline(el)) kept.set(slot, { value: current(el), proposed: el.dataset.proposed });
+  }
+  return kept;
+}
+
+function focusOf() {
+  const el = document.activeElement;
+  if (!el || !host.contains(el) || !el.matches("input, select")) return null;
+  let start = null, end = null;
+  try { start = el.selectionStart; end = el.selectionEnd; } catch { /* a field with no caret */ }
+  return { slot: slotOf(el), start, end };
+}
+
+// Puts the typed text back through the fields' properties, never through markup, and the focus where it was.
+function restore(kept, focused) {
+  for (const el of fieldsOf(host)) {
+    const slot = slotOf(el);
+    const text = kept.get(slot);
+    if (text && (el.tagName !== "SELECT" || [...el.options].some((o) => o.value === text.value))) put(el, text.value);
+    if (text?.proposed !== undefined) el.dataset.proposed = text.proposed;
+    if (focused && slot && slot === focused.slot) {
+      el.focus({ preventScroll: true });
+      if (focused.start !== null) try { el.setSelectionRange(focused.start, focused.end); } catch { /* a field with no caret */ }
+    }
+  }
+}
+
+// What a click sent is no longer typed and unsent: those fields go back to the value they were drawn with, so the draw that follows
+// takes the server's. The slots are read before the request, since a draw in the meantime replaces the elements.
+const slotsIn = (scope) => new Set([...fieldsOf(scope)].map(slotOf).filter(Boolean));
+function settle(sent) {
+  for (const el of fieldsOf(host)) if (sent.has(slotOf(el))) put(el, baseline(el));
 }
 
 // The fields of the form that apply to the kind and the verification chosen; the others are hidden, never sent.
@@ -309,7 +393,7 @@ function usageOf(identity) {
 
 // The key a call made is shown here once, in the one element the Copy button copies, and nowhere else: not in a command, not in
 // storage, not in the address. Closing the window empties that element and removes the window.
-function showKey(identity, made) {
+function showKey(identity, made, usage) {
   const dialog = document.createElement("dialog");
   dialog.className = "key-window";
   dialog.innerHTML = `
@@ -318,7 +402,7 @@ function showKey(identity, made) {
     <code class="mono key-secret" data-key-secret></code>
     <div class="row"><button class="primary" data-copy-key>Copy the key</button></div>
     <h3>How to use it</h3>
-    <pre class="usage">${esc(usageOf(identity))}</pre>
+    <pre class="usage">${esc(usage)}</pre>
     <div class="row"><button data-close-key>Close</button></div>`;
   const secret = dialog.querySelector("[data-key-secret]");
   secret.textContent = made.key;
@@ -331,8 +415,10 @@ function showKey(identity, made) {
   dialog.showModal();
 }
 
-async function makeKey(identity, label, expires) {
-  showKey(identity, await api(`/api/rights/identities/${encodeURIComponent(identity.clientId)}/keys`, { label: label || null, expires: expires || null }));
+// The window opens whichever visit is on screen when the key arrives: it is the one place a key made ever appears. Its usage is worded
+// before the request, from the rights the click found, since the visit may be left, and its rights dropped, before the answer.
+async function makeKey(identity, usage, label, expires) {
+  showKey(identity, await api(`/api/rights/identities/${encodeURIComponent(identity.clientId)}/keys`, { label: label || null, expires: expires || null }), usage);
 }
 
 async function onClick(e) {
@@ -341,6 +427,10 @@ async function onClick(e) {
   const row = b.closest("[data-identity]");
   const keys = b.closest("[data-keys-of]");
   const waiting = b.closest("[data-pending]");
+  // The visit the click began on: when its request answers on another one, the tab, the form, the keys listed, the matrix draft and
+  // the fields are the new visit's, and the click neither writes them nor draws nor reads the rights again. Its toasts stay (they
+  // name the object), and so does the window of a key it made.
+  const page = visit;
   try {
     if (b.dataset.kindTab !== undefined) {
       activeTab = b.dataset.kindTab;
@@ -352,7 +442,7 @@ async function onClick(e) {
         name: waiting.querySelector('[data-field="name"]').value.trim(),
         groups: groupsOf(waiting.querySelector('[data-field="groups"]').value),
       });
-      activeTab = "node";
+      if (page === visit) activeTab = "node";
       toast(`${subject} accepted: its host joins on its next attempt.`, "info");
     } else if (b.dataset.ignore !== undefined) {
       await api(`/api/rights/pending/${encodeURIComponent(waiting.dataset.pending)}/ignore`, {});
@@ -364,24 +454,27 @@ async function onClick(e) {
       if (identity.kind === "node") Object.assign(identity, { groups: groupsOf(v("a-groups")) });
       if (identity.kind === "launcher") identity.pipelines = groupsOf(v("a-pipelines"));
       if (identity.kind === "person") Object.assign(identity, { role: v("a-role"), account: identity.auth === "idp" ? v("a-account") : null });
+      const usage = usageOf(identity);
       await api("/api/rights/identities", identity);
-      activeTab = identity.kind;
-      adding = false;
+      if (page === visit) { activeTab = identity.kind; adding = false; }
       if (identity.auth === "key") {
-        openKeys.add(identity.clientId);
-        await makeKey(identity);
+        if (page === visit) openKeys.add(identity.clientId);
+        await makeKey(identity, usage);
       } else toast(`${identity.clientId} created: the identity provider verifies it.`, "info");
     } else if (b.dataset.keys !== undefined) {
       const id = row.dataset.identity;
       if (openKeys.delete(id)) { render(); return; }
       openKeys.add(id);
       await listKeys(id);
-      render();
+      if (page === visit) render();
       return;
     } else if (b.dataset.makeKey !== undefined) {
       const id = keys.dataset.keysOf;
       const expires = keys.querySelector("[data-key-expires]").value;
-      await makeKey(rights.identities.find((i) => i.clientId === id), keys.querySelector("[data-key-label]").value.trim(), expires ? new Date(expires).toISOString() : null);
+      const sent = slotsIn(keys);
+      const identity = rights.identities.find((i) => i.clientId === id);
+      await makeKey(identity, usageOf(identity), keys.querySelector("[data-key-label]").value.trim(), expires ? new Date(expires).toISOString() : null);
+      if (page === visit) settle(sent);
     } else if (b.dataset.revokeKey !== undefined) {
       const id = keys.dataset.keysOf;
       if (!confirm(`Revoke key ${b.dataset.revokeKey} of ${id}? It opens nothing more, its hosts are disconnected and a session it opened ends.`)) return;
@@ -389,6 +482,7 @@ async function onClick(e) {
       toast(`Key ${b.dataset.revokeKey} of ${id} revoked.`, "info");
     } else if (b.dataset.saveIdentity !== undefined) {
       const id = row.dataset.identity;
+      const sent = slotsIn(row);
       await api(`/api/rights/identities/${encodeURIComponent(id)}`, {
         clientId: id,
         name: row.querySelector('[data-field="name"]').value.trim(),
@@ -398,6 +492,7 @@ async function onClick(e) {
         role: row.querySelector('[data-field="role"]')?.value ?? null,
         enabled: row.querySelector('[data-field="enabled"]').checked,
       }, "PUT");
+      if (page === visit) settle(sent);
       toast(`${id} saved.`, "info");
     } else if (b.dataset.reconnect !== undefined) {
       const { disconnected } = await api(`/api/rights/identities/${encodeURIComponent(row.dataset.identity)}/reconnect`, {});
@@ -406,12 +501,13 @@ async function onClick(e) {
       const id = row.dataset.identity;
       if (!confirm(`Remove ${id}? It obtains no more tokens, and its node is disconnected.`)) return;
       await api(`/api/rights/identities/${encodeURIComponent(id)}`, undefined, "DELETE");
-      openKeys.delete(id);
+      if (page === visit) openKeys.delete(id);
     } else if (b.dataset.matrixSave !== undefined) {
       await api("/api/rights/matrix", { matrix: Object.fromEntries(Object.entries(matrixDraft).map(([g, s]) => [g, [...s]])) }, "PUT");
-      matrixDraft = null;
+      if (page === visit) matrixDraft = null;
       toast("Flow matrix applied: the hub uses it from the next transfer.", "info");
     } else if (b.dataset.matrixReset !== undefined) { matrixDraft = null; render(); return; }
+    if (page !== visit) return;
     await load();
   } catch (err) {
     toast(err.message);

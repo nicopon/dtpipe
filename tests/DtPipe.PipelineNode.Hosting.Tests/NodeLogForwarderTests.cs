@@ -11,7 +11,7 @@ public sealed class NodeLogForwarderTests
     public void A_Forwarded_Line_Names_The_Category_Of_The_Logger_That_Wrote_It()
     {
         var forwarder = new NodeLogForwarder();
-        var factory = forwarder.For(NullLoggerFactory.Instance, "n", fragment: null);
+        var factory = forwarder.For(NullLoggerFactory.Instance, "n", fragment: null, runId: null);
 
         factory.CreateLogger("TransportR.Client.Session").LogWarning("session lost");
         factory.CreateLogger("DtPipe.Other").LogInformation("hello");

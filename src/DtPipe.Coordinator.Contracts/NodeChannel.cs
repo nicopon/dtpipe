@@ -255,9 +255,12 @@ public enum ExitedAck { Accepted, NotAdmitted, UnknownConnection }
 /// <summary>
 /// One log line a node forwards. <see cref="Category"/> is the category of the logger that wrote it, which is how the
 /// coordinator tells a line of the transport library from any other without reading its message; null when the
-/// writer names none.
+/// writer names none. <see cref="RunId"/> is the run of the fragment that wrote the line, as the node that launched it set it
+/// (<see cref="LaunchRequest.RunId"/>); null for a line of the node itself or of the coordinator, written outside a run. The
+/// coordinator keeps it as the node wrote it, like <see cref="Fragment"/>, and looks no run up per line: the log path is bounded
+/// and lossy, so the value is a label for reading and decides nothing.
 /// </summary>
-public sealed record NodeLogLine(string Node, string? Fragment, string Level, string Message, string? Category = null);
+public sealed record NodeLogLine(string Node, string? Fragment, string Level, string Message, string? Category = null, string? RunId = null);
 
 /// <summary>What a logger category says about the library that wrote the line.</summary>
 public static class LogCategories

@@ -17,15 +17,15 @@ internal sealed class NodeLogForwarder
 
     /// <summary>
     /// A logger factory that writes to the host's own loggers and to the coordinator, tagged with
-    /// <paramref name="fragment"/>. The child's stderr is logged at Debug, so the coordinator gets
-    /// Debug and up; TransportR and the framework only from Warning. Disposing it leaves the host's
-    /// factory alone.
+    /// <paramref name="fragment"/> and the <paramref name="runId"/> it runs in (both null for a line of the node itself).
+    /// The child's stderr is logged at Debug, so the coordinator gets Debug and up; TransportR and the framework only from
+    /// Warning. Disposing it leaves the host's factory alone.
     /// </summary>
-    public ILoggerFactory For(ILoggerFactory host, string node, string? fragment) => new Factory(host, this, node, fragment);
+    public ILoggerFactory For(ILoggerFactory host, string node, string? fragment, string? runId) => new Factory(host, this, node, fragment, runId);
 
-    private sealed class Factory(ILoggerFactory host, NodeLogForwarder sink, string node, string? fragment) : ILoggerFactory
+    private sealed class Factory(ILoggerFactory host, NodeLogForwarder sink, string node, string? fragment, string? runId) : ILoggerFactory
     {
-        public ILogger CreateLogger(string categoryName) => new Tee(host.CreateLogger(categoryName), sink, node, fragment, categoryName,
+        public ILogger CreateLogger(string categoryName) => new Tee(host.CreateLogger(categoryName), sink, node, fragment, runId, categoryName,
             LogCategories.IsTransport(categoryName) || categoryName.StartsWith("Microsoft", StringComparison.Ordinal)
                 ? LogLevel.Warning
                 : LogLevel.Debug);
@@ -34,7 +34,7 @@ internal sealed class NodeLogForwarder
         public void Dispose() { }
     }
 
-    private sealed class Tee(ILogger host, NodeLogForwarder sink, string node, string? fragment, string category, LogLevel forwarded) : ILogger
+    private sealed class Tee(ILogger host, NodeLogForwarder sink, string node, string? fragment, string? runId, string category, LogLevel forwarded) : ILogger
     {
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => host.BeginScope(state);
         public bool IsEnabled(LogLevel logLevel) => logLevel >= forwarded || host.IsEnabled(logLevel);
@@ -46,7 +46,7 @@ internal sealed class NodeLogForwarder
             if (logLevel < forwarded || logLevel == LogLevel.None) return;
             var message = formatter(state, exception);
             if (exception is not null) message += $" ({exception.GetType().Name}: {exception.Message})";
-            sink._lines.Writer.TryWrite(new NodeLogLine(node, fragment, logLevel.ToString(), message, category));
+            sink._lines.Writer.TryWrite(new NodeLogLine(node, fragment, logLevel.ToString(), message, category, runId));
         }
     }
 }

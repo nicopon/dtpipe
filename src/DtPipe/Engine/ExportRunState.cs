@@ -8,6 +8,7 @@ using DtPipe.Core.Validation;
 using Microsoft.Extensions.Logging;
 using Apache.Arrow;
 using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
 using DtPipe.Core.Abstractions.Dag;
 using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Core.Pipelines;
@@ -129,6 +130,7 @@ internal sealed partial class ExportRunState
         await LoadPersistedSchemaAsync(ct);
 
         Reader = ReaderFactory.Create(Registry);
+        Exception? fault = null;
         try
         {
             // Opening a reader plays what the source runs on its own (--duck-init), so the verdict
@@ -147,12 +149,41 @@ internal sealed partial class ExportRunState
 
             await RunCoreAsync(ct);
         }
+        catch (Exception ex)
+        {
+            fault = ex;
+            throw;
+        }
         finally
         {
             // Parquet footers and DB writers flush on dispose — never skip it.
-            await Reader.DisposeAsync();
-            if (Writer is not null) await Writer.DisposeAsync();
+            await DisposeEndsAsync(fault);
         }
+    }
+
+    /// <summary>
+    /// Disposes the reader, then the writer, each one whatever the other does. The run's own fault is the one
+    /// reported, a cancellation included (exit 130): a dispose error that follows it is logged, never put in
+    /// its place. With no fault in flight a dispose error is the run's, since a writer whose finalisation
+    /// fails must not end in success: the writer's leads and the reader's is logged when both throw.
+    /// </summary>
+    private async Task DisposeEndsAsync(Exception? fault)
+    {
+        Exception? readerFault = null;
+        Exception? writerFault = null;
+        try { await Reader.DisposeAsync(); }
+        catch (Exception ex) { readerFault = ex; }
+        try { if (Writer is not null) await Writer.DisposeAsync(); }
+        catch (Exception ex) { writerFault = ex; }
+
+        var leading = fault is null ? writerFault ?? readerFault : null;
+        if (readerFault is not null && !ReferenceEquals(readerFault, leading))
+            Logger.LogError(readerFault, "Reader dispose failed");
+        if (writerFault is not null && !ReferenceEquals(writerFault, leading))
+            Logger.LogError(writerFault, "Writer dispose failed");
+
+        if (leading is not null)
+            ExceptionDispatchInfo.Capture(leading).Throw();
     }
 
     /// <summary>

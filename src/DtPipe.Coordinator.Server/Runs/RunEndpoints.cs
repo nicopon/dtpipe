@@ -1,4 +1,6 @@
+using System.Globalization;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using DtPipe.Coordinator.Contracts;
 using DtPipe.Coordinator.Server.Access;
@@ -14,6 +16,9 @@ internal static partial class RunEndpoints
 {
     [GeneratedRegex(@"^[A-Za-z][A-Za-z0-9_-]*\z")]
     private static partial Regex AliasPattern();
+
+    private const int DefaultPage = 50;
+    private const int MaxPage = 500;
 
     private static CursorView ViewOf(CursorRecord c) => new(c.Alias, c.Column, c.Type, c.Value, c.RunId, c.UpdatedAt, c.SetBy);
 
@@ -42,8 +47,28 @@ internal static partial class RunEndpoints
                 return Results.BadRequest(new { error = "Name a pipeline, a branch and a value: {\"value\": \"…\"}." });
             return Results.Ok(ViewOf(deployments.SetCursor(id, alias, request.Type, request.Value, TrustedIdp.CallerOf(http) ?? "")));
         });
-        api.MapGet("/runs", (string? pipeline, RunJournal journal) => journal.List(pipeline));
+        // The journal, newest first: a page of `limit` runs (50 when it is not given, at most MaxPage), of one pipeline and of one state
+        // when they are named. X-Total-Count is how many runs answer those two filters before the page cuts them, from the page's snapshot.
+        api.MapGet("/runs", (string? pipeline, string? state, int? limit, RunJournal journal, HttpContext http) =>
+        {
+            RunState? only = null;
+            if (!string.IsNullOrEmpty(state))
+            {
+                // A table of the words, not Enum.TryParse, which takes "1" for a value.
+                only = Enum.GetValues<RunState>().Cast<RunState?>().FirstOrDefault(s => string.Equals(s!.Value.Word(), state, StringComparison.OrdinalIgnoreCase));
+                if (only is null)
+                    return Results.BadRequest(new { error = $"'{state}' is no run state: {string.Join(", ", Enum.GetValues<RunState>().Select(s => s.Word()))}." });
+            }
+            var (runs, total) = journal.Page(pipeline, Math.Clamp(limit ?? DefaultPage, 1, MaxPage), only);
+            http.Response.Headers["X-Total-Count"] = total.ToString(CultureInfo.InvariantCulture);
+            return Results.Ok(runs);
+        });
+        // The latest run that is over of each pipeline, whole, however long ago it ended.
+        api.MapGet("/runs/last", (RunJournal journal) => journal.Latest());
         api.MapGet("/runs/queue", (DeploymentManager deployments) => deployments.Queue);
+        // One run, in flight, queued or journaled; the literal routes above take their own segment before this one.
+        api.MapGet("/runs/{id}", (string id, DeploymentManager deployments) =>
+            deployments.FindRun(id) is { } run ? Results.Ok(run) : Results.NotFound(new { error = $"'{id}' is no run the coordinator keeps." }));
         designer.MapPost("/runs/cancel", (CancelRequest? request, DeploymentManager deployments) =>
         {
             deployments.Cancel(request?.RunId);
@@ -63,28 +88,41 @@ internal static partial class RunEndpoints
             context.Response.Headers.CacheControl = "no-cache";
             var json = context.RequestServices.GetRequiredService<Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.Http.Json.JsonOptions>>().Value.SerializerOptions;
 
-            // `at` is when the event happened, so a page opened later dates the backlog it replays as it was, never as it loaded.
-            async Task WriteAsync(string type, object data, DateTimeOffset? at = null)
+            async Task WriteAsync(EventFrame frame)
             {
-                await context.Response.WriteAsync($"data: {JsonSerializer.Serialize(new { type, data, at }, json)}\n\n");
+                await context.Response.WriteAsync($"data: {JsonSerializer.Serialize(frame, json)}\n\n");
                 await context.Response.Body.FlushAsync();
             }
 
+            // An event of the bus carries its `seq` and the bus's `boot`, and `at`, when it happened, so a page opened later dates the
+            // backlog it replays as it was, never as it loaded. A line sent from the backlog says `replay`; a live one carries no flag.
+            // The backlog and the live events are split under the lock of `Subscribe`: an event is in one and never in both.
+            EventFrame FrameOf(ServerEvent evt, bool replay) => new(evt.Type, evt.Data, evt.At, evt.Seq, bus.Boot, replay ? true : null);
+
+            // The subscription precedes the response's first byte because the page reads its state again when the stream opens: a response
+            // started before it would reopen the window in which an event reaches neither that read nor the stream.
             var (backlog, live, unsubscribe) = bus.Subscribe();
             try
             {
-                await WriteAsync("nodes", inventory.Snapshot());
+                await WriteAsync(new("nodes", inventory.Snapshot(), null));
                 var plan = deployments.ActivePlan;
-                await WriteAsync("state", new { plan, run = deployments.CurrentRun(plan?.PipelineId) });
-                await WriteAsync("deployments", await deployments.DeploymentsAsync());
-                foreach (var evt in backlog.Where(e => e.Type == "log").TakeLast(150)) await WriteAsync(evt.Type, evt.Data, evt.At);
-                await foreach (var evt in live.ReadAllAsync(context.RequestAborted)) await WriteAsync(evt.Type, evt.Data, evt.At);
+                await WriteAsync(new("state", new { plan, run = deployments.CurrentRun(plan?.PipelineId) }, null));
+                await WriteAsync(new("deployments", await deployments.DeploymentsAsync(), null));
+                foreach (var evt in backlog.Where(e => e.Type == "log").TakeLast(150)) await WriteAsync(FrameOf(evt, replay: true));
+                await foreach (var evt in live.ReadAllAsync(context.RequestAborted)) await WriteAsync(FrameOf(evt, replay: false));
             }
             catch (OperationCanceledException) { }
             finally { unsubscribe(); }
         });
     }
 }
+
+/// <summary>One frame of <c>/api/events</c>. The three snapshots written first come from no event of the bus: they carry no <c>seq</c> or <c>boot</c>.</summary>
+internal sealed record EventFrame(
+    string Type, object Data, DateTimeOffset? At,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? Seq = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Boot = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? Replay = null);
 
 internal sealed record RunRequest(string? PipelineId = null);
 internal sealed record CancelRequest(string? RunId);

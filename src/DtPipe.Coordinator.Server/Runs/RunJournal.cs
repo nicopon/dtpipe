@@ -108,14 +108,19 @@ public sealed record RunView(
 /// ends, so a restart finds what it interrupted: those runs are ended then (<see cref="RestartedRefusal"/>), and the ones that had
 /// started are labelled <see cref="RunView.SinkMayBePartial"/> and leave their fragments <see cref="Owed"/>: their children may still run, and the abandonment is kept in the store until
 /// a replica gives them up, so a second restart before the replicas announce forgets nothing. History (<see cref="List"/>, <see cref="Find"/>) holds the runs
-/// that are over and keeps the latest <see cref="IRunStore.Window"/>, in memory as in the store; a run in flight is in the store
+/// that are over and keeps the latest <see cref="KeptPerPipeline"/> of each pipeline, in memory as in the store: the journal decides, and
+/// names the runs it drops for the store to erase in the write that ends the run that pushed them out, or at start; the runs of no pipeline
+/// share one bucket of that size, and the runs of a pipeline no longer in the library are kept like the others. A run in flight is in the store
 /// only. A run not yet over that cannot be written throws <see cref="StoreUnavailableException"/>, so none starts without its
 /// record; one that is over is kept in memory whatever the store says, since refusing it would help nobody, and a store that missed
-/// it leaves it in flight for the next start to end.
+/// it leaves it in flight for the next start to end; the documents that write should have erased stay in the store until that start,
+/// which drops them as it drops any run beyond the bucket.
 /// </summary>
 public sealed class RunJournal
 {
-    private const int Kept = IRunStore.Window;
+    /// <summary>How many runs that are over the journal keeps of each pipeline.</summary>
+    public const int KeptPerPipeline = 10;
+
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     {
         Converters = { new JsonStringEnumConverter() },
@@ -145,7 +150,7 @@ public sealed class RunJournal
                 logger.LogWarning("Run journal document skipped: {Error}", ex.Message);
             }
         }
-        // The counter is raised to every id read, before the window: a run's id and its start time do not follow one order.
+        // The counter is raised to every id read, before the buckets are cut: a run's id and its start time do not follow one order.
         store.RaiseSequenceTo(loaded.Keys.Select(IdNumber).DefaultIfEmpty(0).Max());
         foreach (var run in loaded.Values.Where(r => r.IsOver)) _runs.Add(run);
         var interrupted = loaded.Values.Where(r => !r.IsOver).ToList();
@@ -158,13 +163,23 @@ public sealed class RunJournal
         foreach (var run in interrupted)
         {
             var ended = run with { State = RunState.Error, FinishedAt = DateTimeOffset.UtcNow, Refusal = RestartedRefusal, SinkMayBePartial = Started(run) };
-            Write(ended);
+            Write(ended, []);
             _runs.Add(ended);
         }
         // A run over that a crash left among the runs in flight is moved to the history.
-        foreach (var run in stored.InFlight.Select(d => Parse(d)).Where(r => r is { IsOver: true })) Write(run!);
-        _runs.Sort((a, b) => b.StartedAt.CompareTo(a.StartedAt));
-        if (_runs.Count > Kept) _runs.RemoveRange(Kept, _runs.Count - Kept);
+        foreach (var run in stored.InFlight.Select(d => Parse(d)).Where(r => r is { IsOver: true })) Write(run!, []);
+        // Newest end first, the order the store reads back and Record keeps.
+        _runs.Sort(Newest);
+        var forgotten = Cut();
+        if (forgotten.Count == 0) return;
+        try
+        {
+            store.Forget(forgotten);
+        }
+        catch (StoreUnavailableException ex)
+        {
+            logger.LogWarning("{Count} runs beyond the {Kept} kept of their pipeline stay in the store until the next start: {Error}", forgotten.Count, KeptPerPipeline, ex.Message);
+        }
     }
 
     /// <summary>The fragments of runs that started and were interrupted, whose replicas have not all given them up: their children may still run.</summary>
@@ -185,23 +200,27 @@ public sealed class RunJournal
 
     public string NextRunId() => $"run-{_store.NextSequence()}";
 
-    /// <summary>Writes the run, whatever its state; one that is over also enters the history.</summary>
+    /// <summary>
+    /// Writes the run, whatever its state; one that is over also enters the history, and pushes out of its pipeline's bucket the runs
+    /// beyond <see cref="KeptPerPipeline"/>, whose documents the same write erases.
+    /// </summary>
     public void Record(RunView run)
     {
         if (!run.IsOver)
         {
-            Write(run);
+            Write(run, []);
             return;
         }
+        IReadOnlyCollection<string> forgotten;
         lock (_lock)
         {
             _runs.RemoveAll(r => r.RunId == run.RunId);
             _runs.Insert(0, run);
-            if (_runs.Count > Kept) _runs.RemoveAt(_runs.Count - 1);
+            forgotten = Cut();
         }
         try
         {
-            Write(run);
+            Write(run, forgotten);
         }
         catch (StoreUnavailableException ex)
         {
@@ -209,9 +228,26 @@ public sealed class RunJournal
         }
     }
 
-    public IReadOnlyList<RunView> List(string? pipelineId = null, int limit = 50)
+    public IReadOnlyList<RunView> List(string? pipelineId = null, int limit = 50, RunState? state = null) => Page(pipelineId, limit, state).Runs;
+
+    /// <summary>
+    /// The newest <paramref name="limit"/> runs of <paramref name="pipelineId"/> (every pipeline when it is null) that ended in
+    /// <paramref name="state"/> (any when it is null), and how many runs answer those two filters before the limit cuts them,
+    /// both read from one snapshot.
+    /// </summary>
+    public (IReadOnlyList<RunView> Runs, int Total) Page(string? pipelineId, int limit, RunState? state = null)
     {
-        lock (_lock) return _runs.Where(r => pipelineId is null || r.PipelineId == pipelineId).Take(limit).ToList();
+        lock (_lock)
+        {
+            var matching = _runs.Where(r => (pipelineId is null || r.PipelineId == pipelineId) && (state is null || r.State == state)).ToList();
+            return (matching.Take(limit).ToList(), matching.Count);
+        }
+    }
+
+    /// <summary>The latest run that is over of each pipeline, newest first; a run of no pipeline is no pipeline's latest.</summary>
+    public IReadOnlyList<RunView> Latest()
+    {
+        lock (_lock) return _runs.Where(r => r.PipelineId is not null).DistinctBy(r => r.PipelineId).ToList();
     }
 
     /// <summary>The latest run kept that <paramref name="match"/> accepts, however far back it is.</summary>
@@ -220,8 +256,28 @@ public sealed class RunJournal
         lock (_lock) return _runs.FirstOrDefault(match);
     }
 
-    private void Write(RunView run) =>
-        _store.Put(new StoredRun(run.RunId, JsonSerializer.Serialize(run, Json), run.IsOver, run.FinishedAt ?? run.StartedAt));
+    private void Write(RunView run, IReadOnlyCollection<string> forget) =>
+        _store.Put(new StoredRun(run.RunId, JsonSerializer.Serialize(run, Json), run.IsOver, EndOf(run)), forget);
+
+    private static DateTimeOffset EndOf(RunView run) => run.FinishedAt ?? run.StartedAt;
+
+    /// <summary>Orders runs by the end the store orders them by, newest first, the later id first among equals.</summary>
+    private static int Newest(RunView a, RunView b)
+    {
+        var byEnd = EndOf(b).CompareTo(EndOf(a));
+        return byEnd != 0 ? byEnd : IdNumber(b.RunId).CompareTo(IdNumber(a.RunId));
+    }
+
+    /// <summary>
+    /// Removes from the history, newest first, every run beyond <see cref="KeptPerPipeline"/> of its pipeline and returns their ids;
+    /// the runs of no pipeline are one bucket. Under the lock, or before the journal is shared.
+    /// </summary>
+    private List<string> Cut()
+    {
+        var beyond = _runs.GroupBy(r => r.PipelineId).SelectMany(g => g.Skip(KeptPerPipeline)).Select(r => r.RunId).ToHashSet();
+        _runs.RemoveAll(r => beyond.Contains(r.RunId));
+        return [.. beyond];
+    }
 
     private static RunView? Parse(string document)
     {

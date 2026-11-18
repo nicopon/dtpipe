@@ -6,6 +6,9 @@ body.app { min-height: 100vh; }
 .nav a:hover { color: var(--text); background: var(--surface-2); }
 .nav a.active { color: var(--accent); background: var(--surface-2); }
 .nav a.external { font-weight: 400; }
+.nav .count { margin-left: 6px; padding: 0 6px; border-radius: 999px; font-size: 11px; font-weight: 700; color: var(--on-solid); }
+.nav .count.bad { background: var(--bad); }
+.nav .count.warn { background: var(--warn); }
 
 .view { padding: 16px; }
 .view-body { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
@@ -66,6 +69,9 @@ table.matrix td.no { color: var(--muted); }
 
 /* Library: one two-line entry per pipeline, facts then actions. It folds by what fits (wrapping flex tracks sized in rem,
    so zoom and font size move the folds), never by a window width; what hover cannot reach is printed in the entry. */
+.lib-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 8px; }
+.lib-bar input { flex: 1 1 16rem; min-width: 0; max-width: 28rem; }
+.lib-bar .hint { margin: 0; }
 .lib-list { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); min-width: 0; }
 .lib-item { --stripe: var(--ok); border-left: 3px solid var(--stripe); border-bottom: 1px solid var(--border); padding: 8px 14px 8px 12px; }
 .lib-item:first-child { border-top-left-radius: 9px; border-top-right-radius: 9px; }
@@ -80,6 +86,7 @@ table.matrix td.no { color: var(--muted); }
 .lib-title .mono { color: var(--muted); white-space: nowrap; }
 .lib-facts .chips-wrap { flex: 0 1 auto; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .lib-run { flex: 1 1 16rem; display: flex; gap: 8px; align-items: center; min-width: 0; color: var(--muted); font-size: 12.5px; }
+.lib-run a { white-space: nowrap; }
 .lib-run > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lib-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }
 .lib-when { flex: 1 1 12rem; min-width: 0; text-align: right; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -121,7 +128,6 @@ table.matrix td.no { color: var(--muted); }
 }
 
 .chips-wrap { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
-.lib-history { margin: 8px 0 2px; padding: 6px 10px; background: var(--surface-2); border-radius: 6px; }
 .history-panel { padding: 6px 0; }
 .commit { display: flex; gap: 10px; align-items: center; padding: 3px 0; font-size: 12.5px; border-bottom: 1px dashed var(--border); flex-wrap: wrap; }
 .commit.active { background: var(--surface-2); }
@@ -161,6 +167,11 @@ pre.usage { white-space: pre-wrap; overflow-wrap: anywhere; }
 .audit { font-size: 12.5px; padding: 2px 0; border-bottom: 1px dashed var(--border); }
 
 /* Runs */
+/* Events: the stream takes the window's height, and the box takes what the toolbar leaves. */
+.view-events { height: calc(100vh - 130px); min-height: 360px; }
+.view-events .events-card { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.view-events .log { flex: 1 1 auto; height: auto; min-height: 0; }
+.log a.run-link { color: var(--accent); }
 .queue-item { display: flex; gap: 10px; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--border); }
 .queue-item button { margin-left: auto; }
 .run-report { padding: 6px 0; }

@@ -8,7 +8,7 @@ namespace DtPipe.Coordinator.Server.Stores;
 /// </summary>
 public sealed record StoredRun(string RunId, string Document, bool Over, DateTimeOffset At);
 
-/// <summary>What <see cref="IRunStore.Load"/> found: the documents of runs not over, and those of the latest runs that are, newest first.</summary>
+/// <summary>What <see cref="IRunStore.Load"/> found: the documents of runs not over, and those of every run that is, newest first.</summary>
 public sealed record StoredRuns(IReadOnlyList<string> InFlight, IReadOnlyList<string> History);
 
 /// <summary>A fragment of a run a restart interrupted, which the replicas of <see cref="Node"/> are still to be asked to abandon.</summary>
@@ -20,14 +20,12 @@ public sealed class StoreUnavailableException(string message, Exception? inner =
 /// <summary>
 /// What <see cref="RunJournal"/> keeps beyond the process: the runs by id, the counter that gives their ids and the
 /// abandonments still owed. One coordinator
-/// writes it. A store holds documents and indexes, never the shape of a run: the journal serializes.
+/// writes it. A store holds documents and indexes, never the shape of a run: the journal serializes, and
+/// it alone decides which runs that are over are kept, naming the others for the store to erase by id.
 /// A call that cannot reach the store throws <see cref="StoreUnavailableException"/> having changed nothing.
 /// </summary>
 public interface IRunStore
 {
-    /// <summary>The runs that are over a store keeps in its history.</summary>
-    const int Window = 200;
-
     /// <summary>How long an abandonment stays owed: the child of an interrupted run is most often already gone.</summary>
     static readonly TimeSpan OwedFor = TimeSpan.FromHours(24);
 
@@ -42,12 +40,15 @@ public interface IRunStore
     void RaiseSequenceTo(long floor);
 
     /// <summary>
-    /// Writes the document of the run; a run that is over leaves the runs in flight for the history, which is cut back to
-    /// <see cref="Window"/>, and the documents it cuts go.
+    /// Writes the document of the run; a run that is over leaves the runs in flight for the history. The documents of
+    /// <paramref name="forget"/>, runs that are over and no longer kept, go in the same transaction.
     /// </summary>
-    void Put(StoredRun run);
+    void Put(StoredRun run, IReadOnlyCollection<string> forget);
 
-    /// <summary>The runs in flight and the latest <see cref="Window"/> runs that are over, newest first.</summary>
+    /// <summary>Erases the documents of runs that are over and no longer kept; a run not over is never erased.</summary>
+    void Forget(IReadOnlyCollection<string> runIds);
+
+    /// <summary>The runs in flight and every run that is over, newest first: the store keeps what the journal does not forget.</summary>
     StoredRuns Load();
 
     /// <summary>Records abandonments owed until <paramref name="until"/>.</summary>

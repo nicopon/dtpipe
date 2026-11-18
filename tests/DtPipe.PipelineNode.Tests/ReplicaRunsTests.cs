@@ -62,7 +62,7 @@ public class ReplicaRunsTests : IDisposable
         var runs = new ReplicaRuns(
             host.CreateNodeChannel(), node, "A", DtPipeExecutableLocator.Path, new Dictionary<string, string>(), _dir.FullName,
             spec => FragmentIntake.JobOf(spec, FragmentPolicy.Bricks, (_, _) => null, (_, _) => null, (_, _) => null, []),
-            _ => NullLogger.Instance, NullLogger.Instance, unwired, maxRuns: maxRuns);
+            (_, _) => NullLogger.Instance, NullLogger.Instance, unwired, maxRuns: maxRuns);
         return (host, node, runs);
     }
 

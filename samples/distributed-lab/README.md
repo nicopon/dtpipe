@@ -21,7 +21,7 @@ disposable hosts of `DtPipe.PipelineNode.Hosting`. They drive the `dtpipe` binar
 ## Quick start
 
 Prerequisites: the .NET 10 SDK, `python3`, a bash shell, network access to nuget.org for the
-TransportR `0.12.0` packages (restored like any other dependency of `DtPipe.Coordinator`) and a
+TransportR `0.12.1` packages (restored like any other dependency of `DtPipe.Coordinator`) and a
 built binary:
 
 ```bash
@@ -215,8 +215,9 @@ python3 tools/idp_check.py          # discovery, both flows, and the refusals th
 | View | Does |
 |---|---|
 | Nodes | every node, its bricks (reference, version, preview), the fragments it hosts, the flow matrix |
-| Library | the pipelines kept, their deployment, **health** (whether the armed version can be launched, and why not), last run, git history, diff, restore; a pipeline's page shows its health, its bindings, the plan a launch would make now drawn in lanes (sources, runner, sinks), its fragments and its job, read only. A pipeline is written with `dtpipe studio --coordinator` and published here |
-| Runs | deployments, the runs in flight and the queue, the journal with each run's report, node events, a query on any database |
+| Library | the pipelines kept, searched by title or id and filtered (all, needs a look, deployed, not deployed), their deployment (a failed one says why), **health** (whether the armed version can be launched, and why not) and last run, linked to its page; a pipeline's page shows its health, its bindings, the plan a launch would make now drawn in lanes (sources, runner, sinks), its fragments, its job read only, its recent runs, and its versions (git history, diff, restore). A pipeline is written with `dtpipe studio --coordinator` and published here |
+| Runs | the runs in flight and the queue; the journal (the latest finished runs of each pipeline), by pipeline and outcome, counted (N of M) and paged, each run opening its page; the deployments that are no library pipeline's, when there are any |
+| Events | the coordinator's stream as the page remembers it (the nodes' lines and their children's stderr), by node, level and text; the coordinator keeps its latest events in memory and replays the log lines among them to a page that opens, until it restarts: a live view, no history |
 | Access | the trusted IdP, the hosts waiting for approval, identities (node, monitor or launcher; name, groups or pipelines, enabled, reconnect), the editable flow matrix, the audit |
 
 **A library pipeline names a brick by reference**: `input: brick:<node>/<brick>` reads a source,
@@ -248,7 +249,7 @@ the answer is the `runId` (202): the scheduler asks `GET /service/runs/{id}` unt
 (`POST /service/runs/{id}/cancel`; a run of another identity or of a person is not its to cancel). An `Idempotency-Key` header
 (1 to 128 letters, digits, `.`, `_`, `:` or `-`) makes a retry safe: a second request of the same identity with the same key
 answers the first run (200) and queues none, whatever became of it, and the same key for another pipeline is a 409. The key lives
-with the run in the journal, which keeps the latest 200 finished runs; a run still in flight when the server stops is ended as an
+with the run in the journal, which keeps the latest ten finished runs of each pipeline; a run still in flight when the server stops is ended as an
 error at the next start and answers its key as that run. A run names who started it (`launchedBy`: a person's email, a service's client id) and the pages show
 it. A launcher reaches nothing else: not `/api`, not `/health`, not the node channel.
 
@@ -390,7 +391,7 @@ sign a person in and out. `/health` is not under `/api` and takes a service's to
 | `GET /api/rights` · `PUT /api/rights/matrix` | rights, the flow matrix |
 | `POST /api/rights/identities` · `PUT`/`DELETE /api/rights/identities/{id}` · `POST …/{id}/reconnect` | identities; reconnect drops a node's control connection so it fetches a new token |
 | `POST /api/rights/pending/{subject}/accept` (`{name, groups, description?}`) · `…/ignore` | a host waiting for approval: accept it as an identity, or set it aside for 24 hours |
-| `POST /api/runs` · `GET /api/runs`, `/api/runs/queue` | `{pipelineId?}` queues a run; the journal; in flight and queued |
+| `POST /api/runs` · `GET /api/runs`, `/api/runs/last`, `/api/runs/queue`, `/api/runs/{id}` | `{pipelineId?}` queues a run; the journal (`?pipeline=`, `?state=`, `?limit=`, the runs that match counted in `X-Total-Count`); the latest finished run of each pipeline; in flight and queued; one run, in flight or journaled |
 | `POST /api/runs/cancel` | `{runId?}`: a run in flight or queued; with no id, the one in flight (409 when several are) |
 | `POST /api/fragments/{name}/kill` | fault injection: ends the fragment's child on every replica of its node whose host enabled it (every lab host does) |
 | `GET /api/events` | server-sent events: nodes, deployments, logs, bytes, runs |

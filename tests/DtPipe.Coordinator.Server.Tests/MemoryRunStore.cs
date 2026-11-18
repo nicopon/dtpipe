@@ -7,7 +7,7 @@ namespace DtPipe.Coordinator.Server.Tests;
 
 /// <summary>
 /// <see cref="IRunStore"/> in memory, for tests that are not about a database: the same contract (documents, a counter that never
-/// goes back, a history cut to the window), nothing from a file. A store lives as long as the test process, found again by the
+/// goes back, a history that erases the runs it is told to forget), nothing from a file. A store lives as long as the test process, found again by the
 /// name of the state directory a test gives it: a second <see cref="RunJournal"/> over the same name is a restart.
 /// </summary>
 public sealed class MemoryRunStore : IRunStore
@@ -53,7 +53,7 @@ public sealed class MemoryRunStore : IRunStore
         lock (_lock) _seq = Math.Max(_seq, floor);
     }
 
-    public void Put(StoredRun run)
+    public void Put(StoredRun run, IReadOnlyCollection<string> forget)
     {
         lock (_lock)
         {
@@ -64,14 +64,21 @@ public sealed class MemoryRunStore : IRunStore
                 _active.Remove(run.RunId);
                 _history.Add((run.RunId, run.At));
                 _history.Sort((a, b) => b.At.CompareTo(a.At));
-                while (_history.Count > IRunStore.Window)
-                {
-                    _documents.Remove(_history[^1].Id);
-                    _history.RemoveAt(_history.Count - 1);
-                }
             }
             else _active.Add(run.RunId);
+            Erase(forget);
         }
+    }
+
+    public void Forget(IReadOnlyCollection<string> runIds)
+    {
+        lock (_lock) Erase(runIds);
+    }
+
+    private void Erase(IReadOnlyCollection<string> runIds)
+    {
+        foreach (var id in runIds)
+            if (_history.RemoveAll(h => h.Id == id) > 0) _documents.Remove(id);
     }
 
     public void AddOwed(IReadOnlyCollection<OwedFragment> owed, DateTimeOffset until)
@@ -96,6 +103,6 @@ public sealed class MemoryRunStore : IRunStore
     public StoredRuns Load()
     {
         lock (_lock)
-            return new StoredRuns([.. _active.Select(id => _documents[id])], [.. _history.Take(IRunStore.Window).Select(h => _documents[h.Id])]);
+            return new StoredRuns([.. _active.Select(id => _documents[id])], [.. _history.Select(h => _documents[h.Id])]);
     }
 }

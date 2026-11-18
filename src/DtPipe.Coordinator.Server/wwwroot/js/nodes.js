@@ -46,7 +46,7 @@ function render() {
       <section class="card node-card ${n.online ? "" : "offline"}" style="--node-color:${nodeColor(n.name)}">
         <div class="node-head">
           <span class="node-name"><span class="dot ${n.online ? "on" : ""}"></span>${esc(n.name)}</span>
-          <span><span class="chip">${esc(n.role === "Runner" ? "runner" : "data")}</span> <span class="chip">${n.groups.length > 1 ? "groups" : "group"} ${esc(n.groups.join(" + "))}</span>${n.capabilities.includes("raw-fragments") && n.role !== "Runner" ? ` <span class="chip" title="This host accepts a fragment that is no brick of its own: its owner configured it so.">raw fragments</span>` : ""}</span>
+          <span><a href="#/events?node=${esc(encodeURIComponent(n.name))}" title="The lines this node reported, in Events">events →</a> <span class="chip">${esc(n.role === "Runner" ? "runner" : "data")}</span> <span class="chip">${n.groups.length > 1 ? "groups" : "group"} ${esc(n.groups.join(" + "))}</span>${n.capabilities.includes("raw-fragments") && n.role !== "Runner" ? ` <span class="chip" title="This host accepts a fragment that is no brick of its own: its owner configured it so.">raw fragments</span>` : ""}</span>
         </div>
         <p class="hint">${esc(n.description)}</p>
         ${n.datasets.map((d) => `<div class="dataset"><code>\${{${esc(d.variable)}}}</code> ${esc(d.description)}</div>`).join("")}

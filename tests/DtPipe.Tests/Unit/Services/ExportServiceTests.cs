@@ -207,6 +207,48 @@ public class ExportServiceTests
             refused.Message);
     }
 
+    /// <summary>
+    /// A run that fails reports its own fault, and its writer is disposed: a reader whose dispose throws
+    /// neither takes the fault's place nor keeps the writer from its dispose, which is where a target
+    /// finalises.
+    /// </summary>
+    [Fact]
+    public async Task A_Reader_Whose_Dispose_Throws_Neither_Replaces_The_Fault_Nor_Skips_The_Writer_Dispose()
+    {
+        var mockReader = new Mock<IStreamReader>();
+        mockReader.Setup(r => r.OpenAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        mockReader.Setup(r => r.Columns).Returns(new List<PipeColumnInfo> { new("col1", typeof(int), true) });
+        mockReader.Setup(r => r.ReadBatchesAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+                  .Returns(FailingRead());
+        mockReader.Setup(r => r.DisposeAsync())
+                  .Returns(() => ValueTask.FromException(new InvalidOperationException("the reader's dispose failed")));
+        _mockReaderFactory.Setup(f => f.OptionsType).Returns(typeof(EmptyOptions));
+        _mockReaderFactory.Setup(f => f.Create(It.IsAny<OptionsRegistry>())).Returns(mockReader.Object);
+
+        var mockWriter = new Mock<IRowDataWriter>();
+        mockWriter.Setup(w => w.InitializeAsync(It.IsAny<IReadOnlyList<PipeColumnInfo>>(), It.IsAny<CancellationToken>())).Returns(ValueTask.CompletedTask);
+        mockWriter.Setup(w => w.DisposeAsync()).Returns(ValueTask.CompletedTask);
+        _mockWriterFactory.Setup(f => f.ComponentName).Returns("test-target");
+        _mockWriterFactory.Setup(f => f.OptionsType).Returns(typeof(EmptyOptions));
+        _mockWriterFactory.Setup(f => f.Create(It.IsAny<OptionsRegistry>())).Returns(mockWriter.Object);
+
+        var fault = await Record.ExceptionAsync(() => _service.RunExportAsync(
+            new PipelineOptions { NoStats = true }, "test-source", "target-path", CancellationToken.None,
+            new List<IDataTransformer>(), _mockReaderFactory.Object, _mockWriterFactory.Object, new OptionsRegistry()));
+
+        Assert.Equal("the read failed", fault?.GetBaseException().Message);
+        mockWriter.Verify(w => w.DisposeAsync(), Times.Once);
+
+        static async IAsyncEnumerable<ReadOnlyMemory<object?[]>> FailingRead()
+        {
+            await Task.Yield();
+            throw new InvalidOperationException("the read failed");
+#pragma warning disable CS0162
+            yield break;
+#pragma warning restore CS0162
+        }
+    }
+
     [Fact]
     public void InjectSchema_GivesAReaderThatTakesColumnTypeHints_TheHintsOfTheSchemaScalars()
     {

@@ -53,6 +53,12 @@ internal sealed class ChannelArrowStream : IArrowArrayStream
     public void Dispose() { }
 }
 
+/// <summary>
+/// A --ref source held whole, which DuckDB scans through the C Data exporter. A batch it has returned is the
+/// scan's from then on and is left to its finalizer: the export reaches a buffer without a handle only by
+/// pinning it, so disposing that batch while the export lives frees memory a scan reads. A batch it has not
+/// returned is no one else's, and <see cref="Dispose"/> disposes it; a second call finds none left.
+/// </summary>
 internal sealed class StaticArrowStream : IArrowArrayStream
 {
     private readonly Schema _schema;
@@ -76,7 +82,11 @@ internal sealed class StaticArrowStream : IArrowArrayStream
         return new ValueTask<RecordBatch?>(default(RecordBatch));
     }
 
-    public void Dispose() { }
+    public void Dispose()
+    {
+        while (_currentIndex < _batches.Count)
+            _batches[_currentIndex++].Dispose();
+    }
 }
 
 internal interface IProjectableArrowStream : IArrowArrayStream
@@ -107,6 +117,7 @@ internal sealed class ProjectedArrowStream : IProjectableArrowStream
     private Schema? _projectedSchema;
     private readonly string _alias;
     private int _ends;
+    private int _disposed;
 
     public ProjectedArrowStream(IArrowArrayStream underlying, string prefix, string alias)
     {
@@ -204,8 +215,10 @@ internal sealed class ProjectedArrowStream : IProjectableArrowStream
         return new RecordBatch(_projectedSchema, columns, batch.Length);
     }
 
+    // The exporter's release and the processor both dispose a registered stream: the second call finds it done.
     public void Dispose()
     {
-        _underlying.Dispose();
+        if (Interlocked.Exchange(ref _disposed, 1) == 0)
+            _underlying.Dispose();
     }
 }

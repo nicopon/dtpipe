@@ -29,9 +29,10 @@ coordinator's library. With `--llm-provider`, a panel lets a model design the jo
 
 ## Limits
 
-- **The coordinator is one process.** Its state survives a restart; a run in flight does not, and
-  ends as an error. On PostgreSQL or SQL Server a second instance can wait as a standby and take
-  over. Storage and backup: [deploy/README.md](../deploy/README.md).
+- **The coordinator is one process.** Its state survives a restart, the journal of runs included; a
+  run in flight does not, and ends as an error. The events and log lines its pages show are kept in
+  memory only, and a restart empties them. On PostgreSQL or SQL Server a second instance can wait as
+  a standby and take over. Storage and backup: [deploy/README.md](../deploy/README.md).
 - **Tried on one machine.** As local processes and as Linux containers, on macOS. It has not been
   run on Windows.
 

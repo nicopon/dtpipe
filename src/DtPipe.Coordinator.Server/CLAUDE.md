@@ -510,7 +510,8 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   ledger's lock where the run is queued, and a run is journaled before it leaves the ledger, so a retry that races the end of the
   first finds it in one or the other. A repeat answers the first run whatever became of it (a new attempt takes a new key), the same
   key for another pipeline is a conflict, and a request with no key is never a repeat. The key lives as long as its run is
-  journaled (`IRunStore.Window`, applied at start as when recording); a run in flight when the server stops is ended at the next
+  journaled, which is among the latest ten that are over of its pipeline (`RunJournal.KeptPerPipeline`, applied at start as when
+  recording): ten later runs of that pipeline end it. A run in flight when the server stops is ended at the next
   start (`RunJournal.RestartedRefusal`) and answers its key as that run. `RunJournal.Find` scans every kept run, `List`'s limit being a page.
   `[CI: RunQueueTests, RunJournalTests, ServiceRoutesTests] [local: the lab's smoke.py bricks - a service launches a run]`
 - **A state is written as a lowercase word, by the converter on the property that carries it.** `RunView.State` and
@@ -523,8 +524,20 @@ holds what a host calls and what no domain owns. The rules below name classes, n
 - **A run is journaled as it goes, and a restart ends what it interrupted.** `RunJournal` keeps the runs in an `IRunStore`, which is
   `SqlRunStore`: the `runs` table (a document per run, whether it is over, its instant), the `owed` table and the `counters` table that draws ids. `RunQueue` draws the id and writes the run when it is queued (under the ledger's lock, before
   the ticket is visible), when it starts and when it ends. History (`List`, `Find`, `PipelineHealth`) holds the runs that are over and
-  is read from memory, loaded at start: one coordinator writes the store, so the window in memory is the store's, and a key's
-  lookup `(LaunchedBy, key)` costs no call to the store under the ledger's lock. **A run not yet over that the store cannot keep
+  is read from memory, loaded at start: one coordinator writes the store, so the history in memory is the store's, and a key's
+  lookup `(LaunchedBy, key)` costs no call to the store under the ledger's lock. **The history keeps the latest ten runs that are over
+  of each pipeline** (`RunJournal.KeptPerPipeline`, a constant): the journal decides and names the runs it drops, and the store erases
+  them by id, in the write that ends the run that pushed them out (`IRunStore.Put`) and, for what `Load` returned, at start
+  (`IRunStore.Forget`), so a database that holds more shrinks. The runs of no pipeline share one bucket, and the runs of a pipeline
+  that left the library are kept like any other. A store that cannot erase leaves the documents until the next start cuts them. The
+  pages read a pipeline's last run at `GET /api/runs/last` (the latest run that is over of each pipeline, however long ago it ended)
+  and its journal at `GET /api/runs?pipeline=&state=`, whose `limit` is a page of at most 500 and whose `X-Total-Count` is how many runs
+  answer the two filters before the page cuts them, counted in the same pass as the page (`RunJournal.Page`); a pipeline's page lists
+  its runs in flight from the queue and its latest five from that journal. A run has an address,
+  `GET /api/runs/{id}` (in flight, queued or journaled; 404 once the retention let it go), which the literal `last` and `queue` outrank.
+  The Events view is the page's own memory of `/api/events` (`LOG_CAPACITY` lines in `core.js`), a run id on a line is the node's word
+  and only ever a link to `#/runs/<id>`, and the view keeps nothing.
+  **A run not yet over that the store cannot keep
   throws `StoreUnavailableException`** (503 from the middleware of `CoordinatorServer`), so none is queued or started
   without its record; a run that is over is kept in memory whatever the store says and only logged, and a store that missed it
   leaves it in flight for the next start to end. A call that finds the connection lost fails at once. At start `RunJournal` gives each run it finds queued or running the state `error` and `RestartedRefusal`, and owes
@@ -543,14 +556,40 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   or successful run has no reason. The pages show it wherever a run is shown (`endNotes` in `core.js`), and count rows as
   `rowsCrossed` does, on every edge. An event of `/api/events` carries `at`, when it happened, so a page opened later dates the
   backlog it replays by it; a replica whose connection dropped carries `awaySince` and `givenUpAt` in the nodes' snapshot.
-  `[CI: RunJournalTests (the label), RunQueueTests, OrphanRunsTests, NodeChannelHubTests; SqlStoreTests] [local: tools/campaign.py F4]` `[unchecked: a wired
+  `[CI: RunJournalTests (the label, the page and its total), StateWireTests (the filter, the header, a run's address), RunQueueTests, OrphanRunsTests, NodeChannelHubTests; SqlStoreTests; RouteTableTests] [local: tools/campaign.py F4]` `[unchecked: a wired
   child with nothing to write ends only once a relay touches its torn-down transfer]`
+- **A frame of the event stream says which event it is and which process sent it.** A frame of `/api/events` that comes from `EventBus` carries
+  `seq`, its number (one more than the last, in the order every subscriber receives them), and `boot`, the id of the bus: `Seq` restarts at 1
+  with each process, so two processes are told apart by `boot`, which a coordinator that takes over behind the same address changes. The three
+  snapshots written first (`nodes`, `state`, `deployments`) come from no event and carry neither. A `log` line sent from the backlog (the last
+  150) carries `replay: true`, a live one carries no flag: `Subscribe` takes the backlog and the subscription under one lock, so an event is in
+  one and never in both, and on a connection under one `boot` a `seq` never follows a larger one. The stream has no `id:` and honours no
+  `Last-Event-ID`: a reader that needs more asks the routes. A reader ignores a member it does not know. The pages (`core.js`) take a `log`
+  line when its `boot` is not the one they hold or its `seq` is past the greatest they took under it, and a frame with neither as they
+  always did: a line is lost never, and a duplicate is possible only when `boot` changes. The mark lives beside `store.logs`, which Clear
+  and the capacity cut would let a line back into. The Events tab's badge counts what is news to the page: a line replayed to its first
+  connection is not, any other is, a line replayed after a cut that the page did not hold included.
+  **The stream sends only `log` lines again, so a page reads its state again at every opening of the stream, the first included**: it
+  reads `STATE_READS` (`core.js`, the one list `start()` reads too, `me` and `info` aside), holds the events that arrive meanwhile (all but
+  `log` lines, which are no state) and applies them over the answers in the order they came, so an answer older than an event never
+  undoes it; a stream that opens again while a read is pending hands the held events to the newer read, and only that one's answers are
+  applied. `onopen` suffices because the route subscribes to the bus before the response's first byte (`Subscribe` precedes every write,
+  and no middleware starts the response earlier): an event published after the subscription arrives on the stream and one published
+  before it is in the answers, while the read of `start()` precedes the stream and can miss the one published between the two. The page
+  then tells the views `nodes`, `bricks`, `deployments`, `runs`, `journal`, `library` and `rights`, those that load their own data
+  included. A read that fails or does not answer in 15 seconds is said in a toast, and the page keeps what the events made: it stays
+  stale until the stream opens again. The "run over" line the Events view writes for a `run` event is written for an event the page
+  received: a run that ended before the first opening or during a cut has none.
+  `[CI: StateWireTests (the frame)] [unchecked: the pages, which no test plays in a browser]`
 - **A transport line during a requested cancellation is shown as information, and nothing reads it.** `NodeLogLine.Category` is the
   category of the logger that wrote the line (`NodeLogForwarder` fills it); `NodeChannelHub.ReportLog` shows a warning or an error of
   `LogCategories.IsTransport` as information, with its label, when the replica that reported it holds runs and the requester asked to
   cancel every one of them (`NodeInventory.IsWindingDown`, fed by `RunQueue`'s cancel and cleared when the run ends). The category
   decides, never the message; the line is kept, a run's own teardown (the orchestrator's) is no requested cancellation, and no state,
-  code or verdict reads the classification. `[CI: RunQueueTests; Hosting.Tests NodeLogForwarderTests]`
+  code or verdict reads the classification. `NodeChannelHub.ReportLog` sets `Node` to the name the rights gave the connection and keeps
+  the rest as the node wrote it, `NodeLogLine.RunId` included (the run of the fragment that logged, null outside one): no lookup per
+  line, a label for reading that no state or verdict reads. A line the coordinator writes itself has no run.
+  `[CI: RunQueueTests, NodeChannelHubTests; Hosting.Tests NodeLogForwarderTests]`
   `[unchecked: that a real transfer's lines all arrive before its run ends]`
 - **A run that was placed records the replica of each fragment.** `RunJournal` keeps the `RunResult` whole,
   `RunResult.Replicas` included: an instance id and the `Origin` the replica announced, untrusted text the pages
