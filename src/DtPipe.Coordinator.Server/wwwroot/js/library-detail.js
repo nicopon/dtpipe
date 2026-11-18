@@ -29,11 +29,16 @@ let showing = 0;          // the newest read of one commit
 // or of the job after a Deploy, keeps the one it found when it began, so a page left or a `load` begun after it retires it and it never
 // retires a `load`. A read that is not its page's newest writes nothing and shows nothing, whatever its answer.
 let reads = 0;
+// The page on screen: `mount` and `leave` alone take the next. A click keeps the one it began on, and after an `await` draws on the
+// page, and clears its `busy`, only while it is still the page's. `reads` cannot say it: every `load` takes one, the `load` that a
+// save or a Deploy of the click's own makes included.
+let visit = 0;
 
 export function mount(el, params) {
   host = el;
   id = params[0];
-  reads++;
+  reads++; visit++;
+  busy = false;
   doc = null; plan = null;
   journaled = null; journalError = "";
   versionsOpen = false; commits = null; versionsError = ""; shown = null;
@@ -45,7 +50,7 @@ export function mount(el, params) {
 
 // An answer in flight when the page is left is dropped by its ticket, and `render` leaves a page with no host alone.
 export function leave() {
-  reads++; asking++; reading++; showing++;
+  reads++; asking++; reading++; showing++; visit++;
   host = null;
 }
 
@@ -359,21 +364,22 @@ async function onClick(e) {
   const b = e.target.closest("button");
   if (!b || b.disabled) return;
   if (b.id === "x-versions" || b.dataset.show) return onVersions(b);
-  // What a click reads again after its own request names the pipeline and the ticket it began with.
-  const pipeline = id, mine = reads;
+  // What a click does after its own request names the pipeline, the ticket and the page it began with: the request goes to the
+  // pipeline it was made on, and the page is drawn on only if it is still that page's.
+  const pipeline = id, mine = reads, page = visit;
   busy = true;
   render();
   try {
     if (b.id === "x-bind" || b.dataset.drop) {
       if (b.dataset.drop) delete draft[b.dataset.drop];
       const bindings = Object.fromEntries(Object.entries(draft).filter(([, v]) => v?.node).map(([alias, v]) => [alias, bindingOf(alias, v)]));
-      const saved = await api(`/api/library/${encodeURIComponent(id)}/bindings`, { bindings, message: `Bind ${id}` }, "PUT");
-      await load();
+      const saved = await api(`/api/library/${encodeURIComponent(pipeline)}/bindings`, { bindings, message: `Bind ${pipeline}` }, "PUT");
+      if (page === visit) await load();
       toast(saved.problems?.length ? "Bindings saved: some do not hold yet." : "Bindings saved.", "info");
     } else if (b.id === "x-deploy") {
-      toast(`Deploying ${id}…`, "info");
-      await api(`/api/library/${encodeURIComponent(id)}/deploy`, {});
-      toast(`${id} deployed: every fragment registered.`, "info");
+      toast(`Deploying ${pipeline}…`, "info");
+      await api(`/api/library/${encodeURIComponent(pipeline)}/deploy`, {});
+      toast(`${pipeline} deployed: every fragment registered.`, "info");
       const read = await api(`/api/library/${encodeURIComponent(pipeline)}`);
       if (mine === reads) doc = read;
     } else if (b.id === "x-allow-edges") {
@@ -382,23 +388,27 @@ async function onClick(e) {
       toast(`Allowed in the flow matrix: ${edges.map((e) => `${e.from} → ${e.to}`).join(", ")}.`, "info");
       await loadPlan(pipeline, mine);
     } else if (b.id === "x-run") {
-      const run = await api("/api/runs", { pipelineId: id });
+      const run = await api("/api/runs", { pipelineId: pipeline });
       toast(`${run.runId} ${runStateLabel(run.state)}.`, "info");
     } else if (b.id === "x-undeploy") {
-      await api(`/api/deployments/${encodeURIComponent(id)}`, undefined, "DELETE");
+      await api(`/api/deployments/${encodeURIComponent(pipeline)}`, undefined, "DELETE");
     } else if (b.dataset.restore) {
       const commit = b.dataset.restore;
-      const at = await api(`/api/library/${encodeURIComponent(id)}/at/${encodeURIComponent(commit)}`);
-      await api(`/api/library/${encodeURIComponent(id)}`, { yaml: at.yaml, message: `Restore ${commit.slice(0, 8)}` }, "PUT");
-      shown = null;
-      toast(`${id} restored to ${commit.slice(0, 8)}.`, "info");
-      await load();
+      const at = await api(`/api/library/${encodeURIComponent(pipeline)}/at/${encodeURIComponent(commit)}`);
+      await api(`/api/library/${encodeURIComponent(pipeline)}`, { yaml: at.yaml, message: `Restore ${commit.slice(0, 8)}` }, "PUT");
+      toast(`${pipeline} restored to ${commit.slice(0, 8)}.`, "info");
+      if (page === visit) {
+        shown = null;
+        await load();
+      }
     }
   } catch (err) {
     toast(err.message);
     // A refused Deploy is read again: the plan then shows what the matrix lacks now.
     if (b.id === "x-deploy") await loadPlan(pipeline, mine).catch(() => {});
   }
+  // A click that ends on another page leaves that page's `busy` and drawing to it.
+  if (page !== visit) return;
   busy = false;
   render();
 }
