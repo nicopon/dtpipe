@@ -40,6 +40,7 @@ export function mount(el, params) {
   reads++; visit++;
   busy = false;
   doc = null; plan = null;
+  draft = {}; taken = sorted(draft);
   journaled = null; journalError = "";
   versionsOpen = false; commits = null; versionsError = ""; shown = null;
   host.addEventListener("click", onClick);
@@ -71,7 +72,7 @@ async function load() {
     if (mine !== reads) return;
     doc = read;
     if (!(await loadPlan(pipeline, mine))) return;
-    draft = draftOf(doc.bindings);
+    takeBindings();
   } catch (e) {
     if (mine === reads && host) host.innerHTML = `<p class="mismatch">${esc(e.message)}</p>`;
     return;
@@ -113,6 +114,16 @@ const draftOf = (bindings) => Object.fromEntries(Object.entries(bindings || {}).
 
 const sorted = (o) => JSON.stringify(Object.entries(o).filter(([, v]) => v?.node).map(([a, v]) => [a, v.node, v.mode]).sort(([a], [b]) => (a < b ? -1 : 1)));
 const bindingsDirty = () => sorted(draft) !== sorted(draftOf(doc.bindings));
+
+// What the draft was last taken from, as `sorted` reads it. The draft is the person's own while it differs from that: a read of the
+// job leaves it be, and takes the server's bindings otherwise. A save makes the draft what the server keeps, so the read it
+// provokes takes the server's, whichever read answers last.
+let taken = sorted({});
+function takeBindings() {
+  const server = draftOf(doc.bindings);
+  if (sorted(draft) === taken) draft = server;
+  taken = sorted(server);
+}
 
 // What the server keeps of a draft binding: its node and mode, and for a non-strict mode the brick it already holds on that node.
 function bindingOf(alias, { node, mode }) {
@@ -374,7 +385,10 @@ async function onClick(e) {
       if (b.dataset.drop) delete draft[b.dataset.drop];
       const bindings = Object.fromEntries(Object.entries(draft).filter(([, v]) => v?.node).map(([alias, v]) => [alias, bindingOf(alias, v)]));
       const saved = await api(`/api/library/${encodeURIComponent(pipeline)}/bindings`, { bindings, message: `Bind ${pipeline}` }, "PUT");
-      if (page === visit) await load();
+      if (page === visit) {
+        taken = sorted(draft);
+        await load();
+      }
       toast(saved.problems?.length ? "Bindings saved: some do not hold yet." : "Bindings saved.", "info");
     } else if (b.id === "x-deploy") {
       toast(`Deploying ${pipeline}…`, "info");
