@@ -10,7 +10,7 @@
 #   uid         the product's coordinator image on a volume owned by another uid, which it refuses to start on,
 #               and on one owned by 1654, which it starts on
 #
-# The stack steps build the images of the commit HEAD names and need ports 80 and 8080 free, and a purged .stack/.
+# The stack steps build the images of the commit HEAD names and need port 80 free (LAB_STACK_HTTP_PORT moves it), and a purged .stack/.
 
 set -u
 LAB="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

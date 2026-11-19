@@ -37,7 +37,7 @@ open http://127.0.0.1:5180          # sign in as labadmin / labadminpwd; the Lab
 |---|---|
 | `./lab.sh up` | builds the lab, seeds the databases on first use, starts the IdP, the coordinator, then the nodes (`LAB_REPLICAS="node-4=2,runner-1=2"` starts that many hosts of one identity for those nodes: the first is named for the node, the others `node-4.r2`, …; each makes its own directory under the node's, the databases stay shared) |
 | `./lab.sh status` | which processes run, and what the coordinator sees of each node |
-| `./lab.sh smoke [lab\|sandbox\|library\|rights\|faults\|bricks] [id…]` | runs the end-to-end check, optionally one pass or some pipelines only; restarts the node hosts in the mode each pass needs |
+| `./lab.sh smoke [lab\|sandbox\|library\|rights\|faults\|bricks\|cursor] [id…]` | runs the end-to-end check, optionally one pass or some pipelines only; restarts the node hosts in the mode each pass needs |
 | `LAB_REPLICAS=node-4=2 ./lab.sh smoke replicas` | the replica model against node-4 carried by two hosts: a run names its replica, a stopped one leaves at once and removes its directory, a cut one is listed disconnected then lost after its grace, an updated one is passed over, and a run is refused when none left composes its plan; played only when named, local lab only, and the variable must be exported to every `lab.sh` call that restarts hosts |
 | `./lab.sh nodes strict\|sandbox` | restarts the node hosts in that mode after undoing every deployment (`LAB_NODE_SANDBOX=1 ./lab.sh up` starts them in sandbox mode) |
 | `./lab.sh studio` | drives `dtpipe studio` against the lab in headless Chrome: open from the library, debug a pipeline of bricks (watch, play, reset), import, run and stop, publish and a refusal; screenshots to `.state/studio/`, outside CI |
@@ -68,6 +68,8 @@ cd distributed-lab
 open http://lab.localtest.me        # the home page: links, health, test accounts
 ./lab.sh stack smoke                # the same checks as the local lab's, against the stack
 ./lab.sh stack smoke keys           # a node and a person verified by a key: only the stack exchanges keys
+./lab.sh stack restart-check        # ends the coordinator, starts it again, checks that its state came back
+./lab.sh stack failover-check       # a passive second coordinator takes over when the first is killed (PostgreSQL)
 ./lab.sh stack down                 # stops everything; .stack/ keeps the data
 ```
 
@@ -106,7 +108,9 @@ delete `.stack/` to change it; when a change is replayed on SQLite is the rule o
 `.claude/rules/distributed-pipelines.md`. The local lab's coordinator keeps its state in a SQLite file in `.state/`. `./lab.sh stack restart-check [restore|restore-alone]` ends the
 coordinator and starts it again, on a copy of its state directory put back for `restore` (also with the
 library's remote emptied for `restore-alone`), and checks that a rights edit, a library save, an armed
-pipeline, a run and a session cookie come back. `LAB_STACK_HTTP_PORT` moves the proxy off port 80, outside and inside: tokens name the issuer
+pipeline, a run and a session cookie come back. `./lab.sh stack failover-check` starts a passive second coordinator on the
+same database, kills the first, waits for the second to serve and runs `smoke` against it; PostgreSQL only, and the stack is left
+on the standby until `down` and `up`. `LAB_STACK_HTTP_PORT` moves the proxy off port 80, outside and inside: tokens name the issuer
 with that port, and the IdP accepts the coordinator's redirects at it (`Idp:ExtraOrigins`). Leave
 it unset for port 80: the IdP names itself without a default port, and `dtpipe studio` refuses an
 authority that differs from that name by more than a trailing slash, an explicit `:80` included.
@@ -122,11 +126,12 @@ differs, `smoke.py` follows `LAB_TARGET=stack`, which `lab.sh` sets:
 - the enrollment check's host is a throwaway container of the `node` image on the stack's network,
   reaching the coordinator at `http://coordinator:8080`;
 - the version check compares each node with the `dtpipe` of its own container: the image builds it
-  from the tree without its git metadata, so it carries no revision suffix.
+  from the tree without its git metadata, so it must announce the commit HEAD names (`+<commit>`), as the revision label of
+  every image the stack runs must.
 
 The containers run in UTC whatever the host's zone; the witness runs in the host's. The campaign
 (`tools/campaign.py`) is not played on the stack. On a Linux Docker host, where a bind mount keeps its
-owner, `tools/linux_replay.sh [stack|sqlite|uid]` plays the stack on each store, removes `.stack/` without
+owner, `tools/linux_replay.sh [postgresql|sqlite|uid]` plays the stack on each store, removes `.stack/` without
 `sudo`, and starts the product's coordinator image on a volume of another uid and on one of its own.
 
 ## The nodes
