@@ -201,8 +201,8 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   store: a document or counter that is absent begins only when it is true. A new store takes its contract from `IRunStore`,
   `IRightsStore`, `IDeploymentStore`, `ICursorStore`, `IIgnoredHostStore` and `IXmlRepository`, and its own tests, as `SqlStoreTests`
   (per provider). `[CI: SqlStoreTests on SQLite and PostgreSQL (build.yml)]` `[local: SqlStoreTests on SQL
-  Server (DTPIPE_TEST_REUSE_INFRA, or coordinator-sqlserver.yml by hand); lab.sh stack restart-check with LAB_STACK_STORE=sqlite,
-  restored from a copy as deploy/README.md's backup]` `[unchecked: the file on a network volume; a power cut between a write and its
+  Server (DTPIPE_TEST_REUSE_INFRA, or coordinator-sqlserver.yml by hand); lab.sh stack restart-check restore with LAB_STACK_STORE=sqlite,
+  at the trigger `.claude/rules/distributed-pipelines.md` sets]` `[unchecked: the file on a network volume; a power cut between a write and its
   sync; a key longer than SQL Server's columns]`
 - **A passive standby reads nothing until it holds the database.** `MapCoordinatorServerAsync` starts `PassiveResponder` on the
   host's addresses before anything else, opens `SqlDatabase` (whose wait is the standby's), then stops the responder and runs the
@@ -222,7 +222,7 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   key and sign everyone out unannounced. A restart signs nobody out. **Limit**: the keys are stored as DataProtection hands them over,
   unencrypted (as the directory they replace held them), and they cross the network: the database is as readable as the account that owns it.
   `[CI: SessionKeysTests, SqlStoreTests]`
-  `[local: lab.sh stack restart-check, on either store]`
+  `[local: lab.sh stack restart-check, on PostgreSQL and, at its trigger, SQLite]`
 - **The rights are kept in the store, read once, and memory is the truth.** `RightsStore` is a thin face over `IRightsStore`
   (`SqlRightsStore`): one JSON document and its version in the `rights` table, on the connection every store borrows
   (`SqlDatabase`, which the container disposes). It is loaded at start, and every reader (`CanSend` on each transfer, `Find` on
@@ -461,7 +461,7 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   forgetting was kept while the call timed out leaves the deployment in memory until the next start, when it is gone. Arm the pipeline
   again (it replaces the record), or undeploy it after the restart.
   `[CI: ArmedDeploymentTests, DeploymentRoutesTests; SqlStoreTests]`
-  `[local: lab.sh stack restart-check — an armed pipeline read back, on either store]` `[unchecked: a write that times out and is applied]`
+  `[local: lab.sh stack restart-check — an armed pipeline read back, on PostgreSQL and, at its trigger, SQLite]` `[unchecked: a write that times out and is applied]`
 - **The hosts set aside are in the store, read once, and an announcement never waits on it.** `EnrollmentQueue` loads an
   `IIgnoredHostStore` (`SqlIgnoredHostStore`: the `ignored_hosts` table, a row per subject with the instant it is let
   back in) when it is built, and the server builds it at start, so a store that cannot be read stops the start. `Propose`, which every

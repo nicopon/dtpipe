@@ -17,7 +17,7 @@ project's `CLAUDE.md`); the nodes are `src/DtPipe.PipelineNode.Hosting` hosts
   the state in `.stack/coordinator`. A stack is made on one store; purge `.stack/` to change it. The local lab's coordinator keeps its
   database in `.state/`, which `lab.sh reset` takes with it, so `tools/campaign.py` restarts the coordinator on the same state and a
   throw-away `LAB_STATE` has a state of its own. `Coordinator:Initialize` is true here only: a lab begins where its store holds nothing.
-  `[local: lab.sh up, lab.sh stack up|smoke on either store, tools/campaign.py F4]`
+  `[local: lab.sh up, lab.sh stack up|smoke on PostgreSQL and, at its trigger, SQLite, tools/campaign.py F4]`
 - **The lab's library is pushed to a bare repository beside its state.** `exec-coordinator` creates `.state/library.git` when it is missing
   (`git init --bare`, nothing of the server) and passes it as `Coordinator:Library:Remote:Url`, so `tools/campaign.py` restarts the coordinator on the
   same remote and `lab.sh reset` takes it with the state. The stack's coordinator mounts `.stack/library.git` for the same purpose and its
@@ -184,9 +184,10 @@ project's `CLAUDE.md`); the nodes are `src/DtPipe.PipelineNode.Hosting` hosts
   each is read back with the cookie sent as it was, never signed in again. On PostgreSQL the database stays in its service, whose backup is the
   database's own, so `restore` puts back the state directory alone. The stack keeps `Coordinator:Initialize` true, so a store that lost
   its state would begin again in silence: the guard compares values and fails then. A run asked in the gap between a host announcing and its data
-  plane client registering is refused by name and asked again. `[local: lab.sh stack restart-check, on either store]`
+  plane client registering is refused by name and asked again. `[local: lab.sh stack restart-check, on PostgreSQL and, at its trigger, SQLite]`
 - Verify a change with `./lab.sh smoke`, a page change with `./lab.sh ui` too, and a change to what
   `dtpipe studio` calls with `./lab.sh studio` (`tools/studio_check.py`, outside CI); one that touches
-  the images, `compose.yaml` or a check's stack form with `./lab.sh stack smoke` as well. The page checks
+  the images, `compose.yaml` or a check's stack form with `./lab.sh stack smoke` as well, on the stores
+  `.claude/rules/distributed-pipelines.md` names. The page checks
   drive headless Chrome over the DevTools protocol (`tools/cdp.py`), because Chrome's own
   `--screenshot` stops the page before its fetches finish. `tools/cdp.py` also clicks and drags with the mouse.

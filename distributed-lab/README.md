@@ -101,9 +101,9 @@ The runner mounts nothing. `LAB_SCALE` (default `1`) multiplies the seeded rows 
 node's rows reference the others' counts, so a node seeded at another scale refuses to start; delete
 `.stack/` to seed again. `LAB_NODE_SANDBOX=1 ./lab.sh stack up` starts the data nodes in sandbox
 mode. The stack's coordinator keeps its state in PostgreSQL; `LAB_STACK_STORE=sqlite` runs it on the product's
-default store, a SQLite file in `.stack/coordinator/`, with no `postgres` service: the same checks pass on both,
-and a stack is made on one store, so delete `.stack/` to change it. The local lab's coordinator keeps its state in
-a SQLite file in `.state/`. `./lab.sh stack restart-check [restore|restore-alone]` ends the
+default store, a SQLite file in `.stack/coordinator/`, with no `postgres` service. A stack is made on one store, so
+delete `.stack/` to change it; when a change is replayed on SQLite is the rule of
+`.claude/rules/distributed-pipelines.md`. The local lab's coordinator keeps its state in a SQLite file in `.state/`. `./lab.sh stack restart-check [restore|restore-alone]` ends the
 coordinator and starts it again, on a copy of its state directory put back for `restore` (also with the
 library's remote emptied for `restore-alone`), and checks that a rights edit, a library save, an armed
 pipeline, a run and a session cookie come back. `LAB_STACK_HTTP_PORT` moves the proxy off port 80, outside and inside: tokens name the issuer
