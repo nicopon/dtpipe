@@ -45,7 +45,7 @@ is downloaded, and the `PackageDownload` line stays in the service's own project
 the .NET and ASP.NET Core runtimes.
 
 A service you can run is in
-[samples/arrow-socket-source](../samples/arrow-socket-source/README.md).
+[dtpipe-sandbox](https://github.com/nicopon/dtpipe-sandbox) under `src/ArrowSocketSource`.
 
 ## What you write yourself
 

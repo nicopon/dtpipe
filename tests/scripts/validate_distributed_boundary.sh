@@ -27,9 +27,8 @@ fail() { echo -e "  ${RED}FAIL: $1${NC}"; exit 1; }
 # Tracked files plus new ones not yet added, so the guard sees a change before it is committed.
 FILES=$(git ls-files --cached --others --exclude-standard)
 
-# Files that are not part of the distributed family, its tests, the lab or the node-host sample (a service that adds a node to
-# itself, as the lab's nodes do, so it may reference the Hosting library).
-OUTSIDE=$(echo "$FILES" | grep -vE '^((src|tests)/DtPipe\.(Coordinator|PipelineNode)(\.[A-Za-z]+)*/|samples/(distributed-lab|arrow-socket-source)/)' || true)
+# Files that are not part of the distributed family, its tests or the lab.
+OUTSIDE=$(echo "$FILES" | grep -vE '^((src|tests)/DtPipe\.(Coordinator|PipelineNode)(\.[A-Za-z]+)*/|samples/distributed-lab/)' || true)
 
 echo "========================================"
 echo "  DtPipe Distributed Boundary Validation"

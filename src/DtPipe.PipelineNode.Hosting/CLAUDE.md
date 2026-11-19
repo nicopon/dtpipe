@@ -63,7 +63,7 @@ none. One node per process, which is one replica of its node's identity; a secon
   `FragmentRun` and `DtPipeCommand` alike; `NodeAgent` resolves the path once for both. The child needs the ASP.NET Core shared
   framework on the machine. The `PackageDownload` line stays in the host's own project: a package's props are read only after the
   first restore, too late to add it. `[CI: Hosting.Tests DtPipeLocationTests; PipelineNode.Tests DtPipeProgramTests]`
-  `[local: samples/arrow-socket-source/spike-node.sh]` `[unchecked: Windows]`
+  `[unchecked: Windows; the package consumed end to end, the dtpipe child its dll starts]`
 - **This library is the family's one package, and it carries the three projects under it.** The assemblies of `DtPipe.PipelineNode`,
   `DtPipe.Coordinator.Contracts` and `DtPipe.Jobs` ship in its `lib/` (`PrivateAssets="all"` on the references, `BundleProjectOutputs`
   in the project), so the packages those projects use are declared here too: a private reference carries none. The targets file ships
@@ -73,8 +73,8 @@ none. One node per process, which is one replica of its node's identity; a secon
   runs that script in a step of its own after the solution's push. A host built against a version not yet published takes a local one
   (`-p:PackageVersion`), since a restore serves the cached copy of a version it has. The package takes the repository's `<Version>`
   like the solution's, and the release packs it at the tag's version.
-  `[local: validate_node_host_package.sh, spike-node.sh] [CI: validate_distributed_boundary.sh — one packable project, bundled projects private]`
-  `[unchecked: the release's step, until a tag runs it]`
+  `[local: validate_node_host_package.sh — the package's content] [CI: validate_distributed_boundary.sh — one packable project, bundled projects private]`
+  `[unchecked: the release's step, until a tag runs it; the package consumed end to end]`
 - **A source of the host's own is served on a socket the host owns.** `AddArrowSource` declares a source brick that reads
   `arrow:pipe://${{DTPIPE_SRC_<ID>}}` and serves the rows of a callback on that socket (`ArrowSocketServer`); each connection runs the
   callback once. The path is a variable of the node, never part of the brick: the brick's text is its version, and the path differs by
@@ -86,8 +86,7 @@ none. One node per process, which is one replica of its node's identity; a secon
   disposes the callback's enumerator. The socket lives in a folder of the process that only the current user reaches, set before the
   socket exists. Registration refuses an id that is no word, two ids that name one variable, and a path longer than a Unix socket takes.
   `[CI: Hosting.Tests ArrowSourceTests; PipelineNode.Tests ArrowSourceReadTests — the real binary reads the socket]`
-`[local: samples/arrow-socket-source/spike-node.sh]`
-  `[unchecked: Windows; a reader that leaves while the callback waits, which the next write finds]`
+  `[unchecked: Windows; a real host reading the socket; a reader that leaves while the callback waits, which the next write finds]`
 - **`BrickRules` (`DtPipe.Coordinator.Contracts`) over `JobYaml` (`DtPipe.Jobs`) is the one
   reading of a branch**, shared with the coordinator, so a studio never calls something a brick
   the node then declines. `BrickHost` does not announce a declared brick that fails the structure rule.
