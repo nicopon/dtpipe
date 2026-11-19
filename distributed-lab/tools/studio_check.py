@@ -29,7 +29,7 @@ from lab_session import ApiError, Session
 HERE = os.path.dirname(os.path.abspath(__file__))
 LAB = os.path.dirname(HERE)
 URL = (sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:5180").rstrip("/")
-DTPIPE = sys.argv[2] if len(sys.argv) > 2 else os.path.join(LAB, "..", "..", "dist", "release", "dtpipe")
+DTPIPE = sys.argv[2] if len(sys.argv) > 2 else os.path.join(LAB, "..", "dist", "release", "dtpipe")
 OUT = sys.argv[3] if len(sys.argv) > 3 else os.path.join(LAB, ".state", "studio")
 os.makedirs(OUT, exist_ok=True)
 ADMIN = Session(URL)

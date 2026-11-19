@@ -17,7 +17,7 @@ are published as container images.
 To try it: [Your first distributed pipeline](guides/distributed-first-pipeline.md). To run it for
 real: [deploy/README.md](../deploy/README.md). Every setting:
 [REFERENCE.md](../REFERENCE.md#distributed-pipeline). A demonstrator with four data nodes, joins
-across them and injected faults: [the lab](../samples/distributed-lab/README.md).
+across them and injected faults: [the lab](../distributed-lab/README.md).
 
 ## The studio
 

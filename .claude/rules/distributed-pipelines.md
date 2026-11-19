@@ -5,7 +5,7 @@ paths:
   - "tests/DtPipe.Coordinator*/**"
   - "tests/DtPipe.PipelineNode*/**"
   - "deploy/**"
-  - "samples/distributed-lab/**"
+  - "distributed-lab/**"
   - "src/DtPipe.Jobs/Coordinator/**"
   - "src/DtPipe/Cli/Node/**"
   - "tests/scripts/validate_distributed_boundary.sh"
@@ -45,7 +45,7 @@ library is a git repository, so the machine it runs on needs `git` on the `PATH`
 and the address, and an executable of the family is such a host. Nothing else in `src/` names
 TransportR; only the family, its tests and the lab do. The family references `DtPipe.Jobs` and no
 other project of the solution, so none of its hosts runs the engine in its own process: every fragment runs as a `dtpipe` child. The lab under
-`samples/distributed-lab` is a host, and it and its sample data are named nowhere else; its bench (the Lab view, planning
+`distributed-lab` is a host, and it and its sample data are named nowhere else; its bench (the Lab view, planning
 by hand, fault injection) is its own coordinator's, `Lab.Coordinator`, and nothing of it is under `src/`.
 `[CI: validate_distributed_boundary.sh — names, references and project shape, not behaviour]`
 

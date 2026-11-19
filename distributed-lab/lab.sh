@@ -38,7 +38,7 @@
 set -euo pipefail
 
 LAB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO="$(cd "$LAB/../.." && pwd)"
+REPO="$(cd "$LAB/.." && pwd)"
 STATE="${LAB_STATE:-$LAB/.state}"
 PORT="${LAB_PORT:-5180}"
 URL="http://127.0.0.1:$PORT"

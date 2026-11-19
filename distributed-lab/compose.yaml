@@ -30,13 +30,13 @@ x-dotnet-service: &dotnet-service
   restart: "no"
 
 x-build: &build
-  context: ../..
-  dockerfile: samples/distributed-lab/docker/Dockerfile
+  context: ..
+  dockerfile: distributed-lab/docker/Dockerfile
 
 # The product's images, which the lab's extend. SOURCE_REVISION is the commit the images are built
 # from (lab.sh sets it).
 x-product-build: &product-build
-  context: ../..
+  context: ..
   dockerfile: deploy/Dockerfile
   args:
     SOURCE_REVISION: ${SOURCE_REVISION:-}

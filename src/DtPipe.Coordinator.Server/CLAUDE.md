@@ -238,7 +238,7 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   of `/api` behind every guard (`CoordinatorApiGroups`), and `AddCoordinatorServer` takes the host's own pages as `AdminView`s:
   under the view's path a page navigation signs in as any page does, and anyone but an admin gets the 403 page that names the
   view. The product's host adds neither. The lab's bench (the Lab view, its scenario catalog, planning by hand and fault
-  injection) is its own coordinator's, `samples/distributed-lab/Lab.Coordinator`: nothing of it enters this project or its
+  injection) is its own coordinator's, `distributed-lab/Lab.Coordinator`: nothing of it enters this project or its
   pages. `[CI: validate_distributed_boundary.sh — names under src/]` `[CI: RouteTableTests — the bench's routes] [local: the lab's
   smoke.py rights — a reader opens the Lab view]` `[unchecked: whether a new route belongs to the bench]`
 - **Fault injection ends a fragment's child only on a replica whose host enabled it.** A replica that did

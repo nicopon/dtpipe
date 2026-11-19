@@ -215,7 +215,7 @@ def frozen_problems(repo, dtpipe, state_dir, node_names, expected=None):
             problems.append(f"{binary} reports {out.stdout.strip()!r}, the frozen commit is {want}")
     if len(binaries) > 1:
         problems.append(f"the lab was launched with another dtpipe than the one given: {sorted(binaries)}")
-    dirty = _git(repo, "status", "--porcelain", "--untracked-files=no", "--", "src", "samples/distributed-lab",
+    dirty = _git(repo, "status", "--porcelain", "--untracked-files=no", "--", "src", "distributed-lab",
                  "Directory.Build.props").splitlines()
     if dirty:
         problems.append(f"{len(dirty)} tracked file(s) changed since the frozen commit, e.g. {dirty[0].strip()}")

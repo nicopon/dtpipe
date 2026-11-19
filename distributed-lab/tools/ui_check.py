@@ -31,7 +31,7 @@ SESSION = Session(URL)
 STACK = os.environ.get("LAB_TARGET") == "stack"
 LAB = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATE = os.path.join(LAB, ".stack") if STACK else os.environ.get("LAB_STATE", os.path.join(LAB, ".state"))
-DTPIPE = os.environ.get("DTPIPE", os.path.join(LAB, "..", "..", "dist", "release", "dtpipe"))
+DTPIPE = os.environ.get("DTPIPE", os.path.join(LAB, "..", "dist", "release", "dtpipe"))
 
 
 def report(ok, name, detail, shot):

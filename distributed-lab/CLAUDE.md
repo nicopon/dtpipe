@@ -1,4 +1,4 @@
-# samples/distributed-lab
+# distributed-lab
 
 Mechanics for editing the lab. What it is and how to run it: `README.md`. The coordinator it runs
 is `Lab.Coordinator`, a host of the product's server, `src/DtPipe.Coordinator.Server` (its rules: that
@@ -33,7 +33,7 @@ project's `CLAUDE.md`); the nodes are `src/DtPipe.PipelineNode.Hosting` hosts
 - **The lab runs its own coordinator, on its own seeds.** `lab.sh exec-coordinator` is the one
   way the coordinator starts, for `lab.sh` and `tools/campaign.py`: `Lab.Coordinator`, the scenarios
   in `pipelines/`, the library from `library-seed/`, the rights from `rights-seed.json`, the state in
-  `.state/`. A lab scenario, brick or pipeline is named under `samples/` only.
+  `.state/`. A lab scenario, brick or pipeline is named under `distributed-lab/` only.
   `[CI: validate_distributed_boundary.sh]`
 - **Lab tools sign in as people, through the IdP.** `tools/lab_session.py` follows the real flow
   (login form, code back to `/signin-oidc`) and sends the CSRF header; where the coordinator shows its key form first (the

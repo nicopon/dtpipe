@@ -1,0 +1,17 @@
+# The build context is the repository root: send only what the Dockerfile copies.
+*
+!Directory.Build.props
+!src/
+!distributed-lab/Lab.Coordinator/
+!distributed-lab/Lab.NodeHost/
+!distributed-lab/Lab.Idp/
+!distributed-lab/pipelines/
+!distributed-lab/library-seed/
+!distributed-lab/nodes/
+!distributed-lab/seed/
+!distributed-lab/rights-seed.json
+!distributed-lab/idp-clients.json
+!distributed-lab/docker/node-entrypoint.sh
+!distributed-lab/docker/coordinator-entrypoint.sh
+**/bin/
+**/obj/

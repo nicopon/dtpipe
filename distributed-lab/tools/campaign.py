@@ -37,7 +37,7 @@ IDP_URL = f"http://127.0.0.1:{os.environ.get('LAB_IDP_PORT', '5190')}"
 LAB = os.path.dirname(HERE)
 OUT = os.path.join(STATE, "campaign", CAMPAIGN)
 NODES = ["node-1", "node-2", "node-3", "node-4", "runner-1"]
-TOXI = os.environ.get("TOXIPROXY_DIR", os.path.normpath(os.path.join(LAB, "..", "..", "..", "transportr", "tools")))
+TOXI = os.environ.get("TOXIPROXY_DIR", os.path.normpath(os.path.join(LAB, "..", "..", "transportr", "tools")))
 
 # A retry storm on the loopback can exhaust the ephemeral ports for a few seconds, the harness's own API calls included
 # (EADDRINUSE / EADDRNOTAVAIL): those are retried, nothing else is (a coordinator that is down must still refuse at once).
@@ -1207,7 +1207,7 @@ NAMED_ONLY = {"F6g": cell_F6g, "F12": cell_F12, "F13": cell_F13}
 
 def preflight():
     """What keeps this machine from judging the lab as it is: a list of (check, finding) pairs, empty when all hold."""
-    repo = os.path.normpath(os.path.join(LAB, "..", ".."))
+    repo = os.path.normpath(os.path.join(LAB, ".."))
     found = [("stray", f"{kind} pid {pid} (parent {ppid}) {args[:140]}") for pid, ppid, kind, args in bench.foreign(STATE, NODES)]
     found += [("busy", f"pid {pid}: {why}: {args[:140]}") for pid, why, args in bench.busy_machine(STATE, NODES, os.path.dirname(TOXI))]
     found += [("version", p) for p in bench.frozen_problems(repo, DTPIPE, STATE, NODES, os.environ.get("CAMPAIGN_FROZEN"))]

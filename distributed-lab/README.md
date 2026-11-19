@@ -26,7 +26,7 @@ built binary:
 
 ```bash
 ./build.sh                          # at the repository root: produces dist/release/dtpipe
-cd samples/distributed-lab
+cd distributed-lab
 ./lab.sh up                         # build, seed the four databases, start everything
 open http://127.0.0.1:5180          # sign in as labadmin / labadminpwd; the Lab view is /lab/
 ./lab.sh smoke                      # every pipeline, distributed, against its witness
@@ -63,7 +63,7 @@ Compose, and port 80 free. The images build dtpipe for Linux themselves, so no `
 needed to start it.
 
 ```bash
-cd samples/distributed-lab
+cd distributed-lab
 ./lab.sh stack up                   # build the images, seed each node on first start, start all
 open http://lab.localtest.me        # the home page: links, health, test accounts
 ./lab.sh stack smoke                # the same checks as the local lab's, against the stack

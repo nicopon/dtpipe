@@ -21,16 +21,16 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS source
 WORKDIR /src
 COPY Directory.Build.props ./
 COPY src/ src/
-COPY samples/distributed-lab/Lab.Coordinator/ samples/distributed-lab/Lab.Coordinator/
-COPY samples/distributed-lab/Lab.NodeHost/ samples/distributed-lab/Lab.NodeHost/
-COPY samples/distributed-lab/Lab.Idp/ samples/distributed-lab/Lab.Idp/
+COPY distributed-lab/Lab.Coordinator/ distributed-lab/Lab.Coordinator/
+COPY distributed-lab/Lab.NodeHost/ distributed-lab/Lab.NodeHost/
+COPY distributed-lab/Lab.Idp/ distributed-lab/Lab.Idp/
 
 # Framework-dependent: the runtime image carries ASP.NET Core.
 FROM source AS hosts-build
 RUN --mount=type=cache,id=dtpipe-lab-nuget,target=/root/.nuget/packages,sharing=locked \
-    dotnet publish samples/distributed-lab/Lab.Coordinator/Lab.Coordinator.csproj -c Release -o /out/coordinator \
-    && dotnet publish samples/distributed-lab/Lab.NodeHost/Lab.NodeHost.csproj -c Release -o /out/node \
-    && dotnet publish samples/distributed-lab/Lab.Idp/Lab.Idp.csproj -c Release -o /out/idp
+    dotnet publish distributed-lab/Lab.Coordinator/Lab.Coordinator.csproj -c Release -o /out/coordinator \
+    && dotnet publish distributed-lab/Lab.NodeHost/Lab.NodeHost.csproj -c Release -o /out/node \
+    && dotnet publish distributed-lab/Lab.Idp/Lab.Idp.csproj -c Release -o /out/idp
 
 FROM product-coordinator AS coordinator-lab
 USER root
@@ -39,10 +39,10 @@ USER root
 RUN git config --system --add safe.directory /lab/library.git && rm -rf /app/*
 USER 1654:1654
 COPY --from=hosts-build /out/coordinator /app
-COPY samples/distributed-lab/pipelines/ /lab/pipelines/
-COPY samples/distributed-lab/library-seed/ /lab/library-seed/
-COPY samples/distributed-lab/rights-seed.json /lab/rights-seed.json
-COPY --chmod=755 samples/distributed-lab/docker/coordinator-entrypoint.sh /lab/coordinator-entrypoint.sh
+COPY distributed-lab/pipelines/ /lab/pipelines/
+COPY distributed-lab/library-seed/ /lab/library-seed/
+COPY distributed-lab/rights-seed.json /lab/rights-seed.json
+COPY --chmod=755 distributed-lab/docker/coordinator-entrypoint.sh /lab/coordinator-entrypoint.sh
 ENTRYPOINT ["/lab/coordinator-entrypoint.sh"]
 
 FROM product-with-dtpipe AS node
@@ -50,12 +50,12 @@ USER root
 RUN mkdir -p /lab/state && chown 1654:1654 /lab/state
 USER 1654:1654
 COPY --from=hosts-build /out/node /app
-COPY samples/distributed-lab/nodes/ /lab/nodes/
-COPY --chmod=755 samples/distributed-lab/seed/seed.sh /lab/seed/seed.sh
-COPY --chmod=755 samples/distributed-lab/docker/node-entrypoint.sh /lab/node-entrypoint.sh
+COPY distributed-lab/nodes/ /lab/nodes/
+COPY --chmod=755 distributed-lab/seed/seed.sh /lab/seed/seed.sh
+COPY --chmod=755 distributed-lab/docker/node-entrypoint.sh /lab/node-entrypoint.sh
 ENTRYPOINT ["/lab/node-entrypoint.sh"]
 
 FROM product-runtime AS idp
 COPY --from=hosts-build /out/idp /app
-COPY samples/distributed-lab/idp-clients.json /lab/idp-clients.json
+COPY distributed-lab/idp-clients.json /lab/idp-clients.json
 ENTRYPOINT ["dotnet", "/app/Lab.Idp.dll"]

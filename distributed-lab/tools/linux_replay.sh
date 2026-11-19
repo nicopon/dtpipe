@@ -14,7 +14,7 @@
 
 set -u
 LAB="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ROOT="$(cd "$LAB/../.." && pwd)"
+ROOT="$(cd "$LAB/.." && pwd)"
 IMAGE="dtpipe-linux-replay/coordinator"
 NAME="dtpipe-linux-replay-$$"
 VOLUME="dtpipe-linux-replay-$$"
