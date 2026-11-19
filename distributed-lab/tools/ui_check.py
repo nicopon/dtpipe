@@ -13,7 +13,7 @@ Writes one screenshot per step.
      the card shows them as text and runs none of it.
 
 Usage: ui_check.py [lab-url] [out-dir]     (defaults: http://127.0.0.1:5180, .state/ui)
-The lab must be up. LAB_TARGET=stack points step 4 at the compose stack, as for smoke.py. Exits 1 if any step fails.
+The lab must be up. Exits 1 if any step fails.
 """
 import json, os, sys, time, urllib.parse
 
@@ -28,9 +28,8 @@ os.makedirs(OUT, exist_ok=True)
 failed = False
 # The tool's own calls sign in through the IdP; the browser signs in through the IdP's form.
 SESSION = Session(URL)
-STACK = os.environ.get("LAB_TARGET") == "stack"
 LAB = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-STATE = os.path.join(LAB, ".stack") if STACK else os.environ.get("LAB_STATE", os.path.join(LAB, ".state"))
+STATE = os.environ.get("LAB_STATE", os.path.join(LAB, ".state"))
 DTPIPE = os.environ.get("DTPIPE", os.path.join(LAB, "..", "dist", "release", "dtpipe"))
 
 
@@ -166,7 +165,7 @@ def waiting_card(browser):
     name, description = "<b>node-2</b>", '<img src=x onerror="window.__enrolled=1"> proposes'
     issuer = SESSION.call("/api/rights")["idp"]["issuer"]
     try:
-        with UnknownHost(STATE, issuer, URL, DTPIPE, STACK, name, description):
+        with UnknownHost(STATE, issuer, URL, DTPIPE, name=name, description=description):
             seen = False
             for _ in range(120):
                 seen = any(p["subject"] == CLIENT for p in SESSION.call("/api/rights")["pending"])

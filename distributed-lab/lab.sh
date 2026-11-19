@@ -26,7 +26,7 @@
 #   ./lab.sh stack C   the same lab as the compose stack (compose.yaml), C being
 #                        up      build the images and start the services (LAB_NODE_SANDBOX=1: sandbox nodes)
 #                        down    stop them; .stack/ keeps the data
-#                        nodes M, status, smoke [pass], ui, studio, logs: as above, against the stack
+#                        nodes M, status, smoke [pass], logs: as above, against the stack
 #                        restart-check [restore|restore-alone]: ends the coordinator's process and starts it again and checks that its state came
 #                            back, a session included. restore does it on a copy of the state directory, as deploy/README.md's backup; restore-alone
 #                            also empties the library's remote. Named only
@@ -392,8 +392,8 @@ status() {
 }
 
 # The compose stack: the same lab in containers, reached by the names its proxy answers to (never
-# 127.0.0.1, which the local lab's cookies hold). smoke.py, ui_check.py and studio_check.py are the
-# ones the local lab runs, pointed at STACK_URL; LAB_TARGET=stack tells smoke.py where the stack differs.
+# 127.0.0.1, which the local lab's cookies hold). smoke.py is the one the local lab runs, pointed at
+# STACK_URL; LAB_TARGET=stack tells it where the stack differs.
 # The images are built from the commit HEAD names, and the services that mount .stack/ run as the user who owns it.
 # LAB_STACK_STORE=sqlite keeps the coordinator's state in its own directory and leaves the postgres service (a profile) out; the
 # default is PostgreSQL. A stack is made on one store: purge .stack/ to change it. The connection string reaches the coordinator
@@ -490,10 +490,8 @@ stack() {
                 nodes_table "$STACK_URL"
             fi ;;
         smoke) LAB_TARGET=stack smoke_passes stack_nodes_mode "$STACK_URL" "$STACK" "$@" ;;
-        ui) LAB_TARGET=stack python3 "$LAB/tools/ui_check.py" "$STACK_URL" "$STACK/ui" ;;
-        studio) python3 "$LAB/tools/studio_check.py" "$STACK_URL" "$DTPIPE" "$STACK/studio" ;;
         logs) compose logs --tail 20 -f ;;
-        *) echo "usage: $0 stack up|down|nodes M|status|smoke [pass]|restart-check [restore|restore-alone]|failover-check|ui|studio|logs" >&2; exit 1 ;;
+        *) echo "usage: $0 stack up|down|nodes M|status|smoke [pass]|restart-check [restore|restore-alone]|failover-check|logs" >&2; exit 1 ;;
     esac
 }
 

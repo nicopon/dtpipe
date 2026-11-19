@@ -44,7 +44,7 @@ open http://127.0.0.1:5180          # sign in as labadmin / labadminpwd; the Lab
 | `./lab.sh ui` | drives both pages in headless Chrome, the library without any designer entry, a pipeline's page with its job read only, the card of a host waiting for approval with its HTML shown as text; screenshots to `.state/ui/` |
 | `./lab.sh seed` | rebuilds the databases (`LAB_SCALE=5` multiplies the row counts) |
 | `./lab.sh logs` | follows every log |
-| `./lab.sh stack up\|down\|status\|nodes\|smoke\|restart-check\|ui\|studio\|logs` | the same commands against [the compose stack](#the-compose-stack) |
+| `./lab.sh stack up\|down\|status\|nodes\|smoke\|restart-check\|failover-check\|logs` | the same commands against [the compose stack](#the-compose-stack) |
 | `./lab.sh down` / `reset` | stops everything, including a process of the lab whose pid file was lost (it says "Lab stopped" only when none is left, and otherwise lists them and fails) / also deletes `.state/` |
 
 Every page and `/api` call needs a person signed in through the IdP, with a role: `labadmin`
@@ -111,7 +111,7 @@ with that port, and the IdP accepts the coordinator's redirects at it (`Idp:Extr
 it unset for port 80: the IdP names itself without a default port, and `dtpipe studio` refuses an
 authority that differs from that name by more than a trailing slash, an explicit `:80` included.
 
-`./lab.sh stack smoke`, `ui` and `studio` run the scripts the local lab runs, from the host with
+`./lab.sh stack smoke` runs the script the local lab runs, from the host with
 `./build.sh`'s binary, pointed at the coordinator's name; `stack nodes strict|sandbox` recreates
 the four node containers in a mode, after undoing every deployment, as `lab.sh nodes` restarts the
 local hosts. The witness reads the databases the nodes seeded under `.stack/`. Where the stack

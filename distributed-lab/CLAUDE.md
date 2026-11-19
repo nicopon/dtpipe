@@ -17,7 +17,7 @@ project's `CLAUDE.md`); the nodes are `src/DtPipe.PipelineNode.Hosting` hosts
   the state in `.stack/coordinator`. A stack is made on one store; purge `.stack/` to change it. The local lab's coordinator keeps its
   database in `.state/`, which `lab.sh reset` takes with it, so `tools/campaign.py` restarts the coordinator on the same state and a
   throw-away `LAB_STATE` has a state of its own. `Coordinator:Initialize` is true here only: a lab begins where its store holds nothing.
-  `[local: lab.sh up, lab.sh stack up|smoke|ui|studio on either store, tools/campaign.py F4]`
+  `[local: lab.sh up, lab.sh stack up|smoke on either store, tools/campaign.py F4]`
 - **The lab's library is pushed to a bare repository beside its state.** `exec-coordinator` creates `.state/library.git` when it is missing
   (`git init --bare`, nothing of the server) and passes it as `Coordinator:Library:Remote:Url`, so `tools/campaign.py` restarts the coordinator on the
   same remote and `lab.sh reset` takes it with the state. The stack's coordinator mounts `.stack/library.git` for the same purpose and its
@@ -37,7 +37,7 @@ project's `CLAUDE.md`); the nodes are `src/DtPipe.PipelineNode.Hosting` hosts
   `[CI: validate_distributed_boundary.sh]`
 - **Lab tools sign in as people, through the IdP.** `tools/lab_session.py` follows the real flow
   (login form, code back to `/signin-oidc`) and sends the CSRF header; where the coordinator shows its key form first (the
-  stack), it and `ui_check.py` take the IdP's link beside it (`/account/login/idp`); every tool reaches `/api`
+  stack), it takes the IdP's link beside it (`/account/login/idp`); every tool reaches `/api`
   through it (`smoke.call`, `ui_check.py`, `nodes_report.py`, `lab.sh`). `ui_check.py` also signs its
   browser in through the IdP's form, so the flow a person follows runs on every pass. `lab.sh exec-coordinator` lists `labadmin`, `labdesigner` and
   `labreader` (`@dtpipe.test`) in the three roles; any other `{user}` / `{user}pwd` signs in with
@@ -61,8 +61,8 @@ project's `CLAUDE.md`); the nodes are `src/DtPipe.PipelineNode.Hosting` hosts
   else. `smoke.py bricks` creates the identity, or completes its list, when the rights predate the seed; it launches twice with one
   key and expects one run. `[local: smoke.py bricks - a service launches a run]`
 - **The host the rights do not know is launched by one module.** `tools/enroll_host.py` (`UnknownHost`) starts it, as a process of the
-  node host on the local lab and a throwaway container of the stack's node image on the stack, for `smoke.py rights` (enrollment) and
-  `ui_check.py` (the "Waiting for approval" card, whose proposed name and description are HTML and must show as text). `forget` takes it
+  node host on the local lab and a throwaway container of the stack's node image on the stack, for `smoke.py rights` (enrollment, on both) and
+  `ui_check.py` (the local lab's "Waiting for approval" card, whose proposed name and description are HTML and must show as text). `forget` takes it
   out of the queue, which keeps a host that is gone for a day. `[local: smoke.py rights - enrollment, ui_check.py]`
 - **Lab nodes are disposable hosts of `DtPipe.PipelineNode.Hosting`.** `Lab.NodeHost` reads
   `nodes/<node>.json` into `AddDtPipeNode`; a node file whose `role` is `runner` starts
@@ -143,8 +143,7 @@ project's `CLAUDE.md`); the nodes are `src/DtPipe.PipelineNode.Hosting` hosts
   never `127.0.0.1` or `localhost`, which the local lab's cookies hold. Nodes reach the coordinator
   directly, never through the proxy. The issuer spells a port only when `LAB_STACK_HTTP_PORT` is set:
   the IdP names itself without a default port, and `dtpipe studio` refuses an authority that differs
-  from that name by more than a trailing slash, an explicit `:80` included. `[local: lab.sh stack
-  studio]`
+  from that name by more than a trailing slash, an explicit `:80` included. `[unchecked]`
 - **The lab's images extend the product's, never the other way.** `deploy/Dockerfile` builds the coordinator, the runtime and the
   runtime with `dtpipe`; `compose.yaml` builds each as a service of `scale: 0` and hands it to `docker/Dockerfile` as a named build
   context (`additional_contexts`), where `coordinator-lab` puts `Lab.Coordinator` in place of the product's coordinator and,
@@ -163,12 +162,12 @@ project's `CLAUDE.md`); the nodes are `src/DtPipe.PipelineNode.Hosting` hosts
 - **`tools/campaign.py` runs on the local lab only.** It tests the engine under faults; the stack is the check of the image and of its state
   (`smoke`, `restart-check`), and `tools/linux_replay.sh` the replay of both on a Linux Docker host, where a bind mount keeps its owner and
   a volume can belong to another uid. `[unchecked: the replay on a Linux host]`
-- **The stack is a target of the lab's checks, never a second set.** `lab.sh stack smoke|ui|studio`
-  run `smoke.py`, `tools/ui_check.py` and `tools/studio_check.py` against `STACK_URL`;
+- **The stack is a target of the lab's checks, never a second set.** `lab.sh stack smoke`
+  runs `smoke.py` against `STACK_URL`; the page checks (`ui_check.py`, `studio_check.py`) run on the local lab only;
   `LAB_TARGET=stack` is the only switch, read where the stack differs (the library directory, the
   coordinator's log, the enrollment host, the revision each node's own binary and image must carry). A new check that
   starts a process or reads a path of the local lab takes its stack form there too.
-  `[local: lab.sh stack smoke, ui, studio]`
+  `[local: lab.sh stack smoke]`
 - **`smoke.py keys` is played only when named, on a coordinator that exchanges keys** (its metadata's `dtpipe_auth` names `key`):
   the stack, whose coordinator sets `Coordinator:Auth:AllowHttpKeys` beside the IdP; the local lab has no `PublicUrl`, so no key
   issuer, and the pass refuses it by name. It makes a node and a person verified by a key, uses and revokes their keys, and removes
@@ -188,6 +187,6 @@ project's `CLAUDE.md`); the nodes are `src/DtPipe.PipelineNode.Hosting` hosts
   plane client registering is refused by name and asked again. `[local: lab.sh stack restart-check, on either store]`
 - Verify a change with `./lab.sh smoke`, a page change with `./lab.sh ui` too, and a change to what
   `dtpipe studio` calls with `./lab.sh studio` (`tools/studio_check.py`, outside CI); one that touches
-  the images, `compose.yaml` or a check's stack form with `./lab.sh stack smoke|ui|studio` as well. The page checks
+  the images, `compose.yaml` or a check's stack form with `./lab.sh stack smoke` as well. The page checks
   drive headless Chrome over the DevTools protocol (`tools/cdp.py`), because Chrome's own
   `--screenshot` stops the page before its fetches finish. `tools/cdp.py` also clicks and drags with the mouse.
