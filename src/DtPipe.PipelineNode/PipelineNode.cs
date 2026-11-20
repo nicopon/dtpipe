@@ -259,7 +259,8 @@ public sealed class PipelineNode : IAsyncDisposable
     /// <summary>
     /// Correlates the edge <paramref name="alias"/> of <paramref name="run"/> to the handle of <paramref name="transferId"/>
     /// and starts relaying it. True when it was the last edge the run declares. A transfer that never reaches this node
-    /// faults the run (<see cref="FaultOrigin.Remote"/>) and returns false.
+    /// faults the run (<see cref="FaultOrigin.Remote"/>) and returns false. Once the handle is claimed, the protection the
+    /// client reports for that transfer is noted on the run under the edge's alias (<see cref="FragmentRun.EdgeProtections"/>).
     /// </summary>
     /// <exception cref="ArgumentException">The run declares no edge of that alias; the handle is not claimed.</exception>
     public async Task<bool> WireAsync(FragmentRun run, string alias, string transferId, CancellationToken ct = default)
@@ -273,7 +274,19 @@ public sealed class PipelineNode : IAsyncDisposable
             run.Fault(FaultOrigin.Remote, $"transfer {transferId} for edge '{alias}' never reached this node: {ex.Message}");
             return false;
         }
+        if (ProtectionOf(transferId) is { } protection) run.NoteProtection(alias, protection);
         return run.Wire(alias, handle);
+    }
+
+    /// <summary>
+    /// What the client reports it applies to the transfer <paramref name="transferId"/>, or null when it lists no such transfer. The client
+    /// holds the transfer's session before it hands over the handle, so a transfer wired now is listed unless it has already ended, which
+    /// leaves no session to ask. The reading informs only: a client that cannot list its transfers says nothing, and wiring goes on.
+    /// </summary>
+    private TransferProtection? ProtectionOf(string transferId)
+    {
+        try { return _client.GetTransfers().FirstOrDefault(t => t.TransferId == transferId)?.Protection; }
+        catch (Exception) { return null; }
     }
 
     /// <summary>

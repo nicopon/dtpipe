@@ -88,6 +88,40 @@ public class CoordinatorDrivenTests
     }
 
     /// <summary>
+    /// The run's result says, for each end of each edge, what that end's own client applied to the transfer. The test nodes announce
+    /// nothing of the data plane, so the words in the result can be neither the announced level nor a setting: only what each client reports.
+    /// </summary>
+    [Theory]
+    [InlineData(false, "none")]
+    [InlineData(true, "encrypted-psk")]
+    public async Task TheResult_NamesTheProtectionEachEndOfEachEdgeApplied(bool sealedWithAKey, string word)
+    {
+        using var fixture = ChainFixture.Create(rowCount: 5_000);
+        await using var host = await CoordinatorTestHost.StartAsync(
+            o => o.Groups["test"] = new TransportR.Hub.GroupAccess { CanSendTo = ["test"] });
+        var orchestrator = host.Host.Services.GetRequiredService<IRunOrchestrator>();
+        var key = System.Security.Cryptography.RandomNumberGenerator.GetBytes(32);
+        Task<TestNode> Connect(string job, string name, params EdgeBinding[] edges) => TestNode.StartAsync(
+            host, name, job, edges, client: new NodeClientOptions
+            {
+                HubUrl = host.Url,
+                EndToEndEncryption = sealedWithAKey,
+                EndToEndPreSharedKey = sealedWithAKey ? _ => key : null,
+            });
+
+        await using var a = await Connect(fixture.FragmentAJobPath, "A", new EdgeBinding("out", EdgeDirection.Outbound));
+        await using var b = await Connect(fixture.FragmentBJobPath, "B",
+            new EdgeBinding("in", EdgeDirection.Inbound), new EdgeBinding("out", EdgeDirection.Outbound));
+        await using var c = await Connect(fixture.FragmentCJobPath, "C", new EdgeBinding("in", EdgeDirection.Inbound));
+
+        var result = await orchestrator.RunAsync(ChainSpec("run-protection", a.Fragment, b.Fragment, c.Fragment)).WaitAsync(Bound);
+
+        Assert.Equal(RunOutcome.Succeeded, result.Outcome);
+        Assert.Equal(2, result.EdgeCounts.Count);
+        Assert.All(result.EdgeCounts, edge => Assert.Equal((word, word), (edge.ProducerProtection, edge.ConsumerProtection)));
+    }
+
+    /// <summary>
     /// A three-fragment chain, the middle fragment's child killed mid-flow (a join is not runnable
     /// yet - see <see cref="ChainFixture"/>): the run is reported failed, cause B, in seconds rather
     /// than the minute-plus a producer waiting out its own send window would otherwise take, and not

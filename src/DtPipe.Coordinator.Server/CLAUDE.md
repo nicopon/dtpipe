@@ -602,8 +602,11 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   `[unchecked: that a real transfer's lines all arrive before its run ends]`
 - **A run that was placed records the replica of each fragment.** `RunJournal` keeps the `RunResult` whole,
   `RunResult.Replicas` included: an instance id and the `Origin` the replica announced, untrusted text the pages
-  escape. A run refused at admission has none, and a document that names none reads as a run with none.
-  `[CI: RunJournalTests]` `[unchecked: the pages' escaping of Origin]`
+  escape. A run refused at admission has none, and a document that names none reads as a run with none. The result's
+  `EdgeCount.ProducerProtection` and `ConsumerProtection` (what each end's client reported it applied to the edge, a word or null) are kept
+  and rendered by the same record, `GET /api/runs/{id}` and the lists included: no route of their own, and a document that names none
+  reads with both ends unknown.
+  `[CI: RunJournalTests, StateWireTests]` `[unchecked: the pages' escaping of Origin]`
 - **A run names the subject and the groups of each fragment's node.** `RunQueue` reads them from the
   rights when the run starts, through `LaunchPlanner.RunFragmentsOf` (`RightsStore.SubjectOf`: the client id of
   the identity named after the fragment's node, the `sub` its tokens carry; `GroupsOf`), and puts them in each

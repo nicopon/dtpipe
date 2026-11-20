@@ -29,7 +29,11 @@ stdin/stdout and TransportR. It speaks to no coordinator itself.
   background what the path to the hub carries of a write stream, the hub announces it, and no transfer waits on it
   or takes its transport from it. It seals its transfers end to end when `NodeClientOptions.EndToEndEncryption` says
   so, with `EndToEndPreSharedKey` when given; a key without encryption is refused before a client is built. `Transfers`
-  (internal) reads each transfer's `Protection`, the only proof that a transfer is sealed. `[CI: EndToEndEncryptionTests]`
+  (internal) reads each transfer's `Protection`, the only proof that a transfer is sealed. `WireAsync` reads it once more for the one
+  transfer it claims, while the client lists it (the client holds a transfer's session before it delivers the handle, and a transfer
+  that ended leaves none), and notes it on the run under the edge's alias: `FragmentRun.EdgeProtections`, then `FragmentOutcome`. A
+  transfer the client does not list, or a client that cannot list, leaves the alias with no entry: the node never guesses one.
+  `[CI: EndToEndEncryptionTests]`
   A run keeps
   the client it was launched with; a client the hub refuses to renew is dropped and another registered
   (`src/DtPipe.PipelineNode.Hosting/CLAUDE.md`).

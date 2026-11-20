@@ -89,6 +89,16 @@ the control plane, over each replica's node channel; TransportR carries the data
   as an edge that cannot join. The policy judges the level and no key or fingerprint: whether two ends hold the same key stays the
   edge's. `[CI: Coordinator.Tests RequiredProtectionTests; Server.Tests RequiredProtectionSettingTests, NodeChannelHubTests,
   ArmedDeploymentTests]`
+- **A run reports the protection each end of each edge applied, as its own client reports it, and an absence reads unknown.** A node
+  reads `TransferInfo.Protection` from its TransportR client when it wires an edge, while the client lists the transfer, and sends it by
+  alias in `FragmentExit.EdgeProtections`, in the words of `DataPlaneProtections` read through the one table `EndToEndKey` also announces
+  with; never from its setting or its announcement, which the client may not apply. The coordinator keeps each end apart
+  (`EdgeCount.ProducerProtection`, `ConsumerProtection`, looked up by each end's own alias like the row counts, never one level made of
+  both) in the run's result, which the journal and the run routes carry. An end that reported nothing (an older node, a transfer the
+  client no longer lists, a fragment that wired nothing, a text that is no word) is null: never the level that seals nothing and never
+  the level the replica announced. The field carries a word and no key, fingerprint or path, and the coordinator reports it and judges
+  nothing by it. `[CI: PipelineNode.Tests EndToEndEncryptionTests, CoordinatorDrivenTests; Hosting.Tests EndToEndKeyTests;
+  Coordinator.Tests ScriptedRunTests, EdgeProtectionReportWireTests; Server.Tests RunJournalTests, StateWireTests]`
 - **Cancel by stream rupture, never by signal**: the node must run on Windows.
 - **A runner hosts no data: a runner's fragment reads and writes its `arrow:` edges and nothing else.** The fragments of every
   run share the runner's host, so a file, a database, a checkpoint or a cursor file it reached would carry rows between two

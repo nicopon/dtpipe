@@ -125,6 +125,13 @@ the table, `OnExitedAsync` and the pure rules (`DetermineOutcome`, `PeersOwingAR
   fragment reported 0 - a fragment attests its own process, not what its peer received. A count
   missing on either side fails closed (never reads as agreement); `RunResult.Describe()` renders
   every edge's two counts regardless of which branch produced the outcome. `[CI: RunOrchestratorTests]`
+- **A run result keeps what each end of an edge reported of its protection, and an end that reported nothing is unknown.**
+  `FragmentExit.EdgeProtections` reaches `FragmentExitReport` under the same rule as the rest of an `Exited`, kept only as the words of
+  `DataPlaneProtections` (`RunOrchestrator.ProtectionsReported`), and `EdgeCount.ProducerProtection` and `ConsumerProtection` are looked up
+  from it by each end's own alias, as `Sent` and `Received` are. No level is made of the two: their difference is the reader's. A fragment
+  that reported no table, no entry for the alias or a text that is no word leaves its end null, never the level that seals nothing and never
+  the level its replica announced. Nothing here refuses, warns or changes a verdict, and `Describe()` renders none of it.
+  `[CI: ScriptedRunTests, EdgeProtectionReportWireTests; PipelineNode.Tests CoordinatorDrivenTests]`
 - **The cause is the first *locally* faulted fragment, never arrival order.** A peer aborting its own
   transfer can fail a healthy fragment before the fragment that actually died reports `Exited`, so
   `DetermineOutcome` picks the cause by `FaultOrigin.Local`, falling back to `RunSpec.Fragments`'

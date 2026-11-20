@@ -170,8 +170,12 @@ none. One node per process, which is one replica of its node's identity; a secon
   accepts, and a report in flight when one is accepted is sent again at once; `NotAdmitted` is final. The
   report carries the token of the launch that started the child (`LaunchRequest.LaunchToken`, kept with the
   run and copied into `FragmentExit`), a held one included: the coordinator admits no report
-  without it.
-  `[CI: PipelineNode.Tests ReplicaRunsTests, CoordinatorDrivenTests, NodeAgentDataPlaneTests]` `[unchecked: the report in flight when an announcement lands]`
+  without it. `ReplicaRuns.ExitOf` builds the report, and it carries, by edge alias, the protection the replica's client reported for that
+  edge (`FragmentExit.EdgeProtections`): read from the run (`FragmentRun.EdgeProtections`), never from the node's setting or announcement,
+  and put in words by `EndToEndKey.WordsOf`, the table the announced level uses too. A value that table does not know has no entry, and a
+  run with no entry at all sends none.
+  `[CI: PipelineNode.Tests ReplicaRunsTests, CoordinatorDrivenTests, NodeAgentDataPlaneTests, EndToEndEncryptionTests; Hosting.Tests EndToEndKeyTests]`
+  `[unchecked: the report in flight when an announcement lands]`
 - **A host holds at most `DtPipeNodeOptions.MaxRuns` runs** (0, the default, for no bound): `ReplicaRuns` admits a launch under a
   lock before its child starts, refuses one beyond the bound by name, and gives the place back when the launch fails or the run
   leaves its table. `Check` never counts, since a deployment is armed long before its runs. The product's runner sets it: the steps

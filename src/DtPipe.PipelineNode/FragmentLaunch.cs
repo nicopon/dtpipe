@@ -40,5 +40,10 @@ public sealed class FragmentLaunch
     public int ReadChunkBytes { get; init; } = NodeClientOptions.DefaultReadChunkBytes;
 }
 
-/// <summary>How a run ended: the child's exit code (1 when the fragment faulted), where the first fault came from, and the rows each edge carried.</summary>
-public sealed record FragmentOutcome(int ExitCode, FaultOrigin? Origin, string? FirstFault, IReadOnlyDictionary<string, long> RowCounts);
+/// <summary>
+/// How a run ended: the child's exit code (1 when the fragment faulted), where the first fault came from, the rows each edge carried,
+/// and what the client reported it applied to the transfer of each edge it read one for (<see cref="FragmentRun.EdgeProtections"/>).
+/// </summary>
+public sealed record FragmentOutcome(
+    int ExitCode, FaultOrigin? Origin, string? FirstFault, IReadOnlyDictionary<string, long> RowCounts,
+    IReadOnlyDictionary<string, TransportR.Client.TransferProtection> EdgeProtections);

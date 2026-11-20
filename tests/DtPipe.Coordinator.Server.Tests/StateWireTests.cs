@@ -100,6 +100,33 @@ public sealed class StateWireTests : IDisposable
             Assert.Equal(JsonValueKind.Array, (await client.GetFromJsonAsync<JsonElement>(literal, Ct)).ValueKind);
     }
 
+    /// <summary>
+    /// The routes that carry a run's result write each end of an edge with the protection it reported, as a word or as null for an
+    /// end that reported none, in the record the run already has: no route of its own.
+    /// </summary>
+    [Fact]
+    public async Task The_Run_Routes_Write_The_Protection_Each_End_Of_An_Edge_Reported_As_A_Word_Or_Null()
+    {
+        using var host = new CoordinatorHost();
+        var journal = host.Services.GetRequiredService<RunJournal>();
+        var edges = new[] { new EdgeCount("p", "out", "c", "in", 5, 5, DataPlaneProtections.EncryptedPsk, null) };
+        journal.Record(RunIn("succeeded") with { Result = new RunResult(RunOutcome.Succeeded, null, [], new Dictionary<string, FragmentExitReport>(), edges) });
+        var client = host.Bearer(CoordinatorHost.Person(CoordinatorHost.Reader));
+
+        var routes = new Dictionary<string, JsonElement>
+        {
+            ["/api/runs/run-1"] = await client.GetFromJsonAsync<JsonElement>("/api/runs/run-1", Ct),
+            ["/api/runs/last"] = (await client.GetFromJsonAsync<JsonElement>("/api/runs/last", Ct))[0],
+            ["/api/runs"] = (await client.GetFromJsonAsync<JsonElement>("/api/runs", Ct))[0],
+        };
+        foreach (var run in routes.Values)
+        {
+            var edge = run.GetProperty("result").GetProperty("edgeCounts")[0];
+            Assert.Equal(DataPlaneProtections.EncryptedPsk, edge.GetProperty("producerProtection").GetString());
+            Assert.Equal(JsonValueKind.Null, edge.GetProperty("consumerProtection").ValueKind);
+        }
+    }
+
     /// <summary>An event of the bus leaves with its number and the bus's id, a line replayed from the backlog says so and a live one does not, and the id is the same from one connection to the next.</summary>
     [Fact]
     public async Task The_Event_Stream_Numbers_The_Events_Of_The_Bus_And_Marks_The_Lines_It_Replays()

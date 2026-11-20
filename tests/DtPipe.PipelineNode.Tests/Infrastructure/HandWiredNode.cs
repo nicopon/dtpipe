@@ -1,3 +1,6 @@
+using DtPipe.Coordinator.Contracts;
+using DtPipe.PipelineNode.Hosting;
+
 namespace DtPipe.PipelineNode.Tests.Infrastructure;
 
 /// <summary>
@@ -48,6 +51,10 @@ internal sealed class HandWiredNode : IAsyncDisposable
     }
 
     public Task<int> RunToCompletionAsync(CancellationToken ct = default) => _run.RunToCompletionAsync(ct);
+
+    /// <summary>Runs to completion and returns the exit a replica would report for it, built by the one function a replica builds it with.</summary>
+    public async Task<FragmentExit> ExitAsync(CancellationToken ct = default) =>
+        ReplicaRuns.ExitOf("run-1", "fragment", "launch-token", await _run.CompleteAsync(ct), cursors: null);
 
     public async ValueTask DisposeAsync()
     {

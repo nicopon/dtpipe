@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using DtPipe.Coordinator.Server.Runs;
 using DtPipe.Coordinator.Server.Stores;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -25,6 +26,34 @@ public sealed class RunJournalTests
 
         var replica = Assert.Single(Assert.Single(again.List()).Result!.Replicas!);
         Assert.Equal(("p@n", "1a2b3c4d", "host:42"), (replica.Key, replica.Value.Id, replica.Value.Origin));
+    }
+
+    /// <summary>
+    /// The protection each end of an edge reported is kept with the run and read back, and a run kept before the field existed reads
+    /// with both ends unknown: absent in the document, null in the record, never the level that seals nothing.
+    /// </summary>
+    [Fact]
+    public void The_Protection_Each_End_Of_An_Edge_Reported_Is_Kept_With_The_Run_And_A_Run_Kept_Without_It_Reads_Unknown()
+    {
+        var result = new RunResult(RunOutcome.Succeeded, null, [], new Dictionary<string, FragmentExitReport>(),
+            [new EdgeCount("p", "out", "c", "in", 5, 5, "encrypted-psk", null)]);
+        Open().Record(new RunView("run-1", "plan-1", RunState.Succeeded, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, result, "ok", null, "p", DateTimeOffset.UtcNow));
+        // The document of a run kept by a coordinator that had no such field: the same run, without it.
+        var older = JsonNode.Parse(MemoryRunStore.At(_dir).Document("run-1")!)!;
+        older["runId"] = "run-2";
+        foreach (var edge in older["result"]!["edgeCounts"]!.AsArray())
+        {
+            edge!.AsObject().Remove("producerProtection");
+            edge.AsObject().Remove("consumerProtection");
+        }
+        MemoryRunStore.At(_dir).Seed("run-2", older.ToJsonString(), over: true);
+
+        var again = Open();
+
+        var kept = Assert.Single(again.Find(r => r.RunId == "run-1")!.Result!.EdgeCounts);
+        Assert.Equal(("encrypted-psk", null), (kept.ProducerProtection, kept.ConsumerProtection));
+        var before = Assert.Single(again.Find(r => r.RunId == "run-2")!.Result!.EdgeCounts);
+        Assert.Equal((5L, 5L, null, null), (before.Sent, before.Received, before.ProducerProtection, before.ConsumerProtection));
     }
 
     [Fact]

@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using DtPipe.Coordinator.Contracts;
+using TransportR.Client;
 
 namespace DtPipe.PipelineNode.Hosting;
 
@@ -49,8 +50,34 @@ internal static class EndToEndKey
         return new(enabled, _ => key, ProtectionOf(enabled, keyed: true), enabled ? IdOf(key) : null);
     }
 
+    /// <summary>
+    /// The one table from what TransportR calls a transfer's protection to the word the coordinator is told. The level a node announces
+    /// and the protection an edge's exit reports are both read through it, so the two cannot name one level differently.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<TransferProtection, string> Words = new Dictionary<TransferProtection, string>
+    {
+        [TransferProtection.None] = DataPlaneProtections.None,
+        [TransferProtection.Encrypted] = DataPlaneProtections.Encrypted,
+        [TransferProtection.EncryptedWithPreSharedKey] = DataPlaneProtections.EncryptedPsk,
+    };
+
     private static string ProtectionOf(bool enabled, bool keyed) =>
-        !enabled ? DataPlaneProtections.None : keyed ? DataPlaneProtections.EncryptedPsk : DataPlaneProtections.Encrypted;
+        Words[!enabled ? TransferProtection.None : keyed ? TransferProtection.EncryptedWithPreSharedKey : TransferProtection.Encrypted];
+
+    /// <summary>The word for <paramref name="protection"/>, or null when this table does not know it (a value a later TransportR adds).</summary>
+    internal static string? WordOf(TransferProtection protection) => Words.GetValueOrDefault(protection);
+
+    /// <summary>
+    /// What an exit reports of its edges: the word of each protection the client reported, by alias, with no entry for a value the table
+    /// does not know; null when no edge has one.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, string>? WordsOf(IReadOnlyDictionary<string, TransferProtection> reported)
+    {
+        var words = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (alias, protection) in reported)
+            if (WordOf(protection) is { } word) words[alias] = word;
+        return words.Count == 0 ? null : words;
+    }
 
     /// <summary>
     /// The fingerprint of <paramref name="key"/>: the first eight bytes of its HMAC-SHA256 over a fixed label, in lowercase

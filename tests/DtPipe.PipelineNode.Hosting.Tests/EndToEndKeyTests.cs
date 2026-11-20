@@ -3,6 +3,7 @@ using DtPipe.PipelineNode.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using TransportR.Client;
 using Xunit;
 
 namespace DtPipe.PipelineNode.Hosting.Tests;
@@ -106,6 +107,26 @@ public class EndToEndKeyTests : IDisposable
         Assert.NotNull(sealedPerPeer.Key);
         Assert.Equal("encrypted-psk", sealedPerPeer.Protection);
         Assert.Null(sealedPerPeer.KeyId);
+    }
+
+    /// <summary>
+    /// What a client reports of a transfer reads through the table the announced level reads through, so one level has one word. A value
+    /// the table does not know (a later TransportR's) has no word and no entry in an exit, and raises nothing.
+    /// </summary>
+    [Fact]
+    public void TheProtectionAClientReports_HasTheWordOfTheAnnouncedLevel_AndAValueTheTableDoesNotKnowHasNoWord()
+    {
+        Assert.Equal(SettingOf(_ => { }).Protection, EndToEndKey.WordOf(TransferProtection.None));
+        Assert.Equal(SettingOf(e => e.Enabled = true).Protection, EndToEndKey.WordOf(TransferProtection.Encrypted));
+        Assert.Equal(SettingOf(e => { e.Enabled = true; e.PreSharedKey = Base64; }).Protection, EndToEndKey.WordOf(TransferProtection.EncryptedWithPreSharedKey));
+        var future = (TransferProtection)99;
+        Assert.Null(EndToEndKey.WordOf(future));
+
+        var words = EndToEndKey.WordsOf(new Dictionary<string, TransferProtection> { ["in"] = TransferProtection.Encrypted, ["out"] = future });
+        var only = Assert.Single(words!);
+        Assert.Equal(("in", "encrypted"), (only.Key, only.Value));
+        Assert.Null(EndToEndKey.WordsOf(new Dictionary<string, TransferProtection> { ["out"] = future }));
+        Assert.Null(EndToEndKey.WordsOf(new Dictionary<string, TransferProtection>()));
     }
 
     [Fact]

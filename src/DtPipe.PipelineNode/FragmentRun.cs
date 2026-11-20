@@ -38,6 +38,7 @@ public sealed class FragmentRun : IAsyncDisposable
     private readonly List<Task> _relayTasks = new();
     private readonly Dictionary<string, long> _rowCounts = new();
     private readonly object _rowCountsLock = new();
+    private readonly Dictionary<string, TransferProtection> _edgeProtections = new(StringComparer.Ordinal);
     private int _faulted;
 
     /// <summary>Completed when the child exits with a non-zero code, whatever its relays are doing.</summary>
@@ -71,6 +72,12 @@ public sealed class FragmentRun : IAsyncDisposable
     public bool ChildHasExited => _child.HasExited;
     public IReadOnlyDictionary<string, long> RowCounts { get { lock (_rowCountsLock) return new Dictionary<string, long>(_rowCounts); } }
 
+    /// <summary>
+    /// What the TransportR client reported it applied to the transfer of each edge, by alias, as <see cref="PipelineNode"/> read it when it handed
+    /// the run the handle. An edge the client did not list at that moment has no entry: the run says nothing of it rather than guess.
+    /// </summary>
+    public IReadOnlyDictionary<string, TransferProtection> EdgeProtections { get { lock (_edgeProtections) return new Dictionary<string, TransferProtection>(_edgeProtections); } }
+
     public string? FirstFault => _fault?.Reason;
     public FaultOrigin? Origin => _fault?.Origin;
 
@@ -90,6 +97,12 @@ public sealed class FragmentRun : IAsyncDisposable
 
     /// <summary>Counts a Wire request on arrival, before its handle is awaited.</summary>
     public void NoteWireRequested() => Interlocked.Increment(ref _wireRequests);
+
+    /// <summary>Keeps what the client reported of the transfer of the edge <paramref name="alias"/>, for <see cref="EdgeProtections"/>.</summary>
+    internal void NoteProtection(string alias, TransferProtection protection)
+    {
+        lock (_edgeProtections) _edgeProtections[alias] = protection;
+    }
 
     /// <summary>Starts relaying the outbound edge <paramref name="alias"/> through <paramref name="send"/>; true when it was the last edge declared.</summary>
     public bool Wire(string alias, ByteSend send)
@@ -505,7 +518,7 @@ public sealed class FragmentRun : IAsyncDisposable
     public async Task<FragmentOutcome> CompleteAsync(CancellationToken ct = default)
     {
         var exitCode = await RunToCompletionAsync(ct);
-        return new FragmentOutcome(exitCode, Origin, FirstFault, RowCounts);
+        return new FragmentOutcome(exitCode, Origin, FirstFault, RowCounts, EdgeProtections);
     }
 
     public ValueTask DisposeAsync()

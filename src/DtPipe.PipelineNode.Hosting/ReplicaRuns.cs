@@ -327,9 +327,8 @@ internal sealed class ReplicaRuns : IAsyncDisposable
         try
         {
             var outcome = await entry.Run.CompleteAsync();
-            await ReportAsync(new FragmentExit(
-                key.RunId, key.Fragment, outcome.ExitCode, OriginWord(outcome.Origin), outcome.FirstFault, outcome.RowCounts,
-                entry.LaunchToken, outcome.ExitCode == 0 ? FragmentCursors.Read(entry.CursorFiles, _logger) : null));
+            await ReportAsync(ExitOf(
+                key.RunId, key.Fragment, entry.LaunchToken, outcome, outcome.ExitCode == 0 ? FragmentCursors.Read(entry.CursorFiles, _logger) : null));
         }
         catch (Exception ex)
         {
@@ -340,6 +339,16 @@ internal sealed class ReplicaRuns : IAsyncDisposable
             await DiscardAsync(key, entry);
         }
     }
+
+    /// <summary>
+    /// What a run reports when it ends. The protection of each edge is what the client reported for that edge's transfer
+    /// (<see cref="FragmentRun.EdgeProtections"/>), in the words of <see cref="DataPlaneProtections"/>: never the node's setting or its
+    /// announcement, which the client may not apply, and no entry for an edge the client reported nothing of.
+    /// </summary>
+    internal static FragmentExit ExitOf(
+        string runId, string fragment, string launchToken, FragmentOutcome outcome, IReadOnlyDictionary<string, CursorReport>? cursors) =>
+        new(runId, fragment, outcome.ExitCode, OriginWord(outcome.Origin), outcome.FirstFault, outcome.RowCounts, launchToken, cursors,
+            EndToEndKey.WordsOf(outcome.EdgeProtections));
 
     /// <summary>The word a fault's origin travels as: <c>Remote</c> for a fault of the run's transfer, <c>Local</c> for any other and for a run with none.</summary>
     internal static string OriginWord(FaultOrigin? origin) => origin == FaultOrigin.Remote ? ExitOrigins.Remote : ExitOrigins.Local;

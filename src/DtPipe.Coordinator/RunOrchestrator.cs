@@ -17,10 +17,14 @@ public sealed record RunEdge(string ProducerFragment, string ProducerAlias, stri
 /// <summary>The fragments a run needs - each bound to the node that may host it, <see cref="RunFragment"/> - and the edges to wire once they are placed.</summary>
 public sealed record RunSpec(string RunId, IReadOnlyList<RunFragment> Fragments, IReadOnlyList<RunEdge> Edges);
 
-/// <summary>What one fragment reported when its own process finished.</summary>
+/// <summary>
+/// What one fragment reported when its own process finished. <see cref="EdgeProtections"/> is, by edge alias, the word of
+/// <see cref="DataPlaneProtections"/> its replica's client reported for that edge's transfer; null when it reported none, and an edge
+/// with no entry is unknown, never the level that seals nothing.
+/// </summary>
 public sealed record FragmentExitReport(
     string Fragment, int ExitCode, FaultOrigin? Origin, string? FirstFault, IReadOnlyDictionary<string, long> RowCounts,
-    IReadOnlyDictionary<string, CursorReport>? Cursors = null);
+    IReadOnlyDictionary<string, CursorReport>? Cursors = null, IReadOnlyDictionary<string, string>? EdgeProtections = null);
 
 /// <summary>
 /// <see cref="Cancelled"/> mirrors the product's own 130 convention (root <c>CLAUDE.md</c>'s exit
@@ -31,11 +35,14 @@ public enum RunOutcome { Succeeded, Failed, Cancelled }
 /// <summary>
 /// One edge's two row counts, always both looked up - never defaulted to "agree" when a fragment
 /// never reported a count for its side, which a chain of <c>&amp;&amp;</c> lookups would do by
-/// short-circuiting past a missing key instead of flagging it.
+/// short-circuiting past a missing key instead of flagging it. <see cref="ProducerProtection"/> and <see cref="ConsumerProtection"/> are what
+/// each end's client reported it applied to the edge's transfer, a word of <see cref="DataPlaneProtections"/>, looked up by each end's own
+/// alias like the counts: null is unknown (a fragment that reported none, or an older host), never the level that seals nothing and never
+/// the level the replica announced. The two ends are kept apart, and no one level of the edge is made of them.
 /// </summary>
 public sealed record EdgeCount(
     string ProducerFragment, string ProducerAlias, string ConsumerFragment, string ConsumerAlias,
-    long? Sent, long? Received)
+    long? Sent, long? Received, string? ProducerProtection = null, string? ConsumerProtection = null)
 {
     public bool Agrees => Sent is not null && Received is not null && Sent == Received;
 }
@@ -221,7 +228,8 @@ public sealed class RunOrchestrator : IRunOrchestrator
 
         // A fragment that exited 0 carries no origin: there was no fault to attribute.
         FaultOrigin? parsedOrigin = exit.ExitCode == 0 ? null : exit.Origin == ExitOrigins.Remote ? FaultOrigin.Remote : FaultOrigin.Local;
-        tcs.TrySetResult(new FragmentExitReport(exit.Fragment, exit.ExitCode, parsedOrigin, exit.FirstFault, exit.RowCounts, exit.Cursors));
+        tcs.TrySetResult(new FragmentExitReport(
+            exit.Fragment, exit.ExitCode, parsedOrigin, exit.FirstFault, exit.RowCounts, exit.Cursors, ProtectionsReported(exit.EdgeProtections)));
 
         // A fragment whose transfer failed under it is not the cause of anything yet: its peers owe the
         // run their own report, within RemoteFailureGrace.
@@ -253,6 +261,17 @@ public sealed class RunOrchestrator : IRunOrchestrator
         && placement.Tokens.TryGetValue(exit.Fragment, out var expected)
         && string.Equals(token, expected, StringComparison.Ordinal);
 
+    /// <summary>
+    /// Pure. The protections an exit reports of its edges, kept as the words of <see cref="DataPlaneProtections"/> only: an entry whose
+    /// text is no such word is dropped, so it reads unknown, and a table left with none is null. The text is a host's, never a level
+    /// made of it.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, string>? ProtectionsReported(IReadOnlyDictionary<string, string>? reported)
+    {
+        var known = reported?.Where(p => DataPlaneProtections.Known(p.Value) is not null).ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal);
+        return known is { Count: > 0 } ? known : null;
+    }
+
     private static IReadOnlyList<EdgeCount> BuildEdgeCounts(
         IReadOnlyDictionary<string, FragmentExitReport> reports, IReadOnlyList<RunEdge> edges) =>
         edges.Select(e =>
@@ -261,8 +280,15 @@ public sealed class RunOrchestrator : IRunOrchestrator
                 && producer.RowCounts.TryGetValue(e.ProducerAlias, out var s) ? s : null;
             long? received = reports.TryGetValue(e.ConsumerFragment, out var consumer)
                 && consumer.RowCounts.TryGetValue(e.ConsumerAlias, out var r) ? r : null;
-            return new EdgeCount(e.ProducerFragment, e.ProducerAlias, e.ConsumerFragment, e.ConsumerAlias, sent, received);
+            return new EdgeCount(
+                e.ProducerFragment, e.ProducerAlias, e.ConsumerFragment, e.ConsumerAlias, sent, received,
+                ProtectionOf(reports, e.ProducerFragment, e.ProducerAlias), ProtectionOf(reports, e.ConsumerFragment, e.ConsumerAlias));
         }).ToList();
+
+    /// <summary>The word the fragment's report names for the edge <paramref name="alias"/>, or null when it reported no fragment, no table or no entry for it.</summary>
+    private static string? ProtectionOf(IReadOnlyDictionary<string, FragmentExitReport> reports, string fragment, string alias) =>
+        reports.TryGetValue(fragment, out var report) && report.EdgeProtections is { } table && table.TryGetValue(alias, out var word)
+            ? DataPlaneProtections.Known(word) : null;
 
     /// <summary>
     /// Pure. The fragments to name when the grace after a remote failure runs out: those that have not

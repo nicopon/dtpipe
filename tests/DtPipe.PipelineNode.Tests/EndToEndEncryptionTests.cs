@@ -94,6 +94,40 @@ public class EndToEndEncryptionTests : IDisposable
             File.ReadAllLines(fixture.SplitCsvPath).Order(StringComparer.Ordinal));
     }
 
+    public static TheoryData<string, string> AlikeEndsWords => new()
+    {
+        { "clear", "none" },
+        { "encrypted", "encrypted" },
+        { "encrypted with the key", "encrypted-psk" },
+    };
+
+    /// <summary>
+    /// What a run reports of an edge's protection is what the node's own client applied to that edge's transfer. These hosts announce
+    /// nothing and carry no setting beyond their client's options, so the word in each end's exit can come only from the client.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(AlikeEndsWords))]
+    public async Task TheExitOfEachEnd_ReportsForTheEdgeTheProtectionItsOwnClientApplied(string ends, string word)
+    {
+        using var fixture = SplitFixture.Create(rowCount: 2_000);
+        await using var host = await CoordinatorTestHost.StartAsync(o => o.Groups["test"] = new GroupAccess { CanSendTo = ["test"] });
+        await using var producer = await HandWiredNode.StartAsync(Ends(host, ends), Launch(fixture.ProducerJobPath, EdgeDirection.Outbound));
+        await using var consumer = await HandWiredNode.StartAsync(Ends(host, ends), Launch(fixture.ConsumerJobPath, EdgeDirection.Inbound));
+        var transferId = await Initiator(host).InitTransferAsync(producer.ClientId, consumer.ClientId, handshakeTimeout: TimeSpan.FromSeconds(20));
+
+        await Task.WhenAll(
+            producer.WireAsync("main", transferId).WaitAsync(Bound),
+            consumer.WireAsync("main", transferId).WaitAsync(Bound));
+        var exits = await Task.WhenAll(producer.ExitAsync().WaitAsync(Bound), consumer.ExitAsync().WaitAsync(Bound));
+
+        Assert.All(exits, exit =>
+        {
+            Assert.Equal(0, exit.ExitCode);
+            var edge = Assert.Single(exit.EdgeProtections!);
+            Assert.Equal(("main", word), (edge.Key, edge.Value));
+        });
+    }
+
     public static TheoryData<string, string> DifferentEnds => new()
     {
         { "encrypted with the key", "clear" },

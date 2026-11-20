@@ -118,6 +118,18 @@ public static class DataPlaneProtections
     };
 
     /// <summary>
+    /// <paramref name="word"/> when it is one of this class's words, otherwise null. Unlike <see cref="Read"/>, an absent or foreign text is never
+    /// <see cref="None"/>: what a replica reports of a transfer it carried is a level or it is unknown.
+    /// </summary>
+    public static string? Known(string? word) => word switch
+    {
+        None => None,
+        Encrypted => Encrypted,
+        EncryptedPsk => EncryptedPsk,
+        _ => null,
+    };
+
+    /// <summary>
     /// The key id <paramref name="keyId"/> states for <paramref name="level"/>, or null: only <see cref="EncryptedPsk"/> carries one,
     /// and only a text of <see cref="KeyIdLength"/> lowercase hexadecimal characters is an id. A host with a key per pair announces none.
     /// </summary>
@@ -263,11 +275,15 @@ public sealed record FragmentCheck(bool Ok, string? Reason = null);
 /// <summary>
 /// What <c>Exited</c> carries: how one run of a fragment ended, and the <see cref="LaunchToken"/> of the launch that
 /// started the child, copied from its <see cref="LaunchRequest"/>. <see cref="Cursors"/> holds, by sink alias, the cursor each sink branch
-/// tracked when the child exited with 0.
+/// tracked when the child exited with 0. <see cref="EdgeProtections"/> holds, by edge alias, what the replica's own TransportR client
+/// reported it applied to that edge's transfer (a word of <see cref="DataPlaneProtections"/>, never a key or a fingerprint): an edge the
+/// client reported nothing of has no entry, and a host that predates the field sends none, so a missing entry means unknown and never
+/// the level that seals nothing. Untrusted text, read through <see cref="DataPlaneProtections.Known"/>.
 /// </summary>
 public sealed record FragmentExit(
     string RunId, string Fragment, int ExitCode, string Origin, string? FirstFault, IReadOnlyDictionary<string, long> RowCounts,
-    string? LaunchToken = null, IReadOnlyDictionary<string, CursorReport>? Cursors = null);
+    string? LaunchToken = null, IReadOnlyDictionary<string, CursorReport>? Cursors = null,
+    IReadOnlyDictionary<string, string>? EdgeProtections = null);
 
 /// <summary>
 /// The two words <see cref="FragmentExit.Origin"/> carries, each by what it does to the run's verdict. The node writes
