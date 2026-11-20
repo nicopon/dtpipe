@@ -118,7 +118,8 @@ internal sealed class RunSession
 
     /// <summary>
     /// Waits, up to <see cref="RunOrchestratorOptions.AdmissionTimeout"/>, for a replica of every fragment's node that
-    /// can run it, and places the whole run in one step. Gives up with the reason for each fragment that never had one.
+    /// can run it, such that the two ends of every edge of <see cref="RunSpec.Edges"/> join, and places the whole run in one
+    /// step. Gives up with the reason for each fragment that never had one, or, when each had one, for an edge no choice joined.
     /// </summary>
     private async Task<IReadOnlyDictionary<string, ReplicaView>> AdmitAsync(CancellationToken ct)
     {
@@ -129,7 +130,7 @@ internal sealed class RunSession
         IReadOnlyDictionary<string, string> reasons;
         while (true)
         {
-            var (chosen, why) = await _services.Admission.TryReserveAsync(Spec.RunId, Spec.Fragments);
+            var (chosen, why) = await _services.Admission.TryReserveAsync(Spec.RunId, Spec.Fragments, Spec.Edges);
             if (chosen is not null) return chosen;
             reasons = why;
 

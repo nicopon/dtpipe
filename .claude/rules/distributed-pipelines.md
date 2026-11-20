@@ -71,6 +71,14 @@ the control plane, over each replica's node channel; TransportR carries the data
   run and never changed: one that is lost ends the runs placed on it, and none resumes on another. The run's
   result names the replica of each fragment. The coordinator knows a message's sender by its connection
   alone, so an `Exited` from any other replica, of another identity or of the same, is not heard.
+  **Eligibility is a fragment's, joining is an edge's.** TransportR has no downgrade, so the two ends of
+  every edge must protect the data plane alike: one level, and one key id where both name one. That
+  relation is not transitive, so admission chooses the replicas of a run together, in its order of
+  preference among the choices that join every edge, and refuses a run no choice joins before anything is
+  launched, naming an edge and what each end does. Arming, and the registration of a plan fixed by hand,
+  refuse an edge whose two nodes each have a connected replica when no pair of them joins; a node with
+  none is left to admission. `[CI: Coordinator.Tests EdgeProtectionTests, ReplicaAdmissionSubjectTests;
+  Server.Tests ArmedDeploymentTests]`
 - **Cancel by stream rupture, never by signal**: the node must run on Windows.
 - **A runner hosts no data: a runner's fragment reads and writes its `arrow:` edges and nothing else.** The fragments of every
   run share the runner's host, so a file, a database, a checkpoint or a cursor file it reached would carry rows between two

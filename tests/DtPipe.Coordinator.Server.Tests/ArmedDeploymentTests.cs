@@ -147,17 +147,20 @@ public sealed partial class ArmedDeploymentTests : IDisposable
 
     private static BrickInfo Brick() => TestBricks.Announced("src", BrickKind.Source, """{"input":"sqlite:a"}""", "source");
 
-    private async Task NodeAsync(string name, string group, NodeRole role, BrickInfo? brick = null)
+    /// <summary>A new replica of <paramref name="name"/>, announcing <paramref name="protection"/> of its data plane; its connection.</summary>
+    private async Task<string> NodeAsync(
+        string name, string group, NodeRole role, BrickInfo? brick = null, string? protection = null, string? keyId = null)
     {
         var client = Guid.NewGuid();
         var subject = "node-" + name;
         await _state.SaveClientAsync(new ClientRegistration(client, "data-" + name, [group], null, null, DateTime.UtcNow, Subject: subject));
         var announcement = new NodeAnnouncement(
             name, "", [], role, role == NodeRole.Data ? [brick ?? Brick()] : [],
-            InstanceId: Guid.NewGuid(), DataPlaneClientId: client);
+            InstanceId: Guid.NewGuid(), DataPlaneClientId: client, DataPlaneProtection: protection, KeyId: keyId);
         var connection = $"c-{name}-{Interlocked.Increment(ref _connections)}";
         _registry.Announce(connection, subject, announcement, [group], () => { });
         _inventory.Announced(name, subject, announcement, [group]);
+        return connection;
     }
 
     private static ArmedDeployment Armed(string node = "n", string job = Job) => new(

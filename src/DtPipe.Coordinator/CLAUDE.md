@@ -211,6 +211,19 @@ while any replica is connected.
   update leaves replicas at two versions of a brick: the run goes to one that composes the plan. Admission
   refuses only when none does (`NoEligibleReplicaException`, naming each fragment and why, replica by
   replica) after `AdmissionTimeout`. `[CI: ReplicaAdmissionSubjectTests]`
+- **Eligibility is a fragment's, joining is an edge's.** The two ends of an edge join when they announce the same
+  level and, where both name a key id, the same one (`ReplicaProtection.Joins`, `EdgeProtection`): TransportR has no
+  downgrade, and a transfer between ends set differently fails before its first batch. An edge is a `RunEdge` of the run,
+  its producer and consumer fragments as the plan pairs them and the run wires them, so two fragments of one node, whose
+  replicas may differ during a rolling update, answer to it too; a fragment's own edges (`FragmentSpec.Edges`) name an alias
+  and a direction only. The relation is not transitive (a key, no key, another key), so `ReplicaRegistry.TryReserve` takes
+  the fragments in order and gives each the first candidate, in the order of preference below, that still lets every edge join, checked
+  by `EdgeProtection.Joinable` (linear in the fragments, their candidates' protections and the edges, once per protection a
+  fragment tries); a run whose candidates all protect alike is placed by the order alone. When each fragment has a
+  candidate and no choice joins, `NoEligibleReplicaException` names, by `edge P -> C`, each edge that cannot join together
+  with the edges before it that could, and what each end does: the words of `ReplicaProtection.Words`, a key id whole.
+  `EvaluateAsync` judges no edge; `ReplicaAdmission.EdgeRefusals` judges pairs of connected replicas, edge by edge, for
+  the server's arming. `[CI: EdgeProtectionTests]`
 - **The client id a replica announces is verified twice.** At the announcement, as a courtesy: one registered
   under another subject, or announced by another replica, is refused. At admission, as the authority: the
   registration is read at the moment of choosing. Only the second sees a client registered after the
@@ -220,11 +233,13 @@ while any replica is connected.
   `ReplicaView.DataPlaneProtection` and `KeyId` are the one reading of them (`DataPlaneProtections`), and any other reader goes
   through them. A word it does not know, or none, reads as the level that seals nothing; an id is kept only on the level that
   carries one and only if it has an id's form. The registry keeps the whole announcement and the key never reaches it: the
-  node announces a fingerprint. No admission, plan or verdict reads the level.
+  node announces a fingerprint. Admission and arming read the level through `ReplicaProtection.Of`, to join an edge's ends;
+  no verdict reads it.
   `[CI: DataPlaneProtectionWireTests; Server.Tests NodeChannelHubTests — what the node's API shows of it]`
 - **Among the eligible, the replica with the fewest runs is chosen, then the least recently chosen, then the
-  lowest instance id**, for every fragment of the run in one step: the choice is read again under the
-  registry's lock against the replica as it is, and leased there, or none is. `[CI: ReplicaRegistryTests]`
+  lowest instance id**, among those that let every edge of the run join, for every fragment of the run in one step: the
+  choice is read again under the registry's lock against the replica as it is, and leased there, or none is.
+  `[CI: ReplicaRegistryTests, EdgeProtectionTests]`
 - **The hub reads a client's groups from the rights each time the client registers or renews its token.** A replica
   has it done on demand with `PipelineNode.RefreshRegistrationAsync` (the call's contract is in
   `src/DtPipe.PipelineNode/CLAUDE.md`), and the hub judges each open transfer against the new groups before that call

@@ -39,16 +39,21 @@ public static class LaunchCauses
     /// <summary>A fragment of a data node has no replica that could run it now.</summary>
     public const string NoEligibleReplica = "no-eligible-replica";
 
+    /// <summary>The two ends of an edge protect the data plane so that no pair of their nodes' connected replicas joins.</summary>
+    public const string ProtectionMismatch = "protection-mismatch";
+
     /// <summary>The planner refused the plan for a reason none of the others names.</summary>
     public const string PlanRefused = "plan-refused";
 }
 
 /// <summary>
 /// Plans a library pipeline when it is launched. The runner is stateless and interchangeable, so it is not part of what a person
-/// decides: the runners online are tried by runs in flight, then by name, and the first whose plan the flow matrix allows and
-/// whose every fragment has an eligible replica is the one. A runner that fails is skipped, and a launch that none can serve names
+/// decides: the runners online are tried by runs in flight, then by name, and the first whose plan the flow matrix allows, whose
+/// every fragment has an eligible replica and whose every edge has a pair of connected replicas that join
+/// (<see cref="ReplicaAdmission.EdgeRefusals"/>) is the one. A runner that fails is skipped, and a launch that none can serve names
 /// each one's reason. The planner already judges the plan's edges against the matrix (<see cref="DistributionPlan.FlowRejection"/>),
-/// which is how a runner in the wrong groups is skipped.
+/// which is how a runner in the wrong groups is skipped; a runner that protects the data plane otherwise than the nodes it joins
+/// is skipped the same way.
 /// </summary>
 internal sealed class LaunchPlanner(AutoPlacer placer, BrickCatalog bricks, NodeInventory inventory, ReplicaAdmission admission, RightsStore rights)
 {
@@ -59,6 +64,20 @@ internal sealed class LaunchPlanner(AutoPlacer placer, BrickCatalog bricks, Node
     /// <summary>The fragment as a replica is asked to run it.</summary>
     public static FragmentSpec SpecOf(PlannedFragment fragment) => new(
         fragment.Name, fragment.Version, fragment.Edges, fragment.Composition, fragment.Form == FragmentForm.Bricks ? null : fragment.Yaml);
+
+    /// <summary>The plan's edges as a run names them: each pairs the fragment that sends with the fragment that receives.</summary>
+    public static IReadOnlyList<RunEdge> RunEdgesOf(DistributionPlan plan) =>
+        plan.Edges.Select(e => new RunEdge(e.ProducerFragment, e.ProducerAlias, e.ConsumerFragment, e.ConsumerAlias)).ToList();
+
+    /// <summary>
+    /// The edges of the plan that no pair of the replicas connected now could carry, a sentence each
+    /// (<see cref="ReplicaAdmission.EdgeRefusals"/>). A node with no usable identity is not judged here: the check that follows names it.
+    /// </summary>
+    public IReadOnlyList<string> ProtectionRefusals(DistributionPlan plan)
+    {
+        try { return admission.EdgeRefusals(RunFragmentsOf(plan), RunEdgesOf(plan)); }
+        catch (ConflictException) { return []; }
+    }
 
     /// <summary>The online runners in the order a launch tries them: the fewest runs in flight first, then by name.</summary>
     public IReadOnlyList<NodeView> Runners() => inventory.Snapshot()
@@ -144,19 +163,30 @@ internal sealed class LaunchPlanner(AutoPlacer placer, BrickCatalog bricks, Node
         catch (ConflictException) { return null; }
     }
 
-    /// <summary>The fragments of a plan with no replica that could run them now: why in a sentence, and as causes. Null when each has one.</summary>
+    /// <summary>
+    /// What keeps a plan from running on the replicas connected now: the fragments with no replica that could run them, and the edges
+    /// no pair of replicas could carry (<see cref="ReplicaAdmission.EdgeRefusals"/>). Why in a sentence, and as causes; null when
+    /// neither is found.
+    /// </summary>
     private async Task<(string? Refusal, List<LaunchCause> Causes)> EligibilityAsync(DistributionPlan plan)
     {
+        IReadOnlyList<RunFragment> fragments;
         IReadOnlyDictionary<string, FragmentEligibility> eligibility;
-        try { eligibility = await admission.EvaluateAsync(RunFragmentsOf(plan)); }
+        try
+        {
+            fragments = RunFragmentsOf(plan);
+            eligibility = await admission.EvaluateAsync(fragments);
+        }
         catch (ConflictException ex) { return (ex.Message, [new(LaunchCauses.PlanRefused, ex.Message)]); }
         var missing = plan.Fragments.Where(f => eligibility[f.Name].Eligible.Count == 0).ToList();
-        if (missing.Count == 0) return (null, []);
+        var apart = admission.EdgeRefusals(fragments, RunEdgesOf(plan));
+        if (missing.Count == 0 && apart.Count == 0) return (null, []);
         var runners = inventory.Snapshot().Where(n => n.Role == NodeRole.Runner).Select(n => n.Name).ToHashSet(StringComparer.Ordinal);
-        var refusal = string.Join(" ", missing.Select(f => CannotRun(f, eligibility[f.Name])));
+        var refusal = string.Join(" ", missing.Select(f => CannotRun(f, eligibility[f.Name])).Concat(apart));
         var causes = missing.Select(f => new LaunchCause(
             runners.Contains(f.Node) ? LaunchCauses.NoAdmissibleRunner : LaunchCauses.NoEligibleReplica,
-            CannotRun(f, eligibility[f.Name]), f.Node, f.Name)).ToList();
+            CannotRun(f, eligibility[f.Name]), f.Node, f.Name))
+            .Concat(apart.Select(edge => new LaunchCause(LaunchCauses.ProtectionMismatch, edge))).ToList();
         return (refusal, causes);
     }
 

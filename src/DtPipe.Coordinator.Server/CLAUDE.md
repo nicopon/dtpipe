@@ -341,7 +341,7 @@ holds what a host calls and what no domain owns. The rules below name classes, n
 - **Health is read, never acted on, and a read is kept.** `PipelineHealth` says whether each armed pipeline can be launched, from
   the job at its armed commit (`IJobSource`, never the library as it is now) and its armed bindings: `AutoPlacer.Check`, the plan
   `LaunchPlanner.ChooseAsync` makes (`Launch.Causes`: no runner, no admissible runner, an edge the matrix forbids, a fragment with
-  no eligible replica, anything else the planner refused) and the verdict of each binding in another mode. It asks no node and
+  no eligible replica, an edge whose ends cannot join, anything else the planner refused) and the verdict of each binding in another mode. It asks no node and
   writes nothing (`PlanForRunAsync` is the launch's, not its). A verdict `StateOf` does not know starts once, in the background,
   on no request's token, and the pipeline is a `warning` until it ends (its end drops the kept read); a verdict the node could
   not give is remembered here for `Coordinator:Health:MaxAge`, since the verifier keeps none, so a silent node is asked once per
@@ -435,7 +435,8 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   of the job, the bindings at that commit, when, by whom}` (`ArmedDeployment`), kept in the store once its deployment is ready and read
   back at start as ready, with no check, since no replica is connected yet. A run reads the job at the armed
   commit (`IJobSource`, the library) and the armed bindings, never the library as it is now. A node whose identity is gone stays
-  armed, and a run is refused naming it. `DeployAsync` deploys a plan fixed by hand, in memory only. Deploying plans as a launch
+  armed, and a run is refused naming it. `DeployAsync` deploys a plan fixed by hand, in memory only, its edges judged against the
+  matrix and the protection of the data plane as a launch's are. Deploying plans as a launch
   would, then asks every connected replica of each node whether it would run the fragments (`Check`, answered, spawning nothing)
   and is ready when each fragment has a replica that said yes and that admission could place a run on. One
   replica that refuses does not fail it while another can run the fragment (a rolling update leaves some at
@@ -627,11 +628,20 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   the run is sent and outside the ledger's lock, asks `LaunchPlanner.ChooseAsync` for the plan of the armed job under the armed
   bindings, and so do `GET /api/library/{id}/plan` (the plan a launch would make now, nothing written) and arming. The
   runners online are tried by runs in flight, then by name; the first whose plan is deployable (the planner already judges its edges
-  against the matrix, which is how a runner in the wrong groups is skipped) and whose every fragment has an eligible replica is
-  used. A plan that does not use the runner fails whichever is chosen and is returned at once; when none serves, the refusal
-  names each runner and why. `NodeInventory.PreferredRunner` is for reads that need any runner, never a plan. The groups a plan
-  names are the rights' at that moment, so a node's groups changing needs no redistribution.
+  against the matrix, which is how a runner in the wrong groups is skipped), whose every fragment has an eligible replica and
+  whose every edge has a pair of connected replicas that join (`ReplicaAdmission.EdgeRefusals`, which is how a runner that
+  protects the data plane otherwise than its nodes is skipped) is used. A plan that does not use the runner fails whichever is
+  chosen and is returned at once; when none serves, the refusal names each runner and why. `NodeInventory.PreferredRunner` is for
+  reads that need any runner, never a plan. The groups a plan names are the rights' at that moment, so a node's groups changing
+  needs no redistribution.
   `[CI: ArmedDeploymentTests, LaunchRoutesTests, PlanRightsTests, RightsStoreTests] [local: the lab's smoke.py rights - several groups]`
+- **An edge whose ends cannot join is refused at arming and at registration, by name, and judged on connected replicas
+  only.** Arming (`LaunchPlanner.ChooseAsync`, a runner at a time) and the registration of a plan fixed by hand
+  (`DeploymentService.DeployAsync`, after the matrix and before the nodes' presence, its runner fixed) refuse an edge whose two
+  nodes each have a connected replica when no pair of them joins (`src/DtPipe.Coordinator/CLAUDE.md`), in the sentence
+  `edge P -> C: P …, C ….` with the words of `ReplicaProtection.Words`, a health cause `protection-mismatch`. A node with no
+  connected replica is not judged here, and replicas that differ within a node pass while a pair of them joins: admission's joint
+  choice decides the run. A save into the library plans nothing and is not judged. `[CI: ArmedDeploymentTests]`
 - **A run records the plan it ran.** `RunView.Plan` (`RunPlan`): the plan's id, the runner it used, each fragment at its version, and
   each binding with the brick version it met and its mode's verdict. A run refused before it had a plan has none.
   `[CI: ArmedDeploymentTests, RunJournalTests]`
