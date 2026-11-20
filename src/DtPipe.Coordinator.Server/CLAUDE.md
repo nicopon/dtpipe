@@ -490,8 +490,11 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   groups, the last announcement of a node with no replica connected, and the page's view. The node is
   online while any replica is connected, and shows the announcement of the connected replica that
   arrived last (a reconnection of the same host does not change which); `NodeView.Replicas` lists each
-  with the runs placed on it and a hash of its bricks, and `ReplicasDisagree` says two connected replicas
-  offer different bricks. A read (a preview, a sample, a sink check) goes to one connected
+  with the runs placed on it, a hash of its bricks and the protection of its data plane as the coordinator reads it
+  (`DataPlaneProtection`, `KeyId`), and `ReplicasDisagree` says two connected replicas offer different bricks while
+  `ReplicasDisagreeOnProtection` says they announce a different level or key id. The latter is a signal and never a
+  refusal: every replica stays admitted, and `NodeChannelHub.Announce` tells it once to the log (`NewProtectionDisagreement`),
+  not at each announcement of the same difference. A read (a preview, a sample, a sink check) goes to one connected
   replica, the one with the fewest runs, and is not tried on a second when it fails. `Disconnect` interrupts
   the connections of every replica of an identity, and `PUT /api/rights/identities/{id}` does it when the
   name or the **groups** change, or when the identity goes from enabled to disabled: a replica's data plane
@@ -500,7 +503,7 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   identity again cuts nothing, no host of it being connected. An edit that leaves out a field (`name`,
   `description`, `groups` or `enabled`) leaves it as the identity has it: the omission neither enables, renames
   nor empties. `Origin`, where a replica says it runs, is untrusted
-  text: cut at `Announce`, the ground of no decision.
+  text: cut at `Announce`, the ground of no decision; the protection it announces is read through `ReplicaView`, never as text.
   `[CI: NodeChannelHubTests, RightsRoutesTests] [local: the lab's smoke.py rights - identity, disabled; tools/campaign.py F3, S7]`
 - **A run names who launched it, and a service may launch it only once.** `RunView.LaunchedBy` is a person's email or the id of
   the identity that launched it, a service or a person verified by a key, or `CallerOf`'s name for a person of the provider with

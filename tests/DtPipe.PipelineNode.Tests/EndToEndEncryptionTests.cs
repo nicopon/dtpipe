@@ -5,7 +5,7 @@ using DtPipe.PipelineNode.Hosting;
 using DtPipe.PipelineNode.Tests.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TransportR.Client;
 using TransportR.Hub;
@@ -140,12 +140,21 @@ public class EndToEndEncryptionTests : IDisposable
         Assert.Contains("end-to-end encryption is off", refused.Message);
     }
 
+    public static TheoryData<string, TransferProtection, string> NodeSettings => new()
+    {
+        { "a key, as a value and as a file", TransferProtection.EncryptedWithPreSharedKey, "encrypted-psk" },
+        { "no key", TransferProtection.Encrypted, "encrypted" },
+        { "encryption off", TransferProtection.None, "none" },
+    };
+
     /// <summary>
-    /// Two node hosts read the same key from their own configuration, one as a value and one from a file, and the clients they
-    /// register seal the transfer the coordinator opens between them with it. The hosts name no dtpipe binary: nothing runs.
+    /// Two node hosts take their setting from their own configuration, and the clients they register carry the transfer the
+    /// coordinator opens between them as that setting says. What each announces to the coordinator is what its client proves: the
+    /// level, and for a key the same fingerprint from a value and from a file. The hosts name no dtpipe binary: nothing runs.
     /// </summary>
-    [Fact]
-    public async Task NodeHosts_SealTheirTransfersWithTheKeyOfTheirOwnConfiguration()
+    [Theory]
+    [MemberData(nameof(NodeSettings))]
+    public async Task NodeHosts_AnnounceTheProtectionTheirClientsApply(string setting, TransferProtection proven, string announcedWord)
     {
         var jwt = new TestJwt();
         var rights = new MutableGroups();
@@ -155,11 +164,20 @@ public class EndToEndEncryptionTests : IDisposable
             o => o.Groups["g"] = new GroupAccess { CanSendTo = ["g"] },
             services => services.Replace(ServiceDescriptor.Singleton<IClientIdentityProvider>(rights)), jwt);
         await using var idp = await FakeIdp.StartAsync(jwt);
+        var keyBase64 = Convert.ToBase64String(DomainKey);
         var keyFile = Path.Combine(_dir.FullName, "domain.key");
-        await File.WriteAllTextAsync(keyFile, Convert.ToBase64String(DomainKey) + "\n", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(keyFile, keyBase64 + "\n", TestContext.Current.CancellationToken);
+        NodeEncryptionOptions Setting(string node) => setting switch
+        {
+            "a key, as a value and as a file" => new() { Enabled = true, PreSharedKey = node == "node-a" ? keyBase64 : "@" + keyFile },
+            "no key" => new() { Enabled = true },
+            _ => new(),
+        };
 
-        var a = await StartAgentAsync(host, idp, "node-a", new NodeEncryptionOptions { Enabled = true, PreSharedKey = Convert.ToBase64String(DomainKey) });
-        var b = await StartAgentAsync(host, idp, "node-b", new NodeEncryptionOptions { Enabled = true, PreSharedKey = "@" + keyFile });
+        var lines = new Lines();
+        using var loggers = LoggerFactory.Create(b => b.AddProvider(lines).SetMinimumLevel(LogLevel.Information));
+        var a = await StartAgentAsync(host, idp, "node-a", Setting("node-a"), loggers);
+        var b = await StartAgentAsync(host, idp, "node-b", Setting("node-b"), loggers);
         try
         {
             var registry = host.Host.Services.GetRequiredService<ReplicaRegistry>();
@@ -167,8 +185,22 @@ public class EndToEndEncryptionTests : IDisposable
                 await AnnouncedClientAsync(registry, "node-a"), await AnnouncedClientAsync(registry, "node-b"),
                 handshakeTimeout: TimeSpan.FromSeconds(20));
 
-            Assert.Equal(TransferProtection.EncryptedWithPreSharedKey, await ProtectionAsync(() => a.DataPlane!.Transfers, transferId));
-            Assert.Equal(TransferProtection.EncryptedWithPreSharedKey, await ProtectionAsync(() => b.DataPlane!.Transfers, transferId));
+            Assert.Equal(proven, await ProtectionAsync(() => a.DataPlane!.Transfers, transferId));
+            Assert.Equal(proven, await ProtectionAsync(() => b.DataPlane!.Transfers, transferId));
+
+            // The id is the one the derivation gives, which the key itself never appears in.
+            var id = proven == TransferProtection.EncryptedWithPreSharedKey
+                ? Convert.ToHexString(HMACSHA256.HashData(DomainKey, "dtpipe end-to-end key id"u8.ToArray())[..8]).ToLowerInvariant()
+                : null;
+            foreach (var node in new[] { "node-a", "node-b" })
+            {
+                var replica = Assert.Single(registry.Replicas(node));
+                Assert.Equal(announcedWord, replica.DataPlaneProtection);
+                Assert.Equal(id, replica.KeyId);
+                var line = Assert.Single(lines.All, l => l.Contains($"Node {node} data plane protection"));
+                Assert.Equal($"Information: Node {node} data plane protection: {announcedWord}" + (id is null ? "" : $", key id {id}"), line);
+            }
+            Assert.DoesNotContain(lines.All, l => l.Contains(keyBase64) || l.Contains(Convert.ToHexString(DomainKey), StringComparison.OrdinalIgnoreCase) || l.Contains(keyFile));
         }
         finally
         {
@@ -180,7 +212,29 @@ public class EndToEndEncryptionTests : IDisposable
         }
     }
 
-    private async Task<NodeAgent> StartAgentAsync(CoordinatorTestHost host, FakeIdp idp, string name, NodeEncryptionOptions encryption)
+    /// <summary>Every line the node hosts log, as <c>Level: message</c>.</summary>
+    private sealed class Lines : ILoggerProvider
+    {
+        private readonly System.Collections.Concurrent.ConcurrentQueue<string> _lines = new();
+
+        public IReadOnlyList<string> All => [.. _lines];
+
+        public ILogger CreateLogger(string categoryName) => new Line(_lines);
+
+        public void Dispose() { }
+
+        private sealed class Line(System.Collections.Concurrent.ConcurrentQueue<string> lines) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+                lines.Enqueue($"{logLevel}: {formatter(state, exception)}");
+        }
+    }
+
+    private async Task<NodeAgent> StartAgentAsync(CoordinatorTestHost host, FakeIdp idp, string name, NodeEncryptionOptions encryption, ILoggerFactory loggers)
     {
         var options = new DtPipeNodeOptions
         {
@@ -191,7 +245,7 @@ public class EndToEndEncryptionTests : IDisposable
             Oidc = new NodeOidcOptions { Authority = idp.Authority, ClientId = name, ClientSecret = "secret" },
             EndToEndEncryption = encryption,
         };
-        var agent = new NodeAgent(Options.Create(options), new NodeDefinition(), NullLoggerFactory.Instance);
+        var agent = new NodeAgent(Options.Create(options), new NodeDefinition(), loggers);
         await agent.StartAsync(CancellationToken.None);
         return agent;
     }

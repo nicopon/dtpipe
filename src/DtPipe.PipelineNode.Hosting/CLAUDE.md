@@ -136,8 +136,14 @@ none. One node per process, which is one replica of its node's identity; a secon
   the provider receives the peer's TransportR client id, which changes with each client, so a key per pair is a host's own code.
   Every node a transfer joins must be set alike, key included: TransportR has no downgrade, and ends set differently fail
   before the first batch, each as its peer's doing (`FaultOrigin.Remote`).
+  **A node announces what its client applies, and nothing of the key but an id.** `EndToEndKey.Resolve` reads the setting once
+  (`EndToEndSetting`) and `NodeAgent` builds both the TransportR client and the announcement from that one value, so the level
+  (`DataPlaneProtections`) the coordinator is told is the client's. A configured key's id is the first 8 bytes of its HMAC-SHA256 over
+  a fixed label, in lowercase hexadecimal, derived on the node: it tells which nodes share a key and cannot be turned back into it;
+  a provider has none. One line at start (`NodeAgent`, Information) names the level and the id, never the key, a part of it or the
+  setting it was read from.
   `[CI: Hosting.Tests EndToEndKeyTests; PipelineNode.Tests EndToEndEncryptionTests — Protection at both ends, two hosts' own
-  clients included]` `[unchecked: the AES-GCM refusal; nodes of one run set differently, which only the run's failure shows]`
+  clients included, and the level and id each announces]` `[unchecked: the AES-GCM refusal; nodes of one run set differently, which only the run's failure shows]`
 - **A node the coordinator disconnects connects again.** SignalR's automatic reconnect does not
   cover a connection the server closes (a reconnect the coordinator asked for, an announcement it
   refused), so `hub.Closed` only signals and `ReconnectLoopAsync` starts the connection again and

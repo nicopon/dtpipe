@@ -11,15 +11,23 @@ namespace DtPipe.Coordinator.Server.Nodes;
 /// announces, which differs from a sibling's while a rolling update is under way, and <see cref="Runs"/> the runs the
 /// coordinator placed on it. While its connection is dropped, <see cref="AwaySince"/> is when it dropped and
 /// <see cref="GivenUpAt"/> when the coordinator stops waiting for its host to announce again; both are null otherwise.
+/// <see cref="DataPlaneProtection"/> and <see cref="KeyId"/> are what the host announced of its data plane, as the coordinator reads
+/// them (<see cref="DataPlaneProtections"/>): a word it knows, and the fingerprint of a pre-shared key, never the key.
 /// </summary>
 public sealed record NodeReplica(
     string Id, DateTimeOffset Since, string? Origin, bool Connected, string? DtpipeVersion, string Bricks,
-    IReadOnlyList<string> Capabilities, int Runs, DateTimeOffset? AwaySince = null, DateTimeOffset? GivenUpAt = null);
+    IReadOnlyList<string> Capabilities, int Runs, DateTimeOffset? AwaySince = null, DateTimeOffset? GivenUpAt = null,
+    string DataPlaneProtection = DataPlaneProtections.None, string? KeyId = null);
 
+/// <summary>
+/// A node as a page shows it. <see cref="ReplicasDisagree"/> says two connected replicas offer different bricks, and
+/// <see cref="ReplicasDisagreeOnProtection"/> that they announce a different protection of the data plane (level or key id): both
+/// are what a rolling update looks like, and neither refuses a replica.
+/// </summary>
 public sealed record NodeView(
     string Name, IReadOnlyList<string> Groups, string Description, bool Online, IReadOnlyList<DatasetInfo> Datasets,
     NodeRole Role, IReadOnlyList<BrickInfo> Bricks, IReadOnlyList<string> Capabilities,
-    string? DtpipeVersion, IReadOnlyList<NodeReplica> Replicas, bool ReplicasDisagree);
+    string? DtpipeVersion, IReadOnlyList<NodeReplica> Replicas, bool ReplicasDisagree, bool ReplicasDisagreeOnProtection = false);
 
 /// <summary>
 /// The nodes the coordinator knows of, by the name their rights give them, over <see cref="ReplicaRegistry"/>, the one
@@ -43,6 +51,8 @@ public sealed class NodeInventory(ReplicaRegistry registry)
     private readonly Dictionary<string, Node> _nodes = new(StringComparer.Ordinal);
     // The runs whose requester asked for a cancellation and that have not ended: a view of what is being wound down, never a verdict.
     private readonly HashSet<string> _cancelRequested = new(StringComparer.Ordinal);
+    // By subject: the difference of protection between a node's replicas that the log told last, so the same one is told once.
+    private readonly Dictionary<string, string> _protectionDisagreements = new(StringComparer.Ordinal);
 
     /// <summary>Records that the requester of run <paramref name="runId"/> asked for its cancellation.</summary>
     public void CancelRequested(string runId)
@@ -90,7 +100,11 @@ public sealed class NodeInventory(ReplicaRegistry registry)
     {
         registry.Forget(subject);
         if (registry.Replicas(subject).Count > 0) return;
-        lock (_lock) _nodes.Remove(subject);
+        lock (_lock)
+        {
+            _nodes.Remove(subject);
+            _protectionDisagreements.Remove(subject);
+        }
     }
 
     /// <summary>The runner a request for the coordinator goes to: one online first, then by name; <c>null</c> when none is known.</summary>
@@ -128,12 +142,39 @@ public sealed class NodeInventory(ReplicaRegistry registry)
             var views = replicas.Select(r => new NodeReplica(
                 r.Key.Short, r.FirstAnnouncedAt, r.Announcement.Origin, r.Connected, r.Announcement.DtpipeVersion,
                 BricksHash(r.Announcement.Bricks), r.Announcement.Capabilities ?? [], r.Leases.Count,
-                r.AwaySince, r.AwaySince + registry.DisconnectGrace)).ToList();
+                r.AwaySince, r.AwaySince + registry.DisconnectGrace, r.DataPlaneProtection, r.KeyId)).ToList();
             return new NodeView(
                 n.Value.Name, reference?.Groups ?? n.Value.Groups, announcement.Description, connected.Count > 0, announcement.Datasets,
                 announcement.Role, announcement.Bricks ?? [], announcement.Capabilities ?? [], announcement.DtpipeVersion, views,
-                views.Where(v => v.Connected).Select(v => v.Bricks).Distinct().Count() > 1);
+                views.Where(v => v.Connected).Select(v => v.Bricks).Distinct().Count() > 1, ProtectionsOf(connected).Count > 1);
         }).ToList();
+    }
+
+    // A replica in grace is left out: only the hosts connected now are set one way or another.
+    private static IReadOnlyList<string> ProtectionsOf(IEnumerable<ReplicaView> connected) =>
+        [.. connected.Select(r => r.KeyId is null ? r.DataPlaneProtection : $"{r.DataPlaneProtection} (key {r.KeyId})")
+            .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)];
+
+    /// <summary>
+    /// What the connected replicas of the node <paramref name="subject"/> announce of their data plane's protection when it is not the
+    /// same on all of them, worded for the log (the levels, and the key ids), and only the first time that set is seen: a replica that
+    /// announces again, as every reconnection does, says nothing new. Null while they agree, which also forgets the last difference,
+    /// so a later one is told again. Nothing is refused on it: a rolling update passes through a node whose replicas differ.
+    /// </summary>
+    public string? NewProtectionDisagreement(string subject)
+    {
+        var protections = ProtectionsOf(registry.Replicas(subject).Where(r => r.Connected));
+        var difference = protections.Count > 1 ? string.Join(", ", protections) : null;
+        lock (_lock)
+        {
+            if (difference is null) _protectionDisagreements.Remove(subject);
+            else if (!_protectionDisagreements.TryGetValue(subject, out var told) || told != difference)
+            {
+                _protectionDisagreements[subject] = difference;
+                return difference;
+            }
+        }
+        return null;
     }
 
     /// <summary>The start of a hash of the bricks a replica announces: equal on replicas that offer the same, different while one is being updated.</summary>
@@ -186,6 +227,13 @@ public sealed class NodeChannelHub(
             return;
         }
         inventory.Announced(identity.Name, identity.ClientId, named, identity.Groups);
+        // Replicas set differently are told, never refused: a rolling update passes through that, and each replica stays admitted.
+        if (inventory.NewProtectionDisagreement(identity.ClientId) is { } differing)
+        {
+            logger.LogWarning("The replicas of {Node} announce a different protection of the data plane: {Protections}", identity.Name, differing);
+            bus.Publish("log", new NodeLogLine("coordinator", null, "Warning",
+                $"The replicas of {identity.Name} announce a different protection of the data plane: {differing}. Every one stays admitted; a transfer between ends set differently fails."));
+        }
         bus.Publish("nodes", inventory.Snapshot());
         if (named.DataPlaneClientId is not null) orphans.OnAnnounced(replica.Value, identity.Name);
     }

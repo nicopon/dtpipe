@@ -216,6 +216,12 @@ while any replica is connected.
   registration is read at the moment of choosing. Only the second sees a client registered after the
   announcement. A replica claiming another identity's client would be handed that identity's transfers.
   `[CI: ReplicaAdmissionSubjectTests]`
+- **A replica's protection of the data plane is read, never trusted.** The announcement's level and key id are text a host chose:
+  `ReplicaView.DataPlaneProtection` and `KeyId` are the one reading of them (`DataPlaneProtections`), and any other reader goes
+  through them. A word it does not know, or none, reads as the level that seals nothing; an id is kept only on the level that
+  carries one and only if it has an id's form. The registry keeps the whole announcement and the key never reaches it: the
+  node announces a fingerprint. No admission, plan or verdict reads the level.
+  `[CI: DataPlaneProtectionWireTests; Server.Tests NodeChannelHubTests — what the node's API shows of it]`
 - **Among the eligible, the replica with the fewest runs is chosen, then the least recently chosen, then the
   lowest instance id**, for every fragment of the run in one step: the choice is read again under the
   registry's lock against the replica as it is, and leased there, or none is. `[CI: ReplicaRegistryTests]`

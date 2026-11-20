@@ -36,14 +36,14 @@ public class EndToEndKeyTests : IDisposable
     private static IEnumerable<string> Refusals(Action<NodeEncryptionOptions> encryption) =>
         Assert.Throws<OptionsValidationException>(() => Resolve(encryption)).Failures;
 
-    private static byte[]? KeyOf(DtPipeNodeOptions options) => EndToEndKey.Resolve(options.EndToEndEncryption)?.Invoke(Guid.NewGuid());
+    private static byte[]? KeyOf(DtPipeNodeOptions options) => EndToEndKey.Resolve(options.EndToEndEncryption).Key?.Invoke(Guid.NewGuid());
 
     [Fact]
     public void Encryption_IsOff_AndTheNodeHoldsNoKey_ByDefault()
     {
         var options = Resolve(_ => { });
         Assert.False(options.EndToEndEncryption.Enabled);
-        Assert.Null(EndToEndKey.Resolve(options.EndToEndEncryption));
+        Assert.Null(EndToEndKey.Resolve(options.EndToEndEncryption).Key);
     }
 
     [Fact]
@@ -75,8 +75,58 @@ public class EndToEndKeyTests : IDisposable
         Assert.Equal(Key, KeyOf(Resolve(e => { e.Enabled = true; e.PreSharedKey = Base64; })));
         Assert.Equal(Key, KeyOf(Resolve(e => { e.Enabled = true; e.PreSharedKey = "@" + file; })));
         Assert.Equal(Key, KeyOf(Resolve(e => { e.Enabled = true; e.PreSharedKeyFile = file; })));
-        Assert.Same(perPeer, EndToEndKey.Resolve(Resolve(e => { e.Enabled = true; e.PreSharedKeyProvider = perPeer; }).EndToEndEncryption));
-        Assert.Null(EndToEndKey.Resolve(Resolve(e => e.Enabled = true).EndToEndEncryption));
+        Assert.Same(perPeer, EndToEndKey.Resolve(Resolve(e => { e.Enabled = true; e.PreSharedKeyProvider = perPeer; }).EndToEndEncryption).Key);
+        Assert.Null(EndToEndKey.Resolve(Resolve(e => e.Enabled = true).EndToEndEncryption).Key);
+    }
+
+    private static EndToEndSetting SettingOf(Action<NodeEncryptionOptions> encryption) => EndToEndKey.Resolve(Resolve(encryption).EndToEndEncryption);
+
+    /// <summary>The level follows what the client is built with: the same resolution gives both, so the announcement cannot say more.</summary>
+    [Fact]
+    public void TheProtection_IsWhatTheClientIsBuiltWith_AndOnlyAConfiguredKeyHasAnId()
+    {
+        var off = SettingOf(_ => { });
+        var sealedWithNoKey = SettingOf(e => e.Enabled = true);
+        var sealedWithTheKey = SettingOf(e => { e.Enabled = true; e.PreSharedKey = Base64; });
+        var sealedPerPeer = SettingOf(e => { e.Enabled = true; e.PreSharedKeyProvider = _ => Key; });
+
+        Assert.False(off.Enabled);
+        Assert.Null(off.Key);
+        Assert.Equal("none", off.Protection);
+        Assert.Null(off.KeyId);
+        Assert.True(sealedWithNoKey.Enabled);
+        Assert.Null(sealedWithNoKey.Key);
+        Assert.Equal("encrypted", sealedWithNoKey.Protection);
+        Assert.Null(sealedWithNoKey.KeyId);
+        Assert.True(sealedWithTheKey.Enabled);
+        Assert.NotNull(sealedWithTheKey.Key);
+        Assert.Equal("encrypted-psk", sealedWithTheKey.Protection);
+        Assert.NotNull(sealedWithTheKey.KeyId);
+        Assert.True(sealedPerPeer.Enabled);
+        Assert.NotNull(sealedPerPeer.Key);
+        Assert.Equal("encrypted-psk", sealedPerPeer.Protection);
+        Assert.Null(sealedPerPeer.KeyId);
+    }
+
+    [Fact]
+    public void TheKeyId_IsAFingerprintOfTheKey_TheSameForTheSameKey_AndNeverTheKey()
+    {
+        var file = Path.Combine(_dir.FullName, "domain.key");
+        File.WriteAllText(file, Base64 + "\n");
+        var other = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+
+        var id = SettingOf(e => { e.Enabled = true; e.PreSharedKey = Base64; }).KeyId!;
+        var sameFromAFile = SettingOf(e => { e.Enabled = true; e.PreSharedKeyFile = file; }).KeyId;
+        var ofAnotherKey = SettingOf(e => { e.Enabled = true; e.PreSharedKey = other; }).KeyId;
+
+        Assert.Matches("^[0-9a-f]{16}$", id);
+        Assert.Equal(id, sameFromAFile);
+        Assert.NotEqual(id, ofAnotherKey);
+        // The derivation every node applies: the first 8 bytes of HMAC-SHA256, keyed with the key, over this label.
+        Assert.Equal(Convert.ToHexString(HMACSHA256.HashData(Key, "dtpipe end-to-end key id"u8.ToArray())[..8]).ToLowerInvariant(), id);
+        Assert.DoesNotContain(Base64, id);
+        Assert.DoesNotContain(Convert.ToHexString(Key).ToLowerInvariant(), id);
+        Assert.DoesNotContain(Convert.ToHexString(Key)[..16].ToLowerInvariant(), id);
     }
 
     [Fact]

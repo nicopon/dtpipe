@@ -368,6 +368,84 @@ public sealed class NodeChannelHubTests : IDisposable
         Assert.InRange(replica.Origin!.Length, 1, 200);
     }
 
+    private const string AKeyId = "0123456789abcdef";
+
+    /// <summary>The replica whose instance id starts with <c>{n:x8}</c>, which is the id the node's API shows it under.</summary>
+    private static NodeAnnouncement Sealing(int n, string? word, string? keyId = null) =>
+        Replica(Guid.Parse($"{n:x8}-0000-0000-0000-000000000000")) with { DataPlaneProtection = word, KeyId = keyId };
+
+    private static (string Level, string? KeyId) Protection(NodeReplica replica) => (replica.DataPlaneProtection, replica.KeyId);
+
+    [Fact]
+    public async Task A_Replica_Protection_Is_Kept_And_Shown_By_Replica_As_The_Coordinator_Reads_It()
+    {
+        foreach (var (n, announcement) in new[]
+        {
+            (1, Sealing(1, "encrypted-psk", AKeyId)),
+            (2, Sealing(2, "encrypted-psk", "ABCDEF0123456789")),
+            (3, Sealing(3, "encrypted", AKeyId)),
+            (4, Sealing(4, "no-such-word", AKeyId)),
+            (5, Sealing(5, null)),
+            (6, Sealing(6, "encrypted-psk")),
+        })
+            await Connect($"c{n}", "known").Hub.Announce(announcement);
+
+        var shown = Assert.Single(_inventory.Snapshot()).Replicas.ToDictionary(r => r.Id);
+        Assert.Equal(("encrypted-psk", AKeyId), Protection(shown["00000001"]));
+        Assert.Equal(("encrypted-psk", null), Protection(shown["00000002"]));
+        Assert.Equal(("encrypted", null), Protection(shown["00000003"]));
+        Assert.Equal(("none", null), Protection(shown["00000004"]));
+        Assert.Equal(("none", null), Protection(shown["00000005"]));
+        Assert.Equal(("encrypted-psk", null), Protection(shown["00000006"]));
+    }
+
+    [Fact]
+    public async Task Replicas_Set_Differently_Are_Flagged_Apart_From_Their_Bricks_And_Every_One_Stays_Admitted()
+    {
+        var (first, firstCaller) = Connect("c1", "known");
+        var (second, secondCaller) = Connect("c2", "known");
+        var (third, thirdCaller) = Connect("c3", "known");
+        await first.Announce(Sealing(1, "encrypted-psk", AKeyId));
+        await second.Announce(Sealing(2, "encrypted-psk", AKeyId));
+        Assert.False(Assert.Single(_inventory.Snapshot()).ReplicasDisagreeOnProtection);
+
+        await third.Announce(Sealing(3, "none"));
+
+        var node = Assert.Single(_inventory.Snapshot());
+        Assert.True(node.ReplicasDisagreeOnProtection);
+        Assert.False(node.ReplicasDisagree);
+        Assert.All(node.Replicas, r => Assert.True(r.Connected));
+        Assert.False(firstCaller.Aborted || secondCaller.Aborted || thirdCaller.Aborted);
+        Assert.Equal(["c1", "c2", "c3"], _inventory.ReplicasOf("node-known").Select(r => r.ConnectionId).Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_Difference_Of_Protection_Is_Logged_Once_And_Again_After_The_Replicas_Agreed()
+    {
+        static int Told(IReadOnlyList<NodeLogLine> lines) => lines.Count(l => l.Message.Contains("a different protection of the data plane"));
+        var (first, _) = Connect("c1", "known");
+        var (second, _) = Connect("c2", "known");
+        await first.Announce(Sealing(1, "encrypted-psk", AKeyId));
+        await second.Announce(Sealing(2, "encrypted-psk", AKeyId));
+        Assert.Equal(0, Told(LogLines()));
+
+        await second.Announce(Sealing(2, "none"));
+        var line = Assert.Single(LogLines(), l => Told([l]) == 1);
+        Assert.Equal(("coordinator", "Warning"), (line.Node, line.Level));
+        Assert.Contains("encrypted-psk (key 0123456789abcdef), none", line.Message);
+
+        // Every reconnection announces again, and the second announcement of a start comes with the data plane client.
+        await second.Announce(Sealing(2, "none") with { DataPlaneClientId = Guid.NewGuid() });
+        await first.Announce(Sealing(1, "encrypted-psk", AKeyId));
+        Assert.Equal(1, Told(LogLines()));
+
+        // The difference ends, and a later one is told again.
+        await second.Announce(Sealing(2, "encrypted-psk", AKeyId));
+        Assert.False(Assert.Single(_inventory.Snapshot()).ReplicasDisagreeOnProtection);
+        await second.Announce(Sealing(2, "encrypted"));
+        Assert.Equal(2, Told(LogLines()));
+    }
+
     [Fact]
     public async Task Disconnecting_An_Identity_Interrupts_Every_Replica()
     {

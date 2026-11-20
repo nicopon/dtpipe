@@ -60,7 +60,11 @@ the control plane, over each replica's node channel; TransportR carries the data
   have.** The node is a byte relay: dtpipe reaches it through `arrow:` and references no TransportR
   assembly.
 - **A node's replicas must be interchangeable**: one database, the same variables, the same bricks outside
-  a rolling update. Nothing checks it; any eligible replica may run a fragment. `[unchecked]`
+  a rolling update, the same protection of the data plane. Any eligible replica may run a fragment. The protection is compared:
+  each replica announces its level and the id of its key (a fingerprint the node derives, never the key), and replicas that
+  differ are flagged in the coordinator's log and by the node's API, never refused, since a rolling update passes through that.
+  `[CI: Coordinator.Tests DataPlaneProtectionWireTests; Server.Tests NodeChannelHubTests; Hosting.Tests EndToEndKeyTests;
+  PipelineNode.Tests EndToEndEncryptionTests]` `[unchecked: the rest]`
 - **A fragment runs on a replica of its node's identity, and only that replica speaks for it.** Admission
   places each fragment on a replica connected under the subject of its node whose bricks compose the plan's
   version and whose TransportR client holds exactly the node's groups. The replica is chosen once for the

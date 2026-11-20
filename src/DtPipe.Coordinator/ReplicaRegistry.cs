@@ -29,7 +29,9 @@ public sealed class ReplicaRegistryOptions
 /// <summary>
 /// A replica as the registry holds it at one instant. <see cref="ConnectionId"/> is null while its connection is
 /// gone and the grace period has not elapsed: such a replica is known, and reachable by no one.
-/// <see cref="Leases"/> are the (run, fragment) pairs the coordinator placed on it.
+/// <see cref="Leases"/> are the (run, fragment) pairs the coordinator placed on it. <see cref="DataPlaneProtection"/> and
+/// <see cref="KeyId"/> are what it announced of its data plane, as the coordinator reads them (<see cref="DataPlaneProtections"/>):
+/// every reader of a replica's protection goes through them, never through the announcement's text.
 /// </summary>
 public sealed record ReplicaView(
     ReplicaKey Key, string? ConnectionId, NodeAnnouncement Announcement, IReadOnlyList<string> Groups,
@@ -38,6 +40,12 @@ public sealed record ReplicaView(
 {
     public bool Connected => ConnectionId is not null;
     public Guid? DataPlaneClientId => Announcement.DataPlaneClientId;
+
+    /// <summary>A word of <see cref="DataPlaneProtections"/>: <see cref="DataPlaneProtections.None"/> for a host that said so, said nothing or said a word this coordinator does not know.</summary>
+    public string DataPlaneProtection => DataPlaneProtections.Read(Announcement.DataPlaneProtection);
+
+    /// <summary>The fingerprint of the replica's pre-shared key; null when its level carries none or the text is no id.</summary>
+    public string? KeyId => DataPlaneProtections.ReadKeyId(DataPlaneProtection, Announcement.KeyId);
 }
 
 /// <summary>

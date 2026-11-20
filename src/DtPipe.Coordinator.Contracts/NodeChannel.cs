@@ -74,16 +74,55 @@ public enum NodeRole { Data, Runner }
 /// for people to read: untrusted text, never a ground for a decision. <see cref="DataPlaneClientId"/> is the
 /// TransportR client the host moves a run's bytes with: the coordinator takes it only when that client is
 /// registered under the same subject as the connection, and opens every transfer to it.
+/// <see cref="DataPlaneProtection"/> is what that client applies to the bytes of its transfers (a word of
+/// <see cref="DataPlaneProtections"/>) and <see cref="KeyId"/> the fingerprint of its pre-shared key, never the key: a host that
+/// says neither is read as sealing nothing. Both are untrusted text, read through <see cref="DataPlaneProtections"/>.
 /// </summary>
 public sealed record NodeAnnouncement(
     string Name, string Description, IReadOnlyList<DatasetInfo> Datasets, NodeRole Role,
     IReadOnlyList<BrickInfo> Bricks, IReadOnlyList<string>? Capabilities = null, string? DtpipeVersion = null,
-    Guid? InstanceId = null, string? Origin = null, Guid? DataPlaneClientId = null)
+    Guid? InstanceId = null, string? Origin = null, Guid? DataPlaneClientId = null,
+    string? DataPlaneProtection = null, string? KeyId = null)
 {
     /// <summary>The capability of a host that accepts a fragment written as a job, not only one made of its bricks.</summary>
     public const string RawFragments = "raw-fragments";
 
     public bool Offers(string capability) => Capabilities?.Contains(capability, StringComparer.Ordinal) == true;
+}
+
+/// <summary>
+/// The words <see cref="NodeAnnouncement.DataPlaneProtection"/> carries, by what a node's client does to the bytes of its transfers,
+/// and how the coordinator reads what a host sent. A node writes one of the words; the coordinator reads any other text, and an
+/// absent one, as <see cref="None"/>, so an announcement never makes it believe in more protection than it can name.
+/// </summary>
+public static class DataPlaneProtections
+{
+    /// <summary>The transfers cross in clear.</summary>
+    public const string None = "none";
+
+    /// <summary>Every batch is sealed, with no pre-shared key: it protects against whoever reads the path, not against a hub that rewrites it.</summary>
+    public const string Encrypted = "encrypted";
+
+    /// <summary>Every batch is sealed with a pre-shared key, the node's own configuration or a provider of its host.</summary>
+    public const string EncryptedPsk = "encrypted-psk";
+
+    /// <summary>The length of a key id: the hexadecimal of eight bytes.</summary>
+    public const int KeyIdLength = 16;
+
+    /// <summary>The level <paramref name="word"/> names, or <see cref="None"/> when it is absent or no word of this class.</summary>
+    public static string Read(string? word) => word switch
+    {
+        Encrypted => Encrypted,
+        EncryptedPsk => EncryptedPsk,
+        _ => None,
+    };
+
+    /// <summary>
+    /// The key id <paramref name="keyId"/> states for <paramref name="level"/>, or null: only <see cref="EncryptedPsk"/> carries one,
+    /// and only a text of <see cref="KeyIdLength"/> lowercase hexadecimal characters is an id. A host with a key per pair announces none.
+    /// </summary>
+    public static string? ReadKeyId(string level, string? keyId) =>
+        level == EncryptedPsk && keyId is { Length: KeyIdLength } && keyId.All(c => c is (>= '0' and <= '9') or (>= 'a' and <= 'f')) ? keyId : null;
 }
 
 public enum BrickKind { Source, Sink }
