@@ -12,7 +12,6 @@ export const store = {
   last: new Map(),   // the latest run that is over of each pipeline, by pipeline id: /api/runs/last, however far back it ended
   queue: [],         // the runs in flight, then the queued ones
   logs: [],
-  bytes: { total: 0 },
   health: { status: "ok", pipelines: [] }, // whether each armed pipeline can be launched: /api/health, read again when its inputs move
   connected: false,
   httpKeys: false, // this coordinator exchanges identity keys over plain HTTP
@@ -55,10 +54,6 @@ export function endNotes(run) {
       ? `<p class="mismatch">The coordinator restarted while this run was in progress: its outputs may hold part of what it wrote.</p>`
       : started ? `<p class="hint">It stopped before its end: an output it was writing may hold part of the rows, or none.</p>` : "",
   ].join("");
-}
-
-export function bytes(b) {
-  return b > 1 << 30 ? (b / (1 << 30)).toFixed(2) + " GiB" : b > 1 << 20 ? (b / (1 << 20)).toFixed(1) + " MiB" : b > 1024 ? (b / 1024).toFixed(0) + " KiB" : b + " B";
 }
 
 export function ago(date) {
@@ -360,7 +355,6 @@ function onEvent({ type, data, at, seq, boot, replay }) {
       // The lines replayed to the page's first connection are its backfill: held, never counted as news.
       addLog({ node: data.node, fragment: data.fragment, level: data.level, message: data.message, ...(typeof data.runId === "string" && data.runId ? { runId: data.runId } : {}), ...(at ? { at: new Date(at) } : {}), ...(replay === true && opened === 1 ? { backfill: true } : {}) });
       break;
-    case "bytes": store.bytes = data; emit("bytes"); break;
     case "library": emit("library"); refreshHealth(); break;
     case "rights":
       api("/api/flow-matrix").then((m) => { store.matrix = m.groups; emit("rights"); }).catch(() => emit("rights"));

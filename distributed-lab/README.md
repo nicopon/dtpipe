@@ -399,5 +399,5 @@ sign a person in and out. `/health` is not under `/api` and takes a service's to
 | `POST /api/runs` · `GET /api/runs`, `/api/runs/last`, `/api/runs/queue`, `/api/runs/{id}` | `{pipelineId?}` queues a run; the journal (`?pipeline=`, `?state=`, `?limit=`, the runs that match counted in `X-Total-Count`); the latest finished run of each pipeline; in flight and queued; one run, in flight or journaled |
 | `POST /api/runs/cancel` | `{runId?}`: a run in flight or queued; with no id, the one in flight (409 when several are) |
 | `POST /api/fragments/{name}/kill` | fault injection: ends the fragment's child on every replica of its node whose host enabled it (every lab host does) |
-| `GET /api/events` | server-sent events: nodes, deployments, logs, bytes, runs |
+| `GET /api/events` | server-sent events: nodes, deployments, logs, runs |
 | `GET /api/health` | the health of every armed pipeline, as the pages read it (reader) |

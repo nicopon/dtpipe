@@ -1,5 +1,5 @@
 // The coordinator's page: a hash router over its views, and the status pills of the top bar.
-import { $, addLog, bytes, esc, gate, parseAddress, start, store, subscribe, tagOf, toast, unseenLogs } from "./core.js";
+import { $, addLog, esc, gate, parseAddress, start, store, subscribe, tagOf, toast, unseenLogs } from "./core.js";
 import * as nodes from "./nodes.js";
 import * as library from "./library.js";
 import * as runs from "./runs.js";
@@ -59,7 +59,6 @@ function renderPills() {
   $("runs-pill").textContent = [inFlight, queued ? `${queued} queued` : ""].filter(Boolean).join(" · ") || "no run";
   $("runs-pill").title = running.map((r) => r.pipelineId).join(", ");
   $("runs-pill").className = `pill ${running.length || queued ? "busy" : ""}`;
-  $("bytes").textContent = `hub ${bytes(store.bytes.total)}`;
 }
 
 subscribe((kind) => {

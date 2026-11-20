@@ -15,7 +15,6 @@ const state = {
   deployState: "",
   run: null,
   history: [],
-  bytes: { total: 0 },
   logs: [],
 };
 
@@ -333,9 +332,6 @@ function renderStatus() {
   const labels = { deploying: "deploying…", ready: "deployed · ready", failed: "deployment failed" };
   pill.textContent = isRunning() ? `${state.run.runId} running` : (state.deployed ? `${state.deployed.pipelineId}: ${labels[state.deployState] || state.deployState || "deployed"}` : "nothing deployed");
   pill.className = "pill " + (isRunning() || state.deployState === "deploying" ? "busy" : state.deployState === "failed" ? "off" : state.deployed ? "on" : "");
-  const b = state.bytes.total;
-  const human = b > 1 << 30 ? (b / (1 << 30)).toFixed(2) + " GiB" : b > 1 << 20 ? (b / (1 << 20)).toFixed(1) + " MiB" : b > 1024 ? (b / 1024).toFixed(0) + " KiB" : b + " B";
-  $("bytes").textContent = `hub ${human}`;
 }
 
 function renderAll() {
@@ -411,10 +407,6 @@ function connectEvents() {
         break;
       case "log":
         addLog({ node: data.node, fragment: data.fragment, level: data.level, message: data.message });
-        break;
-      case "bytes":
-        state.bytes = data;
-        renderStatus();
         break;
     }
   };
