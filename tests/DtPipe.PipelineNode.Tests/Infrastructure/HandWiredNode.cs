@@ -20,6 +20,9 @@ internal sealed class HandWiredNode : IAsyncDisposable
     public int ChildProcessId => _run.ChildProcessId;
     public bool ChildHasExited => _run.ChildHasExited;
     public IReadOnlyDictionary<string, long> RowCounts => _run.RowCounts;
+    public string? FirstFault => _run.FirstFault;
+    public FaultOrigin? Origin => _run.Origin;
+    public IReadOnlyList<TransportR.Client.TransferInfo> Transfers => _node.Transfers;
 
     /// <summary>Connects, then launches: a hub that refuses the connection leaves no child behind.</summary>
     public static async Task<HandWiredNode> StartAsync(NodeClientOptions client, FragmentLaunch launch)

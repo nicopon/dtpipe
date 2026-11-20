@@ -32,6 +32,8 @@ internal sealed class NodeAgent : BackgroundService
     private readonly DtPipeCommand _command;
     private string? _dtpipeVersion;
     private readonly OidcTokenClient _tokens;
+    // Read once, at start, like the client secret: a client made later takes the same key.
+    private readonly Func<Guid, byte[]?>? _endToEndKey;
     private readonly NodeLogForwarder _forwarder = new();
     private readonly ILoggerFactory _hostLoggers;
     private readonly ILogger _logger;
@@ -83,9 +85,13 @@ internal sealed class NodeAgent : BackgroundService
         _command = dtpipe;
         _jobs = new DelegatedJobs(_options.Name, _policy == FragmentPolicy.AnyFragment, dtpipe);
         _tokens = new OidcTokenClient(_options.Oidc, _options.Name, _options.CoordinatorUrl);
+        _endToEndKey = EndToEndKey.Resolve(_options.EndToEndEncryption);
     }
 
     private NodeRole Role => _policy == FragmentPolicy.AnyFragment ? NodeRole.Runner : NodeRole.Data;
+
+    /// <summary>The replica's data plane client as it is now, or null while it has none.</summary>
+    internal PipelineNode? DataPlane => _node;
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
@@ -249,6 +255,8 @@ internal sealed class NodeAgent : BackgroundService
                 AccessTokenProvider = () => _tokens.GetAsync(fresh: true),
                 BatchBytes = _options.BatchBytes,
                 MaxInFlightBatches = _options.MaxInFlightBatches,
+                EndToEndEncryption = _options.EndToEndEncryption.Enabled,
+                EndToEndPreSharedKey = _endToEndKey,
             }, _forwarder.For(_hostLoggers, _options.Name, fragment: null, runId: null), ct);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)

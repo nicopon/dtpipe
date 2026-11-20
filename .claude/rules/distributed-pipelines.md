@@ -117,7 +117,8 @@ the control plane, over each replica's node channel; TransportR carries the data
   `no_new_privs`. A list it cannot apply stops the start; an empty list or `DTPIPE_EGRESS_RULES=off` installs nothing and warns.
   The rules take addresses, never names: a name resolved once is a rule that outlives the address. Every other image, the
   coordinator's, keeps `USER 1654:1654`. **A step never reads the runner's identity**: a client secret given as `@path` is
-  read by the entry point, as root, so the runner's key is root's alone (`deploy/compose.yaml`), and the runner makes itself not
+  read by the entry point, as root, so the runner's key is root's alone (`deploy/compose.yaml`), and so is an end-to-end key
+  given as `@path` (`DtPipeNode__EndToEndEncryption__PreSharedKey`), and the runner makes itself not
   dumpable (`NotDumpable`, Linux) before it starts a step, so a step, under the same user, reads neither its environment nor its
   memory. The runner's state directory, the other runs' jobs and spill files included, stays that user's.
   `[local: validate_runner_egress.sh, on the images of a checkout]`

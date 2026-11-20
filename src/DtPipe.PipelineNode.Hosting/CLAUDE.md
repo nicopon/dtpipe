@@ -125,6 +125,19 @@ none. One node per process, which is one replica of its node's identity; a secon
   begins with `@`. `dtpipe node` resolves its own references (`src/DtPipe/CLAUDE.md`) and hands the value over, so such a secret cannot
   pass through it (a coordinator's key never begins with `@`).
   `[CI: Hosting.Tests KeyTokenTests, DtPipeNodeBuilderTests]`
+- **The end-to-end key is the node's own, read at start, and never travels.** `DtPipeNodeOptions.EndToEndEncryption` is off by
+  default; `Enabled` seals the data plane's transfers, and a pre-shared key from one source (`PreSharedKey`, base64 of 32 bytes
+  or `@path`; `PreSharedKeyFile`; `PreSharedKeyProvider`, a host's code) makes a hub that rewrites a transfer fail it. `Validate`
+  reads the key (`EndToEndKey`, through `SecretReference`) and refuses a key without `Enabled`, two sources, a text that is no
+  base64 of 32 bytes and a platform without AES-GCM, so a key the node cannot use stops the start: `ConnectNodeAsync` only logs
+  a client it could not build, which would leave the node announced without a data plane. No message of the node channel and no
+  answer of the coordinator carries a key: the coordinator hosts the hub and reaches the node at the same address, so a key it
+  handed out would protect nothing against whoever holds that path. A configured key serves every peer (one per trust domain);
+  the provider receives the peer's TransportR client id, which changes with each client, so a key per pair is a host's own code.
+  Every node a transfer joins must be set alike, key included: TransportR has no downgrade, and ends set differently fail
+  before the first batch, each as its peer's doing (`FaultOrigin.Remote`).
+  `[CI: Hosting.Tests EndToEndKeyTests; PipelineNode.Tests EndToEndEncryptionTests — Protection at both ends, two hosts' own
+  clients included]` `[unchecked: the AES-GCM refusal; nodes of one run set differently, which only the run's failure shows]`
 - **A node the coordinator disconnects connects again.** SignalR's automatic reconnect does not
   cover a connection the server closes (a reconnect the coordinator asked for, an announcement it
   refused), so `hub.Closed` only signals and `ReconnectLoopAsync` starts the connection again and

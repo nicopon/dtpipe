@@ -151,6 +151,17 @@ case "${DtPipeNode__Oidc__ClientSecret:-}" in
         ;;
 esac
 
+# The end-to-end key given as @path likewise: a step that read it could stand between any two nodes that share it.
+case "${DtPipeNode__EndToEndEncryption__PreSharedKey:-}" in
+    @*)
+        key=$(cat -- "${DtPipeNode__EndToEndEncryption__PreSharedKey#@}" 2>/dev/null) || error "DtPipeNode__EndToEndEncryption__PreSharedKey names a file that cannot be read."
+        [ -n "$key" ] || error "DtPipeNode__EndToEndEncryption__PreSharedKey names an empty file."
+        DtPipeNode__EndToEndEncryption__PreSharedKey=$key
+        export DtPipeNode__EndToEndEncryption__PreSharedKey
+        unset key
+        ;;
+esac
+
 home=$(getent passwd "$worker" | cut -d: -f6)
 export HOME="${home:-/tmp}"
 exec setpriv --reuid="$worker" --regid="$worker" --clear-groups --bounding-set=-all --inh-caps=-all --no-new-privs \
