@@ -11,8 +11,9 @@ namespace DtPipe.Cli.Commands;
 /// <c>dtpipe node [options] (-i … | -o …) --alias id …</c>: this process is a data node of a distributed pipeline. Each branch of
 /// the pipeline grammar is a brick the node offers, named by its alias; <c>--job</c> reads them from a file. <c>dtpipe node
 /// --runner</c> is the other kind of node: it hosts no data, so it takes no brick, and runs any fragment the coordinator sends.
-/// Its settings are <c>DtPipeNode__*</c> in the environment; the options here only override the three that name it. A secret is
-/// never an argument: the client secret is a reference (<c>keyring://alias</c>, <c>${{NAME}}</c>), read once at start.
+/// Its settings are <c>DtPipeNode__*</c> in the environment; the options here only override the few that name them. A secret is
+/// never an argument: the client secret and the end-to-end key are references (<c>keyring://alias</c>, <c>${{NAME}}</c>, <c>@file</c>),
+/// read once at start.
 /// </summary>
 public sealed class NodeCommand : Command
 {
@@ -41,12 +42,22 @@ public sealed class NodeCommand : Command
         {
             Description = "The node's secret at the identity provider, as a reference: keyring://alias, ${{NAME}} or @file (default: DtPipeNode__Oidc__ClientSecret)",
         };
+        var e2e = new Option<bool>("--e2e")
+        {
+            Description = "Seal every batch of the node's transfers end to end (default: DtPipeNode__EndToEndEncryption__Enabled); every node a transfer joins needs the same setting",
+        };
+        var e2eKey = new Option<string?>("--e2e-key")
+        {
+            Description = "The key the transfers are sealed with, shared by every node, as a reference: keyring://alias, ${{NAME}} or @file; needs --e2e (default: DtPipeNode__EndToEndEncryption__PreSharedKey)",
+        };
         Options.Add(runner);
         Options.Add(job);
         Options.Add(name);
         Options.Add(coordinator);
         Options.Add(description);
         Options.Add(clientSecret);
+        Options.Add(e2e);
+        Options.Add(e2eKey);
         // The rest is the pipeline grammar, read by the lexer.
         TreatUnmatchedTokensAsErrors = false;
 
@@ -55,29 +66,35 @@ public sealed class NodeCommand : Command
             var tokens = parseResult.UnmatchedTokens.ToList();
             if (tokens.FirstOrDefault(IsSettingToken) is { } setting)
             {
-                Console.Error.WriteLine($"[ERROR] '{setting}': a node's settings come from the environment (DtPipeNode__*) or from --name, --coordinator, --description and --client-secret.");
+                Console.Error.WriteLine($"[ERROR] '{setting}': a node's settings come from the environment (DtPipeNode__*) or from --name, --coordinator, --description, --client-secret, --e2e and --e2e-key.");
                 return 1;
             }
 
             var secrets = serviceProvider.GetRequiredService<ISecretsManager>();
-            var reference = parseResult.GetValue(clientSecret);
-            if (reference is { } literal && !NodeBricks.IsSecretReference(literal))
+            var secretOption = parseResult.GetValue(clientSecret);
+            if (secretOption is { } literal && !NodeBricks.IsSecretReference(literal))
             {
                 Console.Error.WriteLine($"[ERROR] {NodeBricks.NotAReference("--client-secret", "secret", "DTPIPE_NODE_KEY")}");
                 return 1;
             }
-            reference ??= Environment.GetEnvironmentVariable($"{EnvironmentPrefix}__Oidc__ClientSecret") is { } fromEnvironment
-                && NodeBricks.IsSecretReference(fromEnvironment) ? fromEnvironment : null;
-
-            string? secret = null;
-            if (reference is not null)
+            var keyOption = parseResult.GetValue(e2eKey);
+            if (keyOption is { } keyLiteral && !NodeBricks.IsSecretReference(keyLiteral))
             {
-                (secret, var unreadable) = await NodeBricks.ReadSecretAsync(reference, "client secret", secrets, ct);
-                if (unreadable is not null)
-                {
-                    Console.Error.WriteLine($"[ERROR] {unreadable}");
-                    return 1;
-                }
+                Console.Error.WriteLine($"[ERROR] {NodeBricks.NotAReference("--e2e-key", "key", "DTPIPE_E2E_KEY")}");
+                return 1;
+            }
+
+            var (secret, secretRefusal) = await ReadReferenceAsync(secretOption, "Oidc__ClientSecret", "client secret", secrets, ct);
+            if (secretRefusal is not null)
+            {
+                Console.Error.WriteLine($"[ERROR] {secretRefusal}");
+                return 1;
+            }
+            var (endToEndKey, keyRefusal) = await ReadReferenceAsync(keyOption, "EndToEndEncryption__PreSharedKey", "end-to-end key", secrets, ct);
+            if (keyRefusal is not null)
+            {
+                Console.Error.WriteLine($"[ERROR] {keyRefusal}");
+                return 1;
             }
 
             var isRunner = parseResult.GetValue(runner);
@@ -119,11 +136,24 @@ public sealed class NodeCommand : Command
             var dtpipe = self is null || Path.GetFileNameWithoutExtension(self).Equals("dotnet", StringComparison.OrdinalIgnoreCase) ? "dtpipe" : self;
 
             return await NodeHostEntry.RunAsync(
-                parseResult.GetValue(name), parseResult.GetValue(coordinator), parseResult.GetValue(description), secret, dtpipe, isRunner, bricks, ct);
+                parseResult.GetValue(name), parseResult.GetValue(coordinator), parseResult.GetValue(description), secret, dtpipe, isRunner,
+                parseResult.GetValue(e2e), endToEndKey, bricks, ct);
         });
     }
 
-    // A token that names a node setting: only the environment and the four options above set one.
+    /// <summary>
+    /// The secret an option or, without it, the setting's environment variable names as a reference, read once; null when neither does.
+    /// The option wins. A variable that holds no reference is left to the host, which reads it as the setting's own text.
+    /// </summary>
+    private static async Task<(string? Secret, string? Refusal)> ReadReferenceAsync(
+        string? option, string setting, string what, ISecretsManager secrets, CancellationToken ct)
+    {
+        var reference = option ?? (Environment.GetEnvironmentVariable($"{EnvironmentPrefix}__{setting}") is { } fromEnvironment
+            && NodeBricks.IsSecretReference(fromEnvironment) ? fromEnvironment : null);
+        return reference is null ? (null, null) : await NodeBricks.ReadSecretAsync(reference, what, secrets, ct);
+    }
+
+    // A token that names a node setting: only the environment and the options above set one.
     private static bool IsSettingToken(string token) =>
         token.Contains($"{EnvironmentPrefix}:", StringComparison.OrdinalIgnoreCase)
         || token.Contains($"{EnvironmentPrefix}__", StringComparison.OrdinalIgnoreCase);

@@ -1409,6 +1409,8 @@ resolved only when the fragment runs. `dtpipe node --runner` hosts no data and r
 | `--job FILE`, `-j FILE` | YAML job file declaring the bricks (sources and sinks) offered by this node |
 | `--name` / `--coordinator` / `--description` | `DtPipeNode__Name`, `__CoordinatorUrl` and `__Description` |
 | `--client-secret REF` | `DtPipeNode__Oidc__ClientSecret`, as a reference: `keyring://alias`, `${{NAME}}` or `@file`. A value is refused; the environment variable takes a reference too |
+| `--e2e` | `DtPipeNode__EndToEndEncryption__Enabled`: seals every batch of the node's transfers, the same on every node a transfer joins. Without a key the node warns at start. All the `EndToEndEncryption__*` settings are in [the node host settings](#node-host-settings-dtpipenode__) |
+| `--e2e-key REF` | `DtPipeNode__EndToEndEncryption__PreSharedKey`, as a reference: `keyring://alias`, `${{NAME}}` or `@file`, naming a key of 32 bytes in base64. A value is refused; the environment variable takes a reference too. Needs `--e2e`: a key alone is refused |
 
 ```bash
 DtPipeNode__Oidc__ClientSecret=keyring://node-secret \

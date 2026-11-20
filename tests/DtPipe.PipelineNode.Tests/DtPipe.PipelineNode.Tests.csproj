@@ -18,6 +18,8 @@
          coordinator as a host does. -->
     <ProjectReference Include="..\..\src\DtPipe.PipelineNode.Hosting\DtPipe.PipelineNode.Hosting.csproj" />
     <ProjectReference Include="..\..\src\DtPipe.Coordinator\DtPipe.Coordinator.csproj" />
+    <!-- LaunchSettings, what `dtpipe node` hands the node host: its text is judged for the secrets it must not print. -->
+    <ProjectReference Include="..\..\src\DtPipe.PipelineNode.Launcher\DtPipe.PipelineNode.Launcher.csproj" />
     <!-- CoordinatorTestHost: the same in-process Kestrel-hosted coordinator DtPipe.Coordinator.Tests
          uses, reused here rather than duplicated. -->
     <ProjectReference Include="..\DtPipe.Coordinator.Tests\DtPipe.Coordinator.Tests.csproj" />

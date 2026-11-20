@@ -154,8 +154,8 @@ through a function — SELECT my_function() passes a verb scan, hence the server
 `Export` loads a `--job` file without interpolating, as `--export-job` does: a `${{NAME}}`, a `keyring://` alias and a
 `${{cursor://|default}}` stay in the announced text, the version and the fragment's job, and only the child resolves them. A value
 resolved at start would enter the version and the announcement. `[CI: CommandLineJobTests]` `[CI: PipelineNode.Tests NodeCommandTests]`
-System.CommandLine matches the options of the node (`--runner`, `--job`, `--name`, `--coordinator`, `--description`, `--client-secret`)
-and leaves every other token to the lexer (`TreatUnmatchedTokensAsErrors = false`). `NodeBricks` takes a branch for a brick
+System.CommandLine matches the options of the node (`--runner`, `--job`, `--name`, `--coordinator`, `--description`, `--client-secret`,
+`--e2e`, `--e2e-key`) and leaves every other token to the lexer (`TreatUnmatchedTokensAsErrors = false`). `NodeBricks` takes a branch for a brick
 only if it reads (`input`) or writes (`output`), never both, never `from`; the alias is the id, a branch without one has none.
 `--runner` makes the node a runner (`LaunchSettings.Runner`: `RunAnyFragment()` and a default description): it hosts no data, so any
 token left to the lexer is refused by name and no brick is read, while without `--runner` a node with no brick is refused.
@@ -178,6 +178,12 @@ would not read back, prints nothing else on stdout, and with `--out` creates the
   secret, and a file that cannot be read is named by its exception's type, never its path, which may be a key pasted after the
   `@`. `NodeBricks.ReadSecretAsync` is the one reading, which `dtpipe studio --key` shares.
   `[CI: PipelineNode.Tests NodeCommandTests; DtPipe.Tests StudioKeyTests]` `[unchecked: the refusals of an unset variable, an absent alias and an unreadable file]`
+- **The end-to-end key is read the same way and belongs to the node.** `--e2e-key` and `DtPipeNode__EndToEndEncryption__PreSharedKey`
+  take a reference, resolved once here; a variable that holds no reference (base64, `@path`) is left for the host to read. The
+  key goes to the host only through `LaunchSettings`, whose `ToString` prints neither it nor the client secret, and never to a
+  message of the channel. A key without the mode is refused by `NodeLauncher`, which sees the configuration the host will read, so
+  `--e2e` and `DtPipeNode__EndToEndEncryption__Enabled` agree; the host's own refusal of a key without a mode stays strict. The same
+  place warns, once, when the mode is on and no key is given. `[CI: PipelineNode.Tests NodeCommandTests]`
 - **A brick holds no credential as a value.** Its version is the hash of its text; `JobSecrets` (the one walk of
   `ConnectionStringSanitizer.CarriesLiteralSecret`, which the studio's agent shares) judges every scalar of the branch as
   written, with its key, and a hit stops the start by naming the branch. Best-effort by

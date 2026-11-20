@@ -55,6 +55,8 @@ public sealed class NodeCommandTests
             var help = sw.ToString();
             Assert.Contains("--job", help);
             Assert.Contains("-j", help);
+            Assert.Matches(@"--e2e\s", help);
+            Assert.Contains("--e2e-key", help);
         }
         finally
         {
