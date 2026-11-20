@@ -221,6 +221,21 @@ public sealed class NodeCommandTests
         Assert.Contains("not against a hub that rewrites batches", log, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("EndToEndEncryption:PreSharedKey is not base64 of 32 bytes", "--coordinator", "http://127.0.0.1:1", "--e2e", "--e2e-key", "${{NODE_COMMAND_E2E_KEY}}")]
+    [InlineData("CoordinatorUrl must be an absolute URL", "--coordinator", "not-a-url")]
+    public void A_Start_Refused_For_An_Option_Prints_Only_Error_Lines(string reason, params string[] given)
+    {
+        var (exit, output) = RunUntilExit(
+            ["node", "--runner", "--name", "node-refused", "--client-secret", "${{NODE_COMMAND_SECRET}}", .. given],
+            new() { ["NODE_COMMAND_SECRET"] = Secret, ["NODE_COMMAND_E2E_KEY"] = "not-a-key" });
+
+        Assert.Equal(1, exit);
+        Assert.Contains(reason, output, StringComparison.Ordinal);
+        Assert.DoesNotContain("Hosting failed to start", output, StringComparison.Ordinal);
+        Assert.All(Lines(output), line => Assert.StartsWith("[ERROR]", line, StringComparison.Ordinal));
+    }
+
     [Fact]
     public void The_Launch_Settings_Print_Neither_The_Key_Nor_The_Client_Secret()
     {

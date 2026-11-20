@@ -91,6 +91,18 @@ public static class NodeLauncher
         if (settings.Runner) node.RunAnyFragment();
 
         using var host = builder.Build();
+
+        // Reading the options validates them. The host logs a stack trace when it meets an option it refuses, so the refusal is made
+        // here, ahead of it, as one error line per failure; any other failure to start is the host's own and keeps its trace.
+        try
+        {
+            _ = host.Services.GetRequiredService<IOptions<DtPipeNodeOptions>>().Value;
+        }
+        catch (OptionsValidationException ex)
+        {
+            return Refuse(ex);
+        }
+
         if (sealedEndToEnd && !hasKey)
             Console.Error.WriteLine("[WARN] End-to-end encryption is on without a key: it protects against whoever reads the path, not against a hub that rewrites batches. Add --e2e-key (the same on every node) so that a rewrite fails the transfer.");
         try
@@ -104,8 +116,13 @@ public static class NodeLauncher
         }
         catch (OptionsValidationException ex)
         {
-            Console.Error.WriteLine("[ERROR] " + string.Join("\n[ERROR] ", ex.Failures));
-            return 1;
+            return Refuse(ex);
         }
+    }
+
+    private static int Refuse(OptionsValidationException ex)
+    {
+        Console.Error.WriteLine("[ERROR] " + string.Join("\n[ERROR] ", ex.Failures));
+        return 1;
     }
 }
