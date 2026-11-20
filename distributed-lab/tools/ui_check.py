@@ -94,6 +94,7 @@ def library_page(browser):
     entries = SESSION.call("/api/library")
     deployments = {d["pipelineId"]: d for d in SESSION.call("/api/deployments")}
     queue = SESSION.call("/api/runs/queue")
+    health = {h["id"]: h for h in SESSION.call("/api/health")["pipelines"]}
     browser.console.clear()
     browser.js("location.hash = '#/library'")
     browser.wait_for(f"document.querySelectorAll('.lib-list [data-run]').length === {len(entries)}", 20)
@@ -103,10 +104,12 @@ def library_page(browser):
         row = f"[data-deploy={json.dumps(e['id'])}]"
         deploy_off = browser.js(f"document.querySelector({json.dumps(row)}).disabled")
         run_off = browser.js(f"document.querySelector('[data-run={json.dumps(e['id'])}]').disabled")
-        blocked = any(p["blocking"] for p in e["bindingProblems"]) or any(r["pipelineId"] == e["id"] for r in queue)
+        h = health.get(e["id"])
+        up_to_date = bool(deployment and deployment["state"] == "ready" and h and not any(c["code"] == "library-newer" for c in h["causes"]))
+        blocked = any(p["blocking"] for p in e["bindingProblems"]) or any(r["pipelineId"] == e["id"] for r in queue) or up_to_date or bool(deployment and deployment["state"] == "deploying")
         if deploy_off != blocked:
             wrong.append(f"{e['id']} deploy disabled={deploy_off}")
-        if run_off != (not deployment or deployment["state"] == "failed"):
+        if run_off != (not deployment or deployment["state"] != "ready" or bool(h and h["status"] == "critical")):
             wrong.append(f"{e['id']} run disabled={run_off}")
     # An armed pipeline's row carries the health chip, with the status /api/health gives; a pipeline not armed carries none.
     probe = entries[0]["id"]
@@ -116,7 +119,7 @@ def library_page(browser):
     try:
         armed = {h["id"]: h["status"] for h in SESSION.call("/api/health")["pipelines"]}
         chips = ("Object.fromEntries([...document.querySelectorAll('.lib-item')]"
-                 ".map(r => [r.querySelector('.lib-title .mono').textContent, ([...r.querySelectorAll('.chip')].find(c => c.textContent.startsWith('health:'))?.textContent ?? '').slice(8) || null]))")
+                 ".map(r => [r.querySelector('.lib-title .mono').textContent, r.querySelector('[data-health]')?.dataset.health ?? null]))")
         browser.js("location.hash = '#/library'")
         shown = {}
         for _ in range(60):

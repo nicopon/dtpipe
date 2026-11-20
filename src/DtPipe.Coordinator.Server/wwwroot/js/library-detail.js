@@ -305,7 +305,7 @@ function recentRunsCard() {
   const waiting = journaled === null && !journalError;
   return `<section class="card"><div class="card-head"><h2>Recent runs</h2><a href="#/runs?pipeline=${esc(encodeURIComponent(id))}">all runs →</a></div>
     ${rows.length ? `<table class="journal">
-      <tr><th>run</th><th>outcome</th><th>started</th><th>duration</th><th title="${esc(ROWS_CROSSED_HINT)}">rows crossed</th><th>cause</th></tr>
+      <tr><th>run</th><th>outcome</th><th>started</th><th>duration</th><th title="${esc(ROWS_CROSSED_HINT)}">rows moved</th><th>cause</th></tr>
       ${rows.map(recentRow).join("")}</table>` : `<p class="hint">${waiting ? "Reading the runs…" : "No run yet."}</p>`}
     ${journalError ? `<p class="mismatch">${esc(journalError)}</p>` : ""}</section>`;
 }

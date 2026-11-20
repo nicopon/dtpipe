@@ -21,6 +21,7 @@ a.button, .button {
 }
 a.button.small { padding: 1px 7px; font-size: 12px; }
 a.button:hover { border-color: var(--accent); }
+a.button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-solid); }
 .strong { font-weight: 700; text-decoration: none; }
 .muted { color: var(--muted); }
 .chip.ok { color: var(--ok); }
@@ -87,6 +88,7 @@ table.matrix td.no { color: var(--muted); }
 .lib-facts .chips-wrap { flex: 0 1 auto; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .lib-run { flex: 1 1 16rem; display: flex; gap: 8px; align-items: center; min-width: 0; color: var(--muted); font-size: 12.5px; }
 .lib-run a { white-space: nowrap; }
+.lib-label { font-weight: 600; white-space: nowrap; }
 .lib-run > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lib-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }
 .lib-when { flex: 1 1 12rem; min-width: 0; text-align: right; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

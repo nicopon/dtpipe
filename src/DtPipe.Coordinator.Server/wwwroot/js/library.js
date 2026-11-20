@@ -1,7 +1,7 @@
 // Library: the pipelines kept in the coordinator's git repository, their deployment state and their last run. A
 // pipeline is written with dtpipe studio and published into it. The list is searched and filtered here; a pipeline's
 // plan, runs and versions are on its own page, `library-detail.js`.
-import { $, ROWS_CROSSED_HINT, ago, api, deploymentOf, esc, healthChip, healthOf, isActive, lastRunOf, plural, rowsCrossed, runHref, runStateLabel, toast } from "./core.js";
+import { $, ROWS_CROSSED_HINT, ago, api, deploymentOf, esc, healthOf, isActive, lastRunOf, plural, rowsCrossed, runHref, runStateLabel, toast } from "./core.js";
 import * as detail from "./library-detail.js";
 
 // What the show filter keeps. "Needs a look" is what the stripe marks (`severity`): one definition of it.
@@ -109,53 +109,115 @@ async function load() {
   renderList();
 }
 
-// Why the bindings of a pipeline's bricks do not hold: a node it names is absent or does not offer the brick, a brick has none,
-// or its text is no longer the brick it is bound to.
+// Why the bindings of the library's version do not hold: a node it names is absent or does not offer the brick, a brick has
+// none, or its text is no longer the brick it was bound to. Shown for a pipeline that is not deployed; a deployed one speaks
+// through its health.
 function bindingsChip(e) {
   const problems = e.bindingProblems || [];
   if (!problems.length) return "";
   const blocking = problems.some((p) => p.blocking);
-  return `<span class="chip ${blocking ? "bad" : "warn"}" title="${esc(problems.map((p) => p.message).join(" "))}">bindings: ${problems.length} problem${problems.length > 1 ? "s" : ""}</span>`;
+  return `<span class="chip ${blocking ? "bad" : "warn"}" title="${esc(problems.map((p) => p.message).join(" "))}">Bindings: ${problems.length} problem${problems.length > 1 ? "s" : ""}</span>`;
 }
 
-// A pipeline is armed at a commit: the list says so, and says when the library has moved on from it. A deployment that
-// failed carries the server's reason, as a run carries its own.
+const HEALTH_WORD = { ok: "Healthy", warning: "Degraded", critical: "Blocked" };
+
+// The one status chip of a row. A deployed pipeline says whether its armed version can be launched, as the coordinator's health
+// read does (what a supervisor reads at /health); a pipeline that is not deployed says whether its bindings hold.
+function statusChip(e) {
+  const d = deploymentOf(e.id);
+  if (!d) return bindingsChip(e);
+  const h = healthOf(e.id);
+  if (!h) return "";
+  const told = h.causes.filter((c) => c.severity !== "info").map((c) => c.message);
+  const tone = h.status === "ok" ? "ok" : h.status === "warning" ? "warn" : "bad";
+  return `<span class="chip ${tone}" data-health="${esc(h.status)}" title="${esc(told.join(" ") || "Can be launched.")}">${esc(HEALTH_WORD[h.status] ?? h.status)}</span>`;
+}
+
+// Whether the library holds another job or other bindings than the deployed ones, judged by content as the health read does
+// (`library-newer`); before the first health read, the commit stands in.
+function libraryIsNewer(e, d) {
+  const h = healthOf(e.id);
+  if (h) return h.causes.some((c) => c.code === "library-newer");
+  return !!(d.commit && e.commit && d.commit !== e.commit);
+}
+
+const shortCommit = (commit) => (commit || "").slice(0, 8);
+
+const DEPLOYMENT_WORD = { ready: "Deployed", deploying: "Deploying", failed: "Failed" };
+
+// What a deployment is: the pipeline is armed at a commit, and a run uses that version, not the latest one in the library. The
+// chip says when the library has moved on from it; the reason of a failed deployment is the server's.
 function deploymentChip(e) {
   const d = deploymentOf(e.id);
-  if (!d) return `<span class="chip">not deployed</span>`;
-  const older = d.commit && e.commit && d.commit !== e.commit;
+  if (!d) return `<span class="chip">Not deployed</span>`;
+  const word = DEPLOYMENT_WORD[d.state] ?? d.state;
   const tone = d.state === "failed" ? "bad" : d.state === "ready" ? "ok" : "warn";
-  const text = `${esc(d.state)}${d.commit ? ` @ ${esc(d.commit.slice(0, 8))}` : ""}`;
-  const chip = d.state === "failed" && d.message
-    ? `<span class="tip"><span class="chip ${tone} tip-t" tabindex="0">${text}</span><span class="tip-b"><b>Why</b>${esc(d.message)}</span></span>`
-    : `<span class="chip ${tone}">${text}</span>`;
-  return chip
-    + (older ? ` <span class="chip warn" title="The library holds a later version of the job: deploy it again to run that one">older version</span>` : "");
+  const newer = libraryIsNewer(e, d);
+  const armed = shortCommit(d.commit);
+  const current = shortCommit(e.commit);
+  const text = !newer ? word
+    : armed && current && armed !== current ? `${word} ${armed} · library has ${current}`
+      : `${word} · library has other bindings`;
+  const problems = e.bindingProblems || [];
+  const bindings = problems.length
+    ? ` ${problems.some((p) => p.blocking) ? "Deploying the library's version would be refused" : "The library's bindings report"}: ${problems.map((p) => p.message).join(" ")}`
+    : "";
+  const title = d.state === "deploying" ? "The pipeline is being armed."
+    : d.state === "failed" ? "The deployment failed."
+    : `${armed ? `Armed at version ${armed}${d.deployedAt ? `, ${ago(d.deployedAt)}` : ""}. ` : ""}Runs use this version, not the latest one in the library.${newer ? ` The library holds a later version: deploy it again to run that one.${bindings}` : ""}`;
+  return d.state === "failed" && d.message
+    ? `<span class="tip"><span class="chip ${tone} tip-t" tabindex="0">${esc(text)}</span><span class="tip-b"><b>Why</b>${esc(d.message)}</span></span>`
+    : `<span class="chip ${newer ? "warn" : tone}" title="${esc(title)}">${esc(text)}</span>`;
 }
 
-// The last run of a pipeline, linked to its page.
+// The last run of a pipeline, named as such and linked to its page.
 function runCell(id) {
+  const label = `<span class="lib-label">Last run</span>`;
   const run = lastRunOf(id);
-  if (!run) return `<span class="hint">never run</span>`;
+  if (!run) return `${label}<span class="hint">none</span>`;
   const rows = rowsCrossed(run);
-  const label = esc(runStateLabel(run.state));
+  const state = esc(runStateLabel(run.state));
   const chip = run.reason
-    ? `<span class="tip"><span class="outcome-chip ${esc(run.state)} tip-t" tabindex="0">${label}</span><span class="tip-b"><b>Why</b>${esc(run.reason)}</span></span>`
-    : `<span class="outcome-chip ${esc(run.state)}">${label}</span>`;
+    ? `<span class="tip"><span class="outcome-chip ${esc(run.state)} tip-t" tabindex="0">${state}</span><span class="tip-b"><b>Why</b>${esc(run.reason)}</span></span>`
+    : `<span class="outcome-chip ${esc(run.state)}">${state}</span>`;
   const link = `<a class="mono" href="${esc(runHref(run.runId))}" title="This run's page">${esc(run.runId)}</a>`;
-  return `${chip}${link}<span title="${esc(ROWS_CROSSED_HINT)}">${isActive(run) ? "" : esc(ago(run.finishedAt))}${rows ? ` · ${rows.toLocaleString("en-US")} rows crossed` : ""}</span>`;
+  const when = [isActive(run) ? "" : ago(run.finishedAt), rows ? `${rows.toLocaleString("en-US")} rows moved` : ""].filter(Boolean).join(" · ");
+  return `${label}${link}${chip}<span title="${esc(ROWS_CROSSED_HINT)}">${esc(when)}</span>`;
 }
 
-// Deploy and Run stay in the bar; Undeploy and Delete, rare and destructive, sit in the menu. Deploying arms the pipeline at
-// the commit the library holds, and the server decides in every case: it refuses bindings that do not hold and a plan no node could run.
+// Why a launch is refused before it is asked for, or "" when none is: nothing armed, an arming that is not over or failed, or a
+// health read that says the armed version cannot be launched. The server decides in every case.
+function runBlock(e, d) {
+  if (!d) return "Not deployed";
+  if (d.state !== "ready") return d.state === "failed" ? "The deployment failed" : "The deployment is not over";
+  const h = healthOf(e.id);
+  const causes = h?.status === "critical" ? h.causes.filter((c) => c.severity === "critical") : [];
+  return causes.length ? `Cannot be launched: ${causes.map((c) => c.message).join(" ")}` : "";
+}
+
+// Open is the row's one primary action; Deploy and Run follow it, and Undeploy and Delete, rare and destructive, sit in the
+// menu. Deploying arms the pipeline at the commit the library holds, and the server decides in every case: it refuses bindings
+// that do not hold and a plan no node could run. A button that is off says why.
 function deployRowActions(e) {
-  const deployment = deploymentOf(e.id);
-  const active = isActive(lastRunOf(e.id));
+  const d = deploymentOf(e.id);
   const unbound = (e.bindingProblems || []).some((p) => p.blocking);
-  const deploy = !active && !unbound;
-  const run = deployment && deployment.state !== "failed";
-  return `<button class="small primary" data-needs="designer" data-run="${esc(e.id)}" ${run ? "" : "disabled"}>Run</button>
-        <button class="small" data-needs="designer" data-deploy="${esc(e.id)}" ${deploy ? "" : "disabled"} title="${unbound ? "Its bindings do not hold" : ""}">Deploy</button>`;
+  const deployWhy = isActive(lastRunOf(e.id)) ? "A run of this pipeline is queued or running"
+    : d && d.state === "deploying" ? "The deployment is not over"
+    : unbound ? "Its bindings do not hold"
+      : d && d.state === "ready" && !libraryIsNewer(e, d) ? "Already deployed at this version"
+        : "";
+  const runWhy = runBlock(e, d);
+  return `<button class="small" data-needs="designer" data-run="${esc(e.id)}" ${runWhy ? "disabled" : ""} title="${esc(runWhy)}">Run</button>
+    <button class="small" data-needs="designer" data-deploy="${esc(e.id)}" ${deployWhy ? "disabled" : ""} title="${esc(deployWhy)}">Deploy</button>`;
+}
+
+// When the library last changed this pipeline, and with what message. A message the library writes by itself says nothing and is left out.
+function savedCell(e) {
+  const own = e.message === `Save ${e.id}` || e.message === `Bind ${e.id}`;
+  const message = e.message && !own ? e.message : "";
+  const when = e.updatedAt ? `Saved ${ago(e.updatedAt)}` : "";
+  const text = [when, message ? `“${message}”` : ""].filter(Boolean).join(" · ");
+  return `<span class="lib-when" title="${esc(message)}">${esc(text)}</span>`;
 }
 
 function moreMenu(e) {
@@ -196,15 +258,15 @@ function item(e) {
     <article class="lib-item ${severity(e)}">
       <div class="lib-facts">
         <div class="lib-title"><a href="#/library/${encodeURIComponent(e.id)}" title="${esc(e.title)}">${esc(e.title)}</a>${descriptionTip(e)}<span class="mono">${esc(e.id)}</span></div>
-        <div class="chips-wrap">${deploymentChip(e)} ${healthChip(e.id)} ${bindingsChip(e)}</div>
+        <div class="chips-wrap">${deploymentChip(e)} ${statusChip(e)}</div>
         <div class="lib-run">${runCell(e.id)}</div>
       </div>
       ${printed}
       <div class="lib-actions">
-        <a class="button small" href="#/library/${encodeURIComponent(e.id)}" title="The plan a launch would make, its runs and versions">Open</a>
+        <a class="button small primary" href="#/library/${encodeURIComponent(e.id)}" title="The plan a launch would make, its runs and versions">Open</a>
         ${deployRowActions(e)}
         ${moreMenu(e)}
-        <span class="lib-when" title="${esc(e.message || "")}">${esc(e.message || "")}${e.message ? " · " : ""}${esc(ago(e.updatedAt))}</span>
+        ${savedCell(e)}
       </div>
     </article>`;
 }

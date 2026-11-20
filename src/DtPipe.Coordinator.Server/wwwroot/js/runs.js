@@ -167,7 +167,7 @@ function renderJournal() {
   const { runs, total } = journal;
   $("r-count").textContent = loaded ? countLabel(runs.length, total) : "";
   el.innerHTML = runs.length ? `<table class="journal">
-    <tr><th>run</th><th>pipeline</th><th>outcome</th><th>by</th><th>started</th><th>duration</th><th title="${esc(ROWS_CROSSED_HINT)}">rows crossed</th><th>cause</th></tr>
+    <tr><th>run</th><th>pipeline</th><th>outcome</th><th>by</th><th>started</th><th>duration</th><th title="${esc(ROWS_CROSSED_HINT)}">rows moved</th><th>cause</th></tr>
     ${runs.map((r) => {
       const rows = rowsCrossed(r);
       const href = esc(runHref(r.runId));
