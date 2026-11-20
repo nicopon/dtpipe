@@ -185,8 +185,10 @@ would not read back, prints nothing else on stdout, and with `--out` creates the
   `--e2e` and `DtPipeNode__EndToEndEncryption__Enabled` agree; the host's own refusal of a key without a mode stays strict. The same
   place warns, once, when the mode is on and no key is given. `[CI: PipelineNode.Tests NodeCommandTests]`
 - **A start refused for an option prints only `[ERROR]` lines.** `NodeLauncher` reads the host's options before it runs, which
-  validates them, so the host never logs its "Hosting failed to start" trace for an option. Any other failure to start (a state
-  directory that cannot be made) reaches the host and keeps that trace; both exit 1. `[CI: PipelineNode.Tests NodeCommandTests]`
+  binds and validates them, so the host never logs its "Hosting failed to start" trace for an option. A value that does not
+  convert to its setting's type prints the setting and the type, never the value: the binder's message repeats it, and a key
+  pasted into the wrong setting must not be echoed. Any other failure to start (a state directory that cannot be made) reaches
+  the host and keeps that trace; both exit 1. `[CI: PipelineNode.Tests NodeCommandTests]`
 - **A brick holds no credential as a value.** Its version is the hash of its text; `JobSecrets` (the one walk of
   `ConnectionStringSanitizer.CarriesLiteralSecret`, which the studio's agent shares) judges every scalar of the branch as
   written, with its key, and a hit stops the start by naming the branch. Best-effort by

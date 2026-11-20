@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 using DtPipe.Coordinator.Contracts;
 using DtPipe.Jobs;
 using DtPipe.PipelineNode.Hosting;
@@ -35,6 +36,11 @@ public static class NodeLauncher
 {
     private const string RunnerDescription = "Runner: hosts no data, runs every step between the bricks";
     private const string EncryptionSection = "DtPipeNode:EndToEndEncryption";
+
+    // The configuration binder's message for a value that does not convert to its setting's type. It repeats the value, so the
+    // pattern is anchored to the end, where only the setting's path and the target type follow, and only those two are read.
+    private static readonly Regex ConversionFailure = new(
+        @"^Failed to convert configuration value\b.* at '(?<setting>[^']*)' to type '(?<type>[^']*)'\.?\s*$", RegexOptions.Singleline | RegexOptions.CultureInvariant);
 
     /// <summary>
     /// Serves until the process is asked to stop, which is a cancellation (130, as <c>dtpipe mcp</c> ends), or says why it cannot
@@ -92,8 +98,11 @@ public static class NodeLauncher
 
         using var host = builder.Build();
 
-        // Reading the options validates them. The host logs a stack trace when it meets an option it refuses, so the refusal is made
-        // here, ahead of it, as one error line per failure; any other failure to start is the host's own and keeps its trace.
+        // Reading the options binds and validates them. The host logs a stack trace when it meets an option it refuses, so the refusal
+        // is made here, ahead of it, as error lines: one per failed validation, and one for a value that does not convert to its
+        // setting's type, which names the setting and the type and never the value (the binder's message repeats it, whatever was
+        // pasted there). Only this read is covered: any other failure to start, an InvalidOperationException that is not that
+        // conversion included, is the host's own and keeps its trace.
         try
         {
             _ = host.Services.GetRequiredService<IOptions<DtPipeNodeOptions>>().Value;
@@ -101,6 +110,11 @@ public static class NodeLauncher
         catch (OptionsValidationException ex)
         {
             return Refuse(ex);
+        }
+        catch (InvalidOperationException ex) when (ConversionFailure.Match(ex.Message) is { Success: true } failure)
+        {
+            Console.Error.WriteLine($"[ERROR] {failure.Groups["setting"].Value} is not a valid {failure.Groups["type"].Value}.");
+            return 1;
         }
 
         if (sealedEndToEnd && !hasKey)

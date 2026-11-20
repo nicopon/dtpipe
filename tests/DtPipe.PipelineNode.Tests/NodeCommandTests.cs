@@ -237,6 +237,22 @@ public sealed class NodeCommandTests
     }
 
     [Fact]
+    public void A_Setting_Of_The_Wrong_Type_Is_Refused_By_Name_Without_Repeating_Its_Value()
+    {
+        var key = NewKey();
+
+        var (exit, output) = RunUntilExit(
+            ["node", "--runner", "--name", "node-malformed", "--coordinator", "http://127.0.0.1:1", "--client-secret", "${{NODE_COMMAND_SECRET}}"],
+            new() { ["NODE_COMMAND_SECRET"] = Secret, ["DtPipeNode__EndToEndEncryption__Enabled"] = key });
+
+        Assert.Equal(1, exit);
+        Assert.Contains("DtPipeNode:EndToEndEncryption:Enabled", output, StringComparison.Ordinal);
+        Assert.DoesNotContain(key, output, StringComparison.Ordinal);
+        Assert.Empty(Regex.Matches(output, @"^\s+at ", RegexOptions.Multiline));
+        Assert.All(Lines(output), line => Assert.StartsWith("[ERROR]", line, StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void The_Launch_Settings_Print_Neither_The_Key_Nor_The_Client_Secret()
     {
         var key = NewKey();
