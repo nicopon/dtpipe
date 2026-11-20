@@ -66,6 +66,35 @@ public sealed partial class ArmedDeploymentTests
         Assert.NotNull(_deployments.ArmedOf("p"));
     }
 
+    /// <summary>
+    /// The edge <c>n -> r1</c> where <c>n</c> sends in clear and the runner seals with a key. Judged as it is, no pair joins and the cause is the
+    /// edge's. Under a required protection <c>n</c>'s only replica is eligible for nothing, so it is no end of a pair: the edge is not judged,
+    /// and <c>n</c> is a node with no eligible replica, by the cause that already names it.
+    /// </summary>
+    [Fact]
+    public async Task A_Node_Whose_Connected_Replicas_Are_All_Under_The_Required_Protection_Is_Not_An_End_Of_An_Edge()
+    {
+        async Task<Launch> LaunchAsync()
+        {
+            await NodeAsync("n", "crm", NodeRole.Data);
+            await NodeAsync("r1", "crm", NodeRole.Runner, protection: DataPlaneProtections.EncryptedPsk, keyId: Key);
+            return await _deployments.PlanLaunchAsync("p", Job, Armed().Bindings, CancellationToken.None);
+        }
+
+        var judged = await LaunchAsync();
+        Assert.Contains(judged.Causes, c => c.Code == LaunchCauses.ProtectionMismatch);
+
+        _required = DataPlaneProtections.EncryptedPsk;
+        Restart();
+        var required = await LaunchAsync();
+
+        Assert.DoesNotContain(required.Causes, c => c.Code == LaunchCauses.ProtectionMismatch);
+        var cause = Assert.Single(required.Causes, c => c.Code == LaunchCauses.NoEligibleReplica);
+        Assert.Equal(("n", "p@n"), (cause.Node, cause.Fragment));
+        Assert.Contains("it sends in clear and this deployment requires encrypted-psk.", cause.Message);
+        Assert.True(Assert.Single(_registry.Replicas("node-n")).Connected);
+    }
+
     private const string ChainJob = "src:\n  input: brick:n/src\nmid:\n  from: src\ndst:\n  from: mid\n  output: brick:m/dst\n";
 
     private static BrickInfo SinkBrick() => TestBricks.Announced("dst", BrickKind.Sink, """{"output":"sqlite:b"}""", "sink");

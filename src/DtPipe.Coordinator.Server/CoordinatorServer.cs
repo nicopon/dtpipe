@@ -71,6 +71,8 @@ public static class CoordinatorServer
         // The state the coordinator keeps beyond the process is in one database, a SQLite file, a PostgreSQL or a SQL Server database, which the stores borrow.
         builder.Services.AddCoordinatorStores(server);
         builder.Services.AddSingleton<RightsStore>();
+        // The protection the deployment requires of a replica reaches admission here, and the node inventory reads the same options.
+        builder.Services.AddSingleton(new AdmissionOptions { RequiredProtection = server.RequiredProtection });
         builder.Services.AddCoordinatorHub(_ => { });
         builder.Services.AddNodeLink<NodeChannelHub>();
         // A node answers a designer's check with a source brick's first row, larger than SignalR's 32 KB default.

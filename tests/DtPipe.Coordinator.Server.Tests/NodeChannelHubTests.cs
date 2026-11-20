@@ -66,10 +66,10 @@ public sealed class NodeChannelHubTests : IDisposable
 
     public void Dispose() { if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true); }
 
-    private (NodeChannelHub Hub, Caller Caller) Connect(string connectionId, string subject)
+    private (NodeChannelHub Hub, Caller Caller) Connect(string connectionId, string subject, NodeInventory? inventory = null)
     {
         var caller = new Caller(connectionId, subject);
-        return (new NodeChannelHub(_inventory, _protocol, _rights, _enrollment, _options, _bus, _orphans, NullLogger<NodeChannelHub>.Instance) { Context = caller }, caller);
+        return (new NodeChannelHub(inventory ?? _inventory, _protocol, _rights, _enrollment, _options, _bus, _orphans, NullLogger<NodeChannelHub>.Instance) { Context = caller }, caller);
     }
 
     private static NodeAnnouncement Proposing(string name) => new(name, "proposed description", [], NodeRole.Data, []);
@@ -444,6 +444,46 @@ public sealed class NodeChannelHubTests : IDisposable
         Assert.False(Assert.Single(_inventory.Snapshot()).ReplicasDisagreeOnProtection);
         await second.Announce(Sealing(2, "encrypted"));
         Assert.Equal(2, Told(LogLines()));
+    }
+
+    [Fact]
+    public async Task A_Replica_Under_The_Required_Protection_Stays_Connected_And_Listed_Named_As_Such_And_Is_Told_Once()
+    {
+        static int Told(IReadOnlyList<NodeLogLine> lines) => lines.Count(l => l.Message.Contains("this deployment requires"));
+        var inventory = new NodeInventory(_registry, new AdmissionOptions { RequiredProtection = DataPlaneProtections.EncryptedPsk });
+        var (below, belowCaller) = Connect("c1", "known", inventory);
+        var (meeting, meetingCaller) = Connect("c2", "known", inventory);
+
+        await meeting.Announce(Sealing(2, "encrypted-psk", AKeyId));
+        Assert.Equal(0, Told(LogLines()));
+        await below.Announce(Sealing(1, "none"));
+
+        var node = Assert.Single(inventory.Snapshot());
+        Assert.Equal("encrypted-psk", node.RequiredProtection);
+        var shown = node.Replicas.ToDictionary(r => r.Id);
+        Assert.Equal((true, true), (shown["00000001"].Connected, shown["00000001"].BelowRequiredProtection));
+        Assert.Equal((true, false), (shown["00000002"].Connected, shown["00000002"].BelowRequiredProtection));
+        Assert.False(belowCaller.Aborted || meetingCaller.Aborted);
+        Assert.Equal(["c1", "c2"], inventory.ReplicasOf("node-known").Select(r => r.ConnectionId).Order(StringComparer.Ordinal));
+        var line = Assert.Single(LogLines(), l => Told([l]) == 1);
+        Assert.Equal(("coordinator", "Warning"), (line.Node, line.Level));
+        Assert.Contains("The replica 00000001 of node-known sends in clear and this deployment requires encrypted-psk", line.Message);
+        Assert.DoesNotContain(AKeyId, line.Message);
+
+        // Every reconnection announces again, and the second announcement of a start comes with the data plane client.
+        await below.Announce(Sealing(1, "none") with { DataPlaneClientId = Guid.NewGuid() });
+        var (back, _) = Connect("c3", "known", inventory);
+        await back.Announce(Sealing(1, "none"));
+        Assert.Equal(1, Told(LogLines()));
+
+        // Another level below the required one is told; a level that meets it is not, and a later fall is told again.
+        await back.Announce(Sealing(1, "encrypted"));
+        Assert.Equal(2, Told(LogLines()));
+        await back.Announce(Sealing(1, "encrypted-psk", AKeyId));
+        Assert.Equal(2, Told(LogLines()));
+        Assert.DoesNotContain(Assert.Single(inventory.Snapshot()).Replicas, r => r.BelowRequiredProtection);
+        await back.Announce(Sealing(1, "none"));
+        Assert.Equal(3, Told(LogLines()));
     }
 
     [Fact]

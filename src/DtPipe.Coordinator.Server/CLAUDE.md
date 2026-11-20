@@ -495,7 +495,12 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   (`DataPlaneProtection`, `KeyId`), and `ReplicasDisagree` says two connected replicas offer different bricks while
   `ReplicasDisagreeOnProtection` says they announce a different level or key id. The latter is a signal and never a
   refusal: every replica stays admitted, and `NodeChannelHub.Announce` tells it once to the log (`NewProtectionDisagreement`),
-  not at each announcement of the same difference. A read (a preview, a sample, a sink check) goes to one connected
+  not at each announcement of the same difference. `Coordinator:DataPlane:RequiredProtection`
+  (`CoordinatorServerOptions.RequiredProtection`, validated at start through `ProtectionPolicy`) reaches admission as the
+  `AdmissionOptions` that `AddCoordinatorServer` registers, and `NodeInventory` reads the same one: a replica below it is
+  `NodeReplica.BelowRequiredProtection` (the level required is `NodeView.RequiredProtection`), is told to the log once per level it
+  announces, by replica (`NewProtectionShortfall`), and stays connected, listed and admitted as a replica, eligible for nothing
+  (`src/DtPipe.Coordinator/CLAUDE.md`). A read (a preview, a sample, a sink check) goes to one connected
   replica, the one with the fewest runs, and is not tried on a second when it fails. `Disconnect` interrupts
   the connections of every replica of an identity, and `PUT /api/rights/identities/{id}` does it when the
   name or the **groups** change, or when the identity goes from enabled to disabled: a replica's data plane
@@ -505,7 +510,7 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   `description`, `groups` or `enabled`) leaves it as the identity has it: the omission neither enables, renames
   nor empties. `Origin`, where a replica says it runs, is untrusted
   text: cut at `Announce`, the ground of no decision; the protection it announces is read through `ReplicaView`, never as text.
-  `[CI: NodeChannelHubTests, RightsRoutesTests] [local: the lab's smoke.py rights - identity, disabled; tools/campaign.py F3, S7]`
+  `[CI: NodeChannelHubTests, RequiredProtectionSettingTests, RightsRoutesTests] [local: the lab's smoke.py rights - identity, disabled; tools/campaign.py F3, S7]`
 - **A run names who launched it, and a service may launch it only once.** `RunView.LaunchedBy` is a person's email or the id of
   the identity that launched it, a service or a person verified by a key, or `CallerOf`'s name for a person of the provider with
   none (an id holds no `@`, and no two identities share one, so a
@@ -641,7 +646,9 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   nodes each have a connected replica when no pair of them joins (`src/DtPipe.Coordinator/CLAUDE.md`), in the sentence
   `edge P -> C: P …, C ….` with the words of `ReplicaProtection.Words`, a health cause `protection-mismatch`. A node with no
   connected replica is not judged here, and replicas that differ within a node pass while a pair of them joins: admission's joint
-  choice decides the run. A save into the library plans nothing and is not judged. `[CI: ArmedDeploymentTests]`
+  choice decides the run. A replica below the deployment's required protection is no end of a pair, so a node whose connected
+  replicas are all below it is a node with no eligible replica (`no-eligible-replica`), never a `protection-mismatch`. A save
+  into the library plans nothing and is not judged. `[CI: ArmedDeploymentTests]`
 - **A run records the plan it ran.** `RunView.Plan` (`RunPlan`): the plan's id, the runner it used, each fragment at its version, and
   each binding with the brick version it met and its mode's verdict. A run refused before it had a plan has none.
   `[CI: ArmedDeploymentTests, RunJournalTests]`

@@ -4,9 +4,10 @@ using TransportR.Hub;
 namespace DtPipe.Coordinator;
 
 /// <summary>
-/// Whether a replica may run a fragment. Pure: it reads what a replica announced and what TransportR holds of its
-/// data plane client, and answers with the reason a replica is out, or null when it is in. Whether the replica is
-/// connected, and which of the eligible ones a run takes, is the registry's (<see cref="ReplicaRegistry.TryReserve"/>).
+/// Whether a replica may run a fragment. Pure: it reads what a replica announced, what TransportR holds of its data plane
+/// client and the protection the deployment requires, and answers with the reason a replica is out, or null when it is in.
+/// Whether the replica is connected, and which of the eligible ones a run takes, is the registry's
+/// (<see cref="ReplicaRegistry.TryReserve"/>).
 /// </summary>
 internal static class ReplicaChooser
 {
@@ -27,6 +28,14 @@ internal static class ReplicaChooser
         if (announcement.Role == NodeRole.Runner || announcement.Offers(NodeAnnouncement.RawFragments)) return null;
         return "this node runs the bricks its owner declared, by id, and takes no job as written.";
     }
+
+    /// <summary>
+    /// Why the replica is out of every fragment, or null: it announces a level of protection of the data plane below the one the
+    /// deployment requires (<see cref="AdmissionOptions.RequiredProtection"/>), and says what it does and what is required. A refusal of
+    /// eligibility alone: the replica stays connected and listed, since a rolling update passes through it. It judges the level, never a key.
+    /// </summary>
+    public static string? ProtectionRefusal(ReplicaView replica, string required) =>
+        ProtectionPolicy.IsBelow(replica, required) ? $"it {ProtectionPolicy.Shortfall(replica, required)}." : null;
 
     /// <summary>
     /// Why the replica's TransportR client cannot carry the run's bytes, or null: it announced a client, that client

@@ -77,6 +77,7 @@ public sealed partial class ArmedDeploymentTests : IDisposable
     private PipelineHealth _health = null!;
     private readonly FakeHeads _heads = new();
     private readonly Microsoft.Extensions.Time.Testing.FakeTimeProvider _time = new();
+    private string _required = DataPlaneProtections.None;
 
     public ArmedDeploymentTests()
     {
@@ -118,14 +119,15 @@ public sealed partial class ArmedDeploymentTests : IDisposable
     private (RightsStore, NodeInventory, RunJournal, DeploymentManager) Start(ReplicaRegistry registry)
     {
         var rights = MemoryRightsStore.Rights(_options);
-        var inventory = new NodeInventory(registry);
+        var admission = new AdmissionOptions { RequiredProtection = _required };
+        var inventory = new NodeInventory(registry, admission);
         var journal = MemoryRunStore.Journal(_options);
         _bus = new EventBus();
         BrickCatalog? bricks = null;
         BindingVerifier? verifier = null;
         _store = new FailingDeploymentStore(MemoryDeploymentStore.At(_options.StateDir));
         var deployments = TestDeployments.Create(
-            inventory, _link, _runs, new ReplicaAdmission(registry, _state), new RightsFlowControl(rights), rights, _bus, journal, _options, _jobs,
+            inventory, _link, _runs, new ReplicaAdmission(registry, _state, admission), new RightsFlowControl(rights), rights, _bus, journal, _options, _jobs,
             (b, requests) =>
             {
                 bricks = b;

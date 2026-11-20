@@ -1355,6 +1355,7 @@ a setting allows it.
 | `LibrarySeed` | A folder of `.yaml` pipelines (with optional `.bindings.json`) a new library starts with |
 | `Identity__LabelClaims` | Claims shown beside a host waiting for approval; a label only |
 | `Health__MaxAge` | The longest a health read is kept. Default: five minutes |
+| `DataPlane__RequiredProtection` | The lowest protection of the data plane a replica may announce: `none`, `encrypted` or `encrypted-psk`, in that order. A replica below it stays connected and listed, marked as below, and is chosen for no fragment. Default: `none`, which requires nothing |
 
 - With SQLite, the state directory is the whole state: back it up stopped
   ([deploy/README.md](./deploy/README.md#backing-up-a-sqlite-coordinator)). With PostgreSQL or SQL

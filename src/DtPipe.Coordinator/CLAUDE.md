@@ -198,7 +198,8 @@ while any replica is connected.
 
 - **A plan, a deployment and a run request name a node, never a replica.** The replica is chosen at admission,
   for the run. `[unchecked]`
-- **A replica is eligible for a fragment when** it is connected; it is of the fragment's node; its TransportR
+- **A replica is eligible for a fragment when** it is connected; it is of the fragment's node; it does not announce a
+  protection of the data plane below the deployment's requirement; its TransportR
   client is verified; and the bricks it announces compose the
   version of the plan.
   `ReplicaChooser` is that rule, pure. The client is verified when it is announced, registered, still
@@ -224,6 +225,14 @@ while any replica is connected.
   with the edges before it that could, and what each end does: the words of `ReplicaProtection.Words`, a key id whole.
   `EvaluateAsync` judges no edge; `ReplicaAdmission.EdgeRefusals` judges pairs of connected replicas, edge by edge, for
   the server's arming. `[CI: EdgeProtectionTests]`
+- **A deployment's required protection is a floor on a replica's level, and a replica below it is eligible for nothing.**
+  `AdmissionOptions.RequiredProtection` is a word of `ProtectionPolicy`, the one order of the levels and the one reading of a
+  word (the setting that fills it refuses any other text, and so does the property). `ReplicaAdmission.Refusal` puts
+  `ReplicaChooser.ProtectionRefusal` first, so `EvaluateAsync`, `TryReserveAsync` and `Explain` carry its reason, in the words
+  of `ReplicaProtection.Words` with no key id; there is no path of its own, and a runner is a node like any other. The replica is
+  never refused at the announcement or cut: `ReplicaProtocol` and `ReplicaRegistry` know nothing of the policy. `EdgeRefusals`
+  leaves such a replica out of the pairs it judges, so a node whose connected replicas are all below the requirement has none and
+  is named by admission, not as an edge that cannot join. `[CI: RequiredProtectionTests; Server.Tests ArmedDeploymentTests]`
 - **The client id a replica announces is verified twice.** At the announcement, as a courtesy: one registered
   under another subject, or announced by another replica, is refused. At admission, as the authority: the
   registration is read at the moment of choosing. Only the second sees a client registered after the
@@ -233,8 +242,8 @@ while any replica is connected.
   `ReplicaView.DataPlaneProtection` and `KeyId` are the one reading of them (`DataPlaneProtections`), and any other reader goes
   through them. A word it does not know, or none, reads as the level that seals nothing; an id is kept only on the level that
   carries one and only if it has an id's form. The registry keeps the whole announcement and the key never reaches it: the
-  node announces a fingerprint. Admission and arming read the level through `ReplicaProtection.Of`, to join an edge's ends;
-  no verdict reads it.
+  node announces a fingerprint. Admission and arming read the level through `ReplicaProtection.Of`, to join an edge's ends,
+  and `ProtectionPolicy` reads it to judge a replica against the requirement; no verdict reads it.
   `[CI: DataPlaneProtectionWireTests; Server.Tests NodeChannelHubTests — what the node's API shows of it]`
 - **Among the eligible, the replica with the fewest runs is chosen, then the least recently chosen, then the
   lowest instance id**, among those that let every edge of the run join, for every fragment of the run in one step: the

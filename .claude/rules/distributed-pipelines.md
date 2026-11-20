@@ -79,6 +79,16 @@ the control plane, over each replica's node channel; TransportR carries the data
   refuse an edge whose two nodes each have a connected replica when no pair of them joins; a node with
   none is left to admission. `[CI: Coordinator.Tests EdgeProtectionTests, ReplicaAdmissionSubjectTests;
   Server.Tests ArmedDeploymentTests]`
+- **A deployment may require a protection of the data plane, and a replica below it is visible and eligible for nothing.**
+  `Coordinator:DataPlane:RequiredProtection` is a floor on the level a replica announces, ordered by `ProtectionPolicy`, which is also
+  the one reading of the setting (a text that is no word stops the start); unset, it requires nothing. A replica
+  below it stays connected and admitted as a replica, never refused or cut at its announcement, since a rolling update passes through
+  it: it is listed as under the policy by the node's API and the log, told once per level it announces, and refused by
+  `ReplicaChooser.ProtectionRefusal` for every fragment, a runner's included, by the paths eligibility already has. Arming does not
+  count it as an end of an edge, so a node whose connected replicas are all below it reads as a node with no eligible replica, never
+  as an edge that cannot join. The policy judges the level and no key or fingerprint: whether two ends hold the same key stays the
+  edge's. `[CI: Coordinator.Tests RequiredProtectionTests; Server.Tests RequiredProtectionSettingTests, NodeChannelHubTests,
+  ArmedDeploymentTests]`
 - **Cancel by stream rupture, never by signal**: the node must run on Windows.
 - **A runner hosts no data: a runner's fragment reads and writes its `arrow:` edges and nothing else.** The fragments of every
   run share the runner's host, so a file, a database, a checkpoint or a cursor file it reached would carry rows between two
