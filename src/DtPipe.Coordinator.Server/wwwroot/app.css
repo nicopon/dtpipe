@@ -13,6 +13,12 @@ body.app { min-height: 100vh; }
 .view { padding: 16px; }
 .view-body { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .view-head h1 { font-size: 20px; margin: 0 0 4px; }
+.crumbs { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.crumbs a { color: var(--muted); text-decoration: none; font-weight: 400; }
+.crumbs a:hover { color: var(--accent); text-decoration: underline; }
+.crumbs .sep { color: var(--muted); }
+.card-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.card-title h2 { margin: 0; }
 .view-head .actions, .view-head .row { margin-top: 8px; }
 a { color: var(--accent); }
 a.button, .button {
@@ -147,6 +153,10 @@ pre.diff .del { color: var(--bad); }
 .xbox .node-name { color: var(--node-color); }
 .unit-line { padding: 5px 10px; border-top: 1px solid var(--border); overflow-wrap: anywhere; }
 .unit-line code { font-weight: 700; }
+.unit-mode { margin-top: 4px; color: var(--muted); }
+.unit-mode select { font-size: 12px; padding: 1px 4px; }
+.unit-mode.changed select { border-color: var(--warn); }
+.card-sub { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
 details.frag-card summary { cursor: pointer; }
 
 /* Access */

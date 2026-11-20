@@ -11,7 +11,7 @@ function lane(fragment) {
   return fragment.edges.some((e) => e.direction === "Inbound") ? 2 : 0;
 }
 
-function unitLine(unit, brickOfUnit) {
+function unitLine(unit, brickOfUnit, extra) {
   const b = unit.branch;
   const brick = store.bricks.find((x) => x.key === brickOfUnit[unit.id]);
   let what;
@@ -21,7 +21,7 @@ function unitLine(unit, brickOfUnit) {
   else if (b.transformers.length) what = `${esc(b.transformers.map((t) => t.type).join(" → "))} over ${esc(b.from.join(", "))}`;
   else if (b.input) what = `reads <code>${esc(b.input)}</code>`;
   else what = "passes rows through";
-  return `<div class="unit-line"><code>${esc(unit.id)}</code> <span>${what}</span></div>`;
+  return `<div class="unit-line"><code>${esc(unit.id)}</code> <span>${what}</span>${extra ? extra(unit.id) : ""}</div>`;
 }
 
 // The plan's problems: what stops it being deployed.
@@ -38,14 +38,14 @@ export function fragmentJobs(plan) {
 
 // Draws plan into el. run, running and current say what to show on the edges: a run's row counts
 // when it ran this plan's edges, and the flowing animation while it is running.
-export function drawLanes(el, plan, brickOfUnit, { run = null, running = false, current = false } = {}) {
+export function drawLanes(el, plan, brickOfUnit, { run = null, running = false, current = false, extra = null } = {}) {
   const lanes = [[], [], []];
   for (const f of plan.fragments) lanes[lane(f)].push(f);
   el.innerHTML = plan.fragments.map((f) => {
     const units = plan.units.filter((u) => f.units.includes(u.id));
     return `<div class="xbox" data-fragment="${esc(f.name)}" style="--node-color:${nodeColor(f.node)}">
       <div class="xbox-head"><span class="node-name">${esc(f.node)}</span><span class="chip">${esc(f.groups.join(" + "))}</span></div>
-      ${units.map((u) => unitLine(u, brickOfUnit)).join("")}
+      ${units.map((u) => unitLine(u, brickOfUnit, extra)).join("")}
     </div>`;
   }).join("") + `<svg></svg>`;
 

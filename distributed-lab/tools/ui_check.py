@@ -64,6 +64,11 @@ def lab_view(browser):
         report(rendered and not errors, "lab " + entry["id"], f"{units} units" + (f"  errors: {errors}" if errors else ""), shot)
 
 
+def path_of(run):
+    # A run of a library pipeline sits under it in the path; one of a plan fixed by hand under Runs.
+    return f"Library>{run['pipelineId']}>Run {run['runId']}" if run.get("pipelineId") else f"Runs>Run {run['runId']}"
+
+
 def coordinator_views(browser):
     library = SESSION.call("/api/library")
     pid = library[0]["id"] if library else ""
@@ -73,9 +78,12 @@ def coordinator_views(browser):
         ("library", f"document.querySelectorAll('.lib-item').length === {len(library)}"),
         (f"library/{pid}", "document.querySelectorAll('.xbox').length > 0 && (document.querySelectorAll('.lanes svg path').length > 0 || document.querySelectorAll('ul.msgs.errors li').length > 0)"
                            " && (document.getElementById('x-job')?.textContent || '').length > 0"
-                           " && !!document.getElementById('x-versions') && [...document.querySelectorAll('h2')].some(h => h.textContent === 'Recent runs')"),
+                           " && !!document.getElementById('x-versions') && [...document.querySelectorAll('h2')].some(h => h.textContent === 'Recent runs')"
+                           " && document.querySelector('h1.crumbs a')?.textContent === 'Library' && !document.querySelector('a.button[href=\"#/library\"]')"),
         ("runs", "!!document.getElementById('r-journal') && !!document.getElementById('r-queue')"),
-        *([(f"runs/{last[0]['runId']}", "!!document.getElementById('run-head') && !!document.querySelector('#run-report .run-report')")] if last else []),
+        *([(f"runs/{last[0]['runId']}", "!!document.getElementById('run-head') && !!document.querySelector('#run-report .run-report')"
+                                                   " && [...document.querySelectorAll('#run-head h1.crumbs > a, #run-head h1.crumbs > .here')].map(e => e.textContent).join('>')"
+                                                   f" === {json.dumps(path_of(last[0]))}")] if last else []),
         ("events", "!!document.getElementById('ev-log') && !!document.getElementById('ev-node')"),
         ("access", "document.querySelectorAll('table.matrix.edit input').length > 0 && document.querySelectorAll('[data-identity]').length > 0"),
     ]
@@ -101,16 +109,13 @@ def library_page(browser):
     wrong = []
     for e in entries:
         deployment = deployments.get(e["id"])
-        row = f"[data-deploy={json.dumps(e['id'])}]"
-        deploy_off = browser.js(f"document.querySelector({json.dumps(row)}).disabled")
         run_off = browser.js(f"document.querySelector('[data-run={json.dumps(e['id'])}]').disabled")
         h = health.get(e["id"])
-        up_to_date = bool(deployment and deployment["state"] == "ready" and h and not any(c["code"] == "library-newer" for c in h["causes"]))
-        blocked = any(p["blocking"] for p in e["bindingProblems"]) or any(r["pipelineId"] == e["id"] for r in queue) or up_to_date or bool(deployment and deployment["state"] == "deploying")
-        if deploy_off != blocked:
-            wrong.append(f"{e['id']} deploy disabled={deploy_off}")
         if run_off != (not deployment or deployment["state"] != "ready" or bool(h and h["status"] == "critical")):
             wrong.append(f"{e['id']} run disabled={run_off}")
+    # Deploying is the pipeline page's alone: the list offers Open and Run, never Deploy.
+    if browser.js("!!document.querySelector('.lib-list [data-deploy]')"):
+        wrong.append("the library list offers Deploy")
     # An armed pipeline's row carries the health chip, with the status /api/health gives; a pipeline not armed carries none.
     probe = entries[0]["id"]
     armed_here = probe not in deployments
@@ -135,7 +140,7 @@ def library_page(browser):
             SESSION.call(f"/api/deployments/{probe}", None, "DELETE")
     pid = entries[0]["id"]
     browser.js(f"document.querySelector('.lib-list a[href=\"#/library/{pid}\"]').click()")
-    opened = browser.wait_for("document.querySelectorAll('.xbox').length > 0 && !!document.getElementById('x-deploy') && !!document.getElementById('x-run')", 20)
+    opened = browser.wait_for("document.querySelectorAll('.xbox').length > 0 && !!document.getElementById('x-run') && !!document.getElementById('x-deploy') && document.getElementById('x-deploy').closest('.card').contains(document.getElementById('x-lanes'))", 20)
     gone = browser.js("!document.querySelector('#nav a[data-view=\"distribution\"]')")
     errors = page_errors(browser)
     report(not wrong and opened and gone and not errors, "library row actions and page",

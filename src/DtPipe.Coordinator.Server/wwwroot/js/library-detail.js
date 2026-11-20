@@ -1,9 +1,12 @@
 // A library pipeline's page: the plan a launch would make now, which the coordinator computes with no help from the user (every
-// brick on its node, every other step on a runner it picks at the launch), drawn in lanes, its refusals, its fragments'
-// jobs, the job's text read only, its latest runs and its versions. The node of each source and sink branch is
-// chosen here, among the nodes that offer its brick; the runner is never named. The bindings are saved from here, and the
-// pipeline is deployed (armed at the commit the library holds) and run.
-import { $, ROWS_CROSSED_HINT, api, apiPage, deploymentOf, duration, esc, fmt, healthChip, healthOf, isActive, lastRunOf, rowsCrossed, runHref, runStateLabel, shortNode, store, toast } from "./core.js";
+// brick on its node, every other step on a runner it picks at the launch), drawn in lanes with its actions beside it, its refusals,
+// its fragments' jobs, the job's text read only, its latest runs and its versions. The node of each source and sink branch is the
+// job's, shown and never chosen here; the runner is never named. Each brick's mode is chosen in its own box of the diagram; Deploy
+// saves the modes as bindings and arms the pipeline at the commit the library holds, and the pipeline is then run from here. This
+// page is the one place that deploys.
+import { $, ROWS_CROSSED_HINT, api, apiPage, deploymentOf, duration, esc, fmt, isActive, lastRunOf, rowsCrossed, runHref, runStateLabel, shortNode, store, toast } from "./core.js";
+import { crumbs } from "./crumbs.js";
+import { deploymentChip, statusChip } from "./pipeline-status.js";
 import { drawLanes, fragmentJobs, legend, planProblems } from "./placement.js";
 
 let host = null;
@@ -14,7 +17,7 @@ let armable = false;     // whether Deploy can make the plan deployable: the ser
 let runner = null;       // the runner a launch would use now, if one passes
 let brickOfUnit = {};
 let offers = {};          // alias -> the nodes that offer the brick of that branch
-let draft = {};           // alias -> the node chosen on the page, saved or not
+let draft = {};           // alias -> the node and mode drafted on the page, saved or not
 let busy = false;
 let journaled = null;     // the latest runs of this pipeline that are over, as the server journals them, once read
 let journalError = "";    // what the read of them said when it failed
@@ -102,13 +105,14 @@ async function loadPlan(pipeline, mine) {
   return true;
 }
 
-// The page chooses a binding's node and mode. A strict binding's brick is resolved by the server from the job's text; one in
-// another mode keeps its brick by id, so it is sent back while its node is the same. A pin is the server's: a check writes it.
+// A brick's node is the job's (`input: brick:<node>/<brick>`): the page shows it and never chooses it. The mode, how the brick may
+// change after it was checked, is chosen in the Deploy step and saved with it. A strict binding's brick is resolved by the server from
+// the job's text; one in another mode keeps its brick by id, sent back while the node is the same. A pin is the server's: a check writes it.
 const MODES = [
-  ["strict", "the branch must stay word for word the brick"],
-  ["contract", "the brick may change while the schema it produces or accepts stays the same"],
-  ["compatible", "the brick may change while its consumers still work"],
-  ["tolerant", "the brick may change as it likes"],
+  ["strict", "The branch must stay word for word the brick it was checked with"],
+  ["contract", "The brick may change while the schema it produces or accepts stays the same"],
+  ["compatible", "The brick may change while its consumers still work"],
+  ["tolerant", "The brick may change as it likes"],
 ];
 const draftOf = (bindings) => Object.fromEntries(Object.entries(bindings || {}).map(([alias, b]) => [alias, { node: b.node, mode: b.mode || "strict" }]));
 
@@ -132,54 +136,36 @@ function bindingOf(alias, { node, mode }) {
   return { node, mode, ...(brick ? { brick } : {}) };
 }
 
-function bindingsChip() {
-  const problems = doc.bindingProblems || [];
-  if (!problems.length) return "";
-  const blocking = problems.some((p) => p.blocking);
-  return `<span class="chip ${blocking ? "bad" : "warn"}" title="${esc(problems.map((p) => p.message).join(" "))}">bindings: ${problems.length} problem${problems.length > 1 ? "s" : ""}</span>`;
-}
 
-// One row per brick branch of the job, and one per binding kept for a branch that is none, so it can be dropped.
-function bindingsCard() {
-  const aliases = Object.keys(offers).sort();
+// A brick's mode, chosen in its own box of the diagram; the tooltip says what the mode allows and what the last check pinned.
+// A mode that differs from the one the server keeps is marked until Deploy saves it.
+function modeControl(alias) {
+  if (!offers[alias]) return "";
+  const mode = draft[alias]?.mode || "strict";
+  const kept = doc.bindings?.[alias]?.mode || "strict";
+  const pin = doc.bindings?.[alias]?.pin;
+  const why = MODES.find(([m]) => m === mode)[1];
+  const title = `${why}. ${pin ? `Checked at brick ${pin.version.slice(0, 12)}.` : "No check has pinned this brick yet."}`;
+  const options = MODES.map(([m, hint]) => `<option value="${m}" title="${esc(hint)}" ${m === mode ? "selected" : ""}>${m}</option>`).join("");
+  const problems = (doc.bindingProblems || []).filter((p) => p.alias === alias).map((p) => `<div class="mismatch">${esc(p.message)}</div>`).join("");
+  return `<div class="unit-mode ${mode !== kept ? "changed" : ""}"><label>mode <select data-needs="designer" data-mode-alias="${esc(alias)}" title="${esc(title)}" ${busy ? "disabled" : ""}>${options}</select></label>${problems}</div>`;
+}
+// A binding the server keeps for an alias no branch of the job has: shown so it can be dropped.
+function strayBindings() {
   const stray = Object.keys(draft).filter((a) => !offers[a]).sort();
-  if (!aliases.length && !stray.length) return "";
+  if (!stray.length) return "";
   const problems = doc.bindingProblems || [];
-  const problemOf = (a) => problems.filter((p) => p.alias === a).map((p) => `<div class="mismatch">${esc(p.message)}</div>`).join("");
-  const rows = aliases.map((a) => {
-    const chosen = draft[a]?.node || "";
-    const mode = draft[a]?.mode || "strict";
-    const nodes = offers[a].includes(chosen) || !chosen ? offers[a] : [...offers[a], chosen];
-    const pin = doc.bindings?.[a]?.pin;
-    return `<tr><td class="mono">${esc(a)}</td><td>
-      <select data-alias="${esc(a)}" ${busy ? "disabled" : ""}>
-        <option value="" ${chosen ? "" : "selected"}>choose a node</option>
-        ${nodes.map((n) => `<option value="${esc(n)}" ${n === chosen ? "selected" : ""}>${esc(n)}${offers[a].includes(n) ? "" : " (does not offer it)"}</option>`).join("")}
-      </select>
-      <select data-mode-alias="${esc(a)}" title="${esc(MODES.find(([m]) => m === mode)?.[1] || "")}" ${busy || !chosen ? "disabled" : ""}>
-        ${MODES.map(([m, why]) => `<option value="${m}" title="${esc(why)}" ${m === mode ? "selected" : ""}>${m}</option>`).join("")}
-      </select>
-      ${pin ? `<span class="hint">checked at brick ${esc(pin.version.slice(0, 12))}</span>` : ""}${problemOf(a)}</td></tr>`;
-  }).join("");
-  const strays = stray.map((a) => `<tr><td class="mono">${esc(a)}</td><td>${problemOf(a) || `<span class="hint">no brick branch of this job</span>`}
-      <button class="small ghost" data-needs="designer" data-drop="${esc(a)}" ${busy ? "disabled" : ""}>Remove</button></td></tr>`).join("");
-  return `<section class="card"><div class="card-head"><h2>Bindings</h2>
-      <span class="actions"><button data-needs="designer" id="x-bind" class="primary" ${bindingsDirty() && !busy ? "" : "disabled"}>Save bindings</button></span></div>
-    <p class="hint">The node each source and sink runs on, and how its brick may change. Saving checks the bindings against the nodes and pins what
-      the check saw. Every other step runs on the runner, which is never named.</p>
-    <table class="library">${rows}${strays}</table></section>`;
+  const rows = stray.map((a) => `<li><span class="mono">${esc(a)}</span> binding kept for no brick branch of the job. ${problems.filter((p) => p.alias === a).map((p) => esc(p.message)).join(" ")}
+    <button class="small ghost" data-needs="designer" data-drop="${esc(a)}" ${busy ? "disabled" : ""}>Remove</button></li>`).join("");
+  return `<ul class="msgs">${rows}</ul>`;
 }
-
 function onChange(e) {
-  const alias = e.target?.dataset?.alias;
-  if (alias !== undefined) {
-    draft[alias] = { node: e.target.value, mode: draft[alias]?.mode || "strict" };
-    render();
-    return;
-  }
-  const modeAlias = e.target?.dataset?.modeAlias;
-  if (modeAlias === undefined) return;
-  draft[modeAlias] = { ...draft[modeAlias], mode: e.target.value };
+  const alias = e.target?.dataset?.modeAlias;
+  if (alias === undefined || !offers[alias]) return;
+  const mode = e.target.value;
+  // A mode that is strict on a brick the library holds no binding for stays absent: nothing is saved for a brick never moved off strict.
+  if (mode === "strict" && !doc.bindings?.[alias]) delete draft[alias];
+  else draft[alias] = { node: offers[alias][0], mode };
   render();
 }
 
@@ -190,51 +176,49 @@ function render() {
   const current = deployment && deployment.commit === doc.commit;
   const run = lastRunOf(id);
   const running = run?.state === "running";
-  // Fragment names are stable per pipeline and node: a run's edges apply when they are this plan's.
+  // Fragment names are stable per pipeline and node: the run's edges apply when they are the plan's.
   const edgeKey = (e) => `${e.producerFragment}|${e.producerAlias}|${e.consumerFragment}|${e.consumerAlias}`;
   const planEdges = new Set(plan.edges.map(edgeKey));
   const runMatches = !!run?.result && run.result.edgeCounts.length === planEdges.size && run.result.edgeCounts.every((e) => planEdges.has(edgeKey(e)));
   const canDeploy = armable && !isActive(run);
-  const canRun = deployment && deployment.state !== "failed";
-
-  const status = [
-    deployment ? `<span class="chip ${deployment.state === "ready" ? "ok" : deployment.state === "failed" ? "bad" : "warn"}">${current ? "deployed" : "an older version is deployed"}: ${esc(deployment.state)} @ ${esc((deployment.commit || "").slice(0, 8))}</span>` : `<span class="chip">not deployed</span>`,
-    healthChip(id),
-    bindingsChip(),
-  ].join(" ");
-
+  const canRun = !!deployment && deployment.state !== "failed";
+  const dirty = bindingsDirty();
+  const upToDate = canRun && current && !dirty;
+  const deployTitle = !armable ? "The plan cannot be deployed now"
+    : isActive(run) ? "A run of this pipeline is queued or running"
+    : dirty ? "Saves the modes, then deploys the version the library holds"
+    : "Deploys the version the library holds";
+  const entry = { ...doc, id };
+  const hasBricks = Object.keys(offers).length > 0;
   host.innerHTML = `
     <div class="view-head">
-      <h1>${esc(doc.yaml.split("\n")[0].replace(/^#\s*/, ""))} <span class="mono muted">${esc(id)}</span></h1>
+      ${crumbs([{ html: "Library", href: "#/library" }, { html: `${esc(doc.yaml.split("\n")[0].replace(/^#\s*/, ""))} <span class="mono muted">${esc(id)}</span>` }])}
       <p class="hint">Planned at each launch: every brick on the node it is bound to, every other step on a runner chosen then. A source wired straight into an output crosses no runner. A launch of the version the library holds ${plan.deployable ? `would run${runner ? ` on ${esc(runner)}` : ""} now` : armable ? "would be refused until Deploy pins the bricks no check has pinned" : "would be refused now"}.</p>
-      <div class="row">${status}
-        <span class="actions">
-          <a class="button" href="#/library">← Library</a>
-          <button data-needs="designer" id="x-deploy" ${canDeploy && !busy && !bindingsDirty() ? "" : "disabled"} title="${bindingsDirty() ? "Save the bindings first" : ""}">Deploy</button>
-          <button data-needs="designer" id="x-run" class="primary" ${canRun && !busy ? "" : "disabled"}>Run</button>
-          ${deployment ? `<button data-needs="designer" id="x-undeploy" class="ghost danger" ${isActive(run) || busy ? "disabled" : ""}>Undeploy</button>` : ""}
-        </span>
-      </div>
     </div>
-    ${healthCard()}
-    ${bindingsCard()}
     ${planProblems(plan).length ? `<section class="card"><ul class="msgs errors">${planProblems(plan).map((e) => `<li>${esc(e)}</li>`).join("")}</ul></section>` : ""}
     ${missingEdgesCard()}
     <section class="card">
-      <div class="card-head"><h2>Fragments and edges</h2>
-        ${legend}</div>
+      <div class="card-head"><div class="card-title"><h2>Fragments and edges</h2>${deploymentChip(entry)} ${statusChip(entry)}</div>
+        <span class="actions">
+          ${dirty ? `<span class="chip warn" title="Deploy saves the modes you changed">modes changed</span>
+          <button data-needs="designer" id="x-modes-reset" class="ghost" ${busy ? "disabled" : ""}>Reset</button>` : ""}
+          ${deployment ? `<button data-needs="designer" id="x-undeploy" class="ghost danger" ${isActive(run) || busy ? "disabled" : ""}>Undeploy</button>` : ""}
+          <button data-needs="designer" id="x-deploy" class="${upToDate ? "" : "primary"}" ${canDeploy && !busy ? "" : "disabled"} title="${esc(deployTitle)}">Deploy</button>
+          <button data-needs="designer" id="x-run" class="${upToDate ? "primary" : ""}" ${canRun && !busy ? "" : "disabled"}>Run</button>
+        </span></div>
+      <div class="card-sub">${hasBricks ? `<span class="hint">A brick's mode says how it may change after it was checked; Deploy saves the modes.</span>` : "<span></span>"}${legend}</div>
       <div class="lanes-head"><span>sources</span><span>runner</span><span>sinks</span></div>
       <div class="lanes" id="x-lanes"></div>
+      ${strayBindings()}
       ${run?.result && !runMatches ? `<p class="hint">The last run's row counts are not drawn on the edges. It ran a plan with other edges than this one.</p>` : ""}
     </section>
     ${recentRunsCard()}
     <section class="card"><h2>Fragment jobs</h2>${fragmentJobs(plan)}</section>
     <section class="card"><div class="card-head"><h2>Job</h2><span class="hint">Read only: write it with <code>dtpipe studio</code> and publish it.</span></div>
-      <pre id="x-job">${esc(doc.yaml)}</pre></section>
+    <pre id="x-job">${esc(doc.yaml)}</pre></section>
     ${versionsCard()}`;
-  drawLanes($("x-lanes"), plan, brickOfUnit, { run, running, current: runMatches });
+  drawLanes($("x-lanes"), plan, brickOfUnit, { run, running, current: runMatches, extra: modeControl });
 }
-
 // The edges between groups the plan needs and the flow matrix does not allow, read from the plan's refused edges: each group of
 // the sender to each group of the receiver. An administrator allows them here, beside what the matrix allows already; anyone
 // else is told who can.
@@ -256,14 +240,6 @@ function missingEdgesCard() {
     <p class="hint">${admin ? "Allowing adds these edges to the matrix and revokes nothing; the change is audited in Access." : "An administrator allows them, here or in Access."}</p></section>`;
 }
 
-// What the health read found of the armed version, the findings that matter first. The plan below is the one the library's version would make.
-function healthCard() {
-  const h = healthOf(id);
-  if (!h || !h.causes.length) return "";
-  const rows = h.causes.map((c) => `<li class="${c.severity === "critical" ? "bad" : c.severity === "warning" ? "warn" : "hint"}"><span class="mono">${esc(c.code)}</span> ${esc(c.message)}</li>`).join("");
-  return `<section class="card"><div class="card-head"><h2>Health</h2><span class="hint">the version armed at ${esc((h.commit || "").slice(0, 8))}</span></div>
-    <ul class="msgs">${rows}</ul></section>`;
-}
 
 const RECENT = 5;
 
@@ -371,26 +347,40 @@ async function onVersions(b) {
   }
 }
 
+// The bindings drafted, as the server keeps them: saved with a check that writes the pins, then read again.
+async function saveBindings(pipeline, page) {
+  const bindings = Object.fromEntries(Object.entries(draft).filter(([, v]) => v?.node).map(([alias, v]) => [alias, bindingOf(alias, v)]));
+  const saved = await api(`/api/library/${encodeURIComponent(pipeline)}/bindings`, { bindings, message: `Bind ${pipeline}` }, "PUT");
+  if (page === visit) {
+    taken = sorted(draft);
+    await load();
+  }
+  return saved;
+}
+
 async function onClick(e) {
   const b = e.target.closest("button");
   if (!b || b.disabled) return;
   if (b.id === "x-versions" || b.dataset.show) return onVersions(b);
+  if (b.id === "x-modes-reset") {
+    draft = draftOf(doc.bindings);
+    taken = sorted(draft);
+    render();
+    return;
+  }
   // What a click does after its own request names the pipeline, the ticket and the page it began with: the request goes to the
   // pipeline it was made on, and the page is drawn on only if it is still that page's.
   const pipeline = id, mine = reads, page = visit;
   busy = true;
   render();
   try {
-    if (b.id === "x-bind" || b.dataset.drop) {
-      if (b.dataset.drop) delete draft[b.dataset.drop];
-      const bindings = Object.fromEntries(Object.entries(draft).filter(([, v]) => v?.node).map(([alias, v]) => [alias, bindingOf(alias, v)]));
-      const saved = await api(`/api/library/${encodeURIComponent(pipeline)}/bindings`, { bindings, message: `Bind ${pipeline}` }, "PUT");
-      if (page === visit) {
-        taken = sorted(draft);
-        await load();
-      }
-      toast(saved.problems?.length ? "Bindings saved: some do not hold yet." : "Bindings saved.", "info");
+    if (b.dataset.drop) {
+      delete draft[b.dataset.drop];
+      const saved = await saveBindings(pipeline, page);
+      toast(saved.problems?.length ? "Binding removed: some others do not hold yet." : "Binding removed.", "info");
     } else if (b.id === "x-deploy") {
+      // The modes are saved first, so the deployment is armed with what the Deploy step showed: the save checks them and writes their pins.
+      if (bindingsDirty()) await saveBindings(pipeline, page);
       toast(`Deploying ${pipeline}…`, "info");
       await api(`/api/library/${encodeURIComponent(pipeline)}/deploy`, {});
       toast(`${pipeline} deployed: every fragment registered.`, "info");

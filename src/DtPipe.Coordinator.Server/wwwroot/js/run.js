@@ -1,6 +1,7 @@
 // A run's own page, `#/runs/<runId>`: its outcome and report, the pipeline it ran, and the lines of the stream that name it.
 // A run in flight is the queue's and follows it to its end; a run that is over is the server's, read once.
 import { $, api, cursorsOf, duration, endNotes, esc, fmt, isActive, linesOfRun, ranPlan, runStateLabel, shortNode, store, toast } from "./core.js";
+import { crumbs } from "./crumbs.js";
 import { lineHtml } from "./events.js";
 
 let host = null;
@@ -18,7 +19,6 @@ export function mount(el, params) {
   missing = false;
   failure = "";
   host.innerHTML = `
-    <p class="hint"><a href="#/runs">← Runs</a></p>
     <div id="run-head" class="view-head"></div>
     <section class="card"><div id="run-report"></div></section>
     <section class="card"><div class="card-head"><h2>Events <span id="run-ev-count" class="hint"></span></h2><a href="#/events">all events →</a></div>
@@ -71,18 +71,21 @@ function drawHead() {
   const el = $("run-head");
   if (!el) return;
   if (!run) {
-    el.innerHTML = `<h1>Run <code>${esc(id)}</code></h1>`;
+    el.innerHTML = crumbs([{ html: "Runs", href: "#/runs" }, { html: `Run <code>${esc(id)}</code>` }]);
     return;
   }
-  const pipeline = run.pipelineId ? `<a href="#/library/${esc(encodeURIComponent(run.pipelineId))}">${esc(run.pipelineId)}</a>` : `plan ${esc(run.planId)}`;
+  // A run of a library pipeline is under it in the path; a run of a plan fixed by hand belongs to no pipeline.
+  const path = run.pipelineId
+    ? [{ html: "Library", href: "#/library" }, { html: `<span class="mono">${esc(run.pipelineId)}</span>`, href: `#/library/${esc(encodeURIComponent(run.pipelineId))}` }]
+    : [{ html: "Runs", href: "#/runs" }];
   const facts = [
-    pipeline,
+    run.pipelineId ? "" : `plan ${esc(run.planId)}`,
     run.launchedBy ? `by ${esc(run.launchedBy)}` : "",
     run.queuedAt ? `queued ${esc(new Date(run.queuedAt).toLocaleString())}` : "",
     run.state === "queued" ? "" : `started ${esc(new Date(run.startedAt).toLocaleString())}`,
     run.finishedAt ? `ended ${esc(new Date(run.finishedAt).toLocaleString())} · ${esc(duration(run))}` : "",
   ].filter(Boolean).join(" · ");
-  el.innerHTML = `<h1>Run <code>${esc(run.runId)}</code> <span class="outcome-chip ${esc(run.state)}">${esc(runStateLabel(run.state))}</span></h1>
+  el.innerHTML = `${crumbs([...path, { html: `Run <code>${esc(run.runId)}</code>` }], `<span class="outcome-chip ${esc(run.state)}">${esc(runStateLabel(run.state))}</span>`)}
     <p class="hint">${facts}</p>
     ${isActive(run) ? `<div class="actions"><button class="small ghost danger" data-needs="designer" data-cancel="${esc(run.runId)}">Stop run</button></div>` : ""}`;
 }
