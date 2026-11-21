@@ -37,6 +37,28 @@ export const shortNode = (fragment) => {
   return text.includes(" ") ? text : text.split("@").pop();
 };
 
+// How the pages say a level of the data plane, keyed by the word the server sends. `sealed` says whether the level seals the
+// transfers and `keyed` whether a pre-shared key is behind it. A level this table has no entry for reads as the server wrote it,
+// with `sealed` null; none given at all is unknown, and the pages say neither "in clear" nor "sealed" of it.
+const PROTECTION_WORDS = new Map([
+  ["none", { text: "in clear", sealed: false, keyed: false }],
+  ["encrypted", { text: "sealed", sealed: true, keyed: false }],
+  ["encrypted-psk", { text: "sealed, key", sealed: true, keyed: true }],
+]);
+
+/** What a level of the data plane reads as, or null when the server gave none: unknown. */
+export function protectionOf(level) {
+  if (level == null || level === "") return null;
+  return PROTECTION_WORDS.get(level) ?? { text: String(level), sealed: null, keyed: false };
+}
+
+/** The words of a level, "unknown" when none is given. A level with a key and a fingerprint announced for it ends with it, cut short. */
+export function protectionWord(level, keyId = null) {
+  const known = protectionOf(level);
+  if (!known) return "unknown";
+  return known.keyed && keyId ? `${known.text} ${String(keyId).slice(0, 8)}…` : known.text;
+}
+
 /** The rows a run's edges delivered, counted on every edge: a row that crosses two edges counts twice. */
 export const rowsCrossed = (run) => run?.result?.edgeCounts?.reduce((s, e) => s + (e.received ?? 0), 0) || 0;
 export const ROWS_CROSSED_HINT = "Counted on every edge of the run: a row that crosses two edges counts twice.";

@@ -511,6 +511,13 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   nor empties. `Origin`, where a replica says it runs, is untrusted
   text: cut at `Announce`, the ground of no decision; the protection it announces is read through `ReplicaView`, never as text.
   `[CI: NodeChannelHubTests, RequiredProtectionSettingTests, RightsRoutesTests] [local: the lab's smoke.py rights - identity, disabled; tools/campaign.py F3, S7]`
+- **The Nodes page says how each replica protects the data plane, and never judges it.** A replica's chip is the level the server
+  reads of its announcement (`NodeReplica.DataPlaneProtection`, with the start of `KeyId` when the level has a key, never a key).
+  `core.js` holds the one table of the pages' words for a level, keyed by the words of `DataPlaneProtections`: a word it has no
+  entry for shows as the server wrote it, escaped, and a replica with none is unknown, never in clear and never sealed.
+  `NodeView.ReplicasDisagreeOnProtection` is a warning under the replicas' title and `NodeReplica.BelowRequiredProtection` a marker
+  on the replica, away or connected, named with `NodeView.RequiredProtection`. The page compares no two levels and derives neither
+  flag from the replicas' words. `[local: ui_check.py]` `[unchecked: the pages, which no test plays in a browser]`
 - **A run names who launched it, and a service may launch it only once.** `RunView.LaunchedBy` is a person's email or the id of
   the identity that launched it, a service or a person verified by a key, or `CallerOf`'s name for a person of the provider with
   none (an id holds no `@`, and no two identities share one, so a
