@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """End-to-end check of the lab: every pipeline, distributed, against its monolithic witness.
 
-Seven passes by default and three more, named. The Lab view's: each pipelines/*.yaml with its catalog layout, deployed and run one
+Seven passes by default and four more, named. The Lab view's: each pipelines/*.yaml with its catalog layout, deployed and run one
 after the other. The library's: each library pipeline planned automatically, then all of them deployed at once and their runs queued together, as the page does: runs
 that share a data node must never be in flight together.
 The rights': the embedded IDP, people's sessions and the studio's bearer tokens, the flow matrix refusing a plan and then, edited under a deployed
@@ -39,7 +39,13 @@ exchange, cuts the node's connection and turns the person's token away at the ne
 The restart's: the stack's coordinator ended and started again (`lab.sh stack restart-check [restore]`, which gives the command in
 LAB_COORDINATOR_RESTART), played only when named: what the coordinator kept comes back as it was, on whichever store it runs: a rights
 edit, an armed pipeline, a journaled run, the ids that follow, and a session cookie that is not signed in again.
-Usage: smoke.py <lab-url> <dtpipe> <state-dir> [lab|library|rights|faults|bricks|cursor|sandbox|replicas|restart|keys] [pipeline-id-substring ...]
+The e2e's: the sealed stack's data plane (`LAB_STACK_E2E=1 lab.sh stack up`, then `lab.sh stack smoke e2e`), played only when named: every
+replica, the runner's too, announces encrypted-psk under one key id and /api/nodes never carries the key; a pipeline's plan and its run say
+encrypted-psk at both ends of each edge; a throwaway host of node-4's identity with no key is listed beside the sealed replica, which takes the run;
+once no sealed replica of node-4 is left the plan and the arming refuse the edge, with the coordinator's own sentence, and keep nothing. The
+host in the clear is stopped and node-4 started again. The deployment's required protection is the coordinator's setting, which the stack does
+not change: its floor is not played.
+Usage: smoke.py <lab-url> <dtpipe> <state-dir> [lab|library|rights|faults|bricks|cursor|sandbox|replicas|restart|keys|e2e] [pipeline-id-substring ...]
 A leading pass name runs that pass alone.
 Against the compose stack (`lab.sh stack smoke`, LAB_TARGET=stack) the state directory is `.stack/`: the
 witness reads the databases the nodes seeded there, the library is the coordinator's own directory, its
@@ -50,7 +56,7 @@ import base64, csv, glob, io, itertools, json, os, re, signal, subprocess, sys, 
 from datetime import datetime
 
 URL, DTPIPE, STATE = sys.argv[1].rstrip("/"), sys.argv[2], sys.argv[3]
-PASSES = {"lab", "library", "rights", "faults", "bricks", "cursor", "sandbox", "replicas", "restart", "keys"}
+PASSES = {"lab", "library", "rights", "faults", "bricks", "cursor", "sandbox", "replicas", "restart", "keys", "e2e"}
 ONLY = sys.argv[4] if len(sys.argv) > 4 and sys.argv[4] in PASSES else None
 SELECTED = sys.argv[5:] if ONLY else sys.argv[4:]
 RUN_TIMEOUT = 180
@@ -1986,12 +1992,159 @@ def keys_pass():
     return failures
 
 
+def e2e_pass():
+    failures = 0
+    pipeline, edges_pipeline = "customers-mirror", "customers-anonymized"
+    producer, consumer = f"{pipeline}@node-1", f"{pipeline}@node-4"
+    sealed_container, clear_host = "dtpipe-lab-stack-node-4-1", "lab-e2e-clear-host"
+    state = os.path.abspath(STATE)
+
+    def check(name, test):
+        nonlocal failures
+        started = time.time()
+        try:
+            detail = test()
+            print(f"PASS  e2e      {name:28} {detail}  ({time.time() - started:.1f}s)")
+            return True
+        except Exception as e:
+            failures += 1
+            print(f"FAIL  e2e      {name:28} {e}")
+            return False
+
+    def key():
+        try:
+            with open(os.path.join(state, "e2e", "key")) as f:
+                return f.read().strip()
+        except OSError:
+            raise RuntimeError("the stack is not sealed: .stack/e2e/key is missing (LAB_STACK_E2E=1 lab.sh stack up)")
+
+    def carries_key(value):
+        return key() in json.dumps(value)
+
+    def node4():
+        return next(n for n in call("/api/nodes") if n["name"] == "node-4")
+
+    def connected(replicas, level=None):
+        return [r for r in replicas if r["connected"] and (level is None or r["dataPlaneProtection"] == level)]
+
+    def announcements():
+        # Every replica says it seals and under which key: the fingerprint of one key, the same for all, never the key.
+        nodes = call("/api/nodes")
+        replicas = [(n["name"], r) for n in nodes for r in n["replicas"]]
+        unsealed = [f"{name}/{r['id']}: {r['dataPlaneProtection']}" for name, r in replicas if r["dataPlaneProtection"] != "encrypted-psk"]
+        ids = {r["keyId"] for _, r in replicas}
+        if unsealed or len(ids) != 1 or None in ids:
+            raise RuntimeError(f"not sealed under one key: {unsealed or ''} key ids {sorted(ids, key=str)}")
+        if any(n["replicasDisagreeOnProtection"] for n in nodes):
+            raise RuntimeError("replicas of one node disagree on their protection")
+        if carries_key(nodes):
+            raise RuntimeError("/api/nodes carries the key")
+        return f"{len(replicas)} replicas of {len(nodes)} nodes (the runner's too) announce encrypted-psk under key id {ids.pop()}, never the key"
+
+    def run_sealed(name):
+        # The plan names each edge's protection before the run, the run reports it at both ends of each edge.
+        call(f"/api/library/{name}/deploy", {})
+        try:
+            plan = call(f"/api/library/{name}/plan")
+            run = call("/api/runs", {"pipelineId": name})
+            final = until(lambda: _finished(run["runId"]), RUN_TIMEOUT, f"the run of {name}")
+            detail = call(f"/api/runs/{run['runId']}")
+        finally:
+            undeploy(name)
+        if final["state"] != "succeeded":
+            raise RuntimeError(f"{name} -> {final['state']}: {final.get('refusal') or final.get('description')}")
+        planned = [e["protection"] for e in plan["edgeProtections"]]
+        ends = [(e["producerProtection"], e["consumerProtection"], e["agrees"], e["sent"] == e["received"]) for e in detail["result"]["edgeCounts"]]
+        if not ends or set(planned) != {"encrypted-psk"} or set(ends) != {("encrypted-psk", "encrypted-psk", True, True)}:
+            raise RuntimeError(f"{name}: planned {planned}, run's two ends {ends}")
+        if carries_key([plan, detail]):
+            raise RuntimeError(f"the plan or the run of {name} carries the key")
+        return detail, len(ends)
+
+    def edges():
+        detail, count = run_sealed(edges_pipeline)
+        return f"{edges_pipeline}: {count} edges planned and run encrypted-psk at both ends, rows sent = received, the runner's among them"
+
+    def clear_host_joins():
+        # A host of node-4's identity set otherwise: a throwaway container of the stack's node image, with no key.
+        issuer = call("/api/rights")["idp"]["issuer"]
+        known = {r["id"] for r in node4()["replicas"]}
+        subprocess.run(["docker", "rm", "-f", clear_host], capture_output=True)
+        subprocess.Popen(["docker", "run", "--rm", "--init", "--name", clear_host, "--network", "dtpipe-lab-stack_default",
+                          "--user", f"{os.getuid()}:{os.getgid()}", "-e", "HOME=/tmp", "-v", f"{os.path.join(state, 'node-4')}:/lab/state/node-4",
+                          "--entrypoint", "dotnet", "dtpipe-lab-stack/node", "/app/Lab.NodeHost.dll", "--config", "/lab/nodes/node-4.json",
+                          "--state", "/lab/state", "--coordinator", "http://coordinator:8080", "--idp", issuer, "--dtpipe", "/usr/local/bin/dtpipe"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        until(lambda: any(r["id"] not in known for r in connected(node4()["replicas"], "none")), 90,
+              "the host in the clear to announce itself as a new replica of node-4")
+        return "a new replica of node-4, started with no key, announced itself as sending in clear"
+
+    def beside():
+        # A rolling update: while one replica of a node still seals, the edge joins through it. The page shows the difference,
+        # nothing is refused, and the run goes to the sealed replica.
+        node = node4()
+        levels = sorted(r["dataPlaneProtection"] for r in connected(node["replicas"]))
+        if levels != ["encrypted-psk", "none"] or not node["replicasDisagreeOnProtection"]:
+            raise RuntimeError(f"/api/nodes: node-4's replicas {levels}, replicasDisagreeOnProtection {node['replicasDisagreeOnProtection']}")
+        sealed = connected(node["replicas"], "encrypted-psk")[0]["id"]
+        detail, _ = run_sealed(pipeline)
+        placed = detail["result"]["replicas"][consumer]["id"]
+        if placed != sealed:
+            raise RuntimeError(f"{consumer} ran on replica {placed}, not on the sealed {sealed}")
+        return f"node-4 lists encrypted-psk and none side by side (replicasDisagreeOnProtection); the run went to the sealed replica {sealed}, both ends encrypted-psk"
+
+    def only_clear():
+        # No sealed replica of node-4 is left: the edge cannot join. The coordinator names it, in the plan and when arming, and keeps nothing.
+        subprocess.run(["docker", "stop", sealed_container], capture_output=True, check=True)
+        until(lambda: not connected(node4()["replicas"], "encrypted-psk"), 60, "node-4's sealed replica to leave")
+        plan = call(f"/api/library/{pipeline}/plan")
+        refusal = next((e["refusal"] for e in plan["edgeProtections"] if e["producerFragment"] == producer and e["consumerFragment"] == consumer), None)
+        if plan["armable"] or not refusal:
+            raise RuntimeError(f"the plan of {pipeline} with node-4 in the clear: armable {plan['armable']}, edge refusal {refusal!r}")
+        for part in (f"edge {producer} -> {consumer}", f"{producer} seals with key ", f"{consumer} sends in clear"):
+            if part not in refusal:
+                raise RuntimeError(f"the refusal does not say {part!r}: {refusal}")
+        try:
+            call(f"/api/library/{pipeline}/deploy", {})
+            raise RuntimeError("the deployment of an edge with no joinable ends was accepted")
+        except ApiError as e:
+            if e.status != 409 or refusal not in str(e):
+                raise RuntimeError(f"arming answered {e}, not 409 with the plan's sentence") from None
+        if left_behind(pipeline):
+            raise RuntimeError(f"the refusal left {left_behind(pipeline)}")
+        return f"plan and arming (409) refuse with the coordinator's sentence: {refusal}"
+
+    def undone():
+        # Whatever the checks left: the host in the clear leaves (a clean stop, so its replica is gone and not waiting out a grace),
+        # node-4 starts again and seals, and nothing stays deployed.
+        subprocess.run(["docker", "stop", "-t", "20", clear_host], capture_output=True)
+        subprocess.run(["docker", "rm", "-f", clear_host], capture_output=True)
+        subprocess.run(["docker", "start", sealed_container], capture_output=True)
+        undeploy(pipeline)
+        until(lambda: (lambda n: n["online"] and len(connected(n["replicas"])) == 1 and connected(n["replicas"], "encrypted-psk")
+                       and not any(r["dataPlaneProtection"] == "none" for r in n["replicas"]))(node4()),
+              120, "node-4 to be sealed again, alone")
+        return "the host in the clear stopped, node-4 started again and seals, nothing deployed"
+
+    check("replicas announce the key id", announcements)
+    check("edges sealed at both ends", edges)
+    try:
+        # The next two act on node-4 only once the host in the clear is there to be judged.
+        if check("a host set otherwise", clear_host_joins):
+            check("beside the sealed replicas", beside)
+            check("no sealed replica left", only_clear)
+    finally:
+        check("undone", undone)
+    return failures
+
+
 def main():
     ctx = Context()
     failures = (catalog_pass(ctx) if ONLY in (None, "lab") else 0) + (library_pass(ctx) if ONLY in (None, "library") else 0) \
         + (rights_pass() if ONLY in (None, "rights") else 0) + (faults_pass() if ONLY in (None, "faults") else 0) \
         + (bricks_pass() if ONLY in (None, "bricks") else 0) + (cursor_pass() if ONLY in (None, "cursor") else 0) + (sandbox_pass() if ONLY in (None, "sandbox") else 0) \
-        + (replicas_pass() if ONLY == "replicas" else 0) + (restart_pass() if ONLY == "restart" else 0) + (keys_pass() if ONLY == "keys" else 0)
+        + (replicas_pass() if ONLY == "replicas" else 0) + (restart_pass() if ONLY == "restart" else 0) + (keys_pass() if ONLY == "keys" else 0) \
+        + (e2e_pass() if ONLY == "e2e" else 0)
     return 1 if failures else 0
 
 

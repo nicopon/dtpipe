@@ -35,6 +35,11 @@
 #   LAB_STACK_STORE=sqlite  the stack's coordinator keeps its state in .stack/coordinator and the postgres service stays out
 #                           (postgresql, the default, keeps it in that service, whose data is in .stack/postgres); a stack is made
 #                           on one store, so purge .stack/ to change it. LAB_POSTGRES_SECRET sets the database's password
+#   LAB_STACK_E2E=1         `stack up` seals the stack's data plane: it makes a key (openssl rand -base64 32) in .stack/e2e/key, mode 0400,
+#                           and the four data nodes and the runner read it through DtPipeNode__EndToEndEncryption__PreSharedKey=@file; the
+#                           coordinator is given neither the key nor the setting. A stack is made one way: once .stack/e2e/key exists every
+#                           command of the stack seals the nodes it starts, with or without the variable; delete that file, then `stack up`,
+#                           to seal no more. `stack smoke e2e` plays the sealed stack's pass, named only
 set -euo pipefail
 
 LAB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -333,7 +338,7 @@ nodes_mode() {
 smoke_passes() {
     local switch="$1" url="$2" state="$3"; shift 3
     local pass="${1:-}"
-    case "$pass" in lab|library|rights|faults|bricks|cursor|sandbox|replicas|keys) shift ;; *) pass="" ;; esac
+    case "$pass" in lab|library|rights|faults|bricks|cursor|sandbox|replicas|keys|e2e) shift ;; *) pass="" ;; esac
     local code=0
     run_pass() {
         local mode="$1" name="$2"; shift 2
@@ -401,8 +406,13 @@ status() {
 compose() {
     local store="${LAB_STACK_STORE:-postgresql}" secret="${LAB_POSTGRES_SECRET:-coordinator-db-lab-secret}"
     [[ "$store" == postgresql || "$store" == sqlite ]] || { echo "LAB_STACK_STORE is postgresql or sqlite, not '$store'" >&2; return 1; }
+    # A sealed stack (.stack/e2e/key exists): the nodes and the runner are given the setting and the key's file, which the services
+    # mount at /run/lab-e2e. Otherwise the two variables are absent, never empty, and compose passes nothing.
+    local sealed=()
+    [[ -s "$STACK/e2e/key" ]] && sealed=(DtPipeNode__EndToEndEncryption__Enabled=true DtPipeNode__EndToEndEncryption__PreSharedKey=@/run/lab-e2e/key)
     (cd "$LAB" \
-        && SOURCE_REVISION="$(git rev-parse HEAD)" LAB_UID="$(id -u)" LAB_GID="$(id -g)" LAB_STACK_STORE="$store" LAB_POSTGRES_SECRET="$secret" \
+        && env ${sealed[@]+"${sealed[@]}"} \
+            SOURCE_REVISION="$(git rev-parse HEAD)" LAB_UID="$(id -u)" LAB_GID="$(id -g)" LAB_STACK_STORE="$store" LAB_POSTGRES_SECRET="$secret" \
             LAB_STACK_CONNECTION="$([[ "$store" == postgresql ]] && echo "Host=postgres;Username=postgres;Password=$secret;Database=coordinator")" \
             COMPOSE_PROFILES="$([[ "$store" == postgresql ]] && echo postgresql)" \
             docker compose "$@")
@@ -468,13 +478,18 @@ stack() {
     case "$command" in
         up)
             # Created here, by the user, so that docker does not create them as root.
-            mkdir -p "$STACK"/{idp,coordinator,library.git,node-1,node-2,node-3,node-4}
+            mkdir -p "$STACK"/{idp,coordinator,library.git,node-1,node-2,node-3,node-4,e2e}
             [[ "${LAB_STACK_STORE:-postgresql}" == sqlite ]] || mkdir -p "$STACK/postgres"
+            # The key is the user's, mode 0400: the nodes run as the user, the runner reads it as root before it drops its privileges.
+            if [[ "${LAB_STACK_E2E:-}" == 1 && ! -s "$STACK/e2e/key" ]]; then
+                (umask 077 && openssl rand -base64 32 >"$STACK/e2e/key") && chmod 0400 "$STACK/e2e/key"
+            fi
             compose up -d --build --wait
             nodes_report "$STACK_URL" "$([[ "${LAB_NODE_SANDBOX:-}" == 1 ]] && echo sandbox || echo strict)" 90 \
                 || { echo "The stack's node hosts did not come online; see ./lab.sh stack logs" >&2; exit 1; }
             echo
-            echo "Stack ready: $STACK_URL (home page: http://lab.localtest.me$STACK_SUFFIX)" ;;
+            echo "Stack ready: $STACK_URL (home page: http://lab.localtest.me$STACK_SUFFIX)"
+            [[ ! -s "$STACK/e2e/key" ]] || echo "Data plane sealed: the nodes and the runner hold the key of .stack/e2e/key." ;;
         down) compose --profile '*' down ;;
         nodes) stack_nodes_mode "${1:-}" ;;
         cycle) stack_cycle "${1:-}" ;;

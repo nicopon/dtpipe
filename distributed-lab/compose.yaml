@@ -65,6 +65,10 @@ x-node-environment: &node-environment
   LAB_COORDINATOR_URL: http://coordinator:8080
   LAB_IDP_URL: http://idp.localtest.me${LAB_STACK_HTTP_PORT:+:}${LAB_STACK_HTTP_PORT:-}
   LAB_NODE_SANDBOX: ${LAB_NODE_SANDBOX:-}
+  # A sealed stack (lab.sh: .stack/e2e/key exists): the settings arrive from the shell and name the key by its file. Without
+  # them the variables are not passed at all, so a stack in the clear runs with the environment it always had.
+  DtPipeNode__EndToEndEncryption__Enabled:
+  DtPipeNode__EndToEndEncryption__PreSharedKey:
 
 services:
   # Built, never started (scale 0): the images the lab's extend, handed to them as build contexts.
@@ -206,28 +210,29 @@ services:
     <<: *node
     command: [node-1]
     environment: *node-environment
-    volumes: [./.stack/node-1:/lab/state/node-1]
+    volumes: [./.stack/node-1:/lab/state/node-1, "./.stack/e2e:/run/lab-e2e:ro"]
 
   node-2:
     <<: *node
     command: [node-2]
     environment: *node-environment
-    volumes: [./.stack/node-2:/lab/state/node-2]
+    volumes: [./.stack/node-2:/lab/state/node-2, "./.stack/e2e:/run/lab-e2e:ro"]
 
   node-3:
     <<: *node
     command: [node-3]
     environment: *node-environment
-    volumes: [./.stack/node-3:/lab/state/node-3]
+    volumes: [./.stack/node-3:/lab/state/node-3, "./.stack/e2e:/run/lab-e2e:ro"]
 
   node-4:
     <<: *node
     command: [node-4]
     environment: *node-environment
-    volumes: [./.stack/node-4:/lab/state/node-4]
+    volumes: [./.stack/node-4:/lab/state/node-4, "./.stack/e2e:/run/lab-e2e:ro"]
 
   # The official runner, configured as any deployment would: through its environment. It holds no
-  # data, so it mounts nothing. Its entry point starts as root to install the network rules and
+  # data, so it mounts only the directory of the end-to-end key (empty on a stack in the clear), which its entry
+  # point reads as root. Its entry point starts as root to install the network rules and
   # runs dtpipe as 1654 with no capability (deploy/README.md).
   runner-1:
     <<: *dotnet-service
@@ -245,6 +250,10 @@ services:
       DtPipeNode__Oidc__ClientId: runner-1
       DtPipeNode__Oidc__ClientSecret: ${LAB_RUNNER_SECRET:-runner-1-lab-secret}
       DtPipeNode__FaultInjection: "true"
+      DtPipeNode__EndToEndEncryption__Enabled:
+      DtPipeNode__EndToEndEncryption__PreSharedKey:
+    volumes:
+      - ./.stack/e2e:/run/lab-e2e:ro
     depends_on:
       coordinator: { condition: service_healthy }
       proxy: { condition: service_healthy }
