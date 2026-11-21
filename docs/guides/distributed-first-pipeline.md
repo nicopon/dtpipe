@@ -134,9 +134,9 @@ cat first.csv
 
 ```text
 OrderId,Country,Product
-0,HM,Pizza
-1,NI,Car
-2,GU,Chicken
+0,BR,Keyboard
+1,SH,Bacon
+2,GT,Towels
 ```
 
 Stay in this folder for the rest of the page.
@@ -203,11 +203,11 @@ cat report.csv
 
 ```text
 Country,Orders
-CC,11
-CK,10
-GF,10
-IQ,10
-BO,9
+CK,12
+MO,12
+BV,11
+KM,9
+PL,9
 ```
 
 The same query on one machine gives the same file:
