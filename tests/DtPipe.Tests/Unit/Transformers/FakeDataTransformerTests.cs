@@ -512,7 +512,7 @@ public class FakeDataTransformerTests
 
             res!.Length.Should().Be(2);
             res.ColumnCount.Should().Be(1 + mappings.Length);
-            for (int c = 1; c < res.ColumnCount; c++)
+            for (int c = 1; c < res!.ColumnCount; c++)
             {
                 TestBatchBuilder.GetVal(res, c, 0).Should().NotBeNull();
                 TestBatchBuilder.GetVal(res, c, 1).Should().NotBeNull();
@@ -801,5 +801,85 @@ public class FakeDataTransformerTests
         using var rowRes2 = await row2.TransformBatchAsync(batch, TestContext.Current.CancellationToken);
         TestBatchBuilder.GetVal(rowRes1!, 1, 0).Should().Be(TestBatchBuilder.GetVal(rowRes2!, 1, 0));
         TestBatchBuilder.GetVal(rowRes1!, 1, 1).Should().Be(TestBatchBuilder.GetVal(rowRes2!, 1, 1));
+    }
+
+    [Fact]
+    public async Task Transform_All50Locales_ShouldProduceValidDomainsUrlsAndNoTemplateLeaks()
+    {
+        var cols = new List<PipeColumnInfo> { new("id", typeof(int), false) };
+        using var batch = TestBatchBuilder.FromRows(cols, new object?[] { 1 }, new object?[] { 2 });
+
+        foreach (var locale in Database.GetAllLocales())
+        {
+            var t = new FakeDataTransformer(new FakeOptions
+            {
+                Fake = new[]
+                {
+                    "domain:internet.domainName",
+                    "url:internet.url",
+                    "email:internet.email",
+                    "name:name.fullName",
+                    "city:address.city",
+                    "addr:address.fullAddress",
+                    "phone:phone.phoneNumber"
+                },
+                Locale = locale,
+                SeedColumn = new[] { "id" },
+                Seed = 42
+            });
+
+            await t.InitializeAsync(cols, TestContext.Current.CancellationToken);
+            using var res = await t.TransformBatchAsync(batch, TestContext.Current.CancellationToken);
+
+            var domain = (string)TestBatchBuilder.GetVal(res!, 1, 0)!;
+            var url = (string)TestBatchBuilder.GetVal(res!, 2, 0)!;
+            var email = (string)TestBatchBuilder.GetVal(res!, 3, 0)!;
+
+            domain.Should().Contain(".").And.NotStartWith("a.", $"locale '{locale}' must not produce degenerate domain");
+            domain.Split('.')[0].Length.Should().BeGreaterThanOrEqualTo(2, $"locale '{locale}' domain label");
+            url.Should().MatchRegex(@"^https?://[a-z0-9-]{2,}\.").And.NotContain("://a.", $"locale '{locale}' URL");
+            email.Should().MatchRegex(@"^[a-z0-9._-]+@[a-z0-9.-]+$");
+
+            for (int c = 1; c < res!.ColumnCount; c++)
+            {
+                var val = (string)TestBatchBuilder.GetVal(res, c, 0)!;
+                val.Should().NotBeNullOrWhiteSpace().And.NotContain("#{").And.NotContain("{{");
+            }
+        }
+    }
+
+    [Fact]
+    public async Task Transform_SeedColumn_Decimal128DifferentScales_ShouldProduceIdenticalOutput()
+    {
+        var t1 = new FakeDataTransformer(new FakeOptions
+        {
+            Fake = new[] { "email:internet.email" },
+            SeedColumn = new[] { "amt" },
+            Seed = 7
+        });
+        var t2 = new FakeDataTransformer(new FakeOptions
+        {
+            Fake = new[] { "email:internet.email" },
+            SeedColumn = new[] { "amt" },
+            Seed = 7
+        });
+
+        await t1.InitializeAsync(new List<PipeColumnInfo> { new("amt", typeof(decimal), false, Precision: 10, Scale: 2) }, TestContext.Current.CancellationToken);
+        await t2.InitializeAsync(new List<PipeColumnInfo> { new("amt", typeof(decimal), false, Precision: 38, Scale: 18) }, TestContext.Current.CancellationToken);
+
+        var t10_2 = new Apache.Arrow.Types.Decimal128Type(10, 2);
+        var b1 = new Decimal128Array.Builder(t10_2);
+        b1.Append(123.45m);
+        using var batch1 = new RecordBatch(new Schema([new Field("amt", t10_2, false)], null), [b1.Build()], 1);
+
+        var t38_18 = new Apache.Arrow.Types.Decimal128Type(38, 18);
+        var b2 = new Decimal128Array.Builder(t38_18);
+        b2.Append(123.450000000000000000m);
+        using var batch2 = new RecordBatch(new Schema([new Field("amt", t38_18, false)], null), [b2.Build()], 1);
+
+        using var res1 = await t1.TransformBatchAsync(batch1, TestContext.Current.CancellationToken);
+        using var res2 = await t2.TransformBatchAsync(batch2, TestContext.Current.CancellationToken);
+
+        TestBatchBuilder.GetVal(res1!, 1, 0).Should().Be(TestBatchBuilder.GetVal(res2!, 1, 0));
     }
 }

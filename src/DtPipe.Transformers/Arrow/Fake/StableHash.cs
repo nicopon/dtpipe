@@ -204,6 +204,16 @@ internal static class ArrowSeedKeyExtractor
     private const ulong InitialAccumulator = 0x9E3779B97F4A7C15UL;
     private const ulong NullLaneSentinel = 0xD6E8FEB86659FD93UL;
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static ulong ComputeDecimal64(decimal value)
+    {
+        var bare = DecimalWidth.Bare(value);
+        if (bare == 0m) bare = 0m;
+        Span<int> bits = stackalloc int[4];
+        decimal.GetBits(bare, bits);
+        return StableHash.Compute64(MemoryMarshal.AsBytes(bits));
+    }
+
     public static void FillRowKeys(RecordBatch batch, int[] seedColumnIndices, ulong[] keys, bool[] hasKey)
     {
         int rowCount = batch.Length;
@@ -411,16 +421,48 @@ internal static class ArrowSeedKeyExtractor
             case Decimal128Array a:
                 for (int i = 0; i < rowCount; i++)
                 {
-                    if (!noNulls && a.IsNull(i)) keys[i] = StableHash.Combine64(keys[i], lane, NullLaneSentinel);
-                    else { keys[i] = StableHash.Combine64(keys[i], lane, StableHash.Compute64(a.GetBytes(i))); hasKey[i] = true; }
+                    if (!noNulls && a.IsNull(i))
+                    {
+                        keys[i] = StableHash.Combine64(keys[i], lane, NullLaneSentinel);
+                    }
+                    else
+                    {
+                        ulong valHash;
+                        try
+                        {
+                            valHash = ComputeDecimal64(a.GetValue(i)!.Value);
+                        }
+                        catch (OverflowException)
+                        {
+                            valHash = StableHash.Compute64(a.GetBytes(i));
+                        }
+                        keys[i] = StableHash.Combine64(keys[i], lane, valHash);
+                        hasKey[i] = true;
+                    }
                 }
                 break;
 
             case Decimal256Array a:
                 for (int i = 0; i < rowCount; i++)
                 {
-                    if (!noNulls && a.IsNull(i)) keys[i] = StableHash.Combine64(keys[i], lane, NullLaneSentinel);
-                    else { keys[i] = StableHash.Combine64(keys[i], lane, StableHash.Compute64(a.GetBytes(i))); hasKey[i] = true; }
+                    if (!noNulls && a.IsNull(i))
+                    {
+                        keys[i] = StableHash.Combine64(keys[i], lane, NullLaneSentinel);
+                    }
+                    else
+                    {
+                        ulong valHash;
+                        try
+                        {
+                            valHash = ComputeDecimal64(a.GetValue(i)!.Value);
+                        }
+                        catch (OverflowException)
+                        {
+                            valHash = StableHash.Compute64(a.GetBytes(i));
+                        }
+                        keys[i] = StableHash.Combine64(keys[i], lane, valHash);
+                        hasKey[i] = true;
+                    }
                 }
                 break;
 

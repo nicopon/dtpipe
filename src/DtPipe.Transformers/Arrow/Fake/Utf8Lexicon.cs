@@ -353,6 +353,7 @@ internal sealed class LocaleLexicon
     public Utf8StringList DomainSuffixes { get; }
     public Utf8StringList PhoneFormats { get; }
     public Utf8StringList LoremWords { get; }
+    public Utf8StringList DomainWordsAscii { get; }
 
     public Utf8StringList CompanySuffixes { get; }
     public Utf8StringList CompanyAdjectives { get; }
@@ -414,6 +415,7 @@ internal sealed class LocaleLexicon
         Utf8StringList domainSuffixes,
         Utf8StringList phoneFormats,
         Utf8StringList loremWords,
+        Utf8StringList domainWordsAscii,
         Utf8StringList companySuffixes,
         Utf8StringList companyAdjectives,
         Utf8StringList companyNouns,
@@ -467,6 +469,7 @@ internal sealed class LocaleLexicon
         DomainSuffixes = domainSuffixes;
         PhoneFormats = phoneFormats;
         LoremWords = loremWords;
+        DomainWordsAscii = domainWordsAscii;
         CompanySuffixes = companySuffixes;
         CompanyAdjectives = companyAdjectives;
         CompanyNouns = companyNouns;
@@ -519,6 +522,15 @@ internal sealed class LocaleLexicon
             ? Utf8StringList.FromStrings(lastAsciiStrings)
             : (englishFallback?.LastNamesAscii ?? Utf8StringList.FromStrings(["smith", "jones", "brown", "lee", "clark"]));
 
+        var loremWordStrings = ExtractStrings(Database.Get("lorem", "words", locale, "en"));
+        if (loremWordStrings.Count == 0)
+            loremWordStrings = ExtractStrings(Database.Get("lorem", "words", "en", "en"));
+        var loremWords = Utf8StringList.FromStrings(loremWordStrings);
+        var domainWordStrings = FoldAsciiDomainWords(loremWordStrings);
+        var domainWordsAscii = domainWordStrings.Count >= 5
+            ? Utf8StringList.FromStrings(domainWordStrings)
+            : (englishFallback?.DomainWordsAscii ?? Utf8StringList.FromStrings(["example", "sample", "alpha", "beta", "gamma"]));
+
         var tplCache = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
 
         return new LocaleLexicon(
@@ -545,7 +557,8 @@ internal sealed class LocaleLexicon
             exampleEmailDomains: LoadPlain(locale, "internet", "example_email"),
             domainSuffixes: LoadPlain(locale, "internet", "domain_suffix"),
             phoneFormats: LoadPlain(locale, "phone_number", "formats"),
-            loremWords: LoadPlain(locale, "lorem", "words"),
+            loremWords: loremWords,
+            domainWordsAscii: domainWordsAscii,
             companySuffixes: LoadPlain(locale, "company", "suffix"),
             companyAdjectives: LoadPlain(locale, "company", "adjective"),
             companyNouns: LoadPlain(locale, "company", "noun"),
@@ -651,6 +664,39 @@ internal sealed class LocaleLexicon
                 sb.Length--;
 
             if (sb.Length > 0)
+                result.Add(sb.ToString());
+        }
+
+        return result;
+    }
+
+    private static List<string> FoldAsciiDomainWords(List<string> source)
+    {
+        var result = new List<string>(source.Count);
+        var sb = new StringBuilder(24);
+
+        for (int i = 0; i < source.Count; i++)
+        {
+            sb.Clear();
+            var normalized = source[i].Normalize(NormalizationForm.FormD);
+            for (int j = 0; j < normalized.Length; j++)
+            {
+                var c = normalized[j];
+                if (CharUnicodeInfo.GetUnicodeCategory(c) == UnicodeCategory.NonSpacingMark)
+                    continue;
+
+                if (c is >= 'A' and <= 'Z')
+                    sb.Append((char)(c + 32));
+                else if (c is >= 'a' and <= 'z' or >= '0' and <= '9' or '-')
+                    sb.Append(c);
+            }
+
+            while (sb.Length > 0 && sb[0] == '-')
+                sb.Remove(0, 1);
+            while (sb.Length > 0 && sb[^1] == '-')
+                sb.Length--;
+
+            if (sb.Length >= 2)
                 result.Add(sb.ToString());
         }
 
