@@ -242,14 +242,18 @@ while any replica is connected.
   fragment tries); a run whose candidates all protect alike is placed by the order alone. When each fragment has a
   candidate and no choice joins, `NoEligibleReplicaException` names, by `edge P -> C`, each edge that cannot join together
   with the edges before it that could, and what each end does: the words of `ReplicaProtection.Words`, a key id whole.
-  `EvaluateAsync` judges no edge; `ReplicaAdmission.EdgeRefusals` judges pairs of connected replicas, edge by edge, for
-  the server's arming. `[CI: EdgeProtectionTests]`
+  `EvaluateAsync` judges no edge; `ReplicaAdmission.EdgeJudgments` judges pairs of connected replicas, edge by edge, for
+  the server's arming and its plan, by `EdgeProtection.Judge`, the one rule: an `EdgeJudgment` holds the two fragments, the level
+  the edge would be held at when its joining pairs share one, and the refusal sentence when no pair joins. An end with no offer
+  leaves the edge unknown (neither level nor refusal), never in clear, and so do joining pairs of several levels, since the
+  level is not chosen among them. `EdgeRefusals` is the refusals of that judgment, in the plan's order, and no second rule.
+  `[CI: EdgeProtectionTests, EdgeJudgmentTests]`
 - **A deployment's required protection is a floor on a replica's level, and a replica below it is eligible for nothing.**
   `AdmissionOptions.RequiredProtection` is a word of `ProtectionPolicy`, the one order of the levels and the one reading of a
   word (the setting that fills it refuses any other text, and so does the property). `ReplicaAdmission.Refusal` puts
   `ReplicaChooser.ProtectionRefusal` first, so `EvaluateAsync`, `TryReserveAsync` and `Explain` carry its reason, in the words
   of `ReplicaProtection.Words` with no key id; there is no path of its own, and a runner is a node like any other. The replica is
-  never refused at the announcement or cut: `ReplicaProtocol` and `ReplicaRegistry` know nothing of the policy. `EdgeRefusals`
+  never refused at the announcement or cut: `ReplicaProtocol` and `ReplicaRegistry` know nothing of the policy. `EdgeJudgments`
   leaves such a replica out of the pairs it judges, so a node whose connected replicas are all below the requirement has none and
   is named by admission, not as an edge that cannot join. `[CI: RequiredProtectionTests; Server.Tests ArmedDeploymentTests]`
 - **The client id a replica announces is verified twice.** At the announcement, as a courtesy: one registered

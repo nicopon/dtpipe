@@ -79,6 +79,15 @@ the control plane, over each replica's node channel; TransportR carries the data
   refuse an edge whose two nodes each have a connected replica when no pair of them joins; a node with
   none is left to admission. `[CI: Coordinator.Tests EdgeProtectionTests, ReplicaAdmissionSubjectTests;
   Server.Tests ArmedDeploymentTests]`
+- **The plan of a pipeline says how each of its edges is protected, by the one rule of joining, and a page never judges it.**
+  `EdgeProtection.Judge` is that rule applied to the replicas connected now (`ReplicaAdmission.EdgeJudgments`); `EdgeRefusals` is
+  its refusals, so the sentence arming gives and the plan's field are one judgment, never two. `GET /api/library/{id}/plan`
+  carries it beside `plan` (`Launch.EdgeProtections`, an `EdgeJudgment` per edge): the two fragments, the level the edge would be
+  held at (the weakest level is a level like another), and the refusal. An edge with neither is unknown, never in clear: an end with no offer
+  (no connected replica, or every one below the required protection) or ends that join at several levels. The edges of a plan
+  the planner refuses are not judged. The judgment holds words, key fingerprints and fragment names, never a key. A page draws
+  the judgment: it compares no two announced levels and reads no cause's sentence to learn which edge it names.
+  `[CI: Coordinator.Tests EdgeJudgmentTests; Server.Tests LaunchRoutesTests]` `[unchecked: a page that judges an edge itself]`
 - **A deployment may require a protection of the data plane, and a replica below it is visible and eligible for nothing.**
   `Coordinator:DataPlane:RequiredProtection` is a floor on the level a replica announces, ordered by `ProtectionPolicy`, which is also
   the one reading of the setting (a text that is no word stops the start); unset, it requires nothing. A replica

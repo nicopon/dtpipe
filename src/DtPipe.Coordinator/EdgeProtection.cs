@@ -47,6 +47,24 @@ public static class EdgeProtection
     private static string Words(IEnumerable<ReplicaProtection> offers) =>
         string.Join(" or ", offers.Select(o => o.Words).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal));
 
+    /// <summary>
+    /// The edge from <paramref name="producer"/> to <paramref name="consumer"/>, judged on the protections each end can take. An end
+    /// with no offer is not judged. Otherwise the edge holds when a pair of offers joins (<see cref="ReplicaProtection.Joins"/>), at the
+    /// level its joining pairs share when they share one and at no level when they differ; when no pair joins, its refusal reads
+    /// <c>edge P -&gt; C: P seals with key …, C sends in clear.</c>
+    /// </summary>
+    public static EdgeJudgment Judge(
+        string producer, IReadOnlyCollection<ReplicaProtection> producerOffers, string consumer, IReadOnlyCollection<ReplicaProtection> consumerOffers)
+    {
+        if (producerOffers.Count == 0 || consumerOffers.Count == 0) return new(producer, consumer, null, null);
+        var levels = producerOffers
+            .SelectMany(p => consumerOffers.Where(p.Joins).Select(_ => p.Level))
+            .Distinct(StringComparer.Ordinal).ToList();
+        return levels.Count == 0
+            ? new(producer, consumer, null, $"{Name(producer, consumer)}: {Ends(producer, producerOffers, consumer, consumerOffers)}.")
+            : new(producer, consumer, levels.Count == 1 ? levels[0] : null, null);
+    }
+
     /// <summary>The edges between <paramref name="fragments"/>, by their positions; an edge naming a fragment of no position is left out.</summary>
     internal static IReadOnlyList<(int Producer, int Consumer)> Indexed(
         IReadOnlyList<string> fragments, IEnumerable<(string Producer, string Consumer)> edges)

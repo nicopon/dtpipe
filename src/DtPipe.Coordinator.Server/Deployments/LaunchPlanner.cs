@@ -11,9 +11,13 @@ namespace DtPipe.Coordinator.Server.Deployments;
 /// <summary>
 /// The plan a launch makes, and the one place a runner is chosen. <see cref="Plan"/> is the first that passes, or, when none
 /// does, the first candidate's with <see cref="Refusals"/> added to its errors. <see cref="Runner"/> is the runner it uses, null
-/// when no branch of the job needs one.
+/// when no branch of the job needs one. <see cref="EdgeProtections"/> is what the replicas connected now say of each edge of
+/// <see cref="Plan"/>, judged once by <see cref="ReplicaAdmission.EdgeJudgments"/>: the plan of a launch that is not deployable has none
+/// judged, and null reads as that.
 /// </summary>
-public sealed record Launch(DistributionPlan Plan, string? Runner, IReadOnlyList<string> Refusals, IReadOnlyList<LaunchCause>? Causes = null)
+public sealed record Launch(
+    DistributionPlan Plan, string? Runner, IReadOnlyList<string> Refusals, IReadOnlyList<LaunchCause>? Causes = null,
+    IReadOnlyList<EdgeJudgment>? EdgeProtections = null)
 {
     public bool Ok => Plan.Deployable;
 
@@ -95,32 +99,35 @@ internal sealed class LaunchPlanner(AutoPlacer placer, BrickCatalog bricks, Node
             var unplaced = new List<string>();
             var plan = placer.Plan(pipelineId, yaml, bindings, null, unplaced);
             var causes = plan.Deployable ? [] : CausesOfPlan(plan, own, unplaced);
+            IReadOnlyList<EdgeJudgment> judged = [];
             if (plan.Deployable)
             {
-                var (refusal, found) = await EligibilityAsync(plan);
+                var (refusal, found, edges) = await EligibilityAsync(plan);
+                judged = edges;
                 if (refusal is not null) (plan, causes) = (Refused(plan, [refusal]), found);
             }
-            return new Launch(plan, null, [], causes);
+            return new Launch(plan, null, [], causes, judged);
         }
 
         DistributionPlan? first = null;
+        IReadOnlyList<EdgeJudgment> firstJudged = [];
         var refusals = new List<string>();
         var reasons = new List<LaunchCause>();
         foreach (var runner in candidates)
         {
             var plan = placer.Plan(pipelineId, yaml, bindings, runner);
-            first ??= plan;
             var uses = plan.Fragments.Any(f => f.Node == runner.Name);
-            var (refusal, found) = plan.Deployable ? await EligibilityAsync(plan) : (null, []);
+            var (refusal, found, judged) = plan.Deployable ? await EligibilityAsync(plan) : (null, [], []);
+            if (first is null) (first, firstJudged) = (plan, judged);
             var why = plan.Deployable ? refusal : Reasons(plan);
-            if (why is null) return new Launch(plan, uses ? runner.Name : null, [], []);
+            if (why is null) return new Launch(plan, uses ? runner.Name : null, [], [], judged);
             var causes = plan.Deployable ? found : CausesOfPlan(plan, own, []);
             // A plan that does not use the runner fails whichever runner is chosen: the others would only repeat it.
-            if (!uses) return new Launch(plan.Deployable ? Refused(plan, [why]) : plan, null, plan.Deployable ? [why] : [], causes);
+            if (!uses) return new Launch(plan.Deployable ? Refused(plan, [why]) : plan, null, plan.Deployable ? [why] : [], causes, judged);
             refusals.Add($"Runner {runner.Name}: {why}");
             reasons.AddRange(causes);
         }
-        return new Launch(Refused(first!, refusals), null, refusals, [.. reasons.DistinctBy(c => (c.Code, c.Fragment, c.Message))]);
+        return new Launch(Refused(first!, refusals), null, refusals, [.. reasons.DistinctBy(c => (c.Code, c.Fragment, c.Message))], firstJudged);
     }
 
     /// <summary>
@@ -165,10 +172,11 @@ internal sealed class LaunchPlanner(AutoPlacer placer, BrickCatalog bricks, Node
 
     /// <summary>
     /// What keeps a plan from running on the replicas connected now: the fragments with no replica that could run them, and the edges
-    /// no pair of replicas could carry (<see cref="ReplicaAdmission.EdgeRefusals"/>). Why in a sentence, and as causes; null when
-    /// neither is found.
+    /// no pair of replicas could carry (<see cref="ReplicaAdmission.EdgeJudgments"/>, whose refusals are the edges' sentences). Why in a
+    /// sentence, and as causes, null when neither is found; and the judgment of each edge, which is empty when a node of the plan has no
+    /// usable identity, since none is then judged.
     /// </summary>
-    private async Task<(string? Refusal, List<LaunchCause> Causes)> EligibilityAsync(DistributionPlan plan)
+    private async Task<(string? Refusal, List<LaunchCause> Causes, IReadOnlyList<EdgeJudgment> Edges)> EligibilityAsync(DistributionPlan plan)
     {
         IReadOnlyList<RunFragment> fragments;
         IReadOnlyDictionary<string, FragmentEligibility> eligibility;
@@ -177,17 +185,18 @@ internal sealed class LaunchPlanner(AutoPlacer placer, BrickCatalog bricks, Node
             fragments = RunFragmentsOf(plan);
             eligibility = await admission.EvaluateAsync(fragments);
         }
-        catch (ConflictException ex) { return (ex.Message, [new(LaunchCauses.PlanRefused, ex.Message)]); }
+        catch (ConflictException ex) { return (ex.Message, [new(LaunchCauses.PlanRefused, ex.Message)], []); }
         var missing = plan.Fragments.Where(f => eligibility[f.Name].Eligible.Count == 0).ToList();
-        var apart = admission.EdgeRefusals(fragments, RunEdgesOf(plan));
-        if (missing.Count == 0 && apart.Count == 0) return (null, []);
+        var judged = admission.EdgeJudgments(fragments, RunEdgesOf(plan));
+        var apart = EdgeJudgment.RefusalsOf(judged);
+        if (missing.Count == 0 && apart.Count == 0) return (null, [], judged);
         var runners = inventory.Snapshot().Where(n => n.Role == NodeRole.Runner).Select(n => n.Name).ToHashSet(StringComparer.Ordinal);
         var refusal = string.Join(" ", missing.Select(f => CannotRun(f, eligibility[f.Name])).Concat(apart));
         var causes = missing.Select(f => new LaunchCause(
             runners.Contains(f.Node) ? LaunchCauses.NoAdmissibleRunner : LaunchCauses.NoEligibleReplica,
             CannotRun(f, eligibility[f.Name]), f.Node, f.Name))
             .Concat(apart.Select(edge => new LaunchCause(LaunchCauses.ProtectionMismatch, edge))).ToList();
-        return (refusal, causes);
+        return (refusal, causes, judged);
     }
 
     /// <summary>The refusal of one fragment, its node the subject of the sentence: the node is what is missing, never the runner that tried.</summary>

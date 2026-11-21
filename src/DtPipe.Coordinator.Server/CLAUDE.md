@@ -644,6 +644,13 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   reads that need any runner, never a plan. The groups a plan names are the rights' at that moment, so a node's groups changing
   needs no redistribution.
   `[CI: ArmedDeploymentTests, LaunchRoutesTests, PlanRightsTests, RightsStoreTests] [local: the lab's smoke.py rights - several groups]`
+- **The plan route says how each edge of a deployable plan is protected, and the page shows it.** `Launch.EdgeProtections` is
+  what `LaunchPlanner.EligibilityAsync` judged once (`ReplicaAdmission.EdgeJudgments`, which `EdgeRefusals` projects), for the
+  plan that is returned: the first candidate's when no runner serves, and none when the planner refused the plan or a node of it has
+  no usable identity. `GET /api/library/{id}/plan` writes it as `edgeProtections` beside `plan`, so the field is filled for an edge
+  that admission then refuses, whose plan reads as not deployable, and is empty for a plan with no edge. `PlannedEdge`,
+  `LaunchCause` and the health read are unchanged: the cause `protection-mismatch` stays a sentence, and a page learns which edge
+  fails from this field, never from that sentence. The studio reads no plan route. `[CI: LaunchRoutesTests]`
 - **An edge whose ends cannot join is refused at arming and at registration, by name, and judged on connected replicas
   only.** Arming (`LaunchPlanner.ChooseAsync`, a runner at a time) and the registration of a plan fixed by hand
   (`DeploymentService.DeployAsync`, after the matrix and before the nodes' presence, its runner fixed) refuse an edge whose two

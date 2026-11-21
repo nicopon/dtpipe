@@ -195,7 +195,17 @@ public sealed class ReplicaAdmission
     /// that differ within a node pass while they offer a joining pair, as a rolling update does; pairs are judged edge by edge, so only
     /// admission's joint choice decides a run. Reserves nothing.
     /// </summary>
-    public IReadOnlyList<string> EdgeRefusals(IReadOnlyList<RunFragment> fragments, IReadOnlyList<RunEdge> edges)
+    public IReadOnlyList<string> EdgeRefusals(IReadOnlyList<RunFragment> fragments, IReadOnlyList<RunEdge> edges) =>
+        EdgeJudgment.RefusalsOf(EdgeJudgments(fragments, edges));
+
+    /// <summary>
+    /// What the replicas connected now say of each distinct edge (a pair of producer and consumer fragments), in the order the plan names
+    /// them: <see cref="EdgeRefusals"/> is its refusals and the same judgment, never a second rule (<see cref="EdgeProtection.Judge"/>).
+    /// The offers of a fragment are those of its node's connected replicas that are not below the required protection. An edge an end of
+    /// which has none is no refusal and comes back unknown here, since a node nothing can be asked of is never one that sends in clear.
+    /// Reserves nothing.
+    /// </summary>
+    public IReadOnlyList<EdgeJudgment> EdgeJudgments(IReadOnlyList<RunFragment> fragments, IReadOnlyList<RunEdge> edges)
     {
         var nodes = new Dictionary<string, string?>(StringComparer.Ordinal);
         foreach (var fragment in fragments) nodes.TryAdd(fragment.Name, fragment.Node);
@@ -204,14 +214,7 @@ public sealed class ReplicaAdmission
             ? connected.Where(r => r.Key.Node == node).Select(ReplicaProtection.Of).Distinct().ToList()
             : [];
 
-        var refusals = new List<string>();
-        foreach (var edge in edges.DistinctBy(e => (e.ProducerFragment, e.ConsumerFragment)))
-        {
-            var (producer, consumer) = (Offers(edge.ProducerFragment), Offers(edge.ConsumerFragment));
-            if (producer.Count == 0 || consumer.Count == 0 || producer.Any(p => consumer.Any(p.Joins))) continue;
-            refusals.Add($"{EdgeProtection.Name(edge.ProducerFragment, edge.ConsumerFragment)}: " +
-                $"{EdgeProtection.Ends(edge.ProducerFragment, producer, edge.ConsumerFragment, consumer)}.");
-        }
-        return refusals;
+        return [.. edges.DistinctBy(e => (e.ProducerFragment, e.ConsumerFragment)).Select(edge =>
+            EdgeProtection.Judge(edge.ProducerFragment, Offers(edge.ProducerFragment), edge.ConsumerFragment, Offers(edge.ConsumerFragment)))];
     }
 }
