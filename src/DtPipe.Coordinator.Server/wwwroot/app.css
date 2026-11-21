@@ -148,6 +148,8 @@ pre.diff .del { color: var(--bad); }
 .lanes-head { display: grid; grid-template-columns: 290px 290px 290px; column-gap: 110px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; margin: 4px 0 8px; }
 .lanes { position: relative; overflow-x: auto; min-height: 60px; }
 .lanes > svg { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; }
+/* The marks that carry the server's sentence in their title answer the pointer, which the edges and the rest of the drawing do not. */
+.lanes > svg .edge-lock, .lanes > svg .edge-protection { pointer-events: all; }
 .xbox { position: absolute; width: 290px; background: var(--surface); border: 1px solid var(--border); border-top: 4px solid var(--node-color); border-radius: 8px; box-shadow: var(--shadow); font-size: 12.5px; }
 .xbox-head { display: flex; justify-content: space-between; padding: 6px 10px; background: var(--surface-2); }
 .xbox .node-name { color: var(--node-color); }

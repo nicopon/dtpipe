@@ -657,7 +657,12 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   no usable identity. `GET /api/library/{id}/plan` writes it as `edgeProtections` beside `plan`, so the field is filled for an edge
   that admission then refuses, whose plan reads as not deployable, and is empty for a plan with no edge. `PlannedEdge`,
   `LaunchCause` and the health read are unchanged: the cause `protection-mismatch` stays a sentence, and a page learns which edge
-  fails from this field, never from that sentence. The studio reads no plan route. `[CI: LaunchRoutesTests]`
+  fails from this field, never from that sentence. The studio reads no plan route. The pipeline's page draws the field and nothing
+  else (`drawLanes`, through the table of words of `core.js`): a closed lock and the word for an edge held at a level that seals, a
+  broken red one for an edge with a refusal, the server's sentence in its title and never read, and no mark for an edge in clear.
+  A null level and refusal are unknown and, like an answer with the field empty or absent, draw as the diagram always did, the
+  legend included. The page compares no two levels, and the protection a run reported is never drawn on the plan's edges.
+  `[CI: LaunchRoutesTests]` `[local: ui_check.py]` `[unchecked: the pages, which no test plays in a browser]`
 - **An edge whose ends cannot join is refused at arming and at registration, by name, and judged on connected replicas
   only.** Arming (`LaunchPlanner.ChooseAsync`, a runner at a time) and the registration of a plan fixed by hand
   (`DeploymentService.DeployAsync`, after the matrix and before the nodes' presence, its runner fixed) refuse an edge whose two

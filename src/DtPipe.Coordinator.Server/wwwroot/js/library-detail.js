@@ -7,7 +7,7 @@
 import { $, ROWS_CROSSED_HINT, api, apiPage, deploymentOf, duration, esc, fmt, isActive, lastRunOf, rowsCrossed, runHref, runStateLabel, shortNode, store, toast } from "./core.js";
 import { crumbs } from "./crumbs.js";
 import { deploymentChip, statusChip } from "./pipeline-status.js";
-import { drawLanes, fragmentJobs, legend, planProblems } from "./placement.js";
+import { drawLanes, fragmentJobs, legendFor, planProblems } from "./placement.js";
 
 let host = null;
 let id = null;
@@ -15,6 +15,7 @@ let doc = null;
 let plan = null;
 let armable = false;     // whether Deploy can make the plan deployable: the server decides, never the page
 let runner = null;       // the runner a launch would use now, if one passes
+let edgeProtections = []; // the server's judgment of each edge of the plan, drawn and never made here; empty when the answer has none
 let brickOfUnit = {};
 let offers = {};          // alias -> the nodes that offer the brick of that branch
 let draft = {};           // alias -> the node and mode drafted on the page, saved or not
@@ -42,7 +43,7 @@ export function mount(el, params) {
   id = params[0];
   reads++; visit++;
   busy = false;
-  doc = null; plan = null;
+  doc = null; plan = null; edgeProtections = [];
   draft = {}; taken = sorted(draft);
   journaled = null; journalError = "";
   versionsOpen = false; commits = null; versionsError = ""; shown = null;
@@ -100,6 +101,8 @@ async function loadPlan(pipeline, mine) {
   plan = answer.plan;
   armable = !!answer.armable;
   runner = answer.runner;
+  // A coordinator that predates the field, a plan it refuses and a plan with no edge all say nothing here.
+  edgeProtections = Array.isArray(answer.edgeProtections) ? answer.edgeProtections : [];
   brickOfUnit = answer.bricks || {};
   offers = answer.offers || {};
   return true;
@@ -206,7 +209,7 @@ function render() {
           <button data-needs="designer" id="x-deploy" class="${upToDate ? "" : "primary"}" ${canDeploy && !busy ? "" : "disabled"} title="${esc(deployTitle)}">Deploy</button>
           <button data-needs="designer" id="x-run" class="${upToDate ? "primary" : ""}" ${canRun && !busy ? "" : "disabled"}>Run</button>
         </span></div>
-      <div class="card-sub">${hasBricks ? `<span class="hint">A brick's mode says how it may change after it was checked; Deploy saves the modes.</span>` : "<span></span>"}${legend}</div>
+      <div class="card-sub">${hasBricks ? `<span class="hint">A brick's mode says how it may change after it was checked; Deploy saves the modes.</span>` : "<span></span>"}${legendFor(plan, edgeProtections)}</div>
       <div class="lanes-head"><span>sources</span><span>runner</span><span>sinks</span></div>
       <div class="lanes" id="x-lanes"></div>
       ${strayBindings()}
@@ -217,7 +220,7 @@ function render() {
     <section class="card"><div class="card-head"><h2>Job</h2><span class="hint">Read only: write it with <code>dtpipe studio</code> and publish it.</span></div>
     <pre id="x-job">${esc(doc.yaml)}</pre></section>
     ${versionsCard()}`;
-  drawLanes($("x-lanes"), plan, brickOfUnit, { run, running, current: runMatches, extra: modeControl });
+  drawLanes($("x-lanes"), plan, brickOfUnit, { run, running, current: runMatches, extra: modeControl, edgeProtections });
 }
 // The edges between groups the plan needs and the flow matrix does not allow, read from the plan's refused edges: each group of
 // the sender to each group of the receiver. An administrator allows them here, beside what the matrix allows already; anyone
