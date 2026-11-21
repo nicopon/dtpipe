@@ -74,16 +74,67 @@ public enum NodeRole { Data, Runner }
 /// for people to read: untrusted text, never a ground for a decision. <see cref="DataPlaneClientId"/> is the
 /// TransportR client the host moves a run's bytes with: the coordinator takes it only when that client is
 /// registered under the same subject as the connection, and opens every transfer to it.
+/// <see cref="DataPlaneProtection"/> is what that client applies to the bytes of its transfers (a word of
+/// <see cref="DataPlaneProtections"/>) and <see cref="KeyId"/> the fingerprint of its pre-shared key, never the key: a host that
+/// says neither is read as sealing nothing. Both are untrusted text, read through <see cref="DataPlaneProtections"/>.
 /// </summary>
 public sealed record NodeAnnouncement(
     string Name, string Description, IReadOnlyList<DatasetInfo> Datasets, NodeRole Role,
     IReadOnlyList<BrickInfo> Bricks, IReadOnlyList<string>? Capabilities = null, string? DtpipeVersion = null,
-    Guid? InstanceId = null, string? Origin = null, Guid? DataPlaneClientId = null)
+    Guid? InstanceId = null, string? Origin = null, Guid? DataPlaneClientId = null,
+    string? DataPlaneProtection = null, string? KeyId = null)
 {
     /// <summary>The capability of a host that accepts a fragment written as a job, not only one made of its bricks.</summary>
     public const string RawFragments = "raw-fragments";
 
     public bool Offers(string capability) => Capabilities?.Contains(capability, StringComparer.Ordinal) == true;
+}
+
+/// <summary>
+/// The words <see cref="NodeAnnouncement.DataPlaneProtection"/> carries, by what a node's client does to the bytes of its transfers,
+/// and how the coordinator reads what a host sent. A node writes one of the words; the coordinator reads any other text, and an
+/// absent one, as <see cref="None"/>, so an announcement never makes it believe in more protection than it can name.
+/// </summary>
+public static class DataPlaneProtections
+{
+    /// <summary>The transfers cross in clear.</summary>
+    public const string None = "none";
+
+    /// <summary>Every batch is sealed, with no pre-shared key: it protects against whoever reads the path, not against a hub that rewrites it.</summary>
+    public const string Encrypted = "encrypted";
+
+    /// <summary>Every batch is sealed with a pre-shared key, the node's own configuration or a provider of its host.</summary>
+    public const string EncryptedPsk = "encrypted-psk";
+
+    /// <summary>The length of a key id: the hexadecimal of eight bytes.</summary>
+    public const int KeyIdLength = 16;
+
+    /// <summary>The level <paramref name="word"/> names, or <see cref="None"/> when it is absent or no word of this class.</summary>
+    public static string Read(string? word) => word switch
+    {
+        Encrypted => Encrypted,
+        EncryptedPsk => EncryptedPsk,
+        _ => None,
+    };
+
+    /// <summary>
+    /// <paramref name="word"/> when it is one of this class's words, otherwise null. Unlike <see cref="Read"/>, an absent or foreign text is never
+    /// <see cref="None"/>: what a replica reports of a transfer it carried is a level or it is unknown.
+    /// </summary>
+    public static string? Known(string? word) => word switch
+    {
+        None => None,
+        Encrypted => Encrypted,
+        EncryptedPsk => EncryptedPsk,
+        _ => null,
+    };
+
+    /// <summary>
+    /// The key id <paramref name="keyId"/> states for <paramref name="level"/>, or null: only <see cref="EncryptedPsk"/> carries one,
+    /// and only a text of <see cref="KeyIdLength"/> lowercase hexadecimal characters is an id. A host with a key per pair announces none.
+    /// </summary>
+    public static string? ReadKeyId(string level, string? keyId) =>
+        level == EncryptedPsk && keyId is { Length: KeyIdLength } && keyId.All(c => c is (>= '0' and <= '9') or (>= 'a' and <= 'f')) ? keyId : null;
 }
 
 public enum BrickKind { Source, Sink }
@@ -224,11 +275,58 @@ public sealed record FragmentCheck(bool Ok, string? Reason = null);
 /// <summary>
 /// What <c>Exited</c> carries: how one run of a fragment ended, and the <see cref="LaunchToken"/> of the launch that
 /// started the child, copied from its <see cref="LaunchRequest"/>. <see cref="Cursors"/> holds, by sink alias, the cursor each sink branch
-/// tracked when the child exited with 0.
+/// tracked when the child exited with 0. <see cref="EdgeProtections"/> holds, by edge alias, what the replica's own TransportR client
+/// reported it applied to that edge's transfer (a word of <see cref="DataPlaneProtections"/>, never a key or a fingerprint): an edge the
+/// client reported nothing of has no entry, and a host that predates the field sends none, so a missing entry means unknown and never
+/// the level that seals nothing. Untrusted text, read through <see cref="DataPlaneProtections.Known"/>. <see cref="EdgeFailures"/> holds, by
+/// edge alias, the category the replica's client gave the failure of that edge's transfer (a word of <see cref="TransferFailures"/>, never a
+/// message): an edge whose transfer did not fail, or failed with no category, has no entry, and a host that predates the field sends none.
+/// Untrusted text, read through <see cref="TransferFailures.Known"/>.
 /// </summary>
 public sealed record FragmentExit(
     string RunId, string Fragment, int ExitCode, string Origin, string? FirstFault, IReadOnlyDictionary<string, long> RowCounts,
-    string? LaunchToken = null, IReadOnlyDictionary<string, CursorReport>? Cursors = null);
+    string? LaunchToken = null, IReadOnlyDictionary<string, CursorReport>? Cursors = null,
+    IReadOnlyDictionary<string, string>? EdgeProtections = null, IReadOnlyDictionary<string, string>? EdgeFailures = null);
+
+/// <summary>
+/// The words <see cref="FragmentExit.EdgeFailures"/> carries: the categories TransportR gives a failed transfer, each as the end that saw
+/// it names it. A node writes one of them; the coordinator keeps only these words (<see cref="Known"/>), never a message, and a category
+/// a later TransportR adds has no word until this class names it.
+/// </summary>
+public static class TransferFailures
+{
+    /// <summary>The hub ended the transfer: a teardown, a reaper, a right withdrawn, or a transfer the hub lost.</summary>
+    public const string EndedByHub = "EndedByHub";
+
+    /// <summary>The other end gave up and said so.</summary>
+    public const string AbandonedByPeer = "AbandonedByPeer";
+
+    /// <summary>On a sender, the receiver acknowledged nothing within the acknowledgement timeout; on a receiver, the transfer did not finish closing within it.</summary>
+    public const string AcknowledgementTimedOut = "AcknowledgementTimedOut";
+
+    /// <summary>This end's handle was released before the transfer reached an outcome.</summary>
+    public const string HandleReleased = "HandleReleased";
+
+    /// <summary>This end could not turn a batch into bytes, or bytes back into a batch.</summary>
+    public const string UndecodableOrUnserializableBatch = "UndecodableOrUnserializableBatch";
+
+    /// <summary>What arrived breaks the wire protocol.</summary>
+    public const string ProtocolViolation = "ProtocolViolation";
+
+    /// <summary>A failure TransportR files under no other category.</summary>
+    public const string Other = "Other";
+
+    /// <summary>End-to-end encryption refused the transfer at this end: the two ends are set differently, or the stream was altered on its way.</summary>
+    public const string EndToEndEncryptionFailed = "EndToEndEncryptionFailed";
+
+    /// <summary><paramref name="word"/> when it is one of this class's words, otherwise null: a text a host sent is a category or nothing.</summary>
+    public static string? Known(string? word) => word switch
+    {
+        EndedByHub or AbandonedByPeer or AcknowledgementTimedOut or HandleReleased or UndecodableOrUnserializableBatch
+            or ProtocolViolation or Other or EndToEndEncryptionFailed => word,
+        _ => null,
+    };
+}
 
 /// <summary>
 /// The two words <see cref="FragmentExit.Origin"/> carries, each by what it does to the run's verdict. The node writes

@@ -1,7 +1,7 @@
 // Runs: the runs in flight and the queue behind them, the journal of finished runs (filtered by pipeline and by state at the
 // server, counted, paged), and the deployments that are no library pipeline's. A run opens its own page, `run.js`:
 // the address `#/runs/<runId>` is this view's too, and it hands the page over.
-import { $, ROWS_CROSSED_HINT, api, apiPage, duration, esc, fmt, nodeColor, plural, rowsCrossed, runHref, runStateLabel, shortNode, store, toast } from "./core.js";
+import { $, ROWS_CROSSED_HINT, api, apiPage, causeKindChip, causeLine, duration, esc, fmt, nodeColor, plural, rowsCrossed, runHref, runStateLabel, store, toast } from "./core.js";
 import * as runPage from "./run.js";
 
 const PAGE = 50;       // what the journal asks for first and what Show more adds
@@ -173,7 +173,7 @@ function renderJournal() {
       const href = esc(runHref(r.runId));
       return `<tr class="clickable" data-href="${href}"><td><a href="${href}"><code>${esc(r.runId)}</code></a></td><td>${esc(r.pipelineId ?? r.planId)}</td>
         <td><span class="outcome-chip ${esc(r.state)}">${esc(runStateLabel(r.state))}</span></td><td class="wrap">${esc(r.launchedBy ?? "")}</td><td title="${esc(r.startedAt)}">${esc(new Date(r.startedAt).toLocaleString())}</td>
-        <td class="num">${esc(duration(r))}</td><td class="num">${rows ? fmt(rows) : ""}</td><td class="wrap">${esc(r.reason ?? (r.result?.cause ? shortNode(r.result.cause) : ""))}</td></tr>`;
+        <td class="num">${esc(duration(r))}</td><td class="num">${rows ? fmt(rows) : ""}</td><td class="wrap">${causeKindChip(r)}${esc(causeLine(r))}</td></tr>`;
     }).join("")}</table>` : `<p class="hint">${!loaded ? "Reading the journal…" : filter.pipeline || filter.state ? "No run answers these filters." : "No run yet."}</p>`;
   $("r-more").innerHTML = runs.length >= total ? ""
     : limit < MAX_PAGE ? `<p><button id="r-show-more" class="ghost small">Show more</button></p>`

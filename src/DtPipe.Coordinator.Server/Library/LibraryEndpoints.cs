@@ -82,13 +82,25 @@ internal static class LibraryEndpoints
         });
 
         // The plan a launch would make now, from the job and the bindings the library holds: nothing is written. The runner it names
-        // is the one a launch would pick at this moment.
+        // is the one a launch would pick at this moment. edgeProtections judges each edge of a deployable plan by the rule arming
+        // applies (Launch.EdgeProtections); the page shows it and never compares levels itself.
         api.MapGet("/library/{id}/plan", async (string id, PipelineLibrary library, AutoPlacer placer, DeploymentManager deployments, CancellationToken ct) =>
         {
             var doc = await library.GetAsync(id, ct);
             if (doc is null) return Results.NotFound(new { error = $"'{id}' is not in the library." });
             var launch = await deployments.PlanLaunchAsync(id, doc.Yaml, doc.Bindings, ct);
-            return Results.Ok(new { plan = launch.Plan, armable = LibraryArming.Armable(launch.Plan.Deployable, doc.BindingProblems), runner = launch.Runner, bricks = placer.BrickAliases(doc.Yaml), offers = placer.Offers(doc.Yaml) });
+            return Results.Ok(new { plan = launch.Plan, armable = LibraryArming.Armable(launch.Plan.Deployable, doc.BindingProblems), runner = launch.Runner, bricks = placer.BrickAliases(doc.Yaml), offers = placer.Offers(doc.Yaml), edgeProtections = launch.EdgeProtections ?? [] });
+        });
+        // The edges of a job text the library need not hold, judged as a launch would judge them now (Launch.EdgeProtections, the rule
+        // arming applies): nothing is saved or kept. A text has no pin, which only a check writes, so each reference to a brick the
+        // catalog offers online is pinned here, in the call alone, at the version the brick has now. A brick the catalog lacks or that
+        // is offline gets none and keeps its own refusal.
+        api.MapPost(CoordinatorApi.EdgeProtectionsRoute, async (EdgeProtectionsRequest request, BrickCatalog bricks, DeploymentManager deployments, CancellationToken ct) =>
+        {
+            var launch = await deployments.PlanLaunchAsync(DraftLabel, request.Job, PinnedNow(request.Job, bricks), ct);
+            return Results.Ok(new EdgeProtectionsResponse(
+                launch.Ok, launch.Ok ? null : launch.Refusal,
+                [.. (launch.EdgeProtections ?? []).Select(e => new EdgeProtectionView(e.ProducerFragment, e.ConsumerFragment, e.Protection, e.Refusal))]));
         });
         // Arms the pipeline at the commit the library holds, with the bindings it holds. A reference no check has pinned is checked and
         // pinned first, in a commit of its own (LibraryArming). The plan a launch would make now must hold and every node must answer
@@ -101,6 +113,20 @@ internal static class LibraryEndpoints
             return Results.Ok(await arming.ArmAsync(doc, TrustedIdp.CallerOf(http), ct));
         });
     }
+
+    /// <summary>The name a job text that is no library pipeline plans under: it only names the fragments (<c>draft@node</c>), and nothing is read or kept under it.</summary>
+    private const string DraftLabel = "draft";
+
+    /// <summary>
+    /// The strict bindings of <paramref name="yaml"/>'s brick references, each pinned at the version its brick has in the catalog now,
+    /// as a check that passed at this moment would leave them. A brick the catalog lacks or that is offline has no pin, so the planner
+    /// words why it cannot be judged. Nothing is written.
+    /// </summary>
+    private static IReadOnlyDictionary<string, Binding> PinnedNow(string yaml, BrickCatalog bricks) =>
+        BrickReferences.Expand(yaml, new Dictionary<string, Binding>(StringComparer.Ordinal))
+            .ToDictionary(b => b.Key, b => bricks.Find($"{b.Value.Node}/{b.Value.Brick}") is { Online: true } brick
+                ? b.Value with { Pin = new BindingPin(brick.Version) }
+                : b.Value, StringComparer.Ordinal);
 
     /// <summary>Why bindings cannot be written at all: an empty alias or node, or a mode that is none of the four. Null when they can.</summary>
     private static string? Refusal(IReadOnlyDictionary<string, Binding>? bindings)

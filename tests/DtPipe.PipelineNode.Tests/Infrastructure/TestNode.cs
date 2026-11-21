@@ -71,9 +71,9 @@ internal sealed class TestNode : IAsyncDisposable
 
     public static async Task<TestNode> StartAsync(
         CoordinatorTestHost host, string name, string jobPath, EdgeBinding[] edges, TimeSpan? unwiredTimeout = null, Guid? instance = null,
-        bool faultInjection = false)
+        bool faultInjection = false, NodeClientOptions? client = null)
     {
-        var node = await PipelineNode.ConnectAsync(new NodeClientOptions { HubUrl = host.Url });
+        var node = await PipelineNode.ConnectAsync(client ?? new NodeClientOptions { HubUrl = host.Url });
         var channel = host.CreateNodeChannel();
         var id = instance ?? Guid.NewGuid();
         var dir = Directory.CreateTempSubdirectory("test-node-runs-").FullName;

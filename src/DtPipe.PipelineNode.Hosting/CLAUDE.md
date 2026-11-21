@@ -125,6 +125,25 @@ none. One node per process, which is one replica of its node's identity; a secon
   begins with `@`. `dtpipe node` resolves its own references (`src/DtPipe/CLAUDE.md`) and hands the value over, so such a secret cannot
   pass through it (a coordinator's key never begins with `@`).
   `[CI: Hosting.Tests KeyTokenTests, DtPipeNodeBuilderTests]`
+- **The end-to-end key is the node's own, read at start, and never travels.** `DtPipeNodeOptions.EndToEndEncryption` is off by
+  default; `Enabled` seals the data plane's transfers, and a pre-shared key from one source (`PreSharedKey`, base64 of 32 bytes
+  or `@path`; `PreSharedKeyFile`; `PreSharedKeyProvider`, a host's code) makes a hub that rewrites a transfer fail it. `Validate`
+  reads the key (`EndToEndKey`, through `SecretReference`) and refuses a key without `Enabled`, two sources, a text that is no
+  base64 of 32 bytes and a platform without AES-GCM, so a key the node cannot use stops the start: `ConnectNodeAsync` only logs
+  a client it could not build, which would leave the node announced without a data plane. No message of the node channel and no
+  answer of the coordinator carries a key: the coordinator hosts the hub and reaches the node at the same address, so a key it
+  handed out would protect nothing against whoever holds that path. A configured key serves every peer (one per trust domain);
+  the provider receives the peer's TransportR client id, which changes with each client, so a key per pair is a host's own code.
+  Every node a transfer joins must be set alike, key included: TransportR has no downgrade, and ends set differently fail
+  before the first batch, each as its peer's doing (`FaultOrigin.Remote`).
+  **A node announces what its client applies, and nothing of the key but an id.** `EndToEndKey.Resolve` reads the setting once
+  (`EndToEndSetting`) and `NodeAgent` builds both the TransportR client and the announcement from that one value, so the level
+  (`DataPlaneProtections`) the coordinator is told is the client's. A configured key's id is the first 8 bytes of its HMAC-SHA256 over
+  a fixed label, in lowercase hexadecimal, derived on the node: it tells which nodes share a key and cannot be turned back into it;
+  a provider has none. One line at start (`NodeAgent`, Information) names the level and the id, never the key, a part of it or the
+  setting it was read from.
+  `[CI: Hosting.Tests EndToEndKeyTests; PipelineNode.Tests EndToEndEncryptionTests — Protection at both ends, two hosts' own
+  clients included, and the level and id each announces]` `[unchecked: the AES-GCM refusal; nodes of one run set differently, which only the run's failure shows]`
 - **A node the coordinator disconnects connects again.** SignalR's automatic reconnect does not
   cover a connection the server closes (a reconnect the coordinator asked for, an announcement it
   refused), so `hub.Closed` only signals and `ReconnectLoopAsync` starts the connection again and
@@ -151,8 +170,15 @@ none. One node per process, which is one replica of its node's identity; a secon
   accepts, and a report in flight when one is accepted is sent again at once; `NotAdmitted` is final. The
   report carries the token of the launch that started the child (`LaunchRequest.LaunchToken`, kept with the
   run and copied into `FragmentExit`), a held one included: the coordinator admits no report
-  without it.
-  `[CI: PipelineNode.Tests ReplicaRunsTests, CoordinatorDrivenTests, NodeAgentDataPlaneTests]` `[unchecked: the report in flight when an announcement lands]`
+  without it. `ReplicaRuns.ExitOf` builds the report, and it carries, by edge alias, the protection the replica's client reported for that
+  edge (`FragmentExit.EdgeProtections`): read from the run (`FragmentRun.EdgeProtections`), never from the node's setting or announcement,
+  and put in words by `EndToEndKey.WordsOf`, the table the announced level uses too. A value that table does not know has no entry, and a
+  run with no entry at all sends none. It carries too, by edge alias, the category the client gave the failure of that edge's transfer
+  (`FragmentExit.EdgeFailures`): read from the run (`FragmentRun.EdgeFailures`) and put in the words of `TransferFailures` by
+  `TransferFailureWords`, the one table from TransportR's categories; a category it does not know, or a failure with none, has no entry,
+  and the message stays in the first fault alone.
+  `[CI: PipelineNode.Tests ReplicaRunsTests, CoordinatorDrivenTests, NodeAgentDataPlaneTests, EndToEndEncryptionTests; Hosting.Tests EndToEndKeyTests]`
+  `[unchecked: the report in flight when an announcement lands]`
 - **A host holds at most `DtPipeNodeOptions.MaxRuns` runs** (0, the default, for no bound): `ReplicaRuns` admits a launch under a
   lock before its child starts, refuses one beyond the bound by name, and gives the place back when the launch fails or the run
   leaves its table. `Check` never counts, since a deployment is armed long before its runs. The product's runner sets it: the steps

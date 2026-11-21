@@ -60,13 +60,68 @@ the control plane, over each replica's node channel; TransportR carries the data
   have.** The node is a byte relay: dtpipe reaches it through `arrow:` and references no TransportR
   assembly.
 - **A node's replicas must be interchangeable**: one database, the same variables, the same bricks outside
-  a rolling update. Nothing checks it; any eligible replica may run a fragment. `[unchecked]`
+  a rolling update, the same protection of the data plane. Any eligible replica may run a fragment. The protection is compared:
+  each replica announces its level and the id of its key (a fingerprint the node derives, never the key), and replicas that
+  differ are flagged in the coordinator's log and by the node's API, never refused, since a rolling update passes through that.
+  `[CI: Coordinator.Tests DataPlaneProtectionWireTests; Server.Tests NodeChannelHubTests; Hosting.Tests EndToEndKeyTests;
+  PipelineNode.Tests EndToEndEncryptionTests]` `[unchecked: the rest]`
 - **A fragment runs on a replica of its node's identity, and only that replica speaks for it.** Admission
   places each fragment on a replica connected under the subject of its node whose bricks compose the plan's
   version and whose TransportR client holds exactly the node's groups. The replica is chosen once for the
   run and never changed: one that is lost ends the runs placed on it, and none resumes on another. The run's
   result names the replica of each fragment. The coordinator knows a message's sender by its connection
   alone, so an `Exited` from any other replica, of another identity or of the same, is not heard.
+  **Eligibility is a fragment's, joining is an edge's.** TransportR has no downgrade, so the two ends of
+  every edge must protect the data plane alike: one level, and one key id where both name one. That
+  relation is not transitive, so admission chooses the replicas of a run together, in its order of
+  preference among the choices that join every edge, and refuses a run no choice joins before anything is
+  launched, naming an edge and what each end does. Arming, and the registration of a plan fixed by hand,
+  refuse an edge whose two nodes each have a connected replica when no pair of them joins; a node with
+  none is left to admission. `[CI: Coordinator.Tests EdgeProtectionTests, ReplicaAdmissionSubjectTests;
+  Server.Tests ArmedDeploymentTests]`
+- **The plan of a pipeline says how each of its edges is protected, by the one rule of joining, and a page never judges it.**
+  `EdgeProtection.Judge` is that rule applied to the replicas connected now (`ReplicaAdmission.EdgeJudgments`); `EdgeRefusals` is
+  its refusals, so the sentence arming gives and the plan's field are one judgment, never two. `GET /api/library/{id}/plan`
+  carries it beside `plan` (`Launch.EdgeProtections`, an `EdgeJudgment` per edge): the two fragments, the level the edge would be
+  held at (the weakest level is a level like another), and the refusal. An edge with neither is unknown, never in clear: an end with no offer
+  (no connected replica, or every one below the required protection) or ends that join at several levels. The edges of a plan
+  the planner refuses are not judged. The judgment holds words, key fingerprints and fragment names, never a key. A page draws
+  the judgment: it compares no two announced levels and reads no cause's sentence to learn which edge it names. `POST /api/edges/protections`
+  gives the same judgment of a job text the library need not hold, which `dtpipe studio` shows before a publication and never acts on.
+  `[CI: Coordinator.Tests EdgeJudgmentTests; Server.Tests LaunchRoutesTests]` `[unchecked: a page that judges an edge itself]`
+- **A deployment may require a protection of the data plane, and a replica below it is visible and eligible for nothing.**
+  `Coordinator:DataPlane:RequiredProtection` is a floor on the level a replica announces, ordered by `ProtectionPolicy`, which is also
+  the one reading of the setting (a text that is no word stops the start); unset, it requires nothing. A replica
+  below it stays connected and admitted as a replica, never refused or cut at its announcement, since a rolling update passes through
+  it: it is listed as under the policy by the node's API and the log, told once per level it announces, and refused by
+  `ReplicaChooser.ProtectionRefusal` for every fragment, a runner's included, by the paths eligibility already has. Arming does not
+  count it as an end of an edge, so a node whose connected replicas are all below it reads as a node with no eligible replica, never
+  as an edge that cannot join. The policy judges the level and no key or fingerprint: whether two ends hold the same key stays the
+  edge's. `[CI: Coordinator.Tests RequiredProtectionTests; Server.Tests RequiredProtectionSettingTests, NodeChannelHubTests,
+  ArmedDeploymentTests]`
+- **A run reports the protection each end of each edge applied, as its own client reports it, and an absence reads unknown.** A node
+  reads `TransferInfo.Protection` from its TransportR client when it wires an edge, while the client lists the transfer, and sends it by
+  alias in `FragmentExit.EdgeProtections`, in the words of `DataPlaneProtections` read through the one table `EndToEndKey` also announces
+  with; never from its setting or its announcement, which the client may not apply. The coordinator keeps each end apart
+  (`EdgeCount.ProducerProtection`, `ConsumerProtection`, looked up by each end's own alias like the row counts, never one level made of
+  both) in the run's result, which the journal and the run routes carry. An end that reported nothing (an older node, a transfer the
+  client no longer lists, a fragment that wired nothing, a text that is no word) is null: never the level that seals nothing and never
+  the level the replica announced. The field carries a word and no key, fingerprint or path, and the coordinator reports it and judges
+  nothing by it. `[CI: PipelineNode.Tests EndToEndEncryptionTests, CoordinatorDrivenTests; Hosting.Tests EndToEndKeyTests;
+  Coordinator.Tests ScriptedRunTests, EdgeProtectionReportWireTests; Server.Tests RunJournalTests, StateWireTests]`
+- **An edge an end of which failed end-to-end encryption is the run's cause, read from the category each end reports, and
+  reports without one give the verdict the rule gives without categories.** A node keeps, by alias, the category its own client gave each transfer's
+  failure (`TransferFailedException.Category`, never its message) and sends it in `FragmentExit.EdgeFailures`, in the words of
+  `TransferFailures` through the one table `TransferFailureWords`; a category the table does not know, and a failure that has none,
+  leave no entry. The coordinator keeps only those words and reads them only where every fault is a consequence of a transfer:
+  the first edge of the run an end of which failed the encryption is the cause, as `producer -> consumer`, with every failed fragment
+  its consequence, and else the receiver of an edge whose sender had no acknowledgement. A cancellation, a silence, a wiring failure
+  and a fragment's own fault are judged before them, and such a run stays a failure. `RunResult.CauseKind` (`CauseKinds`) says what
+  the cause names, so the journal reads the reason from it rather than guess; a result kept without it is read by its reports. An edge the
+  hub could not open adds the word of the hub's category, a refusal none. No exception's text decides a cause, and none enters
+  `EdgeFailures` or `CauseKind`.
+  `[CI: PipelineNode.Tests EndToEndEncryptionTests, CoordinatorDrivenTests; Coordinator.Tests EdgeFailureVerdictTests,
+  EdgeFailureReportWireTests, ScriptedRunTests; Server.Tests RunJournalTests, StateWireTests]`
 - **Cancel by stream rupture, never by signal**: the node must run on Windows.
 - **A runner hosts no data: a runner's fragment reads and writes its `arrow:` edges and nothing else.** The fragments of every
   run share the runner's host, so a file, a database, a checkpoint or a cursor file it reached would carry rows between two
@@ -117,7 +172,8 @@ the control plane, over each replica's node channel; TransportR carries the data
   `no_new_privs`. A list it cannot apply stops the start; an empty list or `DTPIPE_EGRESS_RULES=off` installs nothing and warns.
   The rules take addresses, never names: a name resolved once is a rule that outlives the address. Every other image, the
   coordinator's, keeps `USER 1654:1654`. **A step never reads the runner's identity**: a client secret given as `@path` is
-  read by the entry point, as root, so the runner's key is root's alone (`deploy/compose.yaml`), and the runner makes itself not
+  read by the entry point, as root, so the runner's key is root's alone (`deploy/compose.yaml`), and so is an end-to-end key
+  given as `@path` (`DtPipeNode__EndToEndEncryption__PreSharedKey`), and the runner makes itself not
   dumpable (`NotDumpable`, Linux) before it starts a step, so a step, under the same user, reads neither its environment nor its
   memory. The runner's state directory, the other runs' jobs and spill files included, stays that user's.
   `[local: validate_runner_egress.sh, on the images of a checkout]`

@@ -77,6 +77,7 @@ public sealed partial class ArmedDeploymentTests : IDisposable
     private PipelineHealth _health = null!;
     private readonly FakeHeads _heads = new();
     private readonly Microsoft.Extensions.Time.Testing.FakeTimeProvider _time = new();
+    private string _required = DataPlaneProtections.None;
 
     public ArmedDeploymentTests()
     {
@@ -118,14 +119,15 @@ public sealed partial class ArmedDeploymentTests : IDisposable
     private (RightsStore, NodeInventory, RunJournal, DeploymentManager) Start(ReplicaRegistry registry)
     {
         var rights = MemoryRightsStore.Rights(_options);
-        var inventory = new NodeInventory(registry);
+        var admission = new AdmissionOptions { RequiredProtection = _required };
+        var inventory = new NodeInventory(registry, admission);
         var journal = MemoryRunStore.Journal(_options);
         _bus = new EventBus();
         BrickCatalog? bricks = null;
         BindingVerifier? verifier = null;
         _store = new FailingDeploymentStore(MemoryDeploymentStore.At(_options.StateDir));
         var deployments = TestDeployments.Create(
-            inventory, _link, _runs, new ReplicaAdmission(registry, _state), new RightsFlowControl(rights), rights, _bus, journal, _options, _jobs,
+            inventory, _link, _runs, new ReplicaAdmission(registry, _state, admission), new RightsFlowControl(rights), rights, _bus, journal, _options, _jobs,
             (b, requests) =>
             {
                 bricks = b;
@@ -147,17 +149,20 @@ public sealed partial class ArmedDeploymentTests : IDisposable
 
     private static BrickInfo Brick() => TestBricks.Announced("src", BrickKind.Source, """{"input":"sqlite:a"}""", "source");
 
-    private async Task NodeAsync(string name, string group, NodeRole role, BrickInfo? brick = null)
+    /// <summary>A new replica of <paramref name="name"/>, announcing <paramref name="protection"/> of its data plane; its connection.</summary>
+    private async Task<string> NodeAsync(
+        string name, string group, NodeRole role, BrickInfo? brick = null, string? protection = null, string? keyId = null)
     {
         var client = Guid.NewGuid();
         var subject = "node-" + name;
         await _state.SaveClientAsync(new ClientRegistration(client, "data-" + name, [group], null, null, DateTime.UtcNow, Subject: subject));
         var announcement = new NodeAnnouncement(
             name, "", [], role, role == NodeRole.Data ? [brick ?? Brick()] : [],
-            InstanceId: Guid.NewGuid(), DataPlaneClientId: client);
+            InstanceId: Guid.NewGuid(), DataPlaneClientId: client, DataPlaneProtection: protection, KeyId: keyId);
         var connection = $"c-{name}-{Interlocked.Increment(ref _connections)}";
         _registry.Announce(connection, subject, announcement, [group], () => { });
         _inventory.Announced(name, subject, announcement, [group]);
+        return connection;
     }
 
     private static ArmedDeployment Armed(string node = "n", string job = Job) => new(

@@ -74,9 +74,9 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
 - **Without `--coordinator` the studio is whole, minus the bricks, the library and the publication.**
   `StudioTools.Coordinator` is null: `/api/coordinator` has no address, `/api/bricks` an empty catalogue,
   `GET /api/publish` no publication, and `/api/coordinator/login`, `/api/library`, `/api/library/open`,
-  `POST /api/publish` and `POST /api/publish/check` answer 404 "opened without --coordinator". Jobs, cards, variables and
+  `POST /api/publish`, `POST /api/publish/check` and `POST /api/publish/edges` answer 404 "opened without --coordinator". Jobs, cards, variables and
   samples never ask for the link; a route that needs it refuses the same way.
-  `[CI: StudioServerTests — jobs, cards, variables, samples and the six refusals]`
+  `[CI: StudioServerTests — jobs, cards, variables, samples and the seven refusals]`
   `[unchecked: import, debug and run without a coordinator; that a new route needing the link refuses]`
 - **The coordinator decides what a brick is; the studio reads its answer.** A card that is a brick is written as the reference to
   it (`input: brick:<node>/<id>` for a source, `output: brick:<node>/<id>` with `from` for a sink): `DesignService` writes it from the
@@ -114,6 +114,17 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   apart from the composition's, for the composed text it judged, and says there is none while signed out. A job whose ends are
   no bricks runs here and is refused by it: a verdict of publication, not an error.
   `[CI: StudioPublicationCheckTests — the real binary]` `[unchecked: the page, which page_smoke.mjs plays without a coordinator]`
+- **What the coordinator's nodes would do with a job's edges is the coordinator's word, which the studio shows and never judges.**
+  `POST /api/publish/edges` asks the coordinator, for the saved job or the cards' composition as `/api/publish/check` does, for the
+  judgment a launch would make now of each edge (`CoordinatorLink.EdgeProtectionsAsync`: the rule of the plan route, over the replicas
+  connected now) and hands it to the page as written. A read: no process starts, nothing is kept, and only while a person is signed in
+  (409 otherwise). A job holding a credential written as a value is not sent (`SecretsRefusal`) and the answer says it was not judged.
+  The page shows it as a third verdict of Problems, apart from the composition's and the publication check's, asked with that check
+  and before *Publish*, never at each edit: an edge is broken when the coordinator gave it a refusal, shown as written, and the page
+  compares no two levels and reads no refusal's text. **A broken edge never stops a publication**: it is said in the status and
+  in Problems, and recalled in the success message while it holds, since arming is where the coordinator refuses and the nodes'
+  state is live. An answer the link cannot read is a named error, never "no broken edge".
+  `[CI: StudioPublishTests, StudioCoordinatorTests]` `[unchecked: the page, which page_smoke.mjs plays without a coordinator]`
 - **A failure shown to a person is worded once, by `ShownFailure` (`DtPipe.Jobs`).** The cause alone: the innermost exception's first
   line, or the last link of a flattened chain without its type, a YAML failure with its line, and for a child's console
   (`OfConsole`) without its log lines, its verdict lines, its wrapped lines' breaks or the `--edges-only` the check runs under, which reads

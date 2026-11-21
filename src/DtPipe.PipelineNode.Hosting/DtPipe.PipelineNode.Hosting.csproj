@@ -35,8 +35,8 @@
     <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.14" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.14" />
     <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.14" />
-    <PackageReference Include="TransportR" Version="0.12.1" />
-    <PackageReference Include="TransportR.Client" Version="0.12.1" />
+    <PackageReference Include="TransportR" Version="0.13.0" />
+    <PackageReference Include="TransportR.Client" Version="0.13.0" />
     <PackageReference Include="YamlDotNet" Version="18.1.0" />
   </ItemGroup>
 

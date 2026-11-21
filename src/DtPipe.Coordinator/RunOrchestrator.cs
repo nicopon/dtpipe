@@ -17,10 +17,17 @@ public sealed record RunEdge(string ProducerFragment, string ProducerAlias, stri
 /// <summary>The fragments a run needs - each bound to the node that may host it, <see cref="RunFragment"/> - and the edges to wire once they are placed.</summary>
 public sealed record RunSpec(string RunId, IReadOnlyList<RunFragment> Fragments, IReadOnlyList<RunEdge> Edges);
 
-/// <summary>What one fragment reported when its own process finished.</summary>
+/// <summary>
+/// What one fragment reported when its own process finished. <see cref="EdgeProtections"/> is, by edge alias, the word of
+/// <see cref="DataPlaneProtections"/> its replica's client reported for that edge's transfer; null when it reported none, and an edge
+/// with no entry is unknown, never the level that seals nothing. <see cref="EdgeFailures"/> is, by edge alias, the word of
+/// <see cref="TransferFailures"/> its replica's client gave the failure of that edge's transfer; null when it reported none, and an edge
+/// with no entry failed with no category, or not at all, or on a host that predates the field.
+/// </summary>
 public sealed record FragmentExitReport(
     string Fragment, int ExitCode, FaultOrigin? Origin, string? FirstFault, IReadOnlyDictionary<string, long> RowCounts,
-    IReadOnlyDictionary<string, CursorReport>? Cursors = null);
+    IReadOnlyDictionary<string, CursorReport>? Cursors = null, IReadOnlyDictionary<string, string>? EdgeProtections = null,
+    IReadOnlyDictionary<string, string>? EdgeFailures = null);
 
 /// <summary>
 /// <see cref="Cancelled"/> mirrors the product's own 130 convention (root <c>CLAUDE.md</c>'s exit
@@ -31,11 +38,14 @@ public enum RunOutcome { Succeeded, Failed, Cancelled }
 /// <summary>
 /// One edge's two row counts, always both looked up - never defaulted to "agree" when a fragment
 /// never reported a count for its side, which a chain of <c>&amp;&amp;</c> lookups would do by
-/// short-circuiting past a missing key instead of flagging it.
+/// short-circuiting past a missing key instead of flagging it. <see cref="ProducerProtection"/> and <see cref="ConsumerProtection"/> are what
+/// each end's client reported it applied to the edge's transfer, a word of <see cref="DataPlaneProtections"/>, looked up by each end's own
+/// alias like the counts: null is unknown (a fragment that reported none, or an older host), never the level that seals nothing and never
+/// the level the replica announced. The two ends are kept apart, and no one level of the edge is made of them.
 /// </summary>
 public sealed record EdgeCount(
     string ProducerFragment, string ProducerAlias, string ConsumerFragment, string ConsumerAlias,
-    long? Sent, long? Received)
+    long? Sent, long? Received, string? ProducerProtection = null, string? ConsumerProtection = null)
 {
     public bool Agrees => Sent is not null && Received is not null && Sent == Received;
 }
@@ -50,11 +60,13 @@ public sealed record EdgeCount(
 /// reported when the grace after a remote failure ran out and reported only once told to cancel. It is
 /// never true for the row-count-mismatch, refused-transfer or refused-launch forms of <see cref="Cause"/>,
 /// which are messages, not fragment names. <see cref="Replicas"/> says which replica ran each fragment.
+/// <see cref="CauseKind"/> says what <see cref="Cause"/> names, a word of <see cref="CauseKinds"/>, so a reader keys on it rather than
+/// guess from the text; null with no cause, and on a result written before the field, which says nothing of it.
 /// </summary>
 public sealed record RunResult(
     RunOutcome Outcome, string? Cause, IReadOnlyList<string> Consequences,
     IReadOnlyDictionary<string, FragmentExitReport> Reports, IReadOnlyList<EdgeCount> EdgeCounts,
-    bool CauseIsUnresponsive = false, IReadOnlyDictionary<string, RunReplica>? Replicas = null)
+    bool CauseIsUnresponsive = false, IReadOnlyDictionary<string, RunReplica>? Replicas = null, string? CauseKind = null)
 {
     /// <summary>The human-readable run report the exit criterion asks for: cause, consequences, counts per edge.</summary>
     public string Describe()
@@ -71,6 +83,28 @@ public sealed record RunResult(
         }
         return string.Join(Environment.NewLine, lines);
     }
+}
+
+/// <summary>
+/// The words <see cref="RunResult.CauseKind"/> carries, by what <see cref="RunResult.Cause"/> names: the one table of them. A cause of
+/// another shape takes a word of its own, so that no reader reads one shape as another.
+/// </summary>
+public static class CauseKinds
+{
+    /// <summary>A fragment, by its name: its own failure, its stop at 130, its silence (<see cref="RunResult.CauseIsUnresponsive"/>), or the first fault when none is its own.</summary>
+    public const string Fragment = "fragment";
+
+    /// <summary>A sentence of the coordinator's: a transfer the hub could not open, a launch a replica refused, row counts that differ.</summary>
+    public const string Message = "message";
+
+    /// <summary>
+    /// An edge, as <c>producer -> consumer</c>, an end of which failed end-to-end encryption: its ends are set differently, or its stream was
+    /// altered on its way. The fragments that failed are its consequences.
+    /// </summary>
+    public const string Edge = "edge";
+
+    /// <summary>A fragment, by its name, that received on an edge whose sender had no acknowledgement from it within its timeout.</summary>
+    public const string MuteReceiver = "mute-receiver";
 }
 
 /// <summary>The replica a fragment ran on: the start of its instance id, and where it says it runs (untrusted text).</summary>
@@ -221,7 +255,9 @@ public sealed class RunOrchestrator : IRunOrchestrator
 
         // A fragment that exited 0 carries no origin: there was no fault to attribute.
         FaultOrigin? parsedOrigin = exit.ExitCode == 0 ? null : exit.Origin == ExitOrigins.Remote ? FaultOrigin.Remote : FaultOrigin.Local;
-        tcs.TrySetResult(new FragmentExitReport(exit.Fragment, exit.ExitCode, parsedOrigin, exit.FirstFault, exit.RowCounts, exit.Cursors));
+        tcs.TrySetResult(new FragmentExitReport(
+            exit.Fragment, exit.ExitCode, parsedOrigin, exit.FirstFault, exit.RowCounts, exit.Cursors, ProtectionsReported(exit.EdgeProtections),
+            FailuresReported(exit.EdgeFailures)));
 
         // A fragment whose transfer failed under it is not the cause of anything yet: its peers owe the
         // run their own report, within RemoteFailureGrace.
@@ -253,6 +289,27 @@ public sealed class RunOrchestrator : IRunOrchestrator
         && placement.Tokens.TryGetValue(exit.Fragment, out var expected)
         && string.Equals(token, expected, StringComparison.Ordinal);
 
+    /// <summary>
+    /// Pure. The protections an exit reports of its edges, kept as the words of <see cref="DataPlaneProtections"/> only: an entry whose
+    /// text is no such word is dropped, so it reads unknown, and a table left with none is null. The text is a host's, never a level
+    /// made of it.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, string>? ProtectionsReported(IReadOnlyDictionary<string, string>? reported) =>
+        WordsReported(reported, DataPlaneProtections.Known);
+
+    /// <summary>
+    /// Pure. The failures an exit reports of its edges, by the same filter as <see cref="ProtectionsReported"/>: the words of
+    /// <see cref="TransferFailures"/> only, so a text that is no category reads as no entry and has no effect on the verdict.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, string>? FailuresReported(IReadOnlyDictionary<string, string>? reported) =>
+        WordsReported(reported, TransferFailures.Known);
+
+    private static IReadOnlyDictionary<string, string>? WordsReported(IReadOnlyDictionary<string, string>? reported, Func<string?, string?> known)
+    {
+        var kept = reported?.Where(p => known(p.Value) is not null).ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal);
+        return kept is { Count: > 0 } ? kept : null;
+    }
+
     private static IReadOnlyList<EdgeCount> BuildEdgeCounts(
         IReadOnlyDictionary<string, FragmentExitReport> reports, IReadOnlyList<RunEdge> edges) =>
         edges.Select(e =>
@@ -261,8 +318,15 @@ public sealed class RunOrchestrator : IRunOrchestrator
                 && producer.RowCounts.TryGetValue(e.ProducerAlias, out var s) ? s : null;
             long? received = reports.TryGetValue(e.ConsumerFragment, out var consumer)
                 && consumer.RowCounts.TryGetValue(e.ConsumerAlias, out var r) ? r : null;
-            return new EdgeCount(e.ProducerFragment, e.ProducerAlias, e.ConsumerFragment, e.ConsumerAlias, sent, received);
+            return new EdgeCount(
+                e.ProducerFragment, e.ProducerAlias, e.ConsumerFragment, e.ConsumerAlias, sent, received,
+                ProtectionOf(reports, e.ProducerFragment, e.ProducerAlias), ProtectionOf(reports, e.ConsumerFragment, e.ConsumerAlias));
         }).ToList();
+
+    /// <summary>The word the fragment's report names for the edge <paramref name="alias"/>, or null when it reported no fragment, no table or no entry for it.</summary>
+    private static string? ProtectionOf(IReadOnlyDictionary<string, FragmentExitReport> reports, string fragment, string alias) =>
+        reports.TryGetValue(fragment, out var report) && report.EdgeProtections is { } table && table.TryGetValue(alias, out var word)
+            ? DataPlaneProtections.Known(word) : null;
 
     /// <summary>
     /// Pure. The fragments to name when the grace after a remote failure runs out: those that have not
@@ -307,6 +371,13 @@ public sealed class RunOrchestrator : IRunOrchestrator
     /// reported when <see cref="RunOrchestratorOptions.RemoteFailureGrace"/> ran out - counts as silent even
     /// when it reported afterwards, once told to cancel: that report is a consequence of the teardown, and
     /// the fragments that failed remotely because of it are its consequences, not the cause.
+    ///
+    /// When every fault is <see cref="FaultOrigin.Remote"/>, the categories the fragments report of their edges' failures
+    /// (<see cref="FragmentExitReport.EdgeFailures"/>) take the place of the first fault: the first edge of
+    /// <paramref name="edges"/> an end of which failed end-to-end encryption is the cause, as <c>producer -> consumer</c>, and
+    /// every failed fragment its consequence; failing that, the receiver of the first edge whose sender had no acknowledgement in
+    /// time. They outrank nothing else: a fragment's own fault, a silence, a wiring failure and a cancellation are judged
+    /// before them, and reports that carry no category give the verdict the rule gives without them.
     /// </summary>
     internal static RunResult DetermineOutcome(
         IReadOnlyDictionary<string, FragmentExitReport> reports,
@@ -336,13 +407,13 @@ public sealed class RunOrchestrator : IRunOrchestrator
             var consequences = allFragments
                 .Where(f => f != cause && (silent.Contains(f) || organicFaults.Any(r => r.Fragment == f)))
                 .ToList();
-            return new RunResult(RunOutcome.Failed, cause, consequences, reports, edgeCounts, CauseIsUnresponsive: true);
+            return new RunResult(RunOutcome.Failed, cause, consequences, reports, edgeCounts, CauseIsUnresponsive: true, CauseKind: CauseKinds.Fragment);
         }
 
         var localFault = organicFaults.FirstOrDefault(r => r.Origin == FaultOrigin.Local);
 
         if (wiringFailure is not null && localFault is null)
-            return new RunResult(RunOutcome.Failed, wiringFailure, [], reports, edgeCounts);
+            return new RunResult(RunOutcome.Failed, wiringFailure, [], reports, edgeCounts, CauseKind: CauseKinds.Message);
 
         if (organicFaults.Count == 0)
         {
@@ -351,17 +422,40 @@ public sealed class RunOrchestrator : IRunOrchestrator
                 return new RunResult(RunOutcome.Succeeded, null, [], reports, edgeCounts);
 
             var edgeNames = mismatchedEdges.Select(e => $"{e.ProducerFragment}->{e.ConsumerFragment}");
-            return new RunResult(RunOutcome.Failed, $"row count mismatch on edge(s): {string.Join(", ", edgeNames)}", [], reports, edgeCounts);
+            return new RunResult(RunOutcome.Failed, $"row count mismatch on edge(s): {string.Join(", ", edgeNames)}", [], reports, edgeCounts,
+                CauseKind: CauseKinds.Message);
         }
 
         if (localFault is { ExitCode: 130 })
         {
             var consequences = organicFaults.Where(r => r.Fragment != localFault.Fragment).Select(r => r.Fragment).ToList();
-            return new RunResult(RunOutcome.Cancelled, localFault.Fragment, consequences, reports, edgeCounts);
+            return new RunResult(RunOutcome.Cancelled, localFault.Fragment, consequences, reports, edgeCounts, CauseKind: CauseKinds.Fragment);
+        }
+
+        if (localFault is null)
+        {
+            // Every fault is a consequence of a transfer: the category an end reports names what failed, where the first fault would
+            // name a fragment that merely saw it first.
+            var failed = organicFaults.ToDictionary(r => r.Fragment, StringComparer.Ordinal);
+            string? FailureOf(string fragment, string alias) =>
+                failed.TryGetValue(fragment, out var report) && report.EdgeFailures is { } table ? table.GetValueOrDefault(alias) : null;
+
+            if (edges.FirstOrDefault(e => FailureOf(e.ProducerFragment, e.ProducerAlias) == TransferFailures.EndToEndEncryptionFailed
+                    || FailureOf(e.ConsumerFragment, e.ConsumerAlias) == TransferFailures.EndToEndEncryptionFailed) is { } sealedApart)
+                return new RunResult(RunOutcome.Failed, $"{sealedApart.ProducerFragment} -> {sealedApart.ConsumerFragment}",
+                    organicFaults.Select(r => r.Fragment).ToList(), reports, edgeCounts, CauseKind: CauseKinds.Edge);
+
+            if (edges.FirstOrDefault(e => FailureOf(e.ProducerFragment, e.ProducerAlias) == TransferFailures.AcknowledgementTimedOut
+                    && !coordinatorCancelled.Contains(e.ConsumerFragment)) is { } unacknowledged)
+            {
+                var receiver = unacknowledged.ConsumerFragment;
+                return new RunResult(RunOutcome.Failed, receiver, organicFaults.Where(r => r.Fragment != receiver).Select(r => r.Fragment).ToList(),
+                    reports, edgeCounts, CauseKind: CauseKinds.MuteReceiver);
+            }
         }
 
         var faultCause = localFault ?? organicFaults[0];
         var faultConsequences = organicFaults.Where(r => r.Fragment != faultCause.Fragment).Select(r => r.Fragment).ToList();
-        return new RunResult(RunOutcome.Failed, faultCause.Fragment, faultConsequences, reports, edgeCounts);
+        return new RunResult(RunOutcome.Failed, faultCause.Fragment, faultConsequences, reports, edgeCounts, CauseKind: CauseKinds.Fragment);
     }
 }

@@ -31,6 +31,12 @@ public sealed class FakeNodeOptions
 
     /// <summary>False: the node answers a <c>Cancel</c> that it knows no such run.</summary>
     public bool KnowsTheRun { get; init; } = true;
+
+    /// <summary>The protection of the data plane announced, a word of <see cref="DataPlaneProtections"/>; none said by default.</summary>
+    public string? DataPlaneProtection { get; init; }
+
+    /// <summary>The key id announced beside it.</summary>
+    public string? KeyId { get; init; }
 }
 
 /// <summary>
@@ -106,7 +112,8 @@ public sealed class FakeNode : IAsyncDisposable
 
     public Task AnnounceAsync() => Channel.InvokeAsync(NodeChannel.Announce, new NodeAnnouncement(
         Name, "", [], _options.Role, _options.Bricks,
-        InstanceId: InstanceId, Origin: "test", DataPlaneClientId: _options.AnnouncedDataPlaneClientId ?? DataPlane?.ClientId));
+        InstanceId: InstanceId, Origin: "test", DataPlaneClientId: _options.AnnouncedDataPlaneClientId ?? DataPlane?.ClientId,
+        DataPlaneProtection: _options.DataPlaneProtection, KeyId: _options.KeyId));
 
     /// <summary>The token of the launch of <paramref name="fragment"/> in <paramref name="runId"/> this node received, null when it received none.</summary>
     public string? LaunchTokenOf(string runId, string fragment) =>

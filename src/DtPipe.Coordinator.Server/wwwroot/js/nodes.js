@@ -1,6 +1,6 @@
 // Nodes: every node and runner, the bricks each offers by the reference a job makes to them, a preview read by
 // the node itself when asked, the replicas that carry it, and the flow matrix.
-import { api, csvTable, esc, nodeColor, store, tagOf } from "./core.js";
+import { api, csvTable, esc, nodeColor, protectionOf, protectionWord, store, tagOf } from "./core.js";
 
 let host = null;
 const open = new Set();      // brick keys whose details are unfolded
@@ -37,6 +37,21 @@ function brickRow(b) {
     </div>`;
 }
 
+// How a replica protects the data plane, as the server reads its announcement: a chip with the level, and its key's fingerprint cut
+// short when it has one. None given is unknown, said so, never "in clear". A replica under the deployment's minimum says so, with the
+// minimum the server names (`required`): it stays listed and runs no fragment.
+function protectionChips(r, required) {
+  const level = protectionOf(r.dataPlaneProtection);
+  const title = level
+    ? `How this replica protects the transfers of the data plane.${level.keyed && r.keyId ? ` The fingerprint of its key: ${r.keyId}.` : ""}`
+    : "The coordinator holds no protection of the data plane for this replica.";
+  const chip = `<span class="chip ${level?.sealed ? "ok" : ""}" title="${esc(title)}">${esc(level ? protectionWord(r.dataPlaneProtection, r.keyId) : "protection unknown")}</span>`;
+  const below = r.belowRequiredProtection === true
+    ? ` <span class="chip bad" title="${esc(`This replica protects the data plane less than this deployment requires${required ? ` (${required})` : ""}: it stays connected and listed, and runs no fragment.`)}">${esc(`below the minimum${required ? `, requires ${required}` : ""}`)}</span>`
+    : "";
+  return ` ${chip}${below}`;
+}
+
 function render() {
   if (!host) return;
   const cards = store.nodes.map((n) => {
@@ -52,10 +67,11 @@ function render() {
         ${n.datasets.map((d) => `<div class="dataset"><code>\${{${esc(d.variable)}}}</code> ${esc(d.description)}</div>`).join("")}
         ${n.role === "Runner" ? `<p class="hint">Carries every step between the bricks: transformers, SQL, merges.</p>` : ""}
         ${bricks.length ? `<h3>Bricks</h3>${bricks.map(brickRow).join("")}` : n.role === "Runner" ? "" : `<p class="hint">No brick offered.</p>`}
-        ${replicas.length ? `<h3 title="A replica is one host carrying this node's identity: a run is placed on one of them that can run its fragment.">Replicas (${replicas.filter((r) => r.connected).length}/${replicas.length})</h3>
+        ${replicas.length ? `<h3 title="A replica is one host carrying this node's identity: a run is placed on one of them that can run its fragment. Its chip says how it protects the data plane.">Replicas (${replicas.filter((r) => r.connected).length}/${replicas.length})</h3>
         ${n.replicasDisagree ? `<p class="hint mismatch">The replicas do not offer the same bricks: usually a rolling update, or two hosts started under the same name. A run goes to a replica that composes its plan.</p>` : ""}
+        ${n.replicasDisagreeOnProtection ? `<p class="hint mismatch">The replicas do not protect their data plane alike: usually a rolling update, or two hosts started under the same name. A run goes to replicas whose protection matches across each edge.</p>` : ""}
         ${replicas.map((r) => `
-          <div class="frag-line" title="${esc(r.origin ?? "")}"><span><code>${esc(r.id)}</code>${r.dtpipeVersion ? ` <span class="chip" title="${esc(r.dtpipeVersion)}">dtpipe ${esc(tagOf(r.dtpipeVersion))}</span>` : ""} <span class="hint">${esc(r.origin ?? "")}</span></span>
+          <div class="frag-line" title="${esc(r.origin ?? "")}"><span><code>${esc(r.id)}</code>${r.dtpipeVersion ? ` <span class="chip" title="${esc(r.dtpipeVersion)}">dtpipe ${esc(tagOf(r.dtpipeVersion))}</span>` : ""}${protectionChips(r, n.requiredProtection)} <span class="hint">${esc(r.origin ?? "")}</span></span>
           <span class="state ${r.connected ? "Registered" : "Failed"}">${r.connected ? "connected" : "away"}${r.runs ? ` · ${r.runs} run${r.runs > 1 ? "s" : ""}` : ""}</span></div>`).join("")}`
           : `<p class="hint">No replica of this node has announced itself.</p>`}
       </section>`;

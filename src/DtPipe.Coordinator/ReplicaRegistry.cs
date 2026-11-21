@@ -29,7 +29,9 @@ public sealed class ReplicaRegistryOptions
 /// <summary>
 /// A replica as the registry holds it at one instant. <see cref="ConnectionId"/> is null while its connection is
 /// gone and the grace period has not elapsed: such a replica is known, and reachable by no one.
-/// <see cref="Leases"/> are the (run, fragment) pairs the coordinator placed on it.
+/// <see cref="Leases"/> are the (run, fragment) pairs the coordinator placed on it. <see cref="DataPlaneProtection"/> and
+/// <see cref="KeyId"/> are what it announced of its data plane, as the coordinator reads them (<see cref="DataPlaneProtections"/>):
+/// every reader of a replica's protection goes through them, never through the announcement's text.
 /// </summary>
 public sealed record ReplicaView(
     ReplicaKey Key, string? ConnectionId, NodeAnnouncement Announcement, IReadOnlyList<string> Groups,
@@ -38,6 +40,12 @@ public sealed record ReplicaView(
 {
     public bool Connected => ConnectionId is not null;
     public Guid? DataPlaneClientId => Announcement.DataPlaneClientId;
+
+    /// <summary>A word of <see cref="DataPlaneProtections"/>: <see cref="DataPlaneProtections.None"/> for a host that said so, said nothing or said a word this coordinator does not know.</summary>
+    public string DataPlaneProtection => DataPlaneProtections.Read(Announcement.DataPlaneProtection);
+
+    /// <summary>The fingerprint of the replica's pre-shared key; null when its level carries none or the text is no id.</summary>
+    public string? KeyId => DataPlaneProtections.ReadKeyId(DataPlaneProtection, Announcement.KeyId);
 }
 
 /// <summary>
@@ -261,30 +269,50 @@ public sealed class ReplicaRegistry
 
     /// <summary>
     /// Places every fragment of a run on a replica in one step, or none. For each fragment the connected replicas of
-    /// its node that <paramref name="eligible"/> accepts are the candidates, and the one with the fewest runs, then the
-    /// least recently chosen, then the lowest instance id, is taken; each choice is leased at once, so the next
-    /// fragment sees it. <paramref name="eligible"/> is read in here, with the replica as it is now: what it was
-    /// computed from (a connection, a data plane client) is checked by the caller against that replica, so a replica
-    /// that changed since is no candidate. Returns null, and leases nothing, when a fragment has no candidate.
+    /// its node that <paramref name="eligible"/> accepts are the candidates. The fragments are taken in order, and each
+    /// takes the candidate with the fewest runs, then the least recently chosen, then the lowest instance id, among those
+    /// that still let the two ends of every one of <paramref name="edges"/> join (<see cref="EdgeProtection"/>): a joining
+    /// candidate is taken even where that order puts another first, and a run whose candidates all protect the data plane
+    /// alike is placed by the order alone. Each choice is leased at once, so the next fragment sees it.
+    /// <paramref name="eligible"/> is read in here, with the replica as it is now: what it was computed from (a connection,
+    /// a data plane client) is checked by the caller against that replica, so a replica that changed since is no candidate.
+    /// Returns null, and leases nothing, when a fragment has no candidate or no choice of candidates joins every edge.
+    /// Costs a pass over the fragments, their candidates' protections and the edges for each protection a fragment tries.
     /// </summary>
     public IReadOnlyDictionary<string, ReplicaView>? TryReserve(
-        string runId, IReadOnlyList<(string Fragment, string Node)> needs, Func<ReplicaView, string, bool> eligible)
+        string runId, IReadOnlyList<(string Fragment, string Node)> needs, Func<ReplicaView, string, bool> eligible,
+        IReadOnlyList<(string Producer, string Consumer)>? edges = null)
     {
         var chosen = new Dictionary<string, ReplicaView>(StringComparer.Ordinal);
         lock (_lock)
         {
+            var candidates = needs.Select(need => _replicas.Values
+                .Where(r => r.Key.Node == need.Node && r.ConnectionId is not null)
+                .Select(r => (Replica: r, View: ViewOf(r)))
+                .Where(c => eligible(c.View, need.Fragment))
+                .Select(c => (c.Replica, Protection: ReplicaProtection.Of(c.View)))
+                .ToList()).ToList();
+            var offers = candidates.Select(c => (IReadOnlyCollection<ReplicaProtection>)c.Select(x => x.Protection).ToHashSet()).ToList();
+            var joined = EdgeProtection.Indexed([.. needs.Select(n => n.Fragment)], edges ?? []);
+            if (!EdgeProtection.Joinable(offers, joined)) return null;
+
             var taken = new List<(Replica Replica, (string, string) Lease, long Previous)>();
-            foreach (var (fragment, node) in needs)
+            for (var i = 0; i < needs.Count; i++)
             {
-                var pick = _replicas.Values
-                    .Where(r => r.Key.Node == node && r.ConnectionId is not null && eligible(ViewOf(r), fragment))
-                    .OrderBy(r => r.Leases.Count).ThenBy(r => r.LastChosen).ThenBy(r => r.Key.Instance, StringComparer.Ordinal)
-                    .FirstOrDefault();
+                var fragment = needs[i].Fragment;
+                var joins = new Dictionary<ReplicaProtection, bool>();
+                var (pick, protection) = candidates[i]
+                    .OrderBy(c => c.Replica.Leases.Count).ThenBy(c => c.Replica.LastChosen).ThenBy(c => c.Replica.Key.Instance, StringComparer.Ordinal)
+                    .FirstOrDefault(c => joins.TryGetValue(c.Protection, out var known)
+                        ? known
+                        : joins[c.Protection] = EdgeProtection.Joinable(EdgeProtection.With(offers, i, c.Protection), joined));
                 if (pick is null)
                 {
+                    // Not reached while the check above holds: each fragment then has a candidate that keeps every edge joinable.
                     foreach (var (replica, lease, previous) in taken) { replica.Leases.Remove(lease); replica.LastChosen = previous; }
                     return null;
                 }
+                offers[i] = [protection];
                 var key = (runId, fragment);
                 taken.Add((pick, key, pick.LastChosen));
                 pick.Leases.Add(key);

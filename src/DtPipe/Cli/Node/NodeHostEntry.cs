@@ -11,9 +11,9 @@ internal static class NodeHostEntry
 {
     [MethodImpl(MethodImplOptions.NoInlining)]
     public static Task<int> RunAsync(string? name, string? coordinator, string? description, string? clientSecret, string dtpipe, bool runner,
-        IReadOnlyList<DeclaredBrick> bricks, CancellationToken ct) =>
+        bool endToEnd, string? endToEndKey, IReadOnlyList<DeclaredBrick> bricks, CancellationToken ct) =>
         NodeLauncher.RunAsync(
-            new LaunchSettings(name, coordinator, description, clientSecret, dtpipe, runner),
+            new LaunchSettings(name, coordinator, description, clientSecret, dtpipe, runner, endToEnd, endToEndKey),
             [.. bricks.Select(b => new LaunchedBrick(b.Id, b.IsSource, b.Yaml))],
             ct);
 }

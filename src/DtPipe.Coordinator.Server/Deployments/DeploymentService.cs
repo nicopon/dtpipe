@@ -102,14 +102,18 @@ internal sealed class DeploymentService
         lock (_ledger.Lock) return _ledger.Deployments.GetValueOrDefault(pipelineId)?.Armed;
     }
 
-    /// <summary>Deploys a plan fixed by hand: in memory only, and it replaces whatever the pipeline was deployed with.</summary>
+    /// <summary>
+    /// Deploys a plan fixed by hand: in memory only, and it replaces whatever the pipeline was deployed with. Its edges are judged
+    /// as a launch's plan is: against the matrix as it is now, then against the protection of the data plane the replicas connected
+    /// now announce. Its runner is fixed, so an edge it refuses is refused at once, where a launch would try another runner.
+    /// </summary>
     public async Task DeployAsync(DistributionPlan plan, string origin, CancellationToken ct)
     {
         if (!plan.Deployable)
             throw new ConflictException("This plan cannot be deployed: " +
                 string.Join(" ", plan.Errors.Append(plan.FlowRejection ?? "").Where(s => s.Length > 0)));
-        // A plan is checked against the matrix as it is now.
         if (PlanFlow.Judge(_planRegistry, plan.Id, plan.Edges).Rejection is { } rejection) throw new ConflictException(rejection);
+        if (_planner.ProtectionRefusals(plan) is { Count: > 0 } apart) throw new ConflictException(string.Join(" ", apart));
         var offline = plan.Fragments.Where(f => _inventory.ReplicasOf(f.Node).Count == 0).Select(f => f.Node).Distinct().ToList();
         if (offline.Count > 0) throw new ConflictException($"Offline: {string.Join(", ", offline)}.");
 

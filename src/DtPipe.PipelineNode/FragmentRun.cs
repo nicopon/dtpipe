@@ -38,6 +38,8 @@ public sealed class FragmentRun : IAsyncDisposable
     private readonly List<Task> _relayTasks = new();
     private readonly Dictionary<string, long> _rowCounts = new();
     private readonly object _rowCountsLock = new();
+    private readonly Dictionary<string, TransferProtection> _edgeProtections = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, TransferFailureCategory> _edgeFailures = new(StringComparer.Ordinal);
     private int _faulted;
 
     /// <summary>Completed when the child exits with a non-zero code, whatever its relays are doing.</summary>
@@ -71,6 +73,19 @@ public sealed class FragmentRun : IAsyncDisposable
     public bool ChildHasExited => _child.HasExited;
     public IReadOnlyDictionary<string, long> RowCounts { get { lock (_rowCountsLock) return new Dictionary<string, long>(_rowCounts); } }
 
+    /// <summary>
+    /// What the TransportR client reported it applied to the transfer of each edge, by alias, as <see cref="PipelineNode"/> read it when it handed
+    /// the run the handle. An edge the client did not list at that moment has no entry: the run says nothing of it rather than guess.
+    /// </summary>
+    public IReadOnlyDictionary<string, TransferProtection> EdgeProtections { get { lock (_edgeProtections) return new Dictionary<string, TransferProtection>(_edgeProtections); } }
+
+    /// <summary>
+    /// The category TransportR gave the failure of each edge's transfer, by alias, read from the <see cref="TransferFailedException"/> a relay
+    /// caught; never from its message. An edge whose transfer did not fail, or failed with no category (a cancellation, a framing the counter
+    /// refused), has no entry. <see cref="FirstFault"/> keeps the message of the first fault whatever this holds.
+    /// </summary>
+    public IReadOnlyDictionary<string, TransferFailureCategory> EdgeFailures { get { lock (_edgeFailures) return new Dictionary<string, TransferFailureCategory>(_edgeFailures); } }
+
     public string? FirstFault => _fault?.Reason;
     public FaultOrigin? Origin => _fault?.Origin;
 
@@ -90,6 +105,18 @@ public sealed class FragmentRun : IAsyncDisposable
 
     /// <summary>Counts a Wire request on arrival, before its handle is awaited.</summary>
     public void NoteWireRequested() => Interlocked.Increment(ref _wireRequests);
+
+    /// <summary>Keeps what the client reported of the transfer of the edge <paramref name="alias"/>, for <see cref="EdgeProtections"/>.</summary>
+    internal void NoteProtection(string alias, TransferProtection protection)
+    {
+        lock (_edgeProtections) _edgeProtections[alias] = protection;
+    }
+
+    /// <summary>Keeps the category of the failure of the edge <paramref name="alias"/>'s transfer, for <see cref="EdgeFailures"/>.</summary>
+    private void NoteFailure(string alias, TransferFailedException failure)
+    {
+        lock (_edgeFailures) _edgeFailures[alias] = failure.Category;
+    }
 
     /// <summary>Starts relaying the outbound edge <paramref name="alias"/> through <paramref name="send"/>; true when it was the last edge declared.</summary>
     public bool Wire(string alias, ByteSend send)
@@ -322,7 +349,8 @@ public sealed class FragmentRun : IAsyncDisposable
             // TransferFailedException is the documented contract for WriteAsync/CompleteAsync. An
             // OperationCanceledException here is never this code's own doing - no cancellation
             // token reaches WriteAsync - so it can only be the transfer failing underneath it, the
-            // same as TransferFailedException.
+            // same as TransferFailedException, though it carries no category.
+            if (ex is TransferFailedException failure) NoteFailure(alias, failure);
             Fault(FaultOrigin.Remote, $"outbound edge '{alias}': {ex.Message}");
         }
         catch (Exception ex)
@@ -363,7 +391,8 @@ public sealed class FragmentRun : IAsyncDisposable
             // Thrown by receive's own ReadAsync or WaitForCompletionAsync: the child was
             // still fine, the transfer itself failed. OperationCanceledException here is never this
             // code's own doing either, for the same reason as the outbound side. InvalidDataException is
-            // the counter refusing the peer's framing.
+            // the counter refusing the peer's framing. Only TransferFailedException carries a category.
+            if (ex is TransferFailedException failure) NoteFailure(alias, failure);
             Fault(FaultOrigin.Remote, $"inbound edge '{alias}': {ex.Message}");
         }
         catch (Exception ex)
@@ -505,7 +534,7 @@ public sealed class FragmentRun : IAsyncDisposable
     public async Task<FragmentOutcome> CompleteAsync(CancellationToken ct = default)
     {
         var exitCode = await RunToCompletionAsync(ct);
-        return new FragmentOutcome(exitCode, Origin, FirstFault, RowCounts);
+        return new FragmentOutcome(exitCode, Origin, FirstFault, RowCounts, EdgeProtections, EdgeFailures);
     }
 
     public ValueTask DisposeAsync()

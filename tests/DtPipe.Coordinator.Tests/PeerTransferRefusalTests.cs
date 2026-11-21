@@ -24,6 +24,7 @@ public class PeerTransferRefusalTests
 
         var ex = await Assert.ThrowsAsync<HubRequestFailedException>(() => client.GetReceiversAsync());
         Assert.Contains("The hub refused the request.", ex.Message);
+        Assert.Equal(HubRequestFailureCategory.Refused, ex.Category);
     }
 
     [Fact]
@@ -39,6 +40,7 @@ public class PeerTransferRefusalTests
         var ex = await Assert.ThrowsAsync<HubRequestFailedException>(
             () => sender.InitTransferAsync(receiver.ClientId));
         Assert.Contains("The hub refused the request.", ex.Message);
+        Assert.Equal(HubRequestFailureCategory.Refused, ex.Category);
     }
 
     [Fact]

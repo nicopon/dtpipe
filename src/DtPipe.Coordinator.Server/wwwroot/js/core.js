@@ -37,6 +37,44 @@ export const shortNode = (fragment) => {
   return text.includes(" ") ? text : text.split("@").pop();
 };
 
+// How the pages say a level of the data plane, keyed by the word the server sends. `sealed` says whether the level seals the
+// transfers and `keyed` whether a pre-shared key is behind it. A level this table has no entry for reads as the server wrote it,
+// with `sealed` null; none given at all is unknown, and the pages say neither "in clear" nor "sealed" of it.
+const PROTECTION_WORDS = new Map([
+  ["none", { text: "in clear", sealed: false, keyed: false }],
+  ["encrypted", { text: "sealed", sealed: true, keyed: false }],
+  ["encrypted-psk", { text: "sealed, key", sealed: true, keyed: true }],
+]);
+
+/** What a level of the data plane reads as, or null when the server gave none: unknown. */
+export function protectionOf(level) {
+  if (level == null || level === "") return null;
+  return PROTECTION_WORDS.get(level) ?? { text: String(level), sealed: null, keyed: false };
+}
+
+/** The words of a level, "unknown" when none is given. A level with a key and a fingerprint announced for it ends with it, cut short. */
+export function protectionWord(level, keyId = null) {
+  const known = protectionOf(level);
+  if (!known) return "unknown";
+  return known.keyed && keyId ? `${known.text} ${String(keyId).slice(0, 8)}…` : known.text;
+}
+
+// What a run's cause names, by the `causeKind` word the server gives it. An edge and a receiver are said as such; any other kind,
+// a kind this table has no entry for and a result with none read as a fragment or a sentence.
+const CAUSE_KINDS = new Map([
+  ["edge", { word: "edge", hint: "The cause is an edge between two fragments, not a fragment: an end of it failed end-to-end encryption." }],
+  ["mute-receiver", { word: "mute receiver", hint: "The cause is a receiver that stopped acknowledging what its sender sent." }],
+]);
+
+/** The word that says a run's cause is an edge or a receiver, as a chip and a space; nothing for any other cause. */
+export function causeKindChip(run) {
+  const kind = CAUSE_KINDS.get(run?.result?.causeKind);
+  return kind ? `<span class="chip" title="${esc(kind.hint)}">${esc(kind.word)}</span> ` : "";
+}
+
+/** The cause of a run in one line: the server's reason, else the cause itself, whole when it is an edge and by its node when it is a fragment. */
+export const causeLine = (run) => run.reason ?? (run.result?.cause ? (run.result.causeKind === "edge" ? run.result.cause : shortNode(run.result.cause)) : "");
+
 /** The rows a run's edges delivered, counted on every edge: a row that crosses two edges counts twice. */
 export const rowsCrossed = (run) => run?.result?.edgeCounts?.reduce((s, e) => s + (e.received ?? 0), 0) || 0;
 export const ROWS_CROSSED_HINT = "Counted on every edge of the run: a row that crosses two edges counts twice.";
@@ -44,12 +82,13 @@ export const ROWS_CROSSED_HINT = "Counted on every edge of the run: a row that c
 /** What a run says of why it ended as it did, and of what it may have left behind: the same words wherever a run is shown. */
 export function endNotes(run) {
   const r = run.result;
-  const cause = run.reason ?? (r?.cause ? `${shortNode(r.cause)}${r.causeIsUnresponsive ? " (unresponsive)" : ""}` : null);
-  const where = run.reason && r?.cause && run.reason !== r.cause ? ` <span class="hint">(${esc(shortNode(r.cause))})</span>` : "";
+  const cause = run.reason ?? (r?.cause ? `${causeLine(run)}${r.causeIsUnresponsive ? " (unresponsive)" : ""}` : null);
+  // The reason of an edge or of a receiver names it already.
+  const where = run.reason && r?.cause && run.reason !== r.cause && !CAUSE_KINDS.has(r.causeKind) ? ` <span class="hint">(${esc(shortNode(r.cause))})</span>` : "";
   const started = run.plan != null && ["failed", "cancelled"].includes(run.state);
   return [
     run.refusal && run.refusal !== run.reason ? `<p class="mismatch">${esc(run.refusal)}</p>` : "",
-    cause ? `<p><b>Cause:</b> ${esc(cause)}${where}</p>` : "",
+    cause ? `<p><b>Cause:</b> ${causeKindChip(run)}${esc(cause)}${where}</p>` : "",
     run.sinkMayBePartial
       ? `<p class="mismatch">The coordinator restarted while this run was in progress: its outputs may hold part of what it wrote.</p>`
       : started ? `<p class="hint">It stopped before its end: an output it was writing may hold part of the rows, or none.</p>` : "",

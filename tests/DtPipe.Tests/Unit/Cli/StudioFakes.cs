@@ -47,6 +47,10 @@ internal sealed class StudioFakes : IAsyncDisposable
     public readonly List<string> IdpPaths = [];
     public Dictionary<string, Recognition> Answers = [];
     public string? Recognized;
+    /// <summary>What the coordinator says of a job's edges, the job it was asked about last, and the status it answers with.</summary>
+    public EdgeProtectionsResponse EdgeJudgment = new(true, null, []);
+    public string? Judged;
+    public int EdgeJudgments, EdgeStatus = 200;
     public int SampleRows, PreviewCalls;
     public readonly Dictionary<string, (string Yaml, string Commit)> Library = [];
     public string? LastSaveBody;
@@ -203,6 +207,12 @@ internal sealed class StudioFakes : IAsyncDisposable
             case "/api/bricks/recognize":
                 Recognized = (await context.Request.ReadFromJsonAsync<RecognizeRequest>(JsonSerializerOptions.Web))!.Job;
                 await context.Response.WriteAsJsonAsync(new RecognizeResponse(Answers), JsonSerializerOptions.Web);
+                break;
+            case "/api/edges/protections":
+                EdgeJudgments++;
+                Judged = (await context.Request.ReadFromJsonAsync<EdgeProtectionsRequest>(JsonSerializerOptions.Web))!.Job;
+                context.Response.StatusCode = EdgeStatus;
+                await context.Response.WriteAsJsonAsync(EdgeJudgment, JsonSerializerOptions.Web);
                 break;
             case "/api/bricks/n1/orders/preview":
                 PreviewCalls++;

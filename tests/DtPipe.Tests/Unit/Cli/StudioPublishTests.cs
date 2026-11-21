@@ -68,6 +68,57 @@ public sealed class StudioPublishTests : IAsyncLifetime
     private Task<(HttpStatusCode Status, JsonElement Body)> PublishAsync(string hash, string? replace = null) =>
         CallAsync(HttpMethod.Post, "/api/publish", new { path = "orders.yaml", hash, id = "orders", message = "from the studio", replace });
 
+    private Task<(HttpStatusCode Status, JsonElement Body)> JudgeEdgesAsync(string hash) =>
+        CallAsync(HttpMethod.Post, "/api/publish/edges", new { path = "orders.yaml", hash });
+
+    /// <summary>
+    /// The edges of the saved job are judged by the coordinator and handed to the page as it worded them, and a publication goes on
+    /// whatever the judgment says: the nodes' state is live, and arming is where the coordinator refuses.
+    /// </summary>
+    [Fact]
+    public async Task A_broken_edge_is_told_as_the_coordinator_worded_it_and_the_publication_passes()
+    {
+        await SignInAsync();
+        const string Refusal = "edge draft@n1 -> draft@runner: draft@n1 seals with key 3f9a0c11d2e4b7a8, draft@runner sends in clear.";
+        _fakes.EdgeJudgment = new EdgeProtectionsResponse(false, $"Runner runner: {Refusal}", [new EdgeProtectionView("draft@n1", "draft@runner", null, Refusal)]);
+        var hash = await HashAsync();
+
+        var (status, judged) = await JudgeEdgesAsync(hash);
+
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.Equal(File.ReadAllText(Path.Combine(_dir, "orders.yaml")), _fakes.Judged);
+        Assert.False(judged.GetProperty("deployable").GetBoolean());
+        var edge = Assert.Single(judged.GetProperty("edgeProtections").EnumerateArray());
+        Assert.Equal(["producerFragment", "consumerFragment", "protection", "refusal"], edge.EnumerateObject().Select(p => p.Name));
+        Assert.Equal(Refusal, edge.GetProperty("refusal").GetString());
+        Assert.Equal(JsonValueKind.Null, edge.GetProperty("protection").ValueKind);
+
+        var (published, saved) = await PublishAsync(hash);
+
+        Assert.Equal(HttpStatusCode.OK, published);
+        Assert.Equal("orders", saved.GetProperty("id").GetString());
+    }
+
+    /// <summary>Signed out the judgment is not asked; a job holding a credential written as a value is not sent, as a publication would refuse it.</summary>
+    [Fact]
+    public async Task The_edges_are_not_asked_signed_out_and_a_job_with_a_credential_is_not_sent_for_them()
+    {
+        var hash = await HashAsync();
+        Assert.Equal(HttpStatusCode.Conflict, (await JudgeEdgesAsync(hash)).Status);
+        await SignInAsync();
+        var secret = "# Orders\nmain:\n  input: pg:Host=db;Username=u;Password=hunter2witness\n  output: csv:o.csv\n";
+        File.WriteAllText(Path.Combine(_dir, "orders.yaml"), secret);
+
+        var (status, judged) = await JudgeEdgesAsync(await HashAsync());
+
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.Equal(0, _fakes.EdgeJudgments);
+        Assert.False(judged.GetProperty("deployable").GetBoolean());
+        Assert.Contains("The job was not sent", judged.GetProperty("refusal").GetString());
+        Assert.Empty(judged.GetProperty("edgeProtections").EnumerateArray());
+        Assert.DoesNotContain("hunter2witness", judged.ToString());
+    }
+
     [Fact]
     public async Task The_saved_job_is_sent_without_its_launch_values_or_its_layout()
     {

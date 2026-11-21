@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+
 namespace DtPipe.PipelineNode.Hosting;
 
 /// <summary>Which fragments a node host agrees to run, whatever the coordinator sends.</summary>
@@ -40,6 +42,29 @@ public sealed class NodeOidcOptions
 
     /// <summary>Space-separated scopes to ask for, if the provider needs any.</summary>
     public string? Scope { get; set; }
+}
+
+/// <summary>
+/// Whether the node's data plane seals its transfers end to end, and with which pre-shared key. Every node a transfer joins must be
+/// set alike, the key included: TransportR has no downgrade, so a transfer between nodes set differently fails before its first
+/// batch. The key is the node's own (<see cref="EndToEndKey"/>), never the coordinator's.
+/// </summary>
+public sealed class NodeEncryptionOptions
+{
+    /// <summary>Seals every batch of the node's transfers. Off by default. Without a key it protects against whoever reads the path, not against a hub that rewrites it.</summary>
+    public bool Enabled { get; set; }
+
+    /// <summary>The key as base64 of 32 bytes (<c>openssl rand -base64 32</c>), or <c>@path</c> to the file that holds it, read once at start.</summary>
+    public string PreSharedKey { get; set; } = "";
+
+    /// <summary>The path of a file that holds the key as base64 of 32 bytes, read once at start.</summary>
+    public string PreSharedKeyFile { get; set; } = "";
+
+    /// <summary>
+    /// Gives the 32-byte key for a peer's TransportR client id, or null when there is none for it, asked at each transfer. Not a
+    /// setting: a host sets it in code.
+    /// </summary>
+    public Func<Guid, byte[]?>? PreSharedKeyProvider { get; set; }
 }
 
 /// <summary>
@@ -109,6 +134,9 @@ public sealed class DtPipeNodeOptions
 
     public NodeOidcOptions Oidc { get; set; } = new();
 
+    /// <summary>End-to-end encryption of the data plane (<c>DtPipeNode__EndToEndEncryption__Enabled</c>, …). Off by default.</summary>
+    public NodeEncryptionOptions EndToEndEncryption { get; set; } = new();
+
     /// <summary>
     /// Variables a data node's dtpipe children see, which a fragment resolves through <c>${{NAME}}</c>; a runner's children, under
     /// <c>--edges-only</c>, get none. Their values never leave the node.
@@ -138,5 +166,15 @@ public sealed class DtPipeNodeOptions
         if (MaxInFlightBatches <= 0) yield return "MaxInFlightBatches must be positive.";
         if (ReadChunkBytes <= 0) yield return "ReadChunkBytes must be positive.";
         if (MaxRuns < 0) yield return "MaxRuns must be 0 (no bound) or positive.";
+
+        // The key is read here, at start: NodeAgent connects the data plane later, under a catch that only logs, so a key it
+        // could not read there would leave a node announced without a data plane instead of a start that fails.
+        var encryption = EndToEndEncryption;
+        var keySources = new[] { encryption.PreSharedKey, encryption.PreSharedKeyFile }.Count(s => !string.IsNullOrEmpty(s))
+            + (encryption.PreSharedKeyProvider is null ? 0 : 1);
+        if (keySources > 1) yield return "EndToEndEncryption:PreSharedKey, EndToEndEncryption:PreSharedKeyFile and a key provider are exclusive: set one.";
+        else if (keySources == 1 && !encryption.Enabled) yield return "EndToEndEncryption:PreSharedKey is set while EndToEndEncryption:Enabled is off.";
+        else if (EndToEndKey.Refusal(encryption) is { } refusal) yield return refusal;
+        if (encryption.Enabled && !AesGcm.IsSupported) yield return "EndToEndEncryption:Enabled needs AES-GCM, which this platform does not provide.";
     }
 }

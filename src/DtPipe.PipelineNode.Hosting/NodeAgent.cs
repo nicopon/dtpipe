@@ -32,6 +32,9 @@ internal sealed class NodeAgent : BackgroundService
     private readonly DtPipeCommand _command;
     private string? _dtpipeVersion;
     private readonly OidcTokenClient _tokens;
+    // Resolved once, at start, like the client secret: a client made later takes the same key. The client and the announcement are
+    // both made from it, so what the node says it applies is what its client applies.
+    private readonly EndToEndSetting _endToEnd;
     private readonly NodeLogForwarder _forwarder = new();
     private readonly ILoggerFactory _hostLoggers;
     private readonly ILogger _logger;
@@ -83,14 +86,23 @@ internal sealed class NodeAgent : BackgroundService
         _command = dtpipe;
         _jobs = new DelegatedJobs(_options.Name, _policy == FragmentPolicy.AnyFragment, dtpipe);
         _tokens = new OidcTokenClient(_options.Oidc, _options.Name, _options.CoordinatorUrl);
+        _endToEnd = EndToEndKey.Resolve(_options.EndToEndEncryption);
     }
 
     private NodeRole Role => _policy == FragmentPolicy.AnyFragment ? NodeRole.Runner : NodeRole.Data;
+
+    /// <summary>The replica's data plane client as it is now, or null while it has none.</summary>
+    internal PipelineNode? DataPlane => _node;
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
         // A runner's steps are designers' jobs, run under this process's user: they must not read its environment or memory.
         if (_policy == FragmentPolicy.AnyFragment) NotDumpable.Apply(_logger);
+        // The level and the key's fingerprint, one line a start: never the key, a part of it or where it was read from.
+        if (_endToEnd.KeyId is { } keyId)
+            _logger.LogInformation("Node {Name} data plane protection: {Protection}, key id {KeyId}", _options.Name, _endToEnd.Protection, keyId);
+        else
+            _logger.LogInformation("Node {Name} data plane protection: {Protection}", _options.Name, _endToEnd.Protection);
         var hub = _hub = new HubConnectionBuilder()
             .WithUrl(_options.CoordinatorUrl.TrimEnd('/') + NodeChannel.Path, o => o.AccessTokenProvider = async () => await _tokens.GetAsync())
             .WithAutomaticReconnect(new KeepRetrying())
@@ -249,6 +261,8 @@ internal sealed class NodeAgent : BackgroundService
                 AccessTokenProvider = () => _tokens.GetAsync(fresh: true),
                 BatchBytes = _options.BatchBytes,
                 MaxInFlightBatches = _options.MaxInFlightBatches,
+                EndToEndEncryption = _endToEnd.Enabled,
+                EndToEndPreSharedKey = _endToEnd.Key,
             }, _forwarder.For(_hostLoggers, _options.Name, fragment: null, runId: null), ct);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
@@ -332,7 +346,7 @@ internal sealed class NodeAgent : BackgroundService
                 new NodeAnnouncement(_options.Name, _options.Description, _datasets, Role, _bricks.Bricks,
                     Capabilities: [.. _gate is null ? [] : new[] { NodeAnnouncement.RawFragments }],
                     DtpipeVersion: _dtpipeVersion, InstanceId: _instanceId, Origin: $"{Environment.MachineName}:{Environment.ProcessId}",
-                    DataPlaneClientId: _node?.ClientId), bounded.Token);
+                    DataPlaneClientId: _node?.ClientId, DataPlaneProtection: _endToEnd.Protection, KeyId: _endToEnd.KeyId), bounded.Token);
         }
         catch (Exception)
         {

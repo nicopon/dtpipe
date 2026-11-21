@@ -1,6 +1,7 @@
 using DtPipe.Coordinator.Contracts;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
+using TransportR;
 using TransportR.Hub;
 
 namespace DtPipe.Coordinator;
@@ -118,7 +119,8 @@ internal sealed class RunSession
 
     /// <summary>
     /// Waits, up to <see cref="RunOrchestratorOptions.AdmissionTimeout"/>, for a replica of every fragment's node that
-    /// can run it, and places the whole run in one step. Gives up with the reason for each fragment that never had one.
+    /// can run it, such that the two ends of every edge of <see cref="RunSpec.Edges"/> join, and places the whole run in one
+    /// step. Gives up with the reason for each fragment that never had one, or, when each had one, for an edge no choice joined.
     /// </summary>
     private async Task<IReadOnlyDictionary<string, ReplicaView>> AdmitAsync(CancellationToken ct)
     {
@@ -129,7 +131,7 @@ internal sealed class RunSession
         IReadOnlyDictionary<string, string> reasons;
         while (true)
         {
-            var (chosen, why) = await _services.Admission.TryReserveAsync(Spec.RunId, Spec.Fragments);
+            var (chosen, why) = await _services.Admission.TryReserveAsync(Spec.RunId, Spec.Fragments, Spec.Edges);
             if (chosen is not null) return chosen;
             reasons = why;
 
@@ -255,14 +257,34 @@ internal sealed class RunSession
                 // InitTransferAsync's documented failure modes (unknown client, expired
                 // token, unauthorized, unreachable, handshake timeout) name neither party
                 // in the exception itself, and neither fragment is known to have gone
-                // quiet: the edge is the cause. The verdict carries no reason beyond
-                // that (which side, which rule); the hub's log holds the detail.
+                // quiet: the edge is the cause. The verdict carries no reason beyond the
+                // category's word (never which side or which rule); the hub's log holds the detail.
                 _services.Logger.LogWarning(ex, "Wiring edge {Producer}->{Consumer} failed", edge.ProducerFragment, edge.ConsumerFragment);
-                _wiringFailure ??= $"transfer {edge.ProducerFragment} -> {edge.ConsumerFragment} could not be opened by the hub";
+                _wiringFailure ??= WiringFailureOf(edge, ex);
                 Abort.Cancel();
                 break;
             }
         }
+    }
+
+    /// <summary>
+    /// Pure. The cause of a run whose edge could not be opened: the edge, and for a hub's failure the word of its
+    /// <see cref="HubRequestFailedException.Category"/>, read from the property and never from the message. A refusal stays one
+    /// case with no word, since the hub does not say whether a right, a client gone or an unknown one refused it, and so does a
+    /// category that says nothing or that this text does not know; any other exception keeps the edge alone.
+    /// </summary>
+    internal static string WiringFailureOf(RunEdge edge, Exception failure)
+    {
+        var text = $"transfer {edge.ProducerFragment} -> {edge.ConsumerFragment} could not be opened by the hub";
+        var why = failure is HubRequestFailedException hub ? hub.Category switch
+        {
+            HubRequestFailureCategory.RateLimited => "a node is at the hub's limit of handshakes or open transfers",
+            HubRequestFailureCategory.HandshakeTimedOut => "its handshake did not complete in time",
+            HubRequestFailureCategory.TargetRefusedOrFailedToPrepare => "a node refused it or could not prepare for it",
+            HubRequestFailureCategory.EndedDuringHandshake => "the hub ended it before its handshake completed",
+            _ => null,
+        } : null;
+        return why is null ? text : $"{text}: {why}";
     }
 
     /// <summary>Hands one end of a transfer to the replica that runs the fragment; a replica that does not know the run or the edge is a failure of the edge.</summary>

@@ -49,11 +49,14 @@ public class ScriptedRunTests
         public Task<int> KillAsync(ReplicaKey replica, string fragment, CancellationToken ct) => throw new NotSupportedException();
 
         /// <summary>A replica reports how a fragment ended, under the token of the launch it answered.</summary>
-        public Task<ExitedAck> ExitAsync(string fragment, int exitCode, string origin = "Local", IReadOnlyDictionary<string, long>? rowCounts = null)
+        public Task<ExitedAck> ExitAsync(
+            string fragment, int exitCode, string origin = "Local", IReadOnlyDictionary<string, long>? rowCounts = null,
+            IReadOnlyDictionary<string, string>? edgeProtections = null)
         {
             var launch = Launches.Last(l => l.Spec.Fragment == fragment);
             return Orchestrator.OnExitedAsync(Replicas[fragment], new FragmentExit(
-                launch.RunId, fragment, exitCode, origin, exitCode == 0 ? null : $"{fragment} failed", rowCounts ?? new Dictionary<string, long>(), launch.LaunchToken));
+                launch.RunId, fragment, exitCode, origin, exitCode == 0 ? null : $"{fragment} failed", rowCounts ?? new Dictionary<string, long>(), launch.LaunchToken,
+                EdgeProtections: edgeProtections));
         }
     }
 
@@ -189,6 +192,30 @@ public class ScriptedRunTests
         Assert.False(result.CauseIsUnresponsive);
     }
 
+    /// <summary>
+    /// The hub's failure to open the transfer adds the word of its category, read from the property and never from the message: a
+    /// refusal stays one case with no word, as does a category that says nothing. The cause is a message either way; an exception that
+    /// is no hub's failure keeps the edge alone (<see cref="ATransferTheHubCannotOpen_MakesTheEdgeTheCause"/>).
+    /// </summary>
+    [Theory]
+    [InlineData(TransportR.HubRequestFailureCategory.Refused, "")]
+    [InlineData(TransportR.HubRequestFailureCategory.Other, "")]
+    [InlineData(TransportR.HubRequestFailureCategory.RateLimited, ": a node is at the hub's limit of handshakes or open transfers")]
+    [InlineData(TransportR.HubRequestFailureCategory.HandshakeTimedOut, ": its handshake did not complete in time")]
+    [InlineData(TransportR.HubRequestFailureCategory.TargetRefusedOrFailedToPrepare, ": a node refused it or could not prepare for it")]
+    [InlineData(TransportR.HubRequestFailureCategory.EndedDuringHandshake, ": the hub ended it before its handshake completed")]
+    public async Task ATransferTheHubCannotOpen_SaysTheWordOfItsCategory_ButNeverOfARefusal(TransportR.HubRequestFailureCategory category, string word)
+    {
+        var harness = await new Harness().WithNodesAsync("p", "c");
+        harness.Transfers.OnInit = () => throw new TransportR.HubRequestFailedException(category, "The hub refused the request.");
+
+        var result = await harness.Orchestrator.RunAsync(Harness.Pair()).WaitAsync(Wait);
+
+        Assert.Equal(RunOutcome.Failed, result.Outcome);
+        Assert.Equal("transfer p -> c could not be opened by the hub" + word, result.Cause);
+        Assert.Equal((CauseKinds.Message, false), (result.CauseKind, result.CauseIsUnresponsive));
+    }
+
     /// <summary>A replica that cannot be reached while its edge is wired is the cause, gone quiet, and is not told to cancel.</summary>
     [Fact]
     public async Task AReplicaUnreachableWhileWiring_IsTheCauseAsUnresponsive_AndIsNotToldToCancel()
@@ -286,6 +313,37 @@ public class ScriptedRunTests
         var result = await run.WaitAsync(Wait);
 
         Assert.Equal(FaultOrigin.Local, result.Reports["p"].Origin);
+    }
+
+    /// <summary>
+    /// Each end of an edge keeps what its own fragment reported, by its own alias. An end that reported nothing for the edge (no table,
+    /// no entry under its alias, or a text that is no level) reads unknown, never as the level that seals nothing, whatever the other
+    /// end said and whatever the replica announced (these replicas announce none).
+    /// </summary>
+    [Theory]
+    [InlineData("no table")]
+    [InlineData("a table of another alias")]
+    [InlineData("a text that is no level")]
+    public async Task AnEndThatReportedNoProtectionForTheEdge_ReadsUnknown_WhateverTheOtherEndSaid(string consumerReport)
+    {
+        var harness = await new Harness().WithNodesAsync("p", "c");
+        var run = harness.Orchestrator.RunAsync(Harness.Pair());
+        await harness.UntilAsync(() => harness.Link.Wires.Count == 2, "both ends of the edge to be wired");
+        IReadOnlyDictionary<string, string>? consumerTable = consumerReport switch
+        {
+            "no table" => null,
+            "a table of another alias" => new Dictionary<string, string> { ["elsewhere"] = "encrypted" },
+            _ => new Dictionary<string, string> { ["in"] = "sealed-by-magic" },
+        };
+
+        await harness.Link.ExitAsync("p", 0, rowCounts: new Dictionary<string, long> { ["out"] = 5 },
+            edgeProtections: new Dictionary<string, string> { ["out"] = "encrypted-psk" });
+        await harness.Link.ExitAsync("c", 0, rowCounts: new Dictionary<string, long> { ["in"] = 5 }, edgeProtections: consumerTable);
+        var result = await run.WaitAsync(Wait);
+
+        var edge = Assert.Single(result.EdgeCounts);
+        Assert.Equal(("encrypted-psk", null), (edge.ProducerProtection, edge.ConsumerProtection));
+        Assert.Equal(["out"], result.Reports["p"].EdgeProtections!.Keys);
     }
 
     /// <summary>A run in which nothing failed has no clock: a peer that takes longer than the grace is never torn down for it.</summary>

@@ -7,6 +7,7 @@ using DtPipe.Coordinator.Server.Library;
 using DtPipe.Coordinator.Server.Nodes;
 using DtPipe.Jobs.Coordinator;
 using Microsoft.Extensions.DependencyInjection;
+using TransportR.Hub;
 using Xunit;
 using DtPipe.Tests.Shared;
 
@@ -44,8 +45,12 @@ public sealed class LaunchRoutesTests : IDisposable
 
     private sealed record IdentityBody(string ClientId, string Name, string Description, string[] Groups, bool Enabled);
 
-    /// <summary>Node A offers the customers brick under <c>crm</c>, a runner is connected, and A may send to it.</summary>
-    private async Task NodeAAndARunnerAsync()
+    /// <summary>
+    /// Node A offers the customers brick under <c>crm</c>, a runner is connected, and A may send to it. Each protects the data plane as
+    /// it is told to, in clear by default. When <paramref name="admitted"/>, each replica has a TransportR client registered under its
+    /// subject with its groups, so that admission finds it eligible and the plan can be one a launch would run.
+    /// </summary>
+    private async Task NodeAAndARunnerAsync(ReplicaProtection? nodeA = null, ReplicaProtection? runner = null, bool admitted = false)
     {
         var source = TestBricks.Announced("customers", BrickKind.Source, Text, "Customers");
         foreach (var identity in new[] { new IdentityBody("a", "node-a", "A", ["crm"], true), new IdentityBody("r", "runner", "R", ["run"], true) })
@@ -57,13 +62,22 @@ public sealed class LaunchRoutesTests : IDisposable
         matrix.EnsureSuccessStatusCode();
         var registry = _host.Services.GetRequiredService<ReplicaRegistry>();
         var inventory = _host.Services.GetRequiredService<NodeInventory>();
-        void Announce(string connection, string subject, NodeAnnouncement announcement, string group)
+        var state = _host.Services.GetRequiredService<IStateStore>();
+        async Task AnnounceAsync(string connection, string subject, NodeAnnouncement announcement, string group)
         {
+            if (admitted)
+            {
+                var client = Guid.NewGuid();
+                await state.SaveClientAsync(new ClientRegistration(client, "data-" + subject, [group], null, null, DateTime.UtcNow, Subject: subject));
+                announcement = announcement with { DataPlaneClientId = client };
+            }
             registry.Announce(connection, subject, announcement, [group], () => { });
             inventory.Announced(announcement.Name, subject, announcement, [group]);
         }
-        Announce("c-a", "a", new NodeAnnouncement("node-a", "", [new DatasetInfo("LAB_DB", "")], NodeRole.Data, [source], InstanceId: Guid.NewGuid()), "crm");
-        Announce("c-r", "r", new NodeAnnouncement("runner", "", [], NodeRole.Runner, [], InstanceId: Guid.NewGuid()), "run");
+        await AnnounceAsync("c-a", "a", new NodeAnnouncement("node-a", "", [new DatasetInfo("LAB_DB", "")], NodeRole.Data, [source], InstanceId: Guid.NewGuid(),
+            DataPlaneProtection: nodeA?.Level, KeyId: nodeA?.KeyId), "crm");
+        await AnnounceAsync("c-r", "r", new NodeAnnouncement("runner", "", [], NodeRole.Runner, [], InstanceId: Guid.NewGuid(),
+            DataPlaneProtection: runner?.Level, KeyId: runner?.KeyId), "run");
     }
 
     private async Task<JsonElement> PlanAsync() =>
@@ -156,6 +170,147 @@ public sealed class LaunchRoutesTests : IDisposable
         Assert.Equal(HttpStatusCode.Conflict, deploy.StatusCode);
         Assert.Contains("do not hold", await deploy.Content.ReadAsStringAsync(Ct));
         Assert.Null(_host.Services.GetRequiredService<DeploymentManager>().ArmedOf("orders"));
+    }
+
+    private const string Key = "3f9a0c11d2e4b7a8";
+    private const string OtherKey = "0123456789abcdef";
+    private static readonly ReplicaProtection Keyed = new(DataPlaneProtections.EncryptedPsk, Key);
+    private static readonly ReplicaProtection OtherKeyed = new(DataPlaneProtections.EncryptedPsk, OtherKey);
+
+    private async Task BoundOrdersAsync()
+    {
+        var library = _host.Services.GetRequiredService<PipelineLibrary>();
+        await library.SaveAsync("orders", Job, "create", Ct);
+        await library.SaveBindingsAsync("orders", new Dictionary<string, Binding> { ["a"] = Checked() }, "bind", Ct);
+    }
+
+    /// <summary>
+    /// The plan of a deployable pipeline says, beside the plan and for each of its edges, the level the edge would be held at, with the
+    /// property names a page reads. Two ends in clear are a level of none, a level that is known; a refused edge is held at no level
+    /// and carries the sentence that names it, which arming gives too.
+    /// </summary>
+    [Theory]
+    [InlineData(false, false, DataPlaneProtections.None, null)]
+    [InlineData(true, true, DataPlaneProtections.EncryptedPsk, null)]
+    [InlineData(true, false, null, $"edge orders@node-a -> orders@runner: orders@node-a seals with key {Key}, orders@runner sends in clear.")]
+    public async Task The_Plan_Says_The_Protection_Of_Each_Edge_By_The_Rule_Arming_Applies(
+        bool nodeSeals, bool runnerSeals, string? protection, string? refusal)
+    {
+        await NodeAAndARunnerAsync(nodeSeals ? Keyed : null, runnerSeals ? Keyed : null, admitted: true);
+        await BoundOrdersAsync();
+
+        var answer = await PlanAsync();
+
+        Assert.Equal(refusal is null, answer.GetProperty("plan").GetProperty("deployable").GetBoolean());
+        Assert.Equal(refusal is null ? "runner" : null, answer.GetProperty("runner").GetString());
+        var edge = Assert.Single(answer.GetProperty("edgeProtections").EnumerateArray());
+        Assert.Equal(["producerFragment", "consumerFragment", "protection", "refusal"], edge.EnumerateObject().Select(p => p.Name));
+        var planned = Assert.Single(answer.GetProperty("plan").GetProperty("edges").EnumerateArray());
+        Assert.Equal(planned.GetProperty("producerFragment").GetString(), edge.GetProperty("producerFragment").GetString());
+        Assert.Equal(planned.GetProperty("consumerFragment").GetString(), edge.GetProperty("consumerFragment").GetString());
+        Assert.Equal(protection, edge.GetProperty("protection").GetString());
+        Assert.Equal(refusal, edge.GetProperty("refusal").GetString());
+    }
+
+    /// <summary>The runner and node A hold keys that differ: the edge is named, with the fingerprint of the key of each end.</summary>
+    [Fact]
+    public async Task The_Plan_Names_An_Edge_Whose_Ends_Hold_Different_Keys_By_Their_Fingerprints()
+    {
+        await NodeAAndARunnerAsync(Keyed, OtherKeyed, admitted: true);
+        await BoundOrdersAsync();
+
+        var answer = await PlanAsync();
+
+        var edge = Assert.Single(answer.GetProperty("edgeProtections").EnumerateArray());
+        Assert.Equal(JsonValueKind.Null, edge.GetProperty("protection").ValueKind);
+        Assert.Equal(
+            $"edge orders@node-a -> orders@runner: orders@node-a seals with key {Key}, orders@runner seals with key {OtherKey}.",
+            edge.GetProperty("refusal").GetString());
+    }
+
+    /// <summary>
+    /// An edge of a plan the planner refuses is not judged, whatever its ends do, and a plan with no edge has none to judge. The planner
+    /// refuses a plan whose fragments exchange nothing, so the plan with no edge is one that is refused for another reason.
+    /// </summary>
+    [Fact]
+    public async Task The_Plan_Judges_No_Edge_Of_A_Plan_It_Refuses_Nor_Of_One_With_No_Edge()
+    {
+        await NodeAAndARunnerAsync(Keyed, null, admitted: true);
+        await BoundOrdersAsync();
+        Assert.Single((await PlanAsync()).GetProperty("edgeProtections").EnumerateArray());
+        using var emptied = await _admin.PutAsJsonAsync("/api/rights/matrix", new { matrix = new Dictionary<string, string[]>() }, Web, Ct);
+        emptied.EnsureSuccessStatusCode();
+
+        var refused = await PlanAsync();
+
+        Assert.False(refused.GetProperty("plan").GetProperty("deployable").GetBoolean());
+        Assert.Single(refused.GetProperty("plan").GetProperty("edges").EnumerateArray());
+        Assert.Empty(refused.GetProperty("edgeProtections").EnumerateArray());
+
+        await _host.Services.GetRequiredService<PipelineLibrary>().SaveAsync("alone", "a:\n  input: generate:10\n", "create", Ct);
+        var alone = await _admin.GetFromJsonAsync<JsonElement>("/api/library/alone/plan", Web, Ct);
+
+        Assert.Empty(alone.GetProperty("plan").GetProperty("edges").EnumerateArray());
+        Assert.Empty(alone.GetProperty("edgeProtections").EnumerateArray());
+    }
+
+    private async Task<JsonElement> JudgeAsync(string job)
+    {
+        using var response = await _admin.PostAsJsonAsync(CoordinatorApi.EdgeProtections, new EdgeProtectionsRequest(job), Web, Ct);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<JsonElement>(Ct);
+    }
+
+    /// <summary>
+    /// The edges of a job text no library entry holds are judged by the rule the plan of a library pipeline applies, each reference pinned
+    /// at its brick's version now, and nothing is saved, bound or armed: the same job saved afterwards is judged the same way.
+    /// </summary>
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    public async Task The_Edges_Of_A_Job_The_Library_Lacks_Are_Judged_As_The_Plan_Of_A_Library_Pipeline_Judges_Them(bool nodeSeals, bool runnerSeals)
+    {
+        await NodeAAndARunnerAsync(nodeSeals ? Keyed : null, runnerSeals ? Keyed : null, admitted: true);
+
+        var answer = await JudgeAsync(Job);
+
+        var library = _host.Services.GetRequiredService<PipelineLibrary>();
+        Assert.Empty(await library.ListAsync(Ct));
+        Assert.Null(_host.Services.GetRequiredService<DeploymentManager>().ArmedOf("draft"));
+        var edge = Assert.Single(answer.GetProperty("edgeProtections").EnumerateArray());
+        Assert.Equal(["producerFragment", "consumerFragment", "protection", "refusal"], edge.EnumerateObject().Select(p => p.Name));
+        Assert.Equal("draft@node-a", edge.GetProperty("producerFragment").GetString());
+        Assert.Equal("draft@runner", edge.GetProperty("consumerFragment").GetString());
+        var joined = nodeSeals == runnerSeals;
+        Assert.Equal(joined, answer.GetProperty("deployable").GetBoolean());
+        Assert.Equal(joined, answer.GetProperty("refusal").ValueKind == JsonValueKind.Null);
+        Assert.Equal(joined, edge.GetProperty("refusal").ValueKind == JsonValueKind.Null);
+        if (!joined) Assert.Contains(edge.GetProperty("refusal").GetString()!, answer.GetProperty("refusal").GetString());
+
+        await BoundOrdersAsync();
+        var judged = Assert.Single((await PlanAsync()).GetProperty("edgeProtections").EnumerateArray());
+        Assert.Equal(judged.GetProperty("protection").GetString(), edge.GetProperty("protection").GetString());
+        Assert.Equal(judged.GetProperty("refusal").GetString()?.Replace("orders@", "draft@"), edge.GetProperty("refusal").GetString());
+    }
+
+    /// <summary>
+    /// A brick of a node with no connected replica, or one its node does not offer, is given no pin: the plan is refused naming it and
+    /// no edge is judged, so the answer says neither a level nor a refusal for an edge it cannot know.
+    /// </summary>
+    [Theory]
+    [InlineData("a:\n  input: brick:node-a/customers\nb:\n  from: a\n", true)]
+    [InlineData("a:\n  input: brick:node-a/ghost\nb:\n  from: a\n", false)]
+    public async Task A_Brick_That_Is_Offline_Or_Not_Offered_Is_Given_No_Pin_And_Its_Edges_Are_Not_Judged(string job, bool nodeAway)
+    {
+        await NodeAAndARunnerAsync(Keyed, Keyed, admitted: true);
+        if (nodeAway) _host.Services.GetRequiredService<ReplicaRegistry>().Disconnected("c-a");
+
+        var answer = await JudgeAsync(job);
+
+        Assert.False(answer.GetProperty("deployable").GetBoolean());
+        Assert.Contains("node-a", answer.GetProperty("refusal").GetString());
+        Assert.Empty(answer.GetProperty("edgeProtections").EnumerateArray());
     }
 
     [Fact]

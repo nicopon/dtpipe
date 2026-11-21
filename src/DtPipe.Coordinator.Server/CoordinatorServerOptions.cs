@@ -1,3 +1,4 @@
+using DtPipe.Coordinator.Contracts;
 using DtPipe.Coordinator.Server.Access;
 using DtPipe.Coordinator.Server.Library;
 using DtPipe.Coordinator.Server.Stores;
@@ -196,6 +197,15 @@ public sealed class CoordinatorServerOptions
     /// <summary>The identities a deployment gives the rights to start with (<c>Coordinator:Bootstrap</c>); none unless set.</summary>
     public RightsBootstrap Bootstrap { get; init; } = RightsBootstrap.None;
 
+    /// <summary>
+    /// The level of protection of the data plane a replica must announce for a fragment to be placed on it
+    /// (<c>Coordinator:DataPlane:RequiredProtection</c>, a word of <see cref="ProtectionPolicy.Words"/>; the weakest, which requires
+    /// nothing, unless set). It reaches admission as <see cref="AdmissionOptions.RequiredProtection"/>. A replica below it stays connected
+    /// and listed, named as under the policy, and is chosen for no fragment; none is refused or cut at its announcement. It judges the
+    /// level, never a key.
+    /// </summary>
+    public string RequiredProtection { get; init; } = DataPlaneProtections.None;
+
     private static Uri? PublicUrlOf(string? value)
     {
         if (string.IsNullOrWhiteSpace(value)) return null;
@@ -204,6 +214,9 @@ public sealed class CoordinatorServerOptions
             throw new InvalidOperationException("Coordinator:PublicUrl must be an http or https address with a host and an optional port, and no user, path, query or fragment (https://coordinator.example).");
         return uri;
     }
+
+    /// <summary>The words as a refusal lists them: <c>'a', 'b' or 'c'</c>.</summary>
+    private static string Quoted(IReadOnlyList<string> words) => $"'{string.Join("', '", words.Take(words.Count - 1))}' or '{words[^1]}'";
 
     // A table, not Enum.TryParse, which takes "1" for a value.
     private static readonly (string Name, StoreKind Kind)[] StoreNames =
@@ -269,6 +282,10 @@ public sealed class CoordinatorServerOptions
         var personLifetime = section.GetValue<TimeSpan?>("Auth:PersonTokenLifetime") ?? TimeSpan.FromHours(1);
         if (personLifetime < MinServiceTokenLifetime)
             throw new InvalidOperationException($"Coordinator:Auth:PersonTokenLifetime must be {MinServiceTokenLifetime.TotalMinutes} minutes at least: the studio asks for its next token two minutes before its token ends.");
+        var required = section["DataPlane:RequiredProtection"] is { Length: > 0 } word
+            ? ProtectionPolicy.Read(word) ?? throw new InvalidOperationException(
+                $"Coordinator:DataPlane:RequiredProtection must be {Quoted(ProtectionPolicy.Words)}.")
+            : DataPlaneProtections.None;
         var options = new CoordinatorServerOptions
         {
             StateDir = PathOf("StateDirectory") ?? Path.GetFullPath("state"),
@@ -297,6 +314,7 @@ public sealed class CoordinatorServerOptions
             SqliteDirectory = PathOf("Sqlite:Directory"),
             LibraryRemote = libraryRemote,
             HealthMaxAge = section.GetValue<TimeSpan?>("Health:MaxAge") is { } age && age > TimeSpan.Zero ? age : TimeSpan.FromMinutes(5),
+            RequiredProtection = required,
         };
         // The first administrator of a server with no provider signs in with the key the deployment gave it: the server makes none.
         if (authority is null && options.Bootstrap.Admin is null)

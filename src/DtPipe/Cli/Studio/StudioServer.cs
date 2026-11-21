@@ -282,6 +282,9 @@ public sealed partial class StudioServer : IAsyncDisposable
                 case ("POST", "/api/publish/check"):
                     await PublicationCheckAsync(context);
                     break;
+                case ("POST", "/api/publish/edges"):
+                    await PublicationEdgesAsync(context);
+                    break;
                 case ("POST", "/api/import"):
                     await ImportAsync(context);
                     break;
@@ -661,18 +664,43 @@ public sealed partial class StudioServer : IAsyncDisposable
         var link = _tools.Coordinator ?? throw new StudioRefusal(404, "This studio was opened without --coordinator.");
         if (link.Status().State != CoordinatorLink.SignedIn)
             throw new StudioRefusal(409, "Sign in to the coordinator: what a publication would refuse is judged over its bricks' rows.");
-        var asked = await BodyAsync<PublicationCheckRequest>(context);
-        string yaml;
-        if (asked.Path is { } asPath)
-        {
-            var path = JobPath(asPath) ?? throw new StudioRefusal(400, "Check a job saved in the folder: name its path.");
-            var job = _folder.ReadJob(path);
-            if (asked.Hash is null || asked.Hash != job.Hash)
-                throw new StudioRefusal(409, $"{path} is not the job saved last: save it, then check it.");
-            yaml = job.Text;
-        }
-        else yaml = asked.Yaml ?? throw new StudioRefusal(400, "A check is asked as {\"yaml\": \"...\"} or {\"path\": \"...\", \"hash\": \"...\"}.");
+        var yaml = await JobToJudgeAsync(context);
         await JsonAsync(context, await JudgeForPublicationAsync(link, yaml, context.RequestAborted));
+    }
+
+    /// <summary>The job a verdict of publication is asked of: the one saved in the folder (<c>path</c> and its <c>hash</c>) or the cards' composition (<c>yaml</c>).</summary>
+    private async Task<string> JobToJudgeAsync(HttpContext context)
+    {
+        var asked = await BodyAsync<PublicationCheckRequest>(context);
+        if (asked.Path is not { } asPath)
+            return asked.Yaml ?? throw new StudioRefusal(400, "A check is asked as {\"yaml\": \"...\"} or {\"path\": \"...\", \"hash\": \"...\"}.");
+        var path = JobPath(asPath) ?? throw new StudioRefusal(400, "Check a job saved in the folder: name its path.");
+        var job = _folder.ReadJob(path);
+        if (asked.Hash is null || asked.Hash != job.Hash)
+            throw new StudioRefusal(409, $"{path} is not the job saved last: save it, then check it.");
+        return job.Text;
+    }
+
+    /// <summary>
+    /// What the coordinator's nodes would do with the edges of a job, as the coordinator words it (<see cref="CoordinatorLink.EdgeProtectionsAsync"/>):
+    /// the job saved in the folder or the cards' composition, as a publication's check is asked. A read: no process starts, nothing is
+    /// kept, and the answer stops nothing, a publication included. The job goes to the coordinator as a publication would send it, so a
+    /// credential written as a value is refused here first, as <see cref="SecretsRefusal"/> words it, and the answer then says the job
+    /// cannot be judged. Only while a person is signed in.
+    /// </summary>
+    private async Task PublicationEdgesAsync(HttpContext context)
+    {
+        var link = _tools.Coordinator ?? throw new StudioRefusal(404, "This studio was opened without --coordinator.");
+        if (link.Status().State != CoordinatorLink.SignedIn)
+            throw new StudioRefusal(409, "Sign in to the coordinator: what its nodes would do with the job's edges is read from it.");
+        var yaml = await JobToJudgeAsync(context);
+        if (SecretsRefusal(yaml) is { } secrets)
+        {
+            await JsonAsync(context, new EdgeProtectionsResponse(false, $"The job was not sent: {secrets}", []));
+            return;
+        }
+        try { await JsonAsync(context, await link.EdgeProtectionsAsync(yaml, context.RequestAborted)); }
+        catch (CoordinatorLinkException ex) { throw new StudioRefusal(502, ex.Message); }
     }
 
     private async Task<PublicationVerdict> JudgeForPublicationAsync(CoordinatorLink link, string yaml, CancellationToken ct)

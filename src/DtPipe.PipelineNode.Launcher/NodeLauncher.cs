@@ -1,3 +1,5 @@
+using System.Text;
+using System.Text.RegularExpressions;
 using DtPipe.Coordinator.Contracts;
 using DtPipe.Jobs;
 using DtPipe.PipelineNode.Hosting;
@@ -14,15 +16,31 @@ public sealed record LaunchedBrick(string Id, bool IsSource, string Yaml);
 
 /// <summary>
 /// What the command line gives a node beyond its environment (<c>DtPipeNode__*</c>); a null leaves the environment's value.
-/// <see cref="ClientSecret"/> is the secret already resolved from its reference. A <see cref="Runner"/> hosts no data and runs any
-/// fragment it is sent.
+/// <see cref="ClientSecret"/> and <see cref="EndToEndKey"/> are the secrets already resolved from their references, and
+/// <see cref="ToString"/> prints neither. A <see cref="Runner"/> hosts no data and runs any fragment it is sent.
+/// <see cref="EndToEnd"/> turns on the end-to-end encryption of the data plane; the key is the node's own and goes nowhere else.
 /// </summary>
-public sealed record LaunchSettings(string? Name, string? CoordinatorUrl, string? Description, string? ClientSecret, string DtPipe, bool Runner = false);
+public sealed record LaunchSettings(string? Name, string? CoordinatorUrl, string? Description, string? ClientSecret, string DtPipe, bool Runner = false,
+    bool EndToEnd = false, string? EndToEndKey = null)
+{
+    // The record's own text would print every member, the two secrets included.
+    private bool PrintMembers(StringBuilder builder)
+    {
+        builder.Append($"Name = {Name}, CoordinatorUrl = {CoordinatorUrl}, Description = {Description}, DtPipe = {DtPipe}, Runner = {Runner}, EndToEnd = {EndToEnd}");
+        return true;
+    }
+}
 
 /// <summary>Runs the node host <c>dtpipe node</c> stands for, in this assembly so that no other starts TransportR.</summary>
 public static class NodeLauncher
 {
     private const string RunnerDescription = "Runner: hosts no data, runs every step between the bricks";
+    private const string EncryptionSection = "DtPipeNode:EndToEndEncryption";
+
+    // The configuration binder's message for a value that does not convert to its setting's type. It repeats the value, so the
+    // pattern is anchored to the end, where only the setting's path and the target type follow, and only those two are read.
+    private static readonly Regex ConversionFailure = new(
+        @"^Failed to convert configuration value\b.* at '(?<setting>[^']*)' to type '(?<type>[^']*)'\.?\s*$", RegexOptions.Singleline | RegexOptions.CultureInvariant);
 
     /// <summary>
     /// Serves until the process is asked to stop, which is a cancellation (130, as <c>dtpipe mcp</c> ends), or says why it cannot
@@ -53,7 +71,20 @@ public static class NodeLauncher
         if (builder.Configuration["DtPipeNode:DtPipe"] is not { Length: > 0 }) Set("DtPipeNode:DtPipe", settings.DtPipe);
 
         Set("DtPipeNode:Oidc:ClientSecret", settings.ClientSecret);
+        if (settings.EndToEnd) Set($"{EncryptionSection}:Enabled", "true");
+        Set($"{EncryptionSection}:PreSharedKey", settings.EndToEndKey);
         builder.Configuration.AddInMemoryCollection(overrides);
+
+        // The mode and the key are read from the configuration the host will see, so the flags and the environment agree. The
+        // host refuses a key without a mode too, in the words of its settings; this names the flags.
+        var sealedEndToEnd = bool.TryParse(builder.Configuration[$"{EncryptionSection}:Enabled"], out var enabled) && enabled;
+        var hasKey = builder.Configuration[$"{EncryptionSection}:PreSharedKey"] is { Length: > 0 }
+            || builder.Configuration[$"{EncryptionSection}:PreSharedKeyFile"] is { Length: > 0 };
+        if (settings.EndToEndKey is { Length: > 0 } && !sealedEndToEnd)
+        {
+            Console.Error.WriteLine("[ERROR] A key is given (--e2e-key, or DtPipeNode__EndToEndEncryption__PreSharedKey) and the encryption is off: a key alone seals nothing. Add --e2e, or drop the key.");
+            return 1;
+        }
 
         builder.Logging.AddFilter("TransportR", LogLevel.Warning);
         builder.Logging.AddFilter("Microsoft", LogLevel.Warning);
@@ -66,6 +97,28 @@ public static class NodeLauncher
         if (settings.Runner) node.RunAnyFragment();
 
         using var host = builder.Build();
+
+        // Reading the options binds and validates them. The host logs a stack trace when it meets an option it refuses, so the refusal
+        // is made here, ahead of it, as error lines: one per failed validation, and one for a value that does not convert to its
+        // setting's type, which names the setting and the type and never the value (the binder's message repeats it, whatever was
+        // pasted there). Only this read is covered: any other failure to start, an InvalidOperationException that is not that
+        // conversion included, is the host's own and keeps its trace.
+        try
+        {
+            _ = host.Services.GetRequiredService<IOptions<DtPipeNodeOptions>>().Value;
+        }
+        catch (OptionsValidationException ex)
+        {
+            return Refuse(ex);
+        }
+        catch (InvalidOperationException ex) when (ConversionFailure.Match(ex.Message) is { Success: true } failure)
+        {
+            Console.Error.WriteLine($"[ERROR] {failure.Groups["setting"].Value} is not a valid {failure.Groups["type"].Value}.");
+            return 1;
+        }
+
+        if (sealedEndToEnd && !hasKey)
+            Console.Error.WriteLine("[WARN] End-to-end encryption is on without a key: it protects against whoever reads the path, not against a hub that rewrites batches. Add --e2e-key (the same on every node) so that a rewrite fails the transfer.");
         try
         {
             await host.RunAsync(ct);
@@ -77,8 +130,13 @@ public static class NodeLauncher
         }
         catch (OptionsValidationException ex)
         {
-            Console.Error.WriteLine("[ERROR] " + string.Join("\n[ERROR] ", ex.Failures));
-            return 1;
+            return Refuse(ex);
         }
+    }
+
+    private static int Refuse(OptionsValidationException ex)
+    {
+        Console.Error.WriteLine("[ERROR] " + string.Join("\n[ERROR] ", ex.Failures));
+        return 1;
     }
 }

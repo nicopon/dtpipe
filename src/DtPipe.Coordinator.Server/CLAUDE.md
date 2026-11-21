@@ -267,13 +267,17 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   `/api/catalog` lists nodes and bricks by node, id and kind, from which `BrickRef.Branch` makes the reference a job writes, on
   either side; never a brick's text and never a schema, which depends on the rows; `/api/bricks/recognize`
   says what each top-level branch of a job is: the brick it references in the direction it references it (`BrickRef.Of` against
-  the catalog), so the studio never decides a brick itself; `/api/bricks/{node}/{id}/sample` asks the node for at most
+  the catalog), so the studio never decides a brick itself; `/api/edges/protections` judges the edges of a job text that the library need
+  not hold, by the rule a launch applies now (`Launch.EdgeProtections`, which `GET /api/library/{id}/plan` writes): a text has no pin, which
+  only a check writes, so the route pins each reference at its brick's version in the catalog, in the call alone, and gives none to a brick
+  the catalog lacks or that is offline, which the planner then refuses by name and leaves its edges unjudged; it writes and keeps nothing, and
+  the studio warns of what it answers without ever stopping a publication; `/api/bricks/{node}/{id}/sample` asks the node for at most
   `MaxSampleRows` rows as Arrow IPC (`SampleBrick`, which the node host bounds in bytes before it
   sends, below the channel's message limit), and `/api/bricks/{node}/{id}/preview` for the first rows and their types, read when a
   person looks at a brick and kept nowhere. Both are the designer's right over every brick, whatever groups the flow matrix gives
   its node: the rows reach the person through the control plane, never a transfer, and each read is logged under
   `NodeEndpoints.ReadsLog`, naming the caller (`CallerOf`), the node, the brick and the bound.
-  `[CI: CoordinatorContractTests, StudioRoutesTests] [local: the lab's smoke.py bricks — the studio's routes]`
+  `[CI: CoordinatorContractTests, StudioRoutesTests, LaunchRoutesTests (the judgment of a job text), RouteTableTests] [local: the lab's smoke.py bricks — the studio's routes]`
   `[unchecked: the log of a read]`
 - **Every save into the library is checked first, and a refused one writes nothing.** The handler of
   `PUT /api/library/{id}` passes the text as received to `DesignValidator`, after the rights and the
@@ -341,7 +345,7 @@ holds what a host calls and what no domain owns. The rules below name classes, n
 - **Health is read, never acted on, and a read is kept.** `PipelineHealth` says whether each armed pipeline can be launched, from
   the job at its armed commit (`IJobSource`, never the library as it is now) and its armed bindings: `AutoPlacer.Check`, the plan
   `LaunchPlanner.ChooseAsync` makes (`Launch.Causes`: no runner, no admissible runner, an edge the matrix forbids, a fragment with
-  no eligible replica, anything else the planner refused) and the verdict of each binding in another mode. It asks no node and
+  no eligible replica, an edge whose ends cannot join, anything else the planner refused) and the verdict of each binding in another mode. It asks no node and
   writes nothing (`PlanForRunAsync` is the launch's, not its). A verdict `StateOf` does not know starts once, in the background,
   on no request's token, and the pipeline is a `warning` until it ends (its end drops the kept read); a verdict the node could
   not give is remembered here for `Coordinator:Health:MaxAge`, since the verifier keeps none, so a silent node is asked once per
@@ -435,7 +439,8 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   of the job, the bindings at that commit, when, by whom}` (`ArmedDeployment`), kept in the store once its deployment is ready and read
   back at start as ready, with no check, since no replica is connected yet. A run reads the job at the armed
   commit (`IJobSource`, the library) and the armed bindings, never the library as it is now. A node whose identity is gone stays
-  armed, and a run is refused naming it. `DeployAsync` deploys a plan fixed by hand, in memory only. Deploying plans as a launch
+  armed, and a run is refused naming it. `DeployAsync` deploys a plan fixed by hand, in memory only, its edges judged against the
+  matrix and the protection of the data plane as a launch's are. Deploying plans as a launch
   would, then asks every connected replica of each node whether it would run the fragments (`Check`, answered, spawning nothing)
   and is ready when each fragment has a replica that said yes and that admission could place a run on. One
   replica that refuses does not fail it while another can run the fragment (a rolling update leaves some at
@@ -490,8 +495,16 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   groups, the last announcement of a node with no replica connected, and the page's view. The node is
   online while any replica is connected, and shows the announcement of the connected replica that
   arrived last (a reconnection of the same host does not change which); `NodeView.Replicas` lists each
-  with the runs placed on it and a hash of its bricks, and `ReplicasDisagree` says two connected replicas
-  offer different bricks. A read (a preview, a sample, a sink check) goes to one connected
+  with the runs placed on it, a hash of its bricks and the protection of its data plane as the coordinator reads it
+  (`DataPlaneProtection`, `KeyId`), and `ReplicasDisagree` says two connected replicas offer different bricks while
+  `ReplicasDisagreeOnProtection` says they announce a different level or key id. The latter is a signal and never a
+  refusal: every replica stays admitted, and `NodeChannelHub.Announce` tells it once to the log (`NewProtectionDisagreement`),
+  not at each announcement of the same difference. `Coordinator:DataPlane:RequiredProtection`
+  (`CoordinatorServerOptions.RequiredProtection`, validated at start through `ProtectionPolicy`) reaches admission as the
+  `AdmissionOptions` that `AddCoordinatorServer` registers, and `NodeInventory` reads the same one: a replica below it is
+  `NodeReplica.BelowRequiredProtection` (the level required is `NodeView.RequiredProtection`), is told to the log once per level it
+  announces, by replica (`NewProtectionShortfall`), and stays connected, listed and admitted as a replica, eligible for nothing
+  (`src/DtPipe.Coordinator/CLAUDE.md`). A read (a preview, a sample, a sink check) goes to one connected
   replica, the one with the fewest runs, and is not tried on a second when it fails. `Disconnect` interrupts
   the connections of every replica of an identity, and `PUT /api/rights/identities/{id}` does it when the
   name or the **groups** change, or when the identity goes from enabled to disabled: a replica's data plane
@@ -500,8 +513,16 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   identity again cuts nothing, no host of it being connected. An edit that leaves out a field (`name`,
   `description`, `groups` or `enabled`) leaves it as the identity has it: the omission neither enables, renames
   nor empties. `Origin`, where a replica says it runs, is untrusted
-  text: cut at `Announce`, the ground of no decision.
-  `[CI: NodeChannelHubTests, RightsRoutesTests] [local: the lab's smoke.py rights - identity, disabled; tools/campaign.py F3, S7]`
+  text: cut at `Announce`, the ground of no decision; the protection it announces is read through `ReplicaView`, never as text.
+  `[CI: NodeChannelHubTests, RequiredProtectionSettingTests, RightsRoutesTests] [local: the lab's smoke.py rights - identity, disabled; tools/campaign.py F3, S7]`
+- **The Nodes page says how each replica protects the data plane, and never judges it.** A replica's chip is the level the server
+  reads of its announcement (`NodeReplica.DataPlaneProtection`, with the start of `KeyId` when the level has a key, never a key).
+  `core.js` holds the one table of the pages' words for a level, keyed by the words of `DataPlaneProtections`: a word it has no
+  entry for shows as the server wrote it, escaped, and a replica with none is unknown, never in clear and never sealed.
+  `NodeView.ReplicasDisagreeOnProtection` is a warning under the replicas' title and `NodeReplica.BelowRequiredProtection` a marker
+  on the replica, away or connected, named with `NodeView.RequiredProtection`. The page compares no two levels and derives neither
+  flag from the replicas' words. `[CI: StateWireTests (The_Nodes_Route_Writes_The_Protection_Of_Each_Replica_Under_The_Names_The_Nodes_Page_Reads)]`
+  `[local: ui_check.py]` `[unchecked: the pages, which no test plays in a browser]`
 - **A run names who launched it, and a service may launch it only once.** `RunView.LaunchedBy` is a person's email or the id of
   the identity that launched it, a service or a person verified by a key, or `CallerOf`'s name for a person of the provider with
   none (an id holds no `@`, and no two identities share one, so a
@@ -551,8 +572,9 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   A run that had started carries `RunView.SinkMayBePartial` (also in `/service/runs`), true: its fragments had been launched and a sink may hold part of
   what they wrote. It is a label only: nothing ranks resumption strategies or reruns the run, and a run that was only queued, or that ended any other way, has none.
   **A run says why in one line, and saying it changes nothing**: `RunView.Reason` is derived each time it is read from `Result` and `Refusal`
-  (the first line of the failing fragment's own error, the fragment that stopped answering, a refusal without the runner it was tried
-  on), never stored as a verdict and never an input to one: state, `Result` and `Refusal` are what the run reports, and a cancelled
+  (the first line of the failing fragment's own error, the fragment that stopped answering, an edge or a receiver said in words, a refusal
+  without the runner it was tried on), read from `RunResult.CauseKind` when the result has one and, for a result kept without it, guessed
+  from the reports, in one function (`FailureLine`); never stored as a verdict and never an input to one: state, `Result` and `Refusal` are what the run reports, and a cancelled
   or successful run has no reason. The pages show it wherever a run is shown (`endNotes` in `core.js`), and count rows as
   `rowsCrossed` does, on every edge. An event of `/api/events` carries `at`, when it happened, so a page opened later dates the
   backlog it replays by it; a replica whose connection dropped carries `awaySince` and `givenUpAt` in the nodes' snapshot.
@@ -593,8 +615,19 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   `[unchecked: that a real transfer's lines all arrive before its run ends]`
 - **A run that was placed records the replica of each fragment.** `RunJournal` keeps the `RunResult` whole,
   `RunResult.Replicas` included: an instance id and the `Origin` the replica announced, untrusted text the pages
-  escape. A run refused at admission has none, and a document that names none reads as a run with none.
-  `[CI: RunJournalTests]` `[unchecked: the pages' escaping of Origin]`
+  escape. A run refused at admission has none, and a document that names none reads as a run with none. The result's
+  `EdgeCount.ProducerProtection` and `ConsumerProtection` (what each end's client reported it applied to the edge, a word or null) are kept
+  and rendered by the same record, `GET /api/runs/{id}` and the lists included: no route of their own, and a document that names none
+  reads with both ends unknown.
+  `[CI: RunJournalTests, StateWireTests]` `[unchecked: the pages' escaping of Origin]`
+- **The run pages say what each end of an edge reported and what a cause names, and read no verdict and no sentence.** A run's edge
+  table gives a word per end from `EdgeCount.ProducerProtection` and `ConsumerProtection`, through the table of words of `core.js`:
+  null, and a run kept without the field, are unknown, never in clear and never sealed, and a word the table has no entry for shows
+  as the server wrote it, escaped. Nothing is drawn from the two ends: the verdict is the run's cause. `RunResult.CauseKind` says how
+  a cause reads (`causeKindChip`, `causeLine`): an edge and a receiver that does not acknowledge are said as such, any other kind
+  and an absent one read as a fragment or a sentence, and no text is parsed to learn what a cause names. A refusal and a reason
+  are the server's lines, shown whole. The health cause `protection-mismatch` reaches the pages by the health read alone
+  (`pipeline-status.js`). `[local: ui_check.py]` `[unchecked: the pages, which no test plays in a browser]`
 - **A run names the subject and the groups of each fragment's node.** `RunQueue` reads them from the
   rights when the run starts, through `LaunchPlanner.RunFragmentsOf` (`RightsStore.SubjectOf`: the client id of
   the identity named after the fragment's node, the `sub` its tokens carry; `GroupsOf`), and puts them in each
@@ -624,11 +657,38 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   the run is sent and outside the ledger's lock, asks `LaunchPlanner.ChooseAsync` for the plan of the armed job under the armed
   bindings, and so do `GET /api/library/{id}/plan` (the plan a launch would make now, nothing written) and arming. The
   runners online are tried by runs in flight, then by name; the first whose plan is deployable (the planner already judges its edges
-  against the matrix, which is how a runner in the wrong groups is skipped) and whose every fragment has an eligible replica is
-  used. A plan that does not use the runner fails whichever is chosen and is returned at once; when none serves, the refusal
-  names each runner and why. `NodeInventory.PreferredRunner` is for reads that need any runner, never a plan. The groups a plan
-  names are the rights' at that moment, so a node's groups changing needs no redistribution.
+  against the matrix, which is how a runner in the wrong groups is skipped), whose every fragment has an eligible replica and
+  whose every edge has a pair of connected replicas that join (`ReplicaAdmission.EdgeRefusals`, which is how a runner that
+  protects the data plane otherwise than its nodes is skipped) is used. A plan that does not use the runner fails whichever is
+  chosen and is returned at once; when none serves, the refusal names each runner and why. `NodeInventory.PreferredRunner` is for
+  reads that need any runner, never a plan. The groups a plan names are the rights' at that moment, so a node's groups changing
+  needs no redistribution.
   `[CI: ArmedDeploymentTests, LaunchRoutesTests, PlanRightsTests, RightsStoreTests] [local: the lab's smoke.py rights - several groups]`
+- **The plan route says how each edge of a deployable plan is protected, and the page shows it.** `Launch.EdgeProtections` is
+  what `LaunchPlanner.EligibilityAsync` judged once (`ReplicaAdmission.EdgeJudgments`, which `EdgeRefusals` projects), for the
+  plan that is returned: the first candidate's when no runner serves, and none when the planner refused the plan or a node of it has
+  no usable identity. `GET /api/library/{id}/plan` writes it as `edgeProtections` beside `plan`, so the field is filled for an edge
+  that admission then refuses, whose plan reads as not deployable, and is empty for a plan with no edge. `PlannedEdge`,
+  `LaunchCause` and the health read are unchanged: the cause `protection-mismatch` stays a sentence, and a page learns which edge
+  fails from this field, never from that sentence. The studio reads no plan route: it reads the same judgment of a job text,
+  `/api/edges/protections` (see "What `dtpipe studio` calls is a contract"). The pipeline's page draws the field and nothing
+  else (`drawLanes`, through the table of words of `core.js`): a closed lock and the word for an edge held at a level that seals, a
+  broken red one for an edge with a refusal, the server's sentence in its title and never read, and no mark for an edge in clear.
+  A null level and refusal are unknown and, like an answer with the field empty or absent, draw as the diagram always did, the
+  legend included. The page compares no two levels, and the protection a run reported is never drawn on the plan's edges.
+  The page reads the plan again on a `nodes` event as it does on `rights`, since the judgment of an edge, the runner and what Deploy
+  can arm follow the connected replicas: a burst of events asks for one read, and a read of the plan that begins meanwhile takes its
+  place, so a stream's opening, which tells `nodes`, `library` and `rights` together, adds none.
+  `[CI: LaunchRoutesTests]` `[local: ui_check.py]` `[unchecked: the pages, which no test plays in a browser]`
+- **An edge whose ends cannot join is refused at arming and at registration, by name, and judged on connected replicas
+  only.** Arming (`LaunchPlanner.ChooseAsync`, a runner at a time) and the registration of a plan fixed by hand
+  (`DeploymentService.DeployAsync`, after the matrix and before the nodes' presence, its runner fixed) refuse an edge whose two
+  nodes each have a connected replica when no pair of them joins (`src/DtPipe.Coordinator/CLAUDE.md`), in the sentence
+  `edge P -> C: P …, C ….` with the words of `ReplicaProtection.Words`, a health cause `protection-mismatch`. A node with no
+  connected replica is not judged here, and replicas that differ within a node pass while a pair of them joins: admission's joint
+  choice decides the run. A replica below the deployment's required protection is no end of a pair, so a node whose connected
+  replicas are all below it is a node with no eligible replica (`no-eligible-replica`), never a `protection-mismatch`. A save
+  into the library plans nothing and is not judged. `[CI: ArmedDeploymentTests]`
 - **A run records the plan it ran.** `RunView.Plan` (`RunPlan`): the plan's id, the runner it used, each fragment at its version, and
   each binding with the brick version it met and its mode's verdict. A run refused before it had a plan has none.
   `[CI: ArmedDeploymentTests, RunJournalTests]`

@@ -125,6 +125,13 @@ the table, `OnExitedAsync` and the pure rules (`DetermineOutcome`, `PeersOwingAR
   fragment reported 0 - a fragment attests its own process, not what its peer received. A count
   missing on either side fails closed (never reads as agreement); `RunResult.Describe()` renders
   every edge's two counts regardless of which branch produced the outcome. `[CI: RunOrchestratorTests]`
+- **A run result keeps what each end of an edge reported of its protection, and an end that reported nothing is unknown.**
+  `FragmentExit.EdgeProtections` reaches `FragmentExitReport` under the same rule as the rest of an `Exited`, kept only as the words of
+  `DataPlaneProtections` (`RunOrchestrator.ProtectionsReported`), and `EdgeCount.ProducerProtection` and `ConsumerProtection` are looked up
+  from it by each end's own alias, as `Sent` and `Received` are. No level is made of the two: their difference is the reader's. A fragment
+  that reported no table, no entry for the alias or a text that is no word leaves its end null, never the level that seals nothing and never
+  the level its replica announced. Nothing here refuses, warns or changes a verdict, and `Describe()` renders none of it.
+  `[CI: ScriptedRunTests, EdgeProtectionReportWireTests; PipelineNode.Tests CoordinatorDrivenTests]`
 - **The cause is the first *locally* faulted fragment, never arrival order.** A peer aborting its own
   transfer can fail a healthy fragment before the fragment that actually died reports `Exited`, so
   `DetermineOutcome` picks the cause by `FaultOrigin.Local`, falling back to `RunSpec.Fragments`'
@@ -134,6 +141,16 @@ the table, `OnExitedAsync` and the pure rules (`DetermineOutcome`, `PeersOwingAR
   organic one. A report's origin is one of the two words of `ExitOrigins`, and any other word reads as `Local`;
   `DtPipe.PipelineNode` declares its own `FaultOrigin`, which `FaultOriginWordsTests` compares with this one.
   `[CI: RunOrchestratorTests, CoordinatorDrivenTests, ScriptedRunTests, PipelineNode.Tests FaultOriginWordsTests]`
+- **When no fault is a fragment's own, the category an end reports of its edge names the cause, and nothing else does.**
+  `FragmentExit.EdgeFailures` reaches `FragmentExitReport` under the same rule as the rest of an `Exited`, kept only as the words of
+  `TransferFailures` (`RunOrchestrator.FailuresReported`, the filter `ProtectionsReported` applies). `DetermineOutcome` reads them only
+  where it would otherwise name the first fault: the first edge of `RunSpec.Edges` an end of which failed end-to-end encryption is the
+  cause, as `producer -> consumer`, and every failed fragment its consequence; else the receiver of the first edge whose sender had no
+  acknowledgement, the sender a consequence. A cancellation, a silence, a wiring failure and a fragment's own fault, 130 included,
+  stay ahead of them, and the outcome stays `Failed`. Reports with no category give the verdict the rule gives without them, to the
+  character. `RunResult.CauseKind`, a word of `CauseKinds`, says what every `Cause` names; `CauseIsUnresponsive` stays beside it and
+  `Describe()` is unchanged. The coordinator never reads an exception's message to decide.
+  `[CI: EdgeFailureVerdictTests, EdgeFailureReportWireTests; PipelineNode.Tests CoordinatorDrivenTests]`
 - **A fragment's own failure ends the run at once.** `OnExitedAsync` raises the run's abort on the
   first `Exited` that is non-zero with a `FaultOrigin.Local` origin, so the teardown tells every
   fragment still running to `Cancel` without waiting for its peers to notice: a peer whose child has
@@ -146,6 +163,8 @@ the table, `OnExitedAsync` and the pure rules (`DetermineOutcome`, `PeersOwingAR
   fails (or a replica answers that it knows no such edge), the run tears down and `Cause` reads `transfer P
   -> C could not be opened by the hub`: no fragment is blamed as unresponsive, and the verdict gives no
   reason (which side, which group, which rule) to whoever reads it; the hub's log holds the detail. A
+  `HubRequestFailedException` adds the word of its `Category`, read from the property (`RunSession.WiringFailureOf`); a refusal
+  adds none, since the hub does not tell a right from a client gone or unknown. A
   fragment that went silent still outranks it. `[CI: RunOrchestratorTests, FaultVerdictTests, ScriptedRunTests]`
 - **A fragment absent from the reports is never read as success.** `DetermineOutcome` takes the
   fragment *names* from `RunSpec.Fragments` as well as the reports collected so far, precisely so a
@@ -198,7 +217,8 @@ while any replica is connected.
 
 - **A plan, a deployment and a run request name a node, never a replica.** The replica is chosen at admission,
   for the run. `[unchecked]`
-- **A replica is eligible for a fragment when** it is connected; it is of the fragment's node; its TransportR
+- **A replica is eligible for a fragment when** it is connected; it is of the fragment's node; it does not announce a
+  protection of the data plane below the deployment's requirement; its TransportR
   client is verified; and the bricks it announces compose the
   version of the plan.
   `ReplicaChooser` is that rule, pure. The client is verified when it is announced, registered, still
@@ -211,14 +231,47 @@ while any replica is connected.
   update leaves replicas at two versions of a brick: the run goes to one that composes the plan. Admission
   refuses only when none does (`NoEligibleReplicaException`, naming each fragment and why, replica by
   replica) after `AdmissionTimeout`. `[CI: ReplicaAdmissionSubjectTests]`
+- **Eligibility is a fragment's, joining is an edge's.** The two ends of an edge join when they announce the same
+  level and, where both name a key id, the same one (`ReplicaProtection.Joins`, `EdgeProtection`): TransportR has no
+  downgrade, and a transfer between ends set differently fails before its first batch. An edge is a `RunEdge` of the run,
+  its producer and consumer fragments as the plan pairs them and the run wires them, so two fragments of one node, whose
+  replicas may differ during a rolling update, answer to it too; a fragment's own edges (`FragmentSpec.Edges`) name an alias
+  and a direction only. The relation is not transitive (a key, no key, another key), so `ReplicaRegistry.TryReserve` takes
+  the fragments in order and gives each the first candidate, in the order of preference below, that still lets every edge join, checked
+  by `EdgeProtection.Joinable` (linear in the fragments, their candidates' protections and the edges, once per protection a
+  fragment tries); a run whose candidates all protect alike is placed by the order alone. When each fragment has a
+  candidate and no choice joins, `NoEligibleReplicaException` names, by `edge P -> C`, each edge that cannot join together
+  with the edges before it that could, and what each end does: the words of `ReplicaProtection.Words`, a key id whole.
+  `EvaluateAsync` judges no edge; `ReplicaAdmission.EdgeJudgments` judges pairs of connected replicas, edge by edge, for
+  the server's arming and its plan, by `EdgeProtection.Judge`, the one rule: an `EdgeJudgment` holds the two fragments, the level
+  the edge would be held at when its joining pairs share one, and the refusal sentence when no pair joins. An end with no offer
+  leaves the edge unknown (neither level nor refusal), never in clear, and so do joining pairs of several levels, since the
+  level is not chosen among them. `EdgeRefusals` is the refusals of that judgment, in the plan's order, and no second rule.
+  `[CI: EdgeProtectionTests, EdgeJudgmentTests]`
+- **A deployment's required protection is a floor on a replica's level, and a replica below it is eligible for nothing.**
+  `AdmissionOptions.RequiredProtection` is a word of `ProtectionPolicy`, the one order of the levels and the one reading of a
+  word (the setting that fills it refuses any other text, and so does the property). `ReplicaAdmission.Refusal` puts
+  `ReplicaChooser.ProtectionRefusal` first, so `EvaluateAsync`, `TryReserveAsync` and `Explain` carry its reason, in the words
+  of `ReplicaProtection.Words` with no key id; there is no path of its own, and a runner is a node like any other. The replica is
+  never refused at the announcement or cut: `ReplicaProtocol` and `ReplicaRegistry` know nothing of the policy. `EdgeJudgments`
+  leaves such a replica out of the pairs it judges, so a node whose connected replicas are all below the requirement has none and
+  is named by admission, not as an edge that cannot join. `[CI: RequiredProtectionTests; Server.Tests ArmedDeploymentTests]`
 - **The client id a replica announces is verified twice.** At the announcement, as a courtesy: one registered
   under another subject, or announced by another replica, is refused. At admission, as the authority: the
   registration is read at the moment of choosing. Only the second sees a client registered after the
   announcement. A replica claiming another identity's client would be handed that identity's transfers.
   `[CI: ReplicaAdmissionSubjectTests]`
+- **A replica's protection of the data plane is read, never trusted.** The announcement's level and key id are text a host chose:
+  `ReplicaView.DataPlaneProtection` and `KeyId` are the one reading of them (`DataPlaneProtections`), and any other reader goes
+  through them. A word it does not know, or none, reads as the level that seals nothing; an id is kept only on the level that
+  carries one and only if it has an id's form. The registry keeps the whole announcement and the key never reaches it: the
+  node announces a fingerprint. Admission and arming read the level through `ReplicaProtection.Of`, to join an edge's ends,
+  and `ProtectionPolicy` reads it to judge a replica against the requirement; no verdict reads it.
+  `[CI: DataPlaneProtectionWireTests; Server.Tests NodeChannelHubTests — what the node's API shows of it]`
 - **Among the eligible, the replica with the fewest runs is chosen, then the least recently chosen, then the
-  lowest instance id**, for every fragment of the run in one step: the choice is read again under the
-  registry's lock against the replica as it is, and leased there, or none is. `[CI: ReplicaRegistryTests]`
+  lowest instance id**, among those that let every edge of the run join, for every fragment of the run in one step: the
+  choice is read again under the registry's lock against the replica as it is, and leased there, or none is.
+  `[CI: ReplicaRegistryTests, EdgeProtectionTests]`
 - **The hub reads a client's groups from the rights each time the client registers or renews its token.** A replica
   has it done on demand with `PipelineNode.RefreshRegistrationAsync` (the call's contract is in
   `src/DtPipe.PipelineNode/CLAUDE.md`), and the hub judges each open transfer against the new groups before that call

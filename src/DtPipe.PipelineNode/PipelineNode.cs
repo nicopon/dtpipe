@@ -51,6 +51,21 @@ public sealed class NodeClientOptions
     /// its transfer is to deliver. A handle nobody wires in that time (its run was torn down first) is dropped.
     /// </summary>
     public TimeSpan UnclaimedTransferTimeout { get; init; } = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// Seals every batch of this client's transfers end to end, so that the hub, and whoever terminates TLS on the way, forwards
+    /// bytes it cannot read. Off by default, as in TransportR. Both ends of a transfer must be set alike, the key included:
+    /// TransportR has no downgrade, and a transfer between ends set differently fails before its first batch.
+    /// </summary>
+    public bool EndToEndEncryption { get; init; }
+
+    /// <summary>
+    /// The 32-byte pre-shared key for the peer whose client id it is given, or null when there is none for it; set only with
+    /// <see cref="EndToEndEncryption"/>. With a key, a hub that rewrites a transfer makes it fail; without one, encryption protects
+    /// only against whoever reads the path. It comes from the node's own configuration, never from the coordinator, which runs
+    /// beside the hub.
+    /// </summary>
+    public Func<Guid, byte[]?>? EndToEndPreSharedKey { get; init; }
 }
 
 /// <summary>
@@ -73,6 +88,9 @@ public sealed class PipelineNode : IAsyncDisposable
     private readonly ConcurrentDictionary<string, TaskCompletionSource<object>> _handles = new();
 
     public Guid ClientId => _client.ClientId;
+
+    /// <summary>The transfers this replica's client holds, as TransportR reports them: <c>Protection</c> says how each crosses the hub.</summary>
+    internal IReadOnlyList<TransferInfo> Transfers => _client.GetTransfers();
 
     private PipelineNode(NodeClientOptions options, ILogger logger, ByteStreamClient client)
     {
@@ -166,6 +184,16 @@ public sealed class PipelineNode : IAsyncDisposable
         // on it or takes its transport from it.
         builder.WithWriteTransportProbe();
 
+        if (options.EndToEndEncryption)
+        {
+            if (options.EndToEndPreSharedKey is { } preSharedKey) builder.WithEndToEndEncryption(preSharedKey);
+            else builder.WithEndToEndEncryption();
+        }
+        else if (options.EndToEndPreSharedKey is not null)
+        {
+            throw new ArgumentException("A pre-shared key is set while end-to-end encryption is off.", nameof(options));
+        }
+
         return builder.Build();
     }
 
@@ -231,7 +259,8 @@ public sealed class PipelineNode : IAsyncDisposable
     /// <summary>
     /// Correlates the edge <paramref name="alias"/> of <paramref name="run"/> to the handle of <paramref name="transferId"/>
     /// and starts relaying it. True when it was the last edge the run declares. A transfer that never reaches this node
-    /// faults the run (<see cref="FaultOrigin.Remote"/>) and returns false.
+    /// faults the run (<see cref="FaultOrigin.Remote"/>) and returns false. Once the handle is claimed, the protection the
+    /// client reports for that transfer is noted on the run under the edge's alias (<see cref="FragmentRun.EdgeProtections"/>).
     /// </summary>
     /// <exception cref="ArgumentException">The run declares no edge of that alias; the handle is not claimed.</exception>
     public async Task<bool> WireAsync(FragmentRun run, string alias, string transferId, CancellationToken ct = default)
@@ -245,7 +274,19 @@ public sealed class PipelineNode : IAsyncDisposable
             run.Fault(FaultOrigin.Remote, $"transfer {transferId} for edge '{alias}' never reached this node: {ex.Message}");
             return false;
         }
+        if (ProtectionOf(transferId) is { } protection) run.NoteProtection(alias, protection);
         return run.Wire(alias, handle);
+    }
+
+    /// <summary>
+    /// What the client reports it applies to the transfer <paramref name="transferId"/>, or null when it lists no such transfer. The client
+    /// holds the transfer's session before it hands over the handle, so a transfer wired now is listed unless it has already ended, which
+    /// leaves no session to ask. The reading informs only: a client that cannot list its transfers says nothing, and wiring goes on.
+    /// </summary>
+    private TransferProtection? ProtectionOf(string transferId)
+    {
+        try { return _client.GetTransfers().FirstOrDefault(t => t.TransferId == transferId)?.Protection; }
+        catch (Exception) { return null; }
     }
 
     /// <summary>

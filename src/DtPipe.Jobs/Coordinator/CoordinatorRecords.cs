@@ -66,6 +66,23 @@ public sealed record Recognition(string? Match);
 /// <summary>What each top-level branch of the job is, by alias.</summary>
 public sealed record RecognizeResponse(IReadOnlyDictionary<string, Recognition> Branches);
 
+/// <summary>A job whose edges the coordinator is asked to judge, as <see cref="JobYaml.Serialize"/> writes it. It need not be in the library.</summary>
+public sealed record EdgeProtectionsRequest(string Job);
+
+/// <summary>
+/// What the connected replicas say of one edge of a job, in the coordinator's words. <see cref="Protection"/> is the level the edge
+/// would be held at and <see cref="Refusal"/> the sentence that says why no pair of its ends' replicas joins; an edge with neither is
+/// unknown, never in clear. The studio reads them and compares nothing.
+/// </summary>
+public sealed record EdgeProtectionView(string ProducerFragment, string ConsumerFragment, string? Protection, string? Refusal);
+
+/// <summary>
+/// The coordinator's judgment of a job's edges as a launch would make it now, nothing kept. <see cref="Refusal"/> is the sentence
+/// that says why the plan is not deployable, absent when it is; <see cref="EdgeProtections"/> is empty for a plan the coordinator
+/// refuses before it can judge an edge.
+/// </summary>
+public sealed record EdgeProtectionsResponse(bool Deployable, string? Refusal, IReadOnlyList<EdgeProtectionView> EdgeProtections);
+
 /// <summary>
 /// How a binding holds a brick: <see cref="Strict"/> the branch must still be, word for word, the brick it is bound to; the other
 /// three let the brick's definition evolve and judge the change against the <see cref="BindingPin"/> a check wrote.

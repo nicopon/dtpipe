@@ -1355,6 +1355,7 @@ a setting allows it.
 | `LibrarySeed` | A folder of `.yaml` pipelines (with optional `.bindings.json`) a new library starts with |
 | `Identity__LabelClaims` | Claims shown beside a host waiting for approval; a label only |
 | `Health__MaxAge` | The longest a health read is kept. Default: five minutes |
+| `DataPlane__RequiredProtection` | The lowest protection of the data plane a replica may announce: `none`, `encrypted` or `encrypted-psk`, in that order. A replica below it stays connected and listed, marked as below, and is chosen for no fragment. Default: `none`, which requires nothing |
 
 - With SQLite, the state directory is the whole state: back it up stopped
   ([deploy/README.md](./deploy/README.md#backing-up-a-sqlite-coordinator)). With PostgreSQL or SQL
@@ -1373,6 +1374,7 @@ a setting allows it.
 | `Name` / `Description` | The name the host proposes. The coordinator names a node from its rights, not from this |
 | `CoordinatorUrl` | The coordinator's base address |
 | `Oidc__Authority` / `__ClientId` / `__ClientSecret` / `__ClientSecretFile` / `__Scope` | The client-credentials client the host authenticates as: `ClientId` is the node's `Name` and `Authority` the first issuer the coordinator names (its own, without a provider), unless given; a node verified by a key beside a provider sets it to the coordinator's address. `ClientSecret` is the key or the provider's secret (`@path` reads it from a file); `ClientSecretFile` names that file without the `@`. A host built on the library may also give it from code (`UseClientSecret`), asked at each token. Set one of the three. The client id is the node's identity |
+| `EndToEndEncryption__Enabled` / `__PreSharedKey` / `__PreSharedKeyFile` | `Enabled=true` seals every batch from one node to the other, so the coordinator's hub and a proxy that ends TLS forward bytes they cannot read. Default: off. `PreSharedKey` is a key of 32 bytes in base64 (`openssl rand -base64 32`), or `@path` to read it from a file; `PreSharedKeyFile` names that file without the `@`. With a key, a hub that alters a transfer makes it fail. Every node a transfer joins needs the same settings, key included, or the transfer fails before its first row. The key comes from each node's own configuration, never from the coordinator |
 | `DtPipe` | The `dtpipe` every fragment runs as a child process: an executable, or the `DtPipe.dll` of the `dtpipe` tool package, which runs through the dotnet host. Default: the tool package placed beside the host by its build, else `dtpipe` on the path; the binary itself under `dtpipe node` |
 | `StateDirectory` | Where fragment jobs are written and run from. Default: a directory under the temp directory |
 | `Policy` | `Bricks` (default: a data node runs only its own bricks) or `AnyFragment` (a runner) |
@@ -1408,6 +1410,8 @@ resolved only when the fragment runs. `dtpipe node --runner` hosts no data and r
 | `--job FILE`, `-j FILE` | YAML job file declaring the bricks (sources and sinks) offered by this node |
 | `--name` / `--coordinator` / `--description` | `DtPipeNode__Name`, `__CoordinatorUrl` and `__Description` |
 | `--client-secret REF` | `DtPipeNode__Oidc__ClientSecret`, as a reference: `keyring://alias`, `${{NAME}}` or `@file`. A value is refused; the environment variable takes a reference too |
+| `--e2e` | `DtPipeNode__EndToEndEncryption__Enabled`: seals every batch of the node's transfers, the same on every node a transfer joins. Without a key the node warns at start. All the `EndToEndEncryption__*` settings are in [the node host settings](#node-host-settings-dtpipenode__) |
+| `--e2e-key REF` | `DtPipeNode__EndToEndEncryption__PreSharedKey`, as a reference: `keyring://alias`, `${{NAME}}` or `@file`, naming a key of 32 bytes in base64. A value is refused; the environment variable takes a reference too. Needs `--e2e` or `DtPipeNode__EndToEndEncryption__Enabled`: a key alone is refused |
 
 ```bash
 DtPipeNode__Oidc__ClientSecret=keyring://node-secret \

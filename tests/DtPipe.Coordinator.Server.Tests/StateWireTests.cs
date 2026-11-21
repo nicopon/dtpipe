@@ -2,6 +2,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using DtPipe.Coordinator.Contracts;
 using DtPipe.Coordinator.Server.Deployments;
+using DtPipe.Coordinator.Server.Nodes;
 using DtPipe.Coordinator.Server.Runs;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -98,6 +99,128 @@ public sealed class StateWireTests : IDisposable
         Assert.Equal(System.Net.HttpStatusCode.NotFound, gone.StatusCode);
         foreach (var literal in new[] { "/api/runs/queue", "/api/runs/last" })
             Assert.Equal(JsonValueKind.Array, (await client.GetFromJsonAsync<JsonElement>(literal, Ct)).ValueKind);
+    }
+
+    /// <summary>
+    /// The routes that carry a run's result write each end of an edge with the protection it reported, as a word or as null for an
+    /// end that reported none, in the record the run already has: no route of its own.
+    /// </summary>
+    [Fact]
+    public async Task The_Run_Routes_Write_The_Protection_Each_End_Of_An_Edge_Reported_As_A_Word_Or_Null()
+    {
+        using var host = new CoordinatorHost();
+        var journal = host.Services.GetRequiredService<RunJournal>();
+        var edges = new[] { new EdgeCount("p", "out", "c", "in", 5, 5, DataPlaneProtections.EncryptedPsk, null) };
+        journal.Record(RunIn("succeeded") with { Result = new RunResult(RunOutcome.Succeeded, null, [], new Dictionary<string, FragmentExitReport>(), edges) });
+        var client = host.Bearer(CoordinatorHost.Person(CoordinatorHost.Reader));
+
+        var routes = new Dictionary<string, JsonElement>
+        {
+            ["/api/runs/run-1"] = await client.GetFromJsonAsync<JsonElement>("/api/runs/run-1", Ct),
+            ["/api/runs/last"] = (await client.GetFromJsonAsync<JsonElement>("/api/runs/last", Ct))[0],
+            ["/api/runs"] = (await client.GetFromJsonAsync<JsonElement>("/api/runs", Ct))[0],
+        };
+        foreach (var run in routes.Values)
+        {
+            var edge = run.GetProperty("result").GetProperty("edgeCounts")[0];
+            Assert.Equal(DataPlaneProtections.EncryptedPsk, edge.GetProperty("producerProtection").GetString());
+            Assert.Equal(JsonValueKind.Null, edge.GetProperty("consumerProtection").ValueKind);
+        }
+    }
+
+    /// <summary>
+    /// The routes that carry a run's result write the kind of its cause beside the cause, and the reason the journal derives from it, in
+    /// the record the run already has: no route of its own.
+    /// </summary>
+    [Fact]
+    public async Task The_Run_Routes_Write_The_Kind_Of_The_Cause_Beside_It()
+    {
+        using var host = new CoordinatorHost();
+        var journal = host.Services.GetRequiredService<RunJournal>();
+        journal.Record(RunIn("failed") with
+        {
+            Result = new RunResult(RunOutcome.Failed, "p -> c", ["p", "c"], new Dictionary<string, FragmentExitReport>(), [], CauseKind: CauseKinds.Edge),
+        });
+        var client = host.Bearer(CoordinatorHost.Person(CoordinatorHost.Reader));
+
+        var routes = new Dictionary<string, JsonElement>
+        {
+            ["/api/runs/run-1"] = await client.GetFromJsonAsync<JsonElement>("/api/runs/run-1", Ct),
+            ["/api/runs/last"] = (await client.GetFromJsonAsync<JsonElement>("/api/runs/last", Ct))[0],
+            ["/api/runs"] = (await client.GetFromJsonAsync<JsonElement>("/api/runs", Ct))[0],
+        };
+        foreach (var run in routes.Values)
+        {
+            var result = run.GetProperty("result");
+            Assert.Equal(("p -> c", CauseKinds.Edge), (result.GetProperty("cause").GetString(), result.GetProperty("causeKind").GetString()));
+            Assert.StartsWith("The ends of p -> c are set differently", run.GetProperty("reason").GetString());
+        }
+    }
+
+    /// <summary>
+    /// The route of the nodes writes, under the names the Nodes page reads, the level and key id each replica announced (a key id present
+    /// as null when there is none), whether it is under the level the deployment requires, away or connected, and for each node
+    /// whether its connected replicas differ in level or key, and the level required. The route renders the inventory's snapshot as it
+    /// is: the replicas reach it through the registry and the inventory, as a host's announcement does.
+    /// </summary>
+    [Fact]
+    public async Task The_Nodes_Route_Writes_The_Protection_Of_Each_Replica_Under_The_Names_The_Nodes_Page_Reads()
+    {
+        const string KeyA = "0123456789abcdef", KeyB = "fedcba9876543210";
+        using var host = new CoordinatorHost(settings: new Dictionary<string, string> { ["DataPlane:RequiredProtection"] = DataPlaneProtections.EncryptedPsk });
+        var registry = host.Services.GetRequiredService<ReplicaRegistry>();
+        var inventory = host.Services.GetRequiredService<NodeInventory>();
+
+        // The replica whose instance id starts with {n:x8}, which is the id the route shows it under.
+        void Announce(string node, int n, string level, string? keyId = null, bool away = false)
+        {
+            var announcement = new NodeAnnouncement(
+                node, "", [], NodeRole.Data, [], InstanceId: Guid.Parse($"{n:x8}-0000-0000-0000-000000000000"), DataPlaneProtection: level, KeyId: keyId);
+            registry.Announce($"c{n}", node, announcement, ["g"], () => { });
+            inventory.Announced(node, node, announcement, ["g"]);
+            if (away) registry.Disconnected($"c{n}");
+        }
+
+        // The levels differ; the key differs under one level; the connected replicas agree while one that is away does not.
+        Announce("mixed", 1, "encrypted-psk", KeyA);
+        Announce("mixed", 2, "none");
+        Announce("rekeyed", 3, "encrypted-psk", KeyA);
+        Announce("rekeyed", 4, "encrypted-psk", KeyB);
+        Announce("alike", 5, "encrypted-psk", KeyA);
+        Announce("alike", 6, "encrypted-psk", KeyA);
+        Announce("alike", 7, "encrypted", away: true);
+
+        var nodes = (await host.Bearer(CoordinatorHost.Person(CoordinatorHost.Reader)).GetFromJsonAsync<JsonElement>("/api/nodes", Ct))
+            .EnumerateArray().ToDictionary(n => n.GetProperty("name").GetString()!);
+
+        Assert.Equal(["alike", "mixed", "rekeyed"], nodes.Keys.Order());
+        foreach (var node in nodes.Values)
+            Assert.Equal("encrypted-psk", node.GetProperty("requiredProtection").GetString());
+        Assert.Equal(
+            [("alike", false), ("mixed", true), ("rekeyed", true)],
+            nodes.OrderBy(n => n.Key).Select(n => (n.Key, n.Value.GetProperty("replicasDisagreeOnProtection").GetBoolean())));
+        Assert.All(nodes.Values, n => Assert.False(n.GetProperty("replicasDisagree").GetBoolean()));
+
+        var replicas = nodes.Values.SelectMany(n => n.GetProperty("replicas").EnumerateArray()).ToDictionary(r => r.GetProperty("id").GetString()!);
+        var shown = replicas.OrderBy(r => r.Key).Select(r => (
+            r.Key,
+            r.Value.GetProperty("connected").GetBoolean(),
+            r.Value.GetProperty("dataPlaneProtection").GetString(),
+            r.Value.GetProperty("keyId").GetString(),
+            r.Value.GetProperty("belowRequiredProtection").GetBoolean()));
+        Assert.Equal(
+            [
+                ("00000001", true, "encrypted-psk", KeyA, false),
+                ("00000002", true, "none", null, true),
+                ("00000003", true, "encrypted-psk", KeyA, false),
+                ("00000004", true, "encrypted-psk", KeyB, false),
+                ("00000005", true, "encrypted-psk", KeyA, false),
+                ("00000006", true, "encrypted-psk", KeyA, false),
+                ("00000007", false, "encrypted", null, true),
+            ],
+            shown);
+        // A replica with no key carries the name all the same, as null: the page reads it as no key.
+        Assert.Equal(JsonValueKind.Null, replicas["00000002"].GetProperty("keyId").ValueKind);
     }
 
     /// <summary>An event of the bus leaves with its number and the bus's id, a line replayed from the backlog says so and a live one does not, and the id is the same from one connection to the next.</summary>

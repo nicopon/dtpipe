@@ -1,3 +1,6 @@
+using DtPipe.Coordinator.Contracts;
+using DtPipe.PipelineNode.Hosting;
+
 namespace DtPipe.PipelineNode.Tests.Infrastructure;
 
 /// <summary>
@@ -20,6 +23,9 @@ internal sealed class HandWiredNode : IAsyncDisposable
     public int ChildProcessId => _run.ChildProcessId;
     public bool ChildHasExited => _run.ChildHasExited;
     public IReadOnlyDictionary<string, long> RowCounts => _run.RowCounts;
+    public string? FirstFault => _run.FirstFault;
+    public FaultOrigin? Origin => _run.Origin;
+    public IReadOnlyList<TransportR.Client.TransferInfo> Transfers => _node.Transfers;
 
     /// <summary>Connects, then launches: a hub that refuses the connection leaves no child behind.</summary>
     public static async Task<HandWiredNode> StartAsync(NodeClientOptions client, FragmentLaunch launch)
@@ -45,6 +51,10 @@ internal sealed class HandWiredNode : IAsyncDisposable
     }
 
     public Task<int> RunToCompletionAsync(CancellationToken ct = default) => _run.RunToCompletionAsync(ct);
+
+    /// <summary>Runs to completion and returns the exit a replica would report for it, built by the one function a replica builds it with.</summary>
+    public async Task<FragmentExit> ExitAsync(CancellationToken ct = default) =>
+        ReplicaRuns.ExitOf("run-1", "fragment", "launch-token", await _run.CompleteAsync(ct), cursors: null);
 
     public async ValueTask DisposeAsync()
     {

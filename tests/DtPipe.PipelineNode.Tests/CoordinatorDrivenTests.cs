@@ -88,6 +88,78 @@ public class CoordinatorDrivenTests
     }
 
     /// <summary>
+    /// The run's result says, for each end of each edge, what that end's own client applied to the transfer. The test nodes announce
+    /// nothing of the data plane, so the words in the result can be neither the announced level nor a setting: only what each client reports.
+    /// </summary>
+    [Theory]
+    [InlineData(false, "none")]
+    [InlineData(true, "encrypted-psk")]
+    public async Task TheResult_NamesTheProtectionEachEndOfEachEdgeApplied(bool sealedWithAKey, string word)
+    {
+        using var fixture = ChainFixture.Create(rowCount: 5_000);
+        await using var host = await CoordinatorTestHost.StartAsync(
+            o => o.Groups["test"] = new TransportR.Hub.GroupAccess { CanSendTo = ["test"] });
+        var orchestrator = host.Host.Services.GetRequiredService<IRunOrchestrator>();
+        var key = System.Security.Cryptography.RandomNumberGenerator.GetBytes(32);
+        Task<TestNode> Connect(string job, string name, params EdgeBinding[] edges) => TestNode.StartAsync(
+            host, name, job, edges, client: new NodeClientOptions
+            {
+                HubUrl = host.Url,
+                EndToEndEncryption = sealedWithAKey,
+                EndToEndPreSharedKey = sealedWithAKey ? _ => key : null,
+            });
+
+        await using var a = await Connect(fixture.FragmentAJobPath, "A", new EdgeBinding("out", EdgeDirection.Outbound));
+        await using var b = await Connect(fixture.FragmentBJobPath, "B",
+            new EdgeBinding("in", EdgeDirection.Inbound), new EdgeBinding("out", EdgeDirection.Outbound));
+        await using var c = await Connect(fixture.FragmentCJobPath, "C", new EdgeBinding("in", EdgeDirection.Inbound));
+
+        var result = await orchestrator.RunAsync(ChainSpec("run-protection", a.Fragment, b.Fragment, c.Fragment)).WaitAsync(Bound);
+
+        Assert.Equal(RunOutcome.Succeeded, result.Outcome);
+        Assert.Equal(2, result.EdgeCounts.Count);
+        Assert.All(result.EdgeCounts, edge => Assert.Equal((word, word), (edge.ProducerProtection, edge.ConsumerProtection)));
+    }
+
+    /// <summary>
+    /// A chain whose middle seals its transfers while its two ends send in clear, which admission would have refused: these replicas
+    /// announce nothing of the data plane, so they all read alike, while their clients apply what each was built with. The run fails,
+    /// in seconds, with the first edge whose ends failed the encryption as its cause and every fragment a consequence, never a healthy
+    /// fragment named for having seen the failure first.
+    /// </summary>
+    [Fact]
+    public async Task AChainWhoseMiddleAloneSeals_FailsWithTheFirstEdgeAsCause_AndNoFragment()
+    {
+        using var fixture = ChainFixture.Create(rowCount: 5_000);
+        await using var host = await CoordinatorTestHost.StartAsync(
+            o => o.Groups["test"] = new TransportR.Hub.GroupAccess { CanSendTo = ["test"] });
+        var orchestrator = host.Host.Services.GetRequiredService<IRunOrchestrator>();
+        var key = System.Security.Cryptography.RandomNumberGenerator.GetBytes(32);
+        Task<TestNode> Connect(string job, string name, bool seals, params EdgeBinding[] edges) => TestNode.StartAsync(
+            host, name, job, edges, client: new NodeClientOptions
+            {
+                HubUrl = host.Url,
+                EndToEndEncryption = seals,
+                EndToEndPreSharedKey = seals ? _ => key : null,
+            });
+
+        await using var a = await Connect(fixture.FragmentAJobPath, "A", false, new EdgeBinding("out", EdgeDirection.Outbound));
+        await using var b = await Connect(fixture.FragmentBJobPath, "B", true,
+            new EdgeBinding("in", EdgeDirection.Inbound), new EdgeBinding("out", EdgeDirection.Outbound));
+        await using var c = await Connect(fixture.FragmentCJobPath, "C", false, new EdgeBinding("in", EdgeDirection.Inbound));
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var result = await orchestrator.RunAsync(ChainSpec("run-sealed-apart", a.Fragment, b.Fragment, c.Fragment)).WaitAsync(Bound);
+        sw.Stop();
+
+        Assert.Equal(RunOutcome.Failed, result.Outcome);
+        Assert.Equal(("A -> B", CauseKinds.Edge, false), (result.Cause, result.CauseKind, result.CauseIsUnresponsive));
+        Assert.Equal(["A", "B", "C"], result.Consequences.Order(StringComparer.Ordinal));
+        Assert.Equal(Coordinator.Contracts.TransferFailures.EndToEndEncryptionFailed, result.Reports["B"].EdgeFailures!["in"]);
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(10), $"the verdict took {sw.Elapsed.TotalSeconds:F1}s");
+    }
+
+    /// <summary>
     /// A three-fragment chain, the middle fragment's child killed mid-flow (a join is not runnable
     /// yet - see <see cref="ChainFixture"/>): the run is reported failed, cause B, in seconds rather
     /// than the minute-plus a producer waiting out its own send window would otherwise take, and not

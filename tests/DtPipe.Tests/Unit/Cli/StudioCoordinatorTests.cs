@@ -266,6 +266,29 @@ public sealed class StudioCoordinatorTests : IAsyncLifetime
         Assert.Contains($"contract {CoordinatorApi.Contract}", body);
     }
 
+    /// <summary>The coordinator's judgment of the edges is handed back as it worded it; one the studio cannot read is a named failure, never an answer of no broken edge.</summary>
+    [Fact]
+    public async Task The_judgment_of_the_edges_is_read_as_the_coordinator_worded_it_and_an_unreadable_answer_is_a_named_failure()
+    {
+        await SignInAsync();
+        _fakes.EdgeJudgment = new EdgeProtectionsResponse(false, "r", [new EdgeProtectionView("draft@a", "draft@b", null, "edge draft@a -> draft@b: x.")]);
+
+        var answer = await _link.EdgeProtectionsAsync("a: {}", Ct);
+
+        Assert.Equal("a: {}", _fakes.Judged);
+        Assert.Equal((false, "r"), (answer.Deployable, answer.Refusal));
+        Assert.Equal(("draft@a", "draft@b", (string?)null, "edge draft@a -> draft@b: x."),
+            answer.EdgeProtections.Select(e => (e.ProducerFragment, e.ConsumerFragment, e.Protection, e.Refusal)).Single());
+
+        _fakes.EdgeJudgment = new EdgeProtectionsResponse(true, null, null!);
+        var unreadable = await Assert.ThrowsAsync<CoordinatorLinkException>(() => _link.EdgeProtectionsAsync("a: {}", Ct));
+        Assert.Contains("cannot read", unreadable.Message);
+
+        _fakes.EdgeStatus = 500;
+        var refused = await Assert.ThrowsAsync<CoordinatorLinkException>(() => _link.EdgeProtectionsAsync("a: {}", Ct));
+        Assert.Contains("did not judge the job's edges", refused.Message);
+    }
+
     [Fact]
     public async Task A_provider_whose_document_names_another_issuer_is_refused()
     {

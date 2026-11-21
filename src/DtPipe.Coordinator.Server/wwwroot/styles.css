@@ -145,11 +145,22 @@ input.grow { flex: 1; min-width: 200px; }
 .edge.memory { stroke: var(--memory); }
 .edge.network { stroke: var(--network); stroke-dasharray: 7 5; }
 .edge.forbidden { stroke: var(--bad); stroke-dasharray: 3 4; }
+.edge.broken { stroke: var(--bad); stroke-dasharray: 9 5 2 5; }
 .edge.flowing { animation: flow .6s linear infinite; }
 @keyframes flow { to { stroke-dashoffset: -12; } }
 .edge-label { font-size: 11px; fill: var(--muted); }
 .edge-label.ok { fill: var(--ok); }
 .edge-label.bad { fill: var(--bad); }
+/* How an edge is protected: a word the colour only repeats, on a halo of the surface so that the edge under it stays legible. */
+.edge-protection { font-size: 11px; fill: var(--muted); paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round; }
+.edge-protection.sealed { fill: var(--network); }
+.edge-protection.broken { fill: var(--bad); font-weight: 600; }
+.edge-lock { fill: none; stroke: var(--network); stroke-width: 1.4; stroke-linecap: round; }
+.edge-lock rect { fill: var(--network); }
+.edge-lock.broken { stroke: var(--bad); }
+.edge-lock.broken rect { fill: var(--surface); }
+.edge-lock .edge-lock-bg { fill: var(--surface); stroke: none; }
+svg.edge-lock { width: 12px; height: 14px; vertical-align: middle; margin-right: 5px; }
 .legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
 .sw { display: inline-block; width: 22px; height: 0; border-top: 2px solid; vertical-align: middle; margin-right: 5px; font-style: normal; }
 .sw.memory { border-color: var(--memory); }
