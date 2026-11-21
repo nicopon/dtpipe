@@ -10,7 +10,9 @@ set -uo pipefail
 # runs as 1654 with no capability, its bounding set empty and no_new_privs set, and a user other than root cannot change the
 # rules; out, the listed address answers and the other is refused at once; a name of the network resolves; nothing comes in,
 # where a runner without a list answers; IPv6 the same, when the network has it; DuckDB and a file read make no connection;
-# a list the runner cannot apply stops its start. Needs a Docker host that grants NET_ADMIN, and no network beyond it.
+# a list the runner cannot apply stops its start. An end-to-end key given as @path, in a file of root's alone, is read by the
+# entry point before the privileges go: the runner starts sealed and says its key id, never the key; dtpipe cannot read the file;
+# a missing file, then an empty one, stop the start. Needs a Docker host that grants NET_ADMIN, and no network beyond it.
 
 : "${DTPIPE_RUNNER_IMAGE:?set DTPIPE_RUNNER_IMAGE to an image of the runner target of deploy/Dockerfile}"
 : "${DTPIPE_COORDINATOR_IMAGE:?set DTPIPE_COORDINATOR_IMAGE to an image of the coordinator target of deploy/Dockerfile}"
@@ -26,8 +28,9 @@ check() { local label=$1; shift; if "$@"; then pass "$label"; else fail "$label"
 P="dtpipe-egress-$$"
 NET="$P-net"
 cleanup() {
-    docker rm -f "$P-coordinator" "$P-other" "$P-runner" "$P-open" >/dev/null 2>&1
+    docker rm -f "$P-coordinator" "$P-other" "$P-runner" "$P-open" "$P-sealed" >/dev/null 2>&1
     docker network rm "$NET" >/dev/null 2>&1
+    docker volume rm "$P-keys" >/dev/null 2>&1
 }
 trap cleanup EXIT
 
@@ -110,6 +113,25 @@ refused() {
 check "start refused without NET_ADMIN" refused NET_ADMIN -e "DTPIPE_EGRESS_ALLOW=$ALLOW"
 check "start refused for a list as uid 1654" refused 'uid 1654' --user 1654:1654 --cap-add NET_ADMIN -e "DTPIPE_EGRESS_ALLOW=$ALLOW"
 check "start refused for a malformed mask, named" refused "'$C4' is not a CIDR mask" --cap-add NET_ADMIN -e "DTPIPE_EGRESS_ALLOW=$C4"
+
+# The end-to-end key: a file of root's, mode 0400, in a volume the runner mounts read-only. The setting names it as @path.
+KEYTEXT=$(head -c 32 /dev/urandom | base64)
+docker volume create "$P-keys" >/dev/null || exit 1
+docker run --rm --user 0 --entrypoint sh -e "K=$KEYTEXT" -v "$P-keys:/keys" "$DTPIPE_RUNNER_IMAGE" \
+    -c 'umask 277 && printf %s "$K" >/keys/key && : >/keys/empty' || exit 1
+sealed_env=(--cap-add NET_ADMIN -e "DTPIPE_EGRESS_ALLOW=$ALLOW" -e DtPipeNode__EndToEndEncryption__Enabled=true -v "$P-keys:/keys:ro")
+docker run -d --init --name "$P-sealed" --network "$NET" "${node_env[@]}" "${sealed_env[@]}" \
+    -e DtPipeNode__EndToEndEncryption__PreSharedKey=@/keys/key "$DTPIPE_RUNNER_IMAGE" >/dev/null || exit 1
+for _ in $(seq 1 30); do docker logs "$P-sealed" 2>&1 | grep -q 'data plane protection' && break; sleep 1; done
+check "key: the runner starts sealed and says its key id, never the key" sh -c \
+    "docker logs '$P-sealed' 2>&1 | grep -Eq 'data plane protection: encrypted-psk, key id [0-9a-f]{16}\$' \
+    && ! docker logs '$P-sealed' 2>&1 | grep -qF -- '$KEYTEXT'"
+check "key: the file is root's, 0400, and 1654 cannot read it" sh -c \
+    "[ \"\$(docker exec '$P-sealed' stat -c %u:%a /keys/key)\" = 0:400 ] && ! docker exec -u 1654 '$P-sealed' cat /keys/key >/dev/null 2>&1"
+check "key: a missing file stops the start" refused 'PreSharedKey names a file that cannot be read' \
+    "${sealed_env[@]}" -e DtPipeNode__EndToEndEncryption__PreSharedKey=@/keys/missing
+check "key: an empty file stops the start" refused 'PreSharedKey names an empty file' \
+    "${sealed_env[@]}" -e DtPipeNode__EndToEndEncryption__PreSharedKey=@/keys/empty
 
 if [ "$FAILED" = 0 ]; then echo -e "${GREEN}The runner's egress rules hold.${NC}"; else echo -e "${RED}The runner's egress rules do not hold.${NC}"; fi
 exit "$FAILED"
