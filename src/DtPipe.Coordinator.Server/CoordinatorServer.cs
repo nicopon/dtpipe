@@ -234,7 +234,12 @@ public static class CoordinatorServer
             await next(context);
         });
         app.UseDefaultFiles();
-        app.UseStaticFiles();
+        // The pages' files carry no content hash in their names: no-cache makes a browser revalidate each by its ETag (304 when
+        // unchanged) instead of reusing a copy kept from another revision, which would load stylesheets and modules of two of them.
+        app.UseStaticFiles(new StaticFileOptions
+        {
+            OnPrepareResponse = context => context.Context.Response.Headers.CacheControl = "no-cache",
+        });
         app.UseRouting();
         app.UseAuthorization();
         app.MapDataHub(requireAuth: true);
