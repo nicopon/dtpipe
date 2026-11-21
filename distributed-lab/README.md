@@ -68,6 +68,7 @@ cd distributed-lab
 open http://lab.localtest.me        # the home page: links, health, test accounts
 ./lab.sh stack smoke                # the same checks as the local lab's, against the stack
 ./lab.sh stack smoke keys           # a node and a person verified by a key: only the stack exchanges keys
+./lab.sh stack smoke e2e            # the data plane sealed: only on a stack raised with LAB_STACK_E2E=1
 ./lab.sh stack restart-check        # ends the coordinator, starts it again, checks that its state came back
 ./lab.sh stack failover-check       # a passive second coordinator takes over when the first is killed (PostgreSQL)
 ./lab.sh stack down                 # stops everything; .stack/ keeps the data
@@ -98,6 +99,11 @@ run side by side. Browse the coordinator at that name, never `127.0.0.1`.
 | `.stack/library.git/` | `coordinator` | the bare repository the library is pushed to, created on first start |
 | `.stack/postgres/` | `postgres` | runs, rights, armed deployments, session keys (not with `LAB_STACK_STORE=sqlite`) |
 | `.stack/node-N/` | `node-N` | its database, seeded on first start, and its fragment jobs |
+| `.stack/e2e/` | `lab.sh` (on the host), the data nodes and the runner | with `LAB_STACK_E2E=1`, the key that seals the data plane |
+
+`LAB_STACK_E2E=1 ./lab.sh stack up` seals the stack's data plane: the data nodes and the runner encrypt what they
+exchange, and the coordinator is left out of it. The stack stays sealed while `.stack/e2e/` holds its key, with or
+without the variable. `./lab.sh stack smoke e2e` plays the sealed stack's pass. The header of `lab.sh` says how.
 
 The runner mounts nothing. `LAB_SCALE` (default `1`) multiplies the seeded rows for every node: a
 node's rows reference the others' counts, so a node seeded at another scale refuses to start; delete
