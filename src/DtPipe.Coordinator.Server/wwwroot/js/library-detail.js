@@ -37,11 +37,13 @@ let reads = 0;
 // page, and clears its `busy`, only while it is still the page's. `reads` cannot say it: every `load` takes one, the `load` that a
 // save or a Deploy of the click's own makes included.
 let visit = 0;
+let planTimer = null;    // the read of the plan that a node's change asked for, waiting for the changes that follow it
 
 export function mount(el, params) {
   host = el;
   id = params[0];
   reads++; visit++;
+  clearTimeout(planTimer);
   busy = false;
   doc = null; plan = null; edgeProtections = [];
   draft = {}; taken = sorted(draft);
@@ -56,6 +58,7 @@ export function mount(el, params) {
 // An answer in flight when the page is left is dropped by its ticket, and `render` leaves a page with no host alone.
 export function leave() {
   reads++; asking++; reading++; showing++; visit++;
+  clearTimeout(planTimer);
   host = null;
 }
 
@@ -65,7 +68,21 @@ export function update(kind) {
   else if (kind === "rights" && doc) loadPlan(id, reads).then((kept) => kept && render(), (e) => toast(e.message));
   // A run that is over is in the journal: the runs listed are read again then, and drawn from the queue meanwhile.
   else if (kind === "journal") loadRecent();
-  else if (["deployments", "runs", "nodes", "all", "health"].includes(kind)) render();
+  // A node announcing, leaving or dropping changes which replicas are connected, and the plan judges each edge, the runner and
+  // whether Deploy can arm from them: the page is drawn from the store at once and the plan is read again, the drafted bindings left be.
+  else if (kind === "nodes") { render(); if (doc) readPlanSoon(); }
+  else if (["deployments", "runs", "all", "health"].includes(kind)) render();
+}
+
+// The plan is computed by the server, so a burst of node events (replicas connecting together, a stream opening that tells `nodes`
+// twice) asks for one read, made once none follows within PLAN_DELAY. A read of the plan that begins meanwhile starts after every
+// change heard so far and takes the pending one's place.
+const PLAN_DELAY = 300;
+function readPlanSoon() {
+  clearTimeout(planTimer);
+  planTimer = setTimeout(() => {
+    if (host && doc) loadPlan(id, reads).then((kept) => kept && render(), (e) => toast(e.message));
+  }, PLAN_DELAY);
 }
 
 async function load() {
@@ -90,6 +107,7 @@ async function load() {
 // longer its page's newest, whether it answered or failed.
 async function loadPlan(pipeline, mine) {
   if (mine !== reads) return false;
+  clearTimeout(planTimer);
   let answer;
   try {
     answer = await api(`/api/library/${encodeURIComponent(pipeline)}/plan`);

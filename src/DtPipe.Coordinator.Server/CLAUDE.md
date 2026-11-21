@@ -670,6 +670,9 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   broken red one for an edge with a refusal, the server's sentence in its title and never read, and no mark for an edge in clear.
   A null level and refusal are unknown and, like an answer with the field empty or absent, draw as the diagram always did, the
   legend included. The page compares no two levels, and the protection a run reported is never drawn on the plan's edges.
+  The page reads the plan again on a `nodes` event as it does on `rights`, since the judgment of an edge, the runner and what Deploy
+  can arm follow the connected replicas: a burst of events asks for one read, and a read of the plan that begins meanwhile takes its
+  place, so a stream's opening, which tells `nodes`, `library` and `rights` together, adds none.
   `[CI: LaunchRoutesTests]` `[local: ui_check.py]` `[unchecked: the pages, which no test plays in a browser]`
 - **An edge whose ends cannot join is refused at arming and at registration, by name, and judged on connected replicas
   only.** Arming (`LaunchPlanner.ChooseAsync`, a runner at a time) and the registration of a plan fixed by hand
