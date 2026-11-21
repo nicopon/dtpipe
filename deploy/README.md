@@ -431,9 +431,17 @@ directory put back, read back the rights, the library, the armed pipelines, the 
 session cookie. Checked outside Docker: the recipe's coordinator settings, with keys made by the
 `keys` service's script, take the runner's key and the administrator's and bootstrap both
 identities. Checked outside Docker, on local programs: a data node and a runner started with one
-end-to-end key ran the pipeline of the first guide, and a runner left in clear was refused by
-Deploy and by Run, with the edge named. Not checked: the recipe's containers since the keys (the
-`keys` service under `up --wait`, the volumes it hands over), the runner's entry point reading an
-end-to-end key given as `@path`, a data node and a runner sealed in containers, a real TLS proxy, a
-Linux Docker host, a volume owned by another uid, a SQLite file on a network volume, an https
-remote with a token.
+end-to-end key ran the pipeline of the first guide, and a runner left in clear was refused by Deploy
+and by Run, with the edge named. Checked in containers, on a macOS Docker host (OrbStack): the
+recipe under `up --wait` (its `keys` service and the volumes it hands over: the coordinator healthy,
+the runner connected with the key it was given, the page answering behind its sign-in); the `docker
+run` above, from the image of a checkout and a key file mounted read-only, which said its key id and
+never the key and joined a coordinator whose other nodes held the same key; the entry point reading
+a key given as `@path` from a file of root's alone, which `dtpipe` cannot read, and refusing a
+missing file and an empty one; four data nodes and a runner sealed with one key beside a coordinator
+given neither, whose pipelines ran `encrypted-psk` at both ends of every edge, a replica left in
+clear beside the sealed ones being listed while the run went to a sealed one, and Deploy refusing
+the edge by name once none was sealed. `docker inspect` of a node and of the runner showed the path
+of the key file, and the key's value was in no log, no answer of the coordinator, no file of its
+state directory and nowhere in its database. Not checked: a real TLS proxy, a Linux Docker host, a
+volume owned by another uid, a SQLite file on a network volume, an https remote with a token.
