@@ -1,45 +1,51 @@
-using Bogus;
-
 namespace DtPipe.Transformers.Arrow.Fake;
 
+internal readonly struct FakeTemplateSegment
+{
+    public readonly bool IsLiteral;
+    public readonly string Literal;
+    public readonly int ColumnIndex;
+
+    private FakeTemplateSegment(bool isLiteral, string literal, int columnIndex)
+    {
+        IsLiteral = isLiteral;
+        Literal = literal;
+        ColumnIndex = columnIndex;
+    }
+
+    public static FakeTemplateSegment CreateLiteral(string literal) => new(true, literal, -1);
+    public static FakeTemplateSegment CreateColumn(int columnIndex) => new(false, string.Empty, columnIndex);
+}
+
 /// <summary>
-/// Holds pre-computed processing info for a column in FakeDataTransformer.
-/// Can be either a generator-based processor or a template-based processor.
+/// Holds pre-computed processing info for a column in <see cref="FakeDataTransformer"/>.
 /// </summary>
-public readonly struct FakeColumnProcessor
+internal readonly struct FakeColumnProcessor
 {
     public readonly int Index;
-    public readonly Func<Faker, object?>? Generator;
-    public readonly string? Template;
-    public readonly HashSet<string>? ReferencedColumns;
-    public readonly string? FakerPath; // For deterministic mode hashing
-    public readonly uint FakerHash; // Precomputed hash
+    public readonly IFakeColumnGenerator? Generator;
+    public readonly FakeTemplateSegment[]? TemplateSegments;
+    public readonly int[]? ReferencedIndices;
+    public readonly ulong ColSalt;
 
-    public bool IsTemplate => Template is not null;
+    public bool IsTemplate => TemplateSegments is not null;
+    public bool IsActive => Generator is not null || TemplateSegments is not null;
 
-    /// <summary>
-    /// Constructor for faker/hardcoded generator.
-    /// </summary>
-    public FakeColumnProcessor(int index, Func<Faker, object?>? generator, string? fakerPath = null)
+    public FakeColumnProcessor(int index, IFakeColumnGenerator generator, ulong colSalt)
     {
         Index = index;
         Generator = generator;
-        Template = null;
-        ReferencedColumns = null;
-        FakerPath = fakerPath;
-        FakerHash = fakerPath is not null ? DtPipe.Transformers.Arrow.Fake.StableHash.ComputeFromString(fakerPath) : 0;
+        TemplateSegments = null;
+        ReferencedIndices = null;
+        ColSalt = colSalt;
     }
 
-    /// <summary>
-    /// Constructor for template processor.
-    /// </summary>
-    public FakeColumnProcessor(int index, string template, HashSet<string> referencedColumns)
+    public FakeColumnProcessor(int index, FakeTemplateSegment[] templateSegments, int[] referencedIndices)
     {
         Index = index;
         Generator = null;
-        Template = template;
-        ReferencedColumns = referencedColumns;
-        FakerPath = null;
-        FakerHash = 0;
+        TemplateSegments = templateSegments;
+        ReferencedIndices = referencedIndices;
+        ColSalt = 0;
     }
 }

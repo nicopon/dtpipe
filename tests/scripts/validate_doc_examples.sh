@@ -347,9 +347,9 @@ echo "--- guides/distributed-first-pipeline.md ---"
           -o first_orders.csv --no-stats > /dev/null 2>&1
 expect_file "the seeded shop database starts with the rows the page prints" first_orders.csv <<'EOF'
 OrderId,Country,Product
-0,HM,Pizza
-1,NI,Car
-2,GU,Chicken
+0,BR,Keyboard
+1,SH,Bacon
+2,GT,Towels
 EOF
 
 # The library the page has a reader write is the one deploy/compose.yaml seeds, byte for byte.
@@ -364,11 +364,11 @@ QUERY=$(sed -n 's/^      query: //p' "$PROJECT_ROOT/deploy/trial/library/shop-or
 "$DTPIPE" -i sqlite:shop.db --query "$QUERY" -o top_countries.csv --no-stats > /dev/null 2>&1
 expect_file "the trial library's example counts orders by country as the page prints" top_countries.csv <<'EOF'
 Country,Orders
-CC,11
-CK,10
-GF,10
-IQ,10
-BO,9
+CK,12
+MO,12
+BV,11
+KM,9
+PL,9
 EOF
 
 # ----------------------------------------
