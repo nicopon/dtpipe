@@ -423,25 +423,27 @@ person who may inspect the container (`docker inspect`, the pod's spec) can read
 give that right with the same care as the secrets. The nodes' end-to-end key is a file of the same
 kind, on the nodes only: the coordinator is never given it.
 
-Checked: the public address, in `PublicUrlTests`, and the stores, in `SqlStoreTests` (SQLite and
-PostgreSQL in CI, SQL Server by hand), of
-[tests/DtPipe.Coordinator.Server.Tests](../tests/DtPipe.Coordinator.Server.Tests). Checked on the
-real containers, on SQLite: the coordinator ended and started again, and a copy of its state
-directory put back, read back the rights, the library, the armed pipelines, the run journal and a
-session cookie. Checked outside Docker: the recipe's coordinator settings, with keys made by the
-`keys` service's script, take the runner's key and the administrator's and bootstrap both
-identities. Checked outside Docker, on local programs: a data node and a runner started with one
-end-to-end key ran the pipeline of the first guide, and a runner left in clear was refused by Deploy
-and by Run, with the edge named. Checked in containers, on a macOS Docker host (OrbStack): the
-recipe under `up --wait` (its `keys` service and the volumes it hands over: the coordinator healthy,
-the runner connected with the key it was given, the page answering behind its sign-in); the `docker
-run` above, from the image of a checkout and a key file mounted read-only, which said its key id and
-never the key and joined a coordinator whose other nodes held the same key; the entry point reading
-a key given as `@path` from a file of root's alone, which `dtpipe` cannot read, and refusing a
-missing file and an empty one; four data nodes and a runner sealed with one key beside a coordinator
-given neither, whose pipelines ran `encrypted-psk` at both ends of every edge, a replica left in
-clear beside the sealed ones being listed while the run went to a sealed one, and Deploy refusing
-the edge by name once none was sealed. `docker inspect` of a node and of the runner showed the path
-of the key file, and the key's value was in no log, no answer of the coordinator, no file of its
-state directory and nowhere in its database. Not checked: a real TLS proxy, a Linux Docker host, a
-volume owned by another uid, a SQLite file on a network volume, an https remote with a token.
+What has been checked:
+
+- **Tests.** The public address (`PublicUrlTests`) and the stores (`SqlStoreTests`: SQLite and PostgreSQL in CI, SQL
+  Server by hand), in [tests/DtPipe.Coordinator.Server.Tests](../tests/DtPipe.Coordinator.Server.Tests).
+- **A restart.** On real containers with SQLite, the coordinator ended and started again, and a copy of its state
+  directory put back: it read back the rights, the library, the armed pipelines, the run journal and a session cookie.
+- **The recipe, outside Docker.** Its coordinator settings, with keys made by the `keys` service's script, take the
+  runner's key and the administrator's and bootstrap both identities.
+- **Sealing, outside Docker.** A data node and a runner started with one key ran the pipeline of the first guide; a
+  runner left in clear was refused by Deploy and by Run, with the edge named.
+- **The recipe, in containers** (macOS Docker host, OrbStack). `up --wait` brings the coordinator healthy, the runner
+  connected with its key and the page answering behind its sign-in. The `docker run` above, from the image of a checkout
+  and a key file mounted read-only, joined a coordinator whose other nodes held the same key, and said its key id, never
+  the key.
+- **The entry point.** It reads a key given as `@path` from a file only root can read, which `dtpipe` cannot, and
+  refuses a missing file and an empty one.
+- **Four data nodes and a runner sealed with one key, beside a coordinator given neither.** Every edge of the pipelines
+  ran `encrypted-psk` at both ends. A replica left in clear was listed, and the run went to a sealed one. Deploy refused
+  the edge by name once none was sealed.
+- **Where the key does not appear.** `docker inspect` of a node and of the runner shows the path of the key file. The
+  key's value is in no log, no answer of the coordinator, no file of its state directory and nowhere in its database.
+
+Not checked: a real TLS proxy, a Linux Docker host, a volume owned by another uid, a SQLite file on a network volume, an
+https remote with a token.

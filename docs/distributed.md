@@ -50,6 +50,8 @@ which it prints at start; the **Nodes** page says it in the words of the third c
 Sealing hides the rows, not the plan: the coordinator opens every transfer, so it still knows which
 nodes exchange rows, and its run page lists the rows of each edge.
 
+### What the coordinator checks
+
 A transfer whose two ends are set differently fails before its first row, so the coordinator checks
 and shows it:
 
