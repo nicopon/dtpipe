@@ -367,6 +367,32 @@ default, and `DtPipeNode__ArrowCompressionLevel`), never through the environment
 than 1.16 does not know the flags and refuses to start, loudly, so a node and the `dtpipe` it runs
 are upgraded together. A 1.16 child reads a compressed edge whichever way it was written.
 
+Rows cross the coordinator's hub in clear unless the nodes seal them. To seal them, make one key
+for the whole trust domain, mount it as a file on every node host, and set two settings there:
+
+```bash
+(umask 077; openssl rand -base64 32 > e2e.key)
+docker run -d --init --cap-add NET_ADMIN -e DTPIPE_EGRESS_ALLOW=10.20.0.0/24 \
+    -v "$PWD/e2e.key:/run/secrets/e2e.key:ro" \
+    -e DtPipeNode__EndToEndEncryption__Enabled=true \
+    -e DtPipeNode__EndToEndEncryption__PreSharedKey=@/run/secrets/e2e.key \
+    -e DtPipeNode__CoordinatorUrl=http://coordinator:8080 ... dtpipe-runner
+```
+
+`dtpipe node --e2e --e2e-key @/run/secrets/e2e.key` takes the same two on a command line.
+
+- **Nodes only.** The key is mounted on the nodes, never on the coordinator.
+- **Every node alike**, mode and key. An edge whose ends differ is refused before anything
+  launches, and named
+  ([what the coordinator checks](../docs/distributed.md#sealing-the-data-plane)).
+- **The runner** reads a key given as `@path` in its entry point, as root, before it drops its
+  privileges, as it reads its client secret.
+- **No rotation.** The key is read once at start: stop everything, change it on every node, start
+  again.
+- **A floor.** `Coordinator__DataPlane__RequiredProtection` on the coordinator names the lowest
+  level a replica may announce; one under it runs no fragment
+  ([REFERENCE.md](../REFERENCE.md#coordinator-settings-coordinator__)).
+
 ## HTTPS in front
 
 The coordinator listens in plain HTTP and never terminates TLS: a proxy or ingress does. Tell the
@@ -394,7 +420,8 @@ gives as a file it mounts (`@path`). The coordinator keeps a key as its hash onl
 `ARG`, no `ENV` of the image and no command line, and the server writes none of them to a log or a
 response. The token reaches git in the environment of the one process that talks to the remote. A
 person who may inspect the container (`docker inspect`, the pod's spec) can read its environment:
-give that right with the same care as the secrets.
+give that right with the same care as the secrets. The nodes' end-to-end key is a file of the same
+kind, on the nodes only: the coordinator is never given it.
 
 Checked: the public address, in `PublicUrlTests`, and the stores, in `SqlStoreTests` (SQLite and
 PostgreSQL in CI, SQL Server by hand), of
@@ -403,6 +430,10 @@ real containers, on SQLite: the coordinator ended and started again, and a copy 
 directory put back, read back the rights, the library, the armed pipelines, the run journal and a
 session cookie. Checked outside Docker: the recipe's coordinator settings, with keys made by the
 `keys` service's script, take the runner's key and the administrator's and bootstrap both
-identities. Not checked: the recipe's containers since the keys (the `keys` service under `up
---wait`, the volumes it hands over), a real TLS proxy, a Linux Docker host, a volume owned by
-another uid, a SQLite file on a network volume, an https remote with a token.
+identities. Checked outside Docker, on local programs: a data node and a runner started with one
+end-to-end key ran the pipeline of the first guide, and a runner left in clear was refused by
+Deploy and by Run, with the edge named. Not checked: the recipe's containers since the keys (the
+`keys` service under `up --wait`, the volumes it hands over), the runner's entry point reading an
+end-to-end key given as `@path`, a data node and a runner sealed in containers, a real TLS proxy, a
+Linux Docker host, a volume owned by another uid, a SQLite file on a network volume, an https
+remote with a token.
