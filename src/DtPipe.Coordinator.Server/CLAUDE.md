@@ -615,6 +615,14 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   and rendered by the same record, `GET /api/runs/{id}` and the lists included: no route of their own, and a document that names none
   reads with both ends unknown.
   `[CI: RunJournalTests, StateWireTests]` `[unchecked: the pages' escaping of Origin]`
+- **The run pages say what each end of an edge reported and what a cause names, and read no verdict and no sentence.** A run's edge
+  table gives a word per end from `EdgeCount.ProducerProtection` and `ConsumerProtection`, through the table of words of `core.js`:
+  null, and a run kept without the field, are unknown, never in clear and never sealed, and a word the table has no entry for shows
+  as the server wrote it, escaped. Nothing is drawn from the two ends: the verdict is the run's cause. `RunResult.CauseKind` says how
+  a cause reads (`causeKindChip`, `causeLine`): an edge and a receiver that does not acknowledge are said as such, any other kind
+  and an absent one read as a fragment or a sentence, and no text is parsed to learn what a cause names. A refusal and a reason
+  are the server's lines, shown whole. The health cause `protection-mismatch` reaches the pages by the health read alone
+  (`pipeline-status.js`). `[local: ui_check.py]` `[unchecked: the pages, which no test plays in a browser]`
 - **A run names the subject and the groups of each fragment's node.** `RunQueue` reads them from the
   rights when the run starts, through `LaunchPlanner.RunFragmentsOf` (`RightsStore.SubjectOf`: the client id of
   the identity named after the fragment's node, the `sub` its tokens carry; `GroupsOf`), and puts them in each

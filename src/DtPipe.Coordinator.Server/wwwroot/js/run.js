@@ -1,6 +1,6 @@
 // A run's own page, `#/runs/<runId>`: its outcome and report, the pipeline it ran, and the lines of the stream that name it.
 // A run in flight is the queue's and follows it to its end; a run that is over is the server's, read once.
-import { $, api, cursorsOf, duration, endNotes, esc, fmt, isActive, linesOfRun, ranPlan, runStateLabel, shortNode, store, toast } from "./core.js";
+import { $, api, cursorsOf, duration, endNotes, esc, fmt, isActive, linesOfRun, protectionOf, protectionWord, ranPlan, runStateLabel, shortNode, store, toast } from "./core.js";
 import { crumbs } from "./crumbs.js";
 import { lineHtml } from "./events.js";
 
@@ -99,16 +99,21 @@ function drawReport() {
   else el.innerHTML = report(run);
 }
 
+// What an end of an edge reported it applied, in the words its own client gave: a word per end, "unknown" for an end that reported none.
+// The page draws no verdict from the two; the run's cause is the server's.
+const protectionCell = (level) => `<td${protectionOf(level) ? "" : ` class="muted"`}>${esc(protectionWord(level))}</td>`;
+const PROTECTION_HINT = "What this end's client reported it applied to the edge's transfer. Unknown: the end reported nothing.";
+
 function report(r) {
   const res = r.result;
   const edges = (res?.edgeCounts || []).map((e) => `<tr><td>${esc(shortNode(e.producerFragment))}.${esc(e.producerAlias)}</td><td>${esc(shortNode(e.consumerFragment))}.${esc(e.consumerAlias)}</td>
-    <td class="num">${e.sent == null ? "?" : fmt(e.sent)}</td><td class="num ${e.sent === e.received && e.sent != null ? "" : "mismatch"}">${e.received == null ? "?" : fmt(e.received)}</td></tr>`).join("");
+    <td class="num">${e.sent == null ? "?" : fmt(e.sent)}</td><td class="num ${e.sent === e.received && e.sent != null ? "" : "mismatch"}">${e.received == null ? "?" : fmt(e.received)}</td>${protectionCell(e.producerProtection)}${protectionCell(e.consumerProtection)}</tr>`).join("");
   const exits = res ? Object.values(res.reports).map((p) => `<tr><td>${esc(shortNode(p.fragment))}</td><td class="num">${p.exitCode}</td><td>${esc(p.origin ?? "")}</td><td class="wrap">${esc(p.firstFault ?? "")}</td></tr>`).join("") : "";
   return `<div class="run-report">
     ${isActive(r) ? `<p class="hint">The run is ${esc(runStateLabel(r.state))}: its report appears here when it ends.</p>` : ""}
     ${endNotes(r)}
     ${res?.consequences?.length ? `<p><b>Consequences:</b> ${res.consequences.map((c) => esc(shortNode(c))).join(", ")}</p>` : ""}
-    ${edges ? `<table><tr><th>from</th><th>to</th><th>sent</th><th>received</th></tr>${edges}</table>` : ""}
+    ${edges ? `<table><tr><th>from</th><th>to</th><th>sent</th><th>received</th><th title="${esc(PROTECTION_HINT)}">from end</th><th title="${esc(PROTECTION_HINT)}">to end</th></tr>${edges}</table>` : ""}
     ${exits ? `<h3>Exit reports</h3><table><tr><th>fragment</th><th>exit</th><th>origin</th><th>first fault</th></tr>${exits}</table>` : ""}
     ${cursorsOf(r)}
     ${ranPlan(r.plan)}

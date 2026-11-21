@@ -4,7 +4,7 @@
 // job's, shown and never chosen here; the runner is never named. Each brick's mode is chosen in its own box of the diagram; Deploy
 // saves the modes as bindings and arms the pipeline at the commit the library holds, and the pipeline is then run from here. This
 // page is the one place that deploys.
-import { $, ROWS_CROSSED_HINT, api, apiPage, deploymentOf, duration, esc, fmt, isActive, lastRunOf, rowsCrossed, runHref, runStateLabel, shortNode, store, toast } from "./core.js";
+import { $, ROWS_CROSSED_HINT, api, apiPage, causeKindChip, causeLine, deploymentOf, duration, esc, fmt, isActive, lastRunOf, rowsCrossed, runHref, runStateLabel, store, toast } from "./core.js";
 import { crumbs } from "./crumbs.js";
 import { deploymentChip, statusChip } from "./pipeline-status.js";
 import { drawLanes, fragmentJobs, legendFor, planProblems } from "./placement.js";
@@ -275,7 +275,7 @@ function recentRow(r) {
     <td><span class="outcome-chip ${esc(r.state)}">${esc(runStateLabel(r.state))}</span></td>
     <td title="${esc(at ?? "")}">${at ? esc(new Date(at).toLocaleString()) : ""}</td>
     <td class="num">${esc(duration(r))}</td><td class="num">${rows ? fmt(rows) : ""}</td>
-    <td class="wrap">${esc(r.reason ?? (r.result?.cause ? shortNode(r.result.cause) : ""))}</td></tr>`;
+    <td class="wrap">${causeKindChip(r)}${esc(causeLine(r))}</td></tr>`;
 }
 
 // The latest runs of this pipeline, each linked to its page, which holds the report.
