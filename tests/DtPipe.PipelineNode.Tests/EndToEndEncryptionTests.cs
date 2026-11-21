@@ -165,6 +165,61 @@ public class EndToEndEncryptionTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// What a run reports of an edge's failure is the category its own client gave it, by the edge's alias: the end that refused the
+    /// encryption and the end its peer abandoned, each in its own exit. The message of the first fault stays as it was.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(DifferentEnds))]
+    public async Task TheExitOfEachEnd_ReportsForTheEdgeTheCategoryItsOwnClientGaveTheFailure(string producerEnds, string consumerEnds)
+    {
+        using var fixture = SplitFixture.Create(rowCount: 2_000);
+        await using var host = await CoordinatorTestHost.StartAsync(o => o.Groups["test"] = new GroupAccess { CanSendTo = ["test"] });
+        await using var producer = await HandWiredNode.StartAsync(Ends(host, producerEnds), Launch(fixture.ProducerJobPath, EdgeDirection.Outbound));
+        await using var consumer = await HandWiredNode.StartAsync(Ends(host, consumerEnds), Launch(fixture.ConsumerJobPath, EdgeDirection.Inbound));
+        var transferId = await Initiator(host).InitTransferAsync(producer.ClientId, consumer.ClientId, handshakeTimeout: TimeSpan.FromSeconds(20));
+
+        await Task.WhenAll(
+            producer.WireAsync("main", transferId).WaitAsync(Bound),
+            consumer.WireAsync("main", transferId).WaitAsync(Bound));
+        var exits = await Task.WhenAll(producer.ExitAsync().WaitAsync(Bound), consumer.ExitAsync().WaitAsync(Bound));
+
+        var words = exits.Select(exit => Assert.Single(exit.EdgeFailures!)).ToList();
+        Assert.All(words, entry => Assert.Equal("main", entry.Key));
+        Assert.Equal(
+            [Coordinator.Contracts.TransferFailures.AbandonedByPeer, Coordinator.Contracts.TransferFailures.EndToEndEncryptionFailed],
+            words.Select(entry => entry.Value).Order(StringComparer.Ordinal));
+        Assert.StartsWith("outbound edge 'main': ", exits[0].FirstFault);
+        Assert.StartsWith("inbound edge 'main': ", exits[1].FirstFault);
+    }
+
+    /// <summary>
+    /// An edge that failed with no category has no entry, never a word made up for it: here the producer's own child fails, which no
+    /// transfer raised; and a category this node's table does not know, which a later TransportR could raise, has none either.
+    /// </summary>
+    [Fact]
+    public async Task AnEdgeThatFailedWithNoCategory_HasNoEntry()
+    {
+        using var fixture = SplitFixture.Create(rowCount: 10);
+        var failing = Path.Combine(_dir.FullName, "failing.yaml");
+        await File.WriteAllTextAsync(failing,
+            $"main:\n  input: csv:{Path.Combine(_dir.FullName, "no-such-file.csv")}\n  output: arrow:-\n", TestContext.Current.CancellationToken);
+        await using var host = await CoordinatorTestHost.StartAsync(o => o.Groups["test"] = new GroupAccess { CanSendTo = ["test"] });
+        await using var producer = await HandWiredNode.StartAsync(Ends(host, "clear"), Launch(failing, EdgeDirection.Outbound));
+        await using var consumer = await HandWiredNode.StartAsync(Ends(host, "clear"), Launch(fixture.ConsumerJobPath, EdgeDirection.Inbound));
+        var transferId = await Initiator(host).InitTransferAsync(producer.ClientId, consumer.ClientId, handshakeTimeout: TimeSpan.FromSeconds(20));
+
+        await Task.WhenAll(
+            producer.WireAsync("main", transferId).WaitAsync(Bound),
+            consumer.WireAsync("main", transferId).WaitAsync(Bound));
+        var exit = await producer.ExitAsync().WaitAsync(Bound);
+
+        Assert.NotEqual(0, exit.ExitCode);
+        Assert.Equal(Coordinator.Contracts.ExitOrigins.Local, exit.Origin);
+        Assert.Null(exit.EdgeFailures);
+        Assert.Null(TransferFailureWords.WordsOf(new Dictionary<string, TransferFailureCategory> { ["main"] = (TransferFailureCategory)999 }));
+    }
+
     [Fact]
     public async Task AKeyWithoutEncryption_IsRefusedBeforeAClientIsBuilt()
     {

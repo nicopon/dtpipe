@@ -127,6 +127,35 @@ public sealed class StateWireTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// The routes that carry a run's result write the kind of its cause beside the cause, and the reason the journal derives from it, in
+    /// the record the run already has: no route of its own.
+    /// </summary>
+    [Fact]
+    public async Task The_Run_Routes_Write_The_Kind_Of_The_Cause_Beside_It()
+    {
+        using var host = new CoordinatorHost();
+        var journal = host.Services.GetRequiredService<RunJournal>();
+        journal.Record(RunIn("failed") with
+        {
+            Result = new RunResult(RunOutcome.Failed, "p -> c", ["p", "c"], new Dictionary<string, FragmentExitReport>(), [], CauseKind: CauseKinds.Edge),
+        });
+        var client = host.Bearer(CoordinatorHost.Person(CoordinatorHost.Reader));
+
+        var routes = new Dictionary<string, JsonElement>
+        {
+            ["/api/runs/run-1"] = await client.GetFromJsonAsync<JsonElement>("/api/runs/run-1", Ct),
+            ["/api/runs/last"] = (await client.GetFromJsonAsync<JsonElement>("/api/runs/last", Ct))[0],
+            ["/api/runs"] = (await client.GetFromJsonAsync<JsonElement>("/api/runs", Ct))[0],
+        };
+        foreach (var run in routes.Values)
+        {
+            var result = run.GetProperty("result");
+            Assert.Equal(("p -> c", CauseKinds.Edge), (result.GetProperty("cause").GetString(), result.GetProperty("causeKind").GetString()));
+            Assert.StartsWith("The ends of p -> c are set differently", run.GetProperty("reason").GetString());
+        }
+    }
+
     /// <summary>An event of the bus leaves with its number and the bus's id, a line replayed from the backlog says so and a live one does not, and the id is the same from one connection to the next.</summary>
     [Fact]
     public async Task The_Event_Stream_Numbers_The_Events_Of_The_Bus_And_Marks_The_Lines_It_Replays()

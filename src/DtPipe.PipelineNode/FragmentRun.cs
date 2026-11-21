@@ -39,6 +39,7 @@ public sealed class FragmentRun : IAsyncDisposable
     private readonly Dictionary<string, long> _rowCounts = new();
     private readonly object _rowCountsLock = new();
     private readonly Dictionary<string, TransferProtection> _edgeProtections = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, TransferFailureCategory> _edgeFailures = new(StringComparer.Ordinal);
     private int _faulted;
 
     /// <summary>Completed when the child exits with a non-zero code, whatever its relays are doing.</summary>
@@ -78,6 +79,13 @@ public sealed class FragmentRun : IAsyncDisposable
     /// </summary>
     public IReadOnlyDictionary<string, TransferProtection> EdgeProtections { get { lock (_edgeProtections) return new Dictionary<string, TransferProtection>(_edgeProtections); } }
 
+    /// <summary>
+    /// The category TransportR gave the failure of each edge's transfer, by alias, read from the <see cref="TransferFailedException"/> a relay
+    /// caught; never from its message. An edge whose transfer did not fail, or failed with no category (a cancellation, a framing the counter
+    /// refused), has no entry. <see cref="FirstFault"/> keeps the message of the first fault whatever this holds.
+    /// </summary>
+    public IReadOnlyDictionary<string, TransferFailureCategory> EdgeFailures { get { lock (_edgeFailures) return new Dictionary<string, TransferFailureCategory>(_edgeFailures); } }
+
     public string? FirstFault => _fault?.Reason;
     public FaultOrigin? Origin => _fault?.Origin;
 
@@ -102,6 +110,12 @@ public sealed class FragmentRun : IAsyncDisposable
     internal void NoteProtection(string alias, TransferProtection protection)
     {
         lock (_edgeProtections) _edgeProtections[alias] = protection;
+    }
+
+    /// <summary>Keeps the category of the failure of the edge <paramref name="alias"/>'s transfer, for <see cref="EdgeFailures"/>.</summary>
+    private void NoteFailure(string alias, TransferFailedException failure)
+    {
+        lock (_edgeFailures) _edgeFailures[alias] = failure.Category;
     }
 
     /// <summary>Starts relaying the outbound edge <paramref name="alias"/> through <paramref name="send"/>; true when it was the last edge declared.</summary>
@@ -335,7 +349,8 @@ public sealed class FragmentRun : IAsyncDisposable
             // TransferFailedException is the documented contract for WriteAsync/CompleteAsync. An
             // OperationCanceledException here is never this code's own doing - no cancellation
             // token reaches WriteAsync - so it can only be the transfer failing underneath it, the
-            // same as TransferFailedException.
+            // same as TransferFailedException, though it carries no category.
+            if (ex is TransferFailedException failure) NoteFailure(alias, failure);
             Fault(FaultOrigin.Remote, $"outbound edge '{alias}': {ex.Message}");
         }
         catch (Exception ex)
@@ -376,7 +391,8 @@ public sealed class FragmentRun : IAsyncDisposable
             // Thrown by receive's own ReadAsync or WaitForCompletionAsync: the child was
             // still fine, the transfer itself failed. OperationCanceledException here is never this
             // code's own doing either, for the same reason as the outbound side. InvalidDataException is
-            // the counter refusing the peer's framing.
+            // the counter refusing the peer's framing. Only TransferFailedException carries a category.
+            if (ex is TransferFailedException failure) NoteFailure(alias, failure);
             Fault(FaultOrigin.Remote, $"inbound edge '{alias}': {ex.Message}");
         }
         catch (Exception ex)
@@ -518,7 +534,7 @@ public sealed class FragmentRun : IAsyncDisposable
     public async Task<FragmentOutcome> CompleteAsync(CancellationToken ct = default)
     {
         var exitCode = await RunToCompletionAsync(ct);
-        return new FragmentOutcome(exitCode, Origin, FirstFault, RowCounts, EdgeProtections);
+        return new FragmentOutcome(exitCode, Origin, FirstFault, RowCounts, EdgeProtections, EdgeFailures);
     }
 
     public ValueTask DisposeAsync()

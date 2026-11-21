@@ -278,12 +278,55 @@ public sealed record FragmentCheck(bool Ok, string? Reason = null);
 /// tracked when the child exited with 0. <see cref="EdgeProtections"/> holds, by edge alias, what the replica's own TransportR client
 /// reported it applied to that edge's transfer (a word of <see cref="DataPlaneProtections"/>, never a key or a fingerprint): an edge the
 /// client reported nothing of has no entry, and a host that predates the field sends none, so a missing entry means unknown and never
-/// the level that seals nothing. Untrusted text, read through <see cref="DataPlaneProtections.Known"/>.
+/// the level that seals nothing. Untrusted text, read through <see cref="DataPlaneProtections.Known"/>. <see cref="EdgeFailures"/> holds, by
+/// edge alias, the category the replica's client gave the failure of that edge's transfer (a word of <see cref="TransferFailures"/>, never a
+/// message): an edge whose transfer did not fail, or failed with no category, has no entry, and a host that predates the field sends none.
+/// Untrusted text, read through <see cref="TransferFailures.Known"/>.
 /// </summary>
 public sealed record FragmentExit(
     string RunId, string Fragment, int ExitCode, string Origin, string? FirstFault, IReadOnlyDictionary<string, long> RowCounts,
     string? LaunchToken = null, IReadOnlyDictionary<string, CursorReport>? Cursors = null,
-    IReadOnlyDictionary<string, string>? EdgeProtections = null);
+    IReadOnlyDictionary<string, string>? EdgeProtections = null, IReadOnlyDictionary<string, string>? EdgeFailures = null);
+
+/// <summary>
+/// The words <see cref="FragmentExit.EdgeFailures"/> carries: the categories TransportR gives a failed transfer, each as the end that saw
+/// it names it. A node writes one of them; the coordinator keeps only these words (<see cref="Known"/>), never a message, and a category
+/// a later TransportR adds has no word until this class names it.
+/// </summary>
+public static class TransferFailures
+{
+    /// <summary>The hub ended the transfer: a teardown, a reaper, a right withdrawn, or a transfer the hub lost.</summary>
+    public const string EndedByHub = "EndedByHub";
+
+    /// <summary>The other end gave up and said so.</summary>
+    public const string AbandonedByPeer = "AbandonedByPeer";
+
+    /// <summary>On a sender, the receiver acknowledged nothing within the acknowledgement timeout; on a receiver, the transfer did not finish closing within it.</summary>
+    public const string AcknowledgementTimedOut = "AcknowledgementTimedOut";
+
+    /// <summary>This end's handle was released before the transfer reached an outcome.</summary>
+    public const string HandleReleased = "HandleReleased";
+
+    /// <summary>This end could not turn a batch into bytes, or bytes back into a batch.</summary>
+    public const string UndecodableOrUnserializableBatch = "UndecodableOrUnserializableBatch";
+
+    /// <summary>What arrived breaks the wire protocol.</summary>
+    public const string ProtocolViolation = "ProtocolViolation";
+
+    /// <summary>A failure TransportR files under no other category.</summary>
+    public const string Other = "Other";
+
+    /// <summary>End-to-end encryption refused the transfer at this end: the two ends are set differently, or the stream was altered on its way.</summary>
+    public const string EndToEndEncryptionFailed = "EndToEndEncryptionFailed";
+
+    /// <summary><paramref name="word"/> when it is one of this class's words, otherwise null: a text a host sent is a category or nothing.</summary>
+    public static string? Known(string? word) => word switch
+    {
+        EndedByHub or AbandonedByPeer or AcknowledgementTimedOut or HandleReleased or UndecodableOrUnserializableBatch
+            or ProtocolViolation or Other or EndToEndEncryptionFailed => word,
+        _ => null,
+    };
+}
 
 /// <summary>
 /// The two words <see cref="FragmentExit.Origin"/> carries, each by what it does to the run's verdict. The node writes

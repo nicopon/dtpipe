@@ -104,6 +104,10 @@ stdin/stdout and TransportR. It speaks to no coordinator itself.
   handle itself, disposed under the call when its transfer was torn down). The coordinator's
   outcome rule tells a run's cause from its consequences by this, not by which fragment reports
   first. `[CI: PipelineNode.Tests, DtPipe.Coordinator.Tests.RunOrchestratorTests]`
+- **A relay that catches a `TransferFailedException` keeps its category by the edge's alias** (`FragmentRun.EdgeFailures`, then
+  `FragmentOutcome`), read from the property and never from the message, which goes on into the first fault unchanged. Any other
+  exception, a cancellation and a framing the counter refused included, leaves the alias with no entry. The host puts the
+  categories in words (`src/DtPipe.PipelineNode.Hosting/CLAUDE.md`). `[CI: EndToEndEncryptionTests]`
 - `ConnectAsync` connects the replica's client and launches nothing; `Launch` spawns a run's child and
   `WireAsync(run, alias, transferId)` hands it one edge's transfer, `true` when it was the last edge the run
   declares. An alias the run does not declare is refused (`ArgumentException`) before the handle is claimed, so the

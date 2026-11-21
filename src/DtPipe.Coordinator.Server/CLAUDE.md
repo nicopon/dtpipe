@@ -560,8 +560,9 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   A run that had started carries `RunView.SinkMayBePartial` (also in `/service/runs`), true: its fragments had been launched and a sink may hold part of
   what they wrote. It is a label only: nothing ranks resumption strategies or reruns the run, and a run that was only queued, or that ended any other way, has none.
   **A run says why in one line, and saying it changes nothing**: `RunView.Reason` is derived each time it is read from `Result` and `Refusal`
-  (the first line of the failing fragment's own error, the fragment that stopped answering, a refusal without the runner it was tried
-  on), never stored as a verdict and never an input to one: state, `Result` and `Refusal` are what the run reports, and a cancelled
+  (the first line of the failing fragment's own error, the fragment that stopped answering, an edge or a receiver said in words, a refusal
+  without the runner it was tried on), read from `RunResult.CauseKind` when the result has one and, for a result kept without it, guessed
+  from the reports, in one function (`FailureLine`); never stored as a verdict and never an input to one: state, `Result` and `Refusal` are what the run reports, and a cancelled
   or successful run has no reason. The pages show it wherever a run is shown (`endNotes` in `core.js`), and count rows as
   `rowsCrossed` does, on every edge. An event of `/api/events` carries `at`, when it happened, so a page opened later dates the
   backlog it replays by it; a replica whose connection dropped carries `awaySince` and `givenUpAt` in the nodes' snapshot.

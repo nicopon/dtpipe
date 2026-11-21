@@ -173,7 +173,10 @@ none. One node per process, which is one replica of its node's identity; a secon
   without it. `ReplicaRuns.ExitOf` builds the report, and it carries, by edge alias, the protection the replica's client reported for that
   edge (`FragmentExit.EdgeProtections`): read from the run (`FragmentRun.EdgeProtections`), never from the node's setting or announcement,
   and put in words by `EndToEndKey.WordsOf`, the table the announced level uses too. A value that table does not know has no entry, and a
-  run with no entry at all sends none.
+  run with no entry at all sends none. It carries too, by edge alias, the category the client gave the failure of that edge's transfer
+  (`FragmentExit.EdgeFailures`): read from the run (`FragmentRun.EdgeFailures`) and put in the words of `TransferFailures` by
+  `TransferFailureWords`, the one table from TransportR's categories; a category it does not know, or a failure with none, has no entry,
+  and the message stays in the first fault alone.
   `[CI: PipelineNode.Tests ReplicaRunsTests, CoordinatorDrivenTests, NodeAgentDataPlaneTests, EndToEndEncryptionTests; Hosting.Tests EndToEndKeyTests]`
   `[unchecked: the report in flight when an announcement lands]`
 - **A host holds at most `DtPipeNodeOptions.MaxRuns` runs** (0, the default, for no bound): `ReplicaRuns` admits a launch under a

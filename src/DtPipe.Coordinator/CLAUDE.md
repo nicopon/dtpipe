@@ -141,6 +141,16 @@ the table, `OnExitedAsync` and the pure rules (`DetermineOutcome`, `PeersOwingAR
   organic one. A report's origin is one of the two words of `ExitOrigins`, and any other word reads as `Local`;
   `DtPipe.PipelineNode` declares its own `FaultOrigin`, which `FaultOriginWordsTests` compares with this one.
   `[CI: RunOrchestratorTests, CoordinatorDrivenTests, ScriptedRunTests, PipelineNode.Tests FaultOriginWordsTests]`
+- **When no fault is a fragment's own, the category an end reports of its edge names the cause, and nothing else does.**
+  `FragmentExit.EdgeFailures` reaches `FragmentExitReport` under the same rule as the rest of an `Exited`, kept only as the words of
+  `TransferFailures` (`RunOrchestrator.FailuresReported`, the filter `ProtectionsReported` applies). `DetermineOutcome` reads them only
+  where it would otherwise name the first fault: the first edge of `RunSpec.Edges` an end of which failed end-to-end encryption is the
+  cause, as `producer -> consumer`, and every failed fragment its consequence; else the receiver of the first edge whose sender had no
+  acknowledgement, the sender a consequence. A cancellation, a silence, a wiring failure and a fragment's own fault, 130 included,
+  stay ahead of them, and the outcome stays `Failed`. Reports with no category give the verdict the rule gives without them, to the
+  character. `RunResult.CauseKind`, a word of `CauseKinds`, says what every `Cause` names; `CauseIsUnresponsive` stays beside it and
+  `Describe()` is unchanged. The coordinator never reads an exception's message to decide.
+  `[CI: EdgeFailureVerdictTests, EdgeFailureReportWireTests; PipelineNode.Tests CoordinatorDrivenTests]`
 - **A fragment's own failure ends the run at once.** `OnExitedAsync` raises the run's abort on the
   first `Exited` that is non-zero with a `FaultOrigin.Local` origin, so the teardown tells every
   fragment still running to `Cancel` without waiting for its peers to notice: a peer whose child has

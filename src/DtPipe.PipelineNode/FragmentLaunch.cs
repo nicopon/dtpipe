@@ -42,8 +42,10 @@ public sealed class FragmentLaunch
 
 /// <summary>
 /// How a run ended: the child's exit code (1 when the fragment faulted), where the first fault came from, the rows each edge carried,
-/// and what the client reported it applied to the transfer of each edge it read one for (<see cref="FragmentRun.EdgeProtections"/>).
+/// what the client reported it applied to the transfer of each edge it read one for (<see cref="FragmentRun.EdgeProtections"/>), and the
+/// category of each transfer that failed with one (<see cref="FragmentRun.EdgeFailures"/>).
 /// </summary>
 public sealed record FragmentOutcome(
     int ExitCode, FaultOrigin? Origin, string? FirstFault, IReadOnlyDictionary<string, long> RowCounts,
-    IReadOnlyDictionary<string, TransportR.Client.TransferProtection> EdgeProtections);
+    IReadOnlyDictionary<string, TransportR.Client.TransferProtection> EdgeProtections,
+    IReadOnlyDictionary<string, TransportR.Client.TransferFailureCategory> EdgeFailures);

@@ -74,7 +74,8 @@ public sealed record RunView(
 
     /// <summary>
     /// Why the run did not succeed, in one line a person reads: the first line of the failing fragment's own error, the
-    /// fragment that stopped answering, or the refusal without the runner it was tried on. It is presentation, derived from
+    /// fragment that stopped answering, why an edge or a receiver failed (<see cref="FailureLine"/>), or the refusal without the
+    /// runner it was tried on. It is presentation, derived from
     /// <see cref="Result"/> and <see cref="Refusal"/> each time it is read: it changes no state, code or verdict, and is null
     /// for a run that succeeded or that its requester cancelled.
     /// </summary>
@@ -85,8 +86,23 @@ public sealed record RunView(
         _ => null,
     };
 
+    /// <summary>
+    /// The one line of a failed run's reason. A result that says what its cause names (<see cref="RunResult.CauseKind"/>) is read by
+    /// that word: an edge says why it failed, a receiver that it did not acknowledge, a message is itself. A result that says nothing of
+    /// it (kept before the field, or written by an older coordinator) is read as a fragment is, by guessing from the reports: the
+    /// cause's own report when it names a fragment that reported, else the cause itself.
+    /// </summary>
     private static string? FailureLine(RunResult result, string cause)
     {
+        switch (result.CauseKind)
+        {
+            case CauseKinds.Edge:
+                return $"The ends of {cause} are set differently for end-to-end encryption, or its stream was altered on its way.";
+            case CauseKinds.MuteReceiver:
+                return $"{cause} stopped acknowledging what it was sent.";
+            case CauseKinds.Message:
+                return cause;
+        }
         if (result.Reports.TryGetValue(cause, out var report))
             return FirstLine(report.FirstFault);
         return result.CauseIsUnresponsive ? $"{cause} stopped answering." : cause;

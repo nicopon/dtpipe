@@ -56,6 +56,56 @@ public sealed class RunJournalTests
         Assert.Equal((5L, 5L, null, null), (before.Sent, before.Received, before.ProducerProtection, before.ConsumerProtection));
     }
 
+    /// <summary>
+    /// A failed run's reason reads the kind of its cause when the result names one: an edge and a receiver say why in words, a message
+    /// is itself, a fragment its own first line. A result kept before the field (the same document without it) reads with no kind and
+    /// keeps the line it always had, guessed from the reports.
+    /// </summary>
+    [Fact]
+    public void The_Reason_Of_A_Failed_Run_Reads_The_Kind_Of_Its_Cause_And_A_Run_Kept_Without_It_Keeps_Its_Line()
+    {
+        var reports = new Dictionary<string, FragmentExitReport>
+        {
+            ["p"] = new("p", 1, FaultOrigin.Local, "Conversion Error: boom\n  at somewhere", new Dictionary<string, long>()),
+        };
+        RunView Failed(string runId, string cause, string kind, bool unresponsive = false) => new(
+            runId, "plan-1", RunState.Failed, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
+            new RunResult(RunOutcome.Failed, cause, [], reports, [], unresponsive, CauseKind: kind), "failed", null, "p", DateTimeOffset.UtcNow);
+        var runs = new[]
+        {
+            (Run: Failed("run-1", "p -> c", CauseKinds.Edge), Line: "The ends of p -> c are set differently for end-to-end encryption, or its stream was altered on its way."),
+            (Run: Failed("run-2", "c", CauseKinds.MuteReceiver), Line: "c stopped acknowledging what it was sent."),
+            (Run: Failed("run-3", "transfer p -> c could not be opened by the hub", CauseKinds.Message), Line: "transfer p -> c could not be opened by the hub"),
+            (Run: Failed("run-4", "p", CauseKinds.Fragment), Line: "Conversion Error: boom"),
+            (Run: Failed("run-5", "c", CauseKinds.Fragment, unresponsive: true), Line: "c stopped answering."),
+        };
+        var journal = Open();
+        foreach (var (run, _) in runs) journal.Record(run);
+        // The documents of the message and fragment runs as a coordinator that had no such field kept them.
+        var olderOf = new Dictionary<string, string> { ["run-3"] = "run-13", ["run-4"] = "run-14", ["run-5"] = "run-15" };
+        foreach (var (from, to) in olderOf)
+        {
+            var older = JsonNode.Parse(MemoryRunStore.At(_dir).Document(from)!)!;
+            older["runId"] = to;
+            older["result"]!.AsObject().Remove("causeKind");
+            MemoryRunStore.At(_dir).Seed(to, older.ToJsonString(), over: true);
+        }
+
+        var again = Open();
+
+        foreach (var (run, line) in runs)
+        {
+            var kept = again.Find(r => r.RunId == run.RunId)!;
+            Assert.Equal((run.Result!.CauseKind, line), (kept.Result!.CauseKind, kept.Reason));
+        }
+        foreach (var (from, to) in olderOf)
+        {
+            var older = again.Find(r => r.RunId == to)!;
+            Assert.Null(older.Result!.CauseKind);
+            Assert.Equal(again.Find(r => r.RunId == from)!.Reason, older.Reason);
+        }
+    }
+
     [Fact]
     public void Who_Launched_A_Run_And_The_Key_It_Came_With_Are_Kept_With_The_Run()
     {

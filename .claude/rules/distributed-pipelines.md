@@ -99,6 +99,18 @@ the control plane, over each replica's node channel; TransportR carries the data
   the level the replica announced. The field carries a word and no key, fingerprint or path, and the coordinator reports it and judges
   nothing by it. `[CI: PipelineNode.Tests EndToEndEncryptionTests, CoordinatorDrivenTests; Hosting.Tests EndToEndKeyTests;
   Coordinator.Tests ScriptedRunTests, EdgeProtectionReportWireTests; Server.Tests RunJournalTests, StateWireTests]`
+- **An edge an end of which failed end-to-end encryption is the run's cause, read from the category each end reports, and
+  reports without one give the verdict the rule gives without categories.** A node keeps, by alias, the category its own client gave each transfer's
+  failure (`TransferFailedException.Category`, never its message) and sends it in `FragmentExit.EdgeFailures`, in the words of
+  `TransferFailures` through the one table `TransferFailureWords`; a category the table does not know, and a failure that has none,
+  leave no entry. The coordinator keeps only those words and reads them only where every fault is a consequence of a transfer:
+  the first edge of the run an end of which failed the encryption is the cause, as `producer -> consumer`, with every failed fragment
+  its consequence, and else the receiver of an edge whose sender had no acknowledgement. A cancellation, a silence, a wiring failure
+  and a fragment's own fault are judged before them, and such a run stays a failure. `RunResult.CauseKind` (`CauseKinds`) says what
+  the cause names, so the journal reads the reason from it rather than guess; a result kept without it is read by its reports. No
+  exception's text decides a cause, and none enters `EdgeFailures` or `CauseKind`.
+  `[CI: PipelineNode.Tests EndToEndEncryptionTests, CoordinatorDrivenTests; Coordinator.Tests EdgeFailureVerdictTests,
+  EdgeFailureReportWireTests; Server.Tests RunJournalTests, StateWireTests]`
 - **Cancel by stream rupture, never by signal**: the node must run on Windows.
 - **A runner hosts no data: a runner's fragment reads and writes its `arrow:` edges and nothing else.** The fragments of every
   run share the runner's host, so a file, a database, a checkpoint or a cursor file it reached would carry rows between two
