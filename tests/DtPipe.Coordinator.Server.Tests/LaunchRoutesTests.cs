@@ -254,6 +254,65 @@ public sealed class LaunchRoutesTests : IDisposable
         Assert.Empty(alone.GetProperty("edgeProtections").EnumerateArray());
     }
 
+    private async Task<JsonElement> JudgeAsync(string job)
+    {
+        using var response = await _admin.PostAsJsonAsync(CoordinatorApi.EdgeProtections, new EdgeProtectionsRequest(job), Web, Ct);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<JsonElement>(Ct);
+    }
+
+    /// <summary>
+    /// The edges of a job text no library entry holds are judged by the rule the plan of a library pipeline applies, each reference pinned
+    /// at its brick's version now, and nothing is saved, bound or armed: the same job saved afterwards is judged the same way.
+    /// </summary>
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    public async Task The_Edges_Of_A_Job_The_Library_Lacks_Are_Judged_As_The_Plan_Of_A_Library_Pipeline_Judges_Them(bool nodeSeals, bool runnerSeals)
+    {
+        await NodeAAndARunnerAsync(nodeSeals ? Keyed : null, runnerSeals ? Keyed : null, admitted: true);
+
+        var answer = await JudgeAsync(Job);
+
+        var library = _host.Services.GetRequiredService<PipelineLibrary>();
+        Assert.Empty(await library.ListAsync(Ct));
+        Assert.Null(_host.Services.GetRequiredService<DeploymentManager>().ArmedOf("draft"));
+        var edge = Assert.Single(answer.GetProperty("edgeProtections").EnumerateArray());
+        Assert.Equal(["producerFragment", "consumerFragment", "protection", "refusal"], edge.EnumerateObject().Select(p => p.Name));
+        Assert.Equal("draft@node-a", edge.GetProperty("producerFragment").GetString());
+        Assert.Equal("draft@runner", edge.GetProperty("consumerFragment").GetString());
+        var joined = nodeSeals == runnerSeals;
+        Assert.Equal(joined, answer.GetProperty("deployable").GetBoolean());
+        Assert.Equal(joined, answer.GetProperty("refusal").ValueKind == JsonValueKind.Null);
+        Assert.Equal(joined, edge.GetProperty("refusal").ValueKind == JsonValueKind.Null);
+        if (!joined) Assert.Contains(edge.GetProperty("refusal").GetString()!, answer.GetProperty("refusal").GetString());
+
+        await BoundOrdersAsync();
+        var judged = Assert.Single((await PlanAsync()).GetProperty("edgeProtections").EnumerateArray());
+        Assert.Equal(judged.GetProperty("protection").GetString(), edge.GetProperty("protection").GetString());
+        Assert.Equal(judged.GetProperty("refusal").GetString()?.Replace("orders@", "draft@"), edge.GetProperty("refusal").GetString());
+    }
+
+    /// <summary>
+    /// A brick of a node with no connected replica, or one its node does not offer, is given no pin: the plan is refused naming it and
+    /// no edge is judged, so the answer says neither a level nor a refusal for an edge it cannot know.
+    /// </summary>
+    [Theory]
+    [InlineData("a:\n  input: brick:node-a/customers\nb:\n  from: a\n", true)]
+    [InlineData("a:\n  input: brick:node-a/ghost\nb:\n  from: a\n", false)]
+    public async Task A_Brick_That_Is_Offline_Or_Not_Offered_Is_Given_No_Pin_And_Its_Edges_Are_Not_Judged(string job, bool nodeAway)
+    {
+        await NodeAAndARunnerAsync(Keyed, Keyed, admitted: true);
+        if (nodeAway) _host.Services.GetRequiredService<ReplicaRegistry>().Disconnected("c-a");
+
+        var answer = await JudgeAsync(job);
+
+        Assert.False(answer.GetProperty("deployable").GetBoolean());
+        Assert.Contains("node-a", answer.GetProperty("refusal").GetString());
+        Assert.Empty(answer.GetProperty("edgeProtections").EnumerateArray());
+    }
+
     [Fact]
     public async Task The_Plan_Of_A_Pipeline_The_Library_Lacks_Is_Not_Found()
     {

@@ -93,6 +93,7 @@ public sealed class RouteTableTests
         "POST /api/bricks/recognize [reader]",
         "POST /api/bricks/{node}/{id}/preview [reader > designer]",
         "POST /api/bricks/{node}/{id}/sample [reader > designer]",
+        "POST /api/edges/protections [reader]",
         "POST /api/library/{id}/deploy [reader > designer]",
         "POST /api/rights/identities [reader > admin]",
         "POST /api/rights/identities/{id}/keys [reader > admin]",

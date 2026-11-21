@@ -267,13 +267,17 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   `/api/catalog` lists nodes and bricks by node, id and kind, from which `BrickRef.Branch` makes the reference a job writes, on
   either side; never a brick's text and never a schema, which depends on the rows; `/api/bricks/recognize`
   says what each top-level branch of a job is: the brick it references in the direction it references it (`BrickRef.Of` against
-  the catalog), so the studio never decides a brick itself; `/api/bricks/{node}/{id}/sample` asks the node for at most
+  the catalog), so the studio never decides a brick itself; `/api/edges/protections` judges the edges of a job text that the library need
+  not hold, by the rule a launch applies now (`Launch.EdgeProtections`, which `GET /api/library/{id}/plan` writes): a text has no pin, which
+  only a check writes, so the route pins each reference at its brick's version in the catalog, in the call alone, and gives none to a brick
+  the catalog lacks or that is offline, which the planner then refuses by name and leaves its edges unjudged; it writes and keeps nothing, and
+  the studio warns of what it answers without ever stopping a publication; `/api/bricks/{node}/{id}/sample` asks the node for at most
   `MaxSampleRows` rows as Arrow IPC (`SampleBrick`, which the node host bounds in bytes before it
   sends, below the channel's message limit), and `/api/bricks/{node}/{id}/preview` for the first rows and their types, read when a
   person looks at a brick and kept nowhere. Both are the designer's right over every brick, whatever groups the flow matrix gives
   its node: the rows reach the person through the control plane, never a transfer, and each read is logged under
   `NodeEndpoints.ReadsLog`, naming the caller (`CallerOf`), the node, the brick and the bound.
-  `[CI: CoordinatorContractTests, StudioRoutesTests] [local: the lab's smoke.py bricks — the studio's routes]`
+  `[CI: CoordinatorContractTests, StudioRoutesTests, LaunchRoutesTests (the judgment of a job text), RouteTableTests] [local: the lab's smoke.py bricks — the studio's routes]`
   `[unchecked: the log of a read]`
 - **Every save into the library is checked first, and a refused one writes nothing.** The handler of
   `PUT /api/library/{id}` passes the text as received to `DesignValidator`, after the rights and the
@@ -666,7 +670,8 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   no usable identity. `GET /api/library/{id}/plan` writes it as `edgeProtections` beside `plan`, so the field is filled for an edge
   that admission then refuses, whose plan reads as not deployable, and is empty for a plan with no edge. `PlannedEdge`,
   `LaunchCause` and the health read are unchanged: the cause `protection-mismatch` stays a sentence, and a page learns which edge
-  fails from this field, never from that sentence. The studio reads no plan route. The pipeline's page draws the field and nothing
+  fails from this field, never from that sentence. The studio reads no plan route: it reads the same judgment of a job text,
+  `/api/edges/protections` (see "What `dtpipe studio` calls is a contract"). The pipeline's page draws the field and nothing
   else (`drawLanes`, through the table of words of `core.js`): a closed lock and the word for an edge held at a level that seals, a
   broken red one for an edge with a refusal, the server's sentence in its title and never read, and no mark for an edge in clear.
   A null level and refusal are unknown and, like an answer with the field empty or absent, draw as the diagram always did, the

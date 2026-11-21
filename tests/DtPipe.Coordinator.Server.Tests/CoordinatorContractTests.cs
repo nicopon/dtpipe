@@ -31,7 +31,7 @@ public sealed class CoordinatorContractTests
     public void Metadata_Uses_The_Rfc_Names_And_Omits_An_Absent_Client()
     {
         Assert.Equal(
-            """{"resource":"http://c.test","authorization_servers":["http://idp.test/","http://c.test"],"bearer_methods_supported":["header"],"dtpipe_contract":11,"dtpipe_studio_client_id":"studio","dtpipe_auth":["idp","key"]}""",
+            $$"""{"resource":"http://c.test","authorization_servers":["http://idp.test/","http://c.test"],"bearer_methods_supported":["header"],"dtpipe_contract":{{CoordinatorApi.Contract}},"dtpipe_studio_client_id":"studio","dtpipe_auth":["idp","key"]}""",
             Write(new ResourceMetadata("http://c.test", ["http://idp.test/", "http://c.test"], ["header"], CoordinatorApi.Contract, "studio",
                 [PersonAuth.Idp, PersonAuth.Key])));
         Assert.DoesNotContain("dtpipe_studio_client_id", Write(new ResourceMetadata("http://c.test", ["http://idp.test/"], ["header"], 1)));
@@ -61,6 +61,10 @@ public sealed class CoordinatorContractTests
         Assert.Equal("""{"job":"a:\n  input: x\n"}""", Write(new RecognizeRequest("a:\n  input: x\n")));
         Assert.Equal("""{"branches":{"a":{"match":"n1/b"}}}""",
             Write(new RecognizeResponse(new Dictionary<string, Recognition> { ["a"] = new("n1/b") })));
+        Assert.Equal("""{"job":"a:\n  input: x\n"}""", Write(new EdgeProtectionsRequest("a:\n  input: x\n")));
+        Assert.Equal(
+            """{"deployable":false,"refusal":"r","edgeProtections":[{"producerFragment":"p@a","consumerFragment":"p@b","protection":null,"refusal":"edge p@a -> p@b: x."}]}""",
+            Write(new EdgeProtectionsResponse(false, "r", [new EdgeProtectionView("p@a", "p@b", null, "edge p@a -> p@b: x.")])));
         Assert.Equal("""{"csv":"id\n1\n","columns":[{"name":"id","type":"int","isNullable":false}]}""",
             Write(new BrickPreviewView("id\n1\n", [new CatalogColumn("id", "int", false)])));
         Assert.Equal("""{"id":"p","commit":"abc","deployed":false,"bindingProblems":null}""", Write(new LibrarySaved("p", "abc", false)));
