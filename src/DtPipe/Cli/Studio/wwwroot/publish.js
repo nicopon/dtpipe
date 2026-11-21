@@ -1,7 +1,7 @@
 // @ts-check
 // Publishing the saved job to the coordinator's library: the id and message, and the outcome (published, refused by the
-// coordinator's check, or in conflict with the library), and what a publication would refuse: the runner's dry run, which
-// the server replays on demand.
+// coordinator's check, or in conflict with the library), what a publication would refuse: the runner's dry run, which the
+// server replays on demand, and what the coordinator's nodes would do with the job's edges, which it words and this page only shows.
 
 import { api, el, status } from "./dom.js";
 import { brickBranches, holdsEdits, showTab } from "./designer.js";
@@ -10,6 +10,7 @@ import { sequence, state } from "./state.js";
 
 const publication = state.publication;
 const checking = sequence();
+const judging = sequence();
 
 const short = (commit) => String(commit || "").slice(0, 8) || "nothing";
 const defaultId = (path) => path.replace(/^.*\//, "").replace(/\.ya?ml$/i, "").toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "") || "pipeline";
@@ -20,6 +21,8 @@ export function forgetPublication() {
   publication.outcome = null;
   checking.cancel();
   publication.check = null;
+  judging.cancel();
+  publication.edges = null;
 }
 
 /**
@@ -53,6 +56,57 @@ export async function checkPublication(saved) {
 // The verdict for the cards as they are now; one for an earlier composition says nothing of them.
 const currentCheck = () => (publication.check && publication.check.yaml === state.cards.result?.yaml ? publication.check : null);
 
+/**
+ * Asks the server what the coordinator's nodes would do with the edges of the job, now: the one saved in the folder when `saved`,
+ * else the cards' composition. A read the coordinator words, never a judgment of this page, so it is asked with the publication
+ * check and before Publish, not at each edit. The verdict, or null when there is none to have (no job, signed out) or the answer
+ * came for another job or a later question. An answer that is not given is an error in the verdict, never a verdict of no broken edge.
+ * @param {boolean} saved
+ * @returns {Promise<import("./state.js").EdgeVerdict | null>}
+ */
+export async function judgeEdges(saved) {
+  const job = state.job;
+  const yaml = state.cards.result?.yaml;
+  if (!job || yaml === undefined || !signedIn()) return null;
+  const ticket = judging.begin();
+  publication.edges = { yaml, pending: true };
+  invalidate("drawer");
+  /** @type {import("./state.js").EdgeVerdict} */
+  let verdict;
+  try {
+    const answer = await api("/api/publish/edges", saved ? { path: job.path, hash: job.hash } : { yaml });
+    verdict = { yaml, pending: false, deployable: !!answer.deployable, refusal: answer.refusal ?? null, edges: answer.edgeProtections ?? [] };
+  } catch (e) {
+    verdict = { yaml, pending: false, error: e.message };
+  }
+  if (judging.stale(ticket) || state.job !== job) return null;
+  publication.edges = verdict;
+  invalidate("drawer");
+  return verdict;
+}
+
+// The verdict for the cards as they are now; one for an earlier composition says nothing of them.
+const currentEdges = () => (publication.edges && publication.edges.yaml === state.cards.result?.yaml ? publication.edges : null);
+
+/** The edges the coordinator refuses to join, as it judged them: those it gave a refusal, whatever that says. @param {import("./state.js").EdgeVerdict | null} verdict */
+const brokenEdges = (verdict) => (verdict?.edges ?? []).filter((edge) => edge.refusal);
+
+/** An edge as the coordinator named it. @param {import("./state.js").EdgeJudgment} edge */
+const edgeName = (edge) => `${edge.producerFragment} → ${edge.consumerFragment}`;
+
+/** What the status says of the edges that stay broken, or an empty text. */
+const brokenNote = () => {
+  const broken = brokenEdges(currentEdges());
+  return broken.length ? `${broken.length === 1 ? "an edge of this job is" : `${broken.length} edges of this job are`} broken now: ${broken.map(edgeName).join(", ")}` : "";
+};
+
+/**
+ * The gestures that ask for what a publication would do: the runner's dry run and the coordinator's judgment of the edges, which
+ * stay two verdicts, each with its own answer.
+ * @param {boolean} saved
+ */
+const askPublication = (saved) => Promise.all([checkPublication(saved), judgeEdges(saved)]);
+
 /** The runner's refusal as it said it, and what the person can read of it. @param {import("./state.js").PublicationCheck} check */
 const refusalView = (check) => [
   el("p", { class: "warn" }, "The runner's dry run refuses this job, as a publication would:"),
@@ -62,10 +116,18 @@ const refusalView = (check) => [
 ];
 
 /**
+ * What Problems says besides the composition's verdict, each apart: what a publication would refuse, as the coordinator's runner
+ * says it, and what the coordinator's nodes would do with the job's edges.
+ */
+export function publicationProblems() {
+  return [refusalProblems(), edgeProblems()];
+}
+
+/**
  * The second verdict of Problems, never mixed with the composition's: what a publication would refuse, as the coordinator's
  * runner says it. Signed out, or with no coordinator, there is none, and the page says so rather than guess.
  */
-export function publicationProblems() {
+function refusalProblems() {
   const title = el("h3", {}, "Would be refused at publication");
   if (!state.coordinator) {
     return [title, el("p", { class: "hint" }, "No verdict: this studio was opened without --coordinator, whose runner judges a publication.")];
@@ -76,7 +138,7 @@ export function publicationProblems() {
   const check = publication.check;
   const current = currentCheck();
   const ask = el("div", { class: "row" },
-    el("button", { class: "small", disabled: !!check?.pending, onclick: () => checkPublication(false) },
+    el("button", { class: "small", disabled: !!check?.pending, onclick: () => askPublication(false) },
       check?.pending ? "Checking…" : current ? "Check again" : "Check publication"),
     el("span", { class: "hint" }, "The runner's dry run over one row of each brick: it starts a process, so it runs when asked and before Publish, never as you edit."));
   if (check?.pending) return [title, ask, el("p", { class: "hint" }, "The runner's dry run is running…")];
@@ -87,6 +149,36 @@ export function publicationProblems() {
       el("p", { class: "hint" }, "A publication also has each sink brick's node judge its output, which this check does not ask.")];
   }
   return [title, ask, refusalView(current)];
+}
+
+/**
+ * The third verdict of Problems, apart from the others: what the coordinator's nodes would do with the edges of this job, now, as
+ * the coordinator words it. Three states: no edge is broken, some are (each named, with its refusal as the coordinator wrote
+ * it), or it has no verdict (the plan cannot be judged now). The page compares no level and reads no refusal's text: an edge is
+ * broken when the coordinator gave it a refusal. A verdict never stops a publication: the nodes' state is live.
+ */
+function edgeProblems() {
+  const title = el("h3", {}, "What the coordinator's nodes would do with the edges");
+  if (!state.coordinator) return [title, el("p", { class: "hint" }, "No verdict: this studio was opened without --coordinator, whose nodes judge the edges.")];
+  if (!signedIn()) return [title, el("p", { class: "hint" }, "No verdict while signed out: the coordinator's nodes judge the edges. Sign in to ask.")];
+  const verdict = publication.edges;
+  const current = currentEdges();
+  const asked = el("span", { class: "hint" }, "Asked with Check publication and before Publish, never as you edit: the nodes' state is live.");
+  if (verdict?.pending) return [title, el("p", { class: "hint" }, "The coordinator is judging the edges…")];
+  if (!current) return [title, asked, verdict ? el("p", { class: "hint" }, "The steps changed since the edges were last judged.") : null];
+  if (current.error) return [title, el("p", { class: "hint" }, `No verdict: the coordinator's judgment of the edges was not read (${current.error}).`)];
+  const broken = brokenEdges(current);
+  if (broken.length) {
+    return [title,
+      el("p", { class: "warn" }, "The coordinator would refuse to arm a job with these edges as its nodes stand now:"),
+      el("ul", { class: "msgs warn" }, broken.map((edge) => el("li", {}, `${edgeName(edge)}: ${edge.refusal}`))),
+      el("p", { class: "hint" }, "Publishing goes on: the nodes may change before the job is armed.")];
+  }
+  const edges = current.edges ?? [];
+  if (!current.deployable || (edges.length > 0 && edges.every((edge) => edge.protection == null))) {
+    return [title, el("p", { class: "hint" }, `No verdict: ${current.refusal || "the coordinator cannot tell now how its nodes would hold these edges."}`), asked];
+  }
+  return [title, el("p", { class: "good" }, "No edge of this job is broken."), asked];
 }
 
 /**
@@ -112,14 +204,19 @@ export async function publish(replace) {
     // What the runner would refuse is said before a question; a check that could not run leaves the publication's own.
     if (signedIn()) {
       status("checking what a publication would refuse…");
-      const check = await checkPublication(true);
+      const [check] = await askPublication(true);
       if (state.job !== job) return;
       if (check?.ok === false) {
         showTab("problems");
         status("A publication would refuse this job: see Problems.", "bad");
         return;
       }
-      status(check?.error ? `The publication's check did not run (${check.error}): the coordinator checks the job again.` : "");
+      // A broken edge is said, never a reason to stop: the coordinator refuses to arm it, and the nodes' state is live.
+      const broken = brokenNote();
+      if (broken) showTab("problems");
+      const said = [check?.error ? `The publication's check did not run (${check.error}): the coordinator checks the job again.` : "",
+        broken ? `${broken}: the coordinator would refuse to arm it. Publishing goes on.` : ""].filter(Boolean).join(" ");
+      status(said, broken ? "warn" : "");
     }
     let last = null;
     try { last = (await api(`/api/publish?path=${encodeURIComponent(job.path)}`)).publication; } catch { /* none */ }
@@ -143,7 +240,9 @@ async function send(replace) {
     const saved = await api("/api/publish", { path: job.path, hash: job.hash, id: request.id, message: request.message, replace });
     const unchanged = !!request.previous && saved.commit === request.previous;
     publication.outcome = { id: request.id, saved, unchanged };
-    status(unchanged ? `already published at ${short(saved.commit)}, nothing changed` : `published at ${short(saved.commit)}`, "good");
+    const broken = brokenNote();
+    status(`${unchanged ? `already published at ${short(saved.commit)}, nothing changed` : `published at ${short(saved.commit)}`}${broken ? `; ${broken}` : ""}`,
+      broken ? "warn" : "good");
   } catch (e) {
     if (e.status === 422) {
       publication.outcome = { id: request.id, refused: { error: e.data?.error || e.message, report: e.data?.report ?? null } };

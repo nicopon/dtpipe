@@ -56,7 +56,16 @@
  * and the last verdict of the runner's dry run, for the composed text it judged (`yaml`): `pending` while it runs, then
  * `ok` with the runner's `report`, or `error` when it could not run.
  * @typedef {{ yaml: string, pending: boolean, ok?: boolean, report?: string | null, error?: string }} PublicationCheck
- * @typedef {{ outcome: any, request: { id: string, message: string, previous?: string | null } | null, check: PublicationCheck | null }} Publication
+ * @typedef {{ outcome: any, request: { id: string, message: string, previous?: string | null } | null, check: PublicationCheck | null,
+ *   edges: EdgeVerdict | null }} Publication
+ */
+
+/**
+ * What the coordinator's nodes would do with the edges of the composed text `yaml`, as it worded it: `pending` while it is asked,
+ * then `deployable`, its `refusal` when the plan is not, and each judged edge (`protection` and `refusal` both null when it cannot
+ * tell), or `error` when it did not answer. The page reads which fields are null and compares no level.
+ * @typedef {{ producerFragment: string, consumerFragment: string, protection: string | null, refusal: string | null }} EdgeJudgment
+ * @typedef {{ yaml: string, pending: boolean, deployable?: boolean, refusal?: string | null, edges?: EdgeJudgment[], error?: string }} EdgeVerdict
  */
 
 /**
@@ -84,7 +93,7 @@ export const state = {
   /** @type {Writing} */
   writing: { review: false },
   /** @type {Publication} */
-  publication: { outcome: null, request: null, check: null },
+  publication: { outcome: null, request: null, check: null, edges: null },
   /** @type {BrickRows | null} */
   brickRows: null,
   /** The variables of the composed job, by name, and the keyring's aliases: never a value the person did not type. @type {{ variables: any[], aliases: string[], error?: string, pending?: boolean }} */

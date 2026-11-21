@@ -86,7 +86,8 @@ the control plane, over each replica's node channel; TransportR carries the data
   held at (the weakest level is a level like another), and the refusal. An edge with neither is unknown, never in clear: an end with no offer
   (no connected replica, or every one below the required protection) or ends that join at several levels. The edges of a plan
   the planner refuses are not judged. The judgment holds words, key fingerprints and fragment names, never a key. A page draws
-  the judgment: it compares no two announced levels and reads no cause's sentence to learn which edge it names.
+  the judgment: it compares no two announced levels and reads no cause's sentence to learn which edge it names. `POST /api/edges/protections`
+  gives the same judgment of a job text the library need not hold, which `dtpipe studio` shows before a publication and never acts on.
   `[CI: Coordinator.Tests EdgeJudgmentTests; Server.Tests LaunchRoutesTests]` `[unchecked: a page that judges an edge itself]`
 - **A deployment may require a protection of the data plane, and a replica below it is visible and eligible for nothing.**
   `Coordinator:DataPlane:RequiredProtection` is a floor on the level a replica announces, ordered by `ProtectionPolicy`, which is also

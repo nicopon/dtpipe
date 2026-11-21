@@ -269,6 +269,25 @@ public sealed class CoordinatorLink : IDisposable
         }
     }
 
+    /// <summary>
+    /// What the coordinator's nodes would do with the edges of <paramref name="job"/> now, as it words it: the judgment a launch would
+    /// make, kept nowhere. An answer this studio cannot read is a named failure, never an answer that says nothing is wrong.
+    /// </summary>
+    public async Task<EdgeProtectionsResponse> EdgeProtectionsAsync(string job, CancellationToken ct)
+    {
+        var body = JsonSerializer.SerializeToUtf8Bytes(new EdgeProtectionsRequest(job), JsonSerializerOptions.Web);
+        using var response = await SendAsync(HttpMethod.Post, CoordinatorApi.EdgeProtections, body, ct: ct);
+        if (!response.IsSuccessStatusCode)
+            throw new CoordinatorLinkException($"{Url} did not judge the job's edges: {await ErrorOf(response, ct)}");
+        try
+        {
+            var answer = await response.Content.ReadFromJsonAsync<EdgeProtectionsResponse>(JsonSerializerOptions.Web, ct);
+            if (answer?.EdgeProtections is { } edges && edges.All(e => e is not null)) return answer;
+        }
+        catch (JsonException) { }
+        throw new CoordinatorLinkException($"{Url} sent a judgment of the job's edges that this studio cannot read.");
+    }
+
     /// <summary>A source brick's first <paramref name="rows"/> rows as Arrow IPC, read by its node.</summary>
     public async Task<byte[]> SampleAsync(string node, string id, int rows, CancellationToken ct)
     {
