@@ -313,8 +313,8 @@ internal static partial class NativeFakeGenerators
                 {
                     if (skipNullSource is not null && skipNullSource.IsNull(i)) { b.AppendNull(); continue; }
                     long ticks = SampleTicks(refTicks, FakeCellSeed.Compute(i, rowKeys, hasRowKey, deterministicMode, colSalt, globalSeed, batchStartRowIndex));
-                    // Construct offset-zero DateTimeOffset directly so wall-clock DateTime values never shift by local TZ.
-                    b.Append(new DateTimeOffset(ticks, TimeSpan.Zero));
+                    // Convert via TemporalNormalization so wall-clock DateTime values never shift by local TZ.
+                    b.Append(TemporalNormalization.ToOffset(new DateTime(ticks, DateTimeKind.Unspecified)));
                 }
                 return b.Build();
             }
