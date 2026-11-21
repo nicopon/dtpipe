@@ -517,7 +517,8 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   entry for shows as the server wrote it, escaped, and a replica with none is unknown, never in clear and never sealed.
   `NodeView.ReplicasDisagreeOnProtection` is a warning under the replicas' title and `NodeReplica.BelowRequiredProtection` a marker
   on the replica, away or connected, named with `NodeView.RequiredProtection`. The page compares no two levels and derives neither
-  flag from the replicas' words. `[local: ui_check.py]` `[unchecked: the pages, which no test plays in a browser]`
+  flag from the replicas' words. `[CI: StateWireTests (The_Nodes_Route_Writes_The_Protection_Of_Each_Replica_Under_The_Names_The_Nodes_Page_Reads)]`
+  `[local: ui_check.py]` `[unchecked: the pages, which no test plays in a browser]`
 - **A run names who launched it, and a service may launch it only once.** `RunView.LaunchedBy` is a person's email or the id of
   the identity that launched it, a service or a person verified by a key, or `CallerOf`'s name for a person of the provider with
   none (an id holds no `@`, and no two identities share one, so a
