@@ -244,6 +244,25 @@ curl -s -X POST "$COORDINATOR_URL/service/runs" \
 The answer holds a `runId`. `GET /service/runs/<runId>`, with the same header, returns its `state`
 until it is `succeeded` or `failed`.
 
+## 8. Seal the data plane (optional)
+
+Until now the rows crossed the coordinator in clear. In another terminal, in the same folder, make
+a key and start the runner again with it. With Docker, the runner takes two settings instead:
+[deploy/README.md](../../deploy/README.md#what-a-deployment-provides).
+
+```bash
+(umask 077; openssl rand -base64 32 > e2e.key)
+kill $(cat ../runner.pid)
+dtpipe node --runner --name runner-1 --coordinator "$COORDINATOR_URL" \
+  --client-secret "@$PWD/../runner-1.key" --e2e --e2e-key "@$PWD/e2e.key" > ../runner.log 2>&1 &
+echo $! > ../runner.pid
+```
+
+Stop the node with Ctrl+C, start it again with `--e2e --e2e-key "@$PWD/e2e.key"` added, and press
+**Run**: **Nodes** shows `sealed, key` on both, and the run's edges say it at each end. Start only
+one of them this way and **Deploy** and **Run** are refused, naming the edge:
+`… sends in clear, … seals with key …` ([more](../distributed.md#sealing-the-data-plane)).
+
 ## Good to know
 
 - **The step ran on the runner**, not on the node: a node only reads and writes its own data.
@@ -268,6 +287,7 @@ until it is `succeeded` or `failed`.
 | The node does not connect | Its identity must exist in **Access**, with the `--name` as client id, and the key must be its own |
 | `--client-secret` is refused | Give a reference, never the value: `'${{NAME}}'`, `keyring://alias` or `@file` |
 | **Deploy** or **Run** is refused | Read the message: node offline, flow missing from the matrix, brick changed. The coordinator's log says more (`docker compose -f deploy/compose.yaml logs -f coordinator`, or `coordinator.log`) |
+| **Deploy** or **Run** is refused with `edge … -> …` and what each end does | A node was started without `--e2e`, or with another key: start every node with the same two flags and the same key file |
 
 ## Stop it
 
