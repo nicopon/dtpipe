@@ -163,6 +163,8 @@ the table, `OnExitedAsync` and the pure rules (`DetermineOutcome`, `PeersOwingAR
   fails (or a replica answers that it knows no such edge), the run tears down and `Cause` reads `transfer P
   -> C could not be opened by the hub`: no fragment is blamed as unresponsive, and the verdict gives no
   reason (which side, which group, which rule) to whoever reads it; the hub's log holds the detail. A
+  `HubRequestFailedException` adds the word of its `Category`, read from the property (`RunSession.WiringFailureOf`); a refusal
+  adds none, since the hub does not tell a right from a client gone or unknown. A
   fragment that went silent still outranks it. `[CI: RunOrchestratorTests, FaultVerdictTests, ScriptedRunTests]`
 - **A fragment absent from the reports is never read as success.** `DetermineOutcome` takes the
   fragment *names* from `RunSpec.Fragments` as well as the reports collected so far, precisely so a

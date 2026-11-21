@@ -107,10 +107,11 @@ the control plane, over each replica's node channel; TransportR carries the data
   the first edge of the run an end of which failed the encryption is the cause, as `producer -> consumer`, with every failed fragment
   its consequence, and else the receiver of an edge whose sender had no acknowledgement. A cancellation, a silence, a wiring failure
   and a fragment's own fault are judged before them, and such a run stays a failure. `RunResult.CauseKind` (`CauseKinds`) says what
-  the cause names, so the journal reads the reason from it rather than guess; a result kept without it is read by its reports. No
-  exception's text decides a cause, and none enters `EdgeFailures` or `CauseKind`.
+  the cause names, so the journal reads the reason from it rather than guess; a result kept without it is read by its reports. An edge the
+  hub could not open adds the word of the hub's category, a refusal none. No exception's text decides a cause, and none enters
+  `EdgeFailures` or `CauseKind`.
   `[CI: PipelineNode.Tests EndToEndEncryptionTests, CoordinatorDrivenTests; Coordinator.Tests EdgeFailureVerdictTests,
-  EdgeFailureReportWireTests; Server.Tests RunJournalTests, StateWireTests]`
+  EdgeFailureReportWireTests, ScriptedRunTests; Server.Tests RunJournalTests, StateWireTests]`
 - **Cancel by stream rupture, never by signal**: the node must run on Windows.
 - **A runner hosts no data: a runner's fragment reads and writes its `arrow:` edges and nothing else.** The fragments of every
   run share the runner's host, so a file, a database, a checkpoint or a cursor file it reached would carry rows between two
