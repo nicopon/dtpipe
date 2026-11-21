@@ -120,6 +120,23 @@ def until(predicate, timeout, what):
     raise RuntimeError(f"timed out waiting for {what}")
 
 
+NO_DATA_PLANE_CLIENT = "it announced no data plane client"
+
+
+def deploy_library(pipeline, timeout=30):
+    """Deploys a library pipeline. A replica that has just reconnected is online before it announces its data plane client, and
+    /api/nodes does not tell the two apart, so a refusal that says a replica announced no client is tried again until the
+    timeout and then raised as it was last given. Any other refusal is raised at once."""
+    deadline = time.time() + timeout
+    while True:
+        try:
+            return call(f"/api/library/{pipeline}/deploy", {})
+        except ApiError as e:
+            if NO_DATA_PLANE_CLIENT not in str(e) or time.time() >= deadline:
+                raise
+            time.sleep(0.3)
+
+
 def query(connection, sql):
     out = subprocess.run([DTPIPE, "--input", connection, "--query", sql, "--output", "csv:-", "--no-stats"],
                          capture_output=True, text=True)
@@ -653,7 +670,7 @@ def rights_pass():
             update(True)
         until(online, 30, "node-3 back online once enabled")
         pipeline = "revenue-by-country"
-        call(f"/api/library/{pipeline}/deploy", {})
+        deploy_library(pipeline)
         try:
             run = call("/api/runs", {"pipelineId": pipeline})
             final = until(lambda: _finished(run["runId"]), RUN_TIMEOUT, "the run through node-3, enabled again")
