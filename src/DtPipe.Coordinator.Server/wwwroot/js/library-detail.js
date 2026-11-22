@@ -228,8 +228,10 @@ function render() {
           <button data-needs="designer" id="x-run" class="${upToDate ? "primary" : ""}" ${canRun && !busy ? "" : "disabled"}>Run</button>
         </span></div>
       <div class="card-sub">${hasBricks ? `<span class="hint">A brick's mode says how it may change after it was checked; Deploy saves the modes.</span>` : "<span></span>"}${legendFor(plan, edgeProtections)}</div>
-      <div class="lanes-head"><span>sources</span><span>runner</span><span>sinks</span></div>
-      <div class="lanes" id="x-lanes"></div>
+      <div class="lanes-scroll">
+        <div class="lanes-head"><span>sources</span><span>runner</span><span>sinks</span></div>
+        <div class="lanes" id="x-lanes"></div>
+      </div>
       ${strayBindings()}
       ${run?.result && !runMatches ? `<p class="hint">The last run's row counts are not drawn on the edges. It ran a plan with other edges than this one.</p>` : ""}
     </section>

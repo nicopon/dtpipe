@@ -81,8 +81,9 @@ input.grow { flex: 1; min-width: 200px; }
 .brand { font-weight: 700; font-size: 16px; display: inline-flex; align-items: center; gap: 6px; }
 .brand span { font-weight: 400; color: var(--muted); }
 .brand a.back { font-weight: 400; font-size: 13px; color: var(--accent); text-decoration: none; margin-right: 10px; }
-.status { display: flex; gap: 8px; flex-wrap: wrap; }
+.status { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .pill { border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px; font-size: 12.5px; color: var(--muted); }
+a.pill:hover { border-color: var(--accent); color: var(--text); }
 .pill.on { color: var(--ok); border-color: var(--ok); }
 .pill.off { color: var(--bad); border-color: var(--bad); }
 .pill.busy { color: var(--warn); border-color: var(--warn); }
@@ -106,7 +107,7 @@ input.grow { flex: 1; min-width: 200px; }
   border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; box-shadow: var(--shadow);
 }
 .node.offline { opacity: .55; }
-.node-head { display: flex; justify-content: space-between; align-items: center; }
+.node-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
 .node-name { font-weight: 700; color: var(--node-color); }
 .chip { display: inline-block; font-size: 11.5px; padding: 0 7px; border-radius: 999px; background: var(--surface-2); color: var(--muted); }
 .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; background: var(--bad); margin-right: 5px; }
@@ -114,7 +115,9 @@ input.grow { flex: 1; min-width: 200px; }
 .dataset { font-size: 12px; color: var(--muted); margin-top: 4px; }
 .dataset code { color: var(--text); }
 .frag { margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--border); font-size: 12.5px; }
-.frag-line { display: flex; justify-content: space-between; gap: 6px; align-items: center; }
+.frag-line { display: flex; justify-content: space-between; gap: 4px 8px; align-items: center; flex-wrap: wrap; }
+.frag-line > span:first-child { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0; overflow-wrap: anywhere; }
+.frag-line .state { flex: none; white-space: nowrap; margin-left: auto; }
 .frag .msg { color: var(--muted); font-size: 11.5px; word-break: break-word; }
 .state { font-size: 11px; padding: 0 6px; border-radius: 4px; border: 1px solid currentColor; }
 .state.Registering, .state.Launched { color: var(--warn); }
@@ -148,11 +151,11 @@ input.grow { flex: 1; min-width: 200px; }
 .edge.broken { stroke: var(--bad); stroke-dasharray: 9 5 2 5; }
 .edge.flowing { animation: flow .6s linear infinite; }
 @keyframes flow { to { stroke-dashoffset: -12; } }
-.edge-label { font-size: 11px; fill: var(--muted); }
+.edge-label { font-size: 11px; fill: var(--muted); paint-order: stroke; stroke: var(--surface); stroke-width: 4px; stroke-linejoin: round; }
 .edge-label.ok { fill: var(--ok); }
 .edge-label.bad { fill: var(--bad); }
 /* How an edge is protected: a word the colour only repeats, on a halo of the surface so that the edge under it stays legible. */
-.edge-protection { font-size: 11px; fill: var(--muted); paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round; }
+.edge-protection { font-size: 11px; fill: var(--muted); paint-order: stroke; stroke: var(--surface); stroke-width: 4px; stroke-linejoin: round; }
 .edge-protection.sealed { fill: var(--network); }
 .edge-protection.broken { fill: var(--bad); font-weight: 600; }
 .edge-lock { fill: none; stroke: var(--network); stroke-width: 1.4; stroke-linecap: round; }

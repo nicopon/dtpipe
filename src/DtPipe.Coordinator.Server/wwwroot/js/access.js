@@ -215,8 +215,8 @@ function render() {
     return `
     <tr data-pending="${esc(p.subject)}">
       <td><code>${esc(p.subject)}</code>${Object.entries(p.labels || {}).map(([k, v]) => `<div class="hint">${esc(k)}: ${esc(v)}</div>`).join("")}</td>
-      <td>${esc(p.proposedName)}<div class="hint">${esc(p.description)}</div></td>
-      <td class="hint">${p.bricks.length ? p.bricks.map(esc).join(", ") : "no brick"}</td>
+      <td class="wrap">${esc(p.proposedName)}<div class="hint">${esc(p.description)}</div></td>
+      <td class="hint wrap">${p.bricks.length ? p.bricks.map(esc).join(", ") : "no brick"}</td>
       <td><input class="mono narrow" data-field="name" value="${esc(name)}" aria-label="Node name for ${esc(p.subject)}"></td>
       <td><input class="mono" data-field="groups" value="${esc(freeGroup(name))}" placeholder="groups, separated by commas" list="groups-list" aria-label="Groups for ${esc(p.subject)}, separated by commas"></td>
       <td class="actions-cell">

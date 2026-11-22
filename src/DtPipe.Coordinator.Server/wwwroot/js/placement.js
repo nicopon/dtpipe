@@ -2,8 +2,12 @@
 // colour, the edges between them, how each is protected, and the fragments' jobs.
 import { esc, fmt, nodeColor, protectionOf, store } from "./core.js";
 
-const BOX_W = 290;
-const LANE_GAP = 110;
+const BOX_W = 276;
+const LANE_GAP = 240;
+const BOX_GAP = 28;
+const PORT_TOP = 38;
+const PORT_STEP = 44;
+const PORT_BOTTOM = 22;
 
 function lane(fragment) {
   const node = store.nodes.find((n) => n.name === fragment.node);
@@ -64,27 +68,12 @@ export function legendFor(plan, edgeProtections) {
   return `<div class="legend"><span><i class="sw network"></i>arrow edge between nodes</span><span><i class="sw forbidden"></i>refused by the flow matrix</span>${kinds.has("sealed") ? `<span>${lockIcon("sealed")}held sealed</span>` : ""}${kinds.has("broken") ? `<span>${lockIcon("broken")}ends that cannot join: hover the lock for why</span>` : ""}</div>`;
 }
 
-// The point of an edge's curve at abscissa x, which its parameter only increases.
-function pointAt(x1, y1, x2, y2, x) {
-  const m = (x1 + x2) / 2;
-  const at = (t) => {
-    const u = 1 - t;
-    return [u * u * u * x1 + 3 * u * u * t * m + 3 * u * t * t * m + t * t * t * x2, u * u * u * y1 + 3 * u * u * t * y1 + 3 * u * t * t * y2 + t * t * t * y2];
-  };
-  let lo = 0, hi = 1;
-  for (let i = 0; i < 24; i++) {
-    const mid = (lo + hi) / 2;
-    if (at(mid)[0] < x) lo = mid; else hi = mid;
-  }
-  return at((lo + hi) / 2);
-}
-
-// A mark on an edge, by its consumer's end: its word, and for a lock, the glyph on the curve with the server's sentence in its title.
-// The word carries the meaning on its own, so that a mark reads without its colour.
-function markMarkup(mark, x, y) {
+// A mark on an edge, by its consumer's end stub at `(x, y)` with label baseline `py`: its word, and for a lock,
+// the glyph on the curve with the server's sentence in its title. The word carries the meaning on its own.
+function markMarkup(mark, x, y, py) {
   const title = `<title>${esc(mark.title)}</title>`;
-  if (mark.kind === "level") return `<text class="edge-protection" x="${x + 10}" y="${y + 4}" text-anchor="end">${title}${esc(mark.word)}</text>`;
-  return `<text class="edge-protection ${mark.kind}" x="${x - 11}" y="${y + 4}" text-anchor="end">${title}${esc(mark.word)}</text>`
+  if (mark.kind === "level") return `<text class="edge-protection" x="${x + 6}" y="${py}" text-anchor="end">${title}${esc(mark.word)}</text>`;
+  return `<text class="edge-protection ${mark.kind}" x="${x - 12}" y="${py}" text-anchor="end">${title}${esc(mark.word)}</text>`
     + `<g class="edge-lock ${mark.kind}" data-protection="${mark.kind}" transform="translate(${x - 6},${y - 7})" role="img" aria-label="${esc(mark.word)}">${title}<circle class="edge-lock-bg" cx="6" cy="7" r="8"/>${LOCK_SHAPES[mark.kind]}</g>`;
 }
 
@@ -99,7 +88,12 @@ export function fragmentJobs(plan) {
 // never the run's: the protections a run reported are not drawn here.
 export function drawLanes(el, plan, brickOfUnit, { run = null, running = false, current = false, extra = null, edgeProtections = [] } = {}) {
   const lanes = [[], [], []];
-  for (const f of plan.fragments) lanes[lane(f)].push(f);
+  const laneOf = {};
+  for (const f of plan.fragments) {
+    const l = lane(f);
+    lanes[l].push(f);
+    laneOf[f.name] = l;
+  }
   el.innerHTML = plan.fragments.map((f) => {
     const units = plan.units.filter((u) => f.units.includes(u.id));
     return `<div class="xbox" data-fragment="${esc(f.name)}" style="--node-color:${nodeColor(f.node)}">
@@ -108,40 +102,128 @@ export function drawLanes(el, plan, brickOfUnit, { run = null, running = false, 
     </div>`;
   }).join("") + `<svg></svg>`;
 
+  const outCounts = {}, inCounts = {};
+  for (const e of plan.edges) {
+    outCounts[e.producerFragment] = (outCounts[e.producerFragment] ?? 0) + 1;
+    inCounts[e.consumerFragment] = (inCounts[e.consumerFragment] ?? 0) + 1;
+  }
+  for (const f of plan.fragments) {
+    const slots = Math.max(outCounts[f.name] ?? 0, inCounts[f.name] ?? 0);
+    if (slots > 0) {
+      const box = el.querySelector(`[data-fragment="${CSS.escape(f.name)}"]`);
+      box.style.minHeight = `${PORT_TOP + (slots - 1) * PORT_STEP + PORT_BOTTOM}px`;
+    }
+  }
+
   let height = 0;
+  const laneBottom = [0, 0, 0];
   lanes.forEach((list, i) => {
     let y = 0;
     for (const f of list) {
       const box = el.querySelector(`[data-fragment="${CSS.escape(f.name)}"]`);
       box.style.left = `${i * (BOX_W + LANE_GAP)}px`;
       box.style.top = `${y}px`;
-      y += box.offsetHeight + 24;
+      y += box.offsetHeight + BOX_GAP;
     }
+    laneBottom[i] = y > 0 ? y - BOX_GAP : 0;
     height = Math.max(height, y);
   });
-  el.style.height = `${height + 10}px`;
+
+  const rect = (name) => {
+    const b = el.querySelector(`[data-fragment="${CSS.escape(name)}"]`);
+    return { x: b.offsetLeft, y: b.offsetTop, w: b.offsetWidth, h: b.offsetHeight };
+  };
+  const outOrder = new Map();
+  const inOrder = new Map();
+  const byProd = new Map();
+  const byCons = new Map();
+  plan.edges.forEach((e, idx) => {
+    if (!byProd.has(e.producerFragment)) byProd.set(e.producerFragment, []);
+    byProd.get(e.producerFragment).push({ e, idx });
+    if (!byCons.has(e.consumerFragment)) byCons.set(e.consumerFragment, []);
+    byCons.get(e.consumerFragment).push({ e, idx });
+  });
+  const isSkipEdge = (e) => laneOf[e.producerFragment] === 0 && laneOf[e.consumerFragment] === 2 && lanes[1].length > 0;
+  for (const list of byProd.values()) {
+    list.sort((a, b) => ((isSkipEdge(a.e) ? 1 : 0) - (isSkipEdge(b.e) ? 1 : 0)) || (rect(a.e.consumerFragment).y - rect(b.e.consumerFragment).y) || (a.idx - b.idx));
+    list.forEach((item, pos) => outOrder.set(item.idx, pos));
+  }
+  for (const list of byCons.values()) {
+    list.sort((a, b) => ((isSkipEdge(a.e) ? 1 : 0) - (isSkipEdge(b.e) ? 1 : 0)) || (rect(a.e.producerFragment).y - rect(b.e.producerFragment).y) || (a.idx - b.idx));
+    list.forEach((item, pos) => inOrder.set(item.idx, pos));
+  }
+
+  const counts = current ? run?.result?.edgeCounts || [] : [];
+  const marks = marksOf(plan, edgeProtections);
+  let maxY = height;
+  let skipCount = 0;
+  const lane1Mid = BOX_W + LANE_GAP + BOX_W / 2;
+
+  const paths = plan.edges.map((e, i) => {
+    const a = rect(e.producerFragment), b = rect(e.consumerFragment);
+    const oi = outOrder.get(i) ?? 0;
+    const ii = inOrder.get(i) ?? 0;
+    const x1 = a.x + a.w, y1 = a.y + PORT_TOP + oi * PORT_STEP;
+    const x2 = b.x, y2 = b.y + PORT_TOP + ii * PORT_STEP;
+    const c = counts.find((x) => x.producerFragment === e.producerFragment && x.consumerFragment === e.consumerFragment && x.consumerAlias === e.consumerAlias);
+    const countSuffix = c ? ` · ${fmt(c.sent)} → ${fmt(c.received)}` : "";
+    const label = !e.allowed ? "refused" : `${e.consumerAlias}${countSuffix}`;
+    const mark = marks[i];
+    const tone = mark?.kind === "sealed" || mark?.kind === "broken" ? ` ${mark.kind}` : "";
+    const cls = !e.allowed ? "forbidden" : `network${tone} ${running ? "flowing" : ""}`;
+    const skipMiddle = laneOf[e.producerFragment] === 0 && laneOf[e.consumerFragment] === 2 && lanes[1].length > 0;
+    const span = skipMiddle ? LANE_GAP : (x2 - x1);
+    const maxW = Math.max(80, span - (mark ? 44 : 24));
+
+    let d, lx, ly, py;
+    if (skipMiddle) {
+      const routeY = Math.max(laneBottom[1], y1, y2) + 28 + skipCount * 36;
+      skipCount++;
+      d = `M${x1},${y1} L${x1 + 24},${y1} C${x1 + 140},${y1} ${x1 + 100},${routeY} ${lane1Mid},${routeY} C${x2 - 100},${routeY} ${x2 - 140},${y2} ${x2 - 24},${y2} L${x2},${y2}`;
+      lx = x1 + 10;
+      ly = y1 - 7;
+      py = y2 - 7;
+      maxY = Math.max(maxY, routeY + 24);
+    } else {
+      const lead = Math.min(28, Math.max(0, (x2 - x1) * 0.14));
+      const m = (x1 + x2) / 2;
+      d = `M${x1},${y1} L${x1 + lead},${y1} C${m},${y1} ${m},${y2} ${x2 - lead},${y2} L${x2},${y2}`;
+      const rising = y2 < y1 - 2;
+      lx = x1 + 10;
+      ly = rising ? y1 + 14 : y1 - 7;
+      py = rising ? y2 - 7 : y2 + 14;
+      maxY = Math.max(maxY, y1 + 22, y2 + 22);
+    }
+    const labelAttr = e.allowed ? ` data-alias="${esc(e.consumerAlias)}" data-counts="${esc(countSuffix)}"` : "";
+    return `<path class="edge ${cls}" d="${d}"/>`
+      + `<text class="edge-label ${c ? (c.sent === c.received ? "ok" : "bad") : ""}" x="${lx}" y="${ly}" data-max-w="${maxW}"${labelAttr}><title>${esc(label)}</title>${esc(label)}</text>`
+      + (mark ? markMarkup(mark, x2 - 16, y2, py) : "");
+  }).join("");
+
+  el.style.height = `${Math.max(height + 10, maxY + 12)}px`;
   el.style.width = `${3 * BOX_W + 2 * LANE_GAP}px`;
 
   const svg = el.querySelector("svg");
   svg.setAttribute("width", el.offsetWidth);
   svg.setAttribute("height", el.offsetHeight);
-  const counts = current ? run?.result?.edgeCounts || [] : [];
-  const rect = (name) => { const b = el.querySelector(`[data-fragment="${CSS.escape(name)}"]`); return { x: b.offsetLeft, y: b.offsetTop, w: b.offsetWidth, h: b.offsetHeight }; };
-  const marks = marksOf(plan, edgeProtections);
-  const outIndex = {}, inIndex = {};
-  svg.innerHTML = plan.edges.map((e, i) => {
-    const a = rect(e.producerFragment), b = rect(e.consumerFragment);
-    const oi = (outIndex[e.producerFragment] = (outIndex[e.producerFragment] ?? -1) + 1);
-    const ii = (inIndex[e.consumerFragment] = (inIndex[e.consumerFragment] ?? -1) + 1);
-    const x1 = a.x + a.w, y1 = a.y + 22 + oi * 16, x2 = b.x, y2 = b.y + 22 + ii * 16;
-    const m = (x1 + x2) / 2;
-    const c = counts.find((x) => x.producerFragment === e.producerFragment && x.consumerFragment === e.consumerFragment && x.consumerAlias === e.consumerAlias);
-    const label = !e.allowed ? "refused" : c ? `${e.consumerAlias} · ${fmt(c.sent)} → ${fmt(c.received)}` : e.consumerAlias;
-    const mark = marks[i];
-    const tone = mark?.kind === "sealed" || mark?.kind === "broken" ? ` ${mark.kind}` : "";
-    const cls = !e.allowed ? "forbidden" : `network${tone} ${running ? "flowing" : ""}`;
-    const [mx, my] = mark ? pointAt(x1, y1, x2, y2, x2 - 18) : [0, 0];
-    return `<path class="edge ${cls}" d="M${x1},${y1} C${m},${y1} ${m},${y2} ${x2},${y2}"/>
-      <text class="edge-label ${c ? (c.sent === c.received ? "ok" : "bad") : ""}" x="${x1 + 8}" y="${y1 - 5}">${esc(label)}</text>${mark ? markMarkup(mark, mx, my) : ""}`;
-  }).join("");
+  svg.innerHTML = paths;
+
+  for (const node of svg.querySelectorAll("text.edge-label")) {
+    const maxW = Number(node.dataset.maxW || 0);
+    if (!maxW) continue;
+    const textNode = [...node.childNodes].find((n) => n.nodeType === Node.TEXT_NODE);
+    if (!textNode || node.getComputedTextLength() <= maxW) continue;
+    const alias = node.dataset.alias || "";
+    const countsText = node.dataset.counts || "";
+    if (countsText && alias.length > 4) {
+      for (let len = alias.length - 1; len >= 3; len--) {
+        textNode.nodeValue = `${alias.slice(0, len)}…${countsText}`;
+        if (node.getComputedTextLength() <= maxW) break;
+      }
+    }
+    while (node.getComputedTextLength() > maxW && textNode.nodeValue.length > 4) {
+      const cur = textNode.nodeValue;
+      textNode.nodeValue = `${cur.slice(0, cur.endsWith("…") ? -2 : -1)}…`;
+    }
+  }
 }

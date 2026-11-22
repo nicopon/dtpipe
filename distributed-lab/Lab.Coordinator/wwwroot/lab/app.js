@@ -113,7 +113,7 @@ function renderNodes() {
       ${n.replicas.map((r) => `
         <div class="frag">
           <div class="frag-line">
-            <span><code>${esc(r.id)}</code>${r.dtpipeVersion ? ` <span class="chip">dtpipe ${esc(r.dtpipeVersion)}</span>` : ""}</span>
+            <span><code>${esc(r.id)}</code>${r.dtpipeVersion ? ` <span class="chip" title="${esc(r.dtpipeVersion)}">dtpipe ${esc(r.dtpipeVersion.split("+")[0])}</span>` : ""}</span>
             <span class="state ${r.connected ? "Registered" : "Failed"}">${r.connected ? "connected" : "away"}${r.runs ? ` · ${r.runs} run${r.runs > 1 ? "s" : ""}` : ""}</span>
           </div>
           <div class="msg">${esc(r.origin ?? "")}${n.replicasDisagree ? ` · bricks ${esc(r.bricks)}` : ""}</div>
@@ -134,7 +134,7 @@ function renderMatrix() {
 // ---------------------------------------------------------------- graph
 
 const COL_WIDTH = 250;
-const COL_GAP = 90;
+const COL_GAP = 160;
 const ROW_GAP = 22;
 
 function renderGraph() {
@@ -248,8 +248,9 @@ function drawEdges(inner, units, byId) {
         }
       }
       const flowing = kind === "network" && isRunning() && isDeployedLayout() ? "flowing" : "";
+      const ly = y2 < y1 - 24 ? y1 + 14 : y1 - 7;
       parts.push(`<path class="edge ${kind} ${flowing}" d="M${x1},${y1} C${mid},${y1} ${mid},${y2} ${x2},${y2}"/>`);
-      if (label) parts.push(`<text class="edge-label ${labelClass}" x="${x1 + 8}" y="${y1 - 6}">${esc(label)}</text>`);
+      if (label) parts.push(`<text class="edge-label ${labelClass}" x="${x1 + 10}" y="${ly}"><title>${esc(label)}</title>${esc(label)}</text>`);
     });
   }
   svg.innerHTML = parts.join("");
