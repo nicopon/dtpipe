@@ -6,10 +6,11 @@ set -e
 # of the three projects it bundles in lib/, the targets file under build/ and buildTransitive/, and a nuspec that depends on the
 # packages the bundled projects use and on none of the bundled projects themselves. Nothing is published.
 #
-#   tests/scripts/validate_node_host_package.sh [--version <x.y.z[-suffix]>] [--out <dir>]
+#   tests/scripts/validate_node_host_package.sh [--release | --version <x.y.z[-suffix]>] [--out <dir>]
 #
-# The version defaults to Directory.Build.props' with a -local.<time> suffix, so a local build never takes the number of a release
-# in the NuGet cache; --out defaults to dist/node-host, which is outside every pack glob of the release.
+# --release reads <Version> from Directory.Build.props directly without a -local.<time> suffix. By default, the version
+# takes Directory.Build.props' with a -local.<time> suffix so a local build never takes the number of a release in the
+# NuGet cache; --out defaults to dist/node-host, which is outside every pack glob of the release.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -21,16 +22,24 @@ NC='\033[0m'
 pass() { echo -e "  ${GREEN}OK: $1${NC}"; }
 fail() { echo -e "  ${RED}FAIL: $1${NC}"; exit 1; }
 
+RELEASE=false
 VERSION=""
 OUT="$PROJECT_ROOT/dist/node-host"
 while [ $# -gt 0 ]; do
     case "$1" in
+        --release) RELEASE=true; shift ;;
         --version) VERSION="$2"; shift 2 ;;
         --out) OUT="$(cd "$2" 2>/dev/null && pwd || echo "$2")"; shift 2 ;;
         *) fail "unknown argument: $1" ;;
     esac
 done
-if [ -z "$VERSION" ]; then
+if [ "$RELEASE" = true ] && [ -n "$VERSION" ]; then
+    fail "--release and --version are mutually exclusive"
+fi
+if [ "$RELEASE" = true ]; then
+    VERSION=$(sed -n 's|.*<Version>\(.*\)</Version>.*|\1|p' Directory.Build.props | head -1)
+    [ -n "$VERSION" ] || fail "no <Version> found in Directory.Build.props"
+elif [ -z "$VERSION" ]; then
     BASE=$(sed -n 's|.*<Version>\(.*\)</Version>.*|\1|p' Directory.Build.props | head -1)
     [ -n "$BASE" ] || fail "no version: pass --version"
     VERSION="$BASE-local.$(date +%s)"
@@ -45,7 +54,11 @@ echo "========================================"
 
 mkdir -p "$OUT"
 rm -f "$PACKAGE"
-dotnet pack "$PROJECT" -c Release -o "$OUT" -p:PackageVersion="$VERSION" -nologo -v q >/dev/null || fail "dotnet pack failed"
+if [ "$RELEASE" = true ]; then
+    dotnet pack "$PROJECT" -c Release -o "$OUT" -nologo -v q >/dev/null || fail "dotnet pack failed"
+else
+    dotnet pack "$PROJECT" -c Release -o "$OUT" -p:Version="$VERSION" -nologo -v q >/dev/null || fail "dotnet pack failed"
+fi
 [ -f "$PACKAGE" ] || fail "no package at $PACKAGE"
 pass "packed $PACKAGE"
 

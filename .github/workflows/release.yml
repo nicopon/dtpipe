@@ -19,8 +19,35 @@ on:
         default: ''
 
 jobs:
+  verify-version:
+    name: Verify Release Version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        if: github.event_name == 'push'
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: Directory.Build.props
+
+      - name: Verify tag matches Directory.Build.props
+        if: github.event_name == 'push'
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          props_version="$(sed -n 's|.*<Version>\(.*\)</Version>.*|\1|p' Directory.Build.props | head -n 1)"
+          if [ -z "$props_version" ]; then
+            echo "Could not read <Version> from Directory.Build.props." >&2
+            exit 1
+          fi
+          if [ "$tag_version" != "$props_version" ]; then
+            echo "Tag '$GITHUB_REF_NAME' ($tag_version) does not match Directory.Build.props (<Version>$props_version</Version>)." >&2
+            echo "Update Directory.Build.props in a chore(release) commit before tagging." >&2
+            exit 1
+          fi
+          echo "Verified tag $GITHUB_REF_NAME matches Directory.Build.props ($props_version)."
+
   test:
     name: Run Tests
+    needs: verify-version
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -46,6 +73,7 @@ jobs:
   build:
     name: Build ${{ matrix.platform }}
     if: github.event_name == 'push'
+    needs: verify-version
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -233,12 +261,13 @@ jobs:
             -exec dotnet nuget push {} --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate \;
 
       - name: Pack and push the node host
-        # DtPipe.PipelineNode.Hosting is outside DtPipe.sln, so the pack above never reaches it. It goes out at the tag's
-        # version, like the packages above, in a step after the others so a failure here stops none of them.
-        # The script packs outside the workspace, which the find above searches, and reads the package before it is pushed.
+        # DtPipe.PipelineNode.Hosting is outside DtPipe.sln, so the pack above never reaches it. It reads <Version>
+        # from Directory.Build.props like the solution's packages, in a step after the others so a failure here stops
+        # none of them. The script packs outside the workspace, which the find above searches, and reads the package
+        # before it is pushed.
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          tests/scripts/validate_node_host_package.sh --version "$version" --out "$RUNNER_TEMP/node-host"
+          version="$(sed -n 's|.*<Version>\(.*\)</Version>.*|\1|p' Directory.Build.props | head -n 1)"
+          tests/scripts/validate_node_host_package.sh --release --out "$RUNNER_TEMP/node-host"
           dotnet nuget push "$RUNNER_TEMP/node-host/DtPipe.PipelineNode.Hosting.$version.nupkg" \
             --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
 
