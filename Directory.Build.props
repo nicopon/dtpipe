@@ -1,7 +1,7 @@
 <Project>
   <PropertyGroup>
     <!-- Centralized Versioning -->
-    <Version>1.19.1</Version>
+    <Version>1.19.2</Version>
 
     <!-- NuGet Global Metadata -->
     <Authors>NicoPon</Authors>
