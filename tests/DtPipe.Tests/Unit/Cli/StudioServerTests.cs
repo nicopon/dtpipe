@@ -382,7 +382,8 @@ public sealed class StudioServerTests : IAsyncLifetime
 
         (HttpMethod, string, object?)[] needingOne =
         [
-            (HttpMethod.Get, "/api/library", null), (HttpMethod.Post, "/api/library/open", new { id = "orders" }),
+            (HttpMethod.Get, "/api/library", null), (HttpMethod.Get, "/api/library/job?id=orders", null),
+            (HttpMethod.Post, "/api/library/open", new { id = "orders" }),
             (HttpMethod.Post, "/api/coordinator/login", null), (HttpMethod.Post, "/api/publish", new { path = "a.yaml", hash, id = "orders" }),
             (HttpMethod.Post, "/api/bricks/preview", new { key = "n1/orders" }), (HttpMethod.Post, "/api/publish/check", new { yaml = "a:\n  input: csv:a.csv\n" }),
             (HttpMethod.Post, "/api/publish/edges", new { yaml = "a:\n  input: csv:a.csv\n" }),
@@ -778,6 +779,94 @@ public sealed class StudioServerTests : IAsyncLifetime
 
         var (missing, _) = await SendAsync(Request(HttpMethod.Post, "/api/import", body: new { args = new[] { "-i", "x" } }));
         Assert.Equal(HttpStatusCode.NotFound, missing);
+    }
+
+    [Fact]
+    public async Task The_jobs_list_includes_subfolders_excluding_hidden_ones()
+    {
+        Directory.CreateDirectory(Path.Combine(_dir, "empty_sub"));
+        var (status, body) = await SendAsync(Request(HttpMethod.Get, "/api/jobs"));
+
+        Assert.Equal(HttpStatusCode.OK, status);
+        var folders = body.GetProperty("folders").EnumerateArray().Select(f => f.GetString()).ToList();
+        Assert.Contains("", folders);
+        Assert.Contains("sub", folders);
+        Assert.Contains("empty_sub", folders);
+        Assert.DoesNotContain(".hidden", folders);
+    }
+
+    [Fact]
+    public async Task The_view_accepts_library_as_a_side_panel()
+    {
+        var (put, _) = await SendAsync(Request(HttpMethod.Put, "/api/view", body: new { side = "library" }));
+        Assert.Equal(HttpStatusCode.NoContent, put);
+        var (_, got) = await SendAsync(Request(HttpMethod.Get, "/api/view"));
+        Assert.Equal("library", got.GetProperty("side").GetString());
+    }
+
+    [Fact]
+    public async Task A_job_and_its_studio_metadata_can_be_renamed_and_refuse_conflicts()
+    {
+        File.WriteAllText(Path.Combine(_dir, "orig.yaml"), Copy);
+        var hash = (await OpenAsync("orig.yaml")).GetProperty("hash").GetString()!;
+        await SaveAsync("orig.yaml", hash, Cards("csv:c.csv", new { main = new { x = 10, y = 20 } }));
+        hash = (await OpenAsync("orig.yaml")).GetProperty("hash").GetString()!;
+        await SendAsync(Request(HttpMethod.Put, "/api/launch", body: new { path = "orig.yaml", overrides = new { X = new { value = "v" } } }));
+        await SendAsync(Request(HttpMethod.Put, "/api/view", body: new { open = "orig.yaml", path = "orig.yaml", job = new { tab = "preview", rows = 12 } }));
+
+        // Conflicts and invalid destinations are refused before moving anything.
+        Assert.Equal(HttpStatusCode.Conflict, (await SendAsync(Request(HttpMethod.Post, "/api/job/rename", body: new { from = "orig.yaml", to = "a.yaml", hash }))).Status);
+        Assert.Equal(HttpStatusCode.Conflict, (await SendAsync(Request(HttpMethod.Post, "/api/job/rename", body: new { from = "orig.yaml", to = "moved.yaml", hash = "stale" }))).Status);
+        Assert.Equal(HttpStatusCode.BadRequest, (await SendAsync(Request(HttpMethod.Post, "/api/job/rename", body: new { from = "orig.yaml", to = "orig.yaml", hash }))).Status);
+        Assert.Equal(HttpStatusCode.NotFound, (await SendAsync(Request(HttpMethod.Post, "/api/job/rename", body: new { from = "orig.yaml", to = "missing/moved.yaml", hash }))).Status);
+        Assert.Equal(HttpStatusCode.BadRequest, (await SendAsync(Request(HttpMethod.Post, "/api/job/rename", body: new { from = "orig.yaml", to = "../moved.yaml", hash }))).Status);
+
+        var (renamed, body) = await SendAsync(Request(HttpMethod.Post, "/api/job/rename", body: new { from = "orig.yaml", to = "sub/moved.yaml", hash }));
+        Assert.Equal(HttpStatusCode.OK, renamed);
+        Assert.Equal("sub/moved.yaml", body.GetProperty("path").GetString());
+        Assert.False(File.Exists(Path.Combine(_dir, "orig.yaml")));
+        Assert.True(File.Exists(Path.Combine(_dir, "sub", "moved.yaml")));
+        Assert.False(File.Exists(Path.Combine(_dir, ".dtpipe", "studio", "orig.yaml-layout.json")));
+        Assert.True(File.Exists(Path.Combine(_dir, ".dtpipe", "studio", "sub", "moved.yaml-layout.json")));
+        Assert.True(File.Exists(Path.Combine(_dir, ".dtpipe", "studio", "sub", "moved.yaml-launch.json")));
+
+        var (_, view) = await SendAsync(Request(HttpMethod.Get, "/api/view?path=sub/moved.yaml"));
+        Assert.Equal("sub/moved.yaml", view.GetProperty("open").GetString());
+        Assert.Equal(12, view.GetProperty("job").GetProperty("rows").GetInt32());
+    }
+
+    [Fact]
+    public async Task A_job_and_its_studio_metadata_can_be_deleted_and_refuse_suspended_or_stale()
+    {
+        File.WriteAllText(Path.Combine(_dir, "doomed.yaml"), Copy);
+        var hash = (await OpenAsync("doomed.yaml")).GetProperty("hash").GetString()!;
+        await SaveAsync("doomed.yaml", hash, Cards("csv:c.csv", new { main = new { x = 10, y = 20 } }));
+        hash = (await OpenAsync("doomed.yaml")).GetProperty("hash").GetString()!;
+        await SendAsync(Request(HttpMethod.Put, "/api/launch", body: new { path = "doomed.yaml", overrides = new { X = new { value = "v" } } }));
+        await SendAsync(Request(HttpMethod.Put, "/api/view", body: new { open = "doomed.yaml", path = "doomed.yaml", job = new { tab = "yaml", rows = 8 } }));
+
+        Assert.Equal(HttpStatusCode.Conflict, (await SendAsync(Request(HttpMethod.Delete, "/api/job?path=doomed.yaml&hash=wrong"))).Status);
+        Assert.True(File.Exists(Path.Combine(_dir, "doomed.yaml")));
+
+        var (deleted, _) = await SendAsync(Request(HttpMethod.Delete, $"/api/job?path=doomed.yaml&hash={Uri.EscapeDataString(hash)}"));
+        Assert.Equal(HttpStatusCode.NoContent, deleted);
+        Assert.False(File.Exists(Path.Combine(_dir, "doomed.yaml")));
+        Assert.False(File.Exists(Path.Combine(_dir, ".dtpipe", "studio", "doomed.yaml-layout.json")));
+        Assert.False(File.Exists(Path.Combine(_dir, ".dtpipe", "studio", "doomed.yaml-launch.json")));
+        var (_, view) = await SendAsync(Request(HttpMethod.Get, "/api/view?path=doomed.yaml"));
+        Assert.Equal(JsonValueKind.Null, view.GetProperty("open").ValueKind);
+        Assert.Equal(JsonValueKind.Null, view.GetProperty("job").ValueKind);
+
+        Assert.Equal(HttpStatusCode.NotFound, (await SendAsync(Request(HttpMethod.Delete, "/api/job?path=doomed.yaml"))).Status);
+        Assert.Equal(HttpStatusCode.BadRequest, (await SendAsync(Request(HttpMethod.Delete, "/api/job?path=../a.yaml"))).Status);
+
+        // A suspended real run blocks both rename and delete.
+        File.WriteAllText(Path.Combine(_dir, "held.yaml"), Copy);
+        Directory.CreateDirectory(Path.Combine(_dir, ".dtpipe", "studio"));
+        File.WriteAllText(Path.Combine(_dir, ".dtpipe", "studio", "held.yaml-debug.json"),
+            """{"session":"studio-debug","real":true,"watch":[],"levels":[{"branch":"main","level":1,"digest":"x","key":"k"}]}""");
+        Assert.Equal(HttpStatusCode.Conflict, (await SendAsync(Request(HttpMethod.Post, "/api/job/rename", body: new { from = "held.yaml", to = "held2.yaml" }))).Status);
+        Assert.Equal(HttpStatusCode.Conflict, (await SendAsync(Request(HttpMethod.Delete, "/api/job?path=held.yaml"))).Status);
     }
 }
 

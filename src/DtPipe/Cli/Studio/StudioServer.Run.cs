@@ -72,6 +72,12 @@ public sealed partial class StudioServer
         get { lock (_runLock) return _run is { Running: true }; }
     }
 
+    private bool RunInProgressFor(string path)
+    {
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        lock (_runLock) return _run is { Running: true } r && string.Equals(r.Path, path, comparison);
+    }
+
     /// <summary>
     /// What a run of the saved job would do, or the refusal that says why it cannot: the job as saved
     /// (its hash is the page's), source bricks bound to rows from their node, every variable

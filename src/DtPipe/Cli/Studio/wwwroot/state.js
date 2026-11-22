@@ -24,9 +24,9 @@
  */
 
 /**
- * The drawer's tab, the panes' sizes and the side panel the person chose: jobs, steps or none (closed); null until they choose,
+ * The drawer's tab, the panes' sizes and the side panel the person chose: jobs, library, steps or none (closed); null until they choose,
  * and the panel then follows the page. A tab is yaml, problems, edit, preview, or one a host adds.
- * @typedef {{ drawer: string, sizes: Record<string, number>, side: "jobs" | "steps" | "none" | null }} View
+ * @typedef {{ drawer: string, sizes: Record<string, number>, side: "jobs" | "library" | "steps" | "none" | null }} View
  */
 
 /**
@@ -102,8 +102,10 @@ export const state = {
   components: { readers: /** @type {any[]} */ ([]), writers: /** @type {any[]} */ ([]) },
   /** The coordinator's catalog read last (its nodes and bricks) and this studio's version; empty with none. */
   catalog: { nodes: /** @type {any[]} */ ([]), bricks: /** @type {any[]} */ ([]), studioVersion: "" },
-  /** The jobs of the folder, and the coordinator's library when a person is signed in. @type {{ folder: string, paths: string[], library: { shown: boolean, pipelines: any[] | null, error: string | null } }} */
-  jobs: { folder: "", paths: [], library: { shown: false, pipelines: null, error: null } },
+  /** The jobs of the folder, its subfolders, coordinator links, and the coordinator's library when signed in.
+   * @type {{ folder: string, paths: string[], folders: string[], publications: Record<string, { id: string, commit: string | null, localModified: boolean | null }>, filter: string,
+   *   library: { shown: boolean, pipelines: any[] | null, error: string | null, filter: string } }} */
+  jobs: { folder: "", paths: [], folders: [""], publications: {}, filter: "", library: { shown: false, pipelines: null, error: null, filter: "" } },
   /** The coordinator the command line named, or null: { url, state, reason, me, studioVersion, contract }. @type {any} */
   coordinator: null,
   /** The agent's panel: whether the command line opened one, the server's last answer (GET /api/agent), and what the agent gave

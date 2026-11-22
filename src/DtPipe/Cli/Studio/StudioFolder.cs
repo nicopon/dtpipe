@@ -24,6 +24,7 @@ public sealed record StudioJob(string Text, string Hash);
 public sealed class StudioFolder
 {
     private const int MaxJobs = 1000;
+    private const int MaxFolders = 500;
     public const long MaxJobBytes = 1_000_000;
 
     private static readonly UTF8Encoding Utf8 = new(encoderShouldEmitUTF8Identifier: false);
@@ -56,6 +57,16 @@ public sealed class StudioFolder
             .Where(r => !r.Split('/').Any(s => s.StartsWith('.')))
             .Order(StringComparer.Ordinal)
             .Take(MaxJobs)
+            .ToList();
+
+    /// <summary>The folder and its subdirectories, as relative paths with '/' separators ("" for the root), in order.</summary>
+    public IReadOnlyList<string> Folders() =>
+        new[] { "" }
+            .Concat(Directory.EnumerateDirectories(Root, "*", Walk)
+                .Select(d => Path.GetRelativePath(Root, d).Replace(Path.DirectorySeparatorChar, '/'))
+                .Where(r => !r.Split('/').Any(s => s.StartsWith('.')))
+                .Order(StringComparer.Ordinal)
+                .Take(MaxFolders))
             .ToList();
 
     public string Read(string relative) => ReadJob(relative).Text;
@@ -93,6 +104,44 @@ public sealed class StudioFolder
             WriteAtomic(path, bytes);
         }
         return Hash(bytes);
+    }
+
+    /// <summary>
+    /// Moves a job from <paramref name="from"/> to <paramref name="to"/> inside the folder, refusing to overwrite an
+    /// existing file or move one whose content changed since <paramref name="expectedHash"/> was read. Returns the hash.
+    /// </summary>
+    public string RenameJob(string from, string to, string? expectedHash)
+    {
+        var fromFull = Resolve(from);
+        var toFull = ResolveForWrite(to);
+        if (string.Equals(fromFull, toFull, PathComparison))
+            throw new StudioRefusal(400, "The new path is the same as the current path.");
+        lock (this)
+        {
+            if (!File.Exists(fromFull))
+                throw new StudioRefusal(404, $"No job at '{from}'.");
+            if (File.Exists(toFull))
+                throw new StudioRefusal(409, $"'{to}' already exists.");
+            var bytes = File.ReadAllBytes(fromFull);
+            if (expectedHash is not null && !string.Equals(Hash(bytes), expectedHash, StringComparison.Ordinal))
+                throw new StudioRefusal(409, $"'{from}' changed on disk since it was opened: open it again, then rename it.");
+            File.Move(fromFull, toFull, overwrite: false);
+            return Hash(File.ReadAllBytes(toFull));
+        }
+    }
+
+    /// <summary>Deletes a job of the folder, refusing one whose content changed since <paramref name="expectedHash"/> was read.</summary>
+    public void DeleteJob(string relative, string? expectedHash)
+    {
+        var full = Resolve(relative);
+        lock (this)
+        {
+            if (!File.Exists(full))
+                throw new StudioRefusal(404, $"No job at '{relative}'.");
+            if (expectedHash is not null && !string.Equals(Hash(File.ReadAllBytes(full)), expectedHash, StringComparison.Ordinal))
+                throw new StudioRefusal(409, $"'{relative}' changed on disk since it was opened: open it again before deleting it.");
+            File.Delete(full);
+        }
     }
 
     /// <summary>The full path of a job of the folder, or a refusal that names why.</summary>
@@ -165,8 +214,8 @@ public sealed class StudioFolder
         && (ext.Equals(".yaml", StringComparison.OrdinalIgnoreCase) || ext.Equals(".yml", StringComparison.OrdinalIgnoreCase));
 }
 
-/// <summary>A job published from this studio: to which coordinator, under which id, at which commit of its job.</summary>
-public sealed record StudioPublication(string Coordinator, string Id, string? Commit);
+/// <summary>A job published from or pulled into this studio: coordinator origin, pipeline id, remote commit, and local file hash.</summary>
+public sealed record StudioPublication(string Coordinator, string Id, string? Commit, string? LocalHash = null);
 
 /// <summary>
 /// What the studio keeps for a job beside the folder's files, never in them and never in git: where
@@ -179,6 +228,7 @@ public sealed record StudioPublication(string Coordinator, string Id, string? Co
 public sealed class StudioLocalFiles(StudioFolder folder)
 {
     private const long MaxBytes = 1_000_000;
+    private static readonly string[] JobKinds = ["layout", "launch", "publish", "debug"];
 
     private string DtpipeDirectory => Path.Combine(folder.Root, SessionResolver.DirectoryName);
 
@@ -271,6 +321,76 @@ public sealed class StudioLocalFiles(StudioFolder folder)
 
     public void WritePublication(string job, StudioPublication publication) =>
         Write(job, "publish", JsonSerializer.SerializeToNode(publication, LaunchJson)!);
+
+    /// <summary>Refuses, before anything changes, any local file of <paramref name="job"/> or the view file if reached through a link.</summary>
+    public void CheckJobFiles(string job)
+    {
+        foreach (var kind in JobKinds) RefuseLinks(PathOf(job, kind));
+        RefuseLinks(ViewPath);
+    }
+
+    /// <summary>Moves every local metadata file of <paramref name="from"/> to <paramref name="to"/> and updates <c>view.json</c>.</summary>
+    public void MoveJobFiles(string from, string to)
+    {
+        CheckJobFiles(from);
+        CheckJobFiles(to);
+        foreach (var kind in JobKinds)
+        {
+            var src = PathOf(from, kind);
+            if (!File.Exists(src)) continue;
+            var dst = PathOf(to, kind);
+            SessionStore.EnsureIgnored(DtpipeDirectory);
+            Directory.CreateDirectory(Path.GetDirectoryName(dst)!);
+            File.Move(src, dst, overwrite: true);
+        }
+        lock (_viewLock)
+        {
+            if (!File.Exists(ViewPath)) return;
+            var view = ReadViewLocked();
+            var changed = false;
+            if ((string?)view["open"] == from)
+            {
+                view["open"] = to;
+                changed = true;
+            }
+            if (view["jobs"] is JsonObject jobs && jobs[from] is { } node)
+            {
+                jobs.Remove(from);
+                jobs[to] = node.DeepClone();
+                changed = true;
+            }
+            if (changed) WriteTo(ViewPath, view);
+        }
+    }
+
+    /// <summary>Deletes every local metadata file of <paramref name="job"/>, forgets any checkpoints it held, and removes it from <c>view.json</c>.</summary>
+    public void DeleteJobFiles(string job, Action<string>? forgetCheckpoint = null)
+    {
+        CheckJobFiles(job);
+        if (forgetCheckpoint is not null && ReadDebug(job) is { } debug)
+        {
+            foreach (var level in debug["levels"] as JsonArray ?? [])
+                if ((string?)level?["key"] is { Length: > 0 } key) forgetCheckpoint(key);
+        }
+        foreach (var kind in JobKinds)
+        {
+            var path = PathOf(job, kind);
+            if (File.Exists(path)) File.Delete(path);
+        }
+        lock (_viewLock)
+        {
+            if (!File.Exists(ViewPath)) return;
+            var view = ReadViewLocked();
+            var changed = false;
+            if ((string?)view["open"] == job)
+            {
+                view.Remove("open");
+                changed = true;
+            }
+            if (view["jobs"] is JsonObject jobs && jobs.Remove(job)) changed = true;
+            if (changed) WriteTo(ViewPath, view);
+        }
+    }
 
     private string SamplesDirectory => Path.Combine(DtpipeDirectory, "studio", "samples");
 

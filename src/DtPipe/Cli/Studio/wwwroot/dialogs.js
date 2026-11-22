@@ -1,0 +1,911 @@
+// @ts-check
+// Modal dialogs for creating, importing, saving, renaming, deleting, inspecting and pulling jobs.
+// Built with DOM calls only: no HTML strings or inline styles are ever constructed here.
+
+import { api, el, fill, targetOf } from "./dom.js";
+
+/** @type {{ dlg: HTMLDialogElement, opener: HTMLElement | null, onClose?: () => void } | null} */
+let active = null;
+
+export const shortCommit = (commit) => String(commit || "").slice(0, 8) || "none";
+
+/** Closes the active modal dialog if one is open, restoring focus when safe. */
+export function closeActiveDialog() {
+  if (!active) return;
+  const { dlg, opener, onClose } = active;
+  active = null;
+  if (dlg.open) dlg.close();
+  dlg.remove();
+  onClose?.();
+  if (opener?.isConnected && opener.offsetParent !== null) opener.focus();
+}
+
+/**
+ * Opens a modal dialog over the page. Only one dialog is open at a time.
+ * `build` receives `{ dialog, body, close }` and populates `body`.
+ * @param {string} id
+ * @param {string} title
+ * @param {(ctx: { dialog: HTMLDialogElement, body: HTMLElement, close: () => void }) => void} build
+ * @param {{ onClose?: () => void }} [options]
+ */
+export function openDialog(id, title, build, options = {}) {
+  closeActiveDialog();
+  const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const dlg = /** @type {HTMLDialogElement} */ (el("dialog", { id, class: "studio-dialog", "aria-labelledby": `${id}-title` }));
+  const body = el("div", { class: "dialog-body" });
+  const close = () => {
+    if (active?.dlg === dlg) closeActiveDialog();
+  };
+  fill(dlg,
+    el("div", { class: "dialog-head" },
+      el("h3", { id: `${id}-title` }, title),
+      el("button", { type: "button", class: "small ghost", "aria-label": "Close dialog", title: "Close", onclick: close }, "×")),
+    body);
+  dlg.addEventListener("cancel", (e) => { e.preventDefault(); close(); });
+  document.body.append(dlg);
+  active = { dlg, opener, onClose: options.onClose };
+  dlg.showModal();
+  build({ dialog: dlg, body, close });
+  return { dialog: dlg, body, close };
+}
+
+/**
+ * Splits a command line into process arguments as a shell would: whitespace separates, quotes group,
+ * backslash escapes outside single quotes, and `\<newline>` continues lines outside single quotes.
+ * @param {string} text
+ * @returns {string[]}
+ */
+export function splitCommand(text) {
+  const args = [];
+  let word = null;
+  let quote = null;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quote) {
+      if (c === quote) quote = null;
+      else if (c === "\\" && quote === "\"" && i + 1 < text.length) {
+        if (text[i + 1] === "\n") i++;
+        else if (text[i + 1] === "\r" && text[i + 2] === "\n") i += 2;
+        else word += text[++i];
+      } else word += c;
+    } else if (c === "'" || c === "\"") {
+      quote = c;
+      word ??= "";
+    } else if (c === "\\" && i + 1 < text.length) {
+      if (text[i + 1] === "\n") i++;
+      else if (text[i + 1] === "\r" && text[i + 2] === "\n") i += 2;
+      else word = (word ?? "") + text[++i];
+    } else if (/\s/.test(c)) {
+      if (word !== null) { args.push(word); word = null; }
+    } else {
+      word = (word ?? "") + c;
+    }
+  }
+  if (quote) throw new Error("A quote is not closed.");
+  if (word !== null) args.push(word);
+  return args;
+}
+
+/**
+ * Combines a chosen subfolder and file name into a normalized workspace relative path,
+ * automatically adding `.yaml` when no YAML extension was typed.
+ * @param {string} folder
+ * @param {string} rawName
+ */
+export function normalizeJobPath(folder, rawName) {
+  let name = String(rawName || "").trim().replace(/\\/g, "/");
+  if (!name) return "";
+  const last = name.split("/").pop() || "";
+  if (!name.endsWith("/") && last !== "." && last !== ".." && !/\.ya?ml$/i.test(name)) name += ".yaml";
+  return folder ? `${folder}/${name}` : name;
+}
+
+/**
+ * Checks whether `path` is a valid job path in the workspace and whether it collides with an existing file.
+ * @param {string} path
+ * @param {string[]} folders
+ * @param {string[]} existingPaths
+ * @param {{ allowExisting?: boolean, allowPath?: string | null }} [options]
+ */
+export function validateJobPath(path, folders, existingPaths, options = {}) {
+  const { allowExisting = false, allowPath = null } = options;
+  if (!path) return { valid: false, exists: false, error: "Enter a file name." };
+  if (path.startsWith("/") || path.endsWith("/")) return { valid: false, exists: false, error: "Enter a file name relative to the workspace." };
+  const parts = path.split("/");
+  if (parts.some((s) => !s || s.startsWith("."))) return { valid: false, exists: false, error: "A path cannot leave the folder or name a hidden file." };
+  if (!/\.ya?ml$/i.test(path)) return { valid: false, exists: false, error: "A job file must end in .yaml or .yml." };
+  if (parts.length > 1) {
+    const parent = parts.slice(0, -1).join("/");
+    if (!folders.includes(parent)) return { valid: false, exists: false, error: `Folder '${parent}/' does not exist in this workspace.` };
+  }
+  const exists = existingPaths.includes(path);
+  if (exists && !allowExisting && path !== allowPath) {
+    return { valid: false, exists: true, error: `'${path}' already exists.` };
+  }
+  return { valid: true, exists, error: null };
+}
+
+/**
+ * Builds a subfolder + filename picker with live `.yaml` normalization and collision validation.
+ * @param {{ idPrefix: string, folders: string[], existingPaths: string[], initialPath: string, allowExisting?: boolean, allowPath?: string | null, label?: string, onChange?: () => void }} opts
+ */
+export function createPathPicker(opts) {
+  const { idPrefix, folders, existingPaths, initialPath, allowExisting = false, allowPath = null, label = "File path", onChange } = opts;
+  const knownFolders = folders?.length ? folders : [""];
+  const slash = initialPath.lastIndexOf("/");
+  const initialFolder = slash > 0 && knownFolders.includes(initialPath.slice(0, slash)) ? initialPath.slice(0, slash) : "";
+  const initialName = initialFolder ? initialPath.slice(initialFolder.length + 1) : initialPath;
+
+  const folderSelect = el("select", { id: `${idPrefix}-folder`, "aria-label": "Folder" },
+    knownFolders.map((f) => el("option", { value: f, selected: f === initialFolder }, f ? `${f}/` : "(root)")));
+  const nameInput = /** @type {HTMLInputElement} */ (el("input", {
+    id: `${idPrefix}-name`,
+    type: "text",
+    class: "mono",
+    value: initialName,
+    placeholder: "job-name.yaml",
+    "aria-label": label,
+  }));
+  const hint = el("div", { class: "hint mono dialog-path-preview" });
+  const errorBox = el("div", { class: "bad dialog-inline-error", hidden: true });
+
+  const container = el("div", { class: "dialog-field" },
+    el("label", { for: `${idPrefix}-name` }, label),
+    el("div", { class: "dialog-path-row" },
+      knownFolders.length > 1 ? folderSelect : null,
+      nameInput),
+    hint,
+    errorBox);
+
+  function state() {
+    const folder = knownFolders.length > 1 ? /** @type {HTMLSelectElement} */ (folderSelect).value : "";
+    const path = normalizeJobPath(folder, nameInput.value);
+    const check = validateJobPath(path, knownFolders, existingPaths, { allowExisting, allowPath });
+    return { path, ...check };
+  }
+
+  function refresh(notify = true) {
+    const s = state();
+    hint.textContent = s.path ? `Path: ${s.path}` : "";
+    errorBox.hidden = !s.error;
+    errorBox.textContent = s.error || "";
+    if (notify) onChange?.();
+  }
+
+  folderSelect.addEventListener("change", () => refresh(true));
+  nameInput.addEventListener("input", () => refresh(true));
+  refresh(false);
+
+  return {
+    element: container,
+    state,
+    setPath(nextPath) {
+      const nextSlash = nextPath.lastIndexOf("/");
+      const nextFolder = nextSlash > 0 && knownFolders.includes(nextPath.slice(0, nextSlash)) ? nextPath.slice(0, nextSlash) : "";
+      if (knownFolders.length > 1) /** @type {HTMLSelectElement} */ (folderSelect).value = nextFolder;
+      nameInput.value = nextFolder ? nextPath.slice(nextFolder.length + 1) : nextPath;
+      refresh();
+    },
+    focus() { nameInput.focus(); nameInput.select(); },
+  };
+}
+
+/** Suggests a non-colliding copy filename derived from `basePath`. @param {string} basePath @param {string[]} existingPaths */
+export function nextFreePath(basePath, existingPaths) {
+  const taken = new Set(existingPaths);
+  const extMatch = /\.ya?ml$/i.exec(basePath);
+  const ext = extMatch ? extMatch[0] : ".yaml";
+  const stem = extMatch ? basePath.slice(0, extMatch.index) : basePath;
+  let candidate = `${stem}-copy${ext}`;
+  for (let n = 2; taken.has(candidate); n++) candidate = `${stem}-copy-${n}${ext}`;
+  return candidate;
+}
+
+/**
+ * Computes a compact line-by-line diff view between two YAML texts using pure DOM nodes.
+ * @param {string} beforeText
+ * @param {string} afterText
+ * @param {string} beforeLabel
+ * @param {string} afterLabel
+ */
+export function renderDiff(beforeText, afterText, beforeLabel, afterLabel) {
+  const a = String(beforeText || "").replace(/\r\n/g, "\n").split("\n");
+  const b = String(afterText || "").replace(/\r\n/g, "\n").split("\n");
+  const header = (summary) => el("div", { class: "diff-head" },
+    el("span", { class: "mono" }, `${beforeLabel} → ${afterLabel}`),
+    el("span", { class: "hint" }, summary));
+
+  if (a.join("\n") === b.join("\n")) {
+    return el("div", { class: "diff-box" }, header("Identical content"));
+  }
+
+  if (a.length > 400 || b.length > 400) {
+    return el("div", { class: "diff-box" },
+      header(`${a.length} lines → ${b.length} lines (preview truncated for size)`),
+      el("pre", { class: "diff-pre mono" }, afterText.slice(0, 8000)));
+  }
+
+  const m = a.length;
+  const n = b.length;
+  const dp = Array.from({ length: m + 1 }, () => new Uint16Array(n + 1));
+  for (let i = m - 1; i >= 0; i--) {
+    for (let j = n - 1; j >= 0; j--) {
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+
+  /** @type {{ kind: "ctx" | "add" | "del", line: string }[]} */
+  const ops = [];
+  let i = 0;
+  let j = 0;
+  let added = 0;
+  let removed = 0;
+  while (i < m && j < n) {
+    if (a[i] === b[j]) { ops.push({ kind: "ctx", line: a[i] }); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { ops.push({ kind: "del", line: a[i] }); removed++; i++; }
+    else { ops.push({ kind: "add", line: b[j] }); added++; j++; }
+  }
+  while (i < m) { ops.push({ kind: "del", line: a[i++] }); removed++; }
+  while (j < n) { ops.push({ kind: "add", line: b[j++] }); added++; }
+
+  const prefix = { ctx: "  ", add: "+ ", del: "- " };
+  return el("div", { class: "diff-box" },
+    header(`+${added} / -${removed} lines`),
+    el("pre", { class: "diff-pre mono" },
+      ops.map((op) => el("span", { class: `diff-line diff-${op.kind}` }, `${prefix[op.kind]}${op.line}\n`))));
+}
+
+/**
+ * Dialog to create a blank job with path collision checking and optional title.
+ * @param {{ folders: string[], existingPaths: string[], defaultTitle?: string, initialPath?: string, title?: string, hideTitle?: boolean, onCreate: (args: { path: string, title: string }) => Promise<void> | void, onCancel?: () => void }} opts
+ */
+export function openNewJobDialog(opts) {
+  const { folders, existingPaths, defaultTitle = "", initialPath, title = "New blank job", hideTitle = false, onCreate, onCancel } = opts;
+  const defaultName = initialPath || (existingPaths.includes("new-job.yaml") ? nextFreePath("new-job.yaml", existingPaths) : "new-job.yaml");
+  let submitted = false;
+  openDialog("d-new-dialog", title, ({ body, close }) => {
+    const createBtn = /** @type {HTMLButtonElement} */ (el("button", { id: "d-new-submit", type: "submit", class: "primary" }, "Create"));
+    const titleInput = /** @type {HTMLInputElement} */ (el("input", { id: "d-new-title", type: "text", value: defaultTitle, placeholder: "Optional job title", "aria-label": "Job title" }));
+    const errorBanner = el("p", { id: "d-new-error", class: "bad dialog-error", hidden: true });
+    let busy = false;
+
+    const picker = createPathPicker({
+      idPrefix: "d-new",
+      folders,
+      existingPaths,
+      initialPath: defaultName,
+      label: "File path",
+      onChange: () => { createBtn.disabled = busy || !picker.state().valid; },
+    });
+
+    const form = el("form", {
+      class: "dialog-form",
+      onsubmit: async (e) => {
+        e.preventDefault();
+        const s = picker.state();
+        if (!s.valid || busy) return;
+        busy = true;
+        createBtn.disabled = true;
+        errorBanner.hidden = true;
+        try {
+          submitted = true;
+          close();
+          await onCreate({ path: s.path, title: hideTitle ? "" : titleInput.value.trim() });
+        } catch (err) {
+          submitted = false;
+          busy = false;
+          createBtn.disabled = !picker.state().valid;
+          errorBanner.hidden = false;
+          errorBanner.textContent = err.message;
+        }
+      },
+    },
+      picker.element,
+      hideTitle ? null : el("div", { class: "dialog-field" },
+        el("label", { for: "d-new-title" }, "Title (optional)"),
+        titleInput),
+      errorBanner,
+      el("div", { class: "row dialog-actions" },
+        el("button", { type: "button", class: "ghost", onclick: close }, "Cancel"),
+        createBtn));
+
+    fill(body, form);
+    createBtn.disabled = !picker.state().valid;
+    picker.focus();
+  }, { onClose: () => { if (!submitted) onCancel?.(); } });
+}
+
+/**
+ * Dialog to create a job from a dtpipe CLI command line (multi-line supported).
+ * Preserves the typed command if the server rejects it.
+ * @param {{ folders: string[], existingPaths: string[], onImport: (args: { path: string, yaml: string }) => Promise<void> | void }} opts
+ */
+export function openFromCliDialog(opts) {
+  const { folders, existingPaths, onImport } = opts;
+  const defaultName = existingPaths.includes("imported.yaml") ? nextFreePath("imported.yaml", existingPaths) : "imported.yaml";
+  openDialog("d-cli-dialog", "New job from CLI command", ({ body, close }) => {
+    const submitBtn = /** @type {HTMLButtonElement} */ (el("button", { id: "d-cli-submit", type: "submit", class: "primary" }, "Import command"));
+    const cmdInput = /** @type {HTMLTextAreaElement} */ (el("textarea", {
+      id: "d-cli-command",
+      class: "mono",
+      rows: "5",
+      spellcheck: "false",
+      "aria-label": "dtpipe command line",
+      placeholder: "dtpipe --input csv:orders.csv \\\n  --output csv:out.csv",
+    }));
+    const errorBanner = el("p", { id: "d-cli-error", class: "bad dialog-error", hidden: true });
+    let busy = false;
+
+    const update = () => {
+      submitBtn.disabled = busy || !cmdInput.value.trim() || !picker.state().valid;
+    };
+
+    const picker = createPathPicker({
+      idPrefix: "d-cli",
+      folders,
+      existingPaths,
+      initialPath: defaultName,
+      label: "Save as file",
+      onChange: update,
+    });
+    cmdInput.addEventListener("input", update);
+
+    const form = el("form", {
+      class: "dialog-form",
+      onsubmit: async (e) => {
+        e.preventDefault();
+        const s = picker.state();
+        if (!s.valid || busy || !cmdInput.value.trim()) return;
+        busy = true;
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Importing…";
+        errorBanner.hidden = true;
+        try {
+          const args = splitCommand(cmdInput.value);
+          if (args[0] === "dtpipe") args.shift();
+          if (!args.length) throw new Error("Enter a dtpipe command line.");
+          const { yaml } = await api("/api/import", { args });
+          close();
+          await onImport({ path: s.path, yaml });
+        } catch (err) {
+          busy = false;
+          submitBtn.textContent = "Import command";
+          update();
+          errorBanner.hidden = false;
+          errorBanner.textContent = err.message;
+        }
+      },
+    },
+      el("div", { class: "dialog-field" },
+        el("label", { for: "d-cli-command" }, "Command line"),
+        cmdInput,
+        el("p", { class: "hint" }, "Multi-line commands with trailing \\ are supported. ${{…}} references stay as typed; --bind-input and --bind-output are refused.")),
+      picker.element,
+      errorBanner,
+      el("div", { class: "row dialog-actions" },
+        el("button", { type: "button", class: "ghost", onclick: close }, "Cancel"),
+        submitBtn));
+
+    fill(body, form);
+    update();
+    cmdInput.focus();
+  });
+}
+
+/**
+ * Dialog to import an external YAML file (upload or paste) into the workspace as a new unsaved draft.
+ * @param {{ folders: string[], existingPaths: string[], onImport: (args: { path: string, yaml: string }) => Promise<void> | void }} opts
+ */
+export function openImportYamlDialog(opts) {
+  const { folders, existingPaths, onImport } = opts;
+  const defaultName = existingPaths.includes("imported.yaml") ? nextFreePath("imported.yaml", existingPaths) : "imported.yaml";
+  openDialog("d-yaml-import-dialog", "Import YAML file", ({ body, close }) => {
+    const submitBtn = /** @type {HTMLButtonElement} */ (el("button", { id: "d-yaml-import-submit", type: "submit", class: "primary" }, "Import YAML"));
+    const fileInput = /** @type {HTMLInputElement} */ (el("input", {
+      id: "d-yaml-import-file",
+      type: "file",
+      accept: ".yaml,.yml,text/yaml,application/x-yaml",
+      "aria-label": "Choose a YAML file from your computer",
+    }));
+    const textInput = /** @type {HTMLTextAreaElement} */ (el("textarea", {
+      id: "d-yaml-import-text",
+      class: "mono",
+      rows: "8",
+      spellcheck: "false",
+      "aria-label": "YAML content",
+      placeholder: "Paste job YAML here, or choose a .yaml / .yml file above…",
+    }));
+    const errorBanner = el("p", { id: "d-yaml-import-error", class: "bad dialog-error", hidden: true });
+    let busy = false;
+
+    const update = () => {
+      submitBtn.disabled = busy || !textInput.value.trim() || !picker.state().valid;
+    };
+
+    const picker = createPathPicker({
+      idPrefix: "d-yaml-import",
+      folders,
+      existingPaths,
+      initialPath: defaultName,
+      label: "Destination file in workspace",
+      onChange: update,
+    });
+
+    fileInput.addEventListener("change", async () => {
+      const file = fileInput.files?.[0];
+      if (!file) return;
+      try {
+        textInput.value = await file.text();
+        const safeName = file.name.replace(/^.*[/\\]/, "");
+        if (safeName) picker.setPath(safeName);
+        errorBanner.hidden = true;
+      } catch (err) {
+        errorBanner.hidden = false;
+        errorBanner.textContent = err.message;
+      }
+      update();
+    });
+    textInput.addEventListener("input", update);
+
+    const form = el("form", {
+      class: "dialog-form",
+      onsubmit: async (e) => {
+        e.preventDefault();
+        const s = picker.state();
+        const yaml = textInput.value;
+        if (!s.valid || busy || !yaml.trim()) return;
+        busy = true;
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Checking…";
+        errorBanner.hidden = true;
+        try {
+          const check = await api("/api/design/decompose", { yaml, layout: null });
+          const parseError = check.errors?.find((msg) => msg.startsWith("The job is not readable:"));
+          if (parseError) throw new Error(parseError);
+          close();
+          await onImport({ path: s.path, yaml });
+        } catch (err) {
+          busy = false;
+          submitBtn.textContent = "Import YAML";
+          update();
+          errorBanner.hidden = false;
+          errorBanner.textContent = err.message;
+        }
+      },
+    },
+      el("div", { class: "dialog-field" },
+        el("label", { for: "d-yaml-import-file" }, "Choose a file (optional)"),
+        fileInput),
+      el("div", { class: "dialog-field" },
+        el("label", { for: "d-yaml-import-text" }, "YAML content"),
+        textInput),
+      picker.element,
+      errorBanner,
+      el("div", { class: "row dialog-actions" },
+        el("button", { type: "button", class: "ghost", onclick: close }, "Cancel"),
+        submitBtn));
+
+    fill(body, form);
+    update();
+    fileInput.focus();
+  });
+}
+
+/**
+ * Dialog to save the currently open job under a new non-colliding path.
+ * @param {{ folders: string[], existingPaths: string[], currentPath: string, suggestedPath: string, onSaveAs: (path: string) => Promise<void> }} opts
+ */
+export function openSaveAsDialog(opts) {
+  const { folders, existingPaths, currentPath, suggestedPath, onSaveAs } = opts;
+  openDialog("d-save-as-dialog", "Save job as…", ({ body, close }) => {
+    const submitBtn = /** @type {HTMLButtonElement} */ (el("button", { id: "d-save-as-submit", type: "submit", class: "primary" }, "Save copy"));
+    const errorBanner = el("p", { id: "d-save-as-error", class: "bad dialog-error", hidden: true });
+    let busy = false;
+
+    const picker = createPathPicker({
+      idPrefix: "d-save-as",
+      folders,
+      existingPaths,
+      initialPath: suggestedPath,
+      label: "New file path",
+      onChange: () => { submitBtn.disabled = busy || !picker.state().valid; },
+    });
+
+    const form = el("form", {
+      class: "dialog-form",
+      onsubmit: async (e) => {
+        e.preventDefault();
+        const s = picker.state();
+        if (!s.valid || busy) return;
+        busy = true;
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Saving…";
+        errorBanner.hidden = true;
+        try {
+          await onSaveAs(s.path);
+          close();
+        } catch (err) {
+          busy = false;
+          submitBtn.textContent = "Save copy";
+          submitBtn.disabled = !picker.state().valid;
+          errorBanner.hidden = false;
+          errorBanner.textContent = err.message;
+        }
+      },
+    },
+      el("p", { class: "hint" }, "Save ", el("code", {}, currentPath), " under another path in this workspace."),
+      picker.element,
+      errorBanner,
+      el("div", { class: "row dialog-actions" },
+        el("button", { type: "button", class: "ghost", onclick: close }, "Cancel"),
+        submitBtn));
+
+    fill(body, form);
+    submitBtn.disabled = !picker.state().valid;
+    picker.focus();
+  });
+}
+
+/**
+ * Dialog to rename or move a job file inside the workspace.
+ * @param {{ folders: string[], existingPaths: string[], path: string, hasEdits: boolean, onRename: (to: string) => Promise<void> }} opts
+ */
+export function openRenameDialog(opts) {
+  const { folders, existingPaths, path, hasEdits, onRename } = opts;
+  openDialog("d-rename-dialog", "Rename or move job", ({ body, close }) => {
+    const submitBtn = /** @type {HTMLButtonElement} */ (el("button", { id: "d-rename-submit", type: "submit", class: "primary" }, "Rename"));
+    const errorBanner = el("p", { id: "d-rename-error", class: "bad dialog-error", hidden: true });
+    let busy = false;
+
+    const update = () => {
+      const s = picker.state();
+      submitBtn.disabled = busy || hasEdits || !s.valid || s.path === path;
+    };
+
+    const picker = createPathPicker({
+      idPrefix: "d-rename",
+      folders,
+      existingPaths,
+      initialPath: path,
+      allowPath: path,
+      label: "New file path",
+      onChange: update,
+    });
+
+    const form = el("form", {
+      class: "dialog-form",
+      onsubmit: async (e) => {
+        e.preventDefault();
+        const s = picker.state();
+        if (hasEdits || !s.valid || s.path === path || busy) return;
+        busy = true;
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Renaming…";
+        errorBanner.hidden = true;
+        try {
+          await onRename(s.path);
+          close();
+        } catch (err) {
+          busy = false;
+          submitBtn.textContent = "Rename";
+          update();
+          errorBanner.hidden = false;
+          errorBanner.textContent = err.message;
+        }
+      },
+    },
+      el("p", { class: "hint" }, "Moves ", el("code", {}, path), " and its studio metadata (layout, launch values, library link, checkpoints)."),
+      hasEdits ? el("p", { class: "warn" }, "This file has unsaved changes. Save or revert them before renaming.") : null,
+      picker.element,
+      errorBanner,
+      el("div", { class: "row dialog-actions" },
+        el("button", { type: "button", class: "ghost", onclick: close }, "Cancel"),
+        submitBtn));
+
+    fill(body, form);
+    update();
+    picker.focus();
+  });
+}
+
+/**
+ * Confirmation dialog to delete a local job file and its studio metadata.
+ * @param {{ path: string, isOpen: boolean, hasEdits: boolean, publicationId: string | null, onDelete: () => Promise<void> }} opts
+ */
+export function openDeleteDialog(opts) {
+  const { path, isOpen, hasEdits, publicationId, onDelete } = opts;
+  openDialog("d-delete-dialog", "Delete local job", ({ body, close }) => {
+    const deleteBtn = /** @type {HTMLButtonElement} */ (el("button", { id: "d-delete-submit", type: "button", class: "danger" }, "Delete file"));
+    const errorBanner = el("p", { id: "d-delete-error", class: "bad dialog-error", hidden: true });
+    let busy = false;
+
+    deleteBtn.addEventListener("click", async () => {
+      if (busy) return;
+      busy = true;
+      deleteBtn.disabled = true;
+      deleteBtn.textContent = "Deleting…";
+      errorBanner.hidden = true;
+      try {
+        await onDelete();
+        close();
+      } catch (err) {
+        busy = false;
+        deleteBtn.disabled = false;
+        deleteBtn.textContent = "Delete file";
+        errorBanner.hidden = false;
+        errorBanner.textContent = err.message;
+      }
+    });
+
+    fill(body,
+      el("p", {}, "Delete ", el("code", {}, path), " and its local studio metadata from this folder? This cannot be undone."),
+      isOpen && hasEdits ? el("p", { class: "warn" }, "Unsaved changes in the open editor will be lost.") : null,
+      publicationId ? el("p", { class: "hint" }, "Only the local file is removed: pipeline ", el("code", {}, publicationId), " remains in the coordinator's library.") : null,
+      errorBanner,
+      el("div", { class: "row dialog-actions" },
+        el("button", { type: "button", class: "ghost", onclick: close }, "Cancel"),
+        deleteBtn));
+    deleteBtn.focus();
+  });
+}
+
+/**
+ * Read-only inspection modal for a coordinator library pipeline without writing anything to disk.
+ * @param {{ pipeline: any, linkedPath: string | null, syncState: string | null, onPull: () => void, onOpenLocal: (path: string) => void }} opts
+ */
+export function openInspectLibraryDialog(opts) {
+  const { pipeline, linkedPath, syncState, onPull, onOpenLocal } = opts;
+  let closed = false;
+  openDialog("d-library-inspect-dialog", pipeline.title || pipeline.id, ({ body, close }) => {
+    const content = el("div", { class: "dialog-form" },
+      el("p", { class: "hint" }, "Reading ", el("code", {}, pipeline.id), " from the coordinator…"));
+    fill(body, content);
+
+    api(`/api/library/job?id=${encodeURIComponent(pipeline.id)}`)
+      .then((remote) => {
+        if (closed) return;
+        const primaryLabel = !linkedPath ? "Pull to workspace…"
+          : syncState === "outdated" || syncState === "diverged" ? "Pull update…"
+          : "Open local";
+        const copyBtn = el("button", {
+          type: "button",
+          class: "ghost",
+          onclick: async () => {
+            try { await navigator.clipboard.writeText(remote.yaml); copyBtn.textContent = "Copied"; }
+            catch { copyBtn.textContent = "Copy failed"; }
+          },
+        }, "Copy YAML");
+
+        fill(content,
+          el("p", { class: "hint mono" }, `${remote.id} · commit ${shortCommit(remote.commit)}`),
+          pipeline.description ? el("p", {}, pipeline.description) : null,
+          linkedPath ? el("p", { class: "hint" }, "Linked in workspace: ", el("code", {}, linkedPath)) : null,
+          el("pre", { class: "dialog-pre mono" }, remote.yaml),
+          el("div", { class: "row dialog-actions" },
+            copyBtn,
+            linkedPath && (syncState === "outdated" || syncState === "diverged")
+              ? el("button", { type: "button", class: "ghost", onclick: () => { close(); onOpenLocal(linkedPath); } }, "Open local")
+              : null,
+            el("button", { type: "button", class: "ghost", onclick: close }, "Close"),
+            el("button", {
+              type: "button",
+              class: "primary",
+              onclick: () => {
+                close();
+                if (linkedPath && syncState !== "outdated" && syncState !== "diverged") onOpenLocal(linkedPath);
+                else onPull();
+              },
+            }, primaryLabel)));
+      })
+      .catch((err) => {
+        if (closed) return;
+        fill(content,
+          el("p", { class: "bad" }, err.message),
+          el("div", { class: "row dialog-actions" },
+            el("button", { type: "button", class: "ghost", onclick: close }, "Close")));
+      });
+  }, { onClose: () => { closed = true; } });
+}
+
+/**
+ * Dialog to pull a pipeline from the coordinator library into the workspace:
+ * creates a new local file, updates a linked local file with a line diff, or resolves an unlinked filename collision.
+ * @param {{ pipeline: any, folders: string[], existingPaths: string[], linkedPath: string | null, syncState: string | null, openJobPath: string | null, openJobHasEdits: boolean, onPulled: (path: string) => Promise<void>, onOpenLocal: (path: string) => Promise<void> }} opts
+ */
+export function openPullDialog(opts) {
+  const { pipeline, folders, existingPaths, linkedPath, syncState, openJobPath, openJobHasEdits, onPulled, onOpenLocal } = opts;
+  let closed = false;
+
+  openDialog("d-pull-dialog", `Pull ${pipeline.id}`, ({ body, close }) => {
+    const content = el("div", { class: "dialog-form" },
+      el("p", { class: "hint" }, "Fetching ", el("code", {}, pipeline.id), " from the coordinator…"));
+    fill(body, content);
+
+    const defaultNewPath = `${pipeline.id}.yaml`;
+    const localToLoad = linkedPath || (existingPaths.includes(defaultNewPath) ? defaultNewPath : null);
+    Promise.all([
+      api(`/api/library/job?id=${encodeURIComponent(pipeline.id)}`),
+      localToLoad ? api(`/api/job?path=${encodeURIComponent(localToLoad)}`).catch(() => null) : Promise.resolve(null),
+    ]).then(([remote, localDoc]) => {
+      if (closed) return;
+      /** @type {Map<string, { yaml: string, hash: string }>} */
+      const localCache = new Map();
+      if (localToLoad && localDoc) localCache.set(localToLoad, { yaml: localDoc.yaml, hash: localDoc.hash });
+
+      const submitBtn = /** @type {HTMLButtonElement} */ (el("button", { id: "d-pull-submit", type: "submit", class: "primary" }, "Pull"));
+      const errorBanner = el("p", { id: "d-pull-error", class: "bad dialog-error", hidden: true });
+      let busy = false;
+
+      if (linkedPath && localDoc) {
+        let mode = syncState === "outdated" || syncState === "diverged" ? "update" : "copy";
+        const copyDefault = nextFreePath(linkedPath, existingPaths);
+        const modeArea = el("div");
+        const picker = createPathPicker({
+          idPrefix: "d-pull-copy",
+          folders,
+          existingPaths,
+          initialPath: copyDefault,
+          label: "Copy file path",
+          onChange: syncUi,
+        });
+
+        const radioUpdate = /** @type {HTMLInputElement} */ (el("input", { type: "radio", name: "pull-mode", value: "update", checked: mode === "update" }));
+        const radioCopy = /** @type {HTMLInputElement} */ (el("input", { type: "radio", name: "pull-mode", value: "copy", checked: mode === "copy" }));
+        radioUpdate.addEventListener("change", () => { if (radioUpdate.checked) { mode = "update"; syncUi(); } });
+        radioCopy.addEventListener("change", () => { if (radioCopy.checked) { mode = "copy"; syncUi(); } });
+
+        function syncUi() {
+          if (mode === "update") {
+            const divergedWarn = syncState === "diverged" || (linkedPath === openJobPath && openJobHasEdits);
+            fill(modeArea,
+              divergedWarn ? el("p", { class: "warn" }, "Local changes in ", el("code", {}, linkedPath), " will be replaced by the coordinator's version.") : null,
+              renderDiff(localDoc.yaml, remote.yaml, linkedPath, `library (${shortCommit(remote.commit)})`));
+            submitBtn.textContent = `Update ${linkedPath}`;
+            submitBtn.disabled = busy;
+          } else {
+            fill(modeArea, picker.element);
+            submitBtn.textContent = "Pull as new copy";
+            submitBtn.disabled = busy || !picker.state().valid;
+          }
+        }
+
+        const form = el("form", {
+          class: "dialog-form",
+          onsubmit: async (e) => {
+            e.preventDefault();
+            if (busy) return;
+            const targetPath = mode === "update" ? linkedPath : picker.state().path;
+            const overwriteHash = mode === "update" ? localDoc.hash : null;
+            if (mode === "copy" && !picker.state().valid) return;
+            busy = true;
+            submitBtn.disabled = true;
+            submitBtn.textContent = "Pulling…";
+            errorBanner.hidden = true;
+            try {
+              const saved = await api("/api/library/open", { id: pipeline.id, path: targetPath, overwriteHash });
+              close();
+              await onPulled(saved.path);
+            } catch (err) {
+              busy = false;
+              errorBanner.hidden = false;
+              errorBanner.textContent = err.message;
+              syncUi();
+            }
+          },
+        },
+          el("p", { class: "hint" }, "Pipeline ", el("code", {}, pipeline.id), " · remote commit ", el("code", {}, shortCommit(remote.commit))),
+          el("div", { class: "dialog-radio-group" },
+            el("label", {}, radioUpdate, " Update linked file (", el("code", {}, linkedPath), ")"),
+            el("label", {}, radioCopy, " Save as a new copy")),
+          modeArea,
+          errorBanner,
+          el("div", { class: "row dialog-actions" },
+            el("button", { type: "button", class: "ghost", onclick: close }, "Cancel"),
+            submitBtn));
+
+        fill(content, form);
+        syncUi();
+        submitBtn.focus();
+        return;
+      }
+
+      // Unlinked pull: allow picking path; if chosen path already exists locally, let user open it, rename, or opt in to overwrite with diff.
+      let replaceExisting = false;
+      const collisionArea = el("div");
+      const picker = createPathPicker({
+        idPrefix: "d-pull",
+        folders,
+        existingPaths,
+        initialPath: defaultNewPath,
+        allowExisting: true,
+        label: "Save to workspace as",
+        onChange: () => { replaceExisting = false; syncCollision(); },
+      });
+
+      function syncCollision() {
+        const s = picker.state();
+        if (!s.exists) {
+          fill(collisionArea);
+          submitBtn.textContent = "Pull & open";
+          submitBtn.disabled = busy || !s.valid;
+          return;
+        }
+        const cached = localCache.get(s.path);
+        const replaceCheck = /** @type {HTMLInputElement} */ (el("input", { id: "d-pull-overwrite", type: "checkbox", checked: replaceExisting }));
+        replaceCheck.addEventListener("change", async () => {
+          replaceExisting = replaceCheck.checked;
+          if (replaceExisting && !localCache.has(s.path)) {
+            try {
+              const doc = await api(`/api/job?path=${encodeURIComponent(s.path)}`);
+              if (closed) return;
+              localCache.set(s.path, { yaml: doc.yaml, hash: doc.hash });
+            } catch (err) {
+              errorBanner.hidden = false;
+              errorBanner.textContent = err.message;
+              replaceExisting = false;
+            }
+          }
+          syncCollision();
+        });
+
+        fill(collisionArea,
+          el("div", { class: "dialog-collision" },
+            el("p", { class: "warn" }, el("code", {}, s.path), " already exists in this workspace (not linked to ", el("code", {}, pipeline.id), ")."),
+            el("div", { class: "row wrap" },
+              el("button", { type: "button", class: "small", onclick: async () => { close(); await onOpenLocal(s.path); } }, `Open existing ${s.path}`),
+              el("label", {}, replaceCheck, ` Replace existing ${s.path}`)),
+            replaceExisting && cached ? renderDiff(cached.yaml, remote.yaml, s.path, `library (${shortCommit(remote.commit)})`) : null));
+
+        submitBtn.textContent = replaceExisting ? `Replace ${s.path}` : "Pull & open";
+        submitBtn.disabled = busy || !s.valid || !replaceExisting || !localCache.has(s.path);
+      }
+
+      const form = el("form", {
+        class: "dialog-form",
+        onsubmit: async (e) => {
+          e.preventDefault();
+          const s = picker.state();
+          if (busy || !s.valid) return;
+          if (s.exists && !replaceExisting) return;
+          const overwriteHash = s.exists ? localCache.get(s.path)?.hash : null;
+          if (s.exists && !overwriteHash) return;
+          busy = true;
+          submitBtn.disabled = true;
+          submitBtn.textContent = "Pulling…";
+          errorBanner.hidden = true;
+          try {
+            const saved = await api("/api/library/open", { id: pipeline.id, path: s.path, overwriteHash });
+            close();
+            await onPulled(saved.path);
+          } catch (err) {
+            busy = false;
+            errorBanner.hidden = false;
+            errorBanner.textContent = err.message;
+            syncCollision();
+          }
+        },
+      },
+        el("p", { class: "hint" }, pipeline.title ? [el("b", {}, pipeline.title), " · "] : null,
+          el("code", {}, pipeline.id), " · commit ", el("code", {}, shortCommit(remote.commit))),
+        el("details", { class: "dialog-details" },
+          el("summary", {}, "Preview YAML"),
+          el("pre", { class: "dialog-pre mono" }, remote.yaml)),
+        picker.element,
+        collisionArea,
+        errorBanner,
+        el("div", { class: "row dialog-actions" },
+          el("button", { type: "button", class: "ghost", onclick: close }, "Cancel"),
+          submitBtn));
+
+      fill(content, form);
+      syncCollision();
+      picker.focus();
+    }).catch((err) => {
+      if (closed) return;
+      fill(content,
+        el("p", { class: "bad" }, err.message),
+        el("div", { class: "row dialog-actions" },
+          el("button", { type: "button", class: "ghost", onclick: close }, "Close")));
+    });
+  }, { onClose: () => { closed = true; } });
+}

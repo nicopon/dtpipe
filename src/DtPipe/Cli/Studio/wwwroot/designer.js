@@ -168,7 +168,7 @@ export function cardChanges(before, after) {
   };
 }
 
-/** Starts from no card at all. */
+/** Starts from no step at all. */
 export async function openBlank(title) {
   opening.cancel();
   cards.history = [];
@@ -176,6 +176,16 @@ export async function openBlank(title) {
   cards.result = null; cards.selected = null; cards.zoom = null; cards.dirty = true; cards.text = null; state.view.drawer = "yaml";
   renderShell();
   await compose();
+}
+
+/** Closes the open job and clears any pending design requests. */
+export function closeDesigner() {
+  opening.cancel();
+  composing.cancel();
+  reading.cancel();
+  clearTimeout(composeTimer);
+  state.brickRows = null;
+  Object.assign(cards, { model: null, result: null, selected: null, zoom: null, dirty: false, history: [], text: null });
 }
 
 /** The coordinator's nodes and bricks: the palette offers them, the inspector describes them. */
@@ -680,7 +690,7 @@ function renderCanvas() {
       hooks.cardTools?.(step.alias) || null,
       el("div", { class: "dcard-sub" }, subtitle),
       hooks.cardBadge?.(step.alias) || null,
-      el("div", { class: "dcard-branch" }, branch),
+      el("div", { class: "dcard-branch", title: branch || null }, branch),
       step.kind !== "source" ? el("span", { class: "port in", "data-port": "in", title: step.kind === "merge" ? "inputs (several)" : "input" }) : null,
       step.kind === "sql" ? [el("span", { class: "port ref", "data-port": "ref", title: "joined inputs (ref)" }), el("span", { class: "port-label ref" }, "ref")] : null,
       step.kind !== "sink" ? el("span", { class: "port out", "data-port": "out", title: "output: drag to an input" }) : null);

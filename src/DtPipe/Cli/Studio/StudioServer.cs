@@ -109,6 +109,7 @@ public sealed partial class StudioServer : IAsyncDisposable
         ["/preview.js"] = ("studio/preview.js", "text/javascript; charset=utf-8"),
         ["/run.js"] = ("studio/run.js", "text/javascript; charset=utf-8"),
         ["/publish.js"] = ("studio/publish.js", "text/javascript; charset=utf-8"),
+        ["/dialogs.js"] = ("studio/dialogs.js", "text/javascript; charset=utf-8"),
         ["/variables.js"] = ("studio/variables.js", "text/javascript; charset=utf-8"),
         ["/agent.js"] = ("studio/agent.js", "text/javascript; charset=utf-8"),
         ["/studio.css"] = ("studio/studio.css", "text/css; charset=utf-8"),
@@ -199,13 +200,19 @@ public sealed partial class StudioServer : IAsyncDisposable
             switch (request.Method, path)
             {
                 case ("GET", "/api/jobs"):
-                    await JsonAsync(context, new { folder = Path.GetFileName(_folder.Root), jobs = _folder.Jobs() });
+                    await JobsAsync(context);
                     break;
                 case ("GET", "/api/job"):
                     await OpenAsync(context, request.Query["path"].ToString());
                     break;
                 case ("PUT", "/api/job"):
                     await SaveAsync(context);
+                    break;
+                case ("POST", "/api/job/rename"):
+                    await RenameJobAsync(context);
+                    break;
+                case ("DELETE", "/api/job"):
+                    await DeleteJobAsync(context);
                     break;
                 case ("GET", "/api/components"):
                     await JsonAsync(context, new { readers = _tools.Readers, writers = _tools.Writers });
@@ -290,6 +297,9 @@ public sealed partial class StudioServer : IAsyncDisposable
                     break;
                 case ("GET", "/api/library"):
                     await LibraryAsync(context);
+                    break;
+                case ("GET", "/api/library/job"):
+                    await LibraryJobAsync(context);
                     break;
                 case ("POST", "/api/library/open"):
                     await OpenFromLibraryAsync(context);
@@ -403,6 +413,74 @@ public sealed partial class StudioServer : IAsyncDisposable
     }
 
     /// <summary>
+    /// Lists the jobs and subdirectories of the folder, along with each job's link to the active coordinator's library.
+    /// </summary>
+    private async Task JobsAsync(HttpContext context)
+    {
+        var jobs = _folder.Jobs();
+        var folders = _folder.Folders();
+        var publications = new Dictionary<string, object>(StringComparer.Ordinal);
+        if (_tools.Coordinator is { } link)
+        {
+            var origin = link.Origin.ToString();
+            foreach (var job in jobs)
+            {
+                StudioPublication? pub;
+                try { pub = _local.ReadPublication(job); }
+                catch (Exception ex) when (ex is StudioRefusal or IOException or UnauthorizedAccessException) { continue; }
+                if (pub is null || pub.Coordinator != origin) continue;
+                bool? localModified = null;
+                if (pub.LocalHash is not null)
+                {
+                    try { localModified = _folder.ReadJob(job).Hash != pub.LocalHash; }
+                    catch (Exception ex) when (ex is StudioRefusal or IOException or UnauthorizedAccessException) { }
+                }
+                publications[job] = new { id = pub.Id, commit = pub.Commit, localModified };
+            }
+        }
+        await JsonAsync(context, new { folder = Path.GetFileName(_folder.Root), jobs, folders, publications });
+    }
+
+    /// <summary>
+    /// Moves a job and its local studio metadata inside the folder, refusing collisions, active/suspended runs, and stale hashes.
+    /// </summary>
+    private async Task RenameJobAsync(HttpContext context)
+    {
+        var asked = await BodyAsync<RenameJobRequest>(context);
+        var from = JobPath(asked.From) ?? throw new StudioRefusal(400, "Name the job's current path as 'from'.");
+        var to = JobPath(asked.To) ?? throw new StudioRefusal(400, "Name the job's new path as 'to'.");
+        _local.CheckJobFiles(from);
+        _local.CheckJobFiles(to);
+        if (RunInProgressFor(from))
+            throw new StudioRefusal(409, $"A run is in progress on '{from}': stop it, or wait for it, before renaming.");
+        if (LoadDebug(from).Real)
+            throw new StudioRefusal(409, $"A real run is suspended on '{from}': write or abandon it before renaming.");
+        var hash = _folder.RenameJob(from, to, asked.Hash);
+        _local.MoveJobFiles(from, to);
+        await JsonAsync(context, new { path = to, hash });
+    }
+
+    /// <summary>
+    /// Deletes a job and its local studio metadata and checkpoints, refusing active/suspended runs and stale hashes.
+    /// </summary>
+    private Task DeleteJobAsync(HttpContext context)
+    {
+        var relative = JobPath(context.Request.Query["path"].ToString())
+            ?? throw new StudioRefusal(400, "Name the job's path to delete.");
+        var hashParam = context.Request.Query["hash"].ToString();
+        var expectedHash = string.IsNullOrEmpty(hashParam) ? null : hashParam;
+        _local.CheckJobFiles(relative);
+        if (RunInProgressFor(relative))
+            throw new StudioRefusal(409, $"A run is in progress on '{relative}': stop it, or wait for it, before deleting.");
+        if (LoadDebug(relative).Real)
+            throw new StudioRefusal(409, $"A real run is suspended on '{relative}': write or abandon it before deleting.");
+        _folder.DeleteJob(relative, expectedHash);
+        _local.DeleteJobFiles(relative, key => ForgetCheckpoint(DebugStore(), key));
+        context.Response.StatusCode = StatusCodes.Status204NoContent;
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
     /// A job, the hash a save must find again, its layout, and whether saving would change its text:
     /// the server writes what it composes, so a file written by hand loses its comments and its order.
     /// </summary>
@@ -463,7 +541,7 @@ public sealed partial class StudioServer : IAsyncDisposable
 
     private static readonly string[] PaneNames = ["pal", "insp", "drawer", "agent"];
     private static readonly string[] ViewTabs = ["yaml", "preview", "variables"];
-    private static readonly string[] ViewSides = ["jobs", "steps", "none"];
+    private static readonly string[] ViewSides = ["jobs", "library", "steps", "none"];
 
     /// <summary>
     /// Keeps how the page was left: the sizes of its panes, the side panel chosen, the job open and, for a job, its tab, the rows
@@ -634,7 +712,7 @@ public sealed partial class StudioServer : IAsyncDisposable
             return;
         }
         var saved = outcome.Saved!;
-        _local.WritePublication(path, new StudioPublication(origin, saved.Id, saved.Commit));
+        _local.WritePublication(path, new StudioPublication(origin, saved.Id, saved.Commit, job.Hash));
         await JsonAsync(context, saved);
     }
 
@@ -776,10 +854,29 @@ public sealed partial class StudioServer : IAsyncDisposable
         catch (Exception ex) when (ex is CoordinatorLinkException or HttpRequestException) { throw new StudioRefusal(502, ex.Message); }
     }
 
+    /// <summary>Reads a library pipeline's YAML and commit without writing anything to disk.</summary>
+    private async Task LibraryJobAsync(HttpContext context)
+    {
+        var link = SignedInLink();
+        var id = context.Request.Query["id"].ToString();
+        if (!CoordinatorApi.IsPipelineId(id))
+            throw new StudioRefusal(400, NotAPipelineId(id));
+        LibraryJob job;
+        try
+        {
+            job = await link.LibraryJobAsync(id, context.RequestAborted)
+                ?? throw new StudioRefusal(404, $"'{id}' is not in the library.");
+        }
+        catch (Exception ex) when (ex is CoordinatorLinkException or HttpRequestException)
+        {
+            throw new StudioRefusal(502, ex.Message);
+        }
+        await JsonAsync(context, new { id = job.Id, yaml = job.Yaml, commit = job.Commit });
+    }
+
     /// <summary>
-    /// Opens a library pipeline as a new file of the folder, <c>&lt;id&gt;.yaml</c>: created only, never over a
-    /// file there, and with the version read kept as the one published last, so a later publication
-    /// replaces exactly that version.
+    /// Opens a library pipeline in the folder (create-only by default, or overwriting the file matching
+    /// <c>overwriteHash</c>), keeping the commit and local file hash for sync and later publications.
     /// </summary>
     private async Task OpenFromLibraryAsync(HttpContext context)
     {
@@ -787,14 +884,17 @@ public sealed partial class StudioServer : IAsyncDisposable
         var asked = await BodyAsync<OpenLibraryRequest>(context);
         if (!CoordinatorApi.IsPipelineId(asked.Id))
             throw new StudioRefusal(400, $"'{asked.Id}' is not a pipeline id: lowercase letters, digits and '-'.");
+        var path = string.IsNullOrWhiteSpace(asked.Path)
+            ? asked.Id + ".yaml"
+            : JobPath(asked.Path)!;
         LibraryJob job;
         try { job = await link.LibraryJobAsync(asked.Id!, context.RequestAborted) ?? throw new StudioRefusal(404, $"'{asked.Id}' is not in the library."); }
         catch (Exception ex) when (ex is CoordinatorLinkException or HttpRequestException) { throw new StudioRefusal(502, ex.Message); }
-        var path = asked.Id + ".yaml";
         _local.CheckPublication(path);
-        var hash = _folder.WriteJob(path, job.Yaml, null);
-        _local.WritePublication(path, new StudioPublication(link.Origin.ToString(), job.Id, job.Commit));
-        await JsonAsync(context, new { path, hash });
+        var expectedHash = string.IsNullOrEmpty(asked.OverwriteHash) ? null : asked.OverwriteHash;
+        var hash = _folder.WriteJob(path, job.Yaml, expectedHash);
+        _local.WritePublication(path, new StudioPublication(link.Origin.ToString(), job.Id, job.Commit, hash));
+        await JsonAsync(context, new { path, hash, commit = job.Commit });
     }
 
     /// <summary>A location a binding can carry: its pairs are separated by commas.</summary>
@@ -995,7 +1095,9 @@ public sealed partial class StudioServer : IAsyncDisposable
 
     private sealed record SaveRequest(string? Path, string? Hash, DesignModel? Model, bool AcceptErrors);
 
-    private sealed record OpenLibraryRequest(string? Id);
+    private sealed record RenameJobRequest(string? From, string? To, string? Hash);
+
+    private sealed record OpenLibraryRequest(string? Id, string? Path = null, string? OverwriteHash = null);
 
     private sealed record BrickPreviewRequest(string? Key);
 

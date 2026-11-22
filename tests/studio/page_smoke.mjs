@@ -1039,6 +1039,165 @@ const scenarios = {
     check("it no longer says the person is not signed in", !/not signed in/.test(await p.ev(`document.querySelector("#coordinator").textContent`)));
   },
 
+  // Workspace file lifecycle: + New menu (blank, multi-line CLI with inline 422, YAML paste), Save as…, Rename…, Filter, Delete…, and a11y/contrast.
+  async "workspace-files"({ page: p, folder }) {
+    await p.until(`document.querySelectorAll("#jobs button.job").length >= 1`);
+    // 1. Blank job with collision check & auto-.yaml
+    await p.click("#new-job-trigger");
+    await p.click("#new-blank");
+    check("New blank job dialog opens", await p.until(`!!document.querySelector("#d-new-dialog[open]")`));
+    await p.ev(`(() => { const e = document.querySelector("#d-new-name"); e.value = "chain"; e.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+    check("Collision disables Create and explains why", await p.until(`document.querySelector("#d-new-submit").disabled && /already exists/.test(document.querySelector("#d-new-dialog").innerText)`));
+    await p.ev(`(() => { const e = document.querySelector("#d-new-name"); e.value = "fresh"; e.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+    check("Auto-adds .yaml extension and enables Create", await p.until(`!document.querySelector("#d-new-submit").disabled && /Path: fresh\\.yaml/.test(document.querySelector("#d-new-dialog").innerText)`));
+    await p.click("#d-new-submit");
+    check("Blank job opens as unsaved draft in Workspace", await p.until(`document.querySelector("#job-name")?.textContent === "fresh.yaml (new)"`));
+    await p.click("#d-save");
+    check("Saving writes fresh.yaml", await p.waitStatus(/^saved$/, 15000) && fs.existsSync(path.join(folder, "fresh.yaml")));
+
+    // 2. From CLI command: inline 422 error keeps typed command, then multi-line command succeeds
+    if (await p.ev(`document.querySelector("#side-jobs-view").hidden`)) await p.click("#side-jobs");
+    await p.click("#new-job-trigger");
+    await p.click("#new-from-cli");
+    check("From CLI dialog opens", await p.until(`!!document.querySelector("#d-cli-dialog[open]")`));
+    const badCli = "dtpipe --input generate:5 --output csv:cli.csv --bind-input main=/tmp/x";
+    await p.ev(`(() => { const t = document.querySelector("#d-cli-command"); t.value = ${JSON.stringify(badCli)}; t.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+    await p.click("#d-cli-submit");
+    check("Invalid CLI keeps dialog open and preserves command", await p.until(`/--bind-input|does not make a job/.test(document.querySelector("#d-cli-error")?.textContent ?? "")`)
+      && await p.ev(`!!document.querySelector("#d-cli-dialog[open]") && document.querySelector("#d-cli-command").value === ${JSON.stringify(badCli)}`));
+    const cliCmd = "dtpipe --input generate:5 \\\n  --output csv:cli.csv";
+    await p.ev(`(() => {
+      const t = document.querySelector("#d-cli-command"); t.value = ${JSON.stringify(cliCmd)}; t.dispatchEvent(new Event("input", { bubbles: true }));
+      const n = document.querySelector("#d-cli-name"); n.value = "from-cli"; n.dispatchEvent(new Event("input", { bubbles: true }));
+    })()`);
+    await p.click("#d-cli-submit");
+    check("Multi-line CLI imports steps as draft", await p.until(`document.querySelector("#job-name")?.textContent === "from-cli.yaml (new)" && document.querySelectorAll(".dcard").length >= 1 && /generate:5/.test(document.querySelector("#d-edit")?.value ?? "") && /csv:cli\\.csv/.test(document.querySelector("#d-edit")?.value ?? "")`));
+
+    // 3. Save as…
+    await p.click("#d-save-as");
+    check("Save as dialog opens", await p.until(`!!document.querySelector("#d-save-as-dialog[open]")`));
+    await p.ev(`(() => { const n = document.querySelector("#d-save-as-name"); n.value = "fresh"; n.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+    check("Save as refuses existing target", await p.until(`document.querySelector("#d-save-as-submit").disabled && /already exists/.test(document.querySelector("#d-save-as-dialog").innerText)`));
+    await p.ev(`(() => { const n = document.querySelector("#d-save-as-name"); n.value = "cli-saved"; n.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+    await p.click("#d-save-as-submit");
+    check("Save as creates cli-saved.yaml", await p.until(`document.querySelector("#job-name")?.textContent === "cli-saved.yaml"`) && fs.existsSync(path.join(folder, "cli-saved.yaml")));
+
+    // 4. Import YAML file into subfolder
+    await p.click("#new-job-trigger");
+    await p.click("#new-from-yaml");
+    check("Import YAML dialog opens", await p.until(`!!document.querySelector("#d-yaml-import-dialog[open]")`));
+    await p.ev(`(() => {
+      const t = document.querySelector("#d-yaml-import-text"); t.value = "main:\\n  input: generate:3\\n  output: csv:yml.csv\\n"; t.dispatchEvent(new Event("input", { bubbles: true }));
+      const f = document.querySelector("#d-yaml-import-folder"); f.value = "sub"; f.dispatchEvent(new Event("change", { bubbles: true }));
+      const n = document.querySelector("#d-yaml-import-name"); n.value = "imported-yml"; n.dispatchEvent(new Event("input", { bubbles: true }));
+    })()`);
+    await p.click("#d-yaml-import-submit");
+    check("Imported YAML opens under sub/", await p.until(`document.querySelector("#job-name")?.textContent === "sub/imported-yml.yaml (new)" && document.querySelectorAll(".dcard").length === 2`));
+    await p.click("#d-save");
+    check("Subfolder file saves and Workspace groups under sub/", await p.waitStatus(/^saved$/, 15000)
+      && fs.existsSync(path.join(folder, "sub/imported-yml.yaml"))
+      && await p.until(`[...document.querySelectorAll(".folder-group summary")].some((s) => s.textContent.includes("sub/"))`));
+
+    // 5. Rename cli-saved.yaml -> cli-renamed.yaml via context menu
+    await p.openJob("cli-saved.yaml");
+    if (await p.ev(`document.querySelector("#side-jobs-view").hidden`)) await p.click("#side-jobs");
+    await p.click(`summary[aria-label="Actions for cli-saved.yaml"]`);
+    await p.clickText(`.job-row details.menu[open] .menu-pop button`, "Rename…");
+    check("Rename dialog opens", await p.until(`!!document.querySelector("#d-rename-dialog[open]")`));
+    await p.ev(`(() => { const n = document.querySelector("#d-rename-name"); n.value = "cli-renamed"; n.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+    await p.click("#d-rename-submit");
+    check("Rename moves file on disk and updates header", await p.until(`document.querySelector("#job-name")?.textContent === "cli-renamed.yaml"`)
+      && !fs.existsSync(path.join(folder, "cli-saved.yaml")) && fs.existsSync(path.join(folder, "cli-renamed.yaml")));
+
+    // 6. Filter workspace files preserves input focus and narrows list
+    await p.type("#jobs-filter", "renamed", 20);
+    check("Filter narrows list while keeping input focus", await p.until(`document.querySelectorAll("#jobs button.job").length === 1 && document.querySelector("#jobs button.job").textContent === "cli-renamed.yaml"`)
+      && await p.ev(`document.activeElement?.id === "jobs-filter"`));
+    await p.ev(`(() => { const f = document.querySelector("#jobs-filter"); f.value = ""; f.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+    await p.until(`document.querySelectorAll("#jobs button.job").length >= 3`);
+
+    // Check accessible names and WCAG contrast on Workspace panel
+    check("Workspace controls all have accessible names", (await p.unnamed()).length === 0, (await p.unnamed()).join(" | "));
+    for (const theme of ["light", "dark"]) {
+      await p.theme(theme);
+      const low = await p.contrast();
+      check(`Workspace reads at 4.5:1 in ${theme} theme`, low.length === 0, low.join(" | "));
+    }
+    await p.theme("light");
+
+    // 7. Delete cli-renamed.yaml
+    await p.click(`summary[aria-label="Actions for cli-renamed.yaml"]`);
+    await p.clickText(`.job-row details.menu[open] .menu-pop button`, "Delete…");
+    check("Delete dialog opens", await p.until(`!!document.querySelector("#d-delete-dialog[open]")`));
+    await p.click("#d-delete-submit");
+    check("Delete removes file and closes open designer", await p.until(`document.querySelector("#job-name")?.textContent === ""`)
+      && !fs.existsSync(path.join(folder, "cli-renamed.yaml")));
+  },
+
+  // Library panel & coordinator sync: signed-out gate, read-only Preview, Pull…, sync states, Publish modal + 412 conflict resolution.
+  async "library-sync"({ page: p, folder }) {
+    const coord = fakeCoordinators.get(folder);
+    check("Library icon is visible in the activity bar", await p.until(`!document.querySelector("#side-library").hidden`));
+    await p.click("#side-library");
+    check("Library lists coordinator pipelines after startup key sign-in", await p.until(`document.querySelectorAll("#library .lib-entry").length === 2`, 20000));
+
+    // Sign out -> signed-out gate -> sign back in via gate button
+    await p.clickText("#coordinator button", "Sign out");
+    check("Signed-out Library shows Sign in gate", await p.until(`!document.querySelector("#library-gate").hidden && /Sign in with the key/.test(document.querySelector("#library-gate").innerText)`));
+    await p.click("#library-gate button");
+    check("Signing in from gate restores Library pipelines", await p.until(`document.querySelectorAll("#library .lib-entry").length === 2`, 20000));
+
+    // Read-only Preview writes nothing to disk
+    await p.clickText("#library .lib-entry button", "Preview");
+    check("Preview dialog displays remote YAML without writing file", await p.until(`!!document.querySelector("#d-library-inspect-dialog[open]") && /brick:n1\\/orders/.test(document.querySelector("#d-library-inspect-dialog").innerText)`)
+      && !fs.existsSync(path.join(folder, "orders-pipeline.yaml")));
+    await p.clickText("#d-library-inspect-dialog button", "Close");
+
+    // Pull pipeline to workspace
+    await p.clickText("#library .lib-entry button", "Pull…");
+    check("Pull dialog opens with default path", await p.until(`!!document.querySelector("#d-pull-dialog[open]") && document.querySelector("#d-pull-name").value === "orders-pipeline.yaml"`));
+    await p.click("#d-pull-submit");
+    check("Pull writes orders-pipeline.yaml, opens it, and shows in sync", await p.until(`document.querySelector("#job-name")?.textContent === "orders-pipeline.yaml" && /in sync/.test(document.querySelector("#job-sync")?.innerText ?? "")`)
+      && fs.existsSync(path.join(folder, "orders-pipeline.yaml")));
+
+    // Local edit -> modified
+    await p.type("#d-title", " edited", 15);
+    await p.click("#d-save");
+    check("Local save marks job as modified", await p.until(`/modified/.test(document.querySelector("#job-sync")?.innerText ?? "")`, 15000));
+
+    // Remote advances -> diverged + update badge on Library icon
+    coord.library.set("orders-pipeline", {
+      id: "orders-pipeline",
+      title: "Orders export",
+      description: "Moves orders from shop to archive",
+      yaml: "# Orders export v2\norders:\n  input: brick:n1/orders\narchive:\n  from: orders\n  output: brick:n1/archive\n",
+      commit: "bbbb2222bbbb2222",
+    });
+    await p.click("#library-refresh");
+    check("Remote update marks diverged and flags Library icon", await p.until(`/diverged/.test(document.querySelector("#job-sync")?.innerText ?? "") && document.querySelector("#side-library").classList.contains("has-updates")`));
+
+    // Publish -> 412 conflict dialog -> diff + Pull remote first
+    await p.click("#d-publish");
+    check("Publish dialog opens and passes dry-run check", await p.until(`!!document.querySelector("#d-publish-dialog[open]") && !document.querySelector("#d-publish-submit")?.disabled`, 30000));
+    await p.click("#d-publish-submit");
+    check("412 conflict renders diff and Pull remote first", await p.until(`!!document.querySelector(".dialog-conflict .diff-box") && !document.querySelector("#d-publish-overwrite").disabled`, 15000));
+
+    // Check accessible names and contrast on conflict diff dialog in both themes
+    check("Publish conflict dialog controls have names", (await p.unnamed()).length === 0, (await p.unnamed()).join(" | "));
+    for (const theme of ["light", "dark"]) {
+      await p.theme(theme);
+      const low = await p.contrast();
+      check(`Publish conflict dialog reads at 4.5:1 in ${theme} theme`, low.length === 0, low.join(" | "));
+    }
+    await p.theme("light");
+
+    await p.clickText("#d-publish-dialog button", "Pull remote first");
+    check("Pull update dialog opens with diff", await p.until(`!!document.querySelector("#d-pull-dialog[open]") && !!document.querySelector("#d-pull-dialog .diff-box")`, 15000));
+    await p.click("#d-pull-submit");
+    check("Pulling remote resolves divergence back to in sync", await p.until(`/in sync/.test(document.querySelector("#job-sync")?.innerText ?? "") && !document.querySelector("#side-library").classList.contains("has-updates")`, 15000));
+    check("Workspace contains remote v2 content", fs.readFileSync(path.join(folder, "orders-pipeline.yaml"), "utf8").includes("Orders export v2"));
+  },
+
   // The agent's provider does not answer, or lacks the configured model: said at the opening, in the header and the panel's warning.
   async "link-agent-down"({ page: p }) {
     check("the header says the model's server does not answer", await p.until(`/model's server not answering/.test(document.querySelector("#agent-link")?.textContent ?? "")`, 20000), await p.ev(`document.querySelector("#agent-link")?.textContent ?? "none"`));
@@ -1052,7 +1211,102 @@ const scenarios = {
 
 // ---------------------------------------------------------------- the runner
 
+const fakeCoordinators = new Map();
+
+function startFakeCoordinator(sampleArrow) {
+  let seq = 2;
+  const library = new Map([
+    ["orders-pipeline", {
+      id: "orders-pipeline",
+      title: "Orders export",
+      description: "Moves orders from shop to archive",
+      yaml: "# Orders export\norders:\n  input: brick:n1/orders\narchive:\n  from: orders\n  output: brick:n1/archive\n",
+      commit: "aaaa1111aaaa1111",
+    }],
+    ["unlinked-pipeline", {
+      id: "unlinked-pipeline",
+      title: "Unlinked report",
+      description: "Another pipeline in the library",
+      yaml: "# Unlinked\norders:\n  input: brick:n1/orders\narchive:\n  from: orders\n  output: brick:n1/archive\n",
+      commit: "cccc3333cccc3333",
+    }],
+  ]);
+  const server = http.createServer((req, res) => {
+    const host = req.headers.host;
+    const baseUrl = `http://${host}`;
+    const urlPath = req.url.split("?")[0];
+    let body = "";
+    req.on("data", (d) => { body += d; });
+    req.on("end", () => {
+      const json = (code, data) => { res.writeHead(code, { "Content-Type": "application/json" }); res.end(JSON.stringify(data)); };
+      if (urlPath === "/.well-known/oauth-protected-resource") {
+        json(200, { resource: baseUrl, authorization_servers: [baseUrl], bearer_methods_supported: ["header"], dtpipe_contract: 12, dtpipe_studio_client_id: "studio", dtpipe_auth: ["key"] });
+      } else if (urlPath === "/.well-known/openid-configuration") {
+        json(200, { issuer: baseUrl, token_endpoint: `${baseUrl}/connect/token` });
+      } else if (urlPath === "/connect/token") {
+        json(200, { access_token: "fake-smoke-token", expires_in: 600, token_type: "Bearer" });
+      } else if (urlPath === "/api/me") {
+        json(200, { name: "alice", email: "alice@test.local", roles: ["designer", "reader"] });
+      } else if (urlPath === "/api/catalog") {
+        json(200, {
+          nodes: [{ name: "n1", online: true, role: "data", dtpipeVersion: "1.0.0" }],
+          bricks: [
+            { key: "n1/orders", node: "n1", id: "orders", kind: "source", title: "Orders", description: "", version: "aaaaaaaaaaaa", online: true },
+            { key: "n1/archive", node: "n1", id: "archive", kind: "sink", title: "Archive", description: "", version: "bbbbbbbbbbbb", online: true },
+          ],
+        });
+      } else if (urlPath === "/api/bricks/recognize") {
+        json(200, { branches: { orders: { match: "n1/orders" }, archive: { match: "n1/archive" } } });
+      } else if (urlPath === "/api/edges/protections") {
+        json(200, { deployable: true, refusal: null, edgeProtections: [] });
+      } else if (urlPath === "/api/bricks/n1/orders/sample") {
+        res.writeHead(200, { "Content-Type": "application/vnd.apache.arrow.stream" });
+        res.end(sampleArrow);
+      } else if (urlPath === "/api/library") {
+        json(200, [...library.values()].map((p) => ({ id: p.id, title: p.title, description: p.description, commit: p.commit })));
+      } else if (urlPath.startsWith("/api/library/")) {
+        const id = decodeURIComponent(urlPath.slice("/api/library/".length));
+        if (req.method === "GET") {
+          const item = library.get(id);
+          if (!item) json(404, { error: "Not found" });
+          else json(200, { id: item.id, yaml: item.yaml, commit: item.commit });
+        } else if (req.method === "PUT") {
+          const existing = library.get(id);
+          const ifNone = req.headers["if-none-match"] === "*";
+          const ifMatch = (req.headers["if-match"] || "").replace(/^"|"$/g, "");
+          if ((ifNone && existing) || (ifMatch && (!existing || existing.commit !== ifMatch))) {
+            json(412, { error: `The library holds ${id} at ${existing?.commit?.slice(0, 8) || "nothing"}.`, commit: existing?.commit ?? null });
+            return;
+          }
+          const save = JSON.parse(body);
+          const commit = `commit-${++seq}`.padEnd(16, "0");
+          library.set(id, { id, title: id, description: null, yaml: save.yaml, commit });
+          json(200, { id, commit, deployed: false });
+        } else json(405, { error: "Method not allowed" });
+      } else {
+        json(404, { error: "Not found" });
+      }
+    });
+  });
+  return new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve({ library, url: `http://127.0.0.1:${server.address().port}`, stop: () => server.close() })));
+}
+
 async function seed(name, folder) {
+  if (name === "workspace-files") {
+    fs.mkdirSync(path.join(folder, "sub"), { recursive: true });
+  }
+  if (name === "library-sync") {
+    const keyPath = path.join(folder, "studio.key");
+    fs.writeFileSync(keyPath, "dtp_alice_0123456789abcdefghijklmnopqrstuvwxyzABCDEFG\n");
+    const arrowPath = path.join(folder, "sample.arrows");
+    const [cmd, args] = BIN ? [BIN, ["-i", "generate:1", "-o", `arrow:${arrowPath}`]] : ["dotnet", [DLL, "-i", "generate:1", "-o", `arrow:${arrowPath}`]];
+    const res = spawnSync(cmd, args, { cwd: folder });
+    if (res.status !== 0) throw new Error(`Failed to generate arrow sample: ${res.stderr}`);
+    const arrowBytes = fs.readFileSync(arrowPath);
+    fs.unlinkSync(arrowPath);
+    fs.unlinkSync(path.join(folder, "chain.yaml"));
+    fakeCoordinators.set(folder, await startFakeCoordinator(arrowBytes));
+  }
   if (name === "cancel-preview") {
     const { DatabaseSync } = await import("node:sqlite");
     const db = new DatabaseSync(path.join(folder, "slow.db"));
@@ -1070,6 +1324,7 @@ async function seed(name, folder) {
 const closedUrl = async () => `http://127.0.0.1:${await freePort()}`;
 const argsOf = {
   "link-coordinator": async () => ["--coordinator", await closedUrl()],
+  "library-sync": (folder) => ["--coordinator", fakeCoordinators.get(folder).url, "--key", `@${path.join(folder, "studio.key")}`],
   "link-agent-down": async () => ["--llm-provider", "ollama", "--llm-url", await closedUrl()],
   "link-agent-model": () => ["--llm-provider", "ollama", "--llm-url", fakeLlm.url, "--llm-model", "absent:9"],
   agent: () => ["--llm-provider", "ollama", "--llm-url", fakeLlm.url],
@@ -1106,13 +1361,15 @@ for (const name of names) {
   const logsBefore = page.logs.length;
   try {
     await seed(name, folder);
-    studio = await startStudio(folder, (await argsOf[name]?.()) ?? []);
+    studio = await startStudio(folder, (await argsOf[name]?.(folder)) ?? []);
     await page.send("Page.navigate", { url: studio.url });
     await scenarios[name]({ page, folder, studio });
   } catch (e) {
     check(`${name} runs to its end`, false, e.stack || String(e));
   } finally {
     studio?.stop();
+    fakeCoordinators.get(folder)?.stop();
+    fakeCoordinators.delete(folder);
     try { fs.rmSync(folder, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch { /* still held: the system cleans the temp folder */ }
   }
   const logs = page.logs.slice(logsBefore);

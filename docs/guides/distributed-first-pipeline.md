@@ -188,8 +188,8 @@ mkdir jobs
 dtpipe studio ./jobs --coordinator "$COORDINATOR_URL" --key '${{DTPIPE_KEY}}'
 ```
 
-The studio offers the nodes' bricks. In the **Library** list under the jobs, click
-`shop-orders-by-country`: it is written into `./jobs` to edit, and **Publish** saves it back.
+The studio offers the nodes' bricks. Open the **Library** panel on the left, pull
+`shop-orders-by-country` into `./jobs` to edit, and use **Publish** to save it back.
 
 ## 6. Arm it, run it
 

@@ -309,4 +309,70 @@ public sealed class StudioPublishTests : IAsyncLifetime
         var (gone, _) = await CallAsync(HttpMethod.Get, "/api/bindings?path=orders.yaml");
         Assert.Equal(HttpStatusCode.NotFound, gone);
     }
+
+    [Fact]
+    public async Task A_library_pipeline_can_be_previewed_without_writing_to_disk()
+    {
+        _fakes.Library["customers"] = ("# Customers\nmain:\n  input: duck:${{DB}}\n  output: csv:c.csv\n", "commit-1");
+        Assert.Equal(HttpStatusCode.Conflict, (await CallAsync(HttpMethod.Get, "/api/library/job?id=customers")).Status);
+        await SignInAsync();
+
+        var (status, doc) = await CallAsync(HttpMethod.Get, "/api/library/job?id=customers");
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.Equal("customers", doc.GetProperty("id").GetString());
+        Assert.Equal("commit-1", doc.GetProperty("commit").GetString());
+        Assert.Contains("csv:c.csv", doc.GetProperty("yaml").GetString());
+        Assert.False(File.Exists(Path.Combine(_dir, "customers.yaml")));
+
+        Assert.Equal(HttpStatusCode.NotFound, (await CallAsync(HttpMethod.Get, "/api/library/job?id=missing")).Status);
+        Assert.Equal(HttpStatusCode.BadRequest, (await CallAsync(HttpMethod.Get, "/api/library/job?id=../bad")).Status);
+    }
+
+    [Fact]
+    public async Task Pulling_and_renaming_track_sync_state_and_support_explicit_overwrite()
+    {
+        Directory.CreateDirectory(Path.Combine(_dir, "sub"));
+        _fakes.Library["customers"] = ("# Customers\nmain:\n  input: duck:${{DB}}\n  output: csv:c.csv\n", "commit-1");
+        await SignInAsync();
+
+        var (pulled, pullBody) = await CallAsync(HttpMethod.Post, "/api/library/open", new { id = "customers", path = "sub/custom.yaml" });
+        Assert.Equal(HttpStatusCode.OK, pulled);
+        Assert.Equal("sub/custom.yaml", pullBody.GetProperty("path").GetString());
+        Assert.Equal("commit-1", pullBody.GetProperty("commit").GetString());
+
+        var (_, jobs1) = await CallAsync(HttpMethod.Get, "/api/jobs");
+        var pub1 = jobs1.GetProperty("publications").GetProperty("sub/custom.yaml");
+        Assert.Equal("customers", pub1.GetProperty("id").GetString());
+        Assert.Equal("commit-1", pub1.GetProperty("commit").GetString());
+        Assert.False(pub1.GetProperty("localModified").GetBoolean());
+
+        // Local modification sets localModified=true, and stale overwriteHash is refused.
+        File.AppendAllText(Path.Combine(_dir, "sub", "custom.yaml"), "# local edit\n");
+        var (_, jobs2) = await CallAsync(HttpMethod.Get, "/api/jobs");
+        Assert.True(jobs2.GetProperty("publications").GetProperty("sub/custom.yaml").GetProperty("localModified").GetBoolean());
+        Assert.Equal(HttpStatusCode.Conflict, (await CallAsync(HttpMethod.Post, "/api/library/open",
+            new { id = "customers", path = "sub/custom.yaml", overwriteHash = "stale" })).Status);
+
+        // Explicit overwrite with current disk hash updates the local file, commit, and localModified=false.
+        _fakes.Library["customers"] = ("# Customers v2\nmain:\n  input: duck:${{DB}}\n  output: csv:c2.csv\n", "commit-2");
+        var currentHash = (await CallAsync(HttpMethod.Get, "/api/job?path=sub/custom.yaml")).Body.GetProperty("hash").GetString()!;
+        var (updated, updatedBody) = await CallAsync(HttpMethod.Post, "/api/library/open",
+            new { id = "customers", path = "sub/custom.yaml", overwriteHash = currentHash });
+        Assert.Equal(HttpStatusCode.OK, updated);
+        Assert.Equal("commit-2", updatedBody.GetProperty("commit").GetString());
+        Assert.Contains("csv:c2.csv", File.ReadAllText(Path.Combine(_dir, "sub", "custom.yaml")));
+
+        var (_, jobs3) = await CallAsync(HttpMethod.Get, "/api/jobs");
+        var pub3 = jobs3.GetProperty("publications").GetProperty("sub/custom.yaml");
+        Assert.Equal("commit-2", pub3.GetProperty("commit").GetString());
+        Assert.False(pub3.GetProperty("localModified").GetBoolean());
+
+        // Renaming preserves the publication link.
+        var afterHash = updatedBody.GetProperty("hash").GetString()!;
+        var (renamed, _) = await CallAsync(HttpMethod.Post, "/api/job/rename", new { from = "sub/custom.yaml", to = "renamed.yaml", hash = afterHash });
+        Assert.Equal(HttpStatusCode.OK, renamed);
+        var (_, jobs4) = await CallAsync(HttpMethod.Get, "/api/jobs");
+        Assert.False(jobs4.GetProperty("publications").TryGetProperty("sub/custom.yaml", out _));
+        Assert.Equal("customers", jobs4.GetProperty("publications").GetProperty("renamed.yaml").GetProperty("id").GetString());
+    }
 }

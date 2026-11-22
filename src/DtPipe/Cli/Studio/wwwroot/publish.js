@@ -1,10 +1,10 @@
 // @ts-check
-// Publishing the saved job to the coordinator's library: the id and message, and the outcome (published, refused by the
-// coordinator's check, or in conflict with the library), what a publication would refuse: the runner's dry run, which the
-// server replays on demand, and what the coordinator's nodes would do with the job's edges, which it words and this page only shows.
+// Publishing the saved job to the coordinator's library: pre-checks (runner dry run and edge protections),
+// unified publish modal, 412 conflict diff & resolution, and the Publish tab view.
 
-import { api, el, status } from "./dom.js";
+import { api, el, fill, status } from "./dom.js";
 import { brickBranches, holdsEdits, showTab } from "./designer.js";
+import { openDialog, renderDiff, shortCommit } from "./dialogs.js";
 import { invalidate } from "./render.js";
 import { sequence, state } from "./state.js";
 
@@ -12,9 +12,28 @@ const publication = state.publication;
 const checking = sequence();
 const judging = sequence();
 
-const short = (commit) => String(commit || "").slice(0, 8) || "nothing";
+const short = shortCommit;
 const defaultId = (path) => path.replace(/^.*\//, "").replace(/\.ya?ml$/i, "").toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "") || "pipeline";
 const signedIn = () => state.coordinator?.state === "signed-in";
+
+/**
+ * Compares a local job's saved coordinator link (`pub`) against the coordinator's library list.
+ * @param {{ id: string, commit: string | null, localModified: boolean | null } | null | undefined} pub
+ * @param {any[] | null | undefined} pipelines
+ * @returns {"synced" | "modified" | "outdated" | "diverged" | "removed" | "unknown" | null}
+ */
+export function computeSyncState(pub, pipelines) {
+  if (!pub) return null;
+  if (!pipelines) return "unknown";
+  const remote = pipelines.find((p) => p.id === pub.id);
+  if (!remote) return "removed";
+  const remoteMoved = remote.commit !== pub.commit;
+  const localMoved = pub.localModified === true;
+  if (remoteMoved && localMoved) return "diverged";
+  if (remoteMoved) return "outdated";
+  if (localMoved) return "modified";
+  return "synced";
+}
 
 /** What a publication showed belongs to the job it was for: another job starts clean. */
 export function forgetPublication() {
@@ -27,8 +46,7 @@ export function forgetPublication() {
 
 /**
  * Asks the server for the runner's dry run of the job: the one saved in the folder when `saved` (what a publication sends),
- * else the cards' composition. It starts a process, so only a person's gesture asks for it, never an edit. The verdict, or
- * null when there is none to have (no job, signed out) or the answer came for another job or a later check.
+ * else the steps' composition. It starts a process, so only a person's gesture asks for it, never an edit.
  * @param {boolean} saved
  * @returns {Promise<import("./state.js").PublicationCheck | null>}
  */
@@ -53,14 +71,11 @@ export async function checkPublication(saved) {
   return check;
 }
 
-// The verdict for the cards as they are now; one for an earlier composition says nothing of them.
 const currentCheck = () => (publication.check && publication.check.yaml === state.cards.result?.yaml ? publication.check : null);
 
 /**
  * Asks the server what the coordinator's nodes would do with the edges of the job, now: the one saved in the folder when `saved`,
- * else the cards' composition. A read the coordinator words, never a judgment of this page, so it is asked with the publication
- * check and before Publish, not at each edit. The verdict, or null when there is none to have (no job, signed out) or the answer
- * came for another job or a later question. An answer that is not given is an error in the verdict, never a verdict of no broken edge.
+ * else the steps' composition.
  * @param {boolean} saved
  * @returns {Promise<import("./state.js").EdgeVerdict | null>}
  */
@@ -85,29 +100,17 @@ export async function judgeEdges(saved) {
   return verdict;
 }
 
-// The verdict for the cards as they are now; one for an earlier composition says nothing of them.
 const currentEdges = () => (publication.edges && publication.edges.yaml === state.cards.result?.yaml ? publication.edges : null);
-
-/** The edges the coordinator refuses to join, as it judged them: those it gave a refusal, whatever that says. @param {import("./state.js").EdgeVerdict | null} verdict */
 const brokenEdges = (verdict) => (verdict?.edges ?? []).filter((edge) => edge.refusal);
-
-/** An edge as the coordinator named it. @param {import("./state.js").EdgeJudgment} edge */
 const edgeName = (edge) => `${edge.producerFragment} → ${edge.consumerFragment}`;
 
-/** What the status says of the edges that stay broken, or an empty text. */
 const brokenNote = () => {
   const broken = brokenEdges(currentEdges());
   return broken.length ? `${broken.length === 1 ? "an edge of this job is" : `${broken.length} edges of this job are`} broken now: ${broken.map(edgeName).join(", ")}` : "";
 };
 
-/**
- * The gestures that ask for what a publication would do: the runner's dry run and the coordinator's judgment of the edges, which
- * stay two verdicts, each with its own answer.
- * @param {boolean} saved
- */
 const askPublication = (saved) => Promise.all([checkPublication(saved), judgeEdges(saved)]);
 
-/** The runner's refusal as it said it, and what the person can read of it. @param {import("./state.js").PublicationCheck} check */
 const refusalView = (check) => [
   el("p", { class: "warn" }, "The runner's dry run refuses this job, as a publication would:"),
   el("pre", {}, check.report || ""),
@@ -115,18 +118,10 @@ const refusalView = (check) => [
     : el("p", { class: "hint" }, "None of these steps is a coordinator's brick, and a published job reads and writes bricks."),
 ];
 
-/**
- * What Problems says besides the composition's verdict, each apart: what a publication would refuse, as the coordinator's runner
- * says it, and what the coordinator's nodes would do with the job's edges.
- */
 export function publicationProblems() {
   return [refusalProblems(), edgeProblems()];
 }
 
-/**
- * The second verdict of Problems, never mixed with the composition's: what a publication would refuse, as the coordinator's
- * runner says it. Signed out, or with no coordinator, there is none, and the page says so rather than guess.
- */
 function refusalProblems() {
   const title = el("h3", {}, "Would be refused at publication");
   if (!state.coordinator) {
@@ -151,12 +146,6 @@ function refusalProblems() {
   return [title, ask, refusalView(current)];
 }
 
-/**
- * The third verdict of Problems, apart from the others: what the coordinator's nodes would do with the edges of this job, now, as
- * the coordinator words it. Three states: no edge is broken, some are (each named, with its refusal as the coordinator wrote
- * it), or it has no verdict (the plan cannot be judged now). The page compares no level and reads no refusal's text: an edge is
- * broken when the coordinator gave it a refusal. A verdict never stops a publication: the nodes' state is live.
- */
 function edgeProblems() {
   const title = el("h3", {}, "What the coordinator's nodes would do with the edges");
   if (!state.coordinator) return [title, el("p", { class: "hint" }, "No verdict: this studio was opened without --coordinator, whose nodes judge the edges.")];
@@ -182,98 +171,285 @@ function edgeProblems() {
 }
 
 /**
- * The coordinator receives the job saved in the folder, never the cards: its layout and its launch values stay on this
- * machine. `replace` names the commit the person chose to replace after a conflict. A brick is a reference that names its
- * node, so a publication carries no binding.
- * @param {string} [replace]
+ * Opens the unified Publish modal for the currently saved job, running pre-checks and handling conflicts inline.
+ * @param {{ onPublished?: () => Promise<void> | void, onPullRemote?: (id: string) => void }} [options]
  */
-export async function publish(replace) {
+export async function publish(options = {}) {
+  const { onPublished, onPullRemote } = options;
   const job = state.job;
   if (!job) return;
   if (holdsEdits() || !job.hash) {
     status("Save the job first: the coordinator receives the job saved in the folder.", "bad");
     return;
   }
-  // What the studio can already tell is said before a question: the coordinator's own check of the job runs at publication.
   if (state.cards.result?.errors?.length) {
     showTab("problems");
     status("The steps do not compose into a job: see Problems before publishing.", "bad");
     return;
   }
-  if (replace === undefined) {
-    // What the runner would refuse is said before a question; a check that could not run leaves the publication's own.
-    if (signedIn()) {
-      status("checking what a publication would refuse…");
-      const [check] = await askPublication(true);
-      if (state.job !== job) return;
-      if (check?.ok === false) {
-        showTab("problems");
-        status("A publication would refuse this job: see Problems.", "bad");
-        return;
-      }
-      // A broken edge is said, never a reason to stop: the coordinator refuses to arm it, and the nodes' state is live.
-      const broken = brokenNote();
-      if (broken) showTab("problems");
-      const said = [check?.error ? `The publication's check did not run (${check.error}): the coordinator checks the job again.` : "",
-        broken ? `${broken}: the coordinator would refuse to arm it. Publishing goes on.` : ""].filter(Boolean).join(" ");
-      status(said, broken ? "warn" : "");
-    }
-    let last = null;
-    try { last = (await api(`/api/publish?path=${encodeURIComponent(job.path)}`)).publication; } catch { /* none */ }
-    const id = prompt("The pipeline's id in the coordinator's library (lowercase letters, digits and '-'):", last?.id || defaultId(job.path));
-    if (!id) return;
-    let idError = null;
-    try { idError = (await api(`/api/publish?path=${encodeURIComponent(job.path)}&id=${encodeURIComponent(id)}`)).idError; } catch { /* publication says */ }
-    if (idError) { status(idError, "bad"); return; }
-    const message = prompt("Describe this version (the commit message):", `Publish ${job.path} from dtpipe studio`);
-    if (message === null) return;
-    publication.request = { id, message, previous: last?.id === id ? last.commit ?? null : null };
-  }
-  return send(replace);
-}
-
-/** @param {string} [replace] */
-async function send(replace) {
-  const job = state.job;
-  const request = publication.request;
-  try {
-    const saved = await api("/api/publish", { path: job.path, hash: job.hash, id: request.id, message: request.message, replace });
-    const unchanged = !!request.previous && saved.commit === request.previous;
-    publication.outcome = { id: request.id, saved, unchanged };
-    const broken = brokenNote();
-    status(`${unchanged ? `already published at ${short(saved.commit)}, nothing changed` : `published at ${short(saved.commit)}`}${broken ? `; ${broken}` : ""}`,
-      broken ? "warn" : "good");
-  } catch (e) {
-    if (e.status === 422) {
-      publication.outcome = { id: request.id, refused: { error: e.data?.error || e.message, report: e.data?.report ?? null } };
-      status("not published: the coordinator's check refused the job", "bad");
-      showTab("publish");
-      return;
-    }
-    if (e.status !== 412) { status(e.message, "bad"); return; }
-    const commit = e.data?.commit ?? null;
-    publication.outcome = { id: request.id, conflict: { error: e.data?.error || e.message, commit } };
-    showTab("publish");
-    // The coordinator says why: the id was taken meanwhile, or the version this studio published last is no longer in place.
-    const question = commit
-      ? `${e.data?.error || `The library holds ${request.id} at ${short(commit)}.`} Replace it with this job?`
-      : `${request.id} is no longer in the library. Publish this job as a new pipeline?`;
-    if (confirm(question)) return publish(commit ?? "");
-    status("not published", "warn");
+  if (!signedIn()) {
+    status("Sign in to the coordinator before publishing.", "bad");
     return;
   }
-  showTab("publish");
+
+  let closed = false;
+  let last = null;
+  let editingId = false;
+  let idTouched = false;
+  let idValue = defaultId(job.path);
+  let messageValue = `Publish ${job.path} from dtpipe studio`;
+  let checkingNow = true;
+  let submitting = false;
+  /** @type {{ error: string, report: string | null } | null} */
+  let refusal = null;
+  /** @type {{ error: string, commit: string | null, id: string, message: string, loading: boolean, remoteYaml: string | null, localYaml: string | null, diffError: string | null } | null} */
+  let conflict = null;
+
+  openDialog("d-publish-dialog", "Publish to coordinator", ({ body, close }) => {
+    const checksBox = el("div", { class: "dialog-checks" });
+    const formArea = el("div");
+
+    function renderChecks() {
+      if (checkingNow) {
+        fill(checksBox, el("p", { class: "hint" }, "Running pre-publication checks (runner dry run and edge protections)…"));
+        return;
+      }
+      const check = currentCheck();
+      const edges = currentEdges();
+      const broken = brokenEdges(edges);
+      fill(checksBox,
+        check?.ok === false ? [el("div", { class: "dialog-check-box warn" }, refusalView(check))]
+          : check?.ok === true ? el("p", { class: "good" }, "Runner dry run passed.")
+          : check?.error ? el("p", { class: "warn" }, `Pre-check did not run (${check.error}): the coordinator checks the job again.`) : null,
+        broken.length ? el("div", { class: "dialog-check-box warn" },
+          el("p", { class: "warn" }, "Broken edges (publishing continues, but arming would refuse):"),
+          el("ul", { class: "msgs warn" }, broken.map((edge) => el("li", {}, `${edgeName(edge)}: ${edge.refusal}`)))) : null);
+    }
+
+    async function sendPublish(replace) {
+      const id = idValue.trim();
+      const message = messageValue;
+      const previous = last?.id === id ? (last.commit ?? null) : null;
+      publication.request = { id, message, previous };
+      submitting = true;
+      refusal = null;
+      renderBody();
+      try {
+        const saved = await api("/api/publish", { path: job.path, hash: job.hash, id, message, replace });
+        if (closed) return;
+        const unchanged = !!previous && saved.commit === previous;
+        publication.outcome = { id, saved, unchanged };
+        const broken = brokenNote();
+        close();
+        status(`${unchanged ? `already published at ${short(saved.commit)}, nothing changed` : `published at ${short(saved.commit)}`}${broken ? `; ${broken}` : ""}`,
+          broken ? "warn" : "good");
+        showTab("publish");
+        await onPublished?.();
+      } catch (e) {
+        if (closed) return;
+        submitting = false;
+        if (e.status === 422) {
+          publication.outcome = { id, refused: { error: e.data?.error || e.message, report: e.data?.report ?? null } };
+          refusal = { error: e.data?.error || e.message, report: e.data?.report ?? null };
+          conflict = null;
+          showTab("publish");
+          renderBody();
+          return;
+        }
+        if (e.status === 412) {
+          const commit = e.data?.commit ?? null;
+          publication.outcome = { id, conflict: { error: e.data?.error || e.message, commit } };
+          showTab("publish");
+          conflict = { error: e.data?.error || e.message, commit, id, message, loading: !!commit, remoteYaml: null, localYaml: null, diffError: null };
+          renderBody();
+          if (commit) {
+            Promise.all([
+              api(`/api/library/job?id=${encodeURIComponent(id)}`),
+              api(`/api/job?path=${encodeURIComponent(job.path)}`),
+            ]).then(([remoteDoc, localDoc]) => {
+              if (closed || !conflict) return;
+              conflict.loading = false;
+              conflict.remoteYaml = remoteDoc.yaml;
+              conflict.localYaml = localDoc.yaml;
+              renderBody();
+            }).catch((diffErr) => {
+              if (closed || !conflict) return;
+              conflict.loading = false;
+              conflict.diffError = diffErr.message;
+              renderBody();
+            });
+          }
+          return;
+        }
+        refusal = { error: e.message, report: null };
+        renderBody();
+      }
+    }
+
+    function renderBody() {
+      const focused = document.activeElement instanceof HTMLInputElement && formArea.contains(document.activeElement)
+        ? { id: document.activeElement.id, start: document.activeElement.selectionStart, end: document.activeElement.selectionEnd }
+        : null;
+      renderChecks();
+
+      if (conflict) {
+        const c = conflict;
+        const overwriteLabel = c.commit ? `Overwrite (${short(c.commit)})` : "Publish as new pipeline";
+        const overwriteBtn = el("button", {
+          id: "d-publish-overwrite",
+          type: "button",
+          class: "danger",
+          disabled: submitting,
+          onclick: () => sendPublish(c.commit ?? ""),
+        }, submitting ? "Publishing…" : overwriteLabel);
+
+        fill(formArea,
+          el("div", { class: "dialog-conflict" },
+            el("p", { class: "warn" }, c.error || `The library holds ${c.id} at ${short(c.commit)}.`),
+            c.commit ? el("p", { class: "hint" }, "Library commit in place: ", el("code", {}, short(c.commit))) : null,
+            c.loading ? el("p", { class: "hint" }, "Loading diff between library and workspace…") : null,
+            c.diffError ? el("p", { class: "hint warn" }, `Could not load diff: ${c.diffError}`) : null,
+            c.remoteYaml !== null && c.localYaml !== null
+              ? renderDiff(c.remoteYaml, c.localYaml, `library (${short(c.commit)})`, job.path) : null,
+            refusal ? [el("p", { class: "bad" }, refusal.error), refusal.report ? el("pre", { class: "dialog-pre" }, refusal.report) : null] : null,
+            el("div", { class: "row dialog-actions" },
+              el("button", { type: "button", class: "ghost", onclick: close }, "Cancel"),
+              c.commit && onPullRemote ? el("button", {
+                type: "button",
+                class: "ghost",
+                disabled: submitting,
+                onclick: () => { close(); onPullRemote(c.id); },
+              }, "Pull remote first") : null,
+              overwriteBtn)));
+        return;
+      }
+
+      const checkBlocked = !checkingNow && currentCheck()?.ok === false;
+      const validId = /^[a-z0-9][a-z0-9-]{0,62}$/.test(idValue.trim());
+      const existingRemote = !last?.id || last.id !== idValue.trim()
+        ? state.jobs.library.pipelines?.find((p) => p.id === idValue.trim()) : null;
+
+      const submitBtn = /** @type {HTMLButtonElement} */ (el("button", {
+        id: "d-publish-submit",
+        type: "submit",
+        class: "primary",
+        disabled: checkingNow || submitting || checkBlocked || !validId,
+      }, submitting ? "Publishing…" : "Publish"));
+
+      const idInput = /** @type {HTMLInputElement} */ (el("input", {
+        id: "d-publish-id",
+        type: "text",
+        class: "mono",
+        value: idValue,
+        "aria-label": "Pipeline ID",
+        placeholder: "my-pipeline",
+      }));
+      const idHint = el("div", { class: "hint" });
+      const idWarn = el("div", { class: "bad dialog-inline-error", hidden: true });
+      const idExistWarn = el("div", { class: "warn dialog-inline-error", hidden: true });
+
+      function syncIdHints() {
+        const trimmed = idValue.trim();
+        const ok = /^[a-z0-9][a-z0-9-]{0,62}$/.test(trimmed);
+        const dup = (!last?.id || last.id !== trimmed) && !!state.jobs.library.pipelines?.some((p) => p.id === trimmed);
+        idWarn.hidden = ok;
+        idWarn.textContent = ok ? "" : "Use lowercase letters, digits, and '-' (starting with a letter or digit).";
+        idExistWarn.hidden = !ok || !dup;
+        idExistWarn.textContent = ok && dup ? `Pipeline '${trimmed}' already exists in the library.` : "";
+        submitBtn.disabled = checkingNow || submitting || (!checkingNow && currentCheck()?.ok === false) || !ok;
+      }
+
+      idInput.addEventListener("input", () => { idTouched = true; idValue = idInput.value; syncIdHints(); });
+
+      const messageInput = /** @type {HTMLInputElement} */ (el("input", {
+        id: "d-publish-message",
+        type: "text",
+        value: messageValue,
+        "aria-label": "Commit message",
+        placeholder: "Describe this change",
+      }));
+      messageInput.addEventListener("input", () => { messageValue = messageInput.value; });
+
+      const idField = !editingId && last?.id
+        ? el("div", { class: "dialog-field" },
+          el("div", { class: "row" },
+            el("span", {}, "Updating library pipeline ", el("code", {}, last.id),
+              last.commit ? [" (from ", el("code", {}, short(last.commit)), ")"] : null),
+            el("button", {
+              type: "button",
+              class: "small ghost",
+              onclick: () => { idTouched = true; editingId = true; renderBody(); },
+            }, "Change ID…")))
+        : el("div", { class: "dialog-field" },
+          el("label", { for: "d-publish-id" }, "Pipeline ID"),
+          idInput,
+          idHint,
+          idWarn,
+          idExistWarn);
+      if (existingRemote && !editingId) idExistWarn.hidden = false;
+
+      const form = el("form", {
+        class: "dialog-form",
+        onsubmit: (e) => {
+          e.preventDefault();
+          if (checkingNow || submitting || currentCheck()?.ok === false) return;
+          if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(idValue.trim())) return;
+          sendPublish(null);
+        },
+      },
+        idField,
+        el("div", { class: "dialog-field" },
+          el("label", { for: "d-publish-message" }, "Commit message"),
+          messageInput),
+        refusal ? [el("p", { class: "bad" }, refusal.error), refusal.report ? el("pre", { class: "dialog-pre" }, refusal.report) : null] : null,
+        el("div", { class: "row dialog-actions" },
+          el("button", { type: "button", class: "ghost", onclick: close }, "Cancel"),
+          submitBtn));
+
+      fill(formArea, form);
+      syncIdHints();
+      if (focused) {
+        const again = /** @type {HTMLInputElement | null} */ (formArea.querySelector(`#${CSS.escape(focused.id)}`));
+        if (again) {
+          again.focus();
+          if (focused.start !== null && focused.end !== null) again.setSelectionRange(focused.start, focused.end);
+        }
+      }
+    }
+
+    fill(body,
+      el("p", { class: "hint" }, "Publishes ", el("code", {}, job.path), " as saved on disk. Its layout and launch values stay local."),
+      checksBox,
+      formArea);
+    renderBody();
+
+    Promise.all([
+      api(`/api/publish?path=${encodeURIComponent(job.path)}`).catch(() => ({ publication: null })),
+      askPublication(true),
+    ]).then(([pubInfo]) => {
+      if (closed) return;
+      last = pubInfo?.publication ?? null;
+      if (!idTouched) {
+        if (last?.id) {
+          idValue = last.id;
+          editingId = false;
+        } else {
+          editingId = true;
+        }
+      }
+      checkingNow = false;
+      renderBody();
+    });
+  }, { onClose: () => { closed = true; } });
 }
 
 /** The Publish tab. */
 export function publicationView() {
   if (!state.coordinator) return el("p", { class: "hint" }, "Open the studio with --coordinator to publish a job into a coordinator's library.");
-  // A refusal the runner's dry run gave the cards as they are is said here too, before anything else.
   const check = currentCheck();
   return [check && check.ok === false ? refusalView(check) : null, outcomeView(publication.outcome)];
 }
 
-/** What the last publication did, or what Publish does when there is none. @param {any} outcome */
 function outcomeView(outcome) {
   if (!outcome) {
     return el("p", { class: "hint" }, "Publish sends the job as saved in this folder to the coordinator's library. Its layout and its launch values stay on this machine: "

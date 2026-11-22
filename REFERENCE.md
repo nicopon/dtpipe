@@ -1240,9 +1240,9 @@ dtpipe studio ./jobs --llm-provider ollama --llm-model qwen2.5-coder:7b  # with 
 | Action | What it does |
 |:---|:---|
 | **▶ Preview** | Runs the job as `--dry-run` does, over the rows you ask for (up to 100 000 per source; a step shows up to 1 000). Each step then shows its rows, columns and types, and a badge with its state |
-| **Save** | Writes the job composed from the steps. A job written by hand loses its inner comments and key order, and the page says so. Refuses a file changed on disk since it was opened, never creates a folder, and never overwrites another file |
+| **Save** / **Save as…** | Writes the job composed from the steps (**Save as…** creates a copy under a new path). A job written by hand loses its inner comments and key order, and the page says so. Refuses a file changed on disk since it was opened, never creates a folder, and never overwrites another file |
+| **Workspace** (`+ New ▾`, file `⋯`) | Lists the folder's jobs grouped by subfolder with live search, sync badges, **Rename…**, and **Delete…**. **+ New ▾** starts a **Blank job…**, converts a multi-line command line (**From CLI command…**, as `--export-job`, refusing `--bind-input`/`--bind-output`), or imports an external file (**Import YAML file…**) |
 | **Variables** | Lists every `${{…}}` the job reads. For a preview, give each a keyring alias or a value; a preview with an unresolved variable is refused |
-| **Import** | Turns a dtpipe command line into a new job, as `--export-job` would. `--bind-input` and `--bind-output` are refused |
 | **Run for real…** | Opens a dialog that lists what the saved job writes; untick an output to leave it out (the job runs without it and what only it needs). **Write N outputs** runs the job for real, as `dtpipe --job`, and writes only the outputs ticked. **Stop** ends it with code 130 |
 | **Review before writing** | An option of **Run for real…**: the run stops before every writing branch it was asked to write and holds the rows; **Write** on an output step opens the same dialog for the held outputs, ticks that one and writes what you confirm, and the others stay held; **Abandon** forgets every row still held (what was already written stays written). A run stopped or failed before every output held its rows can only be abandoned |
 | **▶** on a step | Runs the job up to that step |
@@ -1296,8 +1296,8 @@ the studio's memory. The coordinator's administrator must list you, and
 | Action | What it does |
 |:---|:---|
 | Palette | Offers the bricks of the coordinator's nodes, an offline node greyed out, with each node's dtpipe version |
-| **Publish** | Sends the saved job to the library under an id you choose. It replaces only the version you last read; if someone else saved since, it asks. A deployed pipeline keeps running its armed version until deployed again |
-| **Library** list | Under the jobs once you are signed in. Clicking a pipeline writes it as a new `<id>.yaml` in the folder, never over a file |
+| **Publish** | Sends the saved job to the library through a modal dialog under an id you choose, after runner and edge pre-checks. Replaces only the version you last read; on conflict (412), shows a diff to pull first or overwrite. A deployed pipeline keeps running its armed version until deployed again |
+| **Library** panel | Separate left-bar panel listing the coordinator's pipelines with **Preview** (read-only), **Pull…** (with target path and collision options), **Open local**, and **Pull update…** (with line diff) |
 
 A preview with bricks reads at most 100 rows of each source brick through the coordinator; a sink
 brick receives nothing, its rows going to a throwaway file under `.dtpipe/studio/samples/`. A run

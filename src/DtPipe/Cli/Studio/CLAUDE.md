@@ -73,10 +73,10 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   `[local: page_smoke.mjs link-studio, link-coordinator, link-agent-down, link-agent-model]` `[unchecked: the page's header after a signed-in coordinator falls, which the status test covers server side only]`
 - **Without `--coordinator` the studio is whole, minus the bricks, the library and the publication.**
   `StudioTools.Coordinator` is null: `/api/coordinator` has no address, `/api/bricks` an empty catalogue,
-  `GET /api/publish` no publication, and `/api/coordinator/login`, `/api/library`, `/api/library/open`,
+  `GET /api/publish` no publication, and `/api/coordinator/login`, `/api/library`, `/api/library/job`, `/api/library/open`,
   `POST /api/publish`, `POST /api/publish/check` and `POST /api/publish/edges` answer 404 "opened without --coordinator". Jobs, cards, variables and
   samples never ask for the link; a route that needs it refuses the same way.
-  `[CI: StudioServerTests — jobs, cards, variables, samples and the seven refusals]`
+  `[CI: StudioServerTests — jobs, cards, variables, samples and the eight refusals]`
   `[unchecked: import, debug and run without a coordinator; that a new route needing the link refuses]`
 - **The coordinator decides what a brick is; the studio reads its answer.** A card that is a brick is written as the reference to
   it (`input: brick:<node>/<id>` for a source, `output: brick:<node>/<id>` with `from` for a sink): `DesignService` writes it from the
@@ -151,10 +151,17 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   `CommandLineJob.Export` gives, which `Program.cs` shares for its refusal of `--bind-input`/
   `--bind-output`; a `${{…}}` stays as typed, and nothing is saved until the person saves the new
   job. `[CI: CommandLineJobTests, StudioServerTests]`
-- **A library pipeline opens as a new file, never over one.** `POST /api/library/open` writes
-  `<id>.yaml` through `WriteJob` (create only, 409 when the file exists) and keeps the version read in
-  `<job>-publish.json`, so the next publication sends `If-Match` for it; a link under `.dtpipe/`
-  refuses before the job is written. `[CI: StudioPublishTests]`
+- **Workspace operations keep local metadata confined and hash-guarded.** `GET /api/jobs` lists jobs,
+  existing subfolders, and each job's publication link (`id`, `commit`, `localModified` against `StudioPublication.LocalHash`)
+  for the active coordinator. `POST /api/job/rename` and `DELETE /api/job` confine paths to the folder,
+  verify the open file's hash, refuse active or suspended real runs, and migrate or remove `.dtpipe/studio/`
+  files (forgetting held checkpoints) and `view.json` entries. `[CI: StudioServerTests, StudioPublishTests]`
+- **A library pipeline previews without writing and pulls with optimistic locking.** `GET /api/library/job`
+  reads a pipeline's YAML and commit without writing to disk. `POST /api/library/open` writes `<id>.yaml`
+  (or `path`) through `WriteJob` (create-only when `overwriteHash` is absent, 409 on collision; optimistic
+  replace when `overwriteHash` matches the file on disk) and keeps the commit and local hash in
+  `<job>-publish.json`, so the UI shows sync state and the next publication sends `If-Match` for it;
+  a link under `.dtpipe/` refuses before the job is written. `[CI: StudioPublishTests]`
 - **A run is the saved file, confirmed first, one engine action at a time.** `POST /api/run/prepare`
   re-reads the file (its hash is the page's), resolves every variable and lists what each branch writes:
   the output through `ConnectionStringSanitizer.Redact`, the writer's block as the file holds it (never
@@ -255,9 +262,9 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   the drawer's scroll) is invalidated by what makes it untrue, never by its own events. Each kind of
   request has its own `sequence()`, so a stale answer of one never drops the answer of another, and an
   answer about a job is dropped once another job is open. The page keeps nothing in `localStorage`:
-  how it was left (the job open, tab, rows, selected card, pane sizes, the side panel chosen) goes through `PUT /api/view` to
+  how it was left (the job open, tab, rows, selected card, pane sizes, the side panel chosen — `jobs`, `library`, `steps` or `none`) goes through `PUT /api/view` to
   `.dtpipe/studio/view.json`, whose values the server checks and rewrites, and which is read only as a
-  preference. A new script needs its route in `StudioServer.Assets`.
+  preference. Modal dialogs (`dialogs.js`) handle creation, CLI/YAML import, save-as, rename, delete, and library inspection/pull. A new script needs its route in `StudioServer.Assets`.
   `[CI: StudioServerTests (every module is served, every import resolves; the view's bounds)]`
 - **What the pointer does, the keyboard does, through the same function.** A card is a stop of Tab and Enter or Space chooses
   it (`selectCard`, which a click calls too); a wire is made by the inspector's Connect and undone by the × of its Inputs list,

@@ -17,9 +17,11 @@ export function onCoordinator(listener) { listeners.push(listener); }
 
 export async function refreshCoordinator() {
   const before = state.coordinator?.state;
+  const beforeUrl = state.coordinator?.url;
   const next = await api("/api/coordinator");
   state.coordinator = next.url ? next : null;
   invalidate("coordinator");
+  if (state.coordinator?.state !== before || state.coordinator?.url !== beforeUrl) invalidate("jobs");
   // The drawer's Problems and Publish say what a publication would refuse only while signed in; a poll that changes
   // nothing leaves the drawer, and what is typed in it, alone.
   if (state.coordinator?.state !== before) invalidate("drawer");
@@ -58,7 +60,7 @@ function render() {
 
 // The provider's page opens in a new tab, so the cards of this one stay as they are. With a key the
 // studio signs in by itself and answers no address: the status is read again.
-async function signIn() {
+export async function signIn() {
   try {
     const { url } = await api("/api/coordinator/login", {});
     if (!url) { await refreshCoordinator(); return; }
