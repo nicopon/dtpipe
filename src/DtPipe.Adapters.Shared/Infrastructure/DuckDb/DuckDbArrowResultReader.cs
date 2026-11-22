@@ -113,7 +113,7 @@ public sealed class DuckDbArrowResultReader : IDisposable
 
                 if (errData != IntPtr.Zero)
                 {
-                    var msg = Marshal.PtrToStringUTF8(DuckDbArrowNative.DuckDBErrorMessage(errData)) ?? "unknown error";
+                    var msg = Marshal.PtrToStringUTF8(DuckDbArrowNative.DuckDBErrorDataMessage(errData)) ?? "unknown error";
                     DuckDbArrowNative.DuckDBDestroyErrorData(ref errData);
                     throw new InvalidOperationException($"duckdb_to_arrow_schema failed: {msg}");
                 }
@@ -205,7 +205,7 @@ public sealed class DuckDbArrowResultReader : IDisposable
         var errData = DuckDbArrowNative.DuckDBDataChunkToArrow(_arrowOptions, chunk, &ffiArray);
         if (errData != IntPtr.Zero)
         {
-            var msg = Marshal.PtrToStringUTF8(DuckDbArrowNative.DuckDBErrorMessage(errData)) ?? "unknown error";
+            var msg = Marshal.PtrToStringUTF8(DuckDbArrowNative.DuckDBErrorDataMessage(errData)) ?? "unknown error";
             DuckDbArrowNative.DuckDBDestroyErrorData(ref errData);
             throw new InvalidOperationException($"duckdb_data_chunk_to_arrow failed: {msg}");
         }

@@ -422,19 +422,60 @@ public class DuckDBSqlProcessorTests
     }
 
     /// <summary>
-    /// EXPLAIN names no source for a scan that reads no column, so a second scan of that kind is caught by the
-    /// stream ending twice: the query fails instead of counting what the first scan left.
+    /// A --ref is held in memory, so a scan reading no column (count(*)) alongside another scan
+    /// succeeds and sees the full row count.
     /// </summary>
     [Fact]
-    public async Task ReadRecordBatches_ScanReadingNoColumnOfASourceScannedTwice_Fails()
+    public async Task OpenAsync_ScanReadingNoColumnOfRefScannedTwice_Succeeds()
     {
         await using var processor = TwoSourceProcessor(
             "SELECT (SELECT count(*) FROM ref) AS n, r.Name FROM main s JOIN ref r ON true");
 
         await processor.OpenAsync();
-        var ex = await Assert.ThrowsAnyAsync<Exception>(() => CountRowsAsync(processor));
+        var counts = new List<long>();
+        await foreach (var b in processor.ReadRecordBatchesAsync())
+        {
+            using (b)
+            {
+                var col = (Int64Array)b.Column(0);
+                for (var i = 0; i < b.Length; i++) counts.Add(col.GetValue(i)!.Value);
+            }
+        }
 
-        Assert.Contains("'ref' was read to its end a second time", ex.ToString());
+        Assert.Equal(6, counts.Count);
+        Assert.All(counts, n => Assert.Equal(3L, n));
+    }
+
+    /// <summary>A second scan on --from that reads no column is still refused naming it.</summary>
+    [Fact]
+    public async Task OpenAsync_ScanReadingNoColumnOfMainScannedTwice_IsRefusedNamingIt()
+    {
+        await using var processor = TwoSourceProcessor(
+            "SELECT (SELECT count(*) FROM main) AS n, s.GenerateIndex FROM main s");
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => processor.OpenAsync());
+
+        Assert.Contains("'main' more than once", ex.Message);
+    }
+
+    /// <summary>
+    /// A recursive CTE referencing --from in its recursive step binds once in the AST but opens a new
+    /// scan on each iteration; the second Init refuses it naming the alias.
+    /// </summary>
+    [Fact]
+    public async Task OpenAsync_MainScannedInRecursiveCte_IsRefusedNamingIt()
+    {
+        await using var processor = TwoSourceProcessor(
+            "WITH RECURSIVE t AS (SELECT 1 AS n UNION ALL SELECT t.n + 1 FROM t JOIN main m ON m.GenerateIndex >= 0 WHERE t.n < 3) " +
+            "SELECT count(*) AS c FROM t");
+
+        var ex = await Assert.ThrowsAnyAsync<Exception>(async () =>
+        {
+            await processor.OpenAsync();
+            await CountRowsAsync(processor);
+        });
+
+        Assert.Contains("'main' more than once", ex.Message);
     }
 
     /// <summary>
@@ -1033,5 +1074,267 @@ public class DuckDBSqlProcessorTests
 
         // Not the query's own words: with several tasks running, DuckDB may report one it interrupted instead.
         Assert.StartsWith("DuckDB failed while streaming the result", failure.Message);
+    }
+
+    [Fact]
+    public unsafe void DuckDB_ErrorDataMessage_ReturnsDuckDbErrorWithoutEntryPointNotFound()
+    {
+        Apache.Arrow.C.CArrowSchema ffiSchema = default;
+        var errData = DtPipe.Adapters.Shared.Infrastructure.DuckDb.DuckDbArrowNative.DuckDBToArrowSchema(
+            IntPtr.Zero, null, null, 0, &ffiSchema);
+
+        Assert.NotEqual(IntPtr.Zero, errData);
+        try
+        {
+            var msg = System.Runtime.InteropServices.Marshal.PtrToStringUTF8(
+                DtPipe.Adapters.Shared.Infrastructure.DuckDb.DuckDbArrowNative.DuckDBErrorDataMessage(errData));
+            Assert.False(string.IsNullOrWhiteSpace(msg));
+        }
+        finally
+        {
+            DtPipe.Adapters.Shared.Infrastructure.DuckDb.DuckDbArrowNative.DuckDBDestroyErrorData(ref errData);
+        }
+        Assert.Equal(IntPtr.Zero, errData);
+    }
+
+    /// <summary>
+    /// Verifies 2048-row slicing across wide types (primitives, strings, decimal, timestamp, uuid, bool8,
+    /// struct, list) and deterministic release of pooled --from buffers even through an ORDER BY query.
+    /// </summary>
+    [Fact]
+    public async Task OpenAsync_AndReadRecordBatches_LargeBatchExceeding2048Rows_SlicesCleanlyAcrossTypes()
+    {
+        const int rows = 5000;
+        var pool = new TrackingMemoryPool();
+
+        var uuidField = ArrowTypeMapper.GetField("uid", typeof(Guid));
+        var bool8Field = new Field("flag8", Int8Type.Default, nullable: true,
+            [KeyValuePair.Create("ARROW:extension:name", "arrow.bool8")]);
+        var structType = new StructType([new Field("k", Int32Type.Default, nullable: false)]);
+        var listType = new ListType(Int32Type.Default);
+        var decType = new Decimal128Type(18, 2);
+        var tsType = new TimestampType(TimeUnit.Microsecond, "UTC");
+
+        var schema = new Schema(
+        [
+            new Field("id", Int32Type.Default, nullable: false),
+            new Field("txt", StringType.Default, nullable: true),
+            new Field("amt", decType, nullable: true),
+            new Field("ts", tsType, nullable: true),
+            uuidField,
+            bool8Field,
+            new Field("st", structType, nullable: false),
+            new Field("lst", listType, nullable: false),
+        ], null);
+
+        var idB = new Int32Array.Builder();
+        var txtB = new StringArray.Builder();
+        var amtB = new Decimal128Array.Builder(decType);
+        var tsB = new TimestampArray.Builder(tsType);
+        var uidB = new Apache.Arrow.Serialization.Reflection.FixedSizeBinaryArrayBuilder(16);
+        var b8B = new Int8Array.Builder();
+        var stKB = new Int32Array.Builder();
+        var lstB = new ListArray.Builder(Int32Type.Default);
+        var lstValB = (Int32Array.Builder)lstB.ValueBuilder;
+
+        var epoch = new DateTimeOffset(2024, 6, 1, 0, 0, 0, TimeSpan.Zero);
+        for (var i = 0; i < rows; i++)
+        {
+            idB.Append(i);
+            if (i % 7 == 0) txtB.AppendNull();
+            else txtB.Append($"row_payload_exceeding_inline_limit_{i:D5}");
+            amtB.Append(i * 1.25m);
+            tsB.Append(epoch.AddSeconds(i));
+            uidB.Append(ArrowTypeMapper.ToArrowUuidBytes(Guid.NewGuid()));
+            if (i % 5 == 0) b8B.AppendNull();
+            else b8B.Append((sbyte)(i % 2));
+            stKB.Append(i * 10);
+            lstB.Append();
+            lstValB.Append(i);
+        }
+
+        var stValid = new ArrowBuffer.BitmapBuilder(rows);
+        for (var i = 0; i < rows; i++) stValid.Append(true);
+
+        var batch = new RecordBatch(schema,
+        [
+            idB.Build(pool),
+            txtB.Build(pool),
+            amtB.Build(pool),
+            tsB.Build(pool),
+            uidB.Build(),
+            b8B.Build(pool),
+            new StructArray(structType, rows, [stKB.Build(pool)], stValid.Build(pool)),
+            lstB.Build(pool),
+        ], rows);
+
+        const string alias = "big";
+        var registry = BuildRegistry(alias, schema, [batch]);
+
+        await using (var processor = new DuckDBSqlProcessor(
+            registry,
+            "SELECT id, txt, amt, ts, uid, flag8, st.k AS sk, lst[1] AS first_elem FROM big ORDER BY id DESC",
+            alias, alias, refAliases: [], refChannelAliases: [],
+            NullLogger<DuckDBSqlProcessor>.Instance))
+        {
+            await processor.OpenAsync();
+            var readRows = 0;
+            int? firstId = null;
+            int? lastId = null;
+            await foreach (var b in processor.ReadRecordBatchesAsync())
+            {
+                using (b)
+                {
+                    var ids = (Int32Array)b.Column(0);
+                    if (b.Length > 0)
+                    {
+                        firstId ??= ids.GetValue(0);
+                        lastId = ids.GetValue(b.Length - 1);
+                    }
+                    readRows += b.Length;
+                }
+            }
+            Assert.Equal(rows, readRows);
+            Assert.Equal(rows - 1, firstId);
+            Assert.Equal(0, lastId);
+        }
+
+        Assert.Equal(0, pool.ActiveAllocations);
+    }
+
+    [Fact]
+    public async Task OpenAsync_AndReadRecordBatches_EmptyBatchesInterleaved_DoesNotTruncateStream()
+    {
+        var schema = new Schema([new Field("n", Int32Type.Default, nullable: false)], null);
+        static RecordBatch MakeBatch(Schema s, params int[] values) =>
+            new(s, [new Int32Array.Builder().AppendRange(values).Build()], values.Length);
+
+        var registry = BuildRegistry("src", schema,
+        [
+            MakeBatch(schema),
+            MakeBatch(schema, 1, 2, 3),
+            MakeBatch(schema),
+            MakeBatch(schema, 4, 5),
+            MakeBatch(schema),
+        ]);
+
+        await using var processor = new DuckDBSqlProcessor(
+            registry, "SELECT n FROM src ORDER BY n", "src", "src",
+            refAliases: [], refChannelAliases: [], NullLogger<DuckDBSqlProcessor>.Instance);
+
+        await processor.OpenAsync();
+        var values = new List<int>();
+        await foreach (var b in processor.ReadRecordBatchesAsync())
+        {
+            using (b)
+            {
+                var col = (Int32Array)b.Column(0);
+                for (var i = 0; i < b.Length; i++) values.Add(col.GetValue(i)!.Value);
+            }
+        }
+        Assert.Equal([1, 2, 3, 4, 5], values);
+
+        // 0-row stream still yields schema and 0 rows.
+        var emptyReg = BuildRegistry("src", schema, [MakeBatch(schema)]);
+        await using var emptyProc = new DuckDBSqlProcessor(
+            emptyReg, "SELECT n FROM src", "src", "src",
+            refAliases: [], refChannelAliases: [], NullLogger<DuckDBSqlProcessor>.Instance);
+        await emptyProc.OpenAsync();
+        Assert.Single(emptyProc.Schema!.FieldsList);
+        Assert.Equal(0, await CountRowsAsync(emptyProc));
+    }
+
+    [Fact]
+    public async Task OpenAsync_AndReadRecordBatches_ArrowBool8AndJsonExtensions_RoundTripUnderEdgesOnly()
+    {
+        var bool8Field = new Field("b", Int8Type.Default, nullable: true,
+            [KeyValuePair.Create("ARROW:extension:name", "arrow.bool8")]);
+        var jsonField = new Field("j", StringType.Default, nullable: true,
+            [KeyValuePair.Create("ARROW:extension:name", "arrow.json")]);
+        var schema = new Schema([bool8Field, jsonField], null);
+
+        var batch = new RecordBatch(schema,
+        [
+            new Int8Array.Builder().Append(1).Append(0).AppendNull().Build(),
+            new StringArray.Builder().Append("{\"a\":1}").Append("{\"a\":2}").AppendNull().Build(),
+        ], 3);
+
+        var registry = BuildRegistry("src", schema, [batch]);
+        await using var processor = new DuckDBSqlProcessor(
+            registry, "SELECT b, j, typeof(b) AS tb, typeof(j) AS tj FROM src WHERE b = true", "src", "src",
+            refAliases: [], refChannelAliases: [], NullLogger<DuckDBSqlProcessor>.Instance,
+            edgesOnly: true);
+
+        await processor.OpenAsync();
+        var bField = processor.Schema!.FieldsList[0];
+        Assert.IsType<Int8Type>(bField.DataType);
+        Assert.Equal("arrow.bool8", bField.Metadata["ARROW:extension:name"]);
+        Assert.Equal(typeof(bool), ArrowTypeMapper.GetClrTypeFromField(bField));
+
+        var jField = processor.Schema.FieldsList[1];
+        Assert.IsType<StringType>(jField.DataType);
+        Assert.Equal("arrow.json", jField.Metadata["ARROW:extension:name"]);
+
+        var batches = new List<RecordBatch>();
+        await foreach (var b in processor.ReadRecordBatchesAsync())
+            batches.Add(b);
+
+        Assert.Equal(1, batches.Sum(b => b.Length));
+        var rowBatch = batches[0];
+        Assert.Equal(true, ArrowTypeMapper.GetValueForField(rowBatch.Column(0), bField, 0));
+        Assert.Equal("{\"a\":1}", ((StringArray)rowBatch.Column(1)).GetString(0));
+        Assert.Equal("BOOLEAN", ((StringArray)rowBatch.Column(2)).GetString(0));
+        Assert.Equal("JSON", ((StringArray)rowBatch.Column(3)).GetString(0));
+        foreach (var b in batches) b.Dispose();
+    }
+
+    /// <summary>
+    /// Joining --from with read_parquet triggers a post-prepare rebind in DuckDB during streaming
+    /// execution. Prepare-scoped bind tracking must allow that rebind rather than rejecting it as a
+    /// duplicate scan.
+    /// </summary>
+    [Fact]
+    public async Task OpenAsync_AndReadRecordBatches_MainJoinedWithReadParquet_RebindsAndFiltersCleanly()
+    {
+        var tempParquet = Path.Combine(Path.GetTempPath(), $"dtpipe-ext-{Guid.NewGuid():N}.parquet");
+        try
+        {
+            await using (var seedConn = new global::DuckDB.NET.Data.DuckDBConnection("DataSource=:memory:"))
+            {
+                await seedConn.OpenAsync();
+                await using var cmd = seedConn.CreateCommand();
+                cmd.CommandText = $"COPY (SELECT i::BIGINT AS id, (i // 100)::INT AS bucket, 'v_' || i::VARCHAR AS val FROM range(0, 500) t(i)) TO '{tempParquet}' (FORMAT PARQUET)";
+                await cmd.ExecuteNonQueryAsync();
+            }
+
+            var schema = new Schema([new Field("id", Int64Type.Default, nullable: false)], null);
+            var batch = new RecordBatch(schema, [new Int64Array.Builder().AppendRange(Enumerable.Range(0, 500).Select(i => (long)i)).Build()], 500);
+            var registry = BuildRegistry("main", schema, [batch]);
+
+            await using var processor = new DuckDBSqlProcessor(
+                registry,
+                $"SELECT m.id, e.val FROM main m JOIN read_parquet('{tempParquet}') e ON m.id = e.id WHERE e.bucket = 2 ORDER BY m.id",
+                "main", "main", refAliases: [], refChannelAliases: [],
+                NullLogger<DuckDBSqlProcessor>.Instance);
+
+            await processor.OpenAsync();
+            var ids = new List<long>();
+            await foreach (var b in processor.ReadRecordBatchesAsync())
+            {
+                using (b)
+                {
+                    var col = (Int64Array)b.Column(0);
+                    for (var i = 0; i < b.Length; i++) ids.Add(col.GetValue(i)!.Value);
+                }
+            }
+
+            Assert.Equal(100, ids.Count);
+            Assert.Equal(200L, ids[0]);
+            Assert.Equal(299L, ids[^1]);
+        }
+        finally
+        {
+            if (File.Exists(tempParquet)) File.Delete(tempParquet);
+        }
     }
 }

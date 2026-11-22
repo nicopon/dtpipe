@@ -3,51 +3,47 @@
 Each processor lives in its own subdirectory (`DuckDB/`, `Merge/`…) with a matching sub-namespace.
 
 `CompositeSqlTransformerFactory` is the DI entry point for `--sql` branches. The only engine is
-DuckDB — `DuckDBSqlTransformerFactory` / `DuckDBSqlProcessor`: zero-copy Arrow C Data Interface on
-read (`--from`), lazy streaming fetch on write, schema inferred from the prepared statement before
+DuckDB — `DuckDBSqlTransformerFactory` / `DuckDBSqlProcessor`: Arrow C Data table functions on read
+(`--from` and `--ref`), lazy streaming fetch on write, schema inferred from the prepared statement before
 execution. The fetch goes through the shared DuckDB read path; never reimplement it here
 (`src/DtPipe.Adapters.Shared/CLAUDE.md`).
 
-**`ChannelArrowStream` waits on the branch's token, never on its argument.** DuckDB reads it through the
-C Data exporter, which passes none: a wait with no token holds the run forever once its source stops,
-since `DagOrchestrator` returns only when every branch has ended. A cancellation stays a failure of the
-stream, never its end, or the query finishes on part of its input.
+**`DuckDbArrowTableSource` waits on the branch's token, never on DuckDB's callbacks.** An empty or
+blocked `--from` channel stops on cancellation and sets a DuckDB function error so the run returns 130
+instead of hanging in `DagOrchestrator`, which waits until every branch ends.
 `[CI: DagOrchestratorTests, validate_cancellation.sh]`
 
-**A registered scan exports its columns behind a per-stream prefix and the user's table is a view that
-names them back.** DuckDB hands an Arrow scan only the columns its plan uses, in the plan's order, and
-EXPLAIN lists them per `ARROW_SCAN` without naming the table: the prefix is what ties a scan's
-projection to exactly one stream. Never merge the projections of two scans: two sources that carry a
-column of the same name hand each other's column to DuckDB, which reads it as another type and faults
-natively. `[CI: DuckDBSqlProcessorTests — SourcesSharingAColumnName]`
+**Each source registers a 0-arg table function (`__dtp_scan_{n}()`) exposed under a view of its alias,
+and converts one column at a time.** `duckdb_table_function_supports_projection_pushdown` gives `Init`
+the exact projected column indices (skipping conversion on `COLUMN_IDENTIFIER_ROW_ID` /
+`COLUMN_IDENTIFIER_EMPTY` for 0-column scans such as `COUNT(*)`), so views stay `SELECT * FROM
+__dtp_scan_{n}()` without `EXPLAIN` or `disabled_optimizers='filter_pushdown'`. Converting per column
+with `duckdb_schema_from_arrow` / `duckdb_data_chunk_from_arrow` and transferring via
+`duckdb_vector_reference_vector` is mandatory: DuckDB 1.5.6 clears `arrow_array->release` on column 0
+while allocating `owned_data` inside the column loop, so a multi-column call releases the array before
+later columns are read. `[CI: DuckDBSqlProcessorTests]`
 
-**A stream is read by one scan.** Each scan ends on the stream's end, so a source scanned twice
-hands the second scan nothing, in code 0. A `--ref` the plan scans more than once (a scan in the
-recursive part of a recursive CTE counts twice: it runs at each iteration) is read once into a
-`MATERIALIZED` CTE put in front of the query under its alias (first in the query's own `WITH` list),
-off the raw scan, and the plan is checked again; the main (`--from`) is refused. Never a table in
-place of the CTE: its known size moves a join's build side onto the stream, which DuckDB estimates
-at one row. Never a CTE inside the view: a view is copied again at each reference. A scan that reads
-no column names no source in EXPLAIN, so `ProjectedArrowStream` fails the query on a second end.
+**Batches are sliced at `STANDARD_VECTOR_SIZE` (2048) and deterministically released.** Each 1-column
+slice retains its buffers (`ArrowOwnership.RetainArray`) and chains a `[UnmanagedCallersOnly]` release
+hook onto `CArrowArray` so the slice disposes as soon as DuckDB releases its vector.
+`[CI: DuckDBSqlProcessorTests]`
+
+**`--ref` sources are re-scannable; `--from` allows a single scan.** Each `Init` on a `--ref` opens an
+independent cursor over its in-memory batches (informed by `duckdb_bind_set_cardinality(..., isExact:
+true)`). A second active `Bind` during `Prepare` or second `Init` on `--from` fails naming the alias,
+catching both duplicate query references and recursive CTE rescans without rejecting DuckDB's
+post-prepare rebinds (e.g. `read_parquet`).
 `[CI: DuckDBSqlProcessorTests — RefScannedTwice, RefJoinedInARecursivePart, MainScannedTwice,
-ScanReadingNoColumn]`
+MainScannedInRecursiveCte, ScanReadingNoColumn]`
 
 **The `--ref` sources are drained together, then registered one after the other.** The drains
-overlap, since the wait on the sources is the cost; a registration writes the processor's maps of the
-sources and uses the one connection, so two registrations at once lose an entry and the query is
-refused or faults. `[CI: DuckDBSqlProcessorTests — RefsEndingTogether]`
+overlap, since the wait on the sources is the cost; registration mutates the connection and `_sources`,
+so two registrations at once race on both. `[CI: DuckDBSqlProcessorTests — RefsEndingTogether]`
 
-**The processor closes DuckDB, then releases each stream it exported, then frees its struct.** DuckDB
-never calls an exported stream's release (a scan reads a copy whose release does nothing), so the
-processor's dispose imports the struct and disposes the import: the exporter's handle is freed and the
-stream disposed, which disposes the `--ref` batches no scan read. A stream's dispose runs once, whoever
-calls it. Released while the connection is open, a stream is a freed handle a running scan still calls
-into, a native fault; never released, it keeps the stream and all its batches reachable.
-`[CI: DuckDBSqlProcessorTests — RefBatchesNoScanRead]` `[unchecked: the release itself and its order]`
-
-**A batch DuckDB has read is not disposed by its stream; its finalizer takes it back**, for a `--ref`
-as for the `--from`. The export reaches a buffer with no handle only by pinning it, so a stream that
-disposed a batch it returned would free memory a scan still reads. `[unchecked]`
+**The processor closes the result reader, then DuckDB, then `_sources`.** Closing `_conn` destroys all
+DuckDB scan states and drops every vector reference so chained release hooks run while `_sources` and
+its `GCHandle` / converted schemas / `--ref` batches are still valid.
+`[CI: DuckDBSqlProcessorTests — RefBatchesNoScanRead]`
 
 - `DuckHubConnectionParser` parses `duck+{provider}:` strings and issues `INSTALL` / `LOAD` /
   `ATTACH`.

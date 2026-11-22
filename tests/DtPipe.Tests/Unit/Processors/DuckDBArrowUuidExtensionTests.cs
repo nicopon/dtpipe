@@ -1,8 +1,6 @@
 using Apache.Arrow;
-using Apache.Arrow.C;
+using DtPipe.Adapters.Shared.Infrastructure.DuckDb;
 using DuckDB.NET.Data;
-using DuckDB.NET.Native;
-using System.Runtime.InteropServices;
 using Xunit;
 
 namespace DtPipe.Tests.Unit.Processors;
@@ -16,27 +14,14 @@ namespace DtPipe.Tests.Unit.Processors;
 ///   FixedSizeBinary(16) + ARROW:extension:name=arrow.uuid (canonical Arrow spec).
 ///
 /// DuckDBSqlProcessor sets arrow_lossless_conversion = true in OpenAsync, so the
-/// Arrow-native schema probe (InspectSchemaViaArrow) returns the correct type.
+/// Arrow-native schema probe returns the correct type.
 /// </summary>
-public partial class DuckDBArrowUuidExtensionTests
+public class DuckDBArrowUuidExtensionTests
 {
     private readonly ITestOutputHelper _output;
     public DuckDBArrowUuidExtensionTests(ITestOutputHelper output) => _output = output;
 
-    private const string DuckDbLib = "duckdb";
     private const string KnownUuid = "SELECT '550e8400-e29b-41d4-a716-446655440000'::UUID AS id";
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct ArrowResult { public nint InternalPtr; }
-
-    [LibraryImport(DuckDbLib, EntryPoint = "duckdb_query_arrow", StringMarshalling = StringMarshalling.Utf8)]
-    private static partial DuckDBState QueryArrow(DuckDBNativeConnection conn, string query, out ArrowResult result);
-
-    [LibraryImport(DuckDbLib, EntryPoint = "duckdb_query_arrow_schema")]
-    private static unsafe partial DuckDBState QueryArrowSchema(ArrowResult result, nint* outSchema);
-
-    [LibraryImport(DuckDbLib, EntryPoint = "duckdb_destroy_arrow")]
-    private static partial void DestroyArrow(ref nint result);
 
     /// <summary>
     /// Documents the DEFAULT DuckDB behavior: UUID exports as Utf8, no extension metadata.
@@ -90,20 +75,10 @@ public partial class DuckDBArrowUuidExtensionTests
         Assert.Equal("arrow.uuid", extensionName, StringComparer.OrdinalIgnoreCase);
     }
 
-    private Schema QuerySchema(DuckDBConnection conn, string query)
+    private static Schema QuerySchema(DuckDBConnection conn, string query)
     {
-        var state = QueryArrow(conn.NativeConnection, query, out var arrowResult);
-        Assert.Equal(DuckDBState.Success, state);
-        try { return ImportSchemaFromResult(arrowResult); }
-        finally { unsafe { nint ptr = arrowResult.InternalPtr; DestroyArrow(ref ptr); } }
-    }
-
-    private unsafe Schema ImportSchemaFromResult(ArrowResult result)
-    {
-        CArrowSchema ffiSchema = default;
-        CArrowSchema* pSchema = &ffiSchema;
-        Assert.Equal(DuckDBState.Success, QueryArrowSchema(result, (nint*)&pSchema));
-        return CArrowSchemaImporter.ImportSchema(&ffiSchema);
+        using var reader = new DuckDbArrowResultReader(conn, query);
+        return reader.Prepare();
     }
 
     private static string FormatMeta(IReadOnlyDictionary<string, string>? meta) =>

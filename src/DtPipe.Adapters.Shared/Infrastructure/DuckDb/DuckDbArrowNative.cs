@@ -17,11 +17,32 @@ public static partial class DuckDbArrowNative
 {
     private const string DuckDbLibrary = "duckdb";
 
-    // ── INPUT: register an Arrow stream as a DuckDB table (zero-copy) ────────────────
+    // ── ARROW IMPORT & TABLE FUNCTION HELPERS ────────────────────────────────────────
 
-    [LibraryImport(DuckDbLibrary, EntryPoint = "duckdb_arrow_scan", StringMarshalling = StringMarshalling.Utf8)]
-    public static unsafe partial DuckDBState DuckDBArrowScan(
-        DuckDBNativeConnection connection, string tableName, CArrowArrayStream* stream);
+    [LibraryImport(DuckDbLibrary, EntryPoint = "duckdb_schema_from_arrow")]
+    public static unsafe partial IntPtr DuckDBSchemaFromArrow(
+        DuckDBNativeConnection connection, CArrowSchema* schema, out IntPtr outConvertedSchema);
+
+    [LibraryImport(DuckDbLibrary, EntryPoint = "duckdb_data_chunk_from_arrow")]
+    public static unsafe partial IntPtr DuckDBDataChunkFromArrow(
+        DuckDBNativeConnection connection, CArrowArray* arrowArray, IntPtr convertedSchema, out IntPtr outChunk);
+
+    [LibraryImport(DuckDbLibrary, EntryPoint = "duckdb_destroy_arrow_converted_schema")]
+    public static partial void DuckDBDestroyArrowConvertedSchema(ref IntPtr convertedSchema);
+
+    [LibraryImport(DuckDbLibrary, EntryPoint = "duckdb_vector_reference_vector")]
+    public static partial void DuckDBVectorReferenceVector(IntPtr toVector, IntPtr fromVector);
+
+    // Raw IntPtr chunk helpers for DuckDB-owned output chunks inside table-function callbacks
+    // (wrapping a DuckDB-owned chunk in DuckDBDataChunk SafeHandle would double-free it).
+    [LibraryImport(DuckDbLibrary, EntryPoint = "duckdb_data_chunk_get_vector")]
+    public static partial IntPtr DuckDBDataChunkGetVector(IntPtr chunk, ulong colIndex);
+
+    [LibraryImport(DuckDbLibrary, EntryPoint = "duckdb_data_chunk_set_size")]
+    public static partial void DuckDBDataChunkSetSize(IntPtr chunk, ulong size);
+
+    [LibraryImport(DuckDbLibrary, EntryPoint = "duckdb_destroy_data_chunk")]
+    public static partial void DuckDBDestroyDataChunk(ref IntPtr chunk);
 
     // ── PREPARE ───────────────────────────────────────────────────────────────────────
 
@@ -85,8 +106,8 @@ public static partial class DuckDbArrowNative
     public static partial void DuckDBDestroyErrorData(ref IntPtr errorData);
 
     // Borrowed pointer — do not free separately; freed by DuckDBDestroyErrorData.
-    [LibraryImport(DuckDbLibrary, EntryPoint = "duckdb_error_message")]
-    public static partial IntPtr DuckDBErrorMessage(IntPtr errorData);
+    [LibraryImport(DuckDbLibrary, EntryPoint = "duckdb_error_data_message")]
+    public static partial IntPtr DuckDBErrorDataMessage(IntPtr errorData);
 
     // ── STREAMING EXECUTE (deprecated — no non-deprecated lazy alternative exists) ────
     // DllImport used instead of LibraryImport: the source generator (SYSLIB1051) cannot
