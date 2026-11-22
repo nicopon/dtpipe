@@ -1,84 +1,118 @@
+using System.Runtime.CompilerServices;
+using Apache.Arrow;
+using Apache.Arrow.Types;
 using DtPipe.Core.Abstractions;
+using DtPipe.Core.Helpers;
+using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using DtPipe.Transformers.Services;
-using DtPipe.Core.Helpers;
 using Jint;
 using Jint.Native;
+using Jint.Native.Object;
+using JsTypes = Jint.Runtime.Types;
 
 namespace DtPipe.Transformers.Row.Expand;
 
-public class ExpandDataTransformer : IMultiRowTransformer, IRequiresOptions<DtPipe.Transformers.Row.Expand.ExpandOptions>
+public class ExpandDataTransformer : BaseColumnarTransformer, IMultiRowTransformer, IRequiresOptions<DtPipe.Transformers.Row.Expand.ExpandOptions>
 {
-    private readonly DtPipe.Transformers.Row.Expand.ExpandOptions _options;
+    private readonly ExpandOptions _options;
     private readonly IJsEngineProvider _jsEngineProvider;
-    private readonly List<JsValue> _compiledExpands = new();
-    private readonly List<string> _wrappedScripts = new();
-    private readonly List<string> _sourceExpressions = new();
-    private string[]? _columnNames;
+    private readonly ConditionalWeakTable<Engine, CompiledExpandState> _engineCache = new();
     private readonly HashSet<string> _reportedUnknownKeys = new(StringComparer.OrdinalIgnoreCase);
 
-    public ExpandDataTransformer(DtPipe.Transformers.Row.Expand.ExpandOptions options, IJsEngineProvider jsEngineProvider)
+    private string[]? _columnNames;
+    private HashSet<string>? _knownColumnSet;
+    private IReadOnlyList<PipeColumnInfo>? _outputColumns;
+    private HashSet<int>? _retypedInputIndices;
+    private int _inputColumnCount;
+    private ExpandStage[] _stages = [];
+    private JsAstAnalyzer.ExpandUnnestPlan? _unnestPlan;
+
+    public override bool CanProcessColumnar => true;
+    internal bool UsesNativeFastPath { get; private set; }
+
+    public ExpandDataTransformer(ExpandOptions options, IJsEngineProvider jsEngineProvider)
     {
         _options = options;
         _jsEngineProvider = jsEngineProvider;
     }
 
-    public ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> sourceColumns, CancellationToken cancellationToken = default)
+    public override async ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(
+        IReadOnlyList<PipeColumnInfo> sourceColumns,
+        CancellationToken cancellationToken = default)
     {
+        await base.InitializeAsync(sourceColumns, cancellationToken);
+
         if (_options.Expand == null || _options.Expand.Length == 0)
         {
-            return ValueTask.FromResult(sourceColumns);
+            _stages = [];
+            _outputColumns = sourceColumns;
+            UsesNativeFastPath = true;
+            return sourceColumns;
         }
 
-        _columnNames = sourceColumns.Select(c => c.Name).ToArray();
+        _inputColumnCount = sourceColumns.Count;
         var engine = _jsEngineProvider.GetEngine();
+
+        var stages = new ExpandStage[_options.Expand.Length];
+        var initialFunctions = new JsValue[_options.Expand.Length];
 
         for (int i = 0; i < _options.Expand.Length; i++)
         {
             var expandScript = _options.Expand[i];
-            var funcName = $"__expand_{Guid.NewGuid():N}";
-
             string body = expandScript.Trim();
             if (!body.Contains("return ") && !body.EndsWith(";"))
-            {
                 body = "return " + body + ";";
-            }
 
-            // Wrap in function expression
             var wrappedScript = $"function(row) {{ {body} }}";
-
-            // Register globally
-            engine.SetValue(funcName, engine.Evaluate($"({wrappedScript})"));
-
-            _wrappedScripts.Add(wrappedScript);
-            _sourceExpressions.Add(expandScript.Trim());
-
-            _compiledExpands.Add(new JsString(funcName));
+            initialFunctions[i] = engine.Evaluate($"({wrappedScript})");
+            stages[i] = new ExpandStage(i, expandScript.Trim(), wrappedScript);
         }
 
         var updatedColumns = new List<PipeColumnInfo>(sourceColumns);
-        foreach (KeyValuePair<string, string> entry in _options.ExpandTypes)
+        var retypedInputIndices = new HashSet<int>();
+
+        foreach (var entry in _options.ExpandTypes)
         {
             string col = entry.Key;
             Type type = ParseDeclaredType(col, entry.Value);
 
             var idx = updatedColumns.FindIndex(c => c.Name.Equals(col, StringComparison.OrdinalIgnoreCase));
             if (idx >= 0)
+            {
                 updatedColumns[idx] = updatedColumns[idx] with { ClrType = type };
+                if (idx < _inputColumnCount) retypedInputIndices.Add(idx);
+            }
             else
+            {
                 updatedColumns.Add(new PipeColumnInfo(col, type, IsNullable: true));
+            }
         }
 
         // Appended, never inserted: TransformMany indexes _columnNames by the incoming row's
         // position, so a declared column has to sit past the last source column.
         _columnNames = updatedColumns.Select(c => c.Name).ToArray();
+        _knownColumnSet = new HashSet<string>(_columnNames, StringComparer.OrdinalIgnoreCase);
+        _outputColumns = updatedColumns;
+        _retypedInputIndices = retypedInputIndices;
+        _stages = stages;
 
-        return ValueTask.FromResult<IReadOnlyList<PipeColumnInfo>>(updatedColumns);
+        _unnestPlan = stages.Length == 1
+            ? JsAstAnalyzer.TryMatchExpandUnnest(_options.Expand[0], sourceColumns, updatedColumns)
+            : null;
+
+        // If an input column other than the target was explicitly retyped, keep the general builder path.
+        if (_unnestPlan != null && retypedInputIndices.Any(idx => idx != _unnestPlan.TargetColumnIndex))
+            _unnestPlan = null;
+
+        UsesNativeFastPath = _unnestPlan != null;
+        _engineCache.AddOrUpdate(engine, CreateState(engine, initialFunctions));
+
+        return updatedColumns;
     }
 
-    // Required by IDataTransformer (base interface)
-    public object?[]? Transform(IReadOnlyList<object?> row)
+    public override object?[]? Transform(IReadOnlyList<object?> row)
     {
         var results = TransformMany(row);
         return results.FirstOrDefault();
@@ -86,101 +120,76 @@ public class ExpandDataTransformer : IMultiRowTransformer, IRequiresOptions<DtPi
 
     public IEnumerable<object?[]> TransformMany(IReadOnlyList<object?> row)
     {
-        if (_compiledExpands.Count == 0 || _columnNames == null)
+        if (_stages.Length == 0 || _columnNames == null)
         {
             yield return row as object?[] ?? row.ToArray();
             yield break;
         }
 
         var engine = _jsEngineProvider.GetEngine();
-        EnsureFunctionsCompiled(engine);
+        var state = GetOrCreateState(engine);
+        state.RowView.SetRow(row);
 
-        // Build JS Context with Proxy for missing column detection
-        var jsSource = new JsObject(engine);
-        for (int i = 0; i < row.Count; i++)
+        IEnumerable<object?[]> currentRows = [row as object?[] ?? row.ToArray()];
+
+        for (int e = 0; e < _stages.Length; e++)
         {
-            var val = row[i];
-            if (val == DBNull.Value) val = null;
-            jsSource.Set(_columnNames[i], JsValue.FromObject(engine, val));
-        }
-
-        // Wrap in Proxy
-        engine.SetValue("__source", jsSource);
-        var jsRow = engine.Evaluate("new Proxy(__source, { get: (target, prop) => { if (typeof prop === 'string' && !(prop in target)) throw new ReferenceError(`Column '${prop}' not found in schema`); return target[prop]; } })");
-
-        // Helper to process a list of rows through a specific expand function
-        IEnumerable<object?[]> currentRows = new[] { row as object?[] ?? row.ToArray() };
-
-        for (int e = 0; e < _compiledExpands.Count; e++)
-        {
-            var funcName = _compiledExpands[e];
-            var expression = _sourceExpressions[e];
+            var stage = _stages[e];
             var nextRows = new List<object?[]>();
+            bool firstRow = true;
 
             foreach (var r in currentRows)
             {
-                JsValue currentJsRow;
-                if (_compiledExpands.Count == 1)
+                JsValue[] callArgs;
+                if (e == 0 && firstRow && _stages.Length == 1)
                 {
-                    currentJsRow = jsRow; // Use the one built above
+                    callArgs = state.SingleArg;
                 }
                 else
                 {
-                    // Rebuild for intermediate rows
-                    var intermediateSource = new JsObject(engine);
-                    for (int k = 0; k < r.Length; k++)
-                    {
-                        var val = r[k];
-                        if (val == DBNull.Value) val = null;
-                        intermediateSource.Set(_columnNames[k], JsValue.FromObject(engine, val));
-                    }
-                    engine.SetValue("__intermediate", intermediateSource);
-                    currentJsRow = engine.Evaluate("new Proxy(__intermediate, { get: (target, prop) => { if (typeof prop === 'string' && !(prop in target)) throw new ReferenceError(`Column '${prop}' not found in schema`); return target[prop]; } })");
+                    state.IntermediateRowView.SetRow(r);
+                    callArgs = state.IntermediateArg;
                 }
-
-                // Set 'row' in global scope for Evaluate Call
-                engine.SetValue("row", currentJsRow);
+                firstRow = false;
 
                 JsValue result;
                 try
                 {
-                    result = engine.Evaluate($"{funcName}(row)");
+                    result = engine.Call(state.Functions[e], JsValue.Undefined, callArgs);
                 }
                 catch (Exception ex)
                 {
-                    // Name the person's expression: the generated symbol ('__expand_80f14686')
-                    // and the Jint wrapper connect to nothing they wrote.
                     throw new InvalidOperationException(
-                        $"--expand could not evaluate {Quote(expression)}: {ex.Message}. "
+                        $"--expand could not evaluate {Quote(stage.SourceExpression)}: {ex.Message}. "
                       + "It takes a JavaScript expression over 'row' — a bare column name is not one, "
                       + "write 'row.<column>'.", ex);
                 }
 
-                // A result of the wrong shape is an error: yielding no rows would discard a whole
-                // source silently, with exit code 0.
                 if (!TryGetElements(engine, result, out var elements))
+                {
                     throw new InvalidOperationException(
-                        $"--expand expects {Quote(expression)} to return an array of row objects, "
+                        $"--expand expects {Quote(stage.SourceExpression)} to return an array of row objects, "
                       + $"but it returned {Describe(result)}.");
+                }
 
                 foreach (var item in elements)
                 {
                     if (!item.IsObject())
+                    {
                         throw new InvalidOperationException(
-                            $"--expand expects {Quote(expression)} to return an array of row objects, "
+                            $"--expand expects {Quote(stage.SourceExpression)} to return an array of row objects, "
                           + $"but an element of the array is {Describe(item)}. Map each element onto a row — "
                           + "'row.tags.map(t => ({ ...row, tag: t }))' — and declare the column it adds with "
                           + "--expand-types \"tag:string\".");
+                    }
 
                     var obj = item.AsObject();
-                    ReportKeysWithNoColumn(obj, expression);
+                    ReportKeysWithNoColumn(obj, stage.SourceExpression);
 
                     var newRow = new object?[_columnNames.Length];
-                    for (int c = 0; c < _columnNames.Length; c++)
-                    {
-                        var val = obj.Get(_columnNames[c]);
-                        newRow[c] = val.IsUndefined() || val.IsNull() ? null : val.ToObject();
-                    }
+                    for (int c = 0; c < state.ColumnJsKeys.Length; c++)
+                        newRow[c] = JsValueConversion.JsValueToClr(obj.Get(state.ColumnJsKeys[c]));
+
                     nextRows.Add(newRow);
                 }
             }
@@ -188,9 +197,276 @@ public class ExpandDataTransformer : IMultiRowTransformer, IRequiresOptions<DtPi
         }
 
         foreach (var r in currentRows)
-        {
             yield return r;
+    }
+
+    protected override ValueTask<RecordBatch?> TransformBatchSafeAsync(RecordBatch batch, CancellationToken ct = default)
+    {
+        if (_stages.Length == 0 || _columnNames == null || _outputColumns == null)
+            return new ValueTask<RecordBatch?>(batch);
+
+        if (batch.Length == 0)
+            return new ValueTask<RecordBatch?>(result: null);
+
+        int outColCount = _outputColumns.Count;
+        var outFields = new Field[outColCount];
+
+        for (int c = 0; c < _inputColumnCount; c++)
+        {
+            if (_retypedInputIndices!.Contains(c))
+            {
+                var colInfo = _outputColumns[c];
+                outFields[c] = ArrowTypeMapper.GetField(colInfo.Name, colInfo.ClrType, isNullable: true, colInfo.Precision, colInfo.Scale);
+            }
+            else
+            {
+                outFields[c] = batch.Schema.GetFieldByIndex(c);
+            }
         }
+        for (int c = _inputColumnCount; c < outColCount; c++)
+        {
+            var colInfo = _outputColumns[c];
+            outFields[c] = ArrowTypeMapper.GetField(colInfo.Name, colInfo.ClrType, isNullable: true, colInfo.Precision, colInfo.Scale);
+        }
+
+        // Structural columnar unnest when the column is a non-null ListArray whose element type
+        // matches the target output field.
+        if (_unnestPlan is { } plan
+            && batch.Column(plan.ListColumnIndex) is ListArray listArr
+            && listArr.NullCount == 0
+            && listArr.Values.Data.DataType.TypeId == outFields[plan.TargetColumnIndex].DataType.TypeId)
+        {
+            return new ValueTask<RecordBatch?>(ExecuteColumnarUnnest(batch, listArr, plan, outFields));
+        }
+
+        return new ValueTask<RecordBatch?>(ExecuteColumnarJint(batch, outFields));
+    }
+
+    private RecordBatch? ExecuteColumnarUnnest(RecordBatch batch, ListArray listArr, JsAstAnalyzer.ExpandUnnestPlan plan, Field[] outFields)
+    {
+        int inLen = batch.Length;
+        ReadOnlySpan<int> offsets = listArr.ValueOffsets;
+        int outLen = offsets[inLen] - offsets[0];
+
+        if (outLen == 0)
+            return null;
+
+        int outColCount = outFields.Length;
+        var outArrays = new IArrowArray[outColCount];
+
+        try
+        {
+            for (int c = 0; c < _inputColumnCount; c++)
+            {
+                if (c == plan.TargetColumnIndex) continue;
+
+                if (c == plan.ListColumnIndex)
+                {
+                    outArrays[c] = ArrowColumnOperations.GatherListArray(listArr, offsets, inLen, outLen);
+                }
+                else
+                {
+                    outArrays[c] = ArrowColumnOperations.GatherScalarArray(
+                        batch.Column(c), batch.Schema.GetFieldByIndex(c), offsets, inLen, outLen);
+                }
+            }
+
+            if (listArr.Offset == 0 && offsets[0] == 0 && offsets[inLen] == listArr.Values.Length)
+            {
+                outArrays[plan.TargetColumnIndex] = ArrowOwnership.RetainArray(listArr.Values);
+            }
+            else
+            {
+                var valueField = ((ListType)listArr.Data.DataType).ValueField;
+                outArrays[plan.TargetColumnIndex] = ArrowColumnOperations.SliceArray(listArr.Values, valueField, offsets[0], outLen);
+            }
+
+            for (int c = _inputColumnCount; c < outColCount; c++)
+            {
+                if (c == plan.TargetColumnIndex) continue;
+                var b = ArrowTypeMapper.CreateBuilder(outFields[c].DataType);
+                for (int r = 0; r < outLen; r++) JsValueConversion.AppendNullFast(b);
+                outArrays[c] = ArrowTypeMapper.BuildArray(b);
+            }
+
+            return new RecordBatch(new Schema(outFields, batch.Schema.Metadata), outArrays, outLen);
+        }
+        catch
+        {
+            for (int i = 0; i < outArrays.Length; i++)
+                outArrays[i]?.Dispose();
+            throw;
+        }
+    }
+
+    private RecordBatch? ExecuteColumnarJint(RecordBatch batch, Field[] outFields)
+    {
+        var engine = _jsEngineProvider.GetEngine();
+        var state = GetOrCreateState(engine);
+        state.ArrowRowView.BindBatch(batch);
+
+        int colCount = outFields.Length;
+        var builders = new IArrowArrayBuilder[colCount];
+        var appenders = new Action<object?>[colCount];
+
+        for (int c = 0; c < colCount; c++)
+        {
+            builders[c] = ArrowTypeMapper.CreateBuilder(outFields[c].DataType);
+            appenders[c] = ArrowTypeMapper.ResolveAppender(builders[c]);
+        }
+
+        int outRowCount = 0;
+        var stage0 = _stages[0];
+
+        for (int rowIdx = 0; rowIdx < batch.Length; rowIdx++)
+        {
+            state.ArrowRowView.SetRowIndex(rowIdx);
+
+            JsValue result0;
+            try
+            {
+                result0 = engine.Call(state.Functions[0], JsValue.Undefined, state.ArrowArg);
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException(
+                    $"--expand could not evaluate {Quote(stage0.SourceExpression)}: {ex.Message}. "
+                  + "It takes a JavaScript expression over 'row' — a bare column name is not one, "
+                  + "write 'row.<column>'.", ex);
+            }
+
+            if (!TryGetElements(engine, result0, out var elements0))
+            {
+                throw new InvalidOperationException(
+                    $"--expand expects {Quote(stage0.SourceExpression)} to return an array of row objects, "
+                  + $"but it returned {Describe(result0)}.");
+            }
+
+            if (_stages.Length == 1)
+            {
+                foreach (var item in elements0)
+                {
+                    if (!item.IsObject())
+                    {
+                        throw new InvalidOperationException(
+                            $"--expand expects {Quote(stage0.SourceExpression)} to return an array of row objects, "
+                          + $"but an element of the array is {Describe(item)}. Map each element onto a row — "
+                          + "'row.tags.map(t => ({ ...row, tag: t }))' — and declare the column it adds with "
+                          + "--expand-types \"tag:string\".");
+                    }
+
+                    var obj = item.AsObject();
+                    ReportKeysWithNoColumn(obj, stage0.SourceExpression);
+
+                    for (int c = 0; c < colCount; c++)
+                        JsValueConversion.AppendJsValueToBuilder(builders[c], obj.Get(state.ColumnJsKeys[c]), appenders[c]);
+
+                    outRowCount++;
+                }
+            }
+            else
+            {
+                var currentRows = ExtractStageObjects(elements0, stage0.SourceExpression, state.ColumnJsKeys);
+
+                for (int e = 1; e < _stages.Length; e++)
+                {
+                    var stage = _stages[e];
+                    bool isLast = e == _stages.Length - 1;
+                    var nextRows = isLast ? null : new List<object?[]>(currentRows.Count);
+
+                    foreach (var r in currentRows)
+                    {
+                        state.IntermediateRowView.SetRow(r);
+                        JsValue res;
+                        try
+                        {
+                            res = engine.Call(state.Functions[e], JsValue.Undefined, state.IntermediateArg);
+                        }
+                        catch (Exception ex)
+                        {
+                            throw new InvalidOperationException(
+                                $"--expand could not evaluate {Quote(stage.SourceExpression)}: {ex.Message}. "
+                              + "It takes a JavaScript expression over 'row' — a bare column name is not one, "
+                              + "write 'row.<column>'.", ex);
+                        }
+
+                        if (!TryGetElements(engine, res, out var elems))
+                        {
+                            throw new InvalidOperationException(
+                                $"--expand expects {Quote(stage.SourceExpression)} to return an array of row objects, "
+                              + $"but it returned {Describe(res)}.");
+                        }
+
+                        if (isLast)
+                        {
+                            foreach (var item in elems)
+                            {
+                                if (!item.IsObject())
+                                {
+                                    throw new InvalidOperationException(
+                                        $"--expand expects {Quote(stage.SourceExpression)} to return an array of row objects, "
+                                      + $"but an element of the array is {Describe(item)}. Map each element onto a row — "
+                                      + "'row.tags.map(t => ({ ...row, tag: t }))' — and declare the column it adds with "
+                                      + "--expand-types \"tag:string\".");
+                                }
+                                var obj = item.AsObject();
+                                ReportKeysWithNoColumn(obj, stage.SourceExpression);
+                                for (int c = 0; c < colCount; c++)
+                                    JsValueConversion.AppendJsValueToBuilder(builders[c], obj.Get(state.ColumnJsKeys[c]), appenders[c]);
+                                outRowCount++;
+                            }
+                        }
+                        else
+                        {
+                            nextRows!.AddRange(ExtractStageObjects(elems, stage.SourceExpression, state.ColumnJsKeys));
+                        }
+                    }
+
+                    if (!isLast) currentRows = nextRows!;
+                }
+            }
+        }
+
+        if (outRowCount == 0)
+            return null;
+
+        var outArrays = new IArrowArray[colCount];
+        try
+        {
+            for (int c = 0; c < colCount; c++)
+                outArrays[c] = ArrowTypeMapper.BuildArray(builders[c]);
+
+            return new RecordBatch(new Schema(outFields, batch.Schema.Metadata), outArrays, outRowCount);
+        }
+        catch
+        {
+            for (int i = 0; i < outArrays.Length; i++)
+                outArrays[i]?.Dispose();
+            throw;
+        }
+    }
+
+    private List<object?[]> ExtractStageObjects(IEnumerable<JsValue> elements, string expression, JsString[] colJsKeys)
+    {
+        var list = new List<object?[]>();
+        foreach (var item in elements)
+        {
+            if (!item.IsObject())
+            {
+                throw new InvalidOperationException(
+                    $"--expand expects {Quote(expression)} to return an array of row objects, "
+                  + $"but an element of the array is {Describe(item)}. Map each element onto a row — "
+                  + "'row.tags.map(t => ({ ...row, tag: t }))' — and declare the column it adds with "
+                  + "--expand-types \"tag:string\".");
+            }
+            var obj = item.AsObject();
+            ReportKeysWithNoColumn(obj, expression);
+            var row = new object?[colJsKeys.Length];
+            for (int c = 0; c < colJsKeys.Length; c++)
+                row[c] = JsValueConversion.JsValueToClr(obj.Get(colJsKeys[c]));
+            list.Add(row);
+        }
+        return list;
     }
 
     /// <summary>
@@ -198,12 +474,15 @@ public class ExpandDataTransformer : IMultiRowTransformer, IRequiresOptions<DtPi
     /// row, so there is nowhere to put it. Say it once per key rather than per row — the run
     /// stays valid, but nothing disappears without a word.
     /// </summary>
-    private void ReportKeysWithNoColumn(Jint.Native.Object.ObjectInstance obj, string expression)
+    private void ReportKeysWithNoColumn(ObjectInstance obj, string expression)
     {
+        if (obj is IRowObjectView { HasOverrides: false })
+            return;
+
         foreach (var property in obj.GetOwnProperties())
         {
             var key = property.Key.ToString();
-            if (Array.Exists(_columnNames!, c => c.Equals(key, StringComparison.OrdinalIgnoreCase))) continue;
+            if (_knownColumnSet!.Contains(key)) continue;
             if (!_reportedUnknownKeys.Add(key)) continue;
 
             Console.Error.WriteLine(
@@ -212,15 +491,6 @@ public class ExpandDataTransformer : IMultiRowTransformer, IRequiresOptions<DtPi
         }
     }
 
-    /// <summary>
-    /// The elements of a result, when it has any.
-    /// </summary>
-    /// <remarks>
-    /// A nested JSON array reaches the engine as a wrapped CLR collection: it carries
-    /// <c>length</c> and answers <c>.map</c>, but <c>Array.isArray</c> is false and so is
-    /// <see cref="JsValue.IsArray"/>. Judging the result on that alone reported <c>row.tags</c> as
-    /// "not an array", which is not what a reader sees in the file.
-    /// </remarks>
     private static bool TryGetElements(Engine engine, JsValue value, out IEnumerable<JsValue> elements)
     {
         if (value.IsArray())
@@ -235,47 +505,64 @@ public class ExpandDataTransformer : IMultiRowTransformer, IRequiresOptions<DtPi
             return true;
         }
 
-        elements = Array.Empty<JsValue>();
+        elements = System.Array.Empty<JsValue>();
         return false;
     }
 
-    /// <summary>Names a JavaScript value by shape, for a message about a result of the wrong one.</summary>
     private static string Describe(JsValue value) => value.Type switch
     {
-        Jint.Runtime.Types.String => "a string",
-        Jint.Runtime.Types.Number => "a number",
-        Jint.Runtime.Types.Boolean => "a boolean",
-        Jint.Runtime.Types.Undefined => "undefined",
-        Jint.Runtime.Types.Null => "null",
-        Jint.Runtime.Types.Object => "a single object",
+        JsTypes.String => "a string",
+        JsTypes.Number => "a number",
+        JsTypes.Boolean => "a boolean",
+        JsTypes.Undefined => "undefined",
+        JsTypes.Null => "null",
+        JsTypes.Object => "a single object",
         _ => "a value of another kind"
     };
 
-    /// <summary>The user's expression, trimmed to stay readable inside a one-line message.</summary>
     private static string Quote(string expression)
         => expression.Length <= 60 ? $"'{expression}'" : $"'{expression[..57]}...'";
 
-    /// <summary>The hint a declaration carries, defaulting to string when it names only a column.</summary>
     private static Type ParseDeclaredType(string column, string? hint)
         => string.IsNullOrWhiteSpace(hint)
             ? typeof(string)
             : TypeHelper.RequireTypeHint("--expand-types", column, hint);
 
-    private void EnsureFunctionsCompiled(Engine engine)
-    {
-        if (_compiledExpands.Count > 0)
+    private CompiledExpandState GetOrCreateState(Engine engine)
+        => _engineCache.GetValue(engine, e =>
         {
-            var firstFunc = _compiledExpands[0].ToString();
-            var val = engine.GetValue(firstFunc);
-            if (val.IsUndefined())
-            {
-                for (int i = 0; i < _compiledExpands.Count; i++)
-                {
-                    var script = _wrappedScripts[i];
-                    var name = _compiledExpands[i].ToString();
-                    engine.SetValue(name, engine.Evaluate($"({script})"));
-                }
-            }
-        }
+            var functions = new JsValue[_stages.Length];
+            for (int i = 0; i < _stages.Length; i++)
+                functions[i] = e.Evaluate($"({_stages[i].WrappedScript})");
+            return CreateState(e, functions);
+        });
+
+    private CompiledExpandState CreateState(Engine engine, JsValue[] functions)
+    {
+        var refErr = JsValueConversion.GetReferenceErrorConstructor(engine);
+        var rowView = new JsRowObjectInstance(engine, _columnNames!, _inputColumnCount, refErr);
+        var intermediateView = new JsRowObjectInstance(engine, _columnNames!, _inputColumnCount, refErr);
+        var arrowRowView = new ArrowRowObjectInstance(engine, _columnNames!, _inputColumnCount, refErr);
+        var keys = _columnNames!.Select(JsString.Create).ToArray();
+        return new CompiledExpandState(functions, rowView, intermediateView, arrowRowView, keys);
     }
+
+    private sealed class CompiledExpandState(
+        JsValue[] functions,
+        JsRowObjectInstance rowView,
+        JsRowObjectInstance intermediateRowView,
+        ArrowRowObjectInstance arrowRowView,
+        JsString[] columnJsKeys)
+    {
+        public JsValue[] Functions { get; } = functions;
+        public JsRowObjectInstance RowView { get; } = rowView;
+        public JsRowObjectInstance IntermediateRowView { get; } = intermediateRowView;
+        public ArrowRowObjectInstance ArrowRowView { get; } = arrowRowView;
+        public JsValue[] SingleArg { get; } = [rowView];
+        public JsValue[] IntermediateArg { get; } = [intermediateRowView];
+        public JsValue[] ArrowArg { get; } = [arrowRowView];
+        public JsString[] ColumnJsKeys { get; } = columnJsKeys;
+    }
+
+    private sealed record ExpandStage(int Index, string SourceExpression, string WrappedScript);
 }

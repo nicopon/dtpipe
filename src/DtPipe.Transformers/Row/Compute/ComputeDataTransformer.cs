@@ -1,4 +1,9 @@
+using System.Collections.Concurrent;
+using System.Globalization;
+using System.Runtime.CompilerServices;
+using Apache.Arrow;
 using DtPipe.Core.Abstractions;
+using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using DtPipe.Transformers.Services;
@@ -9,23 +14,27 @@ using Jint.Runtime;
 namespace DtPipe.Transformers.Row.Compute;
 
 /// <summary>
-/// Transforms data rows using Javascript scripts via Jint.
+/// Transforms data rows and Arrow batches using Jint.
 /// </summary>
-public sealed class ComputeDataTransformer : IDataTransformer, IRequiresOptions<DtPipe.Transformers.Row.Compute.ComputeOptions>
+public sealed class ComputeDataTransformer : BaseColumnarTransformer, IRequiresOptions<DtPipe.Transformers.Row.Compute.ComputeOptions>
 {
+    private const int ParallelBatchThreshold = 1024;
+
     private readonly ComputeOptions _options;
     private readonly IJsEngineProvider _jsEngineProvider;
-    private readonly List<string> _initializationScripts = new();
     private readonly Dictionary<string, string> _mappings;
     private readonly Dictionary<string, Type> _typeHints;
-
-    // State initialized in InitializeAsync
-    private Dictionary<string, int>? _columnNameToIndex;
-    private string[]? _columnNames;
-    private ScriptColumnProcessor[]? _processors;
-    private int _inputColumnCount; // number of columns in the original input schema (before new virtual columns)
-
     private readonly bool _skipNull;
+
+    private readonly ConditionalWeakTable<Engine, CompiledComputeState> _engineCache = new();
+
+    private string[]? _columnNames;
+    private IReadOnlyList<PipeColumnInfo>? _outputColumns;
+    private ScriptColumnProcessor[]? _processors;
+    private HashSet<int>? _writtenColumnIndices;
+    private int _inputColumnCount;
+
+    public override bool CanProcessColumnar => true;
 
     public ComputeDataTransformer(ComputeOptions options, IJsEngineProvider jsEngineProvider)
     {
@@ -58,32 +67,37 @@ public sealed class ComputeDataTransformer : IDataTransformer, IRequiresOptions<
 
     public bool HasScript => _mappings.Count > 0;
 
-    public ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(IReadOnlyList<PipeColumnInfo> columns, CancellationToken ct = default)
+    public override async ValueTask<IReadOnlyList<PipeColumnInfo>> InitializeAsync(
+        IReadOnlyList<PipeColumnInfo> columns,
+        CancellationToken ct = default)
     {
+        await base.InitializeAsync(columns, ct);
+
         if (!HasScript)
         {
-            return new ValueTask<IReadOnlyList<PipeColumnInfo>>(columns);
+            _outputColumns = columns;
+            return columns;
         }
 
         _inputColumnCount = columns.Count;
 
-        // Build mutable name→index mapping (we may extend it for new virtual columns)
         var nameToIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         for (var i = 0; i < columns.Count; i++)
             nameToIndex[columns[i].Name] = i;
 
         var outputColumns = new List<PipeColumnInfo>(columns);
-        var processors = new List<ScriptColumnProcessor>();
+        var processors = new ScriptColumnProcessor[_mappings.Count];
+        var writtenIndices = new HashSet<int>();
         var engine = _jsEngineProvider.GetEngine();
+        var compiledInitialFunctions = new JsValue[_mappings.Count];
+        int procIdx = 0;
 
         foreach (var (colName, script) in _mappings)
         {
-            // If column doesn't exist yet, create it as a new virtual column
             if (!nameToIndex.TryGetValue(colName, out var colIndex))
             {
                 colIndex = outputColumns.Count;
                 nameToIndex[colName] = colIndex;
-                // Default to string; may be overridden by _typeHints below
                 outputColumns.Add(new PipeColumnInfo(colName, typeof(string), IsNullable: true));
             }
             else
@@ -94,38 +108,220 @@ public sealed class ComputeDataTransformer : IDataTransformer, IRequiresOptions<
                 outputColumns[colIndex] = outputColumns[colIndex] with { Precision = null, Scale = null };
             }
 
+            writtenIndices.Add(colIndex);
             var (function, wrappedScript) = CompileBody(engine, script);
-            var uniqueFunctionName = $"proc_{colIndex}_{Guid.NewGuid():N}";
-            engine.SetValue(uniqueFunctionName, function);
-
-            processors.Add(new ScriptColumnProcessor(colIndex, uniqueFunctionName, wrappedScript));
+            compiledInitialFunctions[procIdx] = function;
+            bool isPure = JsAstAnalyzer.IsPureForParallel(wrappedScript);
+            processors[procIdx] = new ScriptColumnProcessor(procIdx, colIndex, wrappedScript, isPure);
+            procIdx++;
         }
 
-        // Apply type hints to existing or new columns
-        foreach (KeyValuePair<string, Type> entry in _typeHints)
+        foreach (var entry in _typeHints)
         {
-            var col = entry.Key;
-            var type = entry.Value;
-            if (nameToIndex.TryGetValue(col, out var idx))
-                outputColumns[idx] = outputColumns[idx] with { ClrType = type };
+            if (nameToIndex.TryGetValue(entry.Key, out var idx))
+                outputColumns[idx] = outputColumns[idx] with { ClrType = entry.Value };
         }
 
-        _columnNameToIndex = nameToIndex;
         _columnNames = outputColumns.Select(c => c.Name).ToArray();
-        _processors = processors.ToArray();
+        _outputColumns = outputColumns;
+        _processors = processors;
+        _writtenColumnIndices = writtenIndices;
 
-        return new ValueTask<IReadOnlyList<PipeColumnInfo>>(outputColumns);
+        // Seed the calling thread's engine cache with the already-compiled functions so the first
+        // row pays no second Evaluate pass.
+        _engineCache.AddOrUpdate(engine, CreateState(engine, compiledInitialFunctions));
+
+        return outputColumns;
     }
 
-    public object?[]? Transform(IReadOnlyList<object?> row)
+    protected override ValueTask<RecordBatch?> TransformBatchSafeAsync(RecordBatch batch, CancellationToken ct = default)
+    {
+        if (!HasScript || _processors == null || _processors.Length == 0 || _outputColumns == null || _columnNames == null)
+            return new ValueTask<RecordBatch?>(batch);
+
+        int outCount = _outputColumns.Count;
+        var outFields = new Field[outCount];
+        var outArrays = new IArrowArray[outCount];
+
+        try
+        {
+            for (int i = 0; i < _inputColumnCount; i++)
+            {
+                if (_writtenColumnIndices!.Contains(i))
+                {
+                    var colInfo = _outputColumns[i];
+                    outFields[i] = ArrowTypeMapper.GetField(colInfo.Name, colInfo.ClrType, isNullable: true, colInfo.Precision, colInfo.Scale);
+                }
+                else
+                {
+                    outFields[i] = batch.Schema.GetFieldByIndex(i);
+                    outArrays[i] = ArrowOwnership.RetainArray(batch.Column(i));
+                }
+            }
+
+            for (int i = _inputColumnCount; i < outCount; i++)
+            {
+                var colInfo = _outputColumns[i];
+                outFields[i] = ArrowTypeMapper.GetField(colInfo.Name, colInfo.ClrType, isNullable: true, colInfo.Precision, colInfo.Scale);
+            }
+
+            if (_jsEngineProvider is JsEngineProvider
+                && batch.Length >= ParallelBatchThreshold
+                && _processors.All(p => p.IsPure))
+            {
+                ExecuteJintProcessorsParallel(batch, _processors, outFields, outArrays, ct);
+            }
+            else
+            {
+                ExecuteJintProcessorsSequential(batch, _processors, outFields, outArrays);
+            }
+
+            return new ValueTask<RecordBatch?>(new RecordBatch(new Schema(outFields, batch.Schema.Metadata), outArrays, batch.Length));
+        }
+        catch
+        {
+            for (int i = 0; i < outArrays.Length; i++)
+                outArrays[i]?.Dispose();
+            throw;
+        }
+    }
+
+    private void ExecuteJintProcessorsSequential(
+        RecordBatch batch,
+        ScriptColumnProcessor[] processors,
+        Field[] outFields,
+        IArrowArray[] outArrays)
+    {
+        var engine = _jsEngineProvider.GetEngine();
+        var state = GetOrCreateState(engine);
+        state.ArrowRowView.BindBatch(batch);
+
+        int count = processors.Length;
+        var builders = new IArrowArrayBuilder[count];
+        var appenders = new Action<object?>[count];
+        var skipInputCols = new IArrowArray?[count];
+
+        for (int p = 0; p < count; p++)
+        {
+            var proc = processors[p];
+            builders[p] = ArrowTypeMapper.CreateBuilder(outFields[proc.ColumnIndex].DataType);
+            appenders[p] = ArrowTypeMapper.ResolveAppender(builders[p]);
+            if (_skipNull && proc.ColumnIndex < _inputColumnCount)
+            {
+                var col = batch.Column(proc.ColumnIndex);
+                if (col.NullCount > 0) skipInputCols[p] = col;
+            }
+        }
+
+        for (int rowIdx = 0; rowIdx < batch.Length; rowIdx++)
+        {
+            state.ArrowRowView.SetRowIndex(rowIdx);
+
+            for (int p = 0; p < count; p++)
+            {
+                var proc = processors[p];
+                if (skipInputCols[p]?.IsNull(rowIdx) == true)
+                {
+                    JsValueConversion.AppendNullFast(builders[p]);
+                    continue;
+                }
+
+                try
+                {
+                    var result = engine.Call(state.Functions[proc.Index], JsValue.Undefined, state.ArrowArg);
+                    ValidateComputeResult(result, _columnNames![proc.ColumnIndex]);
+                    JsValueConversion.AppendJsValueToBuilder(builders[p], result, appenders[p]);
+                }
+                catch (Exception ex)
+                {
+                    throw new InvalidOperationException(
+                        $"Error evaluating compute script for column '{_columnNames![proc.ColumnIndex]}': {ex.Message}", ex);
+                }
+            }
+        }
+
+        for (int p = 0; p < count; p++)
+            outArrays[processors[p].ColumnIndex] = ArrowTypeMapper.BuildArray(builders[p]);
+    }
+
+    private void ExecuteJintProcessorsParallel(
+        RecordBatch batch,
+        ScriptColumnProcessor[] processors,
+        Field[] outFields,
+        IArrowArray[] outArrays,
+        CancellationToken ct)
+    {
+        int len = batch.Length;
+        int procCount = processors.Length;
+        var targets = new ParallelColumnBuffer[procCount];
+
+        for (int p = 0; p < procCount; p++)
+        {
+            var proc = processors[p];
+            var clrType = _outputColumns![proc.ColumnIndex].ClrType;
+            IArrowArray? skipCol = _skipNull && proc.ColumnIndex < _inputColumnCount && batch.Column(proc.ColumnIndex).NullCount > 0
+                ? batch.Column(proc.ColumnIndex)
+                : null;
+            targets[p] = new ParallelColumnBuffer(proc, clrType, skipCol, len);
+        }
+
+        try
+        {
+            Parallel.ForEach(
+                Partitioner.Create(0, len),
+                new ParallelOptions { CancellationToken = ct },
+                range =>
+                {
+                    var engine = _jsEngineProvider.GetEngine();
+                    var state = GetOrCreateState(engine);
+                    state.ArrowRowView.BindBatch(batch);
+
+                    for (int rowIdx = range.Item1; rowIdx < range.Item2; rowIdx++)
+                    {
+                        state.ArrowRowView.SetRowIndex(rowIdx);
+
+                        for (int p = 0; p < procCount; p++)
+                        {
+                            var buf = targets[p];
+                            var proc = buf.Processor;
+                            if (buf.SkipCol?.IsNull(rowIdx) == true)
+                            {
+                                buf.SetNull(rowIdx);
+                                continue;
+                            }
+
+                            try
+                            {
+                                var result = engine.Call(state.Functions[proc.Index], JsValue.Undefined, state.ArrowArg);
+                                ValidateComputeResult(result, _columnNames![proc.ColumnIndex]);
+                                buf.SetValue(rowIdx, result);
+                            }
+                            catch (Exception ex)
+                            {
+                                throw new InvalidOperationException(
+                                    $"Error evaluating compute script for column '{_columnNames![proc.ColumnIndex]}': {ex.Message}", ex);
+                            }
+                        }
+                    }
+                });
+        }
+        catch (AggregateException aex) when (aex.InnerExceptions.Count > 0)
+        {
+            throw aex.InnerExceptions[0];
+        }
+
+        for (int p = 0; p < procCount; p++)
+            outArrays[targets[p].Processor.ColumnIndex] = targets[p].BuildArrowArray(outFields[targets[p].Processor.ColumnIndex]);
+    }
+
+    public override object?[]? Transform(IReadOnlyList<object?> row)
     {
         if (_processors == null || _processors.Length == 0 || _columnNames == null)
             return row as object?[] ?? row.ToArray();
 
         var engine = _jsEngineProvider.GetEngine();
-        EnsureFunctionsCompiled(engine);
+        var state = GetOrCreateState(engine);
 
-        // Expand the row if new virtual columns were added during InitializeAsync
         var outputLength = _columnNames.Length;
         object?[] rowArray;
 
@@ -139,18 +335,7 @@ public sealed class ComputeDataTransformer : IDataTransformer, IRequiresOptions<
             rowArray = row as object?[] ?? row.ToArray();
         }
 
-        // Build a JS object representing the input row (input columns only)
-        var jsSource = new JsObject(engine);
-        for (int i = 0; i < _inputColumnCount && i < _columnNames.Length; i++)
-        {
-            jsSource.Set(_columnNames[i], JsValue.FromObject(engine, rowArray[i]));
-        }
-
-        // Create Proxy using Jint Engine API for robust schema validation
-        engine.SetValue("__source", jsSource);
-        var jsRow = engine.Evaluate("new Proxy(__source, { get: (target, prop) => { if (typeof prop === 'string' && !(prop in target)) throw new ReferenceError(`Column '${prop}' not found in schema`); return target[prop]; } })");
-
-        engine.SetValue("row", jsRow);
+        state.RowView.SetRow(rowArray);
 
         foreach (var processor in _processors)
         {
@@ -159,29 +344,37 @@ public sealed class ComputeDataTransformer : IDataTransformer, IRequiresOptions<
 
             try
             {
-                var result = engine.Evaluate($"{processor.FunctionName}(row)");
-
-                // null is a value a script may mean; undefined is the absence of one. Writing it as NULL
-                // would drop the data without a trace, so it stops the run and names the column.
-                if (result.IsUndefined())
-                    throw new InvalidOperationException(
-                        "the script returned undefined. Return a value, or null for an empty one: a body with "
-                        + "statements needs an explicit 'return', and a function must be called to give its result.");
-
-                rowArray[processor.ColumnIndex] = result.IsNull() ? null : result.ToObject();
-
-                if (rowArray[processor.ColumnIndex] is double d && (double.IsInfinity(d) || double.IsNaN(d)))
-                {
-                    throw new InvalidOperationException($"Compute script for column '{_columnNames[processor.ColumnIndex]}' resulted in {d} (possible division by zero).");
-                }
+                var result = engine.Call(state.Functions[processor.Index], JsValue.Undefined, state.SingleArg);
+                ValidateComputeResult(result, _columnNames[processor.ColumnIndex]);
+                rowArray[processor.ColumnIndex] = JsValueConversion.JsValueToClr(result);
             }
             catch (Exception ex)
             {
-                throw new InvalidOperationException($"Error evaluating compute script for column '{_columnNames[processor.ColumnIndex]}': {ex.Message}", ex);
+                throw new InvalidOperationException(
+                    $"Error evaluating compute script for column '{_columnNames[processor.ColumnIndex]}': {ex.Message}", ex);
             }
         }
 
         return rowArray;
+    }
+
+    private static void ValidateComputeResult(JsValue result, string columnName)
+    {
+        // null is a value a script may mean; undefined is the absence of one. Writing it as NULL
+        // would drop the data without a trace, so it stops the run and names the column.
+        if (result.IsUndefined())
+        {
+            throw new InvalidOperationException(
+                "the script returned undefined. Return a value, or null for an empty one: a body with "
+                + "statements needs an explicit 'return', and a function must be called to give its result.");
+        }
+
+        if (result.IsNumber())
+        {
+            double d = result.AsNumber();
+            if (double.IsInfinity(d) || double.IsNaN(d))
+                throw new InvalidOperationException($"Compute script for column '{columnName}' resulted in {d} (possible division by zero).");
+        }
     }
 
     /// <summary>
@@ -212,24 +405,140 @@ public sealed class ComputeDataTransformer : IDataTransformer, IRequiresOptions<
         return (engine.Evaluate($"({asStatements})"), asStatements);
     }
 
-    // Not IDisposable: the engine is the caller's, passed to each method.
-
-    private void EnsureFunctionsCompiled(Engine engine)
-    {
-        if (_processors != null && _processors.Length > 0)
+    private CompiledComputeState GetOrCreateState(Engine engine)
+        => _engineCache.GetValue(engine, e =>
         {
-            var firstFunc = _processors[0].FunctionName;
-            var val = engine.GetValue(firstFunc);
-            if (val.IsUndefined())
+            var functions = new JsValue[_processors!.Length];
+            for (int i = 0; i < _processors.Length; i++)
+                functions[i] = e.Evaluate($"({_processors[i].WrappedScript})");
+            return CreateState(e, functions);
+        });
+
+    private CompiledComputeState CreateState(Engine engine, JsValue[] functions)
+    {
+        var refErr = JsValueConversion.GetReferenceErrorConstructor(engine);
+        var rowView = new JsRowObjectInstance(engine, _columnNames!, _inputColumnCount, refErr);
+        var arrowRowView = new ArrowRowObjectInstance(engine, _columnNames!, _inputColumnCount, refErr);
+        return new CompiledComputeState(functions, rowView, arrowRowView);
+    }
+
+    private sealed class CompiledComputeState(JsValue[] functions, JsRowObjectInstance rowView, ArrowRowObjectInstance arrowRowView)
+    {
+        public JsValue[] Functions { get; } = functions;
+        public JsRowObjectInstance RowView { get; } = rowView;
+        public ArrowRowObjectInstance ArrowRowView { get; } = arrowRowView;
+        public JsValue[] SingleArg { get; } = [rowView];
+        public JsValue[] ArrowArg { get; } = [arrowRowView];
+    }
+
+    private sealed class ParallelColumnBuffer
+    {
+        public ScriptColumnProcessor Processor { get; }
+        public IArrowArray? SkipCol { get; }
+        private readonly double[]? _doubles;
+        private readonly bool[]? _doubleNulls;
+        private readonly string?[]? _strings;
+        private readonly object?[]? _objects;
+        private volatile bool _hasAnyNull;
+
+        public ParallelColumnBuffer(ScriptColumnProcessor processor, Type clrType, IArrowArray? skipCol, int length)
+        {
+            Processor = processor;
+            SkipCol = skipCol;
+
+            if (clrType == typeof(double))
             {
-                foreach (var p in _processors)
-                {
-                    // Re-register using SetValue/Evaluate
-                    engine.SetValue(p.FunctionName, engine.Evaluate($"({p.WrappedScript})"));
-                }
+                _doubles = new double[length];
+                _doubleNulls = new bool[length];
             }
+            else if (clrType == typeof(string))
+            {
+                _strings = new string?[length];
+            }
+            else
+            {
+                _objects = new object?[length];
+            }
+        }
+
+        public void SetNull(int idx)
+        {
+            if (_doubleNulls != null)
+            {
+                _doubleNulls[idx] = true;
+                _hasAnyNull = true;
+            }
+            else if (_strings != null) _strings[idx] = null;
+            else if (_objects != null) _objects[idx] = null;
+        }
+
+        public void SetValue(int idx, JsValue result)
+        {
+            if (_doubles != null)
+            {
+                if (result.IsNull())
+                {
+                    _doubleNulls![idx] = true;
+                    _hasAnyNull = true;
+                    return;
+                }
+                _doubles[idx] = result.IsNumber()
+                    ? result.AsNumber()
+                    : Convert.ToDouble(JsValueConversion.JsValueToClr(result), CultureInfo.InvariantCulture);
+                return;
+            }
+
+            if (_strings != null)
+            {
+                _strings[idx] = result.IsNull() ? null : JsValueConversion.JsValueToString(result);
+                return;
+            }
+
+            _objects![idx] = JsValueConversion.JsValueToClr(result);
+        }
+
+        public IArrowArray BuildArrowArray(Field field)
+        {
+            if (_doubles != null)
+            {
+                if (!_hasAnyNull)
+                {
+                    var buf = new ArrowBuffer.Builder<double>(_doubles.Length);
+                    buf.Append(_doubles);
+                    return new DoubleArray(buf.Build(), ArrowBuffer.Empty, _doubles.Length, 0, 0);
+                }
+
+                var dBuilder = new DoubleArray.Builder();
+                for (int i = 0; i < _doubles.Length; i++)
+                {
+                    if (_doubleNulls![i]) dBuilder.AppendNull();
+                    else dBuilder.Append(_doubles[i]);
+                }
+                return dBuilder.Build();
+            }
+
+            if (_strings != null)
+            {
+                var sBuilder = new StringArray.Builder();
+                for (int i = 0; i < _strings.Length; i++)
+                {
+                    if (_strings[i] is null) sBuilder.AppendNull();
+                    else sBuilder.Append(_strings[i]);
+                }
+                return sBuilder.Build();
+            }
+
+            var builder = ArrowTypeMapper.CreateBuilder(field.DataType);
+            var appender = ArrowTypeMapper.ResolveAppender(builder);
+            foreach (var v in _objects!)
+                appender(v);
+            return ArrowTypeMapper.BuildArray(builder);
         }
     }
 
-    private record struct ScriptColumnProcessor(int ColumnIndex, string FunctionName, string WrappedScript);
+    private sealed record ScriptColumnProcessor(
+        int Index,
+        int ColumnIndex,
+        string WrappedScript,
+        bool IsPure);
 }

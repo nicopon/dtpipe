@@ -9,9 +9,8 @@ using Xunit;
 namespace DtPipe.Tests.Unit.Transformers;
 
 /// <summary>
-/// The filter carries a vectorised fast path beside the Jint one. It is an optimisation, so the
-/// property these tests hold is that the two agree — a filter must not return a different set of
-/// rows because the engine took a different route to it.
+/// The filter evaluates JavaScript predicates in both columnar Arrow mode and row mode.
+/// The two execution paths must always agree on which rows are kept or rejected.
 /// </summary>
 public class FilterDataTransformerTests : IDisposable
 {
@@ -70,9 +69,9 @@ public class FilterDataTransformerTests : IDisposable
     {
         var transformer = Build(expression);
         await transformer.InitializeAsync(IntColumn("Value"));
-        transformer.CanProcessColumnar.Should().BeTrue("a numeric column against a numeric literal is the fast path");
+        transformer.CanProcessColumnar.Should().BeTrue("all filter predicates run in columnar mode");
 
-        var result = await transformer.TransformBatchAsync(IntBatch("Value", value));
+        using var result = await transformer.TransformBatchAsync(IntBatch("Value", value));
 
         (result is not null && result.Length == 1).Should().Be(kept);
     }
@@ -84,7 +83,7 @@ public class FilterDataTransformerTests : IDisposable
 
         var columnar = Build("row.Value >= 500");
         await columnar.InitializeAsync(IntColumn("Value"));
-        var batch = await columnar.TransformBatchAsync(IntBatch("Value", values));
+        using var batch = await columnar.TransformBatchAsync(IntBatch("Value", values));
         var fromColumnar = Enumerable.Range(0, batch!.Length)
             .Select(i => ((Int32Array)batch.Column(0)).GetValue(i)!.Value).ToArray();
 
@@ -96,12 +95,12 @@ public class FilterDataTransformerTests : IDisposable
         fromColumnar.Should().Equal(500, 501, 99_999);
     }
 
-    // ── Eligibility: the fast path may decline, never disagree ─────────────────
+    // ── Columnar Jint coverage & agreement with row mode ───────────────────────
 
     [Theory]
-    [InlineData("row.Name == 'Ada'")]          // text column, quoted literal, equality
+    [InlineData("row.Name == 'Ada'")]
     [InlineData("row.Name != 'Ada'")]
-    public async Task TextEquality_TakesTheFastPath(string expression)
+    public async Task TextEquality_RunsInColumnarMode(string expression)
     {
         var transformer = Build(expression);
         await transformer.InitializeAsync(TextColumn("Name"));
@@ -109,14 +108,14 @@ public class FilterDataTransformerTests : IDisposable
     }
 
     [Theory]
-    [InlineData("row.Name > 'Ada'")]           // quoted literal on a relational operator
-    [InlineData("row.Score > 500")]            // text column against a number
-    [InlineData("row.Value == null")]          // null literal
-    [InlineData("row.Value == true")]          // boolean literal
-    [InlineData("row.Value == 'a' + 'b'")]     // starts and ends with a quote, but is an expression
-    [InlineData("row.Name.length > 0")]        // not a bare column reference
-    [InlineData("Value > 500")]                // the undocumented spelling is no longer a trigger
-    public async Task WhatCannotBeProvenEquivalent_FallsBackToJavaScript(string expression)
+    [InlineData("row.Name > 'Ada'")]
+    [InlineData("row.Score > 500")]
+    [InlineData("row.Value == null")]
+    [InlineData("row.Value == true")]
+    [InlineData("row.Value == 'a' + 'b'")]
+    [InlineData("row.Name.length > 0")]
+    [InlineData("Value > 500")]
+    public async Task ComplexAndAmbiguousPredicates_RunInColumnarJavaScriptMode(string expression)
     {
         var transformer = Build(expression);
         await transformer.InitializeAsync(
@@ -124,7 +123,63 @@ public class FilterDataTransformerTests : IDisposable
             : expression.Contains("Score") ? TextColumn("Score")
             : IntColumn("Value"));
 
-        transformer.CanProcessColumnar.Should().BeFalse();
+        transformer.CanProcessColumnar.Should().BeTrue("all filter predicates run in columnar mode");
+    }
+
+    [Fact]
+    public async Task ColumnarFallback_TextComparisonAndNullPropertyAccess_MatchRowMode()
+    {
+        var textFilter = Build("row.Score > 500");
+        await textFilter.InitializeAsync(TextColumn("Score"));
+
+        var schema = new Schema.Builder().Field(f => f.Name("Score").DataType(StringType.Default)).Build();
+        var sb = new StringArray.Builder();
+        sb.Append("96575");
+        sb.Append("12");
+        using var inBatch = new RecordBatch(schema, new IArrowArray[] { sb.Build() }, 2);
+        using var outBatch = await textFilter.TransformBatchAsync(inBatch);
+        outBatch.Should().NotBeNull();
+        outBatch!.Length.Should().Be(1);
+        ((StringArray)outBatch.Column(0)).GetString(0).Should().Be("96575");
+        (textFilter.Transform(["96575"]) is not null).Should().BeTrue();
+        (textFilter.Transform(["12"]) is not null).Should().BeFalse();
+
+        var nullPropFilter = Build("row.Name.length > 3");
+        await nullPropFilter.InitializeAsync(TextColumn("Name"));
+
+        var nameSchema = new Schema.Builder().Field(f => f.Name("Name").DataType(StringType.Default)).Build();
+        var nb = new StringArray.Builder();
+        nb.AppendNull();
+        nb.Append("Grace");
+        using var nameBatch = new RecordBatch(nameSchema, new IArrowArray[] { nb.Build() }, 2);
+        using var nameOut = await nullPropFilter.TransformBatchAsync(nameBatch);
+        nameOut.Should().NotBeNull();
+        nameOut!.Length.Should().Be(1);
+        ((StringArray)nameOut.Column(0)).GetString(0).Should().Be("Grace");
+    }
+
+    [Theory]
+    [InlineData("row.Value > 10 && row.Value <= 50")]
+    [InlineData("row.Value == 5 || row.Value === 20")]
+    [InlineData("!(row.Value > 15)")]
+    [InlineData("row.Value % 2 == 0")]
+    [InlineData("row.Value !== 15")]
+    public async Task CompoundAndModuloFilters_ColumnarAgreesWithRowMode(string expression)
+    {
+        var values = new[] { 4, 5, 10, 15, 20, 50, 51 };
+
+        var columnar = Build(expression);
+        await columnar.InitializeAsync(IntColumn("Value"));
+        using var outBatch = await columnar.TransformBatchAsync(IntBatch("Value", values));
+        var colVals = outBatch is null
+            ? System.Array.Empty<int>()
+            : Enumerable.Range(0, outBatch.Length).Select(i => ((Int32Array)outBatch.Column(0)).GetValue(i)!.Value).ToArray();
+
+        var rowMode = Build(expression);
+        await rowMode.InitializeAsync(IntColumn("Value"));
+        var rowVals = values.Where(v => rowMode.Transform(new object?[] { v }) is not null).ToArray();
+
+        colVals.Should().Equal(rowVals);
     }
 
     // ── A missing column is an error, not an empty result ──────────────────────

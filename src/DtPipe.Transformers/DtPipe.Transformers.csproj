@@ -22,4 +22,9 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="DtPipe.Tests" />
+    <InternalsVisibleTo Include="DtPipe.Benchmarks" />
+  </ItemGroup>
+
 </Project>
