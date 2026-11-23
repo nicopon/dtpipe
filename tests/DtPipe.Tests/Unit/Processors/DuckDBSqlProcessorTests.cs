@@ -122,6 +122,85 @@ public class DuckDBSqlProcessorTests
     }
 
     /// <summary>
+    /// Only the --from source streams: a join with a --ref builds its hash table on the --ref, so rows come out
+    /// while the main is still producing, whichever side of the join the query names it on. A hash table built
+    /// on the main holds the whole stream and gives no row before its end.
+    /// </summary>
+    [Theory]
+    [InlineData("SELECT m.k, r.v FROM main m JOIN ref r ON m.k = r.k")]
+    [InlineData("SELECT m.k, r.v FROM ref r JOIN main m ON m.k = r.k")]
+    public async Task ReadRecordBatches_MainJoinedWithRef_StreamsBeforeMainEnds(string query)
+    {
+        var mainSchema = new Schema([new Field("k", Int64Type.Default, nullable: false)], null);
+        var refSchema = new Schema(
+            [new Field("k", Int64Type.Default, nullable: false), new Field("v", StringType.Default, nullable: false)], null);
+
+        var refKeys = new Int64Array.Builder();
+        var refValues = new StringArray.Builder();
+        for (var i = 0; i < 1000; i++)
+        {
+            refKeys.Append(i);
+            refValues.Append($"v{i}");
+        }
+        var channelRef = Channel.CreateUnbounded<RecordBatch>();
+        channelRef.Writer.TryWrite(new RecordBatch(refSchema, [refKeys.Build(), refValues.Build()], 1000));
+        channelRef.Writer.Complete();
+
+        // The main produces until the test has its answer: a source that has not ended while the query runs.
+        var channelMain = Channel.CreateUnbounded<RecordBatch>();
+        using var stop = new CancellationTokenSource();
+        var producer = Task.Run(async () =>
+        {
+            try
+            {
+                while (!stop.IsCancellationRequested)
+                {
+                    var keys = new Int64Array.Builder();
+                    for (var i = 0; i < 100; i++) keys.Append(i);
+                    await channelMain.Writer.WriteAsync(new RecordBatch(mainSchema, [keys.Build()], 100));
+                    await Task.Delay(10, stop.Token);
+                }
+            }
+            catch (OperationCanceledException) { }
+            finally { channelMain.Writer.Complete(); }
+        });
+
+        var mock = new Mock<IMemoryChannelRegistry>();
+        mock.Setup(r => r.WaitForArrowChannelSchemaAsync("main", It.IsAny<CancellationToken>())).ReturnsAsync(mainSchema);
+        mock.Setup(r => r.GetArrowChannel("main")).Returns((channelMain, mainSchema));
+        mock.Setup(r => r.WaitForArrowChannelSchemaAsync("ref", It.IsAny<CancellationToken>())).ReturnsAsync(refSchema);
+        mock.Setup(r => r.GetArrowChannel("ref")).Returns((channelRef, refSchema));
+
+        var processor = new DuckDBSqlProcessor(
+            mock.Object, query, "main", "main",
+            refAliases: ["ref"], refChannelAliases: ["ref"],
+            NullLogger<DuckDBSqlProcessor>.Instance);
+        try
+        {
+            await processor.OpenAsync();
+            await using var batches = processor.ReadRecordBatchesAsync().GetAsyncEnumerator();
+            var first = batches.MoveNextAsync().AsTask();
+            var streamed = await Task.WhenAny(first, Task.Delay(TimeSpan.FromSeconds(15))) == first;
+
+            stop.Cancel();
+            await producer;
+            if (await first)
+            {
+                batches.Current.Dispose();
+                while (await batches.MoveNextAsync())
+                    batches.Current.Dispose();
+            }
+
+            Assert.True(streamed, "The join gave no row while its --from source was producing: its hash table is built on the stream.");
+        }
+        finally
+        {
+            stop.Cancel();
+            await processor.DisposeAsync();
+        }
+    }
+
+    /// <summary>
     /// The --ref sources are drained together and registered one after the other: a registration writes the
     /// maps of the sources and uses the one connection, neither of which takes two threads. The channels end
     /// at the same instant while OpenAsync waits on them, which is when registrations would overlap and one

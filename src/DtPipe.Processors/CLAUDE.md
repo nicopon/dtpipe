@@ -36,6 +36,11 @@ post-prepare rebinds (e.g. `read_parquet`).
 `[CI: DuckDBSqlProcessorTests — RefScannedTwice, RefJoinedInARecursivePart, MainScannedTwice,
 MainScannedInRecursiveCte, ScanReadingNoColumn]`
 
+**The `--from` stream declares a cardinality far above any `--ref`, never none.** A `--ref` declares its
+exact row count; a stream declared without one is estimated at one row, and DuckDB builds every hash join
+on it: the whole stream held in memory and no row out before its end.
+`[CI: DuckDBSqlProcessorTests — MainJoinedWithRef_StreamsBeforeMainEnds]`
+
 **The `--ref` sources are drained together, then registered one after the other.** The drains
 overlap, since the wait on the sources is the cost; registration mutates the connection and `_sources`,
 so two registrations at once race on both. `[CI: DuckDBSqlProcessorTests — RefsEndingTogether]`

@@ -24,6 +24,11 @@ internal sealed unsafe class DuckDbArrowTableSource : IDisposable
     // in duckdb_init_get_column_index for scans that read no columns (e.g. SELECT COUNT(*)).
     private const ulong ColumnIdentifierEmpty = ulong.MaxValue - 1;
 
+    // The --from stream's estimate: far above any --ref, which is held whole in memory. A stream declared
+    // without one is estimated at one row, so DuckDB builds every hash join on it and holds the whole stream
+    // before its first row out.
+    private const ulong StreamCardinalityEstimate = 1UL << 40;
+
     // Keeps exported 1-column RecordBatch slices alive until DuckDB invokes CArrowArray.release.
     private static readonly ConcurrentDictionary<IntPtr, RecordBatch> RetainedExports = new();
     private static IntPtr _exporterRelease;
@@ -262,6 +267,8 @@ internal sealed unsafe class DuckDbArrowTableSource : IDisposable
 
             if (source._isRef)
                 NativeMethods.TableFunction.DuckDBBindSetCardinality(info, source._refTotalRows, isExact: true);
+            else
+                NativeMethods.TableFunction.DuckDBBindSetCardinality(info, StreamCardinalityEstimate, isExact: false);
         }
         catch (Exception ex)
         {
