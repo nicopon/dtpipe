@@ -335,18 +335,25 @@ public sealed class ComputeDataTransformer : BaseColumnarTransformer, IRequiresO
             rowArray = row as object?[] ?? row.ToArray();
         }
 
+        // Every script reads the row as it came in, as the Arrow path does: the view reads rowArray, so the
+        // results are written only once every script has run.
         state.RowView.SetRow(rowArray);
+        var results = state.RowResults;
 
         foreach (var processor in _processors)
         {
+            // A skipped cell is null, so writing null back below leaves it as it came.
             if (_skipNull && processor.ColumnIndex < _inputColumnCount && rowArray[processor.ColumnIndex] is null)
+            {
+                results[processor.Index] = null;
                 continue;
+            }
 
             try
             {
                 var result = engine.Call(state.Functions[processor.Index], JsValue.Undefined, state.SingleArg);
                 ValidateComputeResult(result, _columnNames[processor.ColumnIndex]);
-                rowArray[processor.ColumnIndex] = JsValueConversion.JsValueToClr(result);
+                results[processor.Index] = JsValueConversion.JsValueToClr(result);
             }
             catch (Exception ex)
             {
@@ -354,6 +361,9 @@ public sealed class ComputeDataTransformer : BaseColumnarTransformer, IRequiresO
                     $"Error evaluating compute script for column '{_columnNames[processor.ColumnIndex]}': {ex.Message}", ex);
             }
         }
+
+        foreach (var processor in _processors)
+            rowArray[processor.ColumnIndex] = results[processor.Index];
 
         return rowArray;
     }
@@ -429,6 +439,7 @@ public sealed class ComputeDataTransformer : BaseColumnarTransformer, IRequiresO
         public ArrowRowObjectInstance ArrowRowView { get; } = arrowRowView;
         public JsValue[] SingleArg { get; } = [rowView];
         public JsValue[] ArrowArg { get; } = [arrowRowView];
+        public object?[] RowResults { get; } = new object?[functions.Length];
     }
 
     private sealed class ParallelColumnBuffer

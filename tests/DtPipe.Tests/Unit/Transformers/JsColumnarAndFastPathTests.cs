@@ -207,6 +207,42 @@ public class JsColumnarAndFastPathTests : IDisposable
             seqs.Values[i].Should().Be(i);
     }
 
+    /// <summary>
+    /// A script reads the row as it came in, whatever another script wrote to it: the row path and the
+    /// Arrow path (sequential under 1024 rows, parallel above) give the same columns.
+    /// </summary>
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2048)]
+    public async Task Compute_ScriptReadingAColumnAnotherRewrites_ReadsItAsItCame_OnEveryPath(int n)
+    {
+        var cols = new List<PipeColumnInfo> { new("A", typeof(double), false) };
+        var options = new ComputeOptions { Compute = ["A:row.A * 10", "B:double:row.A + 1"] };
+
+        var rowTransformer = new ComputeDataTransformer(options, _jsProvider);
+        await rowTransformer.InitializeAsync(cols);
+        var columnar = new ComputeDataTransformer(options, _jsProvider);
+        await columnar.InitializeAsync(cols);
+
+        // From 1: at 0, A * 10 + 1 and A + 1 agree and would hide the rewritten value.
+        var values = new DoubleArray.Builder();
+        for (int i = 1; i <= n; i++) values.Append(i);
+        using var inBatch = new RecordBatch(ArrowSchemaFactory.Create(cols), [values.Build()], n);
+        using var outBatch = await columnar.TransformBatchAsync(inBatch);
+        var a = (DoubleArray)outBatch!.Column(0);
+        var b = (DoubleArray)outBatch.Column(1);
+
+        for (int i = 0; i < n; i++)
+        {
+            double input = i + 1;
+            var row = rowTransformer.Transform([input])!;
+            row[0].Should().Be(input * 10);
+            row[1].Should().Be(input + 1);
+            a.GetValue(i).Should().Be(input * 10);
+            b.GetValue(i).Should().Be(input + 1);
+        }
+    }
+
     [Fact]
     public async Task Compute_ColumnarJint_PreservesExactJsSemantics_NullsAndUnicode()
     {
