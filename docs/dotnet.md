@@ -38,14 +38,23 @@ node.AddArrowSource("orders", "Orders of the shop API", OrdersTransform.Schema, 
 node.AddBrick("numbers", BrickKind.Source, "Generated numbers", "input: generate:1000");
 ```
 
-A coordinator sees the service as a data node offering two bricks: `orders`, read from the service's
-own code, and `numbers`, a standard dtpipe source. Each run of a fragment is a `dtpipe` child
-process, taken from the `dtpipe` tool package. A tool package cannot be a `PackageReference`, so it
-is downloaded, and the `PackageDownload` line stays in the service's own project. The machine needs
-the .NET and ASP.NET Core runtimes.
+A coordinator sees the service as a data node offering two source bricks: `orders`, read from the
+service's own code, and `numbers`, a standard dtpipe source. (The sample below adds two CSV sinks.)
+Each run of a fragment is a `dtpipe` child process, taken from the `dtpipe` tool package. A tool
+package cannot be a `PackageReference`, so it is downloaded, and the `PackageDownload` line stays in
+the service's own project. The machine needs the .NET and ASP.NET Core runtimes. Keep the node
+library, the `dtpipe` package and the coordinator on the same release.
 
-A service you can run is in
-[dtpipe-sandbox](https://github.com/nicopon/dtpipe-sandbox) under `src/ArrowSocketSource`.
+A service you can run is in [dtpipe-sandbox](https://github.com/nicopon/dtpipe-sandbox) under
+`src/ArrowSocketSource`. One script starts a coordinator image, a runner and the service, then runs
+both pipelines three times, once after restarting the service, and checks the rows:
+
+```bash
+bash src/ArrowSocketSource/run.sh
+```
+
+It needs the .NET SDK, Docker or Podman, `curl` and `jq`. To start the coordinator and the runner
+by hand instead: [Your first distributed pipeline](guides/distributed-first-pipeline.md).
 
 ## What you write yourself
 

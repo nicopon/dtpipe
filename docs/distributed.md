@@ -11,8 +11,9 @@ them.
 | **Node** | A host next to its own data. It offers **bricks**: reads and writes its owner declared on that data, so the coordinator never holds a connection string |
 | **Runner** | A node with no data. It runs the steps between the bricks: a join, a SQL query, an anonymization |
 
-A node is `dtpipe node`, or any .NET host that calls `AddDtPipeNode`. The coordinator and the runner
-are published as container images.
+A node is `dtpipe node`, or any .NET host that calls `AddDtPipeNode`
+([a service as a node](dotnet.md#a-service-as-a-node)). The coordinator and the runner are
+published as container images.
 
 To try it: [Your first distributed pipeline](guides/distributed-first-pipeline.md). To run it for
 real: [deploy/README.md](../deploy/README.md). Every setting:

@@ -304,6 +304,6 @@ docker compose -f deploy/compose.yaml down -v       # with Docker
 |:---|:---|
 | Every setting of the coordinator and the nodes | [REFERENCE.md](../../REFERENCE.md#distributed-pipeline) |
 | Declare bricks on a real database | [`dtpipe node`](../../REFERENCE.md#a-node-from-the-cli-dtpipe-node) |
-| Make your own .NET service a node | [`AddDtPipeNode`](../../src/DtPipe.PipelineNode.Hosting/CLAUDE.md) |
+| Make your own .NET service a node | [`AddDtPipeNode`, with a runnable sample](../dotnet.md#a-service-as-a-node) |
 | Four data nodes, joins across them, rights and faults | [The distributed lab](../../distributed-lab/README.md) |
 | Run it for real: volumes, databases, TLS, backup | [deploy/README.md](../../deploy/README.md) |
