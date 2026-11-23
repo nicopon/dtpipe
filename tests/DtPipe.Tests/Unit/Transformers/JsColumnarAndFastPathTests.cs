@@ -384,6 +384,56 @@ public class JsColumnarAndFastPathTests : IDisposable
         ((StringArray)jsonOut.Column(1)).GetString(1).Should().Be("y");
     }
 
+    /// <summary>
+    /// The unnest hands a list's values over as they are only into a column of exactly their type: a decimal
+    /// of another scale or a timestamp of another unit than the declared column goes through JavaScript, so
+    /// the batch's schema describes the buffer it carries.
+    /// </summary>
+    [Fact]
+    public async Task Expand_ListOfAnotherWidthThanTheDeclaredColumn_GivesAColumnItsSchemaDescribes()
+    {
+        var decimalType = new Decimal128Type(10, 2);
+        using var decimals = await UnnestOneAsync(
+            decimalType, new Decimal128Array.Builder(decimalType).Append(12.34m).Build(), "decimal");
+        var decimalField = decimals.Schema.GetFieldByIndex(1);
+        var decimalColumn = (Decimal128Array)decimals.Column(1);
+        ((Decimal128Type)decimalColumn.Data.DataType).Scale.Should().Be(((Decimal128Type)decimalField.DataType).Scale);
+        ((Decimal128Type)decimalColumn.Data.DataType).Precision.Should().Be(((Decimal128Type)decimalField.DataType).Precision);
+        decimalColumn.GetValue(0).Should().Be(12.34m);
+
+        var nanoseconds = new TimestampType(TimeUnit.Nanosecond, (string?)null);
+        using var timestamps = await UnnestOneAsync(
+            nanoseconds,
+            new TimestampArray.Builder(nanoseconds).Append(new DateTimeOffset(2024, 1, 2, 3, 4, 5, TimeSpan.Zero)).Build(),
+            "datetime");
+        var timestampField = (TimestampType)timestamps.Schema.GetFieldByIndex(1).DataType;
+        ((TimestampType)timestamps.Column(1).Data.DataType).Unit.Should().Be(timestampField.Unit);
+    }
+
+    // Expands a one-row batch whose "Tags" list holds `values` into a declared column "V".
+    private async Task<RecordBatch> UnnestOneAsync(IArrowType elementType, IArrowArray values, string declared)
+    {
+        var listType = new ListType(new Field("item", elementType, true));
+        var offsets = new ArrowBuffer.Builder<int>().Append(0).Append(values.Length).Build();
+        var list = new ListArray(listType, 1, offsets, values, ArrowBuffer.Empty, 0, 0);
+        using var batch = new RecordBatch(new Schema([new Field("Tags", listType, false)], null), [list], 1);
+
+        var expand = new ExpandDataTransformer(
+            new ExpandOptions
+            {
+                Expand = ["row.Tags.map(t => ({ ...row, V: t }))"],
+                ExpandTypes = new(StringComparer.OrdinalIgnoreCase) { ["V"] = declared }
+            },
+            _jsProvider);
+        await expand.InitializeAsync([new PipeColumnInfo("Tags", typeof(List<object>), false)]);
+        expand.UsesNativeFastPath.Should().BeTrue();
+
+        var result = await expand.TransformBatchAsync(batch);
+        result.Should().NotBeNull();
+        result!.Length.Should().Be(values.Length);
+        return result;
+    }
+
     // ── Window: cross-batch count, key, window-all & mutations ───────────────
 
     [Fact]

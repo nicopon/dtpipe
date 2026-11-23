@@ -229,17 +229,57 @@ public class ExpandDataTransformer : BaseColumnarTransformer, IMultiRowTransform
             outFields[c] = ArrowTypeMapper.GetField(colInfo.Name, colInfo.ClrType, isNullable: true, colInfo.Precision, colInfo.Scale);
         }
 
-        // Structural columnar unnest when the column is a non-null ListArray whose element type
-        // matches the target output field.
+        // Structural columnar unnest when the column is a non-null ListArray whose element field is
+        // exactly the target output field.
         if (_unnestPlan is { } plan
             && batch.Column(plan.ListColumnIndex) is ListArray listArr
             && listArr.NullCount == 0
-            && listArr.Values.Data.DataType.TypeId == outFields[plan.TargetColumnIndex].DataType.TypeId)
+            && MovesAsIs(((ListType)listArr.Data.DataType).ValueField, outFields[plan.TargetColumnIndex]))
         {
             return new ValueTask<RecordBatch?>(ExecuteColumnarUnnest(batch, listArr, plan, outFields));
         }
 
         return new ValueTask<RecordBatch?>(ExecuteColumnarJint(batch, outFields));
+    }
+
+    // The unnest hands the list's values over as they are, so the target field must describe them exactly.
+    // A TypeId alone leaves a decimal's precision and scale, a timestamp's unit and zone and a fixed width
+    // unchecked: the batch's schema would then misdescribe the buffer, and every reader would misread it.
+    // A type not named here, nested or parameterised, takes the JavaScript path.
+    private static bool MovesAsIs(Field values, Field target)
+    {
+        var (a, b) = (values.DataType, target.DataType);
+        if (a.TypeId != b.TypeId || !SameMetadata(values, target))
+            return false;
+
+        return (a, b) switch
+        {
+            (Decimal32Type x, Decimal32Type y) => (x.Precision, x.Scale) == (y.Precision, y.Scale),
+            (Decimal64Type x, Decimal64Type y) => (x.Precision, x.Scale) == (y.Precision, y.Scale),
+            (Decimal128Type x, Decimal128Type y) => (x.Precision, x.Scale) == (y.Precision, y.Scale),
+            (Decimal256Type x, Decimal256Type y) => (x.Precision, x.Scale) == (y.Precision, y.Scale),
+            (FixedSizeBinaryType x, FixedSizeBinaryType y) => x.ByteWidth == y.ByteWidth,
+            (TimestampType x, TimestampType y) => x.Unit == y.Unit
+                && string.Equals(x.Timezone ?? "", y.Timezone ?? "", StringComparison.Ordinal),
+            (Time32Type x, Time32Type y) => x.Unit == y.Unit,
+            (Time64Type x, Time64Type y) => x.Unit == y.Unit,
+            (DurationType x, DurationType y) => x.Unit == y.Unit,
+            _ => a.TypeId is ArrowTypeId.Boolean
+                or ArrowTypeId.Int8 or ArrowTypeId.Int16 or ArrowTypeId.Int32 or ArrowTypeId.Int64
+                or ArrowTypeId.UInt8 or ArrowTypeId.UInt16 or ArrowTypeId.UInt32 or ArrowTypeId.UInt64
+                or ArrowTypeId.HalfFloat or ArrowTypeId.Float or ArrowTypeId.Double
+                or ArrowTypeId.String or ArrowTypeId.LargeString or ArrowTypeId.Binary or ArrowTypeId.LargeBinary
+                or ArrowTypeId.Date32 or ArrowTypeId.Date64,
+        };
+    }
+
+    // An extension name or a decimal's undeclared mark changes how a cell reads, so the fields carry the same metadata.
+    private static bool SameMetadata(Field a, Field b)
+    {
+        if (!a.HasMetadata || !b.HasMetadata)
+            return a.HasMetadata == b.HasMetadata;
+        return a.Metadata.Count == b.Metadata.Count
+            && a.Metadata.All(kv => b.Metadata.TryGetValue(kv.Key, out var value) && value == kv.Value);
     }
 
     private RecordBatch? ExecuteColumnarUnnest(RecordBatch batch, ListArray listArr, JsAstAnalyzer.ExpandUnnestPlan plan, Field[] outFields)
