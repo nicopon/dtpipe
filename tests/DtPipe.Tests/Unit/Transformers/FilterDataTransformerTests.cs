@@ -1,9 +1,11 @@
 using Apache.Arrow;
 using Apache.Arrow.Types;
 using DtPipe.Core.Models;
+using DtPipe.Tests.Helpers;
 using DtPipe.Transformers.Arrow.Filter;
 using DtPipe.Transformers.Services;
 using AwesomeAssertions;
+using Jint.Runtime;
 using Xunit;
 
 namespace DtPipe.Tests.Unit.Transformers;
@@ -27,6 +29,28 @@ public class FilterDataTransformerTests : IDisposable
         var array = new Int32Array.Builder().AppendRange(values).Build();
         return new RecordBatch(schema, new IArrowArray[] { array }, values.Length);
     }
+
+    private static RecordBatch TextBatch(string name, params string?[] values)
+    {
+        var schema = new Schema.Builder().Field(f => f.Name(name).DataType(StringType.Default)).Build();
+        var builder = new StringArray.Builder();
+        foreach (var value in values)
+        {
+            if (value is null) builder.AppendNull();
+            else builder.Append(value);
+        }
+        return new RecordBatch(schema, new IArrowArray[] { builder.Build() }, values.Length);
+    }
+
+    private static int[] KeptValues(RecordBatch? batch) =>
+        batch is null
+            ? System.Array.Empty<int>()
+            : Enumerable.Range(0, batch.Length).Select(i => ((Int32Array)batch.Column(0)).GetValue(i)!.Value).ToArray();
+
+    private static string[] KeptTexts(RecordBatch? batch) =>
+        batch is null
+            ? System.Array.Empty<string>()
+            : Enumerable.Range(0, batch.Length).Select(i => ((StringArray)batch.Column(0)).GetString(i)).ToArray();
 
     private static List<PipeColumnInfo> IntColumn(string name) => new() { new(name, typeof(int), true) };
     private static List<PipeColumnInfo> TextColumn(string name) => new() { new(name, typeof(string), true) };
@@ -200,15 +224,141 @@ public class FilterDataTransformerTests : IDisposable
         act.Should().Throw<InvalidOperationException>().WithMessage("*NoSuchColumn*");
     }
 
-    /// <summary>A property read on a null value stays permissive — the distinction the throw is for.</summary>
+    /// <summary>The Arrow path refuses a missing column as the row path does.</summary>
     [Fact]
-    public async Task PropertyOnNull_StillReadsAsNoMatch()
+    public async Task MissingColumn_Throws_OnTheArrowPath_Too()
     {
-        var transformer = Build("row.Name.length > 3");
-        await transformer.InitializeAsync(TextColumn("Name"));
+        var transformer = Build("row.NoSuchColumn > 1");
+        await transformer.InitializeAsync(IntColumn("Value"));
 
-        transformer.Transform(new object?[] { null }).Should().BeNull();
-        transformer.Transform(new object?[] { "Grace" }).Should().NotBeNull();
+        var act = async () => await transformer.TransformBatchAsync(IntBatch("Value", 1));
+
+        (await act.Should().ThrowAsync<InvalidOperationException>()).WithMessage("*NoSuchColumn*");
+    }
+
+    // ── A script's error is not "no match" ─────────────────────────────────────
+
+    /// <summary>
+    /// A read on null is a TypeError the engine words in two ways (a property, a method), and the filter
+    /// recognises it by that wording: this test is what breaks if a newer engine words it otherwise.
+    /// </summary>
+    [Theory]
+    [InlineData("row.Name.length > 3")]
+    [InlineData("row.Name.includes('ra')")]
+    [InlineData("row.Name['length'] > 3")]
+    [InlineData("row.Name[0] === 'G'")]
+    public async Task ReadingAPropertyOfNull_IsNoMatch_OnBothPaths(string expression)
+    {
+        var onRows = Build(expression);
+        await onRows.InitializeAsync(TextColumn("Name"));
+        onRows.Transform(new object?[] { null }).Should().BeNull();
+        onRows.Transform(new object?[] { "Grace" }).Should().NotBeNull();
+
+        var onBatches = Build(expression);
+        await onBatches.InitializeAsync(TextColumn("Name"));
+        using var result = await onBatches.TransformBatchAsync(TextBatch("Name", null, "Grace", null));
+        KeptTexts(result).Should().Equal("Grace");
+    }
+
+    [Theory]
+    [InlineData("row.Value.nope.deeper > 1")]
+    [InlineData("({}).p.q === 1")]
+    public async Task ReadingAPropertyOfUndefined_IsNoMatch_OnBothPaths(string expression)
+    {
+        var onRows = Build(expression);
+        await onRows.InitializeAsync(IntColumn("Value"));
+        onRows.Transform(new object?[] { 1 }).Should().BeNull();
+
+        var onBatches = Build(expression);
+        await onBatches.InitializeAsync(IntColumn("Value"));
+        using var result = await onBatches.TransformBatchAsync(IntBatch("Value", 1, 2));
+        result.Should().BeNull();
+    }
+
+    /// <summary>
+    /// Any other error of the script fails the run and names the filter: a throw, a call of something
+    /// that is not a function, an error of the engine. Read as "no match", each of them dropped every
+    /// row without a word, in exit 0.
+    /// </summary>
+    [Theory]
+    [InlineData("throw new Error('boom');", "boom")]
+    [InlineData("return row.Value.nope();", "nope")]
+    [InlineData("return JSON.parse('{');", "JSON")]
+    [InlineData("return new Array(-1).length > 0;", "Invalid array length")]
+    public async Task AnyOtherScriptError_FailsTheRun_OnBothPaths(string expression, string reason)
+    {
+        var onRows = Build(expression);
+        await onRows.InitializeAsync(IntColumn("Value"));
+        var rows = () => onRows.Transform(new object?[] { 1 });
+        var rowFailure = rows.Should().Throw<InvalidOperationException>().Which;
+        rowFailure.Message.Should().Contain($"Error evaluating filter '{expression}'").And.Contain(reason);
+
+        var onBatches = Build(expression);
+        await onBatches.InitializeAsync(IntColumn("Value"));
+        var batches = async () => await onBatches.TransformBatchAsync(IntBatch("Value", 1));
+        var batchFailure = (await batches.Should().ThrowAsync<InvalidOperationException>()).Which;
+        batchFailure.Message.Should().Contain($"Error evaluating filter '{expression}'").And.Contain(reason);
+    }
+
+    [Theory]
+    [InlineData("while (true) {} return true;", typeof(TimeoutException))]
+    [InlineData("const a = []; while (true) a.push(new Array(100000).fill(1)); return true;", typeof(MemoryLimitExceededException))]
+    public async Task ATimeoutAndAMemoryLimit_FailTheRun_OnBothPaths(string expression, Type limit)
+    {
+        using var limited = new LimitedJsEngineProvider();
+
+        var onRows = new FilterDataTransformer(new FilterOptions { Filters = new[] { expression } }, limited);
+        await onRows.InitializeAsync(IntColumn("Value"));
+        var rows = () => onRows.Transform(new object?[] { 1 });
+        var rowFailure = rows.Should().Throw<InvalidOperationException>().Which;
+        rowFailure.Message.Should().Contain($"Error evaluating filter '{expression}'");
+        rowFailure.InnerException.Should().BeOfType(limit);
+
+        var onBatches = new FilterDataTransformer(new FilterOptions { Filters = new[] { expression } }, limited);
+        await onBatches.InitializeAsync(IntColumn("Value"));
+        var batches = async () => await onBatches.TransformBatchAsync(IntBatch("Value", 1));
+        var batchFailure = (await batches.Should().ThrowAsync<InvalidOperationException>()).Which;
+        batchFailure.Message.Should().Contain($"Error evaluating filter '{expression}'");
+        batchFailure.InnerException.Should().BeOfType(limit);
+    }
+
+    // ── Stages read each other ─────────────────────────────────────────────────
+
+    private FilterDataTransformer BuildStages(params string[] expressions) =>
+        new(new FilterOptions { Filters = expressions }, _jsEngineProvider);
+
+    /// <summary>A stage reads what the one before wrote to the row, on both paths, in a batch or a row at a time.</summary>
+    [Fact]
+    public async Task AStage_ReadsWhatTheStageBeforeWroteToTheRow_OnBothPaths()
+    {
+        string[] stages = ["row.x = row.A * 2; return true;", "return row.x > 3;"];
+
+        var onRows = BuildStages(stages);
+        await onRows.InitializeAsync(IntColumn("A"));
+        new[] { 1, 2, 4 }.Where(a => onRows.Transform(new object?[] { a }) is not null).Should().Equal(2, 4);
+
+        var onBatches = BuildStages(stages);
+        await onBatches.InitializeAsync(IntColumn("A"));
+        using var first = await onBatches.TransformBatchAsync(IntBatch("A", 1, 2, 4));
+        using var second = await onBatches.TransformBatchAsync(IntBatch("A", 4, 1, 2, 1));
+        KeptValues(first).Should().Equal(2, 4);
+        KeptValues(second).Should().Equal(4, 2);
+    }
+
+    /// <summary>A row a stage does not keep reaches no later stage, so the later one never sees what it could not read.</summary>
+    [Fact]
+    public async Task ARowAStageDropsReachesNoLaterStage_OnBothPaths()
+    {
+        string[] stages = ["row.A > 1", "if (row.A < 2) throw new Error('reached'); return true;"];
+
+        var onRows = BuildStages(stages);
+        await onRows.InitializeAsync(IntColumn("A"));
+        new[] { 1, 2, 4 }.Where(a => onRows.Transform(new object?[] { a }) is not null).Should().Equal(2, 4);
+
+        var onBatches = BuildStages(stages);
+        await onBatches.InitializeAsync(IntColumn("A"));
+        using var result = await onBatches.TransformBatchAsync(IntBatch("A", 1, 2, 4));
+        KeptValues(result).Should().Equal(2, 4);
     }
 
     // ── Row mode, JavaScript conditions ────────────────────────────────────────

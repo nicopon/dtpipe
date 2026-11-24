@@ -274,11 +274,12 @@ public class JsKeptRowTests : IDisposable
 
     [Theory]
     [InlineData("compute")]
+    [InlineData("filter")]
     [InlineData("expand")]
     [InlineData("window")]
     public async Task A_Timeout_And_A_Memory_Limit_Fail_Alike_On_Either_View(string kind)
     {
-        using var limited = new LimitedEngineProvider();
+        using var limited = new LimitedJsEngineProvider();
         foreach (var keeps in new[] { false, true })
         {
             var prefix = keeps ? KeepFirst(kind) : "";
@@ -292,19 +293,6 @@ public class JsKeptRowTests : IDisposable
             SharesRowView(growing).Should().Be(!keeps);
             var grow = async () => await RunAsync(growing, [[1]], column: 0);
             (await grow.Should().ThrowAsync<InvalidOperationException>()).WithInnerException<MemoryLimitExceededException>();
-        }
-    }
-
-    /// <summary>A filter reads any other failure as "no match", on either view.</summary>
-    [Fact]
-    public async Task A_Filter_Reads_A_Timeout_As_No_Match_On_Either_View()
-    {
-        using var limited = new LimitedEngineProvider();
-        foreach (var keeps in new[] { false, true })
-        {
-            var filter = (FilterDataTransformer)await CreateAsync("filter", (keeps ? KeepFirst("filter") : "") + "while (true) {} return true;", limited);
-            filter.SharesRowView.Should().Be(!keeps);
-            (await RunAsync(filter, [[1]], column: 0)).Should().BeEmpty();
         }
     }
 
@@ -411,22 +399,5 @@ public class JsKeptRowTests : IDisposable
             new Schema([new Field("A", DoubleType.Default, false)], null),
             [builder.Build(allocator)],
             values.Length);
-    }
-
-    /// <summary>The engine's limits, scaled down so that a test reaches them in well under a second.</summary>
-    private sealed class LimitedEngineProvider : IJsEngineProvider
-    {
-        private readonly ThreadLocal<Jint.Engine> _engine = new(
-            () => new Jint.Engine(cfg => cfg.Strict(true).LimitMemory(8_000_000).TimeoutInterval(TimeSpan.FromMilliseconds(300))),
-            trackAllValues: true);
-
-        public Jint.Engine GetEngine() => _engine.Value!;
-
-        public void Dispose()
-        {
-            foreach (var engine in _engine.Values)
-                engine.Dispose();
-            _engine.Dispose();
-        }
     }
 }

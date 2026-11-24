@@ -287,7 +287,7 @@ sits in, wherever it falls among the step's flags.
 | `--format` | `"Display:{First} {Last}"` | [.NET Composite Format](https://learn.microsoft.com/en-us/dotnet/standard/base-types/composite-formatting) using column names as placeholders |
 | `--compute` | `"Col:row.A * 2"` | JS expression, returned as is; a body of statements needs `return`. A result of `undefined` is an error, `null` is an empty value |
 | `--compute-types` | `"Col:int32"` | Declare the CLR type of a computed or new column. Same vocabulary as `--column-types` — see [Type hints](#type-hints) |
-| `--filter` | `"row.Val > 100"` | Drop rows where the JS expression returns falsy. Columns are read off `row`; a name the schema does not carry is an error, not an empty result |
+| `--filter` | `"row.Val > 100"` | Drop rows where the JS expression returns falsy. Columns are read off `row`; a name the schema does not carry is an error, not an empty result. Any other error of the script fails the run, except reading a property of a `null` value, which is no match |
 | `--expand` | `"row.Tags.split(',').map(t => ({ ...row, Tag: t }))"` | Expand one row into multiple. Must return an array of **row objects**: an array of plain values is refused |
 | `--expand-types` | `"Tag:string"` | Declare a column `--expand` creates. Undeclared keys are not in the output schema and are dropped |
 | `--window-count` | `5` | Accumulate N rows, then run `--window-script` over them |

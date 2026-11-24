@@ -90,14 +90,17 @@ public partial class FilterDataTransformer : BaseColumnarTransformer, IRequiresO
 
         if (SharesRowView)
         {
+            // A row's stages run together, as on the row path: the cursor moves once per row, so a stage
+            // reads what the one before wrote to 'row', and a row a stage drops reaches no later stage.
             state.ArrowRowView.BindBatch(batch);
-            for (int s = 0; s < _stages.Length; s++)
+            for (int i = 0; i < len; i++)
             {
-                for (int i = 0; i < len; i++)
+                state.ArrowRowView.SetRowIndex(i);
+                for (int s = 0; s < _stages.Length; s++)
                 {
-                    if (!selectionMask[i]) continue;
-                    state.ArrowRowView.SetRowIndex(i);
-                    selectionMask[i] = Matches(engine, state, s, state.ArrowArg);
+                    if (Matches(engine, state, s, state.ArrowArg)) continue;
+                    selectionMask[i] = false;
+                    break;
                 }
             }
         }
@@ -150,6 +153,11 @@ public partial class FilterDataTransformer : BaseColumnarTransformer, IRequiresO
         return row as object?[] ?? row.ToArray();
     }
 
+    /// <summary>
+    /// Whether the stage keeps the row. A property read on a null or undefined value is "no match", on
+    /// purpose; any other error of the script, a timeout or a memory limit included, fails the run naming
+    /// the filter.
+    /// </summary>
     private bool Matches(Engine engine, CompiledFilterState state, int stageIndex, JsValue[] args)
     {
         var stage = _stages[stageIndex];
@@ -158,16 +166,19 @@ public partial class FilterDataTransformer : BaseColumnarTransformer, IRequiresO
             var result = engine.Call(state.Functions[stage.Index], JsValue.Undefined, args);
             return result.IsBoolean() && result.AsBoolean();
         }
+        catch (JavaScriptException jsEx) when (IsNullPropertyRead(jsEx))
+        {
+            return false;
+        }
         catch (JavaScriptException jsEx) when (IsMissingColumn(jsEx))
         {
             throw new InvalidOperationException(
                 $"Error evaluating filter '{stage.RawExpression}': {jsEx.Message}. "
                 + "A filter reads its columns off 'row' — write row.<column>.", jsEx);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            // Property access on a null value: the filter reads it as "no match", on purpose.
-            return false;
+            throw new InvalidOperationException($"Error evaluating filter '{stage.RawExpression}': {ex.Message}", ex);
         }
     }
 
@@ -177,6 +188,19 @@ public partial class FilterDataTransformer : BaseColumnarTransformer, IRequiresO
     /// </summary>
     private static bool IsMissingColumn(JavaScriptException ex) =>
         ex.Error is ObjectInstance error && error.Get("name").ToString() == "ReferenceError";
+
+    /// <summary>
+    /// A property read on a null or undefined value. The engine raises it as a plain TypeError with no
+    /// structured kind, so its wording is the only handle: <c>Cannot read properties of null (reading 'x')</c>
+    /// for a property, <c>Cannot read property 'x' of null</c> for a method call. The tests of both forms
+    /// break if a newer engine words them otherwise.
+    /// </summary>
+    private static bool IsNullPropertyRead(JavaScriptException ex) =>
+        ex.Error is ObjectInstance error
+        && error.Get("name").ToString() == "TypeError"
+        && error.Get("message").ToString() is var message
+        && message.StartsWith("Cannot read propert", StringComparison.Ordinal)
+        && (message.Contains(" of null", StringComparison.Ordinal) || message.Contains(" of undefined", StringComparison.Ordinal));
 
     private CompiledFilterState GetOrCreateState(Engine engine)
         => _engineCache.GetValue(engine, e =>
