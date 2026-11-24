@@ -47,4 +47,28 @@ public sealed class StudioSettingsTests : IDisposable
         Assert.Null(settings.ReadLlmKey("https://api.example.com/v2"));
         Assert.Null(settings.ReadLlmKey("http://api.example.com/v1"));
     }
+
+    [Fact]
+    public void A_coordinator_round_trips_beside_the_agent_and_its_key_is_not_offered_to_another_origin()
+    {
+        var settings = new StudioSettings(SettingsPath, _secrets);
+        settings.WriteAgent(new AgentSettings("ollama", "http://localhost:11434", "m", 30));
+        settings.WriteCoordinator(new CoordinatorSettings("https://coordinator.example.com", "key"));
+        Assert.True(settings.StoreCoordinatorKey("https://Coordinator.example.com:443/", "dtp_key"));
+
+        Assert.Equal(new AgentSettings("ollama", "http://localhost:11434", "m", 30), settings.ReadAgent());
+        Assert.Equal(new CoordinatorSettings("https://coordinator.example.com", "key"), settings.ReadCoordinator());
+        Assert.Equal("studio.coordinator:https://coordinator.example.com", StudioSettings.CoordinatorAlias("https://Coordinator.example.com:443/"));
+        Assert.Equal("dtp_key", settings.ReadCoordinatorKey("https://coordinator.example.com"));
+        Assert.Null(settings.ReadCoordinatorKey("https://other.example.com"));
+        Assert.DoesNotContain("dtp_key", File.ReadAllText(SettingsPath));
+
+        settings.ClearCoordinator();
+        Assert.Null(settings.ReadCoordinator());
+        Assert.NotNull(settings.ReadAgent());
+
+        File.WriteAllText(SettingsPath, """{"version":1,"coordinator":{"origin":"https://x.example.com/path","auth":"key"}}""");
+        Assert.Null(settings.ReadCoordinator());
+        Assert.NotNull(settings.Warning);
+    }
 }

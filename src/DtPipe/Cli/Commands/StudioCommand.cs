@@ -120,9 +120,15 @@ public sealed class StudioCommand : Command
                     return 1;
                 }
             }
-            using var _ = link;
             var secrets = serviceProvider.GetRequiredService<ISecretsManager>();
             var settings = new StudioSettings(StudioSettings.DefaultPath(), secrets);
+            var remembered = settings.Read();
+            if (settings.Warning is { } ignored) Console.Error.WriteLine($"[WARN] {ignored}");
+            CoordinatorConnection? coordinatorStart = null;
+            // Nothing named on the command line: the coordinator the person connected in the page and asked to remember.
+            if (link is null && remembered.Coordinator is { } rememberedCoordinator)
+                (link, coordinatorStart) = RememberedCoordinator(settings, rememberedCoordinator);
+            using var _ = link;
             var agentTools = new McpToolProvider(serviceProvider.GetRequiredService<DtPipeMcpTools>());
             var trace = AgentTrace.Open(parseResult.GetValue(agentTraceOption) ?? Environment.GetEnvironmentVariable("DTPIPE_AGENT_TRACE"), out var traceFailure);
             if (traceFailure is not null) Console.Error.WriteLine($"[WARN] The agent's trace cannot be written: {traceFailure}");
@@ -138,8 +144,7 @@ public sealed class StudioCommand : Command
                     return 1;
                 }
                 // Nothing named on the command line: the connection the person made in the page and asked to remember.
-                (agent, start) = Remembered(settings, agentTools, trace);
-                if (settings.Warning is { } ignored) Console.Error.WriteLine($"[WARN] {ignored}");
+                (agent, start) = Remembered(remembered.Agent, settings, agentTools, trace);
             }
             else
             {
@@ -194,7 +199,8 @@ public sealed class StudioCommand : Command
                 lookup => new DesignService(lookup, endpoints),
                 args => CommandLineJob.Export(serviceProvider, args),
                 agent,
-                new StudioAgentLink(settings, agentTools, trace, StudioAgentClients.Create, start));
+                new StudioAgentLink(settings, agentTools, trace, StudioAgentClients.Create, start),
+                new StudioCoordinatorStart(settings, coordinatorStart));
             StudioServer server;
             try
             {
@@ -227,9 +233,9 @@ public sealed class StudioCommand : Command
     /// The agent the person asked the studio to remember, built from the file and the key kept for its address. A provider that
     /// needs a key and finds none builds no agent: it waits, described as needing its key, for the person to connect it again.
     /// </summary>
-    private static (StudioAgentSetup? Agent, AgentConnection? Start) Remembered(StudioSettings settings, IAgentToolProvider tools, AgentTrace? trace)
+    private static (StudioAgentSetup? Agent, AgentConnection? Start) Remembered(AgentSettings? agent, StudioSettings settings, IAgentToolProvider tools, AgentTrace? trace)
     {
-        if (settings.ReadAgent() is not { } remembered) return (null, null);
+        if (agent is not { } remembered) return (null, null);
         var timeout = TimeSpan.FromSeconds(remembered.Timeout is > 0 ? remembered.Timeout.Value : (int)AgentOptions.DefaultLlmTimeout.TotalSeconds);
         var key = remembered.Provider == "openai" ? settings.ReadLlmKey(remembered.Url) : null;
         var seconds = (int)timeout.TotalSeconds;
@@ -241,6 +247,31 @@ public sealed class StudioCommand : Command
         var client = StudioAgentClients.Create(remembered.Provider, key, timeout)!;
         return (new StudioAgentSetup(client, remembered.Url, remembered.Model, tools, trace),
             new AgentConnection(remembered.Provider, remembered.Url, remembered.Model, seconds, "remembered", key is null ? "none" : "stored"));
+    }
+
+    /// <summary>
+    /// The coordinator the person asked the studio to remember, as a link and its description. A key sign-in that needs a key and
+    /// finds none builds no link: it waits, described as needing its key, for the person to connect it again. It never stops the
+    /// start, and its sign-in runs in the background (<c>StudioServer</c>).
+    /// </summary>
+    private static (CoordinatorLink? Link, CoordinatorConnection Start) RememberedCoordinator(StudioSettings settings, CoordinatorSettings remembered)
+    {
+        var key = remembered.Auth == "key" ? settings.ReadCoordinatorKey(remembered.Origin) : null;
+        if (remembered.Auth == "key")
+        {
+            try
+            {
+                if (key is not null)
+                    return (new CoordinatorLink(new Uri(remembered.Origin), key: key), new CoordinatorConnection(remembered.Origin, "key", "remembered", "stored"));
+            }
+            catch (CoordinatorLinkException)
+            {
+                // A key the keyring holds that no coordinator makes: asked again, as one that is missing.
+            }
+            Console.Error.WriteLine("[WARN] The remembered coordinator needs its key again: connect it from the page.");
+            return (null, new CoordinatorConnection(remembered.Origin, "key", "remembered", "none", NeedsKey: true));
+        }
+        return (new CoordinatorLink(new Uri(remembered.Origin)), new CoordinatorConnection(remembered.Origin, "browser", "remembered", "none"));
     }
 
     /// <summary>Why the studio could not listen at <paramref name="port"/>: the cause, with the option that changes it.</summary>
