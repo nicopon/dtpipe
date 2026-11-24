@@ -301,6 +301,13 @@ sits in, wherever it falls among the step's flags.
 | `--window-key` | `"CustomerId"` | Run `--window-script` each time this column's value changes |
 | `--window-script` | `"rows.map(...)"` | JavaScript over the accumulated rows (`rows`); must return an array of rows |
 
+#### Fake values
+
+`--fake` takes its values from the data of Bogus (its lists of names, cities, words…); dtpipe
+composes them itself (a company name, a job title, an address), so a value is not the one Bogus
+returns for the same seed. At an equal seed, 1.19.0 produces other values than the versions before
+it: tables masked before and after the upgrade no longer join on a fake value.
+
 #### Type hints
 
 `--column-types`, `--compute-types` and `--expand-types` share one vocabulary. A hint that names no

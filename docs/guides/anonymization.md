@@ -43,7 +43,8 @@ id,name,email,phone,iban,salary
 
 `--fake` uses [Bogus](https://github.com/bchavez/Bogus): `name.fullName`, `internet.email`,
 `address.city`, `company.companyName`, `random.uuid`… An unknown path is refused, and the message
-lists the valid ones. `--fake-locale fr` generates French names and addresses.
+lists the valid ones. `--fake-locale fr` generates French names and addresses. What a value is
+drawn from, and how it holds across versions: [Fake values](../../REFERENCE.md#fake-values).
 
 ## Keep joins working
 
