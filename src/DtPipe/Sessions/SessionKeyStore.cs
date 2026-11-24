@@ -32,7 +32,9 @@ public static class SessionKeyStore
         => Path.Combine(UserStatePaths.KeysDirectory(), $"{SessionResolver.Sanitize(sessionName)}.key");
 
     /// <summary>
-    /// Returns this session's key, creating it on first use.
+    /// Returns this session's key, creating it on first use. Two callers meeting a session with
+    /// no key (two branches of one run, two processes) get the same one: the file is created
+    /// exclusively, and a caller that lost the creation waits for the winner's bytes.
     /// </summary>
     /// <exception cref="IOException">
     /// If the key directory cannot be written to. This fails the run on purpose: falling back to
@@ -42,23 +44,21 @@ public static class SessionKeyStore
     public static byte[] GetOrCreateKey(string sessionName)
     {
         var path = KeyPath(sessionName);
-        if (File.Exists(path))
-        {
-            var existing = File.ReadAllBytes(path);
-            if (existing.Length == KeySizeBytes) return existing;
-            // A truncated key can only produce unreadable artefacts; replace it rather than
-            // failing every future read with a decryption error.
-            File.Delete(path);
-        }
-
         var dir = Path.GetDirectoryName(path)!;
         try
         {
             Directory.CreateDirectory(dir);
-            var key = RandomNumberGenerator.GetBytes(KeySizeBytes);
-            File.WriteAllBytes(path, key);
-            RestrictToOwner(path);
-            return key;
+            // Bounded: a creator that died after creating the file leaves it short for good, and
+            // only that is replaced, since a key can only produce unreadable artefacts if truncated.
+            for (var attempt = 0; attempt < 100; attempt++)
+            {
+                if (TryCreate(path) is { } created) return created;
+                if (TryGetKey(sessionName) is { } existing) return existing;
+                Thread.Sleep(10);
+            }
+            File.Delete(path);
+            return TryCreate(path) ?? TryGetKey(sessionName)
+                ?? throw new IOException($"The key file '{path}' is held without holding a key.");
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
         {
@@ -66,6 +66,27 @@ public static class SessionKeyStore
                 $"dtpipe could not write the session key to '{dir}'. Materialisation is refused rather " +
                 $"than writing artefacts unencrypted — the guarantee is a property of the whole store, " +
                 $"so one cleartext session would void it for all of them. Original error: {ex.Message}", ex);
+        }
+    }
+
+    /// <summary>Creates the file and writes a new key into it, or returns null if the file exists.</summary>
+    private static byte[]? TryCreate(string path)
+    {
+        var options = new FileStreamOptions
+        {
+            Mode = FileMode.CreateNew,
+            Access = FileAccess.Write,
+            Share = FileShare.None,
+        };
+        if (!OperatingSystem.IsWindows()) options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite; // NTFS inherits the user profile's ACL.
+        FileStream file;
+        try { file = new FileStream(path, options); }
+        catch (IOException) when (File.Exists(path)) { return null; }
+        using (file)
+        {
+            var key = RandomNumberGenerator.GetBytes(KeySizeBytes);
+            file.Write(key);
+            return key;
         }
     }
 
@@ -83,11 +104,5 @@ public static class SessionKeyStore
     {
         var path = KeyPath(sessionName);
         if (File.Exists(path)) File.Delete(path);
-    }
-
-    private static void RestrictToOwner(string path)
-    {
-        if (OperatingSystem.IsWindows()) return; // NTFS inherits the user profile's ACL.
-        File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
     }
 }

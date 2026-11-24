@@ -135,6 +135,23 @@ public class CheckpointStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task Writers_Starting_Together_On_A_Fresh_Session_Share_One_Key()
+    {
+        const int writers = 16;
+        var name = $"fresh-{Guid.NewGuid():N}";
+        using var gate = new Barrier(writers);
+
+        var keys = await Task.WhenAll(Enumerable.Range(0, writers).Select(_ => Task.Factory.StartNew(
+            () => { gate.SignalAndWait(); return SessionKeyStore.GetOrCreateKey(name); },
+            TaskCreationOptions.LongRunning)));
+
+        var onDisk = SessionKeyStore.TryGetKey(name);
+        onDisk.Should().NotBeNull();
+        keys.Select(Convert.ToHexString).Should().OnlyContain(k => k == Convert.ToHexString(onDisk!),
+            "two branches of one run checkpointing into a new session must write under the key a later read finds");
+    }
+
+    [Fact]
     public async Task A_Foreign_Key_Yields_Nothing()
     {
         await _store.WriteAsync("key1", Batches(1, 4));
