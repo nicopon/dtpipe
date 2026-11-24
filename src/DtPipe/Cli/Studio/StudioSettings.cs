@@ -33,12 +33,20 @@ public sealed class StudioSettings(string path, ISecretsManager secrets)
     /// <summary>False once the keyring refused a read or a write: a key typed after that lasts the session only.</summary>
     public bool KeyringUsable { get; private set; } = true;
 
-    private sealed record FileModel(int Version, AgentSettings? Agent, CoordinatorSettings? Coordinator = null);
+    /// <summary>
+    /// What the file holds: the agent, the coordinators known (an origin each, by address), the one that is active and whether it
+    /// is connected again at start.
+    /// </summary>
+    private sealed record FileModel(
+        int Version, AgentSettings? Agent, CoordinatorSettings[]? Coordinators = null, string? ActiveCoordinator = null, bool Reconnect = false);
 
     /// <summary>The remembered agent, or null: nothing remembered, or a file that is ignored (see <see cref="Warning"/>).</summary>
     public AgentSettings? ReadAgent() => Read().Agent;
 
-    /// <summary>The remembered coordinator, or null: nothing remembered, or a file that is ignored (see <see cref="Warning"/>).</summary>
+    /// <summary>
+    /// The coordinator to connect at start: the active one when the file asks for the reconnection, or null (nothing remembered,
+    /// no reconnection, or a file that is ignored: see <see cref="Warning"/>).
+    /// </summary>
     public CoordinatorSettings? ReadCoordinator() => Read().Coordinator;
 
     /// <summary>Every section the file holds and this studio reads; one that is invalid is left out, and <see cref="Warning"/> says why.</summary>
@@ -47,8 +55,14 @@ public sealed class StudioSettings(string path, ISecretsManager secrets)
         Warning = null;
         var file = ReadFile();
         if (file is null) return new RememberedSettings(null, null);
-        return new RememberedSettings(ValidAgent(file.Agent), ValidCoordinator(file.Coordinator));
+        var coordinators = (file.Coordinators ?? []).Select(ValidCoordinator).OfType<CoordinatorSettings>().ToList();
+        var active = file is { Reconnect: true, ActiveCoordinator: { } origin } && IsOrigin(origin)
+            ? coordinators.FirstOrDefault(c => SameAddress(c.Origin, origin))
+            : null;
+        return new RememberedSettings(ValidAgent(file.Agent), active);
     }
+
+    private static bool SameAddress(string a, string b) => NormalizeUrl(a) == NormalizeUrl(b);
 
     private FileModel? ReadFile()
     {
@@ -94,10 +108,21 @@ public sealed class StudioSettings(string path, ISecretsManager secrets)
     /// <summary>Forgets the remembered agent; the file stays only for what else it holds.</summary>
     public void ClearAgent() => Clear(file => file with { Agent = null });
 
-    public void WriteCoordinator(CoordinatorSettings coordinator) => Update(file => file with { Coordinator = coordinator });
+    /// <summary>Keeps the coordinator among those known, by its address, makes it the active one and asks for its reconnection at start.</summary>
+    public void WriteCoordinator(CoordinatorSettings coordinator) => Update(file => file with
+    {
+        Coordinators = [.. (file.Coordinators ?? []).Where(c => !SameAddress(c.Origin, coordinator.Origin)), coordinator],
+        ActiveCoordinator = coordinator.Origin,
+        Reconnect = true,
+    });
 
-    /// <summary>Forgets the remembered coordinator; the file stays only for what else it holds.</summary>
-    public void ClearCoordinator() => Clear(file => file with { Coordinator = null });
+    /// <summary>Forgets the active coordinator: its entry goes, and nothing is connected at the next start.</summary>
+    public void ClearCoordinator() => Clear(file => file with
+    {
+        Coordinators = (file.Coordinators ?? []).Where(c => file.ActiveCoordinator is null || !SameAddress(c.Origin, file.ActiveCoordinator)).ToArray(),
+        ActiveCoordinator = null,
+        Reconnect = false,
+    });
 
     /// <summary>Changes one section and keeps the others as they are; a file that cannot be read is replaced, since the person asked to write.</summary>
     private void Update(Func<FileModel, FileModel> change) => Write(change(ReadFile() ?? new FileModel(Version, null)));

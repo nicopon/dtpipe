@@ -63,11 +63,17 @@ public sealed class StudioSettingsTests : IDisposable
         Assert.Null(settings.ReadCoordinatorKey("https://other.example.com"));
         Assert.DoesNotContain("dtp_key", File.ReadAllText(SettingsPath));
 
+        // Another coordinator becomes the active one, the first stays known; forgetting the active one leaves nothing to connect at start.
+        settings.WriteCoordinator(new CoordinatorSettings("https://other.example.com", "browser"));
+        Assert.Equal(new CoordinatorSettings("https://other.example.com", "browser"), settings.ReadCoordinator());
+        Assert.Contains("https://coordinator.example.com", File.ReadAllText(SettingsPath));
+
         settings.ClearCoordinator();
         Assert.Null(settings.ReadCoordinator());
+        Assert.DoesNotContain("other.example.com", File.ReadAllText(SettingsPath));
         Assert.NotNull(settings.ReadAgent());
 
-        File.WriteAllText(SettingsPath, """{"version":1,"coordinator":{"origin":"https://x.example.com/path","auth":"key"}}""");
+        File.WriteAllText(SettingsPath, """{"version":1,"coordinators":[{"origin":"https://x.example.com/path","auth":"key"}],"activeCoordinator":"https://x.example.com/path","reconnect":true}""");
         Assert.Null(settings.ReadCoordinator());
         Assert.NotNull(settings.Warning);
     }
