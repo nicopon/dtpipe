@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using DtPipe.Cli.Agent;
 using DtPipe.Cli.Expressions;
 using DtPipe.Cli.Node;
 using DtPipe.Cli.Security;
@@ -38,7 +39,7 @@ public sealed record StudioComponent(string Name, string Category);
 public sealed record StudioTools(
     IStudioEngine Engine, DesignService Design, IReadOnlyList<StudioComponent> Readers, IReadOnlyList<StudioComponent> Writers,
     ISecretsManager Secrets, CoordinatorLink? Coordinator = null, Func<IBrickLookup, DesignService>? DesignWith = null,
-    StudioImporter? Import = null, StudioAgentSetup? Agent = null);
+    StudioImporter? Import = null, StudioAgentSetup? Agent = null, StudioAgentLink? AgentLink = null);
 
 /// <summary>
 /// The engine as the studio asks it: a sample, a real run, and the cut a preview runs. Each call carries the
@@ -137,7 +138,10 @@ public sealed partial class StudioServer : IAsyncDisposable
         PurgeDrafts();
         Token = token;
         _token = Encoding.UTF8.GetBytes(token);
-        if (tools.Agent is { } agent) _agent = new StudioAgent(agent, new StudioAgentTools(agent.Tools, this));
+        _slot = new AgentSlot(
+            tools.Agent is { } agent ? NewAgent(agent) : null,
+            tools.AgentLink?.Start ?? (tools.Agent is { } started ? new AgentConnection(started.Client.ProviderName, started.BaseUrl, started.Model,
+                (int)AgentOptions.DefaultLlmTimeout.TotalSeconds, "flag", "none") : null));
     }
 
     public string Token { get; }
@@ -1114,7 +1118,7 @@ public sealed partial class StudioServer : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         // The agent's waits end first, then the run it may have started; its turn is awaited last.
-        var agent = _agent?.DisposeAsync();
+        var agent = Agent?.DisposeAsync();
         await StopRunAndWaitAsync();
         if (agent is { } stopping) await stopping;
         await _app.StopAsync();

@@ -121,15 +121,25 @@ public sealed class StudioCommand : Command
                 }
             }
             using var _ = link;
+            var secrets = serviceProvider.GetRequiredService<ISecretsManager>();
+            var settings = new StudioSettings(StudioSettings.DefaultPath(), secrets);
+            var agentTools = new McpToolProvider(serviceProvider.GetRequiredService<DtPipeMcpTools>());
+            var trace = AgentTrace.Open(parseResult.GetValue(agentTraceOption) ?? Environment.GetEnvironmentVariable("DTPIPE_AGENT_TRACE"), out var traceFailure);
+            if (traceFailure is not null) Console.Error.WriteLine($"[WARN] The agent's trace cannot be written: {traceFailure}");
+            using var __ = trace;
             StudioAgentSetup? agent = null;
+            AgentConnection? start = null;
             var provider = parseResult.GetValue(llmProviderOption);
             if (provider is null)
             {
-                if (new Option[] { llmUrlOption, llmModelOption, llmKeyOption, llmTimeoutOption, agentTraceOption }.FirstOrDefault(o => parseResult.GetResult(o) is not null) is { } orphan)
+                if (new Option[] { llmUrlOption, llmModelOption, llmKeyOption, llmTimeoutOption }.FirstOrDefault(o => parseResult.GetResult(o) is not null) is { } orphan)
                 {
                     Console.Error.WriteLine($"[ERROR] {orphan.Name} sets up the agent: name its provider with --llm-provider.");
                     return 1;
                 }
+                // Nothing named on the command line: the connection the person made in the page and asked to remember.
+                (agent, start) = Remembered(settings, agentTools, trace);
+                if (settings.Warning is { } ignored) Console.Error.WriteLine($"[WARN] {ignored}");
             }
             else
             {
@@ -138,8 +148,8 @@ public sealed class StudioCommand : Command
                 {
                     string? refusal;
                     (llmKey, refusal) = NodeBricks.IsSecretReference(keyReference)
-                        ? await NodeBricks.ReadSecretAsync(keyReference, "key", serviceProvider.GetRequiredService<ISecretsManager>(), ct)
-                        : (null, NodeBricks.NotAReference("--llm-key", "key", "DTPIPE_LLM_KEY"));
+                        ? await NodeBricks.ReadSecretAsync(keyReference, "key", secrets, ct)
+                        : (null, NodeBricks.NotAReference("--llm-key", "key", "LLM_API_KEY"));
                     if (refusal is not null)
                     {
                         Console.Error.WriteLine($"[ERROR] {refusal}");
@@ -147,24 +157,17 @@ public sealed class StudioCommand : Command
                     }
                 }
                 var timeout = TimeSpan.FromSeconds(parseResult.GetValue(llmTimeoutOption) is { } seconds and > 0 ? seconds : (int)AgentOptions.DefaultLlmTimeout.TotalSeconds);
-                ILlmClient? client = provider.ToLowerInvariant() switch
-                {
-                    "ollama" => new OllamaClient(timeout),
-                    "openai" => new OpenAiClient(llmKey, timeout),
-                    _ => null,
-                };
+                var client = StudioAgentClients.Create(provider, llmKey, timeout);
                 if (client is null)
                 {
                     Console.Error.WriteLine($"[ERROR] --llm-provider is ollama or openai, not '{provider}'.");
                     return 1;
                 }
-                var url = parseResult.GetValue(llmUrlOption) ?? (client is OpenAiClient ? "https://api.openai.com" : "http://localhost:11434");
-                var trace = AgentTrace.Open(parseResult.GetValue(agentTraceOption) ?? Environment.GetEnvironmentVariable("DTPIPE_AGENT_TRACE"), out var traceFailure);
-                if (traceFailure is not null) Console.Error.WriteLine($"[WARN] The agent's trace cannot be written: {traceFailure}");
-                agent = new StudioAgentSetup(client, url, parseResult.GetValue(llmModelOption),
-                    new McpToolProvider(serviceProvider.GetRequiredService<DtPipeMcpTools>()), trace);
+                var url = parseResult.GetValue(llmUrlOption) ?? StudioAgentClients.DefaultUrl(client.ProviderName);
+                var model = parseResult.GetValue(llmModelOption);
+                agent = new StudioAgentSetup(client, url, model, agentTools, trace);
+                start = new AgentConnection(client.ProviderName, url, model, (int)timeout.TotalSeconds, "flag", llmKey is null ? "none" : "flag");
             }
-            using var __ = agent?.Trace;
             // With a key the studio signs in at once; a refusal leaves it signed out with the reason, which the page shows too.
             if (link is { ByKey: true })
             {
@@ -186,11 +189,12 @@ public sealed class StudioCommand : Command
                 new DesignService(IBrickLookup.None, endpoints),
                 readers.Select(r => new StudioComponent(r.ComponentName, r.Category)).OrderBy(c => c.Name, StringComparer.Ordinal).ToList(),
                 writers.Select(w => new StudioComponent(w.ComponentName, w.Category)).OrderBy(c => c.Name, StringComparer.Ordinal).ToList(),
-                serviceProvider.GetRequiredService<ISecretsManager>(),
+                secrets,
                 link,
                 lookup => new DesignService(lookup, endpoints),
                 args => CommandLineJob.Export(serviceProvider, args),
-                agent);
+                agent,
+                new StudioAgentLink(settings, agentTools, trace, StudioAgentClients.Create, start));
             StudioServer server;
             try
             {
@@ -217,6 +221,26 @@ public sealed class StudioCommand : Command
                 }
             }
         });
+    }
+
+    /// <summary>
+    /// The agent the person asked the studio to remember, built from the file and the key kept for its address. A provider that
+    /// needs a key and finds none builds no agent: it waits, described as needing its key, for the person to connect it again.
+    /// </summary>
+    private static (StudioAgentSetup? Agent, AgentConnection? Start) Remembered(StudioSettings settings, IAgentToolProvider tools, AgentTrace? trace)
+    {
+        if (settings.ReadAgent() is not { } remembered) return (null, null);
+        var timeout = TimeSpan.FromSeconds(remembered.Timeout is > 0 ? remembered.Timeout.Value : (int)AgentOptions.DefaultLlmTimeout.TotalSeconds);
+        var key = remembered.Provider == "openai" ? settings.ReadLlmKey(remembered.Url) : null;
+        var seconds = (int)timeout.TotalSeconds;
+        if (remembered.Provider == "openai" && key is null)
+        {
+            Console.Error.WriteLine("[WARN] The remembered model needs its key again: connect it from the page.");
+            return (null, new AgentConnection(remembered.Provider, remembered.Url, remembered.Model, seconds, "remembered", "none", NeedsKey: true));
+        }
+        var client = StudioAgentClients.Create(remembered.Provider, key, timeout)!;
+        return (new StudioAgentSetup(client, remembered.Url, remembered.Model, tools, trace),
+            new AgentConnection(remembered.Provider, remembered.Url, remembered.Model, seconds, "remembered", key is null ? "none" : "stored"));
     }
 
     /// <summary>Why the studio could not listen at <paramref name="port"/>: the cause, with the option that changes it.</summary>

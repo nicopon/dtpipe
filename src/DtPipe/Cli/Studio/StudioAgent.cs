@@ -9,8 +9,8 @@ using DtPipe.Core.Security;
 namespace DtPipe.Cli.Studio;
 
 /// <summary>
-/// The model the command line names for the studio's agent: its client, the address it calls (never set by the page), the model
-/// to start with, dtpipe's tools as the model may be offered them, and the session trace when one was asked for.
+/// The model the studio's agent runs on: its client, the address it calls, the model to start with, dtpipe's tools as the model
+/// may be offered them, and the session trace when one was asked for.
 /// </summary>
 public sealed record StudioAgentSetup(ILlmClient Client, string BaseUrl, string? Model, IAgentToolProvider Tools, AgentTrace? Trace = null);
 
@@ -40,6 +40,7 @@ internal sealed class StudioAgent : IAsyncDisposable
     private string? _model;
     private Task _turn = Task.CompletedTask;
     private CancellationTokenSource? _stop;
+    private bool _closed;
     private Card? _pending;
     private int _cards;
     // The last job a tool call carried and how many differing ones came: the page applies a revision it has not seen.
@@ -129,6 +130,27 @@ internal sealed class StudioAgent : IAsyncDisposable
         }
     }
 
+    /// <summary>The model the next turn asks, or null while none is chosen.</summary>
+    public string? Model
+    {
+        get { lock (_gate) return _model; }
+    }
+
+    /// <summary>
+    /// Closes this agent to new turns when nothing is in flight, so it can be replaced; otherwise the reason it stays. The check
+    /// and the closing are one step: a turn that starts after it is refused.
+    /// </summary>
+    public string? TryClose()
+    {
+        lock (_gate)
+        {
+            if (!_turn.IsCompleted) return "A turn is running: stop it before connecting another model.";
+            if (_pending is not null) return "A card waits for your answer: answer it before connecting another model.";
+            _closed = true;
+            return null;
+        }
+    }
+
     public bool Busy
     {
         get { lock (_gate) return !_turn.IsCompleted; }
@@ -144,6 +166,7 @@ internal sealed class StudioAgent : IAsyncDisposable
     {
         lock (_gate)
         {
+            if (_closed) throw new StudioRefusal(409, "This agent was replaced: reload the page.");
             if (!_turn.IsCompleted) throw new StudioRefusal(409, "A turn is already running: stop it, or wait for it.");
             if (model is { Length: > 0 } && model != _model)
             {

@@ -8,12 +8,13 @@ namespace DtPipe.Cli.Studio;
 /// <summary>
 /// The studio's agent: its routes, and the gestures its tools make through the studio's own paths. A save is the page's
 /// save (<c>Decompose</c>, <c>Compose</c>, <c>WriteJob</c> against the hash read when the card was made), which waits for the
-/// person's answer to a card; no tool writes a target. Without <c>--llm-provider</c>,
-/// <c>GET /api/agent</c> answers <c>enabled: false</c> and every other route 404.
+/// person's answer to a card; no tool writes a target. With no agent connected, <c>GET /api/agent</c> answers
+/// <c>enabled: false</c> and the conversation's other routes 404; the connection's routes answer always, under the session's
+/// token like every other, and none of their answers carries a key.
 /// </summary>
 public sealed partial class StudioServer
 {
-    private StudioAgent? _agent;
+    private readonly AgentSlot _slot;
     private string _slotHolder = "An action";
 
     /// <summary>Takes the engine slot now, or refuses naming who holds it.</summary>
@@ -42,14 +43,23 @@ public sealed partial class StudioServer
     }
 
     private CancellationTokenSource Linked(CancellationToken ct) =>
-        CancellationTokenSource.CreateLinkedTokenSource(ct, _agent?.TurnStop ?? CancellationToken.None);
+        CancellationTokenSource.CreateLinkedTokenSource(ct, Agent?.TurnStop ?? CancellationToken.None);
+
+    private StudioAgent? Agent => _slot.Current;
+
+    private StudioAgent NewAgent(StudioAgentSetup setup) => new(setup, new StudioAgentTools(setup.Tools, this));
 
     private async Task AgentRouteAsync(HttpContext context, string method, string path)
     {
-        if (_agent is not { } agent)
+        if (path.StartsWith("/api/agent/connection", StringComparison.Ordinal))
+        {
+            await ConnectionRouteAsync(context, method, path);
+            return;
+        }
+        if (Agent is not { } agent)
         {
             if ((method, path) == ("GET", "/api/agent")) { await JsonAsync(context, new { enabled = false }); return; }
-            throw new StudioRefusal(404, "This studio was opened without --llm-provider.");
+            throw new StudioRefusal(404, "No model is connected to this studio's agent.");
         }
         switch (method, path)
         {
@@ -106,7 +116,7 @@ public sealed partial class StudioServer
         var relative = JobPath(path) ?? throw new StudioRefusal(400, "read-job needs the job's 'path' in the folder.");
         var job = _folder.ReadJob(relative);
         using var linked = Linked(ct);
-        if (await _agent!.MaySendAsync(relative, job.Text, ["send", "withhold"], linked.Token) != "send")
+        if (await Agent!.MaySendAsync(relative, job.Text, ["send", "withhold"], linked.Token) != "send")
             return Answer(new { withheld = $"The person kept the text of '{relative}' from you: it holds a credential as a value. Ask them what you need to know of it." });
         return Answer(new { path = relative, yaml = job.Text });
     }
@@ -130,7 +140,7 @@ public sealed partial class StudioServer
         string? hash = File.Exists(_folder.ResolveForWrite(relative)) ? _folder.ReadJob(relative).Hash : null;
         var body = new { path = relative, replaces = hash is not null, yaml = composed.Yaml, rewrites = composed.Yaml != yaml.Replace("\r\n", "\n") };
         using var linked = Linked(ct);
-        var choice = await _agent!.AskAsync("save", body, null, ["save", "refuse"],
+        var choice = await Agent!.AskAsync("save", body, null, ["save", "refuse"],
             (chosen, _) => chosen == "save" && !Unchanged(relative, hash) ? $"'{relative}' changed on disk since the card was shown: nothing was written." : null,
             linked.Token);
         return choice switch
