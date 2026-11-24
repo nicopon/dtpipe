@@ -633,6 +633,7 @@ function renderBar() {
   set("d-watch-rows", { disabled: dbg.running || dbg.real, ...(document.activeElement === $("d-watch-rows") ? {} : { value: String(dbg.rows) }) });
   set("d-forget-pins", { disabled: dbg.running || dbg.real, hidden: dbg.watch.length === 0 });
   set("d-run", { disabled: dbg.running || suspended, title: suspended ? SUSPENDED : RUN_TITLE });
+  set("d-publish", { hidden: !state.coordinator });
   if (state.job && lastShownDirty !== holdsEdits()) invalidate("jobs");
 }
 
@@ -665,7 +666,7 @@ function barButtons() {
     el("button", { id: "d-forget-pins", class: "ghost small", hidden: true, title: "Unpin every step and forget the checkpoints they kept", onclick: forgetPins }, "Forget pins"),
     el("span", { id: "d-suspended", class: "suspended", hidden: true, title: SUSPENDED }, "⏸ run suspended: write or abandon it on the output steps"),
     el("button", { id: "d-run", class: "danger", title: RUN_TITLE, onclick: () => prepareRun() }, "Run for real…"),
-    state.coordinator ? el("button", { id: "d-publish", title: "Send the saved job to the coordinator's library", onclick: () => publishAndRead() }, "Publish") : null,
+    el("button", { id: "d-publish", hidden: !state.coordinator, title: "Send the saved job to the coordinator's library", onclick: () => publishAndRead() }, "Publish"),
   ];
 }
 
@@ -718,6 +719,12 @@ async function start() {
   if (typeof kept.open === "string" && state.jobs.paths.includes(kept.open)) await open(kept.open, true);
   onCoordinator(loadBricks);
   onCoordinator(loadLibrary);
+  // Another coordinator has other publications; what a publication showed was said by the one that is gone.
+  let connectedTo = null;
+  onCoordinator((link) => {
+    if ((link?.url ?? null) !== connectedTo) { connectedTo = link?.url ?? null; forgetPublication(); }
+    loadJobs().catch(() => {});
+  });
   await refreshCoordinator();
   await loadBricks();
   await loadLibrary();

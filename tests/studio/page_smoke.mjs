@@ -1060,6 +1060,53 @@ const scenarios = {
     }
   },
 
+  // A coordinator connected from the page, with no flag: the pill offers it, a key signs in for the session, another connection
+  // is remembered with no key, a studio started again reads it back, and forgetting disconnects. Nothing here writes the keyring.
+  async "coordinator-connect"({ page: p, folder, studio }) {
+    const file = path.join(folder, ".smoke-state", "studio.json");
+    const pill = `document.querySelector("#coordinator")?.textContent ?? ""`;
+    check("the pill says no coordinator is connected and offers to connect one", await p.until(`/no coordinator/.test(${pill}) && !!document.querySelector("#coordinator-connect")`), await p.ev(pill));
+    check("the library and the publication are not offered", await p.ev(`document.querySelector("#side-library").hidden`));
+    await p.click("#coordinator-connect");
+    check("the dialog opens", await p.until(`!!document.querySelector("#d-coordinator-origin") && document.querySelector("#d-coordinator-key").parentElement.hidden`));
+    await p.ev(`(() => {
+      const set = (id, value) => { const n = document.querySelector(id); n.value = value; n.dispatchEvent(new Event("input")); n.dispatchEvent(new Event("change")); };
+      set("#d-coordinator-origin", ${JSON.stringify(fakeCoordinators.get(folder).url)});
+      set("#d-coordinator-auth", "key");
+      set("#d-coordinator-key", "dtp_alice_0123456789abcdefghijklmnopqrstuvwxyzABCDEFG");
+      document.querySelector("#d-coordinator-remember").checked = false;
+    })()`);
+    await p.click("#d-coordinator-test");
+    check("Test says the key signs in", await p.until(`/signs in as alice@test.local/.test(document.querySelector("#d-coordinator-note")?.textContent ?? "")`), await p.ev(`document.querySelector("#d-coordinator-note")?.textContent ?? ""`));
+    await p.click("#d-coordinator-submit");
+    check("Connect signs the person in with the key", await p.until(`!document.querySelector("#d-coordinator-dialog") && /alice@test.local/.test(${pill})`, 20000), await p.ev(pill));
+    check("the library is offered once a coordinator is connected", await p.until(`!document.querySelector("#side-library").hidden`));
+    check("nothing is remembered when the box is not ticked", !fs.existsSync(file));
+    await p.shot("coordinator-1-connected");
+
+    await p.click("#coordinator-change");
+    check("the dialog reads the connection back", await p.until(`document.querySelector("#d-coordinator-auth")?.value === "key" && !!document.querySelector("#d-coordinator-forget")`));
+    await p.ev(`(() => { const a = document.querySelector("#d-coordinator-auth"); a.value = "browser"; a.dispatchEvent(new Event("change")); })()`);
+    await p.click("#d-coordinator-submit");
+    check("Connect replaces the link: signed out, to sign in through the browser", await p.until(`!document.querySelector("#d-coordinator-dialog") && /Sign in/.test(${pill}) && !/alice@test.local/.test(${pill})`), await p.ev(pill));
+    const written = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
+    check("the coordinator is remembered, with no key", written.includes(fakeCoordinators.get(folder).url) && !/dtp_/.test(written), written || "no file");
+
+    studio.stop();
+    await sleep(500);
+    const again = await startStudio(folder);
+    try {
+      await p.send("Page.navigate", { url: again.url });
+      check("a studio started without a flag connects the remembered coordinator", await p.until(`/127.0.0.1/.test(${pill}) && !!document.querySelector("#coordinator-change")`, 30000), await p.ev(pill));
+      await p.click("#coordinator-change");
+      await p.click("#d-coordinator-forget");
+      check("forgetting disconnects and removes the remembered coordinator", await p.until(`!document.querySelector("#d-coordinator-dialog") && /no coordinator/.test(${pill})`)
+        && !JSON.parse(fs.readFileSync(file, "utf8")).coordinator);
+    } finally {
+      again.stop();
+    }
+  },
+
   // The header says each link and why: a studio that stops is never a problem of the cards, and a save is not offered anyway.
   async "link-studio"({ page: p, studio }) {
     check("the job opens", await p.openJob("chain.yaml"));
@@ -1336,7 +1383,7 @@ async function seed(name, folder) {
   if (name === "workspace-files") {
     fs.mkdirSync(path.join(folder, "sub"), { recursive: true });
   }
-  if (name === "library-sync") {
+  if (name === "library-sync" || name === "coordinator-connect") {
     const keyPath = path.join(folder, "studio.key");
     fs.writeFileSync(keyPath, "dtp_alice_0123456789abcdefghijklmnopqrstuvwxyzABCDEFG\n");
     const arrowPath = path.join(folder, "sample.arrows");

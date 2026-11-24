@@ -1046,3 +1046,117 @@ export function openAgentConnectDialog(opts) {
     url.focus();
   });
 }
+
+/**
+ * The coordinator's connection: its address, how the person signs in (through the browser, or with a key the coordinator made)
+ * and, under Advanced, whether to remember it on this machine. The key is typed here and sent once; the page never reads one
+ * back, only whether one is kept and where. `onConnect(body)` makes the connection (false: the person declined) and
+ * `onForget()` disconnects and forgets what is remembered.
+ * @param {{ connection: any, onConnect: (body: any) => Promise<any>, onForget: () => Promise<void> }} opts
+ */
+export function openCoordinatorConnectDialog(opts) {
+  const { connection, onConnect, onForget } = opts;
+  openDialog("d-coordinator-dialog", "Connect a coordinator", ({ body, close }) => {
+    const origin = /** @type {HTMLInputElement} */ (el("input", {
+      id: "d-coordinator-origin", type: "text", class: "mono", autocomplete: "off", "aria-label": "Address",
+      value: connection?.origin || "", placeholder: "https://coordinator.example.com",
+    }));
+    const auth = /** @type {HTMLSelectElement} */ (el("select", { id: "d-coordinator-auth", "aria-label": "Sign in" },
+      el("option", { value: "browser", selected: connection?.auth !== "key" }, "Through the browser"),
+      el("option", { value: "key", selected: connection?.auth === "key" }, "With a key the coordinator made for me")));
+    const key = /** @type {HTMLInputElement} */ (el("input", { id: "d-coordinator-key", type: "password", autocomplete: "off", "aria-label": "Key", placeholder: "dtp_…" }));
+    const keyNote = el("p", { id: "d-coordinator-key-note", class: "hint" });
+    const removeKey = /** @type {HTMLInputElement} */ (el("input", { id: "d-coordinator-remove-key", type: "checkbox", "aria-label": "Remove the key kept for this address" }));
+    const remember = /** @type {HTMLInputElement} */ (el("input", { id: "d-coordinator-remember", type: "checkbox", checked: true, "aria-label": "Remember on this machine" }));
+    const note = el("p", { id: "d-coordinator-note", class: "hint" });
+    const banner = el("p", { id: "d-coordinator-error", class: "bad dialog-error", hidden: true });
+    const connect = /** @type {HTMLButtonElement} */ (el("button", { id: "d-coordinator-submit", type: "submit", class: "primary" }, "Connect"));
+    const test = /** @type {HTMLButtonElement} */ (el("button", { id: "d-coordinator-test", type: "button" }, "Test"));
+    let busy = false;
+
+    const same = (a, b) => String(a || "").toLowerCase().replace(/\/+$/, "") === String(b || "").toLowerCase().replace(/\/+$/, "");
+    const request = () => ({
+      origin: origin.value.trim(),
+      auth: auth.value,
+      key: key.value || undefined,
+      removeKey: removeKey.checked,
+      remember: remember.checked,
+    });
+    const fail = (message) => { banner.hidden = false; banner.textContent = message; };
+    const settle = (value) => { busy = value; connect.disabled = value; test.disabled = value; };
+    const update = () => {
+      const keyed = auth.value === "key";
+      key.parentElement.hidden = !keyed;
+      const here = same(origin.value, connection?.origin);
+      const kept = here && connection?.key;
+      keyNote.textContent = kept === "stored" ? "A key is kept in the keyring for this address: leave the field empty to keep it, or type another to replace it."
+        : kept === "flag" ? "The key was given on the command line: it holds for this session only."
+        : kept === "session" ? "A key typed earlier is held for this session only: type it again to remember it."
+        : connection?.needsKey && here ? "This coordinator was remembered, but its key is not kept: type it again."
+        : "A key is kept only for the address it is given at: another address asks for it again.";
+      removeKey.parentElement.hidden = !(keyed && kept === "stored");
+      note.textContent = connection?.source === "flag" ? "This coordinator is set by the command line: a change holds for this session, and is remembered only when ticked."
+        : connection?.keyring === false ? "The system keyring cannot be used: a key lasts for this session only." : "";
+    };
+    auth.addEventListener("change", update);
+    origin.addEventListener("input", update);
+
+    test.addEventListener("click", async () => {
+      if (busy) return;
+      settle(true);
+      banner.hidden = true;
+      test.textContent = "Testing…";
+      try {
+        const answer = await api("/api/coordinator/connection/test", request());
+        note.textContent = answer.signedInAs ? `The coordinator answers, and the key signs in as ${answer.signedInAs}.` : "The coordinator answers.";
+      } catch (err) {
+        fail(err.message);
+      }
+      test.textContent = "Test";
+      settle(false);
+    });
+
+    const form = el("form", {
+      class: "dialog-form",
+      onsubmit: async (e) => {
+        e.preventDefault();
+        if (busy) return;
+        settle(true);
+        banner.hidden = true;
+        connect.textContent = "Connecting…";
+        try {
+          const answer = await onConnect(request());
+          key.value = "";
+          if (answer !== false) { close(); return; }
+        } catch (err) {
+          fail(err.message);
+        }
+        connect.textContent = "Connect";
+        settle(false);
+      },
+    },
+      el("div", { class: "dialog-field" }, el("label", { for: "d-coordinator-origin" }, "Address"), el("div", { class: "row" }, origin, test)),
+      el("div", { class: "dialog-field" }, el("label", { for: "d-coordinator-auth" }, "Sign in"), auth),
+      el("div", { class: "dialog-field" }, el("label", { for: "d-coordinator-key" }, "Key"), key, keyNote,
+        el("label", {}, removeKey, " Remove the key kept for this address")),
+      el("details", { class: "dialog-details" }, el("summary", {}, "Advanced"),
+        el("label", {}, remember, " Remember on this machine (the key goes to the system keyring, never to a file)")),
+      note,
+      banner,
+      el("div", { class: "row dialog-actions" },
+        connection?.source && connection.source !== "none"
+          ? el("button", {
+            id: "d-coordinator-forget", type: "button", class: "ghost", title: "Disconnect, and forget the remembered coordinator and the key kept for its address",
+            onclick: async () => {
+              if (busy) return;
+              try { await onForget(); close(); } catch (err) { fail(err.message); }
+            },
+          }, "Disconnect and forget")
+          : null,
+        el("button", { type: "button", class: "ghost", onclick: close }, "Cancel"),
+        connect));
+    fill(body, form);
+    update();
+    origin.focus();
+  });
+}

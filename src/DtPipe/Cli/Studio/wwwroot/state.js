@@ -106,8 +106,10 @@ export const state = {
    * @type {{ folder: string, paths: string[], folders: string[], publications: Record<string, { id: string, commit: string | null, localModified: boolean | null }>, filter: string,
    *   library: { shown: boolean, pipelines: any[] | null, error: string | null, filter: string } }} */
   jobs: { folder: "", paths: [], folders: [""], publications: {}, filter: "", library: { shown: false, pipelines: null, error: null, filter: "" } },
-  /** The coordinator the command line named, or null: { url, state, reason, me, studioVersion, contract }. @type {any} */
+  /** The coordinator connected now, or null: { url, state, reason, me, studioVersion, contract, byKey, unreachable }. @type {any} */
   coordinator: null,
+  /** How the coordinator is connected, as the server says it (never the key): { connected, needsKey, source, origin, auth, key, canConnect, ... }. @type {any} */
+  coordinatorConnection: null,
   /** The agent's panel: whether the command line opened one, the server's last answer (GET /api/agent), and what the agent gave
    * that waits for the person's Apply because they changed the cards since the agent read them (a plan, or the file it saved),
    * and the cards the agent's last plan adds, changes and removes against the cards it came to (`unknown` when either side does

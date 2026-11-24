@@ -5,6 +5,7 @@
 import { api, el, fill, status } from "./dom.js";
 import { brickBranches, holdsEdits, showTab } from "./designer.js";
 import { openDialog, renderDiff, shortCommit } from "./dialogs.js";
+import { openCoordinatorConnect } from "./coordinator.js";
 import { invalidate } from "./render.js";
 import { sequence, state } from "./state.js";
 
@@ -125,7 +126,7 @@ export function publicationProblems() {
 function refusalProblems() {
   const title = el("h3", {}, "Would be refused at publication");
   if (!state.coordinator) {
-    return [title, el("p", { class: "hint" }, "No verdict: this studio was opened without --coordinator, whose runner judges a publication.")];
+    return [title, el("p", { class: "hint" }, "No verdict: no coordinator is connected, whose runner judges a publication.")];
   }
   if (!signedIn()) {
     return [title, el("p", { class: "hint" }, "No verdict while signed out: the check reads each brick's rows through the coordinator. Sign in to ask for it.")];
@@ -148,7 +149,7 @@ function refusalProblems() {
 
 function edgeProblems() {
   const title = el("h3", {}, "What the coordinator's nodes would do with the edges");
-  if (!state.coordinator) return [title, el("p", { class: "hint" }, "No verdict: this studio was opened without --coordinator, whose nodes judge the edges.")];
+  if (!state.coordinator) return [title, el("p", { class: "hint" }, "No verdict: no coordinator is connected, whose nodes judge the edges.")];
   if (!signedIn()) return [title, el("p", { class: "hint" }, "No verdict while signed out: the coordinator's nodes judge the edges. Sign in to ask.")];
   const verdict = publication.edges;
   const current = currentEdges();
@@ -445,7 +446,10 @@ export async function publish(options = {}) {
 
 /** The Publish tab. */
 export function publicationView() {
-  if (!state.coordinator) return el("p", { class: "hint" }, "Open the studio with --coordinator to publish a job into a coordinator's library.");
+  if (!state.coordinator) {
+    return [el("p", { class: "hint" }, "No coordinator is connected: connect one to publish a job into its library."),
+      el("button", { id: "publish-connect", class: "small primary", onclick: openCoordinatorConnect }, "Connect a coordinator…")];
+  }
   const check = currentCheck();
   return [check && check.ok === false ? refusalView(check) : null, outcomeView(publication.outcome)];
 }
