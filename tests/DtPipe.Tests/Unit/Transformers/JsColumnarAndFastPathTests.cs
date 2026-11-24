@@ -435,6 +435,43 @@ public class JsColumnarAndFastPathTests : IDisposable
         return result;
     }
 
+    /// <summary>
+    /// Lists that cover a stretch of their values array hand that stretch over as a view of the same buffers: the
+    /// input batch is disposed before the output is read, and the allocator ends at zero.
+    /// </summary>
+    [Fact]
+    public async Task Expand_ListsOverAStretchOfText_UnnestsAViewThatOutlivesTheInput()
+    {
+        var pool = new DtPipe.Tests.Helpers.TrackingMemoryPool();
+        var items = new StringArray.Builder();
+        foreach (var item in new[] { "skipped", "é", "日本", "😀", "", "y", "skipped too" }) items.Append(item);
+
+        // Row 0 covers items 1-2, row 1 none, row 2 items 3-5: the stretch starts at 1 and ends before the last value.
+        var offsets = new ArrowBuffer.Builder<int>().Append(1).Append(3).Append(3).Append(6).Build(pool);
+        var listType = new ListType(new Field("item", StringType.Default, true));
+        var list = new ListArray(listType, 3, offsets, items.Build(pool), ArrowBuffer.Empty, 0, 0);
+        var ids = new Int32Array.Builder().AppendRange([10, 20, 30]).Build(pool);
+        var inBatch = new RecordBatch(
+            new Schema([new Field("Id", Int32Type.Default, false), new Field("Tags", listType, false)], null), [ids, list], 3);
+
+        var expand = new ExpandDataTransformer(
+            new ExpandOptions { Expand = ["row.Tags.map(t => ({ ...row, Tag: t }))"], ExpandTypes = new() { ["Tag"] = "string" } },
+            _jsProvider);
+        await expand.InitializeAsync([new PipeColumnInfo("Id", typeof(int), false), new PipeColumnInfo("Tags", typeof(List<string>), false)]);
+        expand.UsesNativeFastPath.Should().BeTrue();
+
+        var outBatch = await expand.TransformBatchAsync(inBatch);
+        inBatch.Dispose();
+
+        outBatch.Should().NotBeNull();
+        var tags = (StringArray)outBatch!.Column(2);
+        Enumerable.Range(0, tags.Length).Select(i => tags.GetString(i)).Should().Equal("é", "日本", "😀", "", "y");
+        ((Int32Array)outBatch.Column(0)).Values.ToArray().Should().Equal(10, 10, 30, 30, 30);
+
+        outBatch.Dispose();
+        pool.ActiveAllocations.Should().Be(0);
+    }
+
     // ── Window: cross-batch count, key, window-all & mutations ───────────────
 
     [Fact]

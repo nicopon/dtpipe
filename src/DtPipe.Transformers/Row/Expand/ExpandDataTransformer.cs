@@ -311,15 +311,7 @@ public class ExpandDataTransformer : BaseColumnarTransformer, IMultiRowTransform
                 }
             }
 
-            if (listArr.Offset == 0 && offsets[0] == 0 && offsets[inLen] == listArr.Values.Length)
-            {
-                outArrays[plan.TargetColumnIndex] = ArrowOwnership.RetainArray(listArr.Values);
-            }
-            else
-            {
-                var valueField = ((ListType)listArr.Data.DataType).ValueField;
-                outArrays[plan.TargetColumnIndex] = ArrowColumnOperations.SliceArray(listArr.Values, valueField, offsets[0], outLen);
-            }
+            outArrays[plan.TargetColumnIndex] = ArrowColumnOperations.SliceArray(listArr.Values, offsets[0], outLen);
 
             for (int c = _inputColumnCount; c < outColCount; c++)
             {

@@ -118,8 +118,7 @@ internal static class ArrowColumnOperations
                     for (int i = 0; i < mask.Length; i++)
                     {
                         if (!mask[i]) continue;
-                        if (a.IsNull(i)) builder.AppendNull();
-                        else builder.Append(a.GetString(i));
+                        AppendCell(builder, a, i);
                     }
                     return builder.Build();
                 }
@@ -278,15 +277,8 @@ internal static class ArrowColumnOperations
                     for (int i = 0; i < inLen; i++)
                     {
                         int rep = offsets[i + 1] - offsets[i];
-                        if (a.IsNull(i))
-                        {
-                            for (int r = 0; r < rep; r++) builder.AppendNull();
-                        }
-                        else
-                        {
-                            string s = a.GetString(i);
-                            for (int r = 0; r < rep; r++) builder.Append(s);
-                        }
+                        for (int r = 0; r < rep; r++)
+                            AppendCell(builder, a, i);
                     }
                     return builder.Build();
                 }
@@ -333,8 +325,7 @@ internal static class ArrowColumnOperations
                 {
                     for (int j = start; j < end; j++)
                     {
-                        if (itemStrings.IsNull(j)) valBuilder.AppendNull();
-                        else valBuilder.Append(itemStrings.GetString(j));
+                        AppendCell(valBuilder, itemStrings, j);
                     }
                     elemPos += len;
                     outOffsetSpan[++rowPos] = elemPos;
@@ -364,35 +355,21 @@ internal static class ArrowColumnOperations
         return new ListArray(listType, outLen, outOffsets.Build(), ArrowTypeMapper.BuildArray(elemBuilder), ArrowBuffer.Empty, 0, 0);
     }
 
-    public static IArrowArray SliceArray(IArrowArray values, Field valueField, int start, int length)
+    /// <summary>
+    /// The rows <c>[start, start + length)</c> of <paramref name="values"/> as a view over the same
+    /// buffers, which it retains: the view outlives the batch that owned the array, and the caller owns
+    /// the view. The buffers are never copied, so it holds for every array type, the ones with no builder
+    /// included.
+    /// </summary>
+    public static IArrowArray SliceArray(IArrowArray values, int start, int length)
+        => global::Apache.Arrow.ArrowArrayFactory.SliceShared(values, start, length);
+
+    // Copies a cell's UTF-8 bytes as they are, with no decoding to a string and encoding back; a null
+    // stays a null and an empty string an empty string.
+    private static void AppendCell(StringArray.Builder builder, StringArray source, int index)
     {
-        if (valueField.HasMetadata)
-        {
-            var reader = ArrowTypeMap.CompileValueReader(values, valueField);
-            var builder = ArrowTypeMapper.CreateBuilder(values.Data.DataType);
-            var append = ArrowTypeMapper.ResolveAppender(builder);
-            for (int i = 0; i < length; i++)
-                append(reader(start + i));
-            return ArrowTypeMapper.BuildArray(builder);
-        }
-
-        if (values is StringArray s)
-        {
-            var builder = new StringArray.Builder();
-            for (int i = 0; i < length; i++)
-            {
-                int idx = start + i;
-                if (s.IsNull(idx)) builder.AppendNull();
-                else builder.Append(s.GetString(idx));
-            }
-            return builder.Build();
-        }
-
-        var genReader = ArrowTypeMap.CompileValueReader(values, valueField);
-        var genBuilder = ArrowTypeMapper.CreateBuilder(values.Data.DataType);
-        var genAppend = ArrowTypeMapper.ResolveAppender(genBuilder);
-        for (int i = 0; i < length; i++)
-            genAppend(genReader(start + i));
-        return ArrowTypeMapper.BuildArray(genBuilder);
+        var bytes = source.GetBytes(index, out bool isNull);
+        if (isNull) builder.AppendNull();
+        else builder.Append(bytes);
     }
 }

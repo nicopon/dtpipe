@@ -260,6 +260,30 @@ public class FilterDataTransformerTests : IDisposable
         KeptTexts(result).Should().Equal("Grace");
     }
 
+    /// <summary>
+    /// A kept text cell leaves as the bytes it came in: accents, a character outside the basic plane, kanji,
+    /// an empty string and a null survive the compaction, whatever neighbours were dropped around them.
+    /// </summary>
+    [Fact]
+    public async Task KeptText_IsTheSameCell_OnBothPaths_WhateverIsDroppedAroundIt()
+    {
+        string?[] texts = ["café", "dropped", null, "", "naïve 😀 日本語", "dropped too", "Ünï", "😀"];
+        const string Expression = "row.Name === null || !row.Name.startsWith('dropped')";
+
+        var onRows = Build(Expression);
+        await onRows.InitializeAsync(TextColumn("Name"));
+        var viaRows = texts.Select(t => onRows.Transform(new object?[] { t })).Where(r => r is not null).Select(r => (string?)r![0]).ToArray();
+
+        var onBatches = Build(Expression);
+        await onBatches.InitializeAsync(TextColumn("Name"));
+        using var result = await onBatches.TransformBatchAsync(TextBatch("Name", texts));
+        var text = (StringArray)result!.Column(0);
+        var viaBatches = Enumerable.Range(0, text.Length).Select(i => text.IsNull(i) ? null : text.GetString(i)).ToArray();
+
+        viaBatches.Should().Equal("café", null, "", "naïve 😀 日本語", "Ünï", "😀");
+        viaBatches.Should().Equal(viaRows);
+    }
+
     [Theory]
     [InlineData("row.Value.nope.deeper > 1")]
     [InlineData("({}).p.q === 1")]
