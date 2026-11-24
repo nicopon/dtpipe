@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
@@ -20,18 +19,16 @@ internal sealed unsafe class DuckDbArrowTableSource : IDisposable
 {
     private const int StandardVectorSize = 2048;
 
-    // DuckDB passes COLUMN_IDENTIFIER_ROW_ID (UINT64_MAX) or COLUMN_IDENTIFIER_EMPTY (UINT64_MAX - 1)
-    // in duckdb_init_get_column_index for scans that read no columns (e.g. SELECT COUNT(*)).
+    // The column identifiers DuckDB reserves past any column: COLUMN_IDENTIFIER_ROW_ID and
+    // COLUMN_IDENTIFIER_EMPTY. It passes them only to a table function that declares virtual columns, and
+    // this one declares none: a scan that reads no column (COUNT(*)) is given column 0.
+    private const ulong ColumnIdentifierRowId = ulong.MaxValue;
     private const ulong ColumnIdentifierEmpty = ulong.MaxValue - 1;
 
     // The --from stream's estimate: far above any --ref, which is held whole in memory. A stream declared
     // without one is estimated at one row, so DuckDB builds every hash join on it and holds the whole stream
     // before its first row out.
     private const ulong StreamCardinalityEstimate = 1UL << 40;
-
-    // Keeps exported 1-column RecordBatch slices alive until DuckDB invokes CArrowArray.release.
-    private static readonly ConcurrentDictionary<IntPtr, RecordBatch> RetainedExports = new();
-    private static IntPtr _exporterRelease;
 
     private readonly DuckDBNativeConnection _connection;
     private readonly string _alias;
@@ -205,7 +202,7 @@ internal sealed unsafe class DuckDbArrowTableSource : IDisposable
         var err = DuckDbArrowNative.DuckDBDataChunkFromArrow(connection, &ffiArray, convertedSchema, out var chunk);
         if (err != IntPtr.Zero)
         {
-            ReleaseExportedIfUnclaimed(&ffiArray);
+            CArrowArrayReleaseHook.ReleaseExportedIfUnclaimed(&ffiArray);
             ThrowIfArrowError(err, "duckdb_data_chunk_from_arrow");
         }
 
@@ -236,6 +233,27 @@ internal sealed unsafe class DuckDbArrowTableSource : IDisposable
 
     private static string ScannedMoreThanOnceMessage(string alias)
         => $"DuckDBSqlProcessor: the plan scans '{alias}' more than once, and a source is a stream a scan reads to its end: a second scan would find nothing. Read '{alias}' once in a CTE (WITH c AS MATERIALIZED (SELECT * FROM {alias}) ...) and select from that.";
+
+    private static string UnknownColumnMessage(string alias, ulong columnId, int columnCount)
+        => $"DuckDBSqlProcessor: the plan asks '{alias}' for column {columnId}, and '{alias}' has {columnCount} columns: a scan cannot fill a column its source does not have.";
+
+    /// <summary>Whether <paramref name="columnId"/> is an identifier DuckDB reserves rather than a column.</summary>
+    internal static bool IsReservedColumnId(ulong columnId)
+        => columnId is ColumnIdentifierRowId or ColumnIdentifierEmpty;
+
+    /// <summary>
+    /// The refusal of a projection that names a column the source does not have, naming the source; null
+    /// when each identifier is one of its <paramref name="columnCount"/> columns or a reserved one.
+    /// </summary>
+    internal static string? UnknownColumnError(string alias, IReadOnlyList<ulong> columnIds, int columnCount)
+    {
+        foreach (var columnId in columnIds)
+        {
+            if (columnId >= (ulong)columnCount && !IsReservedColumnId(columnId))
+                return UnknownColumnMessage(alias, columnId, columnCount);
+        }
+        return null;
+    }
 
     // ── Unmanaged callbacks (never let managed exceptions unwind across native frames) ──
 
@@ -305,6 +323,14 @@ internal sealed unsafe class DuckDbArrowTableSource : IDisposable
             for (var i = 0; i < colCount; i++)
                 colIds[i] = NativeMethods.TableFunction.DuckDBInitGetColumnIndex(info, (ulong)i);
 
+            // Judged once per scan, before the source gives a row.
+            var unknownColumn = UnknownColumnError(source._alias, colIds, source._fieldNames.Length);
+            if (unknownColumn is not null)
+            {
+                NativeMethods.TableFunction.DuckDBInitSetError(info, unknownColumn);
+                return;
+            }
+
             var state = new ScanState(colIds);
             var stateHandle = GCHandle.Alloc(state);
             NativeMethods.TableFunction.DuckDBInitSetInitData(info, GCHandle.ToIntPtr(stateHandle), &DestroyScanState);
@@ -354,8 +380,10 @@ internal sealed unsafe class DuckDbArrowTableSource : IDisposable
                 var projIds = state.ProjectedColumnIds;
                 for (var k = 0; k < projIds.Length; k++)
                 {
+                    // A reserved identifier names nothing to read; Init refused every other one past the
+                    // source's columns.
                     var colId = projIds[k];
-                    if (colId >= ColumnIdentifierEmpty || colId >= (ulong)source._fieldNames.Length)
+                    if (IsReservedColumnId(colId))
                         continue;
 
                     var colIdx = (int)colId;
@@ -454,23 +482,12 @@ internal sealed unsafe class DuckDbArrowTableSource : IDisposable
             throw;
         }
 
-        var slot = ReleaseSlot(&ffiArray);
-        var innerRelease = *slot;
-        var existing = Interlocked.CompareExchange(ref _exporterRelease, innerRelease, IntPtr.Zero);
-        if (existing != IntPtr.Zero && existing != innerRelease)
-        {
-            ((delegate* unmanaged[Cdecl]<CArrowArray*, void>)innerRelease)(&ffiArray);
-            colBatch.Dispose();
-            throw new InvalidOperationException("Unexpected Arrow exporter release callback mismatch.");
-        }
-
-        RetainedExports[(IntPtr)ffiArray.private_data] = colBatch;
-        *slot = (IntPtr)(delegate* unmanaged[Cdecl]<CArrowArray*, void>)&ReleaseRetainedBatch;
+        CArrowArrayReleaseHook.Chain(&ffiArray, colBatch);
 
         var errData = DuckDbArrowNative.DuckDBDataChunkFromArrow(connection, &ffiArray, convertedColSchema, out var tempChunk);
         if (errData != IntPtr.Zero)
         {
-            ReleaseExportedIfUnclaimed(&ffiArray);
+            CArrowArrayReleaseHook.ReleaseExportedIfUnclaimed(&ffiArray);
             errorMessage = ExtractAndDestroyError(errData);
             return false;
         }
@@ -487,27 +504,6 @@ internal sealed unsafe class DuckDbArrowTableSource : IDisposable
         {
             DuckDbArrowNative.DuckDBDestroyDataChunk(ref tempChunk);
         }
-    }
-
-    // Apache.Arrow keeps CArrowArray.release internal; the Arrow C Data ABI places it immediately before private_data.
-    private static IntPtr* ReleaseSlot(CArrowArray* array) => (IntPtr*)&array->private_data - 1;
-
-    private static void ReleaseExportedIfUnclaimed(CArrowArray* array)
-    {
-        var releasePtr = *ReleaseSlot(array);
-        if (releasePtr != IntPtr.Zero)
-            ((delegate* unmanaged[Cdecl]<CArrowArray*, void>)releasePtr)(array);
-    }
-
-    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
-    private static void ReleaseRetainedBatch(CArrowArray* array)
-    {
-        RetainedExports.TryRemove((IntPtr)array->private_data, out var colBatch);
-
-        var inner = (delegate* unmanaged[Cdecl]<CArrowArray*, void>)_exporterRelease;
-        if (inner != null) inner(array);
-
-        colBatch?.Dispose();
     }
 
     public void Dispose()
