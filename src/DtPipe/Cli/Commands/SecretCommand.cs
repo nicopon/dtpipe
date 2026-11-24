@@ -84,7 +84,7 @@ public class SecretCommand : Command
         {
             try
             {
-                var secrets = _secretsManager.ListSecrets();
+                var secrets = ReservedAliases.Visible(_secretsManager.ListSecrets()).ToList();
                 if (secrets.Count == 0)
                 {
                     _console.MarkupLine("[yellow]No secrets found in keyring.[/]");
