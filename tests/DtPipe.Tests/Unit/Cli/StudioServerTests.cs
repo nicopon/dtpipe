@@ -392,7 +392,7 @@ public sealed class StudioServerTests : IAsyncLifetime
             needingOne.Select(c => $"{c.Item1} {c.Item2} 404"),
             await StatusesAsync(needingOne));
         var (_, refusal) = await SendAsync(Request(HttpMethod.Post, "/api/publish", body: new { path = "a.yaml", hash, id = "orders" }));
-        Assert.Equal("This studio was opened without --coordinator.", refusal.GetProperty("error").GetString());
+        Assert.Equal("No coordinator is connected to this studio: connect one from the page.", refusal.GetProperty("error").GetString());
     }
 
     [Fact]

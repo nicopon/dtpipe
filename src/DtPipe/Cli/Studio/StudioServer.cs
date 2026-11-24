@@ -33,13 +33,14 @@ public sealed record StudioComponent(string Name, string Category);
 /// <summary>
 /// What the studio's server works with: the engine, the designer's model (the coordinator's own, with
 /// dtpipe's components for endpoints), the components the palette lists, the keyring a variable may be
-/// launched from, and the coordinator the command line named, if any.
+/// launched from, and the coordinator the studio starts with, if any (<see cref="CoordinatorAtStart"/>: the page may replace it,
+/// so the server reads the link in place, never this one).
 /// <see cref="DesignWith"/> gives the same model over the coordinator's bricks; without it, <see cref="Design"/> alone.
 /// </summary>
 public sealed record StudioTools(
     IStudioEngine Engine, DesignService Design, IReadOnlyList<StudioComponent> Readers, IReadOnlyList<StudioComponent> Writers,
-    ISecretsManager Secrets, CoordinatorLink? Coordinator = null, Func<IBrickLookup, DesignService>? DesignWith = null,
-    StudioImporter? Import = null, StudioAgentSetup? Agent = null, StudioAgentLink? AgentLink = null);
+    ISecretsManager Secrets, CoordinatorLink? CoordinatorAtStart = null, Func<IBrickLookup, DesignService>? DesignWith = null,
+    StudioImporter? Import = null, StudioAgentSetup? Agent = null, StudioAgentLink? AgentLink = null, StudioCoordinatorStart? CoordinatorStart = null);
 
 /// <summary>
 /// The engine as the studio asks it: a sample, a real run, and the cut a preview runs. Each call carries the
@@ -124,6 +125,9 @@ public sealed partial class StudioServer : IAsyncDisposable
     private readonly StudioLocalFiles _local;
     private readonly StudioVariables _variables;
     private readonly byte[] _token;
+    private const string NoCoordinator = "No coordinator is connected to this studio: connect one from the page.";
+
+    private readonly CoordinatorSlot _coordinator;
     private readonly SemaphoreSlim _sampling = new(1, 1);
     private readonly TaskCompletionSource _quit = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -138,11 +142,27 @@ public sealed partial class StudioServer : IAsyncDisposable
         PurgeDrafts();
         Token = token;
         _token = Encoding.UTF8.GetBytes(token);
+        _coordinator = new CoordinatorSlot(
+            tools.CoordinatorAtStart,
+            tools.CoordinatorStart?.Start ?? (tools.CoordinatorAtStart is { } given
+                ? new CoordinatorConnection(given.Origin.ToString().TrimEnd('/'), given.ByKey ? "key" : "browser", "flag", given.ByKey ? "flag" : "none")
+                : null));
+        if (tools.CoordinatorAtStart is { ByKey: true } remembered && _coordinator.Connection?.Source == "remembered")
+            _coordinator.StartSignIn(remembered);
         _slot = new AgentSlot(
             tools.Agent is { } agent ? NewAgent(agent) : null,
             tools.AgentLink?.Start ?? (tools.Agent is { } started ? new AgentConnection(started.Client.ProviderName, started.BaseUrl, started.Model,
                 (int)AgentOptions.DefaultLlmTimeout.TotalSeconds, "flag", "none") : null));
     }
+
+    /// <summary>The coordinator's link in place now. Read it where the request uses it; a request that awaits the coordinator holds it first.</summary>
+    private CoordinatorLink? Coordinator => _coordinator.Current;
+
+    /// <summary>The routes that send something to the coordinator: the library, the bricks, a publication, a sign-in.</summary>
+    private static bool ReachesCoordinator(string path) =>
+        path == "/api/coordinator/login" || path.StartsWith("/api/bricks", StringComparison.Ordinal)
+        || path.StartsWith("/api/library", StringComparison.Ordinal) || path.StartsWith("/api/publish", StringComparison.Ordinal)
+        || path == "/api/design/decompose";
 
     public string Token { get; }
     public int Port { get; private set; }
@@ -201,6 +221,8 @@ public sealed partial class StudioServer : IAsyncDisposable
             if (!CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(request.Headers[TokenHeader].ToString()), _token))
                 throw new StudioRefusal(401, "This session's token is missing or wrong: open the address dtpipe studio printed.");
 
+            // A request that reaches the coordinator holds its link to the end: the connection cannot be replaced under it.
+            using var hold = ReachesCoordinator(path) ? _coordinator.Hold() : null;
             switch (request.Method, path)
             {
                 case ("GET", "/api/jobs"):
@@ -257,10 +279,10 @@ public sealed partial class StudioServer : IAsyncDisposable
                     await SampleAsync(context);
                     break;
                 case ("GET", "/api/coordinator"):
-                    await JsonAsync(context, (object?)_tools.Coordinator?.Status() ?? new { url = (string?)null });
+                    await JsonAsync(context, (object?)Coordinator?.Status() ?? new { url = (string?)null });
                     break;
                 case ("POST", "/api/coordinator/login"):
-                    var link = _tools.Coordinator ?? throw new StudioRefusal(404, "This studio was opened without --coordinator.");
+                    var link = Coordinator ?? throw new StudioRefusal(404, NoCoordinator);
                     // With a key there is no tab to open: the studio signs in here, and the page reads the status again.
                     try
                     {
@@ -274,7 +296,7 @@ public sealed partial class StudioServer : IAsyncDisposable
                     catch (CoordinatorLinkException ex) { throw new StudioRefusal(502, ex.Message); }
                     break;
                 case ("POST", "/api/coordinator/logout"):
-                    _tools.Coordinator?.SignOutNow();
+                    Coordinator?.SignOutNow();
                     context.Response.StatusCode = StatusCodes.Status204NoContent;
                     break;
                 case ("GET", "/api/publish"):
@@ -283,7 +305,7 @@ public sealed partial class StudioServer : IAsyncDisposable
                     var proposed = request.Query["id"].ToString();
                     await JsonAsync(context, new
                     {
-                        publication = published?.Coordinator == _tools.Coordinator?.Origin.ToString() ? published : null,
+                        publication = published?.Coordinator == Coordinator?.Origin.ToString() ? published : null,
                         idError = proposed.Length == 0 || CoordinatorApi.IsPipelineId(proposed) ? null : NotAPipelineId(proposed),
                     });
                     break;
@@ -391,11 +413,12 @@ public sealed partial class StudioServer : IAsyncDisposable
     {
         AdmitHost(context.Request);
         if (context.Request.Method != "GET") throw new StudioRefusal(405, "The sign-in comes back as a GET.");
+        using var hold = _coordinator.Hold();
         string message;
-        if (_tools.Coordinator is not { } link)
+        if (Coordinator is not { } link)
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
-            message = "This studio was opened without --coordinator.";
+            message = NoCoordinator;
         }
         else
         {
@@ -424,7 +447,7 @@ public sealed partial class StudioServer : IAsyncDisposable
         var jobs = _folder.Jobs();
         var folders = _folder.Folders();
         var publications = new Dictionary<string, object>(StringComparer.Ordinal);
-        if (_tools.Coordinator is { } link)
+        if (Coordinator is { } link)
         {
             var origin = link.Origin.ToString();
             foreach (var job in jobs)
@@ -639,7 +662,7 @@ public sealed partial class StudioServer : IAsyncDisposable
             foreach (var (alias, brick) in sampling.Sources)
             {
                 byte[] arrow;
-                try { arrow = await _tools.Coordinator!.SampleAsync(brick.Node, brick.Id, Math.Min(rows, CoordinatorApi.MaxSampleRows), ct); }
+                try { arrow = await (Coordinator ?? throw new StudioRefusal(409, NoCoordinator)).SampleAsync(brick.Node, brick.Id, Math.Min(rows, CoordinatorApi.MaxSampleRows), ct); }
                 catch (CoordinatorLinkException ex) { throw new StudioRefusal(502, $"'{alias}': {ex.Message}"); }
                 files.Add(_local.SampleFile(arrow));
                 inputs.Add((alias, Bindable(files[^1])));
@@ -682,7 +705,7 @@ public sealed partial class StudioServer : IAsyncDisposable
     /// </summary>
     private async Task PublishAsync(HttpContext context)
     {
-        var link = _tools.Coordinator ?? throw new StudioRefusal(404, "This studio was opened without --coordinator.");
+        var link = Coordinator ?? throw new StudioRefusal(404, NoCoordinator);
         var asked = await BodyAsync<PublishRequest>(context);
         var path = JobPath(asked.Path) ?? throw new StudioRefusal(400, "Publish a job saved in the folder: name its path.");
         if (!CoordinatorApi.IsPipelineId(asked.Id)) throw new StudioRefusal(400, NotAPipelineId(asked.Id));
@@ -743,7 +766,7 @@ public sealed partial class StudioServer : IAsyncDisposable
     /// </summary>
     private async Task PublicationCheckAsync(HttpContext context)
     {
-        var link = _tools.Coordinator ?? throw new StudioRefusal(404, "This studio was opened without --coordinator.");
+        var link = Coordinator ?? throw new StudioRefusal(404, NoCoordinator);
         if (link.Status().State != CoordinatorLink.SignedIn)
             throw new StudioRefusal(409, "Sign in to the coordinator: what a publication would refuse is judged over its bricks' rows.");
         var yaml = await JobToJudgeAsync(context);
@@ -772,7 +795,7 @@ public sealed partial class StudioServer : IAsyncDisposable
     /// </summary>
     private async Task PublicationEdgesAsync(HttpContext context)
     {
-        var link = _tools.Coordinator ?? throw new StudioRefusal(404, "This studio was opened without --coordinator.");
+        var link = Coordinator ?? throw new StudioRefusal(404, NoCoordinator);
         if (link.Status().State != CoordinatorLink.SignedIn)
             throw new StudioRefusal(409, "Sign in to the coordinator: what its nodes would do with the job's edges is read from it.");
         var yaml = await JobToJudgeAsync(context);
@@ -847,7 +870,7 @@ public sealed partial class StudioServer : IAsyncDisposable
 
     /// <summary>The coordinator's link when a person is signed in to it; a refusal that names what is missing otherwise.</summary>
     private CoordinatorLink SignedInLink() =>
-        _tools.Coordinator is not { } link ? throw new StudioRefusal(404, "This studio was opened without --coordinator.")
+        Coordinator is not { } link ? throw new StudioRefusal(404, NoCoordinator)
         : link.Status().State != CoordinatorLink.SignedIn ? throw new StudioRefusal(409, "Sign in to the coordinator to read its library.")
         : link;
 
@@ -908,7 +931,7 @@ public sealed partial class StudioServer : IAsyncDisposable
 
     /// <summary>The designer's model over the catalog read last: what a card names is found, nothing is recognised.</summary>
     private DesignService Design() =>
-        _tools.DesignWith is { } with && _tools.Coordinator is { } link ? with(new StudioBricks(link.Catalog)) : _tools.Design;
+        _tools.DesignWith is { } with && Coordinator is { } link ? with(new StudioBricks(link.Catalog)) : _tools.Design;
 
     /// <summary>
     /// The model for taking <paramref name="yaml"/> apart: the coordinator says what each branch is when a
@@ -916,7 +939,7 @@ public sealed partial class StudioServer : IAsyncDisposable
     /// </summary>
     private async Task<DesignService> DesignForAsync(string yaml, CancellationToken ct)
     {
-        if (_tools.DesignWith is not { } with || _tools.Coordinator is not { } link) return _tools.Design;
+        if (_tools.DesignWith is not { } with || Coordinator is not { } link) return _tools.Design;
         string job;
         try { job = ForRecognition(yaml); }
         catch (Exception) { return Design(); }
@@ -946,8 +969,8 @@ public sealed partial class StudioServer : IAsyncDisposable
     /// </summary>
     private BrickSampling RunnableHere(string yaml, List<SampledBrick>? bricks, string gesture)
     {
-        var sampling = BrickSampling.Of(yaml, bricks, _tools.Coordinator?.Catalog);
-        if (sampling.Sources.Count > 0 && _tools.Coordinator?.Status().State != CoordinatorLink.SignedIn)
+        var sampling = BrickSampling.Of(yaml, bricks, Coordinator?.Catalog);
+        if (sampling.Sources.Count > 0 && Coordinator?.Status().State != CoordinatorLink.SignedIn)
             throw new StudioRefusal(409, $"This job reads a node's brick: sign in to the coordinator to {gesture} it.");
         RefuseMisusedReferences(sampling.Yaml);
         RefuseReferences(sampling.Yaml, SignedInCatalog());
@@ -1009,12 +1032,12 @@ public sealed partial class StudioServer : IAsyncDisposable
 
     /// <summary>The catalog read from the coordinator while a person is signed in to it, or null.</summary>
     private BrickCatalogView? SignedInCatalog() =>
-        _tools.Coordinator is { } link && link.Status().State == CoordinatorLink.SignedIn ? link.Catalog : null;
+        Coordinator is { } link && link.Status().State == CoordinatorLink.SignedIn ? link.Catalog : null;
 
     /// <summary>The job with each brick's branch replaced as a sample replaces it; as it is when that cannot be done.</summary>
     private string WithoutBricks(string yaml, List<SampledBrick>? bricks)
     {
-        try { return BrickSampling.Of(yaml, bricks, _tools.Coordinator?.Catalog).Yaml; }
+        try { return BrickSampling.Of(yaml, bricks, Coordinator?.Catalog).Yaml; }
         catch (Exception ex) when (ex is StudioRefusal or FormatException or YamlDotNet.Core.YamlException) { return yaml; }
     }
 
@@ -1024,7 +1047,7 @@ public sealed partial class StudioServer : IAsyncDisposable
     /// </summary>
     private async Task BricksAsync(HttpContext context)
     {
-        var link = _tools.Coordinator;
+        var link = Coordinator;
         string? error = null;
         BrickCatalogView? catalog = null;
         if (link is not null)
@@ -1051,7 +1074,7 @@ public sealed partial class StudioServer : IAsyncDisposable
     /// </summary>
     private async Task BrickPreviewAsync(HttpContext context)
     {
-        var link = _tools.Coordinator ?? throw new StudioRefusal(404, "This studio was opened without --coordinator.");
+        var link = Coordinator ?? throw new StudioRefusal(404, NoCoordinator);
         var asked = await BodyAsync<BrickPreviewRequest>(context);
         var brick = link.Catalog?.Bricks.FirstOrDefault(b => b.Key == asked.Key)
             ?? throw new StudioRefusal(409, $"'{asked.Key}' is no brick of the catalog read last: sign in to the coordinator.");
@@ -1124,5 +1147,6 @@ public sealed partial class StudioServer : IAsyncDisposable
         await _app.StopAsync();
         await _app.DisposeAsync();
         _sampling.Dispose();
+        _coordinator.Dispose();
     }
 }

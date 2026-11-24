@@ -327,7 +327,7 @@ public sealed partial class StudioServer
                 if (plan.Cut?.Dropped.Contains(alias) == true) continue;
                 if (plan.Cut?.Unread.Contains(alias) == true) continue;
                 byte[] arrow;
-                try { arrow = await _tools.Coordinator!.SampleAsync(brick.Node, brick.Id, CoordinatorApi.MaxSampleRows, context.RequestAborted); }
+                try { arrow = await (Coordinator ?? throw new StudioRefusal(409, NoCoordinator)).SampleAsync(brick.Node, brick.Id, CoordinatorApi.MaxSampleRows, context.RequestAborted); }
                 catch (CoordinatorLinkException ex) { throw new StudioRefusal(502, $"'{alias}': {ex.Message}"); }
                 files.Add(_local.SampleFile(arrow));
                 inputs.Add($"{alias}={Bindable(files[^1])}");
