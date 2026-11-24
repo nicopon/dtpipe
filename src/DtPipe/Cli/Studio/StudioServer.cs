@@ -942,7 +942,9 @@ public sealed partial class StudioServer : IAsyncDisposable
     /// </summary>
     private async Task<DesignService> DesignForAsync(string yaml, CancellationToken ct)
     {
-        if (_tools.DesignWith is not { } with || Coordinator is not { } link) return _tools.Design;
+        // Held where the link is awaited, whichever route asks: opening a job and the agent's save ask it too.
+        using var hold = _coordinator.Hold();
+        if (_tools.DesignWith is not { } with || hold.Link is not { } link) return _tools.Design;
         string job;
         try { job = ForRecognition(yaml); }
         catch (Exception) { return Design(); }

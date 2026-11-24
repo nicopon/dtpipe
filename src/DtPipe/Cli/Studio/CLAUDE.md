@@ -61,11 +61,12 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   the CSRF header. `[CI: StudioCoordinatorTests, StudioKeyTests]`
 - **The link is in a slot, held by whoever uses it, and a key stays bound to its origin.** `CoordinatorSlot` holds the link
   (`StudioTools.CoordinatorAtStart` is only what the studio starts with: read the slot, never that field). A request that
-  reaches the coordinator (`ReachesCoordinator`, the callback included) holds the link to its end, an engine action holds the
+  awaits the coordinator holds the link to its end (`ReachesCoordinator` by route, the callback and `DesignForAsync` where the link is awaited), an engine action holds the
   engine slot, and a replacement, taken under the engine slot, is refused with 409 while either is held, so a publication, a
   library read or a sample never finds its link closed. A replacement stops the sign-in the old link was making, makes the old
   link forget its tokens and closes it. At start the coordinator is the one `--coordinator` names or, with no flag, the one
-  remembered in `studio.json` (`StudioSettings`, `UserStatePaths.Root()`: origin and `browser` or `key`, never a key); a flag
+  remembered in `studio.json` (`StudioSettings`, `UserStatePaths.Root()`: the coordinators known, each an origin and `browser` or `key`,
+  the active one and whether it reconnects at start, never a key); a flag
   never writes the file, and a connection of the page writes it only when *Remember* is ticked. A remembered key sign-in starts
   in the background and reads `signing-in` meanwhile, and a coordinator that does not answer never stops the start. The key is the
   keyring's, under `studio.coordinator:<normalized origin>`: another origin finds none and asks again, and a remembered key that

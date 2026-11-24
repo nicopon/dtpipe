@@ -1061,7 +1061,8 @@ const scenarios = {
   },
 
   // A coordinator connected from the page, with no flag: the pill offers it, a key signs in for the session, another connection
-  // is remembered with no key, a studio started again reads it back, and forgetting disconnects. Nothing here writes the keyring.
+  // is remembered with no key, a studio started again reads it back, and
+  // forgetting disconnects. Nothing here writes the keyring: a key is typed without *Remember*, and forgetting only reads it.
   async "coordinator-connect"({ page: p, folder, studio }) {
     const file = path.join(folder, ".smoke-state", "studio.json");
     const pill = `document.querySelector("#coordinator")?.textContent ?? ""`;

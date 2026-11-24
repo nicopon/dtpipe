@@ -1066,7 +1066,7 @@ export function openCoordinatorConnectDialog(opts) {
       el("option", { value: "key", selected: connection?.auth === "key" }, "With a key the coordinator made for me")));
     const key = /** @type {HTMLInputElement} */ (el("input", { id: "d-coordinator-key", type: "password", autocomplete: "off", "aria-label": "Key", placeholder: "dtp_…" }));
     const keyNote = el("p", { id: "d-coordinator-key-note", class: "hint" });
-    const removeKey = /** @type {HTMLInputElement} */ (el("input", { id: "d-coordinator-remove-key", type: "checkbox", "aria-label": "Remove the key kept for this address" }));
+    const removeKey = /** @type {HTMLInputElement} */ (el("input", { id: "d-coordinator-remove-key", type: "checkbox", "aria-label": "Forget the key kept for this address" }));
     const remember = /** @type {HTMLInputElement} */ (el("input", { id: "d-coordinator-remember", type: "checkbox", checked: true, "aria-label": "Remember on this machine" }));
     const note = el("p", { id: "d-coordinator-note", class: "hint" });
     const banner = el("p", { id: "d-coordinator-error", class: "bad dialog-error", hidden: true });
@@ -1094,7 +1094,7 @@ export function openCoordinatorConnectDialog(opts) {
         : kept === "session" ? "A key typed earlier is held for this session only: type it again to remember it."
         : connection?.needsKey && here ? "This coordinator was remembered, but its key is not kept: type it again."
         : "A key is kept only for the address it is given at: another address asks for it again.";
-      removeKey.parentElement.hidden = !(keyed && kept === "stored");
+      removeKey.parentElement.hidden = !(!keyed && kept === "stored");
       note.textContent = connection?.source === "flag" ? "This coordinator is set by the command line: a change holds for this session, and is remembered only when ticked."
         : connection?.keyring === false ? "The system keyring cannot be used: a key lasts for this session only." : "";
     };
@@ -1137,8 +1137,8 @@ export function openCoordinatorConnectDialog(opts) {
     },
       el("div", { class: "dialog-field" }, el("label", { for: "d-coordinator-origin" }, "Address"), el("div", { class: "row" }, origin, test)),
       el("div", { class: "dialog-field" }, el("label", { for: "d-coordinator-auth" }, "Sign in"), auth),
-      el("div", { class: "dialog-field" }, el("label", { for: "d-coordinator-key" }, "Key"), key, keyNote,
-        el("label", {}, removeKey, " Remove the key kept for this address")),
+      el("div", { class: "dialog-field" }, el("label", { for: "d-coordinator-key" }, "Key"), key, keyNote),
+      el("label", {}, removeKey, " Forget the key kept for this address"),
       el("details", { class: "dialog-details" }, el("summary", {}, "Advanced"),
         el("label", {}, remember, " Remember on this machine (the key goes to the system keyring, never to a file)")),
       note,
