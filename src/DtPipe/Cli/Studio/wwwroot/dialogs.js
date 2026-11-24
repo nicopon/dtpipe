@@ -909,3 +909,140 @@ export function openPullDialog(opts) {
     });
   }, { onClose: () => { closed = true; } });
 }
+
+const AGENT_PROVIDERS = {
+  ollama: { label: "Ollama", url: "http://localhost:11434", provider: "ollama" },
+  openai: { label: "OpenAI", url: "https://api.openai.com", provider: "openai" },
+  compatible: { label: "OpenAI-compatible server", url: "", provider: "openai" },
+};
+
+/** The choice a connection stands for: an openai provider at another address than OpenAI's is a compatible server. @param {any} connection */
+function providerChoice(connection) {
+  if (connection?.provider === "ollama") return "ollama";
+  if (connection?.provider === "openai") return connection.url && connection.url !== AGENT_PROVIDERS.openai.url ? "compatible" : "openai";
+  return "ollama";
+}
+
+/**
+ * The agent's connection: provider, address, key, model and, under Advanced, the delay and whether to remember it on this
+ * machine. The key is typed here and sent once; the page never reads one back, only whether one is kept and where.
+ * `onConnect(body)` makes the connection (false: the person declined) and `onForget()` forgets what is remembered.
+ * @param {{ connection: any, onConnect: (body: any) => Promise<any>, onForget: () => Promise<void> }} opts
+ */
+export function openAgentConnectDialog(opts) {
+  const { connection, onConnect, onForget } = opts;
+  openDialog("d-agent-dialog", "Connect a model", ({ body, close }) => {
+    const choice = providerChoice(connection);
+    const provider = /** @type {HTMLSelectElement} */ (el("select", { id: "d-agent-provider", "aria-label": "Provider" },
+      Object.entries(AGENT_PROVIDERS).map(([value, p]) => el("option", { value, selected: value === choice }, p.label))));
+    const url = /** @type {HTMLInputElement} */ (el("input", {
+      id: "d-agent-url", type: "text", class: "mono", autocomplete: "off", "aria-label": "Address",
+      value: connection?.url || AGENT_PROVIDERS[choice].url, placeholder: "https://models.example.com/v1",
+    }));
+    const key = /** @type {HTMLInputElement} */ (el("input", { id: "d-agent-key", type: "password", autocomplete: "off", "aria-label": "Key", placeholder: "API key, if the server asks for one" }));
+    const keyNote = el("p", { id: "d-agent-key-note", class: "hint" });
+    const removeKey = /** @type {HTMLInputElement} */ (el("input", { id: "d-agent-remove-key", type: "checkbox", "aria-label": "Remove the key kept for this address" }));
+    const model = /** @type {HTMLSelectElement} */ (el("select", { id: "d-agent-model", "aria-label": "Model" },
+      el("option", { value: connection?.model || "" }, connection?.model || "(Test lists the models)")));
+    const timeout = /** @type {HTMLInputElement} */ (el("input", { id: "d-agent-timeout", type: "number", min: "1", "aria-label": "Seconds with no token before a call fails", value: String(connection?.timeout || 300) }));
+    const remember = /** @type {HTMLInputElement} */ (el("input", { id: "d-agent-remember", type: "checkbox", checked: true, "aria-label": "Remember on this machine" }));
+    const note = el("p", { id: "d-agent-note", class: "hint" });
+    const banner = el("p", { id: "d-agent-error", class: "bad dialog-error", hidden: true });
+    const connect = /** @type {HTMLButtonElement} */ (el("button", { id: "d-agent-submit", type: "submit", class: "primary" }, "Connect"));
+    const test = /** @type {HTMLButtonElement} */ (el("button", { id: "d-agent-test", type: "button" }, "Test"));
+    let busy = false;
+
+    const same = (a, b) => String(a || "").toLowerCase().replace(/\/+$/, "") === String(b || "").toLowerCase().replace(/\/+$/, "");
+    const request = () => ({
+      provider: AGENT_PROVIDERS[provider.value].provider,
+      url: url.value.trim(),
+      model: model.value || undefined,
+      timeout: Number(timeout.value) || undefined,
+      key: key.value || undefined,
+      removeKey: removeKey.checked,
+      remember: remember.checked,
+    });
+    const fail = (message) => { banner.hidden = false; banner.textContent = message; };
+    const settle = (value) => { busy = value; connect.disabled = value; test.disabled = value; };
+    const update = () => {
+      const keyed = provider.value !== "ollama";
+      key.disabled = !keyed;
+      key.parentElement.hidden = !keyed;
+      const here = same(url.value, connection?.url);
+      const kept = here && connection?.key;
+      keyNote.hidden = !keyed;
+      keyNote.textContent = kept === "stored" ? "A key is kept in the keyring for this address: leave the field empty to keep it, or type another to replace it."
+        : kept === "flag" ? "The key was given on the command line: it holds for this session only."
+        : kept === "session" ? "A key typed earlier is held for this session only: type it again to remember it."
+        : connection?.needsKey && here ? "This model was remembered, but its key is not kept: type it again."
+        : "A key is kept only for the address it is given at: another address asks for it again.";
+      removeKey.parentElement.hidden = !(keyed && kept === "stored");
+      note.textContent = connection?.source === "flag" ? "This model is set by the command line: a change holds for this session, and is remembered only when ticked."
+        : connection?.keyring === false ? "The system keyring cannot be used: a key lasts for this session only." : "";
+    };
+    provider.addEventListener("change", () => { url.value = AGENT_PROVIDERS[provider.value].url; update(); });
+    url.addEventListener("input", update);
+
+    test.addEventListener("click", async () => {
+      if (busy) return;
+      settle(true);
+      banner.hidden = true;
+      test.textContent = "Testing…";
+      try {
+        const { models } = await api("/api/agent/connection/test", request());
+        const wanted = model.value;
+        fill(model, models.map((name) => el("option", { value: name, selected: name === wanted }, name)));
+        note.textContent = `${models.length} model${models.length === 1 ? "" : "s"} listed.`;
+      } catch (err) {
+        fail(err.message);
+      }
+      test.textContent = "Test";
+      settle(false);
+    });
+
+    const form = el("form", {
+      class: "dialog-form",
+      onsubmit: async (e) => {
+        e.preventDefault();
+        if (busy) return;
+        settle(true);
+        banner.hidden = true;
+        connect.textContent = "Connecting…";
+        try {
+          const answer = await onConnect(request());
+          key.value = "";
+          if (answer !== false) { close(); return; }
+        } catch (err) {
+          fail(err.message);
+        }
+        connect.textContent = "Connect";
+        settle(false);
+      },
+    },
+      el("div", { class: "dialog-field" }, el("label", { for: "d-agent-provider" }, "Provider"), provider),
+      el("div", { class: "dialog-field" }, el("label", { for: "d-agent-url" }, "Address"), url),
+      el("div", { class: "dialog-field" }, el("label", { for: "d-agent-key" }, "Key"), key, keyNote,
+        el("label", {}, removeKey, " Remove the key kept for this address")),
+      el("div", { class: "dialog-field" }, el("label", { for: "d-agent-model" }, "Model"), el("div", { class: "row" }, model, test)),
+      el("details", { class: "dialog-details" }, el("summary", {}, "Advanced"),
+        el("div", { class: "dialog-field" }, el("label", { for: "d-agent-timeout" }, "Seconds with no token before a call fails"), timeout),
+        el("label", {}, remember, " Remember on this machine (the key goes to the system keyring, never to a file)")),
+      note,
+      banner,
+      el("div", { class: "row dialog-actions" },
+        connection?.source && connection.source !== "none"
+          ? el("button", {
+            id: "d-agent-forget", type: "button", class: "ghost", title: "Forget the remembered model and the key kept for its address",
+            onclick: async () => {
+              if (busy) return;
+              try { await onForget(); close(); } catch (err) { fail(err.message); }
+            },
+          }, "Forget what is remembered")
+          : null,
+        el("button", { type: "button", class: "ghost", onclick: close }, "Cancel"),
+        connect));
+    fill(body, form);
+    update();
+    url.focus();
+  });
+}

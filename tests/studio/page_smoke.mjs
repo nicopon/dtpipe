@@ -6,6 +6,7 @@
 // save refused then accepted, a run, a question, a plan put on the cards, a job holding a credential, Stop, a reload mid-turn, an
 // edit made while a save waits, the person's save over the file the agent saved, a turn that fails); Undo of a deleted card and of
 // a plan, and the cards a plan names; a preview stopped
+// a model connected from the page with no flag, and read back by a studio started again;
 // while its source is still answering; Tab to a card, a wire made and undone from the keyboard, every control named,
 // the text at 4.5:1 in both themes.
 //
@@ -79,7 +80,9 @@ function kill(child) {
 async function startStudio(folder, extra = []) {
   const [command, args] = BIN ? [BIN, ["studio", folder, ...extra]] : ["dotnet", [DLL, "studio", folder, ...extra]];
   // Started in the job's folder: a job that writes a relative path writes there, never into the directory the test was run from.
-  const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], cwd: folder });
+  // What the studio remembers is kept in the folder's own hidden directory, so a scenario never reads or writes the person's.
+  const env = { ...process.env, DTPIPE_STATE_HOME: path.join(folder, ".smoke-state") };
+  const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], cwd: folder, env });
   let out = "";
   let err = "";
   child.stderr.on("data", (d) => { err += d; });
@@ -1019,10 +1022,48 @@ const scenarios = {
     check("a drag still wires two cards", await wired("b", "c"), await wires());
   },
 
+  // A model connected from the page, with no flag: the empty panel offers it, Test lists the models, Connect opens the
+  // conversation, and a studio started again reads the remembered connection back, which holds no secret.
+  async "agent-connect"({ page: p, folder, studio }) {
+    check("the empty panel offers to connect a model", await p.until(`!document.querySelector("#agent-pane").hidden && !!document.querySelector("#agent-connect") && document.querySelector("#agent-body").hidden`));
+    check("the header says there is no agent", await p.ev(`document.querySelector("#agent-link").textContent.includes("no agent")`));
+    await p.shot("connect-1-empty");
+    await p.click("#agent-connect");
+    check("the dialog opens on Ollama", await p.until(`document.querySelector("#d-agent-provider")?.value === "ollama" && document.querySelector("#d-agent-key").parentElement.hidden`));
+    await p.ev(`(() => { const u = document.querySelector("#d-agent-url"); u.value = ${JSON.stringify(fakeLlm.url)}; u.dispatchEvent(new Event("input")); })()`);
+    await p.click("#d-agent-test");
+    check("Test lists the models of the server", await p.until(`[...document.querySelectorAll("#d-agent-model option")].map((o) => o.value).join() === "fake:1,fake:2"`));
+    await p.shot("connect-2-dialog");
+    await p.click("#d-agent-submit");
+    check("Connect opens the conversation", await p.until(`!document.querySelector("#d-agent-dialog") && !document.querySelector("#agent-body").hidden && document.querySelector("#agent-model")?.value === "fake:1"`));
+    check("the header names the model and its provider", await p.until(`/fake:1 · ollama/.test(document.querySelector("#agent-link").textContent)`), await p.ev(`document.querySelector("#agent-link").textContent`));
+    await p.ev(`document.querySelector("#agent-prompt").value = "hello"`);
+    await p.click("#agent-send");
+    check("the agent answers", await p.until(`/ok: hello/.test(document.querySelector("#agent-log")?.textContent ?? "")`, 30000));
+    const file = path.join(folder, ".smoke-state", "studio.json");
+    const written = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
+    check("the settings are remembered, with no key", written.includes(fakeLlm.url) && !/"key"/i.test(written), written || "no file");
+
+    studio.stop();
+    await sleep(500);
+    const again = await startStudio(folder);
+    try {
+      await p.send("Page.navigate", { url: again.url });
+      check("a studio started without a flag reads the connection back", await p.until(`!document.querySelector("#agent-body")?.hidden && document.querySelector("#agent-model")?.value === "fake:1"`, 30000));
+      check("the header says the model", await p.until(`/fake:1 · ollama/.test(document.querySelector("#agent-link").textContent)`));
+      await p.click("#agent-link");
+      check("the dialog offers to forget it", await p.until(`!!document.querySelector("#d-agent-forget")`));
+      await p.click("#d-agent-forget");
+      check("forgetting removes the remembered agent", await p.until(`!document.querySelector("#d-agent-dialog")`) && !JSON.parse(fs.readFileSync(file, "utf8")).agent);
+    } finally {
+      again.stop();
+    }
+  },
+
   // The header says each link and why: a studio that stops is never a problem of the cards, and a save is not offered anyway.
   async "link-studio"({ page: p, studio }) {
     check("the job opens", await p.openJob("chain.yaml"));
-    check("the header says the agent is off and the studio answers", await p.ev(`document.querySelector("#agent-link")?.textContent.includes("agent: off") && document.querySelector("#studio-link").hidden`));
+    check("the header says there is no agent and the studio answers", await p.ev(`document.querySelector("#agent-link")?.textContent.includes("no agent") && document.querySelector("#studio-link").hidden`));
     await p.ev(`(() => { window.__asked = []; window.confirm = (m) => { window.__asked.push(m); return true; }; })()`);
     studio.stop();
     await sleep(500);

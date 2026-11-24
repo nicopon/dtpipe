@@ -113,10 +113,10 @@ export const state = {
    * and the cards the agent's last plan adds, changes and removes against the cards it came to (`unknown` when either side does
    * not take apart into cards). `problem` is what the provider's list of models says is wrong with the agent before a first
    * message: its server does not answer, or the model the command line names is not among those it lists.
-   * @type {{ enabled: boolean, status: any, behind: { yaml?: string, saved?: string } | null,
+   * @type {{ enabled: boolean, connection: any, status: any, behind: { yaml?: string, saved?: string } | null,
    *   marks: { yaml: string, unknown?: boolean, added: string[], changed: string[], removed: string[] } | null,
    *   problem: { short: string, text: string } | null }} */
-  agent: { enabled: false, status: null, behind: null, marks: null, problem: null },
+  agent: { enabled: false, connection: null, status: null, behind: null, marks: null, problem: null },
 };
 
 /**

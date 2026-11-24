@@ -1,11 +1,12 @@
 // @ts-check
-// The agent's panel: one conversation with the model the command line named, read by polling GET /api/agent. The server
+// The agent's panel: one conversation with the model connected to the studio, read by polling GET /api/agent. The server
 // says everything the panel shows (steps, verdict, question, the card waiting for the person, the plan); the page sends the
 // prompt, the open job's cards and the person's answers, and writes no YAML. A write the agent asks for waits for an answer
 // here: nothing is saved or run until the person clicks.
 
 import { $, api, el, fill, status, svg } from "./dom.js";
 import { applySizes, bindSplit, cardChanges, editingText, showTab } from "./designer.js";
+import { openAgentConnectDialog } from "./dialogs.js";
 import { invalidate, onZone } from "./render.js";
 import { state } from "./state.js";
 
@@ -45,18 +46,16 @@ const live = el("div", { id: "agent-now" });
 
 onZone("agent", renderAgent);
 onZone("agent", renderAgentLink);
+onZone("agent", renderEmpty);
 
 /**
- * Builds the panel in `pane` when this studio has an agent. The host gives what only it knows: `applyPlan(yaml)` puts a plan
- * on the open job's cards, `openPlan(yaml)` opens one as a new job, `reopen(path)` reads a saved job again, `jobsChanged()`
- * reads the folder's jobs again.
+ * Builds the panel in `pane`: the conversation when a model is connected, else an empty panel that offers to connect one.
+ * The host gives what only it knows: `applyPlan(yaml)` puts a plan on the open job's cards, `openPlan(yaml)` opens one as a
+ * new job, `reopen(path)` reads a saved job again, `jobsChanged()` reads the folder's jobs again.
  * @param {HTMLElement} pane @param {{ applyPlan: (yaml: string) => Promise<boolean>, openPlan: (yaml: string) => Promise<boolean>, reopen: (path: string, ask?: boolean) => Promise<boolean>, jobsChanged: () => Promise<void>, followPlan: (yaml: string) => Promise<boolean> }} host
  */
 export async function mountAgent(pane, host) {
   hooks = host;
-  const first = await api("/api/agent?after=0");
-  if (!first.enabled) { invalidate("agent"); return; }
-  state.agent.enabled = true;
   pane.hidden = false;
   pane.parentElement?.classList.add("with-agent");
   fill(pane,
@@ -64,25 +63,70 @@ export async function mountAgent(pane, host) {
     el("div", { class: "row agent-head" },
       el("h2", {}, "Agent"),
       el("select", { id: "agent-model", "aria-label": "Model", title: "The model the provider lists; another one starts a new conversation", onchange: changeModel }),
-      el("button", { class: "small ghost", title: "Forget this conversation", onclick: reset }, "new")),
-    el("p", { id: "agent-endpoint", class: "hint mono", title: "Set on the command line (--llm-provider, --llm-url): the page cannot change it" }),
-    el("p", { id: "agent-meter", class: "hint mono", hidden: true, title: "The turn, its step, and the prompt the model read for its last call (what a turn adds to the conversation grows it)" }),
-    el("p", { id: "agent-warning", class: "hint warn", hidden: true }),
-    el("p", { id: "agent-behind", class: "hint warn", hidden: true }),
-    el("div", { id: "agent-log", class: "agent-log" }, live),
-    el("div", { class: "agent-input" },
-      el("textarea", { id: "agent-prompt", "aria-label": "Message to the agent", rows: "3", placeholder: "Ask the agent… (Ctrl+Enter sends)", onkeydown: onPromptKey }),
-      el("div", { class: "row" },
-        el("span", { class: "hint", title: "The open job goes with every message, and what the agent gives lands on its steps, unsaved" }, "works on the open job"),
-        el("button", { id: "agent-send", class: "primary", onclick: () => send() }, "Send"),
-        el("button", { id: "agent-stop", class: "danger", hidden: true, onclick: stop }, "Stop"))));
+      el("button", { id: "agent-new", class: "small ghost", title: "Forget this conversation", onclick: reset }, "new")),
+    el("div", { id: "agent-empty", class: "agent-empty", hidden: true }),
+    el("div", { id: "agent-body", class: "agent-body", hidden: true },
+      el("p", { id: "agent-endpoint", class: "hint mono", title: "The provider and the address of this conversation: the model button of the header changes them" }),
+      el("p", { id: "agent-meter", class: "hint mono", hidden: true, title: "The turn, its step, and the prompt the model read for its last call (what a turn adds to the conversation grows it)" }),
+      el("p", { id: "agent-warning", class: "hint warn", hidden: true }),
+      el("p", { id: "agent-behind", class: "hint warn", hidden: true }),
+      el("div", { id: "agent-log", class: "agent-log" }, live),
+      el("div", { class: "agent-input" },
+        el("textarea", { id: "agent-prompt", "aria-label": "Message to the agent", rows: "3", placeholder: "Ask the agent… (Ctrl+Enter sends)", onkeydown: onPromptKey }),
+        el("div", { class: "row" },
+          el("span", { class: "hint", title: "The open job goes with every message, and what the agent gives lands on its steps, unsaved" }, "works on the open job"),
+          el("button", { id: "agent-send", class: "primary", onclick: () => send() }, "Send"),
+          el("button", { id: "agent-stop", class: "danger", hidden: true, onclick: stop }, "Stop")))));
   // Its width is the pane's own: the pointer's distance to the pane's right edge.
   bindSplit(/** @type {HTMLElement} */ (pane.querySelector(".split-agent")), "agent", (e) => pane.getBoundingClientRect().right - e.clientX);
   applySizes();
+  $("agent-link").addEventListener("click", openConnect);
+  await refreshAgent();
+}
+
+/**
+ * Reads the connection and, when a model is connected, its conversation from the start: after the page connected, replaced or
+ * forgot a model nothing of the old conversation stays, and the plans of the new one are read from none.
+ */
+async function refreshAgent() {
+  clearTimeout(pollTimer);
+  state.agent.connection = await api("/api/agent/connection");
+  const first = await api("/api/agent?after=0");
+  dropLog();
+  synced = null;
   appliedRevision = first.job?.revision ?? 0;
-  accept(first, true);
-  await loadModels();
-  if (first.busy || first.pending) poll();
+  state.agent.enabled = !!first.enabled;
+  state.agent.status = null;
+  state.agent.problem = null;
+  $("agent-body").hidden = !state.agent.enabled;
+  $("agent-model").hidden = !state.agent.enabled;
+  $("agent-new").hidden = !state.agent.enabled;
+  $("agent-empty").hidden = state.agent.enabled;
+  if (state.agent.enabled) {
+    accept(first, true);
+    await loadModels();
+    if (first.busy || first.pending) poll();
+  }
+  invalidate("agent");
+}
+
+/** The connection dialog: what the server says of the connection now, and the page's way to connect or to forget. */
+async function openConnect() {
+  let connection;
+  try { connection = await api("/api/agent/connection"); } catch (e) { status(e.message, "bad"); return; }
+  openAgentConnectDialog({
+    connection,
+    onConnect: async (body) => {
+      if (shown > 0 && !confirm("Connecting a model starts a new conversation: forget this one?")) return false;
+      const answer = await api("/api/agent/connection", body, "PUT");
+      await refreshAgent();
+      return answer;
+    },
+    onForget: async () => {
+      await api("/api/agent/connection", undefined, "DELETE");
+      await refreshAgent();
+    },
+  });
 }
 
 async function loadModels() {
@@ -294,17 +338,33 @@ function entryView(entry) {
     entry.result ? el("pre", {}, entry.result) : null);
 }
 
-// The header's line for the agent: off when the studio was opened without one, else whether its provider answers.
+// The header's button for the agent: the model and its provider, a warning when its server does not answer or the model is
+// not among those listed, and what is missing when none is connected.
 function renderAgentLink() {
   const host = $("agent-link");
+  const connection = state.agent.connection;
   if (!state.agent.enabled) {
-    fill(host, el("span", { class: "dot" }), " agent: off");
-    host.title = "Open the studio with --llm-provider to ask an agent";
+    const needsKey = connection?.needsKey;
+    fill(host, el("span", { class: needsKey ? "dot warn" : "dot" }), needsKey ? " model: key needed" : " no agent");
+    host.title = needsKey ? "This model was remembered, but its key is not kept: connect it again" : "Connect a model to ask an agent";
     return;
   }
   const problem = state.agent.problem;
-  fill(host, el("span", { class: problem ? "dot warn" : "dot good" }), ` agent: ${problem ? problem.short : (state.agent.status?.provider ?? "ready")}`);
-  host.title = problem?.text ?? "";
+  const model = state.agent.status?.model || connection?.model;
+  fill(host, el("span", { class: problem ? "dot warn" : "dot good" }), ` ${problem ? problem.short : [model, state.agent.status?.provider ?? connection?.provider].filter(Boolean).join(" · ") || "ready"}`);
+  host.title = problem?.text ?? "The model of the agent: click to connect another";
+}
+
+// The empty panel: nothing is connected, or a remembered model waits for its key.
+function renderEmpty() {
+  const host = $("agent-empty");
+  if (state.agent.enabled) return;
+  const needsKey = state.agent.connection?.needsKey;
+  fill(host,
+    el("p", { class: "hint" }, needsKey
+      ? "The model you remembered needs its key again."
+      : "No model is connected. Connect Ollama, OpenAI or a compatible server to ask the agent about your jobs."),
+    el("button", { id: "agent-connect", class: "primary", onclick: openConnect }, needsKey ? "Reconnect…" : "Connect a model…"));
 }
 
 function renderAgent() {
