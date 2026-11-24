@@ -52,4 +52,24 @@ public class DuckDbArrowTableFunctionTests
     [Fact]
     public void A_Projection_Of_Columns_And_Reserved_Ids_Is_Accepted()
         => DuckDbArrowTableSource.UnknownColumnError("orders", [2, 0, 1, ulong.MaxValue - 1], ColumnCount).Should().BeNull();
+
+    [Fact]
+    public void An_Empty_Array_Is_Made_Whole_Each_Time_For_The_Types_That_Carry_Offsets()
+    {
+        // A buffer shared by every call would be freed by the first caller that disposes its array.
+        for (var i = 0; i < 2; i++)
+        {
+            foreach (var type in new Apache.Arrow.Types.IArrowType[]
+            {
+                new Apache.Arrow.Types.ListType(Apache.Arrow.Types.Int32Type.Default),
+                new Apache.Arrow.Types.LargeListType(Apache.Arrow.Types.Int32Type.Default),
+                Apache.Arrow.Types.LargeStringType.Default,
+                Apache.Arrow.Types.LargeBinaryType.Default,
+            })
+            {
+                using var array = EmptyArrowArrayFactory.CreateEmpty(type);
+                array.Data.Buffers[1].Length.Should().BeGreaterThan(0, "the offsets of an empty array hold their first zero");
+            }
+        }
+    }
 }

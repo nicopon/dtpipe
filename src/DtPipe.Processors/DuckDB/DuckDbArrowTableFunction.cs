@@ -575,8 +575,10 @@ internal sealed unsafe class DuckDbArrowTableSource : IDisposable
 /// </summary>
 internal static class EmptyArrowArrayFactory
 {
-    private static readonly ArrowBuffer ZeroInt32Buffer = new ArrowBuffer.Builder<int>(1).Append(0).Build();
-    private static readonly ArrowBuffer ZeroInt64Buffer = new ArrowBuffer.Builder<long>(1).Append(0).Build();
+    // A buffer is owned by the array built on it, and the caller disposes that array: one shared across
+    // calls would be freed by the first.
+    private static ArrowBuffer ZeroInt32Buffer() => new ArrowBuffer.Builder<int>(1).Append(0).Build();
+    private static ArrowBuffer ZeroInt64Buffer() => new ArrowBuffer.Builder<long>(1).Append(0).Build();
 
     public static IArrowArray CreateEmpty(IArrowType type)
     {
@@ -591,15 +593,15 @@ internal static class EmptyArrowArrayFactory
             case LargeStringType:
             case LargeBinaryType:
                 return global::Apache.Arrow.ArrowArrayFactory.BuildArray(
-                    new ArrayData(type, 0, 0, 0, [ArrowBuffer.Empty, ZeroInt64Buffer, ArrowBuffer.Empty]));
+                    new ArrayData(type, 0, 0, 0, [ArrowBuffer.Empty, ZeroInt64Buffer(), ArrowBuffer.Empty]));
             case StringViewType:
                 return new StringViewArray.Builder().Build();
             case BinaryViewType:
                 return new BinaryViewArray.Builder().Build();
             case ListType lt:
-                return new ListArray(lt, 0, ZeroInt32Buffer, CreateEmpty(lt.ValueDataType), ArrowBuffer.Empty);
+                return new ListArray(lt, 0, ZeroInt32Buffer(), CreateEmpty(lt.ValueDataType), ArrowBuffer.Empty);
             case LargeListType llt:
-                return new LargeListArray(llt, 0, ZeroInt64Buffer, CreateEmpty(llt.ValueDataType), ArrowBuffer.Empty);
+                return new LargeListArray(llt, 0, ZeroInt64Buffer(), CreateEmpty(llt.ValueDataType), ArrowBuffer.Empty);
             case FixedSizeListType fsl:
                 return new FixedSizeListArray(fsl, 0, CreateEmpty(fsl.ValueDataType), ArrowBuffer.Empty);
             case ListViewType lvt:
@@ -611,7 +613,7 @@ internal static class EmptyArrowArrayFactory
             case StructType st:
                 return new StructArray(st, 0, st.Fields.Select(f => CreateEmpty(f.DataType)).ToArray(), ArrowBuffer.Empty);
             case MapType mt:
-                return new MapArray(mt, 0, ZeroInt32Buffer, CreateEmpty(mt.Fields[0].DataType), ArrowBuffer.Empty);
+                return new MapArray(mt, 0, ZeroInt32Buffer(), CreateEmpty(mt.Fields[0].DataType), ArrowBuffer.Empty);
             case DictionaryType dt:
                 return new DictionaryArray(dt, CreateEmpty(dt.IndexType), CreateEmpty(dt.ValueType));
             case RunEndEncodedType ree:
