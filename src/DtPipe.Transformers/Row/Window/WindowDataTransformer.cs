@@ -28,6 +28,13 @@ public class WindowDataTransformer : BaseColumnarTransformer, IMultiRowTransform
 
     public override bool CanProcessColumnar => true;
 
+    /// <summary>
+    /// The script gets the pool of views and the array the transformer reuses from window to window; false
+    /// when it may keep a row or change the array, and each window then gets views and an array of its own
+    /// (<see cref="JsRowRetention"/>).
+    /// </summary>
+    internal bool SharesRowView { get; private set; } = true;
+
     public WindowDataTransformer(WindowOptions options, IJsEngineProvider jsEngineProvider)
     {
         _options = options;
@@ -52,6 +59,7 @@ public class WindowDataTransformer : BaseColumnarTransformer, IMultiRowTransform
 
             var wrappedScript = $"function(rows) {{ {script} }}";
             _wrappedScript = wrappedScript;
+            SharesRowView = JsRowRetention.CanShareView(wrappedScript, JsRowArgument.Rows);
 
             var fn = engine.Evaluate($"({wrappedScript})");
             _engineCache.AddOrUpdate(engine, CreateState(engine, fn));
@@ -179,12 +187,6 @@ public class WindowDataTransformer : BaseColumnarTransformer, IMultiRowTransform
             if (pos + windowCount <= len)
             {
                 EnsureBuilders();
-                var arrowPool = state.EnsureArrowPool(windowCount);
-                foreach (var slot in arrowPool) slot.BindBatch(batch);
-
-                var windowArgs = windowCount == 0
-                    ? state.GetEmptyArgs()
-                    : state.GetArrowPoolArgs(windowCount);
 
                 if (windowCount <= 0)
                 {
@@ -197,10 +199,28 @@ public class WindowDataTransformer : BaseColumnarTransformer, IMultiRowTransform
                 }
                 else
                 {
+                    List<ArrowRowObjectInstance>? arrowPool = null;
+                    JsValue[]? poolArgs = null;
+                    if (SharesRowView)
+                    {
+                        arrowPool = state.EnsureArrowPool(windowCount);
+                        foreach (var slot in arrowPool) slot.BindBatch(batch);
+                        poolArgs = state.GetArrowPoolArgs(windowCount);
+                    }
+
                     while (pos + windowCount <= len)
                     {
-                        for (int k = 0; k < windowCount; k++)
-                            arrowPool[k].SetRowIndex(pos + k);
+                        JsValue[] windowArgs;
+                        if (arrowPool is not null)
+                        {
+                            for (int k = 0; k < windowCount; k++)
+                                arrowPool[k].SetRowIndex(pos + k);
+                            windowArgs = poolArgs!;
+                        }
+                        else
+                        {
+                            windowArgs = state.OwnArgs(readers, pos, windowCount);
+                        }
 
                         var result = EvaluateWindow(engine, state.Function, windowArgs);
                         outRowCount += AppendResultArrayToBuilders(result, builders!, appenders!, state.ColJsKeys);
@@ -256,21 +276,30 @@ public class WindowDataTransformer : BaseColumnarTransformer, IMultiRowTransform
                     {
                         EnsureBuilders();
                         int runLen = runEnd - pos;
-                        var arrowPool = state.EnsureArrowPool(runLen);
-                        if (!arrowBound)
+                        JsValue[] windowArgs;
+                        if (SharesRowView)
                         {
-                            foreach (var slot in arrowPool) slot.BindBatch(batch);
-                            arrowBound = true;
+                            var arrowPool = state.EnsureArrowPool(runLen);
+                            if (!arrowBound)
+                            {
+                                foreach (var slot in arrowPool) slot.BindBatch(batch);
+                                arrowBound = true;
+                            }
+                            else
+                            {
+                                for (int k = 0; k < runLen; k++) arrowPool[k].BindBatch(batch);
+                            }
+
+                            for (int k = 0; k < runLen; k++)
+                                arrowPool[k].SetRowIndex(pos + k);
+
+                            windowArgs = state.GetArrowPoolArgs(runLen);
                         }
                         else
                         {
-                            for (int k = 0; k < runLen; k++) arrowPool[k].BindBatch(batch);
+                            windowArgs = state.OwnArgs(readers, pos, runLen);
                         }
 
-                        for (int k = 0; k < runLen; k++)
-                            arrowPool[k].SetRowIndex(pos + k);
-
-                        var windowArgs = state.GetArrowPoolArgs(runLen);
                         var result = EvaluateWindow(engine, state.Function, windowArgs);
                         outRowCount += AppendResultArrayToBuilders(result, builders!, appenders!, state.ColJsKeys);
                         _lastKey = runKey;
@@ -368,11 +397,7 @@ public class WindowDataTransformer : BaseColumnarTransformer, IMultiRowTransform
         var engine = _jsEngineProvider.GetEngine();
         var state = GetOrCreateState(engine);
 
-        var rowPool = state.EnsureRowPool(_buffer.Count);
-        for (int i = 0; i < _buffer.Count; i++)
-            rowPool[i].SetRow(_buffer[i]);
-
-        var result = EvaluateWindow(engine, state.Function, state.GetRowPoolArgs(_buffer.Count));
+        var result = EvaluateWindow(engine, state.Function, BufferArgs(state));
         _buffer.Clear();
 
         if (result.IsArray())
@@ -400,12 +425,20 @@ public class WindowDataTransformer : BaseColumnarTransformer, IMultiRowTransform
         IArrowArrayBuilder[] builders,
         Action<object?>[] appenders)
     {
+        var result = EvaluateWindow(engine, state.Function, BufferArgs(state));
+        return AppendResultArrayToBuilders(result, builders, appenders, state.ColJsKeys);
+    }
+
+    /// <summary>The buffered rows as the script's argument: the pool, or views and an array of their own.</summary>
+    private JsValue[] BufferArgs(CompiledWindowState state)
+    {
+        if (!SharesRowView)
+            return state.OwnArgs(_buffer);
+
         var rowPool = state.EnsureRowPool(_buffer.Count);
         for (int i = 0; i < _buffer.Count; i++)
             rowPool[i].SetRow(_buffer[i]);
-
-        var result = EvaluateWindow(engine, state.Function, state.GetRowPoolArgs(_buffer.Count));
-        return AppendResultArrayToBuilders(result, builders, appenders, state.ColJsKeys);
+        return state.GetRowPoolArgs(_buffer.Count);
     }
 
     private static int AppendResultArrayToBuilders(
@@ -471,6 +504,7 @@ public class WindowDataTransformer : BaseColumnarTransformer, IMultiRowTransform
         private readonly Dictionary<int, JsValue[]> _rowArgsBySize = new();
         private readonly Dictionary<int, JsValue[]> _arrowArgsBySize = new();
         private JsValue[]? _emptyArgs;
+        private JsRowObjectInstance? _layout;
 
         public JsValue Function { get; } = function;
         public JsString[] ColJsKeys { get; } = colJsKeys;
@@ -488,6 +522,26 @@ public class WindowDataTransformer : BaseColumnarTransformer, IMultiRowTransform
                 _arrowPool.Add(new ArrowRowObjectInstance(engine, columnNames, columnNames.Length, refErrorCtor));
             return _arrowPool;
         }
+
+        /// <summary>A window of rows a script may keep: a view of its own per row, in an array of its own.</summary>
+        public JsValue[] OwnArgs(List<object?[]> rows)
+        {
+            var items = new JsValue[rows.Count];
+            for (int i = 0; i < items.Length; i++)
+                items[i] = Layout.Own(rows[i]);
+            return [new JsArray(engine, items)];
+        }
+
+        /// <summary><see cref="OwnArgs(List{object[]})"/> over <paramref name="count"/> rows of a batch from <paramref name="start"/>.</summary>
+        public JsValue[] OwnArgs(Func<int, object?>[] readers, int start, int count)
+        {
+            var items = new JsValue[count];
+            for (int i = 0; i < count; i++)
+                items[i] = Layout.Own(readers, start + i);
+            return [new JsArray(engine, items)];
+        }
+
+        private JsRowObjectInstance Layout => _layout ??= new JsRowObjectInstance(engine, columnNames, columnNames.Length, refErrorCtor);
 
         public JsValue[] GetEmptyArgs()
             => _emptyArgs ??= [new JsArray(engine, 0u, 0u)];

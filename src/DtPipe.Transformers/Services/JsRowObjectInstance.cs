@@ -18,6 +18,7 @@ internal interface IRowObjectView
 /// <summary>
 /// Reusable lazy JS object view over a CLR row. Avoids creating a JsObject, copying unused
 /// columns, and evaluating a JavaScript Proxy per row while preserving ReferenceError checks.
+/// <see cref="Own(IReadOnlyList{object})"/> gives a script that may keep its row a view of its own instead.
 /// </summary>
 internal sealed class JsRowObjectInstance : ObjectInstance, IRowObjectView
 {
@@ -46,12 +47,50 @@ internal sealed class JsRowObjectInstance : ObjectInstance, IRowObjectView
         }
     }
 
+    /// <summary>A view over <paramref name="values"/>, which it owns, with <paramref name="layout"/>'s columns.</summary>
+    private JsRowObjectInstance(JsRowObjectInstance layout, object?[] values)
+        : base(layout.Engine)
+    {
+        Prototype = layout.Engine.Intrinsics.Object.PrototypeObject;
+        _refErrorCtor = layout._refErrorCtor;
+        _columnNames = layout._columnNames;
+        _nameToIndex = layout._nameToIndex;
+        _cachedKeys = layout._cachedKeys;
+        _row = values;
+    }
+
     public bool HasOverrides => _overrides is { Count: > 0 };
 
     public void SetRow(IReadOnlyList<object?> row)
     {
         _row = row;
         _overrides?.Clear();
+    }
+
+    /// <summary>
+    /// A view of its own over a copy of <paramref name="row"/>'s values, with this view's columns: what a
+    /// script that may keep its row receives, so a row it kept reads its own values and its own writes
+    /// once the transformer has moved on (<see cref="JsRowRetention"/>).
+    /// </summary>
+    public JsRowObjectInstance Own(IReadOnlyList<object?> row)
+    {
+        var values = new object?[_columnNames.Length];
+        for (int i = 0; i < values.Length; i++)
+            values[i] = row[i];
+        return new JsRowObjectInstance(this, values);
+    }
+
+    /// <summary>
+    /// <see cref="Own(IReadOnlyList{object})"/> over the row at <paramref name="rowIndex"/> of a batch, read
+    /// through its readers (<c>ArrowTypeMapper.CompileValueReaders</c>) when the view is made: a kept row
+    /// never reads the batch again, which its owner disposes once the chain has run.
+    /// </summary>
+    public JsRowObjectInstance Own(Func<int, object?>[] readers, int rowIndex)
+    {
+        var values = new object?[_columnNames.Length];
+        for (int i = 0; i < values.Length; i++)
+            values[i] = readers[i](rowIndex);
+        return new JsRowObjectInstance(this, values);
     }
 
     public override JsValue Get(JsValue property, JsValue receiver)

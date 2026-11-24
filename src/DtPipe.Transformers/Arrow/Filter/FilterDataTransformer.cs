@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using Apache.Arrow;
 using DtPipe.Core.Abstractions;
+using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using DtPipe.Transformers.Services;
@@ -21,6 +22,12 @@ public partial class FilterDataTransformer : BaseColumnarTransformer, IRequiresO
     private FilterStage[] _stages = [];
 
     public override bool CanProcessColumnar { get; protected set; }
+
+    /// <summary>
+    /// Every filter gets the view the transformer moves from row to row; false when one may keep its row,
+    /// and each row then gets a view of its own (<see cref="JsRowRetention"/>).
+    /// </summary>
+    internal bool SharesRowView { get; private set; } = true;
 
     public FilterDataTransformer(FilterOptions options, IJsEngineProvider jsEngineProvider)
     {
@@ -63,6 +70,7 @@ public partial class FilterDataTransformer : BaseColumnarTransformer, IRequiresO
         }
 
         _stages = stages;
+        SharesRowView = stages.All(stage => JsRowRetention.CanShareView(stage.WrappedScript, JsRowArgument.Row));
         _engineCache.AddOrUpdate(engine, CreateState(engine, initialFunctions));
 
         return sourceColumns;
@@ -79,32 +87,29 @@ public partial class FilterDataTransformer : BaseColumnarTransformer, IRequiresO
 
         var engine = _jsEngineProvider.GetEngine();
         var state = GetOrCreateState(engine);
-        state.ArrowRowView.BindBatch(batch);
 
-        for (int s = 0; s < _stages.Length; s++)
+        if (SharesRowView)
         {
-            var stage = _stages[s];
-            var fn = state.Functions[stage.Index];
+            state.ArrowRowView.BindBatch(batch);
+            for (int s = 0; s < _stages.Length; s++)
+            {
+                for (int i = 0; i < len; i++)
+                {
+                    if (!selectionMask[i]) continue;
+                    state.ArrowRowView.SetRowIndex(i);
+                    selectionMask[i] = Matches(engine, state, s, state.ArrowArg);
+                }
+            }
+        }
+        else
+        {
+            // A row's stages share its view, as on the row path.
+            var readers = ArrowTypeMapper.CompileValueReaders(batch);
             for (int i = 0; i < len; i++)
             {
-                if (!selectionMask[i]) continue;
-                state.ArrowRowView.SetRowIndex(i);
-                try
-                {
-                    var result = engine.Call(fn, JsValue.Undefined, state.ArrowArg);
-                    selectionMask[i] = result.IsBoolean() && result.AsBoolean();
-                }
-                catch (JavaScriptException jsEx) when (IsMissingColumn(jsEx))
-                {
-                    throw new InvalidOperationException(
-                        $"Error evaluating filter '{stage.RawExpression}': {jsEx.Message}. "
-                        + "A filter reads its columns off 'row' — write row.<column>.", jsEx);
-                }
-                catch (Exception)
-                {
-                    // Property access on a null value: the filter reads it as "no match", on purpose.
-                    selectionMask[i] = false;
-                }
+                JsValue[] args = [state.RowView.Own(readers, i)];
+                for (int s = 0; s < _stages.Length && selectionMask[i]; s++)
+                    selectionMask[i] = Matches(engine, state, s, args);
             }
         }
 
@@ -125,31 +130,45 @@ public partial class FilterDataTransformer : BaseColumnarTransformer, IRequiresO
 
         var engine = _jsEngineProvider.GetEngine();
         var state = GetOrCreateState(engine);
-        state.RowView.SetRow(row);
+        JsValue[] args;
+        if (SharesRowView)
+        {
+            state.RowView.SetRow(row);
+            args = state.SingleArg;
+        }
+        else
+        {
+            args = [state.RowView.Own(row)];
+        }
 
         for (int i = 0; i < _stages.Length; i++)
         {
-            var stage = _stages[i];
-            try
-            {
-                var result = engine.Call(state.Functions[i], JsValue.Undefined, state.SingleArg);
-                if (!result.IsBoolean() || !result.AsBoolean())
-                    return null;
-            }
-            catch (JavaScriptException jsEx) when (IsMissingColumn(jsEx))
-            {
-                throw new InvalidOperationException(
-                    $"Error evaluating filter '{stage.RawExpression}': {jsEx.Message}. "
-                    + "A filter reads its columns off 'row' — write row.<column>.", jsEx);
-            }
-            catch (Exception)
-            {
-                // Property access on a null value: the filter reads it as "no match", on purpose.
+            if (!Matches(engine, state, i, args))
                 return null;
-            }
         }
 
         return row as object?[] ?? row.ToArray();
+    }
+
+    private bool Matches(Engine engine, CompiledFilterState state, int stageIndex, JsValue[] args)
+    {
+        var stage = _stages[stageIndex];
+        try
+        {
+            var result = engine.Call(state.Functions[stage.Index], JsValue.Undefined, args);
+            return result.IsBoolean() && result.AsBoolean();
+        }
+        catch (JavaScriptException jsEx) when (IsMissingColumn(jsEx))
+        {
+            throw new InvalidOperationException(
+                $"Error evaluating filter '{stage.RawExpression}': {jsEx.Message}. "
+                + "A filter reads its columns off 'row' — write row.<column>.", jsEx);
+        }
+        catch (Exception)
+        {
+            // Property access on a null value: the filter reads it as "no match", on purpose.
+            return false;
+        }
     }
 
     /// <summary>

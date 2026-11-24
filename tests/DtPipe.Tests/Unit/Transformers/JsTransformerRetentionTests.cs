@@ -68,6 +68,38 @@ public class JsTransformerRetentionTests : IDisposable
         RetainedBytesPerRow(row => transformer.Transform(row)).Should().BeLessThan(MaxRetainedBytesPerRow);
     }
 
+    /// <summary>
+    /// A script that keeps its row gets a view of its own per row: it retains what it keeps (the last
+    /// row here), never every row it was given.
+    /// </summary>
+    [Fact]
+    public async Task A_View_Per_Row_Retains_Only_What_The_Script_Keeps()
+    {
+        var compute = new ComputeDataTransformer(
+            new ComputeOptions { Compute = ["c:globalThis.__last = row; return 'x';"] }, _jsEngineProvider);
+        await compute.InitializeAsync(Columns);
+        compute.SharesRowView.Should().BeFalse();
+        RetainedBytesPerRow(row => compute.Transform(row)).Should().BeLessThan(MaxRetainedBytesPerRow);
+
+        var filter = new FilterDataTransformer(
+            new FilterOptions { Filters = ["globalThis.__last = row; return true;"] }, _jsEngineProvider);
+        await filter.InitializeAsync(Columns);
+        filter.SharesRowView.Should().BeFalse();
+        RetainedBytesPerRow(row => filter.Transform(row)).Should().BeLessThan(MaxRetainedBytesPerRow);
+
+        var expand = new ExpandDataTransformer(
+            new ExpandOptions { Expand = ["globalThis.__last = row; return [row];"] }, _jsEngineProvider);
+        await expand.InitializeAsync(Columns);
+        expand.SharesRowView.Should().BeFalse();
+        RetainedBytesPerRow(row => expand.TransformMany(row).Count()).Should().BeLessThan(MaxRetainedBytesPerRow);
+
+        var window = new WindowDataTransformer(
+            new WindowOptions { Count = 5, Script = "globalThis.__last = rows[0]; return rows;" }, _jsEngineProvider);
+        await window.InitializeAsync(Columns);
+        window.SharesRowView.Should().BeFalse();
+        RetainedBytesPerRow(row => window.TransformMany(row).Count()).Should().BeLessThan(MaxRetainedBytesPerRow);
+    }
+
     private static double RetainedBytesPerRow(Action<object?[]> processRow)
     {
         for (var i = 0; i < WarmUpRows; i++)

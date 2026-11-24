@@ -36,6 +36,12 @@ public sealed class ComputeDataTransformer : BaseColumnarTransformer, IRequiresO
 
     public override bool CanProcessColumnar => true;
 
+    /// <summary>
+    /// Every script gets the view the transformer moves from row to row; false when one may keep its row,
+    /// and each row then gets a view of its own (<see cref="JsRowRetention"/>).
+    /// </summary>
+    internal bool SharesRowView { get; private set; } = true;
+
     public ComputeDataTransformer(ComputeOptions options, IJsEngineProvider jsEngineProvider)
     {
         _options = options;
@@ -126,6 +132,7 @@ public sealed class ComputeDataTransformer : BaseColumnarTransformer, IRequiresO
         _outputColumns = outputColumns;
         _processors = processors;
         _writtenColumnIndices = writtenIndices;
+        SharesRowView = processors.All(p => JsRowRetention.CanShareView(p.WrappedScript, JsRowArgument.Row));
 
         // Seed the calling thread's engine cache with the already-compiled functions so the first
         // row pays no second Evaluate pass.
@@ -194,7 +201,9 @@ public sealed class ComputeDataTransformer : BaseColumnarTransformer, IRequiresO
     {
         var engine = _jsEngineProvider.GetEngine();
         var state = GetOrCreateState(engine);
-        state.ArrowRowView.BindBatch(batch);
+        var readers = SharesRowView ? null : ArrowTypeMapper.CompileValueReaders(batch);
+        if (readers is null)
+            state.ArrowRowView.BindBatch(batch);
 
         int count = processors.Length;
         var builders = new IArrowArrayBuilder[count];
@@ -215,7 +224,7 @@ public sealed class ComputeDataTransformer : BaseColumnarTransformer, IRequiresO
 
         for (int rowIdx = 0; rowIdx < batch.Length; rowIdx++)
         {
-            state.ArrowRowView.SetRowIndex(rowIdx);
+            var args = state.ArgsFor(readers, rowIdx);
 
             for (int p = 0; p < count; p++)
             {
@@ -228,7 +237,7 @@ public sealed class ComputeDataTransformer : BaseColumnarTransformer, IRequiresO
 
                 try
                 {
-                    var result = engine.Call(state.Functions[proc.Index], JsValue.Undefined, state.ArrowArg);
+                    var result = engine.Call(state.Functions[proc.Index], JsValue.Undefined, args);
                     ValidateComputeResult(result, _columnNames![proc.ColumnIndex]);
                     JsValueConversion.AppendJsValueToBuilder(builders[p], result, appenders[p]);
                 }
@@ -265,6 +274,8 @@ public sealed class ComputeDataTransformer : BaseColumnarTransformer, IRequiresO
             targets[p] = new ParallelColumnBuffer(proc, clrType, skipCol, len);
         }
 
+        var readers = SharesRowView ? null : ArrowTypeMapper.CompileValueReaders(batch);
+
         try
         {
             Parallel.ForEach(
@@ -274,11 +285,12 @@ public sealed class ComputeDataTransformer : BaseColumnarTransformer, IRequiresO
                 {
                     var engine = _jsEngineProvider.GetEngine();
                     var state = GetOrCreateState(engine);
-                    state.ArrowRowView.BindBatch(batch);
+                    if (readers is null)
+                        state.ArrowRowView.BindBatch(batch);
 
                     for (int rowIdx = range.Item1; rowIdx < range.Item2; rowIdx++)
                     {
-                        state.ArrowRowView.SetRowIndex(rowIdx);
+                        var args = state.ArgsFor(readers, rowIdx);
 
                         for (int p = 0; p < procCount; p++)
                         {
@@ -292,7 +304,7 @@ public sealed class ComputeDataTransformer : BaseColumnarTransformer, IRequiresO
 
                             try
                             {
-                                var result = engine.Call(state.Functions[proc.Index], JsValue.Undefined, state.ArrowArg);
+                                var result = engine.Call(state.Functions[proc.Index], JsValue.Undefined, args);
                                 ValidateComputeResult(result, _columnNames![proc.ColumnIndex]);
                                 buf.SetValue(rowIdx, result);
                             }
@@ -336,8 +348,17 @@ public sealed class ComputeDataTransformer : BaseColumnarTransformer, IRequiresO
         }
 
         // Every script reads the row as it came in, as the Arrow path does: the view reads rowArray, so the
-        // results are written only once every script has run.
-        state.RowView.SetRow(rowArray);
+        // results are written only once every script has run. A view of its own copies the row first.
+        JsValue[] args;
+        if (SharesRowView)
+        {
+            state.RowView.SetRow(rowArray);
+            args = state.SingleArg;
+        }
+        else
+        {
+            args = [state.RowView.Own(row)];
+        }
         var results = state.RowResults;
 
         foreach (var processor in _processors)
@@ -351,7 +372,7 @@ public sealed class ComputeDataTransformer : BaseColumnarTransformer, IRequiresO
 
             try
             {
-                var result = engine.Call(state.Functions[processor.Index], JsValue.Undefined, state.SingleArg);
+                var result = engine.Call(state.Functions[processor.Index], JsValue.Undefined, args);
                 ValidateComputeResult(result, _columnNames[processor.ColumnIndex]);
                 results[processor.Index] = JsValueConversion.JsValueToClr(result);
             }
@@ -440,6 +461,19 @@ public sealed class ComputeDataTransformer : BaseColumnarTransformer, IRequiresO
         public JsValue[] SingleArg { get; } = [rowView];
         public JsValue[] ArrowArg { get; } = [arrowRowView];
         public object?[] RowResults { get; } = new object?[functions.Length];
+
+        /// <summary>
+        /// The arguments for a batch's row: the cursor, bound to the batch, when <paramref name="readers"/> is
+        /// null; otherwise a view of the row's own, read when it is made.
+        /// </summary>
+        public JsValue[] ArgsFor(Func<int, object?>[]? readers, int rowIdx)
+        {
+            if (readers is not null)
+                return [RowView.Own(readers, rowIdx)];
+
+            ArrowRowView.SetRowIndex(rowIdx);
+            return ArrowArg;
+        }
     }
 
     private sealed class ParallelColumnBuffer

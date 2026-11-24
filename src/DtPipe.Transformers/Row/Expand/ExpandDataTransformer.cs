@@ -32,6 +32,12 @@ public class ExpandDataTransformer : BaseColumnarTransformer, IMultiRowTransform
     public override bool CanProcessColumnar => true;
     internal bool UsesNativeFastPath { get; private set; }
 
+    /// <summary>
+    /// Every stage gets the view the transformer moves from row to row; false when one may keep its row,
+    /// and each row then gets a view of its own (<see cref="JsRowRetention"/>).
+    /// </summary>
+    internal bool SharesRowView { get; private set; } = true;
+
     public ExpandDataTransformer(ExpandOptions options, IJsEngineProvider jsEngineProvider)
     {
         _options = options;
@@ -97,6 +103,7 @@ public class ExpandDataTransformer : BaseColumnarTransformer, IMultiRowTransform
         _outputColumns = updatedColumns;
         _retypedInputIndices = retypedInputIndices;
         _stages = stages;
+        SharesRowView = stages.All(stage => JsRowRetention.CanShareView(stage.WrappedScript, JsRowArgument.Row));
 
         _unnestPlan = stages.Length == 1
             ? JsAstAnalyzer.TryMatchExpandUnnest(_options.Expand[0], sourceColumns, updatedColumns)
@@ -128,7 +135,6 @@ public class ExpandDataTransformer : BaseColumnarTransformer, IMultiRowTransform
 
         var engine = _jsEngineProvider.GetEngine();
         var state = GetOrCreateState(engine);
-        state.RowView.SetRow(row);
 
         IEnumerable<object?[]> currentRows = [row as object?[] ?? row.ToArray()];
 
@@ -141,8 +147,13 @@ public class ExpandDataTransformer : BaseColumnarTransformer, IMultiRowTransform
             foreach (var r in currentRows)
             {
                 JsValue[] callArgs;
-                if (e == 0 && firstRow && _stages.Length == 1)
+                if (!SharesRowView)
                 {
+                    callArgs = [state.RowView.Own(r)];
+                }
+                else if (e == 0 && firstRow && _stages.Length == 1)
+                {
+                    state.RowView.SetRow(row);
                     callArgs = state.SingleArg;
                 }
                 else
@@ -343,7 +354,9 @@ public class ExpandDataTransformer : BaseColumnarTransformer, IMultiRowTransform
     {
         var engine = _jsEngineProvider.GetEngine();
         var state = GetOrCreateState(engine);
-        state.ArrowRowView.BindBatch(batch);
+        var readers = SharesRowView ? null : ArrowTypeMapper.CompileValueReaders(batch);
+        if (readers is null)
+            state.ArrowRowView.BindBatch(batch);
 
         int colCount = outFields.Length;
         var builders = new IArrowArrayBuilder[colCount];
@@ -360,12 +373,21 @@ public class ExpandDataTransformer : BaseColumnarTransformer, IMultiRowTransform
 
         for (int rowIdx = 0; rowIdx < batch.Length; rowIdx++)
         {
-            state.ArrowRowView.SetRowIndex(rowIdx);
+            JsValue[] args;
+            if (readers is null)
+            {
+                state.ArrowRowView.SetRowIndex(rowIdx);
+                args = state.ArrowArg;
+            }
+            else
+            {
+                args = [state.RowView.Own(readers, rowIdx)];
+            }
 
             JsValue result0;
             try
             {
-                result0 = engine.Call(state.Functions[0], JsValue.Undefined, state.ArrowArg);
+                result0 = engine.Call(state.Functions[0], JsValue.Undefined, args);
             }
             catch (Exception ex)
             {
@@ -416,11 +438,21 @@ public class ExpandDataTransformer : BaseColumnarTransformer, IMultiRowTransform
 
                     foreach (var r in currentRows)
                     {
-                        state.IntermediateRowView.SetRow(r);
+                        JsValue[] stageArgs;
+                        if (readers is null)
+                        {
+                            state.IntermediateRowView.SetRow(r);
+                            stageArgs = state.IntermediateArg;
+                        }
+                        else
+                        {
+                            stageArgs = [state.IntermediateRowView.Own(r)];
+                        }
+
                         JsValue res;
                         try
                         {
-                            res = engine.Call(state.Functions[e], JsValue.Undefined, state.IntermediateArg);
+                            res = engine.Call(state.Functions[e], JsValue.Undefined, stageArgs);
                         }
                         catch (Exception ex)
                         {
