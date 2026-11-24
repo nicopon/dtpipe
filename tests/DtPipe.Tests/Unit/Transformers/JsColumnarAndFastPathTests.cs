@@ -193,9 +193,10 @@ public class JsColumnarAndFastPathTests : IDisposable
         for (int i = 0; i < n; i++)
             bands.GetString(i).Should().Be(i % 2 == 0 ? "E" : "O");
 
-        // Impure script reading/mutating a global -> falls back to sequential Jint, producing 0..n-1.
+        // Impure script reading/mutating a top-level binding -> falls back to sequential Jint, producing
+        // 0..n-1. A lexical binding, since the engine's global object is frozen (JsRealmFreeze).
         var engine = _jsProvider.GetEngine();
-        engine.Evaluate("var __seq = 0;");
+        engine.Evaluate("let __seq = 0;");
         var impureTrans = new ComputeDataTransformer(
             new ComputeOptions { Compute = ["Seq:int:__seq++"] },
             _jsProvider);

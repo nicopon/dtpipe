@@ -19,11 +19,16 @@ public class JsEngineProvider : IJsEngineProvider
     private Engine CreateEngine()
     {
         // Shared configuration for all JS execution in DtPipe
-        return new Engine(cfg => cfg
+        var engine = new Engine(cfg => cfg
             .Strict(true)
             .LimitMemory(256_000_000) // 256MB memory limit for streaming JS pipelines
             .TimeoutInterval(TimeSpan.FromSeconds(5))
         );
+
+        // An engine serves every script of its thread for as long as the provider lives, so its realm is
+        // frozen before the first script: none can leave state there for the next call.
+        JsRealmFreeze.Apply(engine);
+        return engine;
     }
 
     public void Dispose()

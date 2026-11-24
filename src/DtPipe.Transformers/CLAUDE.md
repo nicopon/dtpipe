@@ -11,8 +11,10 @@ sub-namespace.
 - A transformer that aggregates or expands emits through `TransformMany` + `Flush`, not `Transform`
   (`WindowDataTransformer.Transform` returns `null`). Sample mode observes the real run, so this is
   what `--dry-run` reports.
-- **A JavaScript row is a value.** The four JavaScript transformers hand a script the view they reuse
-  from row to row (a cursor, a window's pool and array) only when `JsRowRetention.CanShareView` proves
-  the script keeps nothing of it; any other script gets a view of its own per row, its values copied
-  when it is made (`JsRowObjectInstance.Own`), so a kept row never reads a batch its owner disposed.
-  One predicate decides for the four, at initialisation. `[CI: JsRowRetentionTests, JsKeptRowTests]`
+- **A JavaScript script keeps nothing from one call to the next.** `JsEngineProvider` freezes each
+  engine's realm when it makes it (`JsRealmFreeze`): a write to a global, a built-in or a prototype
+  throws, naming the write. The four JavaScript transformers hand every script the view they move from
+  row to row; a view refuses to lose its extensibility and takes `Object.prototype` back at each move,
+  and each window gets a new array over the views. Never give a script an object that outlives its
+  call without closing it the same way: a script that kept a row would read the row the view moved to,
+  in a batch its owner may have disposed. `[CI: JsRealmFreezeTests, JsKeptRowTests]`

@@ -28,13 +28,6 @@ public class WindowDataTransformer : BaseColumnarTransformer, IMultiRowTransform
 
     public override bool CanProcessColumnar => true;
 
-    /// <summary>
-    /// The script gets the pool of views and the array the transformer reuses from window to window; false
-    /// when it may keep a row or change the array, and each window then gets views and an array of its own
-    /// (<see cref="JsRowRetention"/>).
-    /// </summary>
-    internal bool SharesRowView { get; private set; } = true;
-
     public WindowDataTransformer(WindowOptions options, IJsEngineProvider jsEngineProvider)
     {
         _options = options;
@@ -59,7 +52,6 @@ public class WindowDataTransformer : BaseColumnarTransformer, IMultiRowTransform
 
             var wrappedScript = $"function(rows) {{ {script} }}";
             _wrappedScript = wrappedScript;
-            SharesRowView = JsRowRetention.CanShareView(wrappedScript, JsRowArgument.Rows);
 
             var fn = engine.Evaluate($"({wrappedScript})");
             _engineCache.AddOrUpdate(engine, CreateState(engine, fn));
@@ -187,6 +179,8 @@ public class WindowDataTransformer : BaseColumnarTransformer, IMultiRowTransform
             if (pos + windowCount <= len)
             {
                 EnsureBuilders();
+                var arrowPool = state.EnsureArrowPool(windowCount);
+                foreach (var slot in arrowPool) slot.BindBatch(batch);
 
                 if (windowCount <= 0)
                 {
@@ -199,30 +193,12 @@ public class WindowDataTransformer : BaseColumnarTransformer, IMultiRowTransform
                 }
                 else
                 {
-                    List<ArrowRowObjectInstance>? arrowPool = null;
-                    JsValue[]? poolArgs = null;
-                    if (SharesRowView)
-                    {
-                        arrowPool = state.EnsureArrowPool(windowCount);
-                        foreach (var slot in arrowPool) slot.BindBatch(batch);
-                        poolArgs = state.GetArrowPoolArgs(windowCount);
-                    }
-
                     while (pos + windowCount <= len)
                     {
-                        JsValue[] windowArgs;
-                        if (arrowPool is not null)
-                        {
-                            for (int k = 0; k < windowCount; k++)
-                                arrowPool[k].SetRowIndex(pos + k);
-                            windowArgs = poolArgs!;
-                        }
-                        else
-                        {
-                            windowArgs = state.OwnArgs(readers, pos, windowCount);
-                        }
+                        for (int k = 0; k < windowCount; k++)
+                            arrowPool[k].SetRowIndex(pos + k);
 
-                        var result = EvaluateWindow(engine, state.Function, windowArgs);
+                        var result = EvaluateWindow(engine, state.Function, state.ArrowWindow(windowCount));
                         outRowCount += AppendResultArrayToBuilders(result, builders!, appenders!, state.ColJsKeys);
                         pos += windowCount;
                     }
@@ -276,31 +252,21 @@ public class WindowDataTransformer : BaseColumnarTransformer, IMultiRowTransform
                     {
                         EnsureBuilders();
                         int runLen = runEnd - pos;
-                        JsValue[] windowArgs;
-                        if (SharesRowView)
+                        var arrowPool = state.EnsureArrowPool(runLen);
+                        if (!arrowBound)
                         {
-                            var arrowPool = state.EnsureArrowPool(runLen);
-                            if (!arrowBound)
-                            {
-                                foreach (var slot in arrowPool) slot.BindBatch(batch);
-                                arrowBound = true;
-                            }
-                            else
-                            {
-                                for (int k = 0; k < runLen; k++) arrowPool[k].BindBatch(batch);
-                            }
-
-                            for (int k = 0; k < runLen; k++)
-                                arrowPool[k].SetRowIndex(pos + k);
-
-                            windowArgs = state.GetArrowPoolArgs(runLen);
+                            foreach (var slot in arrowPool) slot.BindBatch(batch);
+                            arrowBound = true;
                         }
                         else
                         {
-                            windowArgs = state.OwnArgs(readers, pos, runLen);
+                            for (int k = 0; k < runLen; k++) arrowPool[k].BindBatch(batch);
                         }
 
-                        var result = EvaluateWindow(engine, state.Function, windowArgs);
+                        for (int k = 0; k < runLen; k++)
+                            arrowPool[k].SetRowIndex(pos + k);
+
+                        var result = EvaluateWindow(engine, state.Function, state.ArrowWindow(runLen));
                         outRowCount += AppendResultArrayToBuilders(result, builders!, appenders!, state.ColJsKeys);
                         _lastKey = runKey;
                         pos = runEnd;
@@ -397,7 +363,11 @@ public class WindowDataTransformer : BaseColumnarTransformer, IMultiRowTransform
         var engine = _jsEngineProvider.GetEngine();
         var state = GetOrCreateState(engine);
 
-        var result = EvaluateWindow(engine, state.Function, BufferArgs(state));
+        var rowPool = state.EnsureRowPool(_buffer.Count);
+        for (int i = 0; i < _buffer.Count; i++)
+            rowPool[i].SetRow(_buffer[i]);
+
+        var result = EvaluateWindow(engine, state.Function, state.RowWindow(_buffer.Count));
         _buffer.Clear();
 
         if (result.IsArray())
@@ -425,20 +395,12 @@ public class WindowDataTransformer : BaseColumnarTransformer, IMultiRowTransform
         IArrowArrayBuilder[] builders,
         Action<object?>[] appenders)
     {
-        var result = EvaluateWindow(engine, state.Function, BufferArgs(state));
-        return AppendResultArrayToBuilders(result, builders, appenders, state.ColJsKeys);
-    }
-
-    /// <summary>The buffered rows as the script's argument: the pool, or views and an array of their own.</summary>
-    private JsValue[] BufferArgs(CompiledWindowState state)
-    {
-        if (!SharesRowView)
-            return state.OwnArgs(_buffer);
-
         var rowPool = state.EnsureRowPool(_buffer.Count);
         for (int i = 0; i < _buffer.Count; i++)
             rowPool[i].SetRow(_buffer[i]);
-        return state.GetRowPoolArgs(_buffer.Count);
+
+        var result = EvaluateWindow(engine, state.Function, state.RowWindow(_buffer.Count));
+        return AppendResultArrayToBuilders(result, builders, appenders, state.ColJsKeys);
     }
 
     private static int AppendResultArrayToBuilders(
@@ -501,10 +463,8 @@ public class WindowDataTransformer : BaseColumnarTransformer, IMultiRowTransform
     {
         private readonly List<JsRowObjectInstance> _rowPool = new();
         private readonly List<ArrowRowObjectInstance> _arrowPool = new();
-        private readonly Dictionary<int, JsValue[]> _rowArgsBySize = new();
-        private readonly Dictionary<int, JsValue[]> _arrowArgsBySize = new();
-        private JsValue[]? _emptyArgs;
-        private JsRowObjectInstance? _layout;
+        private readonly Dictionary<int, JsValue[]> _rowViewsBySize = new();
+        private readonly Dictionary<int, JsValue[]> _arrowViewsBySize = new();
 
         public JsValue Function { get; } = function;
         public JsString[] ColJsKeys { get; } = colJsKeys;
@@ -523,53 +483,28 @@ public class WindowDataTransformer : BaseColumnarTransformer, IMultiRowTransform
             return _arrowPool;
         }
 
-        /// <summary>A window of rows a script may keep: a view of its own per row, in an array of its own.</summary>
-        public JsValue[] OwnArgs(List<object?[]> rows)
+        /// <summary>
+        /// The script's argument for a window of the first <paramref name="count"/> views of the row pool.
+        /// The views are reused from window to window and the array is new each time: what a script puts
+        /// in it, or sets on it, does not reach the next window.
+        /// </summary>
+        public JsValue[] RowWindow(int count) => WindowOf(_rowPool, _rowViewsBySize, count);
+
+        /// <summary><see cref="RowWindow"/> over the views of the Arrow pool.</summary>
+        public JsValue[] ArrowWindow(int count) => WindowOf(_arrowPool, _arrowViewsBySize, count);
+
+        private JsValue[] WindowOf<TView>(List<TView> pool, Dictionary<int, JsValue[]> viewsBySize, int count) where TView : JsValue
         {
-            var items = new JsValue[rows.Count];
-            for (int i = 0; i < items.Length; i++)
-                items[i] = Layout.Own(rows[i]);
-            return [new JsArray(engine, items)];
-        }
-
-        /// <summary><see cref="OwnArgs(List{object[]})"/> over <paramref name="count"/> rows of a batch from <paramref name="start"/>.</summary>
-        public JsValue[] OwnArgs(Func<int, object?>[] readers, int start, int count)
-        {
-            var items = new JsValue[count];
-            for (int i = 0; i < count; i++)
-                items[i] = Layout.Own(readers, start + i);
-            return [new JsArray(engine, items)];
-        }
-
-        private JsRowObjectInstance Layout => _layout ??= new JsRowObjectInstance(engine, columnNames, columnNames.Length, refErrorCtor);
-
-        public JsValue[] GetEmptyArgs()
-            => _emptyArgs ??= [new JsArray(engine, 0u, 0u)];
-
-        public JsValue[] GetRowPoolArgs(int count)
-        {
-            if (count == 0) return GetEmptyArgs();
-            if (!_rowArgsBySize.TryGetValue(count, out var args))
+            if (!viewsBySize.TryGetValue(count, out var views))
             {
-                var items = new JsValue[count];
-                for (int i = 0; i < count; i++) items[i] = _rowPool[i];
-                args = [new JsArray(engine, items)];
-                _rowArgsBySize[count] = args;
+                views = new JsValue[count];
+                for (int i = 0; i < count; i++)
+                    views[i] = pool[i];
+                viewsBySize[count] = views;
             }
-            return args;
-        }
 
-        public JsValue[] GetArrowPoolArgs(int count)
-        {
-            if (count == 0) return GetEmptyArgs();
-            if (!_arrowArgsBySize.TryGetValue(count, out var args))
-            {
-                var items = new JsValue[count];
-                for (int i = 0; i < count; i++) items[i] = _arrowPool[i];
-                args = [new JsArray(engine, items)];
-                _arrowArgsBySize[count] = args;
-            }
-            return args;
+            // A JsArray stores into the array it is given, so it gets a copy of the cached views.
+            return [new JsArray(engine, (JsValue[])views.Clone())];
         }
     }
 }

@@ -16,9 +16,23 @@ internal interface IRowObjectView
 }
 
 /// <summary>
+/// What both row views refuse. A transformer hands a script the same view from row to row, and a write
+/// to a column is cleared when the view moves, but extensibility taken away from the view would stay on
+/// it for the next row. Each view throws a <c>TypeError</c> naming the operation rather than answering
+/// false, so <c>Reflect.preventExtensions</c> fails as loudly as <c>Object.preventExtensions</c>,
+/// <c>Object.seal</c> and <c>Object.freeze</c>. A prototype set on the view is not refused (Jint lets no
+/// type outside it override <c>SetPrototypeOf</c>): the view takes <c>Object.prototype</c> back each time
+/// it moves, so the change lasts for its row only, as a write to a column does.
+/// </summary>
+internal static class RowViewRefusals
+{
+    public static JavaScriptException PreventExtensions(Engine engine)
+        => new(engine.Intrinsics.TypeError, "Cannot prevent extensions of a row (Object.preventExtensions, seal or freeze)");
+}
+
+/// <summary>
 /// Reusable lazy JS object view over a CLR row. Avoids creating a JsObject, copying unused
 /// columns, and evaluating a JavaScript Proxy per row while preserving ReferenceError checks.
-/// <see cref="Own(IReadOnlyList{object})"/> gives a script that may keep its row a view of its own instead.
 /// </summary>
 internal sealed class JsRowObjectInstance : ObjectInstance, IRowObjectView
 {
@@ -26,13 +40,15 @@ internal sealed class JsRowObjectInstance : ObjectInstance, IRowObjectView
     private readonly Dictionary<string, int> _nameToIndex;
     private readonly List<JsValue> _cachedKeys;
     private readonly ErrorConstructor _refErrorCtor;
+    private readonly ObjectInstance _objectPrototype;
     private IReadOnlyList<object?> _row = System.Array.Empty<object?>();
     private Dictionary<string, JsValue>? _overrides;
 
     public JsRowObjectInstance(Engine engine, IReadOnlyList<string> columnNames, int exposedColumnCount, ErrorConstructor refErrorCtor)
         : base(engine)
     {
-        Prototype = engine.Intrinsics.Object.PrototypeObject;
+        _objectPrototype = engine.Intrinsics.Object.PrototypeObject;
+        Prototype = _objectPrototype;
         _refErrorCtor = refErrorCtor;
         _columnNames = new string[exposedColumnCount];
         _nameToIndex = new Dictionary<string, int>(exposedColumnCount, StringComparer.Ordinal);
@@ -47,51 +63,20 @@ internal sealed class JsRowObjectInstance : ObjectInstance, IRowObjectView
         }
     }
 
-    /// <summary>A view over <paramref name="values"/>, which it owns, with <paramref name="layout"/>'s columns.</summary>
-    private JsRowObjectInstance(JsRowObjectInstance layout, object?[] values)
-        : base(layout.Engine)
-    {
-        Prototype = layout.Engine.Intrinsics.Object.PrototypeObject;
-        _refErrorCtor = layout._refErrorCtor;
-        _columnNames = layout._columnNames;
-        _nameToIndex = layout._nameToIndex;
-        _cachedKeys = layout._cachedKeys;
-        _row = values;
-    }
-
     public bool HasOverrides => _overrides is { Count: > 0 };
 
+    /// <summary>
+    /// Moves the view to <paramref name="row"/>: the previous row's writes are cleared and its prototype
+    /// is <c>Object.prototype</c> again (<see cref="RowViewRefusals"/>).
+    /// </summary>
     public void SetRow(IReadOnlyList<object?> row)
     {
         _row = row;
         _overrides?.Clear();
+        Prototype = _objectPrototype;
     }
 
-    /// <summary>
-    /// A view of its own over a copy of <paramref name="row"/>'s values, with this view's columns: what a
-    /// script that may keep its row receives, so a row it kept reads its own values and its own writes
-    /// once the transformer has moved on (<see cref="JsRowRetention"/>).
-    /// </summary>
-    public JsRowObjectInstance Own(IReadOnlyList<object?> row)
-    {
-        var values = new object?[_columnNames.Length];
-        for (int i = 0; i < values.Length; i++)
-            values[i] = row[i];
-        return new JsRowObjectInstance(this, values);
-    }
-
-    /// <summary>
-    /// <see cref="Own(IReadOnlyList{object})"/> over the row at <paramref name="rowIndex"/> of a batch, read
-    /// through its readers (<c>ArrowTypeMapper.CompileValueReaders</c>) when the view is made: a kept row
-    /// never reads the batch again, which its owner disposes once the chain has run.
-    /// </summary>
-    public JsRowObjectInstance Own(Func<int, object?>[] readers, int rowIndex)
-    {
-        var values = new object?[_columnNames.Length];
-        for (int i = 0; i < values.Length; i++)
-            values[i] = readers[i](rowIndex);
-        return new JsRowObjectInstance(this, values);
-    }
+    public override bool PreventExtensions() => throw RowViewRefusals.PreventExtensions(Engine);
 
     public override JsValue Get(JsValue property, JsValue receiver)
     {
@@ -208,6 +193,7 @@ internal sealed class ArrowRowObjectInstance : ObjectInstance, IRowObjectView
     private readonly List<JsValue> _cachedKeys;
     private readonly ErrorConstructor _refErrorCtor;
     private readonly Func<int, JsValue>?[] _readers;
+    private readonly ObjectInstance _objectPrototype;
     private RecordBatch? _boundBatch;
     private int _rowIndex;
     private Dictionary<string, JsValue>? _overrides;
@@ -215,7 +201,8 @@ internal sealed class ArrowRowObjectInstance : ObjectInstance, IRowObjectView
     public ArrowRowObjectInstance(Engine engine, IReadOnlyList<string> columnNames, int exposedColumnCount, ErrorConstructor refErrorCtor)
         : base(engine)
     {
-        Prototype = engine.Intrinsics.Object.PrototypeObject;
+        _objectPrototype = engine.Intrinsics.Object.PrototypeObject;
+        Prototype = _objectPrototype;
         _refErrorCtor = refErrorCtor;
         _columnNames = new string[exposedColumnCount];
         _nameToIndex = new Dictionary<string, int>(exposedColumnCount, StringComparer.Ordinal);
@@ -242,11 +229,15 @@ internal sealed class ArrowRowObjectInstance : ObjectInstance, IRowObjectView
         System.Array.Clear(_readers);
     }
 
+    /// <summary><see cref="JsRowObjectInstance.SetRow"/> at <paramref name="index"/> of the bound batch.</summary>
     public void SetRowIndex(int index)
     {
         _rowIndex = index;
         _overrides?.Clear();
+        Prototype = _objectPrototype;
     }
+
+    public override bool PreventExtensions() => throw RowViewRefusals.PreventExtensions(Engine);
 
     private JsValue ReadColumn(int idx)
     {

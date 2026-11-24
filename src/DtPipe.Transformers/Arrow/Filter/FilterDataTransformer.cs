@@ -1,7 +1,6 @@
 using System.Runtime.CompilerServices;
 using Apache.Arrow;
 using DtPipe.Core.Abstractions;
-using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Core.Models;
 using DtPipe.Core.Options;
 using DtPipe.Transformers.Services;
@@ -22,12 +21,6 @@ public partial class FilterDataTransformer : BaseColumnarTransformer, IRequiresO
     private FilterStage[] _stages = [];
 
     public override bool CanProcessColumnar { get; protected set; }
-
-    /// <summary>
-    /// Every filter gets the view the transformer moves from row to row; false when one may keep its row,
-    /// and each row then gets a view of its own (<see cref="JsRowRetention"/>).
-    /// </summary>
-    internal bool SharesRowView { get; private set; } = true;
 
     public FilterDataTransformer(FilterOptions options, IJsEngineProvider jsEngineProvider)
     {
@@ -70,7 +63,6 @@ public partial class FilterDataTransformer : BaseColumnarTransformer, IRequiresO
         }
 
         _stages = stages;
-        SharesRowView = stages.All(stage => JsRowRetention.CanShareView(stage.WrappedScript, JsRowArgument.Row));
         _engineCache.AddOrUpdate(engine, CreateState(engine, initialFunctions));
 
         return sourceColumns;
@@ -88,31 +80,17 @@ public partial class FilterDataTransformer : BaseColumnarTransformer, IRequiresO
         var engine = _jsEngineProvider.GetEngine();
         var state = GetOrCreateState(engine);
 
-        if (SharesRowView)
+        // A row's stages run together, as on the row path: the cursor moves once per row, so a stage
+        // reads what the one before wrote to 'row', and a row a stage drops reaches no later stage.
+        state.ArrowRowView.BindBatch(batch);
+        for (int i = 0; i < len; i++)
         {
-            // A row's stages run together, as on the row path: the cursor moves once per row, so a stage
-            // reads what the one before wrote to 'row', and a row a stage drops reaches no later stage.
-            state.ArrowRowView.BindBatch(batch);
-            for (int i = 0; i < len; i++)
+            state.ArrowRowView.SetRowIndex(i);
+            for (int s = 0; s < _stages.Length; s++)
             {
-                state.ArrowRowView.SetRowIndex(i);
-                for (int s = 0; s < _stages.Length; s++)
-                {
-                    if (Matches(engine, state, s, state.ArrowArg)) continue;
-                    selectionMask[i] = false;
-                    break;
-                }
-            }
-        }
-        else
-        {
-            // A row's stages share its view, as on the row path.
-            var readers = ArrowTypeMapper.CompileValueReaders(batch);
-            for (int i = 0; i < len; i++)
-            {
-                JsValue[] args = [state.RowView.Own(readers, i)];
-                for (int s = 0; s < _stages.Length && selectionMask[i]; s++)
-                    selectionMask[i] = Matches(engine, state, s, args);
+                if (Matches(engine, state, s, state.ArrowArg)) continue;
+                selectionMask[i] = false;
+                break;
             }
         }
 
@@ -133,20 +111,11 @@ public partial class FilterDataTransformer : BaseColumnarTransformer, IRequiresO
 
         var engine = _jsEngineProvider.GetEngine();
         var state = GetOrCreateState(engine);
-        JsValue[] args;
-        if (SharesRowView)
-        {
-            state.RowView.SetRow(row);
-            args = state.SingleArg;
-        }
-        else
-        {
-            args = [state.RowView.Own(row)];
-        }
+        state.RowView.SetRow(row);
 
         for (int i = 0; i < _stages.Length; i++)
         {
-            if (!Matches(engine, state, i, args))
+            if (!Matches(engine, state, i, state.SingleArg))
                 return null;
         }
 

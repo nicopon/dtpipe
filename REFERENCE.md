@@ -270,6 +270,13 @@ sits in, wherever it falls among the step's flags.
   mapping of the same step produced.
 - **`--skip-null` belongs to `--fake` and to `--compute`.** It binds to the step it follows and is
   refused anywhere else, since both claim it.
+- **A JavaScript script keeps nothing from one row to the next.** A `--compute`, `--filter`,
+  `--expand` or `--window-script` script cannot write a global or a built-in (`globalThis.n = 1`,
+  `Math.x = 1`, `Array.prototype.x = 1`): the run fails, naming the write
+  (`Cannot assign to read only property 'n' of Object`). An object of the script's own gets a method
+  such as `toString` in its literal, not by assignment. A write to `row` lasts for that row,
+  `Object.setPrototypeOf(row, …)` included. `Object.preventExtensions`, `Object.seal` and
+  `Object.freeze` on `row` fail the run. Each window gets a new `rows` array.
 
 | Flag | Syntax | Description |
 |:---|:---|:---|

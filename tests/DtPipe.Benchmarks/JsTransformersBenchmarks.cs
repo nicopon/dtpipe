@@ -60,7 +60,9 @@ public class JsTransformersBenchmarks
     {
         BuildDatasets();
         _jsProvider = new JsEngineProvider();
-        _jsProvider.GetEngine().Evaluate("var __benchSeq = 0;");
+        // A top-level lexical binding, not a property of the global object, which the engine freezes when
+        // it is made (JsRealmFreeze): a top-level var would be refused.
+        _jsProvider.GetEngine().Evaluate("let __benchSeq = 0;");
 
         _computeNarrowArith = new ComputeDataTransformer(
             new ComputeOptions
