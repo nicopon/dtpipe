@@ -16,8 +16,8 @@ namespace DtPipe.Cli.Commands;
 
 /// <summary>
 /// <c>dtpipe studio [folder] [--coordinator url [--key reference]]</c>: a local page over the YAML jobs of a folder, sampled
-/// through the same path as the MCP <c>dry-run</c> tool, and signed in to a coordinator when one is named, through the browser or with
-/// a key the coordinator made for the person. The key is a reference, never a value, read once at start. It ends when the page asks
+/// through the same path as the MCP <c>dry-run</c> tool, and signed in to a coordinator when one is named (or remembered), through the
+/// browser or with a key the coordinator made for the person. The key is a reference, never a value, read once at start. It ends when the page asks
 /// to (exit 0) or on Ctrl+C (exit 130: a cancellation never reads as a success).
 /// </summary>
 public sealed class StudioCommand : Command

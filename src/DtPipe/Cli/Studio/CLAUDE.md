@@ -45,38 +45,52 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   launch file holds an alias or a typed text, never a keyring value; the page sees names and
   aliases only. The keyring is opened only for a job that needs it, and its alias list is kept for the session
   (read again once when a name is missing): opening it can ask the person and wait.
-- **The command line names the coordinator, never the page.** `--coordinator <url>` gives the studio
-  a `CoordinatorLink` to that origin: the coordinator's metadata (RFC 9728) and contract number
-  (`CoordinatorApi.Contract`, refused by name when it differs), its
+- **The person names the coordinator, by flag or from the page; a token and a key go to that origin only.** `--coordinator <url>`,
+  or a connection made in the page (`PUT /api/coordinator/connection`), gives the studio a `CoordinatorLink` to that origin: the
+  coordinator's metadata (RFC 9728) and contract number (`CoordinatorApi.Contract`, refused by name when it differs), its
   provider's discovery (issuer equal, no HTTPS downgrade), then authorization code with PKCE through
   a new tab, back to `/callback`, the one path reached without the session's token: a GET, the
   `Host` check kept, a single-use `state` that a wrong one leaves waiting, `iss` checked when sent.
   `--key` takes a reference (`${{NAME}}`, `keyring://`, `@file`) and refuses a value, as `--client-secret` does, and
-  is read once at start (`StudioCommand.ReadKeyAsync`): the studio then opens no tab. The metadata's `dtpipe_auth` must name
-  `key`, and the key is exchanged (client credentials) only at the token endpoint of the authorization server that is the
-  coordinator's own address, its discovery's issuer equal and the endpoint on that origin; it is presented again to renew.
-  The tokens and the key live in the process only, never in a response or the page; the access token is renewed
-  two minutes ahead, a 401 renews once and sends once, a refused renewal signs out with its reason.
+  is read once at start (`StudioCommand.ReadKeyAsync`): the studio then opens no tab. The page sends a key as a value, once.
+  The metadata's `dtpipe_auth` must name `key`, and the key is exchanged (client credentials) only at the token endpoint of the
+  authorization server that is the coordinator's own address, its discovery's issuer equal and the endpoint on that origin; it is
+  presented again to renew. The tokens and the key live in the process only, never in a response or the page; the access token is
+  renewed two minutes ahead, a 401 renews once and sends once, a refused renewal signs out with its reason.
   The link's client sends to the coordinator's origin only, follows no redirect, and always carries
   the CSRF header. `[CI: StudioCoordinatorTests, StudioKeyTests]`
+- **The link is in a slot, held by whoever uses it, and a key stays bound to its origin.** `CoordinatorSlot` holds the link
+  (`StudioTools.CoordinatorAtStart` is only what the studio starts with: read the slot, never that field). A request that
+  reaches the coordinator (`ReachesCoordinator`, the callback included) holds the link to its end, an engine action holds the
+  engine slot, and a replacement, taken under the engine slot, is refused with 409 while either is held, so a publication, a
+  library read or a sample never finds its link closed. A replacement stops the sign-in the old link was making, makes the old
+  link forget its tokens and closes it. At start the coordinator is the one `--coordinator` names or, with no flag, the one
+  remembered in `studio.json` (`StudioSettings`, `UserStatePaths.Root()`: origin and `browser` or `key`, never a key); a flag
+  never writes the file, and a connection of the page writes it only when *Remember* is ticked. A remembered key sign-in starts
+  in the background and reads `signing-in` meanwhile, and a coordinator that does not answer never stops the start. The key is the
+  keyring's, under `studio.coordinator:<normalized origin>`: another origin finds none and asks again, and a remembered key that
+  is missing builds no link, described as needing its key (`needsKey`). The page connects, tests, changes and forgets through
+  `/api/coordinator/connection` (`GET`, `POST …/test`, `PUT`, `DELETE`), reads back whether a key is kept and where (`none`,
+  `stored`, `flag`, `session`), and names no alias; no answer, refusal or message of these routes holds the key (`Mask`, then the
+  sanitizer). `[CI: StudioCoordinatorConnectionTests, StudioSettingsTests]` `[local: page_smoke.mjs coordinator-connect]`
 - **A link that does not answer says so as a transport failure, never as an error of what was asked.** Each exchange of the
   `CoordinatorLink` goes through `ExchangeAsync`: an answer of any status clears `CoordinatorStatus.Unreachable`, none (refused,
   unresolved, timed out) keeps its words there and throws a `CoordinatorLinkException` naming who did not answer. A person who is not
   signed in has no exchange to fail, so `/api/bricks` probes the coordinator's metadata (`ProbeAsync`, `ProbeBound`, no token, no
   polling) and the header says "unreachable" from the opening. The page reads the status again after each exchange it makes with
-  the coordinator (`linkRead`, and a 502 through `onLinkDoubt`), never on a timer. A request that got no answer from the studio
+  the coordinator (`linkRead`, and a 502 through `onLinkDoubt`), never on a timer but while a key signs in by itself or a sign-in is awaited. A request that got no answer from the studio
   itself is `STUDIO_SILENT` in `api()` (`transport` on the error): every module shows that message, `compose` keeps the last
   verdict and returns it `unanswered` (a save or a preview then stops quietly, with no "Save anyway?"), and the header's
   `#studio-link` holds until an answer comes. The model's provider is the third link: `loadModels` reads its list at the opening
   (`ILlmClient.ListModelsAsync` throws when the server does not answer), and `#agent-link` and `#agent-warning` say that it does not,
   that the configured model is not in the list, or that the studio has no agent. `[CI: StudioCoordinatorTests]`
   `[local: page_smoke.mjs link-studio, link-coordinator, link-agent-down, link-agent-model]` `[unchecked: the page's header after a signed-in coordinator falls, which the status test covers server side only]`
-- **Without `--coordinator` the studio is whole, minus the bricks, the library and the publication.**
-  `StudioTools.Coordinator` is null: `/api/coordinator` has no address, `/api/bricks` an empty catalogue,
-  `GET /api/publish` no publication, and `/api/coordinator/login`, `/api/library`, `/api/library/job`, `/api/library/open`,
-  `POST /api/publish`, `POST /api/publish/check` and `POST /api/publish/edges` answer 404 "opened without --coordinator". Jobs, cards, variables and
-  samples never ask for the link; a route that needs it refuses the same way.
-  `[CI: StudioServerTests — jobs, cards, variables, samples and the eight refusals]`
+- **With no coordinator connected the studio is whole, minus the bricks, the library and the publication.**
+  `/api/coordinator` has no address, `/api/bricks` an empty catalogue, `GET /api/publish` no publication, and
+  `/api/coordinator/login`, `/api/library`, `/api/library/job`, `/api/library/open`, `POST /api/publish`,
+  `POST /api/publish/check` and `POST /api/publish/edges` answer 404 "No coordinator is connected", read at each request, so
+  they follow the connection. Jobs, cards, variables and samples never ask for the link; a route that needs it refuses the same
+  way. `[CI: StudioServerTests — jobs, cards, variables, samples and the eight refusals]`
   `[unchecked: import, debug and run without a coordinator; that a new route needing the link refuses]`
 - **The coordinator decides what a brick is; the studio reads its answer.** A card that is a brick is written as the reference to
   it (`input: brick:<node>/<id>` for a source, `output: brick:<node>/<id>` with `from` for a sink): `DesignService` writes it from the

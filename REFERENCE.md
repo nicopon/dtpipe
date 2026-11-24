@@ -1242,7 +1242,7 @@ dtpipe studio ./jobs --llm-provider ollama --llm-model qwen2.5-coder:7b  # with 
 | Option | Description |
 |---|---|
 | `--port` | Port on 127.0.0.1. Default: any free port |
-| `--coordinator` | A distributed pipeline's coordinator, by its address: its bricks and its library. Default: none |
+| `--coordinator` | A distributed pipeline's coordinator, by its address: its bricks and its library. Default: the coordinator remembered on this machine, else none |
 | `--key` | Sign in to the coordinator with a key it made for you, as a reference (`${{NAME}}`, `keyring://alias`, `@file`), never the key itself. Default: through the browser |
 | `--llm-provider` | Connects the agent to `ollama` or `openai` for this session. Default: the model remembered on this machine, else no agent |
 | `--llm-url` | The provider's address. Default: `http://localhost:11434` for ollama, `https://api.openai.com` for openai |
@@ -1260,6 +1260,14 @@ address, key, model, `Test`, `Remember on this machine`) and forgets it again. T
 `$XDG_STATE_HOME/dtpipe` or `~/.local/state/dtpipe`), written with the user's rights alone and
 holding no key. A key goes to the system keyring under the address it was given at; another
 address asks for it again. `dtpipe secret list` does not show it.
+
+The coordinator is read the same way: `--coordinator` first, then what the studio remembers, then
+none, and a flag never writes what is remembered. The header always shows its state (connected,
+signing in, offline, signed out, or a remembered key to give again), and **Connect…** opens a
+dialog (address, sign in through the browser or with a key, `Test`, `Remember on this machine`)
+that also changes the coordinator or forgets it. A remembered coordinator connects again at start;
+one that does not answer never stops the studio. A key goes to the system keyring under the
+address of its coordinator, so another address asks for it again.
 
 | Action | What it does |
 |:---|:---|
@@ -1312,10 +1320,11 @@ new job when none is open. Guide: [The agent](./docs/guides/agent.md).
 
 ### With a coordinator
 
-`--coordinator` names the one coordinator the studio talks to. **Sign in** goes through the
-coordinator's identity provider; with `--key`, the studio exchanges the key instead. Tokens stay in
-the studio's memory. The coordinator's administrator must list you, and
-`Coordinator:Studio:ClientId` names the studio's client.
+The studio talks to one coordinator, named with `--coordinator` or connected from the page. **Sign
+in** goes through the coordinator's identity provider; with a key (`--key`, or the dialog's key),
+the studio exchanges the key instead. Tokens stay in the studio's memory. Changing the coordinator
+is refused while a publication, a run or a preview is in progress. The coordinator's administrator
+must list you, and `Coordinator:Studio:ClientId` names the studio's client.
 
 | Action | What it does |
 |:---|:---|
