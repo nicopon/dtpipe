@@ -253,7 +253,7 @@ internal sealed class ArrowRowObjectInstance : RowViewObject
         return reader(_rowIndex);
     }
 
-    private static Func<int, JsValue> CompileJsReader(Engine engine, IArrowArray array, Field field)
+    internal static Func<int, JsValue> CompileJsReader(Engine engine, IArrowArray array, Field field)
     {
         // Metadata-bearing columns (arrow.uuid, arrow.bool8, arrow.opaque, undeclared decimals)
         // must flow through ArrowTypeMap so logical decoding matches row mode.
