@@ -54,6 +54,9 @@ internal sealed class StudioFakes : IAsyncDisposable
     public int SampleRows, PreviewCalls;
     public readonly Dictionary<string, (string Yaml, string Commit)> Library = [];
     public string? LastSaveBody;
+    /// <summary>Held while a library save is answered: <c>SaveReached</c> says the save arrived, <c>SaveGate</c> lets it end.</summary>
+    public TaskCompletionSource? SaveGate;
+    public readonly TaskCompletionSource SaveReached = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public LibraryRefused? Refusal;
     public bool Deployed;
     public int Commits;
@@ -239,6 +242,8 @@ internal sealed class StudioFakes : IAsyncDisposable
             case { } library when library.StartsWith("/api/library/", StringComparison.Ordinal):
                 var id = library["/api/library/".Length..];
                 LastSaveBody = await new StreamReader(context.Request.Body).ReadToEndAsync();
+                SaveReached.TrySetResult();
+                if (SaveGate is not null) await SaveGate.Task;
                 var save = JsonSerializer.Deserialize<LibrarySave>(LastSaveBody, JsonSerializerOptions.Web)!;
                 if (Refusal is not null)
                 {

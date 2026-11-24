@@ -360,6 +360,9 @@ public sealed partial class StudioServer : IAsyncDisposable
                     context.Response.StatusCode = StatusCodes.Status202Accepted;
                     _quit.TrySetResult();
                     break;
+                case var (method, _) when path.StartsWith("/api/coordinator/connection", StringComparison.Ordinal):
+                    await CoordinatorConnectionRouteAsync(context, method, path);
+                    break;
                 case var (method, _) when path == "/api/agent" || path.StartsWith("/api/agent/", StringComparison.Ordinal):
                     await AgentRouteAsync(context, method, path);
                     break;

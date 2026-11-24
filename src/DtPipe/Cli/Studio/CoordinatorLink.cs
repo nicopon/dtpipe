@@ -210,6 +210,12 @@ public sealed class CoordinatorLink : IDisposable
         }
     }
 
+    /// <summary>
+    /// Reaches the coordinator as a sign-in would, through its metadata and its provider's discovery, with the checks a sign-in makes
+    /// (contract, address, the way people sign in), and signs nobody in.
+    /// </summary>
+    public async Task CheckAsync(CancellationToken ct) => await DiscoverAsync(ct);
+
     /// <summary>Keeps the tokens and asks the coordinator who they name: a coordinator that refuses the person signs them out.</summary>
     private async Task<string> SignedInAsync(Tokens tokens, CancellationToken ct)
     {
