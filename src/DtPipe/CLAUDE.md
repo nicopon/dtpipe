@@ -231,7 +231,7 @@ for the caller of `Compute`, BranchFingerprintTests]`
 dry-run by default). Tool table: `REFERENCE.md#model-context-protocol-mcp-server`; options:
 `REFERENCE.md#mcp-guardrails-isqlsafetypolicy--iapprovalgate`. The agent (`AgentExecutor`,
 `OllamaClient`, `OpenAiClient`) lives under `Cli/Agent/`: a loop over a model and the tools of
-`McpToolProvider`, with no command of its own; `dtpipe studio --llm-provider` hosts it
+`McpToolProvider`, with no command of its own; `dtpipe studio` hosts it
 (`src/DtPipe/Cli/Studio/CLAUDE.md`). It names no console and no toolkit: a turn tells its
 host through `ITurnView` and `TurnSummaryModel`, and the host shows them. `[CI: validate_agent_boundary.sh]`
 
@@ -311,6 +311,15 @@ only the shapes it recognises; the file header says so rather than claiming the 
 
 To diagnose a failing session: read the trace, verify the claim in the source, run the fix before
 publishing it. Look first at what dtpipe tells the model about itself.
+
+## The keyring
+
+`KeyringSecretsManager` keeps `dtpipe secret`'s aliases in one JSON blob. KeySharp raises the same exception for an entry that
+does not exist and for one it cannot read, and its error type is not reliable, so nothing decides on the type: a marker entry
+is written after every blob, and a failed read of the blob with the marker present is unreadable (`KeyringUnreadableException`,
+no write follows, since a write would replace every alias with the one being set), without it absent (empty). A blob written
+before the marker reads as absent when its read fails; a keyring locked so that the marker cannot be read either reads as
+absent too. `[CI: KeyringSecretsManagerTests]`
 
 ## Studio
 

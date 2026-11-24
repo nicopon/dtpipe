@@ -290,7 +290,7 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   the server. `[local: page_smoke.mjs undo, agent-edit]`
   `[local: tests/studio/page_smoke.mjs - Node 22+, Chrome and a built dtpipe; types are checked by the
   editor alone (// @ts-check), no tool runs them]`
-- **The agent writes a job through the page's paths, after a card, and no output at all.** `--llm-provider` gives the
+- **The agent writes a job through the page's paths, after a card, and no output at all.** A connected model gives the
   studio a `StudioAgent` (one conversation, in memory, a turn in the background read by polling `GET /api/agent?after=N`)
   over `StudioAgentTools`: dtpipe's tools as `McpToolProvider` offers them (F1) and the studio's own. `save-job` first asks
   `validate-yaml-job` (the tool's own check, never a second validator) and answers its refusal, with no card and no write,
@@ -322,10 +322,23 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   mask, while the model keeps the words as typed; a message that spells a credential out is told so by a notice and is never held
   back. A job (a plan, a save card) is shown as written: it is the text to save. A refusal's words go through the same mask in
   `HandleAsync`'s catch. `[CI: StudioAgentTests — the conversation]` `[unchecked: a refusal's mask]` The
-  key (`--llm-key`) is a reference read once at start, kept in the client; the page never sets the model's address. The
   panel's width is the `agent` pane, resized and kept as the designer's (`bindSplit`, `applySizes`).
   `[CI: StudioAgentTests]` `[local: page_smoke.mjs agent, agent-edit — a scripted endpoint that speaks Ollama's API]`
   `[unchecked: Quit and Ctrl+C during a turn]`
+- **The page connects the agent; a key stays bound to its address and no answer holds one.** At start the agent is the one
+  `--llm-provider` names (its key a reference, read once, kept in the client) or, with no flag, the connection remembered in
+  `studio.json` (`StudioSettings`, under `UserStatePaths.Root()`, never `~/.dtpipe`: a `.dtpipe/` is a project's store); a flag
+  never writes the file, and a file that cannot be read or is of another version is ignored with a warning. The page connects,
+  tests, replaces and forgets the model through `/api/agent/connection` (`GET`, `POST …/test`, `PUT`, `DELETE`), under the
+  session's token. `AgentSlot` holds the agent: a replacement closes the old one in a single step with the check that no turn
+  runs and no card waits (`StudioAgent.TryClose`, 409 otherwise), so a turn that starts after is refused, and opens a new
+  conversation. The file holds no secret: a key is the keyring's, under `studio.llm:<normalized address>`, so another address
+  finds none and asks again. The page sends a value, never an alias or a `keyring://` reference, and reads back only whether a
+  key is kept and where (`none`, `stored`, `flag`, `session`); a typed key the keyring refuses lasts the session and the page
+  says so. No answer, refusal or message of these routes holds the key (`Mask`, then the sanitizer), and a provider that needs a
+  key it cannot find at start builds no agent: the panel offers to connect it again. `ReservedAliases` keeps `studio.` aliases
+  out of every list of aliases, `dtpipe secret list` included.
+  `[CI: StudioConnectionTests, StudioSettingsTests]` `[local: page_smoke.mjs agent-connect]` `[unchecked: the dialog's wording of a key's state]`
 - Quit from the page exits 0, Ctrl+C 130. A quit is refused while a run goes on; Ctrl+C cancels
   the run and the studio then exits.
 

@@ -18,6 +18,25 @@ Open the address it prints. The panel on the right takes a mission:
 The agent inspects the source, writes the job, previews it on a few rows, then asks to save it. Once
 saved, the job runs without a model: you run it with **Run for real…**.
 
+## Connecting a model
+
+```bash
+dtpipe studio ./jobs     # then click Connect a model… in the panel
+```
+
+Choose Ollama, OpenAI or a compatible server, type its address and, for a remote model, its key.
+**Test** lists the models the server offers; **Connect** opens the conversation. Tick **Remember on
+this machine**, under **Advanced**, and a studio started later without a flag connects the same
+model again.
+
+What is remembered goes to `studio.json` in your user state folder (macOS
+`~/Library/Application Support/dtpipe`, Windows `%LOCALAPPDATA%\dtpipe`, Linux
+`~/.local/state/dtpipe`): the provider, the address, the model and the delay, never a key. The key
+goes to the system keyring, under the address it was given at, so another address asks for it
+again; `dtpipe secret list` does not show it. A model named with `--llm-provider` wins over the
+remembered one and writes nothing. Without a usable keyring the key lasts for the session, and
+the dialog says so. **Forget what is remembered** removes the file's model and its key.
+
 ## What the agent may do
 
 | The agent… | You confirm |
@@ -81,6 +100,7 @@ automation.
 
 - A credential under a key dtpipe does not know is not flagged; a column named like one may be.
 - A job that reads or writes a brick runs from the page, not from the agent.
+- A remembered model that needs a key asks for it again when the keyring cannot be read.
 - Weaker models loop or invent YAML keys: the agent's `dry-run` catches most of it, read its plan.
 
 ---

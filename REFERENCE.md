@@ -1244,12 +1244,22 @@ dtpipe studio ./jobs --llm-provider ollama --llm-model qwen2.5-coder:7b  # with 
 | `--port` | Port on 127.0.0.1. Default: any free port |
 | `--coordinator` | A distributed pipeline's coordinator, by its address: its bricks and its library. Default: none |
 | `--key` | Sign in to the coordinator with a key it made for you, as a reference (`${{NAME}}`, `keyring://alias`, `@file`), never the key itself. Default: through the browser |
-| `--llm-provider` | Opens the agent's panel on `ollama` or `openai`. Default: no agent |
+| `--llm-provider` | Connects the agent to `ollama` or `openai` for this session. Default: the model remembered on this machine, else no agent |
 | `--llm-url` | The provider's address. Default: `http://localhost:11434` for ollama, `https://api.openai.com` for openai |
 | `--llm-model` | The model the agent starts with; the page may pick another the provider lists. Default: none |
 | `--llm-key` | The provider's API key, as a reference (`${{NAME}}`, `keyring://alias`, `@file`), never the key itself. Default: none, which a server that does not authenticate needs |
 | `--llm-timeout` | Seconds with no token before a model call fails. Default: 300 |
 | `--agent-trace` | Records the agent's session as JSON lines; a directory gets a timestamped file. Default: `$DTPIPE_AGENT_TRACE`, else none |
+
+The agent's connection is read from the command line first, then from what the studio remembers,
+then none: a studio started with no flag and nothing remembered has no agent, and the panel offers
+to connect one. A flag never writes what is remembered. The page connects a model (provider,
+address, key, model, `Test`, `Remember on this machine`) and forgets it again. The settings are
+`studio.json` under the user state folder (`DTPIPE_STATE_HOME` first; else macOS
+`~/Library/Application Support/dtpipe`, Windows `%LOCALAPPDATA%\dtpipe`, Linux
+`$XDG_STATE_HOME/dtpipe` or `~/.local/state/dtpipe`), written with the user's rights alone and
+holding no key. A key goes to the system keyring under the address it was given at; another
+address asks for it again. `dtpipe secret list` does not show it.
 
 | Action | What it does |
 |:---|:---|
@@ -1272,10 +1282,10 @@ The studio keeps its own files under `.dtpipe/studio/` in the folder: the steps'
 
 ### The agent
 
-With `--llm-provider`, the panel on the right talks to a model that uses dtpipe's tools: it inspects
-sources, validates and previews jobs (`dry-run`), reads the jobs of the folder, and the job it gives
-lands on the open job's steps, unsaved, or opens as a new job when none is open. Guide:
-[The agent](./docs/guides/agent.md).
+Once a model is connected (`--llm-provider`, or from the page), the panel on the right talks to a
+model that uses dtpipe's tools: it inspects sources, validates and previews jobs (`dry-run`), reads
+the jobs of the folder, and the job it gives lands on the open job's steps, unsaved, or opens as a
+new job when none is open. Guide: [The agent](./docs/guides/agent.md).
 
 - **A save waits for you.** The agent's `save-job` shows a card (the text the studio composed) and
   writes nothing until you answer; a file changed since the card refuses the answer. A job that
