@@ -1,5 +1,7 @@
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Text;
 using Apache.Arrow;
 using Apache.Arrow.Arrays;
 using Apache.Arrow.Serialization.Mapping;
@@ -197,12 +199,19 @@ public static class StableHash
 
 /// <summary>
 /// Extracts 64-bit deterministic row seed keys directly from Arrow column buffers without boxing
-/// or managed string allocations.
+/// or a managed string allocation per row.
+/// <para>
+/// A key is a function of the value <see cref="ArrowTypeMap.CompileValueReader"/> reads from the
+/// column, never of how the column stores it: one value is one key whatever its integer width, its
+/// timestamp unit or zone, its date width or its dictionary encoding. A text hashes as its UTF-8
+/// bytes, a date, a wall clock and an instant as the ticks of the moment they name, so that
+/// <c>--fake-seed-column</c> keeps a join between two tables whose columns store the value apart.
+/// </para>
 /// </summary>
 internal static class ArrowSeedKeyExtractor
 {
-    private const ulong InitialAccumulator = 0x9E3779B97F4A7C15UL;
-    private const ulong NullLaneSentinel = 0xD6E8FEB86659FD93UL;
+    internal const ulong InitialAccumulator = 0x9E3779B97F4A7C15UL;
+    internal const ulong NullLaneSentinel = 0xD6E8FEB86659FD93UL;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static ulong ComputeDecimal64(decimal value)
@@ -212,6 +221,59 @@ internal static class ArrowSeedKeyExtractor
         Span<int> bits = stackalloc int[4];
         decimal.GetBits(bare, bits);
         return StableHash.Compute64(MemoryMarshal.AsBytes(bits));
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static ulong DoubleKey(double value) => StableHash.Compute64(value == 0.0 ? 0L : BitConverter.DoubleToInt64Bits(value));
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static ulong FloatKey(float value) => StableHash.Compute64(value == 0.0f ? 0L : BitConverter.SingleToInt32Bits(value));
+
+    /// <summary>A date is the ticks of its midnight, as a <see cref="DateTime"/> of that day would be.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static ulong DateKey(DateOnly value) => StableHash.Compute64(value.DayNumber * TimeSpan.TicksPerDay);
+
+    /// <summary>
+    /// A <see cref="DateTime"/> is its own ticks: a wall clock has no zone to apply, and an instant
+    /// marked local is read as the UTC moment it names, so that the host's zone is never in a key.
+    /// </summary>
+    private static ulong DateTimeKey(DateTime value)
+        => StableHash.Compute64(value.Kind == DateTimeKind.Local ? value.ToUniversalTime().Ticks : value.Ticks);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static ulong InstantKey(DateTimeOffset value) => StableHash.Compute64(value.UtcTicks);
+
+    /// <summary>
+    /// The key of a value read as a boxed object, for a cell that is not read in place: it gives the
+    /// key the typed loop of the same value gives.
+    /// </summary>
+    private static ulong HashValue(object value) => value switch
+    {
+        string s => StableHash.Compute64(Encoding.UTF8.GetBytes(s)),
+        bool b => StableHash.Compute64(b ? 1UL : 0UL),
+        sbyte v => StableHash.Compute64((long)v),
+        short v => StableHash.Compute64((long)v),
+        int v => StableHash.Compute64((long)v),
+        long v => StableHash.Compute64(v),
+        byte v => StableHash.Compute64((long)v),
+        ushort v => StableHash.Compute64((long)v),
+        uint v => StableHash.Compute64((long)v),
+        ulong v => StableHash.Compute64(v),
+        double v => DoubleKey(v),
+        float v => FloatKey(v),
+        decimal v => ComputeDecimal64(v),
+        DateOnly v => DateKey(v),
+        DateTime v => DateTimeKey(v),
+        DateTimeOffset v => InstantKey(v),
+        byte[] v => StableHash.Compute64(v),
+        _ => DisplayKey(value)
+    };
+
+    /// <summary>The key of a value with no form of its own: the UTF-16 bytes of its text.</summary>
+    private static ulong DisplayKey(object value)
+    {
+        var text = value as string ?? value.ToString() ?? string.Empty;
+        return StableHash.Compute64(MemoryMarshal.AsBytes(text.AsSpan()));
     }
 
     public static void FillRowKeys(RecordBatch batch, int[] seedColumnIndices, ulong[] keys, bool[] hasKey)
@@ -369,9 +431,7 @@ internal static class ArrowSeedKeyExtractor
                         if (!noNulls && a.IsNull(i)) keys[i] = StableHash.Combine64(keys[i], lane, NullLaneSentinel);
                         else
                         {
-                            double d = values[i];
-                            long bits = d == 0.0 ? 0L : BitConverter.DoubleToInt64Bits(d);
-                            keys[i] = StableHash.Combine64(keys[i], lane, StableHash.Compute64(bits));
+                            keys[i] = StableHash.Combine64(keys[i], lane, DoubleKey(values[i]));
                             hasKey[i] = true;
                         }
                     }
@@ -386,9 +446,7 @@ internal static class ArrowSeedKeyExtractor
                         if (!noNulls && a.IsNull(i)) keys[i] = StableHash.Combine64(keys[i], lane, NullLaneSentinel);
                         else
                         {
-                            float f = values[i];
-                            long bits = f == 0.0f ? 0L : BitConverter.SingleToInt32Bits(f);
-                            keys[i] = StableHash.Combine64(keys[i], lane, StableHash.Compute64(bits));
+                            keys[i] = StableHash.Combine64(keys[i], lane, FloatKey(values[i]));
                             hasKey[i] = true;
                         }
                     }
@@ -475,37 +533,34 @@ internal static class ArrowSeedKeyExtractor
                 break;
 
             case Date32Array a:
+                for (int i = 0; i < rowCount; i++)
                 {
-                    var values = a.Values;
-                    for (int i = 0; i < rowCount; i++)
-                    {
-                        if (!noNulls && a.IsNull(i)) keys[i] = StableHash.Combine64(keys[i], lane, NullLaneSentinel);
-                        else { keys[i] = StableHash.Combine64(keys[i], lane, StableHash.Compute64((long)values[i])); hasKey[i] = true; }
-                    }
-                    break;
+                    if (!noNulls && a.IsNull(i)) keys[i] = StableHash.Combine64(keys[i], lane, NullLaneSentinel);
+                    else { keys[i] = StableHash.Combine64(keys[i], lane, DateKey(a.GetDateOnly(i)!.Value)); hasKey[i] = true; }
                 }
+                break;
 
             case Date64Array a:
+                for (int i = 0; i < rowCount; i++)
                 {
-                    var values = a.Values;
-                    for (int i = 0; i < rowCount; i++)
-                    {
-                        if (!noNulls && a.IsNull(i)) keys[i] = StableHash.Combine64(keys[i], lane, NullLaneSentinel);
-                        else { keys[i] = StableHash.Combine64(keys[i], lane, StableHash.Compute64(values[i])); hasKey[i] = true; }
-                    }
-                    break;
+                    if (!noNulls && a.IsNull(i)) keys[i] = StableHash.Combine64(keys[i], lane, NullLaneSentinel);
+                    else { keys[i] = StableHash.Combine64(keys[i], lane, DateTimeKey(a.GetDateTime(i)!.Value)); hasKey[i] = true; }
                 }
+                break;
 
+            // The unit and the zone are storage: the key is the instant the reader returns, which a
+            // zone-less column reads as the wall clock of the same ticks.
             case TimestampArray a:
+                for (int i = 0; i < rowCount; i++)
                 {
-                    var values = a.Values;
-                    for (int i = 0; i < rowCount; i++)
-                    {
-                        if (!noNulls && a.IsNull(i)) keys[i] = StableHash.Combine64(keys[i], lane, NullLaneSentinel);
-                        else { keys[i] = StableHash.Combine64(keys[i], lane, StableHash.Compute64(values[i])); hasKey[i] = true; }
-                    }
-                    break;
+                    if (!noNulls && a.IsNull(i)) keys[i] = StableHash.Combine64(keys[i], lane, NullLaneSentinel);
+                    else { keys[i] = StableHash.Combine64(keys[i], lane, InstantKey(a.GetTimestamp(i)!.Value)); hasKey[i] = true; }
                 }
+                break;
+
+            case DictionaryArray a:
+                AccumulateDictionary(a, lane, rowCount, keys, hasKey);
+                break;
 
             default:
                 {
@@ -519,8 +574,7 @@ internal static class ArrowSeedKeyExtractor
                         }
                         else
                         {
-                            var str = val as string ?? val.ToString() ?? string.Empty;
-                            keys[i] = StableHash.Combine64(keys[i], lane, StableHash.Compute64(MemoryMarshal.AsBytes(str.AsSpan())));
+                            keys[i] = StableHash.Combine64(keys[i], lane, DisplayKey(val));
                             hasKey[i] = true;
                         }
                     }
@@ -528,4 +582,52 @@ internal static class ArrowSeedKeyExtractor
                 }
         }
     }
+
+    /// <summary>
+    /// A dictionary column is the values its indices point at: each entry is hashed once, as the value
+    /// <see cref="ArrowTypeMap.GetValue"/> reads from the dictionary, and a row takes the key of its
+    /// entry. A null index, a null entry and an index out of range are a null, as the reader reads them.
+    /// </summary>
+    private static void AccumulateDictionary(DictionaryArray array, int lane, int rowCount, ulong[] keys, bool[] hasKey)
+    {
+        var dictionary = array.Dictionary;
+        var entryKeys = new ulong[dictionary.Length];
+        var entryPresent = new bool[dictionary.Length];
+        for (int j = 0; j < entryKeys.Length; j++)
+        {
+            if (ArrowTypeMap.GetValue(dictionary, j) is { } entry)
+            {
+                entryKeys[j] = HashValue(entry);
+                entryPresent[j] = true;
+            }
+        }
+
+        var indices = array.Indices;
+        for (int i = 0; i < rowCount; i++)
+        {
+            int position = indices.IsNull(i) ? -1 : PositionAt(indices, i);
+            if ((uint)position < (uint)entryPresent.Length && entryPresent[position])
+            {
+                keys[i] = StableHash.Combine64(keys[i], lane, entryKeys[position]);
+                hasKey[i] = true;
+            }
+            else
+            {
+                keys[i] = StableHash.Combine64(keys[i], lane, NullLaneSentinel);
+            }
+        }
+    }
+
+    private static int PositionAt(IArrowArray indices, int i) => indices switch
+    {
+        Int8Array a => a.Values[i],
+        Int16Array a => a.Values[i],
+        Int32Array a => a.Values[i],
+        Int64Array a => checked((int)a.Values[i]),
+        UInt8Array a => a.Values[i],
+        UInt16Array a => a.Values[i],
+        UInt32Array a => checked((int)a.Values[i]),
+        UInt64Array a => checked((int)a.Values[i]),
+        _ => Convert.ToInt32(ArrowTypeMap.GetValue(indices, i), CultureInfo.InvariantCulture)
+    };
 }
