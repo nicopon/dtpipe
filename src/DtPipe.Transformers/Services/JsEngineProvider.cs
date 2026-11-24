@@ -11,6 +11,8 @@ public class JsEngineProvider : IJsEngineProvider
         _threadLocalEngine = new ThreadLocal<Engine>(CreateEngine, trackAllValues: true);
     }
 
+    public bool EnginePerThread => true;
+
     public Engine GetEngine()
     {
         return _threadLocalEngine.Value!;

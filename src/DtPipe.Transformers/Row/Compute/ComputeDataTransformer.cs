@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
-using System.Globalization;
 using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
 using Apache.Arrow;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Infrastructure.Arrow;
@@ -165,16 +165,7 @@ public sealed class ComputeDataTransformer : BaseColumnarTransformer, IRequiresO
                 outFields[i] = ArrowTypeMapper.GetField(colInfo.Name, colInfo.ClrType, isNullable: true, colInfo.Precision, colInfo.Scale);
             }
 
-            if (_jsEngineProvider is JsEngineProvider
-                && batch.Length >= ParallelBatchThreshold
-                && _processors.All(p => p.IsPure))
-            {
-                ExecuteJintProcessorsParallel(batch, _processors, outFields, outArrays, ct);
-            }
-            else
-            {
-                ExecuteJintProcessorsSequential(batch, _processors, outFields, outArrays);
-            }
+            ExecuteJintProcessors(batch, _processors, outFields, outArrays, ct);
 
             return new ValueTask<RecordBatch?>(new RecordBatch(new Schema(outFields, batch.Schema.Metadata), outArrays, batch.Length));
         }
@@ -186,11 +177,74 @@ public sealed class ComputeDataTransformer : BaseColumnarTransformer, IRequiresO
         }
     }
 
-    private void ExecuteJintProcessorsSequential(
+    private void ExecuteJintProcessors(
         RecordBatch batch,
         ScriptColumnProcessor[] processors,
         Field[] outFields,
-        IArrowArray[] outArrays)
+        IArrowArray[] outArrays,
+        CancellationToken ct)
+    {
+        bool parallel = _jsEngineProvider.EnginePerThread
+            && batch.Length >= ParallelBatchThreshold
+            && processors.All(p => p.IsPure);
+
+        if (!parallel)
+        {
+            var columns = ConvertRange(batch, processors, outFields, 0, batch.Length);
+            for (int p = 0; p < processors.Length; p++)
+                outArrays[processors[p].ColumnIndex] = columns[p];
+            return;
+        }
+
+        // Each range is converted exactly as a whole batch is, by its own builders; the ranges are then
+        // joined in row order, so the two paths hold no conversion of their own to drift apart.
+        var ranges = Partitioner.Create(0, batch.Length).GetDynamicPartitions().ToArray();
+        var chunks = new IArrowArray[ranges.Length][];
+        try
+        {
+            try
+            {
+                Parallel.For(
+                    0,
+                    ranges.Length,
+                    new ParallelOptions { CancellationToken = ct },
+                    r => chunks[r] = ConvertRange(batch, processors, outFields, ranges[r].Item1, ranges[r].Item2));
+            }
+            catch (AggregateException aex) when (aex.InnerExceptions.Count > 0)
+            {
+                ExceptionDispatchInfo.Capture(aex.InnerExceptions[0]).Throw();
+            }
+
+            for (int p = 0; p < processors.Length; p++)
+            {
+                var column = new IArrowArray[ranges.Length];
+                for (int r = 0; r < ranges.Length; r++)
+                    column[r] = chunks[r][p];
+                outArrays[processors[p].ColumnIndex] = ArrowArrayConcatenator.Concatenate(column)!;
+            }
+        }
+        finally
+        {
+            foreach (var chunk in chunks)
+            {
+                if (chunk is null) continue;
+                foreach (var array in chunk)
+                    array.Dispose();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Runs every script over the rows of <paramref name="start"/> to <paramref name="end"/> and converts each
+    /// result into the builder of its output column: the one place the Arrow path turns a script's value into
+    /// a cell, whatever the size of the batch.
+    /// </summary>
+    private IArrowArray[] ConvertRange(
+        RecordBatch batch,
+        ScriptColumnProcessor[] processors,
+        Field[] outFields,
+        int start,
+        int end)
     {
         var engine = _jsEngineProvider.GetEngine();
         var state = GetOrCreateState(engine);
@@ -213,7 +267,7 @@ public sealed class ComputeDataTransformer : BaseColumnarTransformer, IRequiresO
             }
         }
 
-        for (int rowIdx = 0; rowIdx < batch.Length; rowIdx++)
+        for (int rowIdx = start; rowIdx < end; rowIdx++)
         {
             state.ArrowRowView.SetRowIndex(rowIdx);
 
@@ -240,78 +294,10 @@ public sealed class ComputeDataTransformer : BaseColumnarTransformer, IRequiresO
             }
         }
 
+        var columns = new IArrowArray[count];
         for (int p = 0; p < count; p++)
-            outArrays[processors[p].ColumnIndex] = ArrowTypeMapper.BuildArray(builders[p]);
-    }
-
-    private void ExecuteJintProcessorsParallel(
-        RecordBatch batch,
-        ScriptColumnProcessor[] processors,
-        Field[] outFields,
-        IArrowArray[] outArrays,
-        CancellationToken ct)
-    {
-        int len = batch.Length;
-        int procCount = processors.Length;
-        var targets = new ParallelColumnBuffer[procCount];
-
-        for (int p = 0; p < procCount; p++)
-        {
-            var proc = processors[p];
-            var clrType = _outputColumns![proc.ColumnIndex].ClrType;
-            IArrowArray? skipCol = _skipNull && proc.ColumnIndex < _inputColumnCount && batch.Column(proc.ColumnIndex).NullCount > 0
-                ? batch.Column(proc.ColumnIndex)
-                : null;
-            targets[p] = new ParallelColumnBuffer(proc, clrType, skipCol, len);
-        }
-
-        try
-        {
-            Parallel.ForEach(
-                Partitioner.Create(0, len),
-                new ParallelOptions { CancellationToken = ct },
-                range =>
-                {
-                    var engine = _jsEngineProvider.GetEngine();
-                    var state = GetOrCreateState(engine);
-                    state.ArrowRowView.BindBatch(batch);
-
-                    for (int rowIdx = range.Item1; rowIdx < range.Item2; rowIdx++)
-                    {
-                        state.ArrowRowView.SetRowIndex(rowIdx);
-
-                        for (int p = 0; p < procCount; p++)
-                        {
-                            var buf = targets[p];
-                            var proc = buf.Processor;
-                            if (buf.SkipCol?.IsNull(rowIdx) == true)
-                            {
-                                buf.SetNull(rowIdx);
-                                continue;
-                            }
-
-                            try
-                            {
-                                var result = engine.Call(state.Functions[proc.Index], JsValue.Undefined, state.ArrowArg);
-                                ValidateComputeResult(result, _columnNames![proc.ColumnIndex]);
-                                buf.SetValue(rowIdx, result);
-                            }
-                            catch (Exception ex)
-                            {
-                                throw new InvalidOperationException(
-                                    $"Error evaluating compute script for column '{_columnNames![proc.ColumnIndex]}': {ex.Message}", ex);
-                            }
-                        }
-                    }
-                });
-        }
-        catch (AggregateException aex) when (aex.InnerExceptions.Count > 0)
-        {
-            throw aex.InnerExceptions[0];
-        }
-
-        for (int p = 0; p < procCount; p++)
-            outArrays[targets[p].Processor.ColumnIndex] = targets[p].BuildArrowArray(outFields[targets[p].Processor.ColumnIndex]);
+            columns[p] = ArrowTypeMapper.BuildArray(builders[p]);
+        return columns;
     }
 
     public override object?[]? Transform(IReadOnlyList<object?> row)
@@ -440,111 +426,6 @@ public sealed class ComputeDataTransformer : BaseColumnarTransformer, IRequiresO
         public JsValue[] SingleArg { get; } = [rowView];
         public JsValue[] ArrowArg { get; } = [arrowRowView];
         public object?[] RowResults { get; } = new object?[functions.Length];
-    }
-
-    private sealed class ParallelColumnBuffer
-    {
-        public ScriptColumnProcessor Processor { get; }
-        public IArrowArray? SkipCol { get; }
-        private readonly double[]? _doubles;
-        private readonly bool[]? _doubleNulls;
-        private readonly string?[]? _strings;
-        private readonly object?[]? _objects;
-        private volatile bool _hasAnyNull;
-
-        public ParallelColumnBuffer(ScriptColumnProcessor processor, Type clrType, IArrowArray? skipCol, int length)
-        {
-            Processor = processor;
-            SkipCol = skipCol;
-
-            if (clrType == typeof(double))
-            {
-                _doubles = new double[length];
-                _doubleNulls = new bool[length];
-            }
-            else if (clrType == typeof(string))
-            {
-                _strings = new string?[length];
-            }
-            else
-            {
-                _objects = new object?[length];
-            }
-        }
-
-        public void SetNull(int idx)
-        {
-            if (_doubleNulls != null)
-            {
-                _doubleNulls[idx] = true;
-                _hasAnyNull = true;
-            }
-            else if (_strings != null) _strings[idx] = null;
-            else if (_objects != null) _objects[idx] = null;
-        }
-
-        public void SetValue(int idx, JsValue result)
-        {
-            if (_doubles != null)
-            {
-                if (result.IsNull())
-                {
-                    _doubleNulls![idx] = true;
-                    _hasAnyNull = true;
-                    return;
-                }
-                _doubles[idx] = result.IsNumber()
-                    ? result.AsNumber()
-                    : Convert.ToDouble(JsValueConversion.JsValueToClr(result), CultureInfo.InvariantCulture);
-                return;
-            }
-
-            if (_strings != null)
-            {
-                _strings[idx] = result.IsNull() ? null : JsValueConversion.JsValueToString(result);
-                return;
-            }
-
-            _objects![idx] = JsValueConversion.JsValueToClr(result);
-        }
-
-        public IArrowArray BuildArrowArray(Field field)
-        {
-            if (_doubles != null)
-            {
-                if (!_hasAnyNull)
-                {
-                    var buf = new ArrowBuffer.Builder<double>(_doubles.Length);
-                    buf.Append(_doubles);
-                    return new DoubleArray(buf.Build(), ArrowBuffer.Empty, _doubles.Length, 0, 0);
-                }
-
-                var dBuilder = new DoubleArray.Builder();
-                for (int i = 0; i < _doubles.Length; i++)
-                {
-                    if (_doubleNulls![i]) dBuilder.AppendNull();
-                    else dBuilder.Append(_doubles[i]);
-                }
-                return dBuilder.Build();
-            }
-
-            if (_strings != null)
-            {
-                var sBuilder = new StringArray.Builder();
-                for (int i = 0; i < _strings.Length; i++)
-                {
-                    if (_strings[i] is null) sBuilder.AppendNull();
-                    else sBuilder.Append(_strings[i]);
-                }
-                return sBuilder.Build();
-            }
-
-            var builder = ArrowTypeMapper.CreateBuilder(field.DataType);
-            var appender = ArrowTypeMapper.ResolveAppender(builder);
-            foreach (var v in _objects!)
-                appender(v);
-            return ArrowTypeMapper.BuildArray(builder);
-        }
     }
 
     private sealed record ScriptColumnProcessor(
