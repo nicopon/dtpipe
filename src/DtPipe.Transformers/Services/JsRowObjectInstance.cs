@@ -31,20 +31,22 @@ internal static class RowViewRefusals
 }
 
 /// <summary>
-/// Reusable lazy JS object view over a CLR row. Avoids creating a JsObject, copying unused
-/// columns, and evaluating a JavaScript Proxy per row while preserving ReferenceError checks.
+/// What both row views share: the column names a script may read, the writes it makes to the view (kept
+/// beside the row and cleared when the view moves), the keys and property lookups the engine asks of an
+/// object, and the refusals of <see cref="RowViewRefusals"/>. A view differs only in where a column's value
+/// comes from (<see cref="ReadColumn"/>) and in how it moves to the next row, which ends in
+/// <see cref="ResetWrites"/>.
 /// </summary>
-internal sealed class JsRowObjectInstance : ObjectInstance, IRowObjectView
+internal abstract class RowViewObject : ObjectInstance, IRowObjectView
 {
     private readonly string[] _columnNames;
     private readonly Dictionary<string, int> _nameToIndex;
     private readonly List<JsValue> _cachedKeys;
     private readonly ErrorConstructor _refErrorCtor;
     private readonly ObjectInstance _objectPrototype;
-    private IReadOnlyList<object?> _row = System.Array.Empty<object?>();
     private Dictionary<string, JsValue>? _overrides;
 
-    public JsRowObjectInstance(Engine engine, IReadOnlyList<string> columnNames, int exposedColumnCount, ErrorConstructor refErrorCtor)
+    protected RowViewObject(Engine engine, IReadOnlyList<string> columnNames, int exposedColumnCount, ErrorConstructor refErrorCtor)
         : base(engine)
     {
         _objectPrototype = engine.Intrinsics.Object.PrototypeObject;
@@ -64,189 +66,21 @@ internal sealed class JsRowObjectInstance : ObjectInstance, IRowObjectView
     }
 
     public bool HasOverrides => _overrides is { Count: > 0 };
+
+    /// <summary>The value of column <paramref name="idx"/> in the row the view stands on.</summary>
+    protected abstract JsValue ReadColumn(int idx);
 
     /// <summary>
-    /// Moves the view to <paramref name="row"/>: the previous row's writes are cleared and its prototype
-    /// is <c>Object.prototype</c> again (<see cref="RowViewRefusals"/>).
+    /// Ends the writes of the row the view leaves: they are cleared and the prototype is
+    /// <c>Object.prototype</c> again (<see cref="RowViewRefusals"/>).
     /// </summary>
-    public void SetRow(IReadOnlyList<object?> row)
+    protected void ResetWrites()
     {
-        _row = row;
         _overrides?.Clear();
         Prototype = _objectPrototype;
     }
 
     public override bool PreventExtensions() => throw RowViewRefusals.PreventExtensions(Engine);
-
-    public override JsValue Get(JsValue property, JsValue receiver)
-    {
-        if (property.IsString())
-        {
-            var name = property.AsString();
-            if (_overrides != null && _overrides.TryGetValue(name, out var overVal))
-                return overVal;
-
-            if (_nameToIndex.TryGetValue(name, out int idx))
-                return JsValueConversion.ClrToJsValue(Engine, _row[idx]);
-
-            if (base.HasProperty(property))
-                return base.Get(property, receiver);
-
-            throw new JavaScriptException(_refErrorCtor, $"Column '{name}' not found in schema");
-        }
-
-        return base.Get(property, receiver);
-    }
-
-    public override bool Set(JsValue property, JsValue value, JsValue receiver)
-    {
-        if (property.IsString())
-        {
-            (_overrides ??= new Dictionary<string, JsValue>(StringComparer.Ordinal))[property.AsString()] = value;
-            return true;
-        }
-
-        return base.Set(property, value, receiver);
-    }
-
-    public override PropertyDescriptor GetOwnProperty(JsValue property)
-    {
-        if (property.IsString())
-        {
-            var name = property.AsString();
-            if (_overrides != null && _overrides.TryGetValue(name, out var overVal))
-                return new PropertyDescriptor(overVal, PropertyFlag.ConfigurableEnumerableWritable);
-
-            if (_nameToIndex.TryGetValue(name, out int idx))
-                return new PropertyDescriptor(JsValueConversion.ClrToJsValue(Engine, _row[idx]), PropertyFlag.ConfigurableEnumerableWritable);
-        }
-
-        return PropertyDescriptor.Undefined;
-    }
-
-    public override bool HasProperty(JsValue property)
-    {
-        if (property.IsString())
-        {
-            var name = property.AsString();
-            if ((_overrides != null && _overrides.ContainsKey(name)) || _nameToIndex.ContainsKey(name))
-                return true;
-        }
-
-        return base.HasProperty(property);
-    }
-
-    public override List<JsValue> GetOwnPropertyKeys(JsTypes types = JsTypes.String | JsTypes.Symbol)
-    {
-        if ((types & JsTypes.String) == JsTypes.Empty)
-            return [];
-
-        if (_overrides == null || _overrides.Count == 0)
-            return _cachedKeys;
-
-        var keys = new List<JsValue>(_cachedKeys.Count + _overrides.Count);
-        keys.AddRange(_cachedKeys);
-        foreach (var key in _overrides.Keys)
-        {
-            if (!_nameToIndex.ContainsKey(key))
-                keys.Add(JsString.Create(key));
-        }
-        return keys;
-    }
-
-    public override IEnumerable<KeyValuePair<JsValue, PropertyDescriptor>> GetOwnProperties()
-    {
-        for (int i = 0; i < _columnNames.Length; i++)
-        {
-            var name = _columnNames[i];
-            var val = _overrides != null && _overrides.TryGetValue(name, out var overVal)
-                ? overVal
-                : JsValueConversion.ClrToJsValue(Engine, _row[i]);
-            yield return new KeyValuePair<JsValue, PropertyDescriptor>(
-                _cachedKeys[i],
-                new PropertyDescriptor(val, PropertyFlag.ConfigurableEnumerableWritable));
-        }
-
-        if (_overrides != null)
-        {
-            foreach (var kvp in _overrides)
-            {
-                if (!_nameToIndex.ContainsKey(kvp.Key))
-                {
-                    yield return new KeyValuePair<JsValue, PropertyDescriptor>(
-                        JsString.Create(kvp.Key),
-                        new PropertyDescriptor(kvp.Value, PropertyFlag.ConfigurableEnumerableWritable));
-                }
-            }
-        }
-    }
-}
-
-/// <summary>
-/// Reusable lazy JS object view backed directly by an Arrow RecordBatch at a mutable row cursor.
-/// Column readers are compiled lazily on first property read per column per batch.
-/// </summary>
-internal sealed class ArrowRowObjectInstance : ObjectInstance, IRowObjectView
-{
-    private readonly string[] _columnNames;
-    private readonly Dictionary<string, int> _nameToIndex;
-    private readonly List<JsValue> _cachedKeys;
-    private readonly ErrorConstructor _refErrorCtor;
-    private readonly Func<int, JsValue>?[] _readers;
-    private readonly ObjectInstance _objectPrototype;
-    private RecordBatch? _boundBatch;
-    private int _rowIndex;
-    private Dictionary<string, JsValue>? _overrides;
-
-    public ArrowRowObjectInstance(Engine engine, IReadOnlyList<string> columnNames, int exposedColumnCount, ErrorConstructor refErrorCtor)
-        : base(engine)
-    {
-        _objectPrototype = engine.Intrinsics.Object.PrototypeObject;
-        Prototype = _objectPrototype;
-        _refErrorCtor = refErrorCtor;
-        _columnNames = new string[exposedColumnCount];
-        _nameToIndex = new Dictionary<string, int>(exposedColumnCount, StringComparer.Ordinal);
-        _cachedKeys = new List<JsValue>(exposedColumnCount);
-        _readers = new Func<int, JsValue>?[exposedColumnCount];
-
-        for (int i = 0; i < exposedColumnCount; i++)
-        {
-            var name = columnNames[i];
-            _columnNames[i] = name;
-            _nameToIndex[name] = i;
-            _cachedKeys.Add(JsString.Create(name));
-        }
-    }
-
-    public bool HasOverrides => _overrides is { Count: > 0 };
-
-    public void BindBatch(RecordBatch batch)
-    {
-        if (ReferenceEquals(_boundBatch, batch))
-            return;
-
-        _boundBatch = batch;
-        System.Array.Clear(_readers);
-    }
-
-    /// <summary><see cref="JsRowObjectInstance.SetRow"/> at <paramref name="index"/> of the bound batch.</summary>
-    public void SetRowIndex(int index)
-    {
-        _rowIndex = index;
-        _overrides?.Clear();
-        Prototype = _objectPrototype;
-    }
-
-    public override bool PreventExtensions() => throw RowViewRefusals.PreventExtensions(Engine);
-
-    private JsValue ReadColumn(int idx)
-    {
-        var reader = _readers[idx] ??= CompileJsReader(
-            Engine,
-            _boundBatch!.Column(idx),
-            _boundBatch.Schema.GetFieldByIndex(idx));
-        return reader(_rowIndex);
-    }
 
     public override JsValue Get(JsValue property, JsValue receiver)
     {
@@ -349,6 +183,74 @@ internal sealed class ArrowRowObjectInstance : ObjectInstance, IRowObjectView
                 }
             }
         }
+    }
+}
+
+/// <summary>
+/// Reusable lazy JS object view over a CLR row. Avoids creating a JsObject, copying unused
+/// columns, and evaluating a JavaScript Proxy per row while preserving ReferenceError checks.
+/// </summary>
+internal sealed class JsRowObjectInstance : RowViewObject
+{
+    private IReadOnlyList<object?> _row = System.Array.Empty<object?>();
+
+    public JsRowObjectInstance(Engine engine, IReadOnlyList<string> columnNames, int exposedColumnCount, ErrorConstructor refErrorCtor)
+        : base(engine, columnNames, exposedColumnCount, refErrorCtor)
+    {
+    }
+
+    /// <summary>
+    /// Moves the view to <paramref name="row"/>: the previous row's writes are cleared and its prototype
+    /// is <c>Object.prototype</c> again (<see cref="RowViewRefusals"/>).
+    /// </summary>
+    public void SetRow(IReadOnlyList<object?> row)
+    {
+        _row = row;
+        ResetWrites();
+    }
+
+    protected override JsValue ReadColumn(int idx) => JsValueConversion.ClrToJsValue(Engine, _row[idx]);
+}
+
+/// <summary>
+/// Reusable lazy JS object view backed directly by an Arrow RecordBatch at a mutable row cursor.
+/// Column readers are compiled lazily on first property read per column per batch.
+/// </summary>
+internal sealed class ArrowRowObjectInstance : RowViewObject
+{
+    private readonly Func<int, JsValue>?[] _readers;
+    private RecordBatch? _boundBatch;
+    private int _rowIndex;
+
+    public ArrowRowObjectInstance(Engine engine, IReadOnlyList<string> columnNames, int exposedColumnCount, ErrorConstructor refErrorCtor)
+        : base(engine, columnNames, exposedColumnCount, refErrorCtor)
+    {
+        _readers = new Func<int, JsValue>?[exposedColumnCount];
+    }
+
+    public void BindBatch(RecordBatch batch)
+    {
+        if (ReferenceEquals(_boundBatch, batch))
+            return;
+
+        _boundBatch = batch;
+        System.Array.Clear(_readers);
+    }
+
+    /// <summary><see cref="JsRowObjectInstance.SetRow"/> at <paramref name="index"/> of the bound batch.</summary>
+    public void SetRowIndex(int index)
+    {
+        _rowIndex = index;
+        ResetWrites();
+    }
+
+    protected override JsValue ReadColumn(int idx)
+    {
+        var reader = _readers[idx] ??= CompileJsReader(
+            Engine,
+            _boundBatch!.Column(idx),
+            _boundBatch.Schema.GetFieldByIndex(idx));
+        return reader(_rowIndex);
     }
 
     private static Func<int, JsValue> CompileJsReader(Engine engine, IArrowArray array, Field field)
