@@ -203,9 +203,10 @@ public static class StableHash
 /// <para>
 /// A key is a function of the value <see cref="ArrowTypeMap.CompileValueReader"/> reads from the
 /// column, never of how the column stores it: one value is one key whatever its integer width, its
-/// timestamp unit or zone, its date width or its dictionary encoding. A text hashes as its UTF-8
-/// bytes, a date, a wall clock and an instant as the ticks of the moment they name, so that
-/// <c>--fake-seed-column</c> keeps a join between two tables whose columns store the value apart.
+/// timestamp unit or zone, its date or time width or its dictionary encoding. A text hashes as its
+/// UTF-8 bytes, a date, a time of day, a wall clock and an instant as the ticks of the moment they
+/// name, so that <c>--fake-seed-column</c> keeps a join between two tables whose columns store the
+/// value apart.
 /// </para>
 /// </summary>
 internal static class ArrowSeedKeyExtractor
@@ -243,6 +244,10 @@ internal static class ArrowSeedKeyExtractor
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static ulong InstantKey(DateTimeOffset value) => StableHash.Compute64(value.UtcTicks);
 
+    /// <summary>A time of day is its ticks since midnight, whole seconds and fraction included.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static ulong TimeKey(TimeOnly value) => StableHash.Compute64(value.Ticks);
+
     /// <summary>
     /// The key of a value read as a boxed object, for a cell that is not read in place: it gives the
     /// key the typed loop of the same value gives.
@@ -265,6 +270,7 @@ internal static class ArrowSeedKeyExtractor
         DateOnly v => DateKey(v),
         DateTime v => DateTimeKey(v),
         DateTimeOffset v => InstantKey(v),
+        TimeOnly v => TimeKey(v),
         byte[] v => StableHash.Compute64(v),
         _ => DisplayKey(value)
     };
@@ -555,6 +561,22 @@ internal static class ArrowSeedKeyExtractor
                 {
                     if (!noNulls && a.IsNull(i)) keys[i] = StableHash.Combine64(keys[i], lane, NullLaneSentinel);
                     else { keys[i] = StableHash.Combine64(keys[i], lane, InstantKey(a.GetTimestamp(i)!.Value)); hasKey[i] = true; }
+                }
+                break;
+
+            case Time32Array a:
+                for (int i = 0; i < rowCount; i++)
+                {
+                    if (!noNulls && a.IsNull(i)) keys[i] = StableHash.Combine64(keys[i], lane, NullLaneSentinel);
+                    else { keys[i] = StableHash.Combine64(keys[i], lane, TimeKey(a.GetTime(i)!.Value)); hasKey[i] = true; }
+                }
+                break;
+
+            case Time64Array a:
+                for (int i = 0; i < rowCount; i++)
+                {
+                    if (!noNulls && a.IsNull(i)) keys[i] = StableHash.Combine64(keys[i], lane, NullLaneSentinel);
+                    else { keys[i] = StableHash.Combine64(keys[i], lane, TimeKey(a.GetTime(i)!.Value)); hasKey[i] = true; }
                 }
                 break;
 

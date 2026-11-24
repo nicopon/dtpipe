@@ -81,6 +81,41 @@ public class FakeSeedKeyTests
         return new Date64Array(new ArrayData(Date64Type.Default, millisSinceEpoch.Length, nulls, 0, new[] { validity.Build(), values.Build() }));
     }
 
+    /// <summary>A time-of-day column of the given width from raw stored values, null for a null cell.</summary>
+    private static IArrowArray TimesOfDay(IArrowType type, params long?[] stored)
+    {
+        var width = type is Time32Type ? 4 : 8;
+        var bytes = new byte[width * stored.Length];
+        var validity = new ArrowBuffer.BitmapBuilder();
+        var nulls = 0;
+        for (var i = 0; i < stored.Length; i++)
+        {
+            BitConverter.GetBytes(stored[i] ?? 0).AsSpan(0, width).CopyTo(bytes.AsSpan(i * width));
+            validity.Append(stored[i].HasValue);
+            if (!stored[i].HasValue) nulls++;
+        }
+        return ArrowArrayFactory.BuildArray(new ArrayData(type, stored.Length, nulls, 0, new[] { validity.Build(), new ArrowBuffer(bytes) }));
+    }
+
+    private static IArrowArray Time32(TimeUnit unit, params long?[] stored) => TimesOfDay(new Time32Type(unit), stored);
+
+    private static IArrowArray Time64(TimeUnit unit, params long?[] stored) => TimesOfDay(new Time64Type(unit), stored);
+
+    /// <summary>A duration column from raw stored microseconds, null for a null cell.</summary>
+    private static DurationArray Durations(params long?[] micros)
+    {
+        var values = new ArrowBuffer.Builder<long>();
+        var validity = new ArrowBuffer.BitmapBuilder();
+        var nulls = 0;
+        foreach (var v in micros)
+        {
+            values.Append(v ?? 0);
+            validity.Append(v.HasValue);
+            if (!v.HasValue) nulls++;
+        }
+        return new DurationArray(new ArrayData(DurationType.Microsecond, micros.Length, nulls, 0, new[] { validity.Build(), values.Build() }));
+    }
+
     private static StringArray Text(params string?[] values)
     {
         var builder = new StringArray.Builder();
@@ -130,7 +165,9 @@ public class FakeSeedKeyTests
         "date-and-the-midnight-instant",
         "dictionary-of-text",
         "text-and-dictionary-of-text",
-        "integers"
+        "integers",
+        "time-of-day-whole-seconds",
+        "time-of-day-sub-second"
     };
 
     private static IArrowArray[] Group(string name)
@@ -214,6 +251,27 @@ public class FakeSeedKeyTests
                     UInt8Type.Default, UInt16Type.Default, UInt32Type.Default, UInt64Type.Default
                 }.Select(t => Integers(t, new int?[] { 42, null, 100 })).ToArray();
 
+            case "time-of-day-whole-seconds":
+                return new[]
+                {
+                    Time32(TimeUnit.Second, 3723, null, 86_399),
+                    Time32(TimeUnit.Millisecond, 3_723_000, null, 86_399_000),
+                    Time64(TimeUnit.Microsecond, 3_723_000_000L, null, 86_399_000_000L),
+                    Time64(TimeUnit.Nanosecond, 3_723_000_000_000L, null, 86_399_000_000_000L),
+                    new DictionaryArray(
+                        new DictionaryType(Int32Type.Default, new Time32Type(TimeUnit.Second), false),
+                        Integers(Int32Type.Default, new int?[] { 1, null, 0 }),
+                        Time32(TimeUnit.Second, 86_399, 3723))
+                };
+
+            case "time-of-day-sub-second":
+                return new[]
+                {
+                    Time32(TimeUnit.Millisecond, 3_723_345, null, 5),
+                    Time64(TimeUnit.Microsecond, 3_723_345_000L, null, 5_000L),
+                    Time64(TimeUnit.Nanosecond, 3_723_345_000_000L, null, 5_000_000L)
+                };
+
             default:
                 throw new ArgumentOutOfRangeException(nameof(name), name, null);
         }
@@ -278,6 +336,9 @@ public class FakeSeedKeyTests
             case DateTimeOffset t:
                 valueHash = StableHash.Compute64(t.UtcTicks);
                 break;
+            case TimeOnly t:
+                valueHash = StableHash.Compute64(t.Ticks);
+                break;
             case DateTime dt:
                 dt.Kind.Should().NotBe(DateTimeKind.Local, "the host's zone is no part of a value");
                 valueHash = StableHash.Compute64(dt.Ticks);
@@ -290,6 +351,16 @@ public class FakeSeedKeyTests
                 break;
         }
         return StableHash.Combine64(ArrowSeedKeyExtractor.InitialAccumulator, 0, valueHash);
+    }
+
+    [Fact]
+    public void TimesOfDayInTheSameMinute_GiveDifferentKeys()
+    {
+        var times = new long?[] { 3723, 3730, 3737, 3744 };
+        var keys = KeysOf(Time32(TimeUnit.Second, times)).Keys;
+
+        keys.Distinct().Should().HaveCount(times.Length, "01:02:03, 01:02:10, 01:02:17 and 01:02:24 are four times");
+        KeysOf(Time64(TimeUnit.Microsecond, times.Select(t => t * 1_000_000L).ToArray())).Keys.Should().Equal(keys);
     }
 
     [Fact]
@@ -322,7 +393,7 @@ public class FakeSeedKeyTests
     /// </summary>
     public static TheoryData<string> UnchangedKeyCases => new()
     {
-        "text", "int64", "decimal", "double", "float", "boolean"
+        "text", "int64", "decimal", "double", "float", "boolean", "timespan"
     };
 
     private static (IArrowArray Column, ulong[] Keys) UnchangedKeyCase(string name)
@@ -357,6 +428,9 @@ public class FakeSeedKeyTests
                     booleans.Append(true).Append(false).AppendNull();
                     return (booleans.Build(), new[] { 8841707400507832957UL, 0UL, 13067915187859978867UL });
                 }
+            case "timespan":
+                return (Durations(3_723_000_000L, 0, -1_500_000L), new[] { 1065290469232225431UL, 5649670533699647525UL, 9592237322467942179UL });
+
             default:
                 throw new ArgumentOutOfRangeException(nameof(name), name, null);
         }
@@ -364,7 +438,7 @@ public class FakeSeedKeyTests
 
     [Theory]
     [MemberData(nameof(UnchangedKeyCases))]
-    public void KeysOfTextIntegersDecimalsDoublesAndBooleans_AreUnchanged(string kind)
+    public void KeysOfTextIntegersDecimalsDoublesBooleansAndDurations_AreUnchanged(string kind)
     {
         var (column, expected) = UnchangedKeyCase(kind);
         KeysOf(column).Keys.Should().Equal(expected, kind);
@@ -403,7 +477,11 @@ public class FakeSeedKeyTests
             Timestamps(TimeUnit.Millisecond, null, InstantSeconds * 1000 + 5, null, 0),
             Dates32(19_000, null, 0),
             Dates64(19_000L * 86_400_000L, null, 0),
-            DictionaryOfText(Int16Type.Default, new string?[] { "alice", "é€" }, new int?[] { 1, null, 0 })
+            DictionaryOfText(Int16Type.Default, new string?[] { "alice", "é€" }, new int?[] { 1, null, 0 }),
+            Time32(TimeUnit.Second, 3723, null, 0),
+            Time32(TimeUnit.Millisecond, 3_723_345, null, 0),
+            Time64(TimeUnit.Microsecond, 3_723_345_678L, null, 0),
+            Time64(TimeUnit.Nanosecond, 3_723_345_678_900L, null, 0)
         };
     }
 
