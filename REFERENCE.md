@@ -1253,8 +1253,10 @@ dtpipe studio ./jobs --llm-provider ollama --llm-model qwen2.5-coder:7b  # with 
 
 The agent's connection is read from the command line first, then from what the studio remembers,
 then none: a studio started with no flag and nothing remembered has no agent, and the panel offers
-to connect one. A flag never writes what is remembered. The page connects a model (provider,
-address, key, model, `Test`, `Remember on this machine`) and forgets it again. The settings are
+to connect one. A flag never writes what is remembered. The page connects a model (Ollama or an
+OpenAI-compatible server: address, key, model, `Test`, and under Advanced the delay, for Ollama the
+context size, and `Remember on this machine`), disconnects it for the session (what is remembered
+stays, and the next start connects it again) and forgets it. The settings are
 `studio.json` under the user state folder (`DTPIPE_STATE_HOME` first; else macOS
 `~/Library/Application Support/dtpipe`, Windows `%LOCALAPPDATA%\dtpipe`, Linux
 `$XDG_STATE_HOME/dtpipe` or `~/.local/state/dtpipe`), written with the user's rights alone and
@@ -1263,21 +1265,23 @@ address asks for it again. `dtpipe secret list` does not show it.
 
 The coordinator is read the same way: `--coordinator` first, then what the studio remembers, then
 none, and a flag never writes what is remembered. The header always shows its state (connected,
-signing in, offline, signed out, or a remembered key to give again), and **Connect…** opens a
-dialog (address, sign in through the browser or with a key, `Test`, `Remember on this machine`)
-that also changes the coordinator or forgets it. A remembered coordinator connects again at start;
+signing in, offline, signed out, or a remembered key to give again), and that zone is the button
+that opens a dialog (address, sign in through the browser or with a key, `Test`,
+`Remember on this machine`) which also changes the coordinator, disconnects it for the session
+(what is remembered stays) or forgets it. A remembered coordinator connects again at start;
 one that does not answer never stops the studio. A key goes to the system keyring under the
 address of its coordinator, so another address asks for it again.
 
-The folder is the one given on the command line, else the current directory. Its name in the
-header opens a dialog to choose another: a full path typed (`~/` stands for your home) or a recent
-folder, `Test`, which counts its jobs, and `Remember among the recent folders`, ticked by default.
-The page then reads everything again from the new folder: its jobs, steps, variables and
-publication links. The agent starts a new conversation, and a job's relative paths resolve in the
-new folder. The change is refused, with the reason, while the open job holds unsaved changes (the
-dialog offers to save or discard them), while a run or a preview goes on, or while the agent's turn
-runs or waits for your answer. Only a folder opened from the page is remembered, in `studio.json`:
-starting on a folder writes nothing, and no folder is opened again at start.
+The folder is the one given on the command line, else the current directory. Its name in the header,
+whose full path shows on hover, opens a dialog to choose another: a full path typed (`~/` stands for
+your home) or a recent folder, `Test`, which counts its jobs, and
+`Remember among the recent folders`, ticked by default. The page then reads everything again from
+the new folder: its jobs, steps, variables and publication links. The agent starts a new
+conversation, and a job's relative paths resolve in the new folder. The change is refused, with the
+reason, while the open job holds unsaved changes (the dialog offers to save or discard them), while
+a run or a preview goes on, or while the agent's turn runs or waits for your answer. Only a folder
+opened from the page is remembered, in `studio.json`: starting on a folder writes nothing, and no
+folder is opened again at start.
 
 | Action | What it does |
 |:---|:---|

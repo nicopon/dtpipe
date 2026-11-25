@@ -44,6 +44,7 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   whole. A suspended real run stays in the old folder's `.dtpipe/studio/` and is found again there. At start the folder is the
   argument, else the current directory, and `StudioCommand` sets the current directory; `studio.json` keeps only the folders the
   page opened with *Remember* ticked (`ReadFolders`, bounded, most recent first), and no folder is opened again at start.
+  The header's folder name shows the root `GET /api/workspace` gives as its tooltip.
   `[CI: StudioWorkspaceTests, StudioSettingsTests]` `[local: page_smoke.mjs workspace-switch]`
   `[unchecked: Windows and Linux paths, a folder through a link or on a network share, the card-waiting refusal]`
 - **The server writes, from cards.** `PUT /api/job` composes the page's cards and writes that text
@@ -89,9 +90,11 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   never writes the file, and a connection of the page writes it only when *Remember* is ticked. A remembered key sign-in starts
   in the background and reads `signing-in` meanwhile, and a coordinator that does not answer never stops the start. The key is the
   keyring's, under `studio.coordinator:<normalized origin>`: another origin finds none and asks again, and a remembered key that
-  is missing builds no link, described as needing its key (`needsKey`). The page connects, tests, changes and forgets through
-  `/api/coordinator/connection` (`GET`, `POST …/test`, `PUT`, `DELETE`), reads back whether a key is kept and where (`none`,
-  `stored`, `flag`, `session`), and names no alias; no answer, refusal or message of these routes holds the key (`Mask`, then the
+  is missing builds no link, described as needing its key (`needsKey`). The page connects, tests, changes, disconnects and
+  forgets through `/api/coordinator/connection` (`GET`, `POST …/test`, `PUT`, `POST …/disconnect`, `DELETE`), reads back whether a
+  key is kept and where (`none`, `stored`, `flag`, `session`), and names no alias; a disconnection closes the link for the
+  session under the replacement's refusals (409) and keeps the file and the keyring's key, and the header's coordinator zone
+  (`#coordinator-link`) is the button that opens the dialog in every state, the actions of a state sitting beside it; no answer, refusal or message of these routes holds the key (`Mask`, then the
   sanitizer). `[CI: StudioCoordinatorConnectionTests, StudioSettingsTests]` `[local: page_smoke.mjs coordinator-connect]`
 - **A link that does not answer says so as a transport failure, never as an error of what was asked.** Each exchange of the
   `CoordinatorLink` goes through `ExchangeAsync`: an answer of any status clears `CoordinatorStatus.Unreachable`, none (refused,
@@ -363,10 +366,15 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   `--llm-provider` names (its key a reference, read once, kept in the client) or, with no flag, the connection remembered in
   `studio.json` (`StudioSettings`, under `UserStatePaths.Root()`, never `~/.dtpipe`: a `.dtpipe/` is a project's store); a flag
   never writes the file, and a file that cannot be read or is of another version is ignored with a warning. The page connects,
-  tests, replaces and forgets the model through `/api/agent/connection` (`GET`, `POST …/test`, `PUT`, `DELETE`), under the
-  session's token. `AgentSlot` holds the agent: a replacement closes the old one in a single step with the check that no turn
-  runs and no card waits (`StudioAgent.TryClose`, 409 otherwise), so a turn that starts after is refused, and opens a new
-  conversation. The file holds no secret: a key is the keyring's, under `studio.llm:<normalized address>`, so another address
+  tests, replaces, disconnects and forgets the model through `/api/agent/connection` (`GET`, `POST …/test`, `PUT`,
+  `POST …/disconnect`, `DELETE`), under the session's token. `AgentSlot` holds the agent: a replacement closes the old one in a
+  single step with the check that no turn runs and no card waits (`StudioAgent.TryClose`, 409 otherwise), so a turn that starts
+  after is refused, and opens a new conversation. **Disconnecting is not forgetting**: `AgentSlot.CloseAsync` closes the agent under
+  the same check and leaves none, keeping the connection's description, the file and the keyring's key, so a studio started again
+  connects it; only a key the client alone held (flag, typed) goes with it. `DELETE` clears the file and the keys, and the page
+  offers both as two buttons. The context window is a field of the connection (`AgentConnection.NumCtx`, `AgentSettings.NumCtx`,
+  `StudioAgentSetup.NumCtx`), read only from an Ollama connection, null for `AgentOptions.DefaultNumCtx`, bounded by
+  `StudioAgentClients.IsNumCtx` on the route and on the file (a value out of bounds ignores the remembered agent, with a warning). The file holds no secret: a key is the keyring's, under `studio.llm:<normalized address>`, so another address
   finds none and asks again. The page sends a value, never an alias or a `keyring://` reference, and reads back only whether a
   key is kept and where (`none`, `stored`, `flag`, `session`); a typed key the keyring refuses lasts the session and the page
   says so. No answer, refusal or message of these routes holds the key (`Mask`, then the sanitizer), and a provider that needs a

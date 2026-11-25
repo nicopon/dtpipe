@@ -24,18 +24,21 @@ saved, the job runs without a model: you run it with **Run for real…**.
 dtpipe studio ./jobs     # then click Connect a model… in the panel
 ```
 
-Choose Ollama, OpenAI or a compatible server, type its address and, for a remote model, its key.
-**Test** lists the models the server offers; **Connect** opens the conversation.
-Tick **Remember on this machine**, under **Advanced**, and a studio started later without a flag
-connects the same model again.
+Choose Ollama or an OpenAI-compatible server (a hosted service that speaks the same API is one),
+type its address and, for a remote model, its key. **Test** lists the models the server offers;
+**Connect** opens the conversation. Under **Advanced**, **Context size** sets the window asked of
+Ollama, in tokens (32768 when left alone; from 4096 to 1048576), and **Remember on this machine**,
+once ticked, makes a studio started later without a flag connect the same model again.
 
 What is remembered goes to `studio.json` in your user state folder (macOS
 `~/Library/Application Support/dtpipe`, Windows `%LOCALAPPDATA%\dtpipe`, Linux
-`~/.local/state/dtpipe`): the provider, the address, the model and the delay, never a key. The key
-goes to the system keyring, under the address it was given at, so another address asks for it
-again; `dtpipe secret list` does not show it. A model named with `--llm-provider` wins over the
-remembered one and writes nothing. Without a usable keyring the key lasts for the session, and
-the dialog says so. **Forget what is remembered** removes the file's model and its key.
+`~/.local/state/dtpipe`): the provider, the address, the model, the delay and the context size,
+never a key. The key goes to the system keyring, under the address it was given at, so another
+address asks for it again; `dtpipe secret list` does not show it. A model named with
+`--llm-provider` wins over the remembered one and writes nothing. Without a usable keyring the key
+lasts for the session, and the dialog says so. **Disconnect** closes the agent for this session and
+keeps the model and its key: the next studio connects it again. **Forget what is remembered**
+removes the file's model and its key.
 
 ## What the agent may do
 

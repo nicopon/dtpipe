@@ -189,8 +189,10 @@ mkdir jobs
 dtpipe studio ./jobs --coordinator "$COORDINATOR_URL" --key '${{DTPIPE_KEY}}'
 ```
 
-Without the flags, press **Connect…** in the header, paste the address and the key, and tick
-**Remember on this machine**: the next studio connects the same coordinator by itself.
+Without the flags, press **no coordinator** in the header, paste the address and the key, and tick
+**Remember on this machine**: the next studio connects the same coordinator by itself. The same
+zone, now named after the coordinator, opens the dialog again; **Disconnect** there closes the link
+for this session and keeps what is remembered.
 
 The studio offers the nodes' bricks. Open the **Library** panel on the left, pull
 `shop-orders-by-country` into `./jobs` to edit, and use **Publish** to save it back.
