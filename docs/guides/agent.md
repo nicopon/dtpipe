@@ -25,9 +25,9 @@ dtpipe studio ./jobs     # then click Connect a model… in the panel
 ```
 
 Choose Ollama, OpenAI or a compatible server, type its address and, for a remote model, its key.
-**Test** lists the models the server offers; **Connect** opens the conversation. Tick **Remember on
-this machine**, under **Advanced**, and a studio started later without a flag connects the same
-model again.
+**Test** lists the models the server offers; **Connect** opens the conversation.
+Tick **Remember on this machine**, under **Advanced**, and a studio started later without a flag
+connects the same model again.
 
 What is remembered goes to `studio.json` in your user state folder (macOS
 `~/Library/Application Support/dtpipe`, Windows `%LOCALAPPDATA%\dtpipe`, Linux
