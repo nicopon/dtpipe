@@ -1031,7 +1031,9 @@ const scenarios = {
     await p.shot("connect-1-empty");
     await p.click("#agent-connect");
     check("the dialog opens on Ollama", await p.until(`document.querySelector("#d-agent-provider")?.value === "ollama" && document.querySelector("#d-agent-key").parentElement.hidden`));
-    await p.ev(`(() => { const u = document.querySelector("#d-agent-url"); u.value = ${JSON.stringify(fakeLlm.url)}; u.dispatchEvent(new Event("input")); })()`);
+    check("the dialog offers Ollama and a compatible server only, and the context size at its default",
+      await p.ev(`[...document.querySelectorAll("#d-agent-provider option")].map((o) => o.value).join() === "ollama,compatible" && document.querySelector("#d-agent-numctx").value === "32768" && !document.querySelector("#d-agent-numctx").parentElement.hidden`));
+    await p.ev(`(() => { const u = document.querySelector("#d-agent-url"); u.value = ${JSON.stringify(fakeLlm.url)}; u.dispatchEvent(new Event("input")); document.querySelector("#d-agent-numctx").value = "16384"; })()`);
     await p.click("#d-agent-test");
     check("Test lists the models of the server", await p.until(`[...document.querySelectorAll("#d-agent-model option")].map((o) => o.value).join() === "fake:1,fake:2"`));
     await p.shot("connect-2-dialog");
@@ -1043,7 +1045,7 @@ const scenarios = {
     check("the agent answers", await p.until(`/ok: hello/.test(document.querySelector("#agent-log")?.textContent ?? "")`, 30000));
     const file = path.join(folder, ".smoke-state", "studio.json");
     const written = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
-    check("the settings are remembered, with no key", written.includes(fakeLlm.url) && !/"key"/i.test(written), written || "no file");
+    check("the settings are remembered, with the context size and no key", written.includes(fakeLlm.url) && /"numCtx": 16384/.test(written) && !/"key"/i.test(written), written || "no file");
 
     studio.stop();
     await sleep(500);
@@ -1052,6 +1054,13 @@ const scenarios = {
       await p.send("Page.navigate", { url: again.url });
       check("a studio started without a flag reads the connection back", await p.until(`!document.querySelector("#agent-body")?.hidden && document.querySelector("#agent-model")?.value === "fake:1"`, 30000));
       check("the header says the model", await p.until(`/fake:1 · ollama/.test(document.querySelector("#agent-link").textContent)`));
+      await p.click("#agent-link");
+      check("the dialog reads the context size back and offers to disconnect, beside forgetting",
+        await p.until(`document.querySelector("#d-agent-numctx")?.value === "16384" && !!document.querySelector("#d-agent-disconnect") && !!document.querySelector("#d-agent-forget")`));
+      await p.click("#d-agent-disconnect");
+      check("Disconnect closes the agent and keeps what is remembered",
+        await p.until(`!document.querySelector("#d-agent-dialog") && document.querySelector("#agent-body").hidden && document.querySelector("#agent-link").textContent.includes("no agent")`)
+        && !!JSON.parse(fs.readFileSync(file, "utf8")).agent);
       await p.click("#agent-link");
       check("the dialog offers to forget it", await p.until(`!!document.querySelector("#d-agent-forget")`));
       await p.click("#d-agent-forget");

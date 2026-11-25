@@ -110,6 +110,52 @@ public sealed class StudioConnectionTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task The_context_size_goes_through_the_connection_and_the_file_and_one_out_of_bounds_is_refused()
+    {
+        await StartAsync();
+        var connect = new { provider = "ollama", url = "http://127.0.0.1:1", model = "m", numCtx = 8192, remember = true };
+
+        var put = await CallAsync(HttpMethod.Put, "/api/agent/connection", connect);
+
+        Assert.Equal(8192, JsonDocument.Parse(put.Body).RootElement.GetProperty("numCtx").GetInt32());
+        Assert.Equal(8192, new StudioSettings(SettingsPath, _secrets).ReadAgent()?.NumCtx);
+        foreach (var numCtx in new[] { StudioAgentClients.MinNumCtx - 1, StudioAgentClients.MaxNumCtx + 1 })
+            Assert.Equal(HttpStatusCode.BadRequest, (await CallAsync(HttpMethod.Put, "/api/agent/connection", new { provider = "ollama", url = "http://127.0.0.1:1", numCtx })).Status);
+
+        var absent = await CallAsync(HttpMethod.Put, "/api/agent/connection", new { provider = "ollama", url = "http://127.0.0.1:1", model = "m", remember = true });
+        Assert.Equal(AgentOptions.DefaultNumCtx, JsonDocument.Parse(absent.Body).RootElement.GetProperty("numCtx").GetInt32());
+        Assert.Null(new StudioSettings(SettingsPath, _secrets).ReadAgent()?.NumCtx);
+    }
+
+    [Fact]
+    public async Task Disconnecting_closes_the_agent_and_keeps_the_file_and_the_key_and_a_turn_refuses_it()
+    {
+        var hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await StartAsync(hold);
+        var connect = new { provider = "openai", url = Url, model = "m", key = Key, remember = true };
+        Assert.Equal(HttpStatusCode.OK, (await CallAsync(HttpMethod.Put, "/api/agent/connection", connect)).Status);
+        Assert.Equal(HttpStatusCode.Accepted, (await CallAsync(HttpMethod.Post, "/api/agent/turn", new { prompt = "hello" })).Status);
+
+        Assert.Equal(HttpStatusCode.Conflict, (await CallAsync(HttpMethod.Post, "/api/agent/connection/disconnect")).Status);
+        Assert.True(JsonDocument.Parse((await CallAsync(HttpMethod.Get, "/api/agent/connection")).Body).RootElement.GetProperty("connected").GetBoolean());
+
+        hold.SetResult();
+        var disconnect = await CallAsync(HttpMethod.Post, "/api/agent/connection/disconnect");
+        for (var i = 0; i < 100 && disconnect.Status == HttpStatusCode.Conflict; i++)
+        {
+            await Task.Delay(50, Ct);
+            disconnect = await CallAsync(HttpMethod.Post, "/api/agent/connection/disconnect");
+        }
+
+        Assert.Equal(HttpStatusCode.OK, disconnect.Status);
+        Assert.DoesNotContain(Key, disconnect.Body);
+        Assert.False(JsonDocument.Parse(disconnect.Body).RootElement.GetProperty("connected").GetBoolean());
+        Assert.Equal("m", new StudioSettings(SettingsPath, _secrets).ReadAgent()?.Model);
+        Assert.Equal(Key, new StudioSettings(SettingsPath, _secrets).ReadLlmKey(Url));
+        Assert.Equal(HttpStatusCode.NotFound, (await CallAsync(HttpMethod.Post, "/api/agent/turn", new { prompt = "again" })).Status);
+    }
+
+    [Fact]
     public async Task A_model_is_not_swapped_under_a_turn()
     {
         var hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

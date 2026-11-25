@@ -106,6 +106,26 @@ public sealed class StudioCoordinatorConnectionTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Disconnecting_closes_the_link_for_the_session_and_keeps_the_file_and_the_key()
+    {
+        await StartAsync();
+        await CallAsync(HttpMethod.Put, "/api/coordinator/connection", new { origin = _fakes.CoordinatorUrl, auth = "key", key = Key, remember = true });
+        await SignedInAsync();
+
+        var disconnect = await CallAsync(HttpMethod.Post, "/api/coordinator/connection/disconnect");
+
+        Assert.Equal(HttpStatusCode.OK, disconnect.Status);
+        Assert.DoesNotContain(Key[^20..], disconnect.Body);
+        var view = JsonDocument.Parse(disconnect.Body).RootElement;
+        Assert.False(view.GetProperty("connected").GetBoolean());
+        Assert.Equal("stored", view.GetProperty("key").GetString());
+        Assert.Equal(HttpStatusCode.NotFound, (await CallAsync(HttpMethod.Post, "/api/publish/check", new { yaml = "a: 1" })).Status);
+        var next = new StudioSettings(SettingsPath, _secrets);
+        Assert.Equal(new CoordinatorSettings(_fakes.CoordinatorUrl, "key"), next.ReadCoordinator());
+        Assert.Equal(Key, next.ReadCoordinatorKey(_fakes.CoordinatorUrl));
+    }
+
+    [Fact]
     public async Task A_command_line_coordinator_is_replaced_for_the_session_and_the_file_is_not_written_unless_asked()
     {
         using var flag = new CoordinatorLink(new Uri(_fakes.CoordinatorUrl));
@@ -141,6 +161,7 @@ public sealed class StudioCoordinatorConnectionTests : IAsyncLifetime
 
         Assert.Equal(HttpStatusCode.Conflict, (await CallAsync(HttpMethod.Put, "/api/coordinator/connection", connect)).Status);
         Assert.Equal(HttpStatusCode.Conflict, (await CallAsync(HttpMethod.Delete, "/api/coordinator/connection")).Status);
+        Assert.Equal(HttpStatusCode.Conflict, (await CallAsync(HttpMethod.Post, "/api/coordinator/connection/disconnect")).Status);
 
         _fakes.SaveGate.SetResult();
         Assert.Equal(HttpStatusCode.OK, (await publishing).Status);
