@@ -31,6 +31,9 @@ internal sealed class StudioWorkspace
 /// </summary>
 internal sealed class WorkspaceSlot(StudioWorkspace workspace, string source)
 {
+    // A page sends requests of its own as the person acts (the view it keeps, the composition): a change waits that long for them.
+    private static readonly TimeSpan Drain = TimeSpan.FromSeconds(5);
+
     private readonly SlotHolds _holds = new("The folder is being used by another request: wait for it to finish.");
     private StudioWorkspace _workspace = workspace;
     private string _source = source;
@@ -44,7 +47,8 @@ internal sealed class WorkspaceSlot(StudioWorkspace workspace, string source)
 
     /// <summary>
     /// Puts <paramref name="next"/> in place and moves the process's current directory to its folder, or refuses with 409 while a
-    /// request holds the workspace or when <paramref name="closeOthers"/> names what still uses it. <paramref name="closeOthers"/>
+    /// request still holds the workspace once <see cref="Drain"/> has passed, or when <paramref name="closeOthers"/> names what
+    /// still uses it. <paramref name="closeOthers"/>
     /// runs under the slot's lock once no request is counted, so a request that holds the workspace refuses the replacement
     /// before anything is closed, and none starts until the folder has moved.
     /// </summary>
@@ -54,5 +58,5 @@ internal sealed class WorkspaceSlot(StudioWorkspace workspace, string source)
         Directory.SetCurrentDirectory(next.Folder.Root);
         Volatile.Write(ref _workspace, next);
         Volatile.Write(ref _source, source);
-    });
+    }, Drain);
 }
