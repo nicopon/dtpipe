@@ -262,7 +262,7 @@ public sealed class CoordinatorServerOptions
         // The issuer is what tells the two providers' tokens apart: one address for both would let either sign for the other.
         if (keyIssuer is not null && string.Equals(authority, keyIssuer, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Coordinator:Authority is Coordinator:PublicUrl, where this server issues the tokens of the identities verified by a key: an external identity provider has an issuer of its own.");
-        var allowHttpKeys = section.GetValue<bool>("Auth:AllowHttpKeys");
+        var allowHttpKeys = section.GetValue<bool?>("Auth:AllowHttpKeys") ?? false;
         var personKeys = section.GetValue<bool?>("Auth:PersonKeys") ?? true;
         // Without a provider every identity is verified by a key, a person's included: the key issuer must exist and take a person's key.
         if (authority is null)
@@ -310,7 +310,7 @@ public sealed class CoordinatorServerOptions
             ConnectionString = connectionString,
             StoreLockWait = lockWait,
             Passive = passive,
-            Initialize = section.GetValue<bool>("Initialize"),
+            Initialize = section.GetValue<bool?>("Initialize") ?? false,
             SqliteDirectory = PathOf("Sqlite:Directory"),
             LibraryRemote = libraryRemote,
             HealthMaxAge = section.GetValue<TimeSpan?>("Health:MaxAge") is { } age && age > TimeSpan.Zero ? age : TimeSpan.FromMinutes(5),

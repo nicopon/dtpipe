@@ -53,4 +53,22 @@ public sealed class RequiredProtectionSettingTests
         Assert.Equal(DataPlaneProtections.None, unset.Services.GetRequiredService<AdmissionOptions>().RequiredProtection);
         Assert.Equal(DataPlaneProtections.EncryptedPsk, set.Services.GetRequiredService<AdmissionOptions>().RequiredProtection);
     }
+
+    [Theory]
+    [InlineData(null, false)]
+    [InlineData("", false)]
+    [InlineData("false", false)]
+    [InlineData("true", true)]
+    public void A_Switch_Set_To_Nothing_Reads_As_Off_As_A_Platform_Leaves_It_When_A_Setting_Is_Removed(string? given, bool expected)
+    {
+        var settings = new Dictionary<string, string?>
+        {
+            ["Coordinator:Authority"] = "http://idp", ["Coordinator:Ui:ClientSecret"] = "x",
+            ["Coordinator:Initialize"] = given, ["Coordinator:Auth:AllowHttpKeys"] = given,
+        };
+        var options = CoordinatorServerOptions.FromConfiguration(new ConfigurationBuilder().AddInMemoryCollection(settings).Build());
+
+        Assert.Equal(expected, options.Initialize);
+        Assert.Equal(expected, options.AllowHttpKeys);
+    }
 }
