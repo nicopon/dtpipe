@@ -10,7 +10,7 @@ public sealed record AgentSettings(string Provider, string Url, string? Model, i
 /// <summary>The coordinator's connection as <c>studio.json</c> keeps it: its origin and how the person signs in (<c>browser</c> or <c>key</c>), never the key.</summary>
 public sealed record CoordinatorSettings(string Origin, string Auth);
 
-/// <summary>What <c>studio.json</c> holds, section by section; a section that cannot be read is null.</summary>
+/// <summary>What <c>studio.json</c> holds as the connections to make at start, section by section; a section that cannot be read is null.</summary>
 public sealed record RememberedSettings(AgentSettings? Agent, CoordinatorSettings? Coordinator);
 
 /// <summary>
@@ -35,22 +35,24 @@ public sealed class StudioSettings(string path, ISecretsManager secrets)
     public bool KeyringUsable { get; private set; } = true;
 
     /// <summary>
-    /// What the file holds: the agent, the coordinators known (an origin each, by address), the one that is active and whether it
-    /// is connected again at start, and the folders the page opened, the most recent first. A folder is never opened at start.
+    /// What the file holds: the agent and the coordinator to connect again at start, and three lists of what the page used with
+    /// success and was asked to remember, the most recent first, each identity once: the agents, the coordinators and the
+    /// folders. A list is a history the person edits; it never decides what is connected at start, and a folder is never opened
+    /// at start.
     /// </summary>
     private sealed record FileModel(
-        int Version, AgentSettings? Agent, CoordinatorSettings[]? Coordinators = null, string? ActiveCoordinator = null, bool Reconnect = false,
-        string[]? Folders = null);
+        int Version, AgentSettings? Agent, CoordinatorSettings? Coordinator = null, AgentSettings[]? Agents = null,
+        CoordinatorSettings[]? Coordinators = null, string[]? Folders = null);
 
-    /// <summary>How many recent folders the file keeps.</summary>
-    public const int MaxFolders = 10;
+    /// <summary>How many entries each list of the file keeps: the recent agents, coordinators and folders.</summary>
+    public const int MaxRecent = 10;
 
     /// <summary>The remembered agent, or null: nothing remembered, or a file that is ignored (see <see cref="Warning"/>).</summary>
     public AgentSettings? ReadAgent() => Read().Agent;
 
     /// <summary>
-    /// The coordinator to connect at start: the active one when the file asks for the reconnection, or null (nothing remembered,
-    /// no reconnection, or a file that is ignored: see <see cref="Warning"/>).
+    /// The coordinator to connect at start: the one the file remembers as active, or null (nothing remembered, or a file that is
+    /// ignored: see <see cref="Warning"/>).
     /// </summary>
     public CoordinatorSettings? ReadCoordinator() => Read().Coordinator;
 
@@ -59,15 +61,30 @@ public sealed class StudioSettings(string path, ISecretsManager secrets)
     {
         Warning = null;
         var file = ReadFile();
-        if (file is null) return new RememberedSettings(null, null);
-        var coordinators = (file.Coordinators ?? []).Select(ValidCoordinator).OfType<CoordinatorSettings>().ToList();
-        var active = file is { Reconnect: true, ActiveCoordinator: { } origin } && IsOrigin(origin)
-            ? coordinators.FirstOrDefault(c => SameAddress(c.Origin, origin))
-            : null;
-        return new RememberedSettings(ValidAgent(file.Agent), active);
+        return file is null ? new RememberedSettings(null, null) : new RememberedSettings(ValidAgent(file.Agent), ValidCoordinator(file.Coordinator));
     }
 
     private static bool SameAddress(string a, string b) => NormalizeUrl(a) == NormalizeUrl(b);
+
+    private static bool SameAgent(AgentSettings a, AgentSettings b) => a.Provider == b.Provider && SameAddress(a.Url, b.Url);
+
+    private static bool SameCoordinator(CoordinatorSettings a, CoordinatorSettings b) => SameAddress(a.Origin, b.Origin);
+
+    private static bool SameFolder(string a, string b) => string.Equals(a, b, StudioFolder.PathComparison);
+
+    /// <summary>The agents the page connected and the person asked to remember, the most recent first, each provider and address once.</summary>
+    public IReadOnlyList<AgentSettings> ReadAgents()
+    {
+        Warning = null;
+        return Distinct(ReadFile()?.Agents, ValidAgent, SameAgent);
+    }
+
+    /// <summary>The coordinators the page connected and the person asked to remember, the most recent first, each origin once.</summary>
+    public IReadOnlyList<CoordinatorSettings> ReadCoordinators()
+    {
+        Warning = null;
+        return Distinct(ReadFile()?.Coordinators, ValidCoordinator, SameCoordinator);
+    }
 
     /// <summary>
     /// The folders the page opened and the person asked to remember, the most recent first, each once, as full paths. One that is
@@ -76,15 +93,21 @@ public sealed class StudioSettings(string path, ISecretsManager secrets)
     public IReadOnlyList<string> ReadFolders()
     {
         Warning = null;
-        var folders = new List<string>();
-        foreach (var folder in ReadFile()?.Folders ?? [])
-        {
-            if (string.IsNullOrWhiteSpace(folder) || !Path.IsPathFullyQualified(folder)) { Ignore<string>("a recent folder is not a full path"); continue; }
-            var normalized = StudioFolder.Normalize(folder);
-            if (!folders.Any(f => string.Equals(f, normalized, StudioFolder.PathComparison))) folders.Add(normalized);
-        }
-        return folders.Take(MaxFolders).ToList();
+        return Distinct(ReadFile()?.Folders, ValidFolder, SameFolder);
     }
+
+    /// <summary>The valid entries of a list, each identity once, the first (the most recent) kept, bounded by <see cref="MaxRecent"/>.</summary>
+    private List<T> Distinct<T>(IEnumerable<T?>? stored, Func<T?, T?> valid, Func<T, T, bool> same) where T : class
+    {
+        var kept = new List<T>();
+        foreach (var item in stored ?? [])
+            if (valid(item) is { } entry && !kept.Any(k => same(k, entry))) kept.Add(entry);
+        return kept.Take(MaxRecent).ToList();
+    }
+
+    /// <summary>The list with the entry put first, once, and the most recent <see cref="MaxRecent"/> kept.</summary>
+    private static T[] Recent<T>(IReadOnlyList<T> current, T entry, Func<T, T, bool> same) =>
+        [.. new[] { entry }.Concat(current.Where(c => !same(c, entry))).Take(MaxRecent)];
 
     private FileModel? ReadFile()
     {
@@ -119,6 +142,12 @@ public sealed class StudioSettings(string path, ISecretsManager secrets)
         return coordinator;
     }
 
+    private string? ValidFolder(string? folder)
+    {
+        if (string.IsNullOrWhiteSpace(folder) || !Path.IsPathFullyQualified(folder)) return Ignore<string>("a recent folder is not a full path");
+        return StudioFolder.Normalize(folder);
+    }
+
     /// <summary>Says why a part of the file is left out, and answers null for the caller to return.</summary>
     private T? Ignore<T>(string reason) where T : class
     {
@@ -126,33 +155,92 @@ public sealed class StudioSettings(string path, ISecretsManager secrets)
         return null;
     }
 
-    public void WriteAgent(AgentSettings agent) => Update(file => file with { Agent = agent });
-
-    /// <summary>Forgets the remembered agent; the file stays only for what else it holds.</summary>
-    public void ClearAgent() => Clear(file => file with { Agent = null });
-
-    /// <summary>Keeps the coordinator among those known, by its address, makes it the active one and asks for its reconnection at start.</summary>
-    public void WriteCoordinator(CoordinatorSettings coordinator) => Update(file => file with
+    /// <summary>Makes the agent the one connected again at start, and puts it first among the recent agents, once, with the model, delay and context it was last used with.</summary>
+    public void WriteAgent(AgentSettings agent) => Update(file => file with
     {
-        Coordinators = [.. (file.Coordinators ?? []).Where(c => !SameAddress(c.Origin, coordinator.Origin)), coordinator],
-        ActiveCoordinator = coordinator.Origin,
-        Reconnect = true,
+        Agent = agent,
+        Agents = Recent(Distinct(file.Agents, ValidAgent, SameAgent), agent, SameAgent),
     });
 
-    /// <summary>Forgets the active coordinator: its entry goes, and nothing is connected at the next start.</summary>
+    /// <summary>Forgets the remembered agent and its entry among the recent ones; the file stays only for what else it holds.</summary>
+    public void ClearAgent() => Clear(file => file with
+    {
+        Agent = null,
+        Agents = ValidAgent(file.Agent) is { } active ? Distinct(file.Agents, ValidAgent, SameAgent).Where(a => !SameAgent(a, active)).ToArray() : file.Agents,
+    });
+
+    /// <summary>
+    /// Removes the recent agents the page shows at this provider and address, the remembered agent too when it is one of them, and
+    /// forgets the key kept for each address. The key is deleted by its alias, never read.
+    /// </summary>
+    public void RemoveAgent(string provider, string url)
+    {
+        var shown = Shown(url);
+        bool Is(AgentSettings agent) => agent.Provider == provider && Shown(agent.Url) == shown;
+        var removed = new List<AgentSettings>();
+        Clear(file =>
+        {
+            var recent = Distinct(file.Agents, ValidAgent, SameAgent);
+            removed.AddRange(recent.Where(Is));
+            var active = ValidAgent(file.Agent);
+            var activeGoes = active is not null && Is(active);
+            if (activeGoes) removed.Add(active!);
+            return file with { Agent = activeGoes ? null : file.Agent, Agents = recent.Where(a => !Is(a)).ToArray() };
+        });
+        foreach (var address in removed.Select(a => a.Url).Distinct()) ForgetLlmKey(address);
+    }
+
+    /// <summary>Makes the coordinator the one connected again at start.</summary>
+    public void WriteCoordinator(CoordinatorSettings coordinator) => Update(file => file with { Coordinator = coordinator });
+
+    /// <summary>Puts the coordinator first among the recent ones, once, with how the person last signed in to it.</summary>
+    public void RememberCoordinator(CoordinatorSettings coordinator) => Update(file => file with
+    {
+        Coordinators = Recent(Distinct(file.Coordinators, ValidCoordinator, SameCoordinator), coordinator, SameCoordinator),
+    });
+
+    /// <summary>Forgets the remembered coordinator and its entry among the recent ones: nothing is connected at the next start.</summary>
     public void ClearCoordinator() => Clear(file => file with
     {
-        Coordinators = (file.Coordinators ?? []).Where(c => file.ActiveCoordinator is null || !SameAddress(c.Origin, file.ActiveCoordinator)).ToArray(),
-        ActiveCoordinator = null,
-        Reconnect = false,
+        Coordinator = null,
+        Coordinators = ValidCoordinator(file.Coordinator) is { } active
+            ? Distinct(file.Coordinators, ValidCoordinator, SameCoordinator).Where(c => !SameCoordinator(c, active)).ToArray()
+            : file.Coordinators,
     });
 
-    /// <summary>Puts the folder first among the recent ones, once, and keeps the most recent <see cref="MaxFolders"/>.</summary>
+    /// <summary>
+    /// Removes the recent coordinator at this origin, the remembered coordinator too when it is that one, and forgets the key kept
+    /// for the origin. The key is deleted by its alias, never read.
+    /// </summary>
+    public void RemoveCoordinator(string origin)
+    {
+        var shown = Shown(origin);
+        bool Is(CoordinatorSettings coordinator) => Shown(coordinator.Origin) == shown;
+        var removed = new List<CoordinatorSettings>();
+        Clear(file =>
+        {
+            var recent = Distinct(file.Coordinators, ValidCoordinator, SameCoordinator);
+            removed.AddRange(recent.Where(Is));
+            var active = ValidCoordinator(file.Coordinator);
+            var activeGoes = active is not null && Is(active);
+            if (activeGoes) removed.Add(active!);
+            return file with { Coordinator = activeGoes ? null : file.Coordinator, Coordinators = recent.Where(c => !Is(c)).ToArray() };
+        });
+        foreach (var address in removed.Select(c => c.Origin).Distinct()) ForgetCoordinatorKey(address);
+    }
+
+    /// <summary>Puts the folder first among the recent ones, once, and keeps the most recent <see cref="MaxRecent"/>.</summary>
     public void RememberFolder(string folder)
     {
         var normalized = StudioFolder.Normalize(folder);
-        var kept = ReadFolders().Where(f => !string.Equals(f, normalized, StudioFolder.PathComparison));
-        Update(file => file with { Folders = [.. new[] { normalized }.Concat(kept).Take(MaxFolders)] });
+        Update(file => file with { Folders = Recent(Distinct(file.Folders, ValidFolder, SameFolder), normalized, SameFolder) });
+    }
+
+    /// <summary>Removes the folder from the recent ones, whether or not it is still on the disk.</summary>
+    public void RemoveFolder(string folder)
+    {
+        var normalized = StudioFolder.Normalize(folder);
+        Clear(file => file with { Folders = Distinct(file.Folders, ValidFolder, SameFolder).Where(f => !SameFolder(f, normalized)).ToArray() });
     }
 
     /// <summary>Changes one section and keeps the others as they are; a file that cannot be read is replaced, since the person asked to write.</summary>
@@ -227,6 +315,25 @@ public sealed class StudioSettings(string path, ISecretsManager secrets)
     public bool StoreCoordinatorKey(string origin, string key) => StoreKey(CoordinatorAlias(origin), key);
 
     public void ForgetCoordinatorKey(string origin) => ForgetKey(CoordinatorAlias(origin));
+
+    /// <summary>
+    /// The aliases the keyring holds now, and nothing of what they hold: the page learns from them which recent entries have a key
+    /// kept. Empty when the keyring cannot be read.
+    /// </summary>
+    public IReadOnlySet<string> KeptAliases()
+    {
+        try
+        {
+            var aliases = secrets.ListSecrets().Keys.ToHashSet(StringComparer.Ordinal);
+            KeyringUsable = true;
+            return aliases;
+        }
+        catch (Exception)
+        {
+            KeyringUsable = false;
+            return new HashSet<string>();
+        }
+    }
 
     private string? ReadKey(string alias)
     {

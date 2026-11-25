@@ -64,19 +64,86 @@ public sealed class StudioSettingsTests : IDisposable
         Assert.Null(settings.ReadCoordinatorKey("https://other.example.com"));
         Assert.DoesNotContain("dtp_key", File.ReadAllText(SettingsPath));
 
-        // Another coordinator becomes the active one, the first stays known; forgetting the active one leaves nothing to connect at start.
+        // Another coordinator becomes the active one, the first stays among the recent ones; forgetting the active one leaves nothing to connect at start.
+        settings.RememberCoordinator(new CoordinatorSettings("https://coordinator.example.com", "key"));
         settings.WriteCoordinator(new CoordinatorSettings("https://other.example.com", "browser"));
+        settings.RememberCoordinator(new CoordinatorSettings("https://other.example.com", "browser"));
         Assert.Equal(new CoordinatorSettings("https://other.example.com", "browser"), settings.ReadCoordinator());
-        Assert.Contains("https://coordinator.example.com", File.ReadAllText(SettingsPath));
+        Assert.Equal(["https://other.example.com", "https://coordinator.example.com"], settings.ReadCoordinators().Select(c => c.Origin));
 
         settings.ClearCoordinator();
         Assert.Null(settings.ReadCoordinator());
+        Assert.Equal(["https://coordinator.example.com"], settings.ReadCoordinators().Select(c => c.Origin));
         Assert.DoesNotContain("other.example.com", File.ReadAllText(SettingsPath));
         Assert.NotNull(settings.ReadAgent());
 
-        File.WriteAllText(SettingsPath, """{"version":1,"coordinators":[{"origin":"https://x.example.com/path","auth":"key"}],"activeCoordinator":"https://x.example.com/path","reconnect":true}""");
+        File.WriteAllText(SettingsPath, """{"version":1,"coordinator":{"origin":"https://x.example.com/path","auth":"key"}}""");
         Assert.Null(settings.ReadCoordinator());
         Assert.NotNull(settings.Warning);
+    }
+
+    [Fact]
+    public void The_recent_agents_and_coordinators_come_most_recent_first_each_once_bounded_and_an_unreadable_entry_is_left_out()
+    {
+        var settings = new StudioSettings(SettingsPath, _secrets);
+        for (var i = 0; i < StudioSettings.MaxRecent + 2; i++)
+        {
+            settings.WriteAgent(new AgentSettings("ollama", $"http://host{i}:11434", "m", 30));
+            settings.RememberCoordinator(new CoordinatorSettings($"https://c{i}.example.com", "browser"));
+        }
+        // An address read alike comes back to the top with what it was last used with, and is not listed twice.
+        settings.WriteAgent(new AgentSettings("ollama", "HTTP://host3:11434/", "other", 60, 8192));
+        settings.RememberCoordinator(new CoordinatorSettings("https://C3.example.com:443", "key"));
+
+        var agents = settings.ReadAgents();
+        Assert.Equal(StudioSettings.MaxRecent, agents.Count);
+        Assert.Equal(new AgentSettings("ollama", "HTTP://host3:11434/", "other", 60, 8192), agents[0]);
+        Assert.Equal("http://host11:11434", agents[1].Url);
+        Assert.Single(agents, a => StudioSettings.NormalizeUrl(a.Url) == "http://host3:11434");
+        Assert.DoesNotContain(agents, a => a.Url == "http://host0:11434");
+        Assert.Equal(StudioSettings.MaxRecent, settings.ReadCoordinators().Count);
+        Assert.Equal("key", settings.ReadCoordinators()[0].Auth);
+
+        File.WriteAllText(SettingsPath, """{"version":1,"agents":[{"provider":"nobody","url":"http://a:1"},{"provider":"openai","url":"https://api.example.com/v1"}],"coordinators":[{"origin":"https://x.example.com/path","auth":"key"}]}""");
+        Assert.Equal(["https://api.example.com/v1"], settings.ReadAgents().Select(a => a.Url));
+        Assert.NotNull(settings.Warning);
+        Assert.Empty(settings.ReadCoordinators());
+        Assert.NotNull(settings.Warning);
+    }
+
+    [Fact]
+    public void Removing_an_entry_forgets_the_key_of_its_address_and_no_other_and_the_remembered_one_goes_with_its_entry()
+    {
+        var settings = new StudioSettings(SettingsPath, _secrets);
+        settings.WriteAgent(new AgentSettings("openai", "https://one.example.com/v1", "m", 30));
+        settings.WriteAgent(new AgentSettings("openai", "https://two.example.com/v1", "m", 30));
+        settings.StoreLlmKey("https://one.example.com/v1", "sk-one");
+        settings.StoreLlmKey("https://two.example.com/v1", "sk-two");
+        settings.RememberCoordinator(new CoordinatorSettings("https://c1.example.com", "key"));
+        settings.RememberCoordinator(new CoordinatorSettings("https://c2.example.com", "key"));
+        settings.StoreCoordinatorKey("https://c1.example.com", "dtp_one");
+        settings.StoreCoordinatorKey("https://c2.example.com", "dtp_two");
+        var kept = settings.KeptAliases();
+        Assert.Contains(StudioSettings.LlmAlias("https://one.example.com/v1"), kept);
+        Assert.Contains(StudioSettings.CoordinatorAlias("https://c1.example.com"), kept);
+
+        settings.RemoveAgent("openai", "https://ONE.example.com/v1/");
+        settings.RemoveCoordinator("https://c1.example.com");
+
+        Assert.Equal(["https://two.example.com/v1"], settings.ReadAgents().Select(a => a.Url));
+        Assert.Equal("https://two.example.com/v1", settings.ReadAgent()?.Url);
+        Assert.Null(settings.ReadLlmKey("https://one.example.com/v1"));
+        Assert.Equal("sk-two", settings.ReadLlmKey("https://two.example.com/v1"));
+        Assert.Equal(["https://c2.example.com"], settings.ReadCoordinators().Select(c => c.Origin));
+        Assert.Null(settings.ReadCoordinatorKey("https://c1.example.com"));
+        Assert.Equal("dtp_two", settings.ReadCoordinatorKey("https://c2.example.com"));
+
+        // The remembered agent is the entry removed: nothing is connected again at start, and its key is gone with it.
+        settings.RemoveAgent("openai", "https://two.example.com/v1");
+        Assert.Null(settings.ReadAgent());
+        Assert.Empty(settings.ReadAgents());
+        Assert.Null(settings.ReadLlmKey("https://two.example.com/v1"));
+        Assert.DoesNotContain("sk-", File.ReadAllText(SettingsPath));
     }
 
     [Fact]
@@ -84,17 +151,21 @@ public sealed class StudioSettingsTests : IDisposable
     {
         var settings = new StudioSettings(SettingsPath, _secrets);
         settings.WriteAgent(new AgentSettings("ollama", "http://localhost:11434", "m", 30));
-        var folders = Enumerable.Range(0, StudioSettings.MaxFolders + 2).Select(i => Path.Combine(_dir, $"f{i}")).ToList();
+        var folders = Enumerable.Range(0, StudioSettings.MaxRecent + 2).Select(i => Path.Combine(_dir, $"f{i}")).ToList();
         foreach (var folder in folders) settings.RememberFolder(folder);
         settings.RememberFolder(folders[3] + Path.DirectorySeparatorChar);
 
         var recent = settings.ReadFolders();
-        Assert.Equal(StudioSettings.MaxFolders, recent.Count);
+        Assert.Equal(StudioSettings.MaxRecent, recent.Count);
         Assert.Equal(folders[3], recent[0]);
         Assert.Equal(folders[^1], recent[1]);
         Assert.Single(recent, f => f == folders[3]);
         Assert.DoesNotContain(folders[0], recent);
         Assert.NotNull(settings.ReadAgent());
+
+        settings.RemoveFolder(folders[3] + Path.DirectorySeparatorChar);
+        Assert.DoesNotContain(folders[3], settings.ReadFolders());
+        Assert.Equal(StudioSettings.MaxRecent - 1, settings.ReadFolders().Count);
 
         File.WriteAllText(SettingsPath, $$"""{"version":1,"folders":["relative/path","",{{JsonSerializer.Serialize(folders[1])}}]}""");
         Assert.Equal([folders[1]], settings.ReadFolders());
