@@ -200,7 +200,8 @@ public sealed class StudioCommand : Command
                 args => CommandLineJob.Export(serviceProvider, args),
                 agent,
                 new StudioAgentLink(settings, agentTools, trace, StudioAgentClients.Create, start),
-                new StudioCoordinatorStart(settings, coordinatorStart));
+                new StudioCoordinatorStart(settings, coordinatorStart),
+                settings);
             StudioServer server;
             try
             {

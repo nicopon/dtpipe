@@ -36,11 +36,13 @@ public sealed record StudioComponent(string Name, string Category);
 /// launched from, and the coordinator the studio starts with, if any (<see cref="CoordinatorAtStart"/>: the page may replace it,
 /// so the server reads the link in place, never this one).
 /// <see cref="DesignWith"/> gives the same model over the coordinator's bricks; without it, <see cref="Design"/> alone.
+/// <see cref="Settings"/> keeps the recent folders; without it, the page opens a folder and remembers none.
 /// </summary>
 public sealed record StudioTools(
     IStudioEngine Engine, DesignService Design, IReadOnlyList<StudioComponent> Readers, IReadOnlyList<StudioComponent> Writers,
     ISecretsManager Secrets, CoordinatorLink? CoordinatorAtStart = null, Func<IBrickLookup, DesignService>? DesignWith = null,
-    StudioImporter? Import = null, StudioAgentSetup? Agent = null, StudioAgentLink? AgentLink = null, StudioCoordinatorStart? CoordinatorStart = null);
+    StudioImporter? Import = null, StudioAgentSetup? Agent = null, StudioAgentLink? AgentLink = null, StudioCoordinatorStart? CoordinatorStart = null,
+    StudioSettings? Settings = null);
 
 /// <summary>
 /// The engine as the studio asks it: a sample, a real run, and the cut a preview runs. Each call carries the
@@ -363,6 +365,9 @@ public sealed partial class StudioServer : IAsyncDisposable
                     break;
                 case var (method, _) when path == "/api/agent" || path.StartsWith("/api/agent/", StringComparison.Ordinal):
                     await AgentRouteAsync(context, method, path);
+                    break;
+                case var (method, _) when path == "/api/workspace" || path.StartsWith("/api/workspace/", StringComparison.Ordinal):
+                    await WorkspaceRouteAsync(context, method, path);
                     break;
                 default:
                     throw new StudioRefusal(404, $"No {request.Method} {path}.");
