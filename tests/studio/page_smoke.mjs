@@ -1089,7 +1089,8 @@ const scenarios = {
       await p.click("#d-workspace-submit");
       check("unsaved changes refuse the change by name, and the dialog offers to save or discard them", await refusedForChanges());
       check("nothing changed meanwhile", await p.ev(`${header} === ${JSON.stringify(path.basename(folder))} && ${jobs} === "chain.yaml"`));
-      await p.click("#d-workspace-discard");
+      // The page reloads at once: a click that waits for the next frame would find the page gone.
+      await p.ev(`document.querySelector("#d-workspace-discard").click()`);
       check("discarding opens the new folder, read again whole", await p.until(`${header} === ${JSON.stringify(path.basename(other))} && ${jobs} === "other.yaml" && !document.querySelector("#d-workspace-dialog")`, 30000), await p.ev(`${jobs} + " | " + (document.querySelector("#d-workspace-error")?.textContent ?? "no dialog")`));
       check("the folder opened keeps no view of the folder left", !viewOf(other).includes("chain.yaml"), viewOf(other));
       check("the job left keeps its file as it was", fs.readFileSync(path.join(folder, "chain.yaml"), "utf8") === fs.readFileSync(path.join(here, "fixtures", "chain.yaml"), "utf8"));
@@ -1102,7 +1103,7 @@ const scenarios = {
       await p.ev(`[...document.querySelectorAll("#d-workspace-recents button")].find((b) => b.title === ${JSON.stringify(folder)}).click()`);
       await p.click("#d-workspace-submit");
       check("unsaved changes refuse again", await refusedForChanges());
-      await p.click("#d-workspace-save");
+      await p.ev(`document.querySelector("#d-workspace-save").click()`);
       check("Save, then open: the start folder is open again", await p.until(`${header} === ${JSON.stringify(path.basename(folder))} && ${jobs} === "chain.yaml"`, 30000), await p.ev(header));
       check("the start folder keeps no view of the folder left", !viewOf(folder).includes("other.yaml"), viewOf(folder));
       check("the job was saved first", fs.readFileSync(path.join(other, "other.yaml"), "utf8") !== fs.readFileSync(path.join(here, "fixtures", "chain.yaml"), "utf8"));
