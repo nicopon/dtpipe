@@ -1,3 +1,4 @@
+using System.Text.Json;
 using DtPipe.Cli.Security;
 using DtPipe.Cli.Studio;
 using Xunit;
@@ -76,5 +77,27 @@ public sealed class StudioSettingsTests : IDisposable
         File.WriteAllText(SettingsPath, """{"version":1,"coordinators":[{"origin":"https://x.example.com/path","auth":"key"}],"activeCoordinator":"https://x.example.com/path","reconnect":true}""");
         Assert.Null(settings.ReadCoordinator());
         Assert.NotNull(settings.Warning);
+    }
+
+    [Fact]
+    public void Recent_folders_come_most_recent_first_each_once_bounded_and_one_that_is_no_full_path_is_left_out()
+    {
+        var settings = new StudioSettings(SettingsPath, _secrets);
+        settings.WriteAgent(new AgentSettings("ollama", "http://localhost:11434", "m", 30));
+        var folders = Enumerable.Range(0, StudioSettings.MaxFolders + 2).Select(i => Path.Combine(_dir, $"f{i}")).ToList();
+        foreach (var folder in folders) settings.RememberFolder(folder);
+        settings.RememberFolder(folders[3] + Path.DirectorySeparatorChar);
+
+        var recent = settings.ReadFolders();
+        Assert.Equal(StudioSettings.MaxFolders, recent.Count);
+        Assert.Equal(folders[3], recent[0]);
+        Assert.Equal(folders[^1], recent[1]);
+        Assert.Single(recent, f => f == folders[3]);
+        Assert.DoesNotContain(folders[0], recent);
+        Assert.NotNull(settings.ReadAgent());
+
+        File.WriteAllText(SettingsPath, $$"""{"version":1,"folders":["relative/path","",{{JsonSerializer.Serialize(folders[1])}}]}""");
+        Assert.Equal([folders[1]], settings.ReadFolders());
+        Assert.Contains("full path", settings.Warning);
     }
 }

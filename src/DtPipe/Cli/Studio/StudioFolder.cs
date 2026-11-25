@@ -37,14 +37,17 @@ public sealed class StudioFolder
         AttributesToSkip = FileAttributes.Hidden | FileAttributes.System | FileAttributes.ReparsePoint,
     };
 
-    private static readonly StringComparison PathComparison =
+    internal static readonly StringComparison PathComparison =
         OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+
+    /// <summary>A full path as the studio names a folder: absolute, without the separator that may end it.</summary>
+    internal static string Normalize(string path) => Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
 
     public string Root { get; }
 
     public StudioFolder(string path)
     {
-        Root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+        Root = Normalize(path);
         if (File.Exists(Root)) throw new DirectoryNotFoundException($"{Root} is a file, not a folder: give the folder that holds the jobs.");
         if (!Directory.Exists(Root)) throw new DirectoryNotFoundException($"No folder at {Root}.");
     }

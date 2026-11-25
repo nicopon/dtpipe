@@ -17,7 +17,8 @@ public sealed record RememberedSettings(AgentSettings? Agent, CoordinatorSetting
 /// What the studio remembers for the person on this machine: <c>studio.json</c> under <see cref="UserStatePaths.Root"/>, holding
 /// no secret, and the secrets in the keyring's blob under aliases derived from the address they belong to
 /// (<c>studio.llm:&lt;address&gt;</c>, <c>studio.coordinator:&lt;origin&gt;</c>), so a key is never offered to another address. A file that cannot be read, or that a
-/// newer studio wrote, is ignored with a warning and never stops the start. A command-line flag never writes here.
+/// newer studio wrote, is ignored with a warning and never stops the start. Nothing the command line gives (a flag, the folder)
+/// is written here.
 /// </summary>
 public sealed class StudioSettings(string path, ISecretsManager secrets)
 {
@@ -35,10 +36,14 @@ public sealed class StudioSettings(string path, ISecretsManager secrets)
 
     /// <summary>
     /// What the file holds: the agent, the coordinators known (an origin each, by address), the one that is active and whether it
-    /// is connected again at start.
+    /// is connected again at start, and the folders the page opened, the most recent first. A folder is never opened at start.
     /// </summary>
     private sealed record FileModel(
-        int Version, AgentSettings? Agent, CoordinatorSettings[]? Coordinators = null, string? ActiveCoordinator = null, bool Reconnect = false);
+        int Version, AgentSettings? Agent, CoordinatorSettings[]? Coordinators = null, string? ActiveCoordinator = null, bool Reconnect = false,
+        string[]? Folders = null);
+
+    /// <summary>How many recent folders the file keeps.</summary>
+    public const int MaxFolders = 10;
 
     /// <summary>The remembered agent, or null: nothing remembered, or a file that is ignored (see <see cref="Warning"/>).</summary>
     public AgentSettings? ReadAgent() => Read().Agent;
@@ -63,6 +68,23 @@ public sealed class StudioSettings(string path, ISecretsManager secrets)
     }
 
     private static bool SameAddress(string a, string b) => NormalizeUrl(a) == NormalizeUrl(b);
+
+    /// <summary>
+    /// The folders the page opened and the person asked to remember, the most recent first, each once, as full paths. One that is
+    /// not a full path is left out, and <see cref="Warning"/> says so.
+    /// </summary>
+    public IReadOnlyList<string> ReadFolders()
+    {
+        Warning = null;
+        var folders = new List<string>();
+        foreach (var folder in ReadFile()?.Folders ?? [])
+        {
+            if (string.IsNullOrWhiteSpace(folder) || !Path.IsPathFullyQualified(folder)) { Ignore<string>("a recent folder is not a full path"); continue; }
+            var normalized = StudioFolder.Normalize(folder);
+            if (!folders.Any(f => string.Equals(f, normalized, StudioFolder.PathComparison))) folders.Add(normalized);
+        }
+        return folders.Take(MaxFolders).ToList();
+    }
 
     private FileModel? ReadFile()
     {
@@ -123,6 +145,14 @@ public sealed class StudioSettings(string path, ISecretsManager secrets)
         ActiveCoordinator = null,
         Reconnect = false,
     });
+
+    /// <summary>Puts the folder first among the recent ones, once, and keeps the most recent <see cref="MaxFolders"/>.</summary>
+    public void RememberFolder(string folder)
+    {
+        var normalized = StudioFolder.Normalize(folder);
+        var kept = ReadFolders().Where(f => !string.Equals(f, normalized, StudioFolder.PathComparison));
+        Update(file => file with { Folders = [.. new[] { normalized }.Concat(kept).Take(MaxFolders)] });
+    }
 
     /// <summary>Changes one section and keeps the others as they are; a file that cannot be read is replaced, since the person asked to write.</summary>
     private void Update(Func<FileModel, FileModel> change) => Write(change(ReadFile() ?? new FileModel(Version, null)));
