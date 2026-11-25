@@ -171,7 +171,7 @@ would not read back, prints nothing else on stdout, and with `--out` creates the
   the transport library behind it, when a node starts. Never name the assembly from another file, never from a constructor or
   from help. `[CI: validate_distributed_boundary.sh, NodeCommandTests]`
 - **A secret is a reference.** `--client-secret` takes `keyring://alias`, `${{NAME}}` or `@file` and refuses a value; the
-  environment's `DtPipeNode__Oidc__ClientSecret` may hold a reference too. It is resolved once, at start, by
+  environment's `DtPipeNode__Oidc__ClientSecret` holds a reference or the value itself, which the host reads. It is resolved once, at start, by
   `CompositeStringContentResolver.Standard`. The host is built without the command line, and a token that names a node setting
   (`DtPipeNode:…`, `DtPipeNode__…`) is refused, so no argument reaches a setting the options do not name. A reference the
   resolver leaves as written (a variable not set, an alias the keyring lacks) stops the start by its name, never passing for the
