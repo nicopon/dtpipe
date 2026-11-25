@@ -122,6 +122,10 @@ async function openConnect() {
       await refreshAgent();
       return answer;
     },
+    onDisconnect: async () => {
+      await api("/api/agent/connection/disconnect", {});
+      await refreshAgent();
+    },
     onForget: async () => {
       await api("/api/agent/connection", undefined, "DELETE");
       await refreshAgent();

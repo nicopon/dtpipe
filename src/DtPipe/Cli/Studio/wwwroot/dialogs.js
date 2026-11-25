@@ -926,11 +926,12 @@ function providerChoice(connection) {
 /**
  * The agent's connection: provider, address, key, model and, under Advanced, the delay and whether to remember it on this
  * machine. The key is typed here and sent once; the page never reads one back, only whether one is kept and where.
- * `onConnect(body)` makes the connection (false: the person declined) and `onForget()` forgets what is remembered.
- * @param {{ connection: any, onConnect: (body: any) => Promise<any>, onForget: () => Promise<void> }} opts
+ * `onConnect(body)` makes the connection (false: the person declined), `onDisconnect()` closes the agent for this session and
+ * keeps what is remembered, and `onForget()` forgets what is remembered.
+ * @param {{ connection: any, onConnect: (body: any) => Promise<any>, onDisconnect: () => Promise<void>, onForget: () => Promise<void> }} opts
  */
 export function openAgentConnectDialog(opts) {
-  const { connection, onConnect, onForget } = opts;
+  const { connection, onConnect, onDisconnect, onForget } = opts;
   openDialog("d-agent-dialog", "Connect a model", ({ body, close }) => {
     const choice = providerChoice(connection);
     const provider = /** @type {HTMLSelectElement} */ (el("select", { id: "d-agent-provider", "aria-label": "Provider" },
@@ -1039,6 +1040,15 @@ export function openAgentConnectDialog(opts) {
       note,
       banner,
       el("div", { class: "row dialog-actions" },
+        connection?.connected
+          ? el("button", {
+            id: "d-agent-disconnect", type: "button", class: "ghost", title: "Close the agent for this session; what is remembered stays, and the next start connects it again",
+            onclick: async () => {
+              if (busy) return;
+              try { await onDisconnect(); close(); } catch (err) { fail(err.message); }
+            },
+          }, "Disconnect")
+          : null,
         connection?.source && connection.source !== "none"
           ? el("button", {
             id: "d-agent-forget", type: "button", class: "ghost", title: "Forget the remembered model and the key kept for its address",

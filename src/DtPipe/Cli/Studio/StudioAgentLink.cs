@@ -78,6 +78,29 @@ internal sealed class AgentSlot(StudioAgent? agent, AgentConnection? connection)
     }
 
     /// <summary>
+    /// Closes the agent in place and leaves none, keeping the description of the connection, or refuses with 409 naming why it
+    /// stays. Nothing is forgotten: the memory and the keyring's key are not this slot's.
+    /// </summary>
+    public async Task CloseAsync()
+    {
+        await _swap.WaitAsync();
+        try
+        {
+            var old = Current;
+            if (old is null) return;
+            if (old.TryClose("disconnecting the model") is { } reason) throw new StudioRefusal(409, reason);
+            Volatile.Write(ref _agent, null);
+            // A key held by the client alone (flag, typed) went with it; the keyring's stays.
+            if (Connection is { } held && held.Key != "stored") Volatile.Write(ref _connection, held with { Key = "none" });
+            await old.DisposeAsync();
+        }
+        finally
+        {
+            _swap.Release();
+        }
+    }
+
+    /// <summary>
     /// Puts the agent <paramref name="create"/> makes in place of <paramref name="closed"/>, which a change beside it closed: a
     /// new conversation. An agent the page replaced meanwhile is new already and stays.
     /// </summary>

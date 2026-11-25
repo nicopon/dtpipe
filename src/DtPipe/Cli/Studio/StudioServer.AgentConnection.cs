@@ -27,6 +27,10 @@ public sealed partial class StudioServer
             case ("POST", "/api/agent/connection/test"):
                 await JsonAsync(context, await TestConnectionAsync(await BodyAsync<AgentConnectionRequest>(context), context.RequestAborted));
                 break;
+            case ("POST", "/api/agent/connection/disconnect"):
+                await _slot.CloseAsync();
+                await JsonAsync(context, ConnectionView());
+                break;
             case ("PUT", "/api/agent/connection"):
                 await JsonAsync(context, await ConnectAsync(await BodyAsync<AgentConnectionRequest>(context)));
                 break;
