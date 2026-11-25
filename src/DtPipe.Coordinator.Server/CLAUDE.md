@@ -370,7 +370,7 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   names, only while the rights hold no enabled administrator with a live key, and never over an identity of that id (one that is no
   administrator stops the start); `Identities`, each verified by its key and added when its id is absent, never changed after. Each key
   is a `SecretReference` (`@path`, or a value the environment gives: one on the command line stops the start) and names its identity;
-  one that is malformed stops the start without being written. The server makes no key, and the matrix is not bootstrapped. The library is a git repository of its own, `library/` under the state directory unless
+  one that is malformed stops the start without being written. The server makes no key, and the matrix is not bootstrapped: a runner's flows are the rights' own (`Runner` of an identity). The library is a git repository of its own, `library/` under the state directory unless
   `Coordinator:Library:Directory` puts it elsewhere, driven by the `git` command line with a fixed identity and with
   its own directory trusted (`safe.directory`, whoever owns a mounted volume; the image needs `git`), and starts with a commit of its own (empty without seeds)
   so that a write always has a commit to go back to; armed deployments and run history are in the store
@@ -647,12 +647,18 @@ holds what a host calls and what no domain owns. The rules below name classes, n
   runner holds: a branch reads no alias it does not declare (`DuckDBSqlProcessorEdgesOnlyTests`), and a runner's fragment
   reaches no file or database (`RunnerEndpoints`), so two flows through one runner need no grant between their groups. A
   cycle among the units refuses the plan, naming them. `[CI: PlanRightsTests]` `*` in the matrix stands for any group on either side (such as `*` → `runner`
-  and `runner` → `*`), while `*` → `*` and `*` as an identity group are refused. Never add a second matrix. The matrix changes whole
+  and `runner` → `*`), while `*` → `*` and `*` as an identity group are refused. **A runner of the rights
+  (`Identity.Runner`, a node's flag) is open without a row**: `RightsStore.Allowed` allows any flow to or from a group that
+  such an identity holds (`RunnerGroups`), and the closure above still decides what crosses it, so `data` → `data` stays the
+  administrator's. The flag is the rights', never the announcement's, since an announcement is a host's own word: such a
+  group belongs to runners alone (`CheckRunnerGroups`, on every write and every load), and a host that announces data under a
+  runner's identity is refused at the announcement. Never add a second matrix. The matrix changes whole
   (`PUT /api/rights/matrix`) or by edges added beside it, which revoke nothing, so two administrators who add at once keep both:
   `POST /api/rights/matrix/edges` (the page sends the pairs of groups a plan's refused edges lack), and `exchangeWithRunners` on a
   node added or accepted, in the same change as the identity, both ways between its groups and those the rights give every runner the
-  inventory knows (the rights do not say which node is a runner, its announcement does; none known refuses the request).
-  `[CI: FlowMatrixEvaluationTests, MatrixEdgesTests, LaunchRoutesTests, PlanRightsTests] [local: the lab's smoke.py rights]`
+  inventory knows (a runner of the rights needs no edge and is left out; for any other the inventory says which node is a runner, its
+  announcement does; no runner known refuses the request).
+  `[CI: FlowMatrixEvaluationTests, MatrixEdgesTests, LaunchRoutesTests, PlanRightsTests, RunnerFlowTests; NodeChannelHubTests] [local: the lab's smoke.py rights]`
 - **A library pipeline is planned when it is launched, and the runner is chosen by one function.** `RunQueue.RunOneAsync`, once
   the run is sent and outside the ledger's lock, asks `LaunchPlanner.ChooseAsync` for the plan of the armed job under the armed
   bindings, and so do `GET /api/library/{id}/plan` (the plan a launch would make now, nothing written) and arming. The

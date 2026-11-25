@@ -254,6 +254,14 @@ public sealed class NodeChannelHub(
             Context.Abort();
             return;
         }
+        // A runner of the rights has its flows open to every group because it hosts no data: a host that announces data under its identity
+        // would receive what every group sends, so it is refused here, whatever its key.
+        if (identity.Runner && announcement.Role != NodeRole.Runner)
+        {
+            Refuse(identity.Name, $"'{clientId}' is a runner in the rights and this host announces itself as a data node: start it with --runner, or make the identity a node that is no runner");
+            Context.Abort();
+            return;
+        }
         // Where a host runs is its own word, shown to people: cut here and escaped by the page.
         var origin = announcement.Origin is null ? null : EnrollmentQueue.Clean(announcement.Origin, EnrollmentQueue.MaxOrigin);
         var named = announcement with { Name = identity.Name, Origin = origin };

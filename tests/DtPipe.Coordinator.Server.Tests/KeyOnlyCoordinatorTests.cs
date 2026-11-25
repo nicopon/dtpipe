@@ -62,6 +62,7 @@ public sealed partial class KeyOnlyCoordinatorTests : IDisposable
         ["Bootstrap:AdminKey"] = "@" + Path.Combine(_secrets, "admin.key"),
         ["Bootstrap:Identities:0:Id"] = "runner",
         ["Bootstrap:Identities:0:Groups:0"] = "runners",
+        ["Bootstrap:Identities:0:Runner"] = "true",
         ["Bootstrap:Identities:0:Key"] = "@" + Path.Combine(_secrets, "runner.key"),
     });
 
@@ -236,6 +237,7 @@ public sealed partial class KeyOnlyCoordinatorTests : IDisposable
         var runner = Assert.Single(rights.Identities, i => i.ClientId == "runner");
         Assert.Equal((IdentityKinds.Node, AuthModes.Key), (runner.Kind, runner.Auth.Mode));
         Assert.Equal(new[] { "runners" }, runner.Groups);
+        Assert.True(runner.Runner);
         Assert.True(ClearKey.Matches(_runnerKey, Assert.Single(runner.Auth.Keys).Hash));
         var bootstrapped = Assert.Single(rights.Audit!, a => a.By == RightsBootstrap.Author);
         Assert.Contains("Identity boss added", bootstrapped.Change);

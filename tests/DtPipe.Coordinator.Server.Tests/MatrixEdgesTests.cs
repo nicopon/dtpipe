@@ -48,6 +48,21 @@ public sealed class MatrixEdgesTests : IDisposable
     }
 
     [Fact]
+    public async Task A_Node_Added_With_Only_Runners_Of_The_Rights_Known_Needs_No_Edge_And_Is_Not_Refused()
+    {
+        using var runner = await _admin.PostAsJsonAsync("/api/rights/identities", new { clientId = "r", name = "runner", groups = new[] { "run" }, runner = true }, Web, Ct);
+        runner.EnsureSuccessStatusCode();
+        var announcement = new NodeAnnouncement("runner", "", [], NodeRole.Runner, [], InstanceId: Guid.NewGuid());
+        _host.Services.GetRequiredService<NodeInventory>().Announced("runner", "r", announcement, ["run"]);
+
+        using var added = await _admin.PostAsJsonAsync("/api/rights/identities",
+            new { clientId = "shop", name = "shop", groups = new[] { "data" }, exchangeWithRunners = true }, Web, Ct);
+
+        added.EnsureSuccessStatusCode();
+        Assert.Empty(Rights.Snapshot().Matrix);
+    }
+
+    [Fact]
     public async Task Allowing_Edges_Adds_Them_Beside_The_Matrix_And_Revokes_Nothing()
     {
         using var set = await _admin.PutAsJsonAsync("/api/rights/matrix", new { matrix = new Dictionary<string, string[]> { ["crm"] = ["run"], ["audit"] = ["run"] } }, Web, Ct);

@@ -162,6 +162,25 @@ public sealed class NodeChannelHubTests : IDisposable
     }
 
     [Fact]
+    public async Task A_Runner_Of_The_Rights_Announcing_Data_Is_Refused_And_One_Announcing_A_Runner_Is_Let_In()
+    {
+        _rights.AddIdentity(new Identity("run-1", "r1", "", ["run"]) { Runner = true });
+
+        var (data, dataCaller) = Connect("c1", "run-1");
+        await data.Announce(Proposing("r1"));
+
+        Assert.True(dataCaller.Aborted);
+        Assert.Empty(_inventory.Snapshot());
+        Assert.Contains("runner in the rights", Assert.Single(LogLines()).Message);
+
+        var (runner, runnerCaller) = Connect("c2", "run-1");
+        await runner.Announce(Proposing("r1") with { Role = NodeRole.Runner });
+
+        Assert.False(runnerCaller.Aborted);
+        Assert.Equal(NodeRole.Runner, Assert.Single(_inventory.Snapshot()).Role);
+    }
+
+    [Fact]
     public async Task A_Monitor_Is_Refused_At_The_Announcement_And_Is_Neither_Queued_Nor_A_Node()
     {
         _rights.AddIdentity(new Identity("watch", "supervisor", "", [], Kind: IdentityKinds.Monitor));

@@ -7,13 +7,14 @@ namespace DtPipe.Coordinator.Server.Access;
 /// last four characters, never its text. <see cref="ToString"/> names the identity alone.
 /// </summary>
 public sealed record BootstrapIdentity(
-    string ClientId, string Kind, string Name, IReadOnlyList<string> Groups, IReadOnlyList<string> Pipelines, string? Role, string KeyHash, string KeyHint)
+    string ClientId, string Kind, string Name, IReadOnlyList<string> Groups, IReadOnlyList<string> Pipelines, string? Role, string KeyHash, string KeyHint, bool Runner = false)
 {
     /// <summary>The identity as the rights add it, enabled, with its one key.</summary>
     public Identity ToIdentity(DateTimeOffset now) => new(ClientId, Name, "", Groups, true, Kind, Pipelines)
     {
         Auth = new IdentityAuth(AuthModes.Key, [new IdentityKey("1", KeyHash, KeyHint, now, RightsBootstrap.KeyLabel)]),
         Role = Role,
+        Runner = Runner,
     };
 
     public override string ToString() => $"{Kind} {ClientId}";
@@ -22,7 +23,7 @@ public sealed record BootstrapIdentity(
 /// <summary>
 /// What <c>Coordinator:Bootstrap</c> gives the rights when the server starts (<see cref="RightsStore.Bootstrap"/>). <c>AdminKey</c> is the
 /// key of the first administrator: a person, admin, whose id is the one the key names. <c>Identities</c> is a list of identities verified
-/// by a key (<c>Id</c>, <c>Kind</c>, <c>Name</c>, <c>Groups</c>, <c>Pipelines</c>, <c>Role</c>, <c>Key</c>), a runner's for one. Each key is
+/// by a key (<c>Id</c>, <c>Kind</c>, <c>Name</c>, <c>Groups</c>, <c>Pipelines</c>, <c>Role</c>, <c>Runner</c>, <c>Key</c>), a runner's for one. Each key is
 /// a <see cref="SecretReference"/> and names its identity; one that is malformed, or names another, stops the start without being written.
 /// The server makes no key: an identity of the rights that no bootstrap names starts with nothing.
 /// </summary>
@@ -64,7 +65,8 @@ public sealed record RightsBootstrap(BootstrapIdentity? Admin, IReadOnlyList<Boo
                 ?? throw new InvalidOperationException($"{setting}:Key is required: an identity the bootstrap adds is verified by the key the deployment gives it."), $"{setting}:Key");
             if (key.ClientId != id) throw new InvalidOperationException($"{setting}:Key opens another identity than '{id}': a key names the identity it opens.");
             identities.Add(new(id, entry["Kind"]?.Trim() is { Length: > 0 } kind ? kind : IdentityKinds.Node, entry["Name"]?.Trim() is { Length: > 0 } name ? name : id,
-                entry.GetSection("Groups").Get<string[]>() ?? [], entry.GetSection("Pipelines").Get<string[]>() ?? [], entry["Role"], key.Hash, key.Hint));
+                entry.GetSection("Groups").Get<string[]>() ?? [], entry.GetSection("Pipelines").Get<string[]>() ?? [], entry["Role"], key.Hash, key.Hint,
+                entry.GetValue<bool?>("Runner") ?? false));
         }
         var bootstrap = new RightsBootstrap(admin, identities);
         if (bootstrap.All.GroupBy(i => i.ClientId).FirstOrDefault(g => g.Count() > 1) is { } twice)

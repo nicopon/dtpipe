@@ -16,7 +16,8 @@ namespace DtPipe.Coordinator.Server.Access;
 /// launcher starts the runs of <see cref="Pipelines"/> and reads them, belongs to no group, and its name is a label too; a person
 /// signs in to the pages and the studio with the <see cref="Role"/> it holds, belongs to no group, and its name is a label too.
 /// <see cref="ClientId"/> is unique among the identities of every kind, so an id written as the author of a change or a run names
-/// one identity.
+/// one identity. A node that is a <see cref="Runner"/> hosts no data and serves every group: the flows to and from its groups need no
+/// row of the matrix.
 /// </summary>
 public sealed record Identity(
     string ClientId, string Name, string Description, IReadOnlyList<string> Groups, bool Enabled = true, string Kind = IdentityKinds.Node,
@@ -32,6 +33,12 @@ public sealed record Identity(
     /// by default), compared without case, never its <c>sub</c>. None for any other identity: a person verified by a key is found by its id.
     /// </summary>
     public string? Account { get; init; }
+
+    /// <summary>
+    /// The node hosts no data and serves every group, so the matrix allows every flow to and from its groups without a row, and its
+    /// groups belong to runners alone. A node only; the host that opens it must announce as a runner.
+    /// </summary>
+    public bool Runner { get; init; }
 
     public bool IsNode => Kind == IdentityKinds.Node;
 
@@ -177,11 +184,22 @@ public sealed class RightsStore
     public bool CanSend(IReadOnlySet<string> from, IReadOnlySet<string> to)
     {
         var doc = _state.Doc;
-        return from.Count > 0 && to.Count > 0 && from.All(f => to.All(t => Allowed(doc, f, t)));
+        var runners = RunnerGroups(doc);
+        return from.Count > 0 && to.Count > 0 && from.All(f => to.All(t => Allowed(doc, runners, f, t)));
     }
 
-    private static bool Allowed(RightsDocument doc, string from, string to) =>
-        (doc.Matrix.TryGetValue(from, out var targets) && (targets.Contains("*") || targets.Contains(to, StringComparer.OrdinalIgnoreCase)))
+    /// <summary>
+    /// The groups of the identities that are runners: a flow to or from one is allowed without a row. They belong to runners alone
+    /// (<see cref="CheckIdentities"/>), so no data node is opened by sharing one.
+    /// </summary>
+    public IReadOnlySet<string> RunnerGroups() => RunnerGroups(_state.Doc);
+
+    private static HashSet<string> RunnerGroups(RightsDocument doc) =>
+        doc.Identities.Where(i => i is { IsNode: true, Runner: true }).SelectMany(i => i.Groups).ToHashSet(StringComparer.Ordinal);
+
+    private static bool Allowed(RightsDocument doc, IReadOnlySet<string> runners, string from, string to) =>
+        runners.Contains(from) || runners.Contains(to)
+        || (doc.Matrix.TryGetValue(from, out var targets) && (targets.Contains("*") || targets.Contains(to, StringComparer.OrdinalIgnoreCase)))
         || (to != "*" && doc.Matrix.TryGetValue("*", out var any) && any.Contains(to, StringComparer.OrdinalIgnoreCase));
 
     public void SetMatrix(Dictionary<string, List<string>> matrix, string? by = null) => Edit(by, doc =>
@@ -216,13 +234,14 @@ public sealed class RightsStore
     {
         if (edges.Count == 0) throw new ConflictException("No edge to allow: an edge names the group that sends and the group that receives.");
         var added = new List<string>();
+        var runners = RunnerGroups(doc);
         foreach (var edge in edges)
         {
             var (from, to) = (edge.From?.Trim() ?? "", edge.To?.Trim() ?? "");
             if (from.Length == 0 || to.Length == 0) throw new ConflictException("An edge names the group that sends and the group that receives.");
             if (from == "*" && to == "*")
                 throw new ConflictException("'* → *' cannot be allowed: declare each flow between groups, or between '*' and a specific group.");
-            if (Allowed(doc, from, to)) continue;
+            if (Allowed(doc, runners, from, to)) continue;
             if (!doc.Matrix.TryGetValue(from, out var targets)) doc.Matrix[from] = targets = [];
             targets.Add(to);
             targets.Sort(StringComparer.Ordinal);
@@ -236,7 +255,7 @@ public sealed class RightsStore
     {
         if (doc.Identities.Any(i => i.ClientId == identity.ClientId)) throw new ConflictException($"'{identity.ClientId}' already exists.");
         var added = Normalized(identity);
-        CheckUnique([.. doc.Identities, added]);
+        CheckIdentities([.. doc.Identities, added]);
         doc.Identities.Add(added);
         return edges is { Count: > 0 } ? $"{Added(added)}; flow matrix: {Allow(doc, edges)}" : Added(added);
     });
@@ -247,7 +266,7 @@ public sealed class RightsStore
         if (added.IsPerson)
             return $"Identity {added.ClientId} added (person {added.Name}{(added.Account is { } account ? $" ({account})" : "")}, {added.Role}{verified})";
         return added.IsNode
-            ? $"Identity {added.ClientId} added (node {added.Name}, groups {string.Join(", ", added.Groups)}{verified})"
+            ? $"Identity {added.ClientId} added ({(added.Runner ? "runner" : "node")} {added.Name}, groups {string.Join(", ", added.Groups)}{verified})"
             : added.Kind == IdentityKinds.Launcher
                 ? $"Identity {added.ClientId} added ({added.Kind} {added.Name}, pipelines {string.Join(", ", added.Pipelines!)}{verified})"
                 : $"Identity {added.ClientId} added ({added.Kind} {added.Name}{verified})";
@@ -282,7 +301,7 @@ public sealed class RightsStore
             foreach (var identity in wanted)
             {
                 var normalized = Normalized(identity.ToIdentity(now));
-                CheckUnique([.. doc.Identities, normalized]);
+                CheckIdentities([.. doc.Identities, normalized]);
                 doc.Identities.Add(normalized);
                 added.Add(normalized.ClientId);
                 changes.Add(Added(normalized));
@@ -319,7 +338,7 @@ public sealed class RightsStore
     /// leaves out is neither emptied, renamed nor enabled by the omission. The identity is read and written as one change.
     /// </summary>
     public void UpdateIdentity(string clientId, string? name, string? description, IReadOnlyList<string>? groups, bool? enabled, string? by = null,
-        IReadOnlyList<string>? pipelines = null, string? role = null, string? account = null) =>
+        IReadOnlyList<string>? pipelines = null, string? role = null, string? account = null, bool? runner = null) =>
         Edit(by, doc =>
         {
             var index = doc.Identities.FindIndex(i => i.ClientId == clientId);
@@ -334,8 +353,9 @@ public sealed class RightsStore
                 Pipelines = pipelines ?? before.Pipelines,
                 Role = role ?? before.Role,
                 Account = account ?? before.Account,
+                Runner = runner ?? before.Runner,
             });
-            CheckUnique(doc.Identities.Select((i, at) => at == index ? after : i).ToList());
+            CheckIdentities(doc.Identities.Select((i, at) => at == index ? after : i).ToList());
             doc.Identities[index] = after;
             var changes = new List<string>();
             if (!before.Groups.SequenceEqual(after.Groups)) changes.Add($"groups {string.Join("+", before.Groups)} → {string.Join("+", after.Groups)}");
@@ -343,6 +363,7 @@ public sealed class RightsStore
             if (before.Role != after.Role) changes.Add($"role {before.Role} → {after.Role}");
             if (before.Account != after.Account) changes.Add($"account {before.Account} → {after.Account}");
             if (before.Name != after.Name) changes.Add($"node {before.Name} → {after.Name}");
+            if (before.Runner != after.Runner) changes.Add(after.Runner ? "made a runner" : "no longer a runner");
             if (before.Enabled != after.Enabled) changes.Add(after.Enabled ? "enabled" : "disabled");
             if (before.Description != after.Description) changes.Add("described again");
             return $"Identity {clientId}: " + (changes.Count > 0 ? string.Join(", ", changes) : "unchanged");
@@ -452,6 +473,9 @@ public sealed class RightsStore
         if (kind != IdentityKinds.Node) groups = [];
         else if (groups.Count == 0) throw new ConflictException($"'{identity.ClientId}' belongs to no group: an identity belongs to at least one.");
         else if (groups.Contains("*")) throw new ConflictException($"'{identity.ClientId}' cannot belong to '*': '*' is the flow matrix wildcard, not a group.");
+        // A runner is a host of fragments with no data, so only a node can be one: the flag opens flows, and no other kind has any.
+        if (identity.Runner && kind != IdentityKinds.Node)
+            throw new ConflictException($"'{identity.ClientId}' is a {kind}: only a node can be a runner.");
         // Only a launcher lists pipelines: a monitor reads them all, and a list on any other kind would grant nothing.
         var pipelines = (identity.Pipelines ?? []).Select(p => p.Trim()).Where(p => p.Length > 0).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
         if (kind != IdentityKinds.Launcher) pipelines = [];
@@ -490,11 +514,26 @@ public sealed class RightsStore
     }
 
     /// <summary>
-    /// Refuses two identities of one name or one client id, whatever their kinds: an id is what a run, an arming and a rights change
-    /// name their author by when it has no email, so it must name one identity.
+    /// Refuses a node that is no runner and holds a group of a runner: the flows to and from a runner's groups are open, so a data
+    /// node that shared one would be open the same way.
     /// </summary>
-    private static void CheckUnique(IReadOnlyList<Identity> identities)
+    private static void CheckRunnerGroups(IReadOnlyList<Identity> identities)
     {
+        var runnerGroups = identities.Where(i => i is { IsNode: true, Runner: true }).SelectMany(i => i.Groups).ToHashSet(StringComparer.Ordinal);
+        foreach (var node in identities.Where(i => i is { IsNode: true, Runner: false }))
+            if (node.Groups.FirstOrDefault(runnerGroups.Contains) is { } shared)
+                throw new ConflictException(
+                    $"Group '{shared}' belongs to runners: '{node.ClientId}' is no runner and cannot hold it, since the flows to and from a runner's groups need no row of the matrix.");
+    }
+
+    /// <summary>
+    /// Refuses the identities that cannot stand together: two of one name or one client id, whatever their kinds (an id is what a run, an
+    /// arming and a rights change name their author by when it has no email, so it must name one identity), and a group held by a runner
+    /// and by a node that is none.
+    /// </summary>
+    private static void CheckIdentities(IReadOnlyList<Identity> identities)
+    {
+        CheckRunnerGroups(identities);
         foreach (var duplicate in identities.GroupBy(i => i.Name, StringComparer.Ordinal).Where(g => g.Count() > 1))
             throw new ConflictException($"'{duplicate.Key}' is the node name of {string.Join(" and ", duplicate.Select(i => i.ClientId))}: a node name belongs to one identity.");
         foreach (var duplicate in identities.GroupBy(i => i.ClientId, StringComparer.Ordinal).Where(g => g.Count() > 1))
@@ -543,7 +582,7 @@ public sealed class RightsStore
     private static RightsDocument Prepared(RightsDocument doc)
     {
         var prepared = doc with { Identities = [.. doc.Identities.Select(Normalized)], Audit = doc.Audit ?? [] };
-        CheckUnique(prepared.Identities);
+        CheckIdentities(prepared.Identities);
         return prepared;
     }
 
