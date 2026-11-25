@@ -25,8 +25,9 @@ let leaving = false;
 // ---------------------------------------------------------------- workspace & library
 
 async function loadJobs() {
-  const { folder, jobs, folders, publications } = await api("/api/jobs");
+  const [{ folder, jobs, folders, publications }, workspace] = await Promise.all([api("/api/jobs"), api("/api/workspace")]);
   state.jobs.folder = folder;
+  state.jobs.root = workspace.root;
   state.jobs.paths = jobs;
   state.jobs.folders = folders?.length ? folders : [""];
   state.jobs.publications = publications || {};
@@ -306,7 +307,7 @@ function renderLibrary() {
 function renderJobs() {
   const { folder } = state.jobs;
   $("folder").textContent = folder;
-  $("folder").title = `${folder}: open another folder`;
+  $("folder").title = state.jobs.root || folder;
   $("folder").setAttribute("aria-label", `Folder ${folder}: open another folder`);
   $("job-name").textContent = state.job ? `${state.job.path}${state.job.hash ? "" : " (new)"}` : "";
   $("job-name").title = state.job ? state.job.path : "";

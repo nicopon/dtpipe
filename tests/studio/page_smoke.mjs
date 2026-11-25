@@ -1080,6 +1080,7 @@ const scenarios = {
       const refusedForChanges = () => p.until(`/not saved/.test(document.querySelector("#d-workspace-error")?.textContent ?? "") && !document.querySelector("#d-workspace-unsaved").hidden`);
 
       check("the header names the folder, as a button", await p.until(`${header} === ${JSON.stringify(path.basename(folder))} && document.querySelector("#folder").tagName === "BUTTON"`), await p.ev(header));
+      check("the folder's full path is its tooltip", await p.ev(`document.querySelector("#folder").title === ${JSON.stringify(folder)}`), await p.ev(`document.querySelector("#folder").title`));
       await unsavedEdit("chain.yaml");
       await p.click("#folder");
       check("the dialog opens on the folder in place", await p.until(`document.querySelector("#d-workspace-path")?.value === ${JSON.stringify(folder)}`));

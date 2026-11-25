@@ -103,9 +103,9 @@ export const state = {
   /** The coordinator's catalog read last (its nodes and bricks) and this studio's version; empty with none. */
   catalog: { nodes: /** @type {any[]} */ ([]), bricks: /** @type {any[]} */ ([]), studioVersion: "" },
   /** The jobs of the folder, its subfolders, coordinator links, and the coordinator's library when signed in.
-   * @type {{ folder: string, paths: string[], folders: string[], publications: Record<string, { id: string, commit: string | null, localModified: boolean | null }>, filter: string,
+   * @type {{ folder: string, root: string, paths: string[], folders: string[], publications: Record<string, { id: string, commit: string | null, localModified: boolean | null }>, filter: string,
    *   library: { shown: boolean, pipelines: any[] | null, error: string | null, filter: string } }} */
-  jobs: { folder: "", paths: [], folders: [""], publications: {}, filter: "", library: { shown: false, pipelines: null, error: null, filter: "" } },
+  jobs: { folder: "", root: "", paths: [], folders: [""], publications: {}, filter: "", library: { shown: false, pipelines: null, error: null, filter: "" } },
   /** The coordinator connected now, or null: { url, state, reason, me, studioVersion, contract, byKey, unreachable }. @type {any} */
   coordinator: null,
   /** How the coordinator is connected, as the server says it (never the key): { connected, needsKey, source, origin, auth, key, canConnect, ... }. @type {any} */
