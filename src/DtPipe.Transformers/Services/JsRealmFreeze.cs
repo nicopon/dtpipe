@@ -40,6 +40,14 @@ internal static class JsRealmFreeze
                 Object.getPrototypeOf(/a/[Symbol.matchAll]('a')),
                 Object.getOwnPropertyDescriptor(arguments, 'callee').get,
             ];
+            // The two iterator prototypes no global names: a helper's, and the wrapper Iterator.from makes
+            // around an iterator that does not inherit from Iterator.prototype.
+            if (typeof Iterator === 'function') {
+                if (typeof Iterator.prototype.map === 'function') {
+                    roots.push(Object.getPrototypeOf([].values().map(x => x)));
+                }
+                roots.push(Object.getPrototypeOf(Iterator.from({ next() { return { done: true }; } })));
+            }
             for (const key of ['input', '$_', 'lastMatch', '$&', 'lastParen', '$+', 'leftContext', '$`',
                 'rightContext', "$'", '$1', '$2', '$3', '$4', '$5', '$6', '$7', '$8', '$9']) {
                 delete RegExp[key];

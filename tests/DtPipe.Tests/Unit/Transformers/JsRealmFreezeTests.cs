@@ -67,6 +67,8 @@ public class JsRealmFreezeTests : IDisposable
                 ['%MapIteratorPrototype%', Object.getPrototypeOf(new Map()[Symbol.iterator]())],
                 ['%SetIteratorPrototype%', Object.getPrototypeOf(new Set()[Symbol.iterator]())],
                 ['%RegExpStringIteratorPrototype%', Object.getPrototypeOf(/a/[Symbol.matchAll]('a'))],
+                ['%IteratorHelperPrototype%', Object.getPrototypeOf([].values().map(x => x))],
+                ['%WrapForValidIteratorPrototype%', Object.getPrototypeOf(Iterator.from({ next() { return { done: true }; } }))],
                 ['%ThrowTypeError%', Object.getOwnPropertyDescriptor(arguments, 'callee').get],
             ];
             const seen = new Set();
@@ -155,7 +157,9 @@ public class JsRealmFreezeTests : IDisposable
         { "Object.getPrototypeOf(function* () {}).__p = row.A; return 'x';", "throws: Cannot assign to read only property '__p' of Object" },
         { "Iterator.prototype.constructor = row.A; return 'x';", "throws: Cannot set property on Iterator prototype directly" },
         { "const o = Object.create(Iterator.prototype); o.constructor = row.A; return String(o.constructor);", "1|2|4" },
-        { "Error.prototype.stack = String(row.A); return 'x';", "throws: Cannot set the \"stack\" property directly on %Error.prototype%" },
+        { "Object.getPrototypeOf([1].values().map(x => x)).__p = row.A; return 'x';", "throws: Cannot assign to read only property '__p' of Object" },
+{ "Object.getPrototypeOf(Iterator.from({ next() { return { done: true }; } })).__p = row.A; return 'x';", "throws: Cannot assign to read only property '__p' of Object" },
+{ "Error.prototype.stack = String(row.A); return 'x';", "throws: Cannot set the \"stack\" property directly on %Error.prototype%" },
         { "Error.stackTraceLimit = row.A; return 'x';", "throws: Cannot assign to read only property 'stackTraceLimit' of Object" },
         { "Object.prototype.__proto__ = { k: row.A }; return 'x';", "throws: Invalid prototype" },
         // (iii) Declarations by indirect eval, direct eval and Function: strict code, so each is local or refused.

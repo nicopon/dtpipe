@@ -45,6 +45,7 @@ internal abstract class RowViewObject : ObjectInstance, IRowObjectView
     private readonly ErrorConstructor _refErrorCtor;
     private readonly ObjectInstance _objectPrototype;
     private Dictionary<string, JsValue>? _overrides;
+    private List<JsValue>? _definedKeys;
 
     protected RowViewObject(Engine engine, IReadOnlyList<string> columnNames, int exposedColumnCount, ErrorConstructor refErrorCtor)
         : base(engine)
@@ -77,6 +78,13 @@ internal abstract class RowViewObject : ObjectInstance, IRowObjectView
     protected void ResetWrites()
     {
         _overrides?.Clear();
+        if (_definedKeys is { Count: > 0 })
+        {
+            foreach (var key in _definedKeys)
+                RemoveOwnProperty(key);
+            _definedKeys.Clear();
+        }
+
         Prototype = _objectPrototype;
     }
 
@@ -113,6 +121,19 @@ internal abstract class RowViewObject : ObjectInstance, IRowObjectView
         return base.Set(property, value, receiver);
     }
 
+    /// <summary>
+    /// A symbol-keyed write and a property definition land on the base object: the key is remembered so
+    /// <see cref="ResetWrites"/> removes it, and the base answers a read of it for the row that wrote it.
+    /// </summary>
+    public override bool DefineOwnProperty(JsValue property, PropertyDescriptor desc)
+    {
+        if (!base.DefineOwnProperty(property, desc))
+            return false;
+
+        (_definedKeys ??= []).Add(property);
+        return true;
+    }
+
     public override PropertyDescriptor GetOwnProperty(JsValue property)
     {
         if (property.IsString())
@@ -125,7 +146,7 @@ internal abstract class RowViewObject : ObjectInstance, IRowObjectView
                 return new PropertyDescriptor(ReadColumn(idx), PropertyFlag.ConfigurableEnumerableWritable);
         }
 
-        return PropertyDescriptor.Undefined;
+        return _definedKeys is { Count: > 0 } ? base.GetOwnProperty(property) : PropertyDescriptor.Undefined;
     }
 
     public override bool HasProperty(JsValue property)

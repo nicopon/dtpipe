@@ -136,12 +136,13 @@ public class ExpandDataTransformer : BaseColumnarTransformer, IMultiRowTransform
         {
             var stage = _stages[e];
             var nextRows = new List<object?[]>();
-            bool firstRow = true;
 
             foreach (var r in currentRows)
             {
                 JsValue[] callArgs;
-                if (e == 0 && firstRow && _stages.Length == 1)
+                // The first stage reads the input row, which has the input columns only; a later stage reads a
+                // row of every column, those the earlier stages declared included.
+                if (e == 0)
                 {
                     callArgs = state.SingleArg;
                 }
@@ -150,7 +151,6 @@ public class ExpandDataTransformer : BaseColumnarTransformer, IMultiRowTransform
                     state.IntermediateRowView.SetRow(r);
                     callArgs = state.IntermediateArg;
                 }
-                firstRow = false;
 
                 JsValue result;
                 try
@@ -573,7 +573,7 @@ public class ExpandDataTransformer : BaseColumnarTransformer, IMultiRowTransform
     {
         var refErr = JsValueConversion.GetReferenceErrorConstructor(engine);
         var rowView = new JsRowObjectInstance(engine, _columnNames!, _inputColumnCount, refErr);
-        var intermediateView = new JsRowObjectInstance(engine, _columnNames!, _inputColumnCount, refErr);
+        var intermediateView = new JsRowObjectInstance(engine, _columnNames!, _columnNames!.Length, refErr);
         var arrowRowView = new ArrowRowObjectInstance(engine, _columnNames!, _inputColumnCount, refErr);
         var keys = _columnNames!.Select(JsString.Create).ToArray();
         return new CompiledExpandState(functions, rowView, intermediateView, arrowRowView, keys);

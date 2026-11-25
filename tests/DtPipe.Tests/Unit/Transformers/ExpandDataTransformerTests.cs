@@ -158,6 +158,22 @@ public class ExpandDataTransformerTests
         Assert.Equal(7, Convert.ToInt32(results[0][0]));
     }
 
+    [Fact]
+    public async Task A_Later_Stage_Reads_A_Column_The_Previous_Stage_Declared()
+    {
+        var options = new ExpandOptions
+        {
+            Expand = new[] { "row.Tags.map(t => ({ ...row, Tag: t }))", "[{ ...row, Seen: row.Tag + '!' }]" },
+            ExpandTypes = new(StringComparer.OrdinalIgnoreCase) { ["Tag"] = "string", ["Seen"] = "string" }
+        };
+        var transformer = new ExpandDataTransformer(options, _realJsProvider);
+        await transformer.InitializeAsync(new List<PipeColumnInfo> { new("Id", typeof(int), false), new("Tags", typeof(object), true) });
+
+        var results = transformer.TransformMany(new object?[] { 7, new[] { "a", "b" } }).ToList();
+
+        Assert.Equal(new object?[] { "a!", "b!" }, results.Select(r => r[^1]).ToArray());
+    }
+
     /// <summary>A declaration naming an existing column retypes it rather than adding a second one.</summary>
     [Fact]
     public async Task A_Declaration_Naming_An_Existing_Column_Retypes_It()
