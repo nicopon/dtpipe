@@ -485,6 +485,54 @@ public class FakeSeedKeyTests
         };
     }
 
+    [Fact]
+    public void ADecimalOfAnyWidthAndScale_GivesTheKeyOfItsValue()
+    {
+        var d32 = KeysOf(new Decimal32Array.Builder(new Decimal32Type(7, 1)).Append(12.5m).Build()).Keys;
+        var d32Wide = KeysOf(new Decimal32Array.Builder(new Decimal32Type(7, 2)).Append(12.5m).Build()).Keys;
+        var d64 = KeysOf(new Decimal64Array.Builder(new Decimal64Type(12, 2)).Append(12.5m).Build()).Keys;
+        var d128 = KeysOf(new Decimal128Array.Builder(new Decimal128Type(12, 2)).Append(12.5m).Build()).Keys;
+
+        d32Wide.Should().Equal(d32);
+        d64.Should().Equal(d32);
+        d128.Should().Equal(d32);
+    }
+
+    [Fact]
+    public void AListOrAStructThatDiffersInAnElement_GivesAnotherKey()
+    {
+        var lists = new ListArray.Builder(Int32Type.Default);
+        var items = (Int32Array.Builder)lists.ValueBuilder;
+        foreach (var v in new[] { 1, 999, 1 })
+        {
+            lists.Append();
+            items.Append(v);
+        }
+
+        var listKeys = KeysOf(lists.Build()).Keys;
+        listKeys[0].Should().NotBe(listKeys[1]);
+        listKeys[0].Should().Be(listKeys[2]);
+
+        var structType = new StructType([new Field("a", Int32Type.Default, true)]);
+        var child = new Int32Array.Builder().Append(1).Append(999).Build();
+        var structKeys = KeysOf(new StructArray(structType, 2, [child], ArrowBuffer.Empty)).Keys;
+        structKeys[0].Should().NotBe(structKeys[1]);
+    }
+
+    [Fact]
+    public void ABool8_GivesTheKeyOfTheBooleanItReadsAs()
+    {
+        var bool8 = new Field("seed", Int8Type.Default, true, new Dictionary<string, string> { ["ARROW:extension:name"] = "arrow.bool8" });
+        var values = new Int8Array.Builder().Append(2).Append(0).Build();
+        var bools = new BooleanArray.Builder().Append(true).Append(false).Build();
+
+        var keys = new ulong[2];
+        ArrowSeedKeyExtractor.FillRowKeys(
+            new RecordBatch(new Schema.Builder().Field(bool8).Build(), [values], 2), [0], keys, new bool[2]);
+
+        keys.Should().Equal(KeysOf(bools).Keys);
+    }
+
     private static T WithCulture<T>(string name, Func<T> action)
     {
         var previous = CultureInfo.CurrentCulture;

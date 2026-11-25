@@ -272,14 +272,45 @@ internal static class ArrowSeedKeyExtractor
         DateTimeOffset v => InstantKey(v),
         TimeOnly v => TimeKey(v),
         byte[] v => StableHash.Compute64(v),
+        System.Collections.IDictionary d => CollectionKey(Entries(d)),
+        System.Collections.IEnumerable l => CollectionKey(l),
         _ => DisplayKey(value)
     };
 
     /// <summary>The key of a value with no form of its own: the UTF-16 bytes of its text.</summary>
     private static ulong DisplayKey(object value)
     {
-        var text = value as string ?? value.ToString() ?? string.Empty;
+        var text = value switch
+        {
+            string s => s,
+            IFormattable f => f.ToString(null, CultureInfo.InvariantCulture),
+            _ => value.ToString() ?? string.Empty,
+        };
         return StableHash.Compute64(MemoryMarshal.AsBytes(text.AsSpan()));
+    }
+
+    /// <summary>
+    /// The key of a list, a map or a struct: its elements' keys in reading order, each under its position,
+    /// so that two values that differ in an element differ in key. The text of such a value is its type's name.
+    /// </summary>
+    private static IEnumerable<System.Collections.DictionaryEntry> Entries(System.Collections.IDictionary dictionary)
+    {
+        foreach (System.Collections.DictionaryEntry entry in dictionary)
+            yield return entry;
+    }
+
+    private static ulong CollectionKey(System.Collections.IEnumerable items)
+    {
+        ulong acc = InitialAccumulator;
+        int position = 0;
+        foreach (var item in items)
+        {
+            var element = item is System.Collections.DictionaryEntry e ? CollectionKey(new object?[] { e.Key, e.Value }) :
+                item is null ? NullLaneSentinel : HashValue(item);
+            acc = StableHash.Combine64(acc, position++, element);
+        }
+
+        return acc;
     }
 
     public static void FillRowKeys(RecordBatch batch, int[] seedColumnIndices, ulong[] keys, bool[] hasKey)
@@ -373,6 +404,15 @@ internal static class ArrowSeedKeyExtractor
                     }
                     break;
                 }
+
+            // A canonical bool8 is a boolean, keyed as the BooleanArray of the same value is.
+            case Int8Array a when ArrowExtensionInfo.TryRead(field, out var bool8Ext) && bool8Ext.Is("arrow.bool8"):
+                for (int i = 0; i < rowCount; i++)
+                {
+                    if (!noNulls && a.IsNull(i)) keys[i] = StableHash.Combine64(keys[i], lane, NullLaneSentinel);
+                    else { keys[i] = StableHash.Combine64(keys[i], lane, StableHash.Compute64(a.Values[i] != 0 ? 1UL : 0UL)); hasKey[i] = true; }
+                }
+                break;
 
             case Int8Array a:
                 {
@@ -530,6 +570,24 @@ internal static class ArrowSeedKeyExtractor
                 }
                 break;
 
+            // Decimal32Array/Decimal64Array derive from FixedSizeBinaryArray too: their bytes depend on the
+            // scale, so the key is the decimal they read, as a Decimal128Array's is.
+            case Decimal32Array a:
+                for (int i = 0; i < rowCount; i++)
+                {
+                    if (!noNulls && a.IsNull(i)) keys[i] = StableHash.Combine64(keys[i], lane, NullLaneSentinel);
+                    else { keys[i] = StableHash.Combine64(keys[i], lane, ComputeDecimal64(a.GetValue(i)!.Value)); hasKey[i] = true; }
+                }
+                break;
+
+            case Decimal64Array a:
+                for (int i = 0; i < rowCount; i++)
+                {
+                    if (!noNulls && a.IsNull(i)) keys[i] = StableHash.Combine64(keys[i], lane, NullLaneSentinel);
+                    else { keys[i] = StableHash.Combine64(keys[i], lane, ComputeDecimal64(a.GetValue(i)!.Value)); hasKey[i] = true; }
+                }
+                break;
+
             case FixedSizeBinaryArray a:
                 for (int i = 0; i < rowCount; i++)
                 {
@@ -596,7 +654,7 @@ internal static class ArrowSeedKeyExtractor
                         }
                         else
                         {
-                            keys[i] = StableHash.Combine64(keys[i], lane, DisplayKey(val));
+                            keys[i] = StableHash.Combine64(keys[i], lane, HashValue(val));
                             hasKey[i] = true;
                         }
                     }
