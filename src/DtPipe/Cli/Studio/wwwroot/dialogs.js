@@ -910,6 +910,50 @@ export function openPullDialog(opts) {
   }, { onClose: () => { closed = true; } });
 }
 
+/**
+ * The recent values a dialog offers, most recent first: a row fills the form and does nothing else, and the × deletes the entry
+ * after a confirmation. `remove(entry)` answers the entries that remain, and the list is drawn again without closing the dialog.
+ * @template T
+ * @param {{ id: string, entries: T[], text: (entry: T) => string, detail?: (entry: T) => string, kept?: (entry: T) => boolean,
+ *   removable?: (entry: T) => boolean, empty: string, question: (entry: T) => string, pick: (entry: T) => void,
+ *   remove: (entry: T) => Promise<T[]>, fail: (message: string) => void }} opts
+ */
+function createRecentList(opts) {
+  const host = el("div", { id: opts.id });
+  let entries = opts.entries;
+  const draw = () => {
+    if (entries.length === 0) {
+      fill(host, el("p", { class: "hint" }, opts.empty));
+      return;
+    }
+    fill(host, el("ul", { class: "dialog-list" }, entries.map((entry) => {
+      const text = opts.text(entry);
+      const detail = opts.detail?.(entry);
+      return el("li", {},
+        el("button", { type: "button", class: "small ghost mono pick", title: text, "aria-label": `Choose ${text}`, onclick: () => opts.pick(entry) }, text),
+        detail ? el("span", { class: "hint" }, detail) : null,
+        opts.kept?.(entry) ? el("span", { class: "pill good", title: "A key is kept in the system keyring for this address" }, "key kept") : null,
+        opts.removable?.(entry) ?? true
+          ? el("button", {
+            type: "button", class: "small ghost forget", title: "Delete this entry", "aria-label": `Delete ${text} from the recent ones`,
+            onclick: async () => {
+              if (!confirm(opts.question(entry))) return;
+              try {
+                entries = await opts.remove(entry);
+                draw();
+                host.querySelector("button.pick")?.focus();
+              } catch (err) {
+                opts.fail(err.message);
+              }
+            },
+          }, "×")
+          : null);
+    })));
+  };
+  draw();
+  return { element: host, update: (/** @type {T[]} */ next) => { entries = next; draw(); } };
+}
+
 const AGENT_PROVIDERS = {
   ollama: { label: "Ollama", url: "http://localhost:11434", provider: "ollama" },
   compatible: { label: "OpenAI-compatible server", url: "", provider: "openai" },
@@ -924,11 +968,14 @@ function providerChoice(connection) {
  * The agent's connection: provider, address, key, model and, under Advanced, the delay and whether to remember it on this
  * machine. The key is typed here and sent once; the page never reads one back, only whether one is kept and where.
  * `onConnect(body)` makes the connection (false: the person declined), `onDisconnect()` closes the agent for this session and
- * keeps what is remembered, and `onForget()` forgets what is remembered.
- * @param {{ connection: any, onConnect: (body: any) => Promise<any>, onDisconnect: () => Promise<void>, onForget: () => Promise<void> }} opts
+ * keeps what is remembered, and `onForget()` forgets what is remembered. The recent models are listed: a row fills the form,
+ * and `onForgetEntry(entry)` deletes one, with the key kept for its address, and answers the connection as it then stands.
+ * @param {{ connection: any, onConnect: (body: any) => Promise<any>, onDisconnect: () => Promise<void>, onForget: () => Promise<void>,
+ *   onForgetEntry: (entry: any) => Promise<any> }} opts
  */
 export function openAgentConnectDialog(opts) {
-  const { connection, onConnect, onDisconnect, onForget } = opts;
+  const { onConnect, onDisconnect, onForget, onForgetEntry } = opts;
+  let connection = opts.connection;
   openDialog("d-agent-dialog", "Connect a model", ({ body, close }) => {
     const choice = providerChoice(connection);
     const provider = /** @type {HTMLSelectElement} */ (el("select", { id: "d-agent-provider", "aria-label": "Provider" },
@@ -974,7 +1021,8 @@ export function openAgentConnectDialog(opts) {
       key.parentElement.hidden = !keyed;
       ctxSize.parentElement.hidden = provider.value !== "ollama";
       const here = same(url.value, connection?.url);
-      const kept = here && connection?.key;
+      const recent = (connection?.history ?? []).find((h) => same(h.url, url.value));
+      const kept = here ? connection?.key : recent?.keyKept ? "stored" : undefined;
       keyNote.hidden = !keyed;
       keyNote.textContent = kept === "stored" ? "A key is kept in the keyring for this address: leave the field empty to keep it, or type another to replace it."
         : kept === "flag" ? "The key was given on the command line: it holds for this session only."
@@ -987,6 +1035,33 @@ export function openAgentConnectDialog(opts) {
     };
     provider.addEventListener("change", () => { url.value = AGENT_PROVIDERS[provider.value].url; update(); });
     url.addEventListener("input", update);
+
+    const recents = createRecentList({
+      id: "d-agent-recents",
+      entries: connection?.history ?? [],
+      text: (entry) => entry.url,
+      detail: (entry) => [AGENT_PROVIDERS[providerChoice(entry)].label, entry.model].filter(Boolean).join(" · "),
+      kept: (entry) => entry.keyKept,
+      empty: "No recent model yet: a model you connect and remember comes here.",
+      question: (entry) => `Delete ${entry.url} from the recent models?${entry.keyKept ? " The key kept for this address is deleted too." : ""} A model connected now stays connected for this session.`,
+      pick: (entry) => {
+        provider.value = providerChoice(entry);
+        url.value = entry.url;
+        fill(model, el("option", { value: entry.model || "" }, entry.model || "(Test lists the models)"));
+        timeout.value = String(entry.timeout || 300);
+        ctxSize.value = String(entry.numCtx || bounds.default);
+        key.value = "";
+        removeKey.checked = false;
+        banner.hidden = true;
+        update();
+      },
+      remove: async (entry) => {
+        connection = await onForgetEntry(entry);
+        update();
+        return connection.history ?? [];
+      },
+      fail,
+    });
 
     test.addEventListener("click", async () => {
       if (busy) return;
@@ -1024,6 +1099,7 @@ export function openAgentConnectDialog(opts) {
         settle(false);
       },
     },
+      el("div", { class: "dialog-field" }, el("span", { class: "hint" }, "Recent models"), recents.element),
       el("div", { class: "dialog-field" }, el("label", { for: "d-agent-provider" }, "Provider"), provider),
       el("div", { class: "dialog-field" }, el("label", { for: "d-agent-url" }, "Address"), url),
       el("div", { class: "dialog-field" }, el("label", { for: "d-agent-key" }, "Key"), key, keyNote,
@@ -1068,11 +1144,14 @@ export function openAgentConnectDialog(opts) {
  * and, under Advanced, whether to remember it on this machine. The key is typed here and sent once; the page never reads one
  * back, only whether one is kept and where. `onConnect(body)` makes the connection (false: the person declined),
  * `onDisconnect()` closes the link for this session and keeps what is remembered, and `onForget()` disconnects and forgets what
- * is remembered.
- * @param {{ connection: any, onConnect: (body: any) => Promise<any>, onDisconnect: () => Promise<void>, onForget: () => Promise<void> }} opts
+ * is remembered. The recent coordinators are listed: a row fills the form, and `onForgetEntry(entry)` deletes one, with the key
+ * kept for its address, and answers the connection as it then stands.
+ * @param {{ connection: any, onConnect: (body: any) => Promise<any>, onDisconnect: () => Promise<void>, onForget: () => Promise<void>,
+ *   onForgetEntry: (entry: any) => Promise<any> }} opts
  */
 export function openCoordinatorConnectDialog(opts) {
-  const { connection, onConnect, onDisconnect, onForget } = opts;
+  const { onConnect, onDisconnect, onForget, onForgetEntry } = opts;
+  let connection = opts.connection;
   openDialog("d-coordinator-dialog", "Connect a coordinator", ({ body, close }) => {
     const origin = /** @type {HTMLInputElement} */ (el("input", {
       id: "d-coordinator-origin", type: "text", class: "mono", autocomplete: "off", "aria-label": "Address",
@@ -1105,7 +1184,8 @@ export function openCoordinatorConnectDialog(opts) {
       const keyed = auth.value === "key";
       key.parentElement.hidden = !keyed;
       const here = same(origin.value, connection?.origin);
-      const kept = here && connection?.key;
+      const recent = (connection?.history ?? []).find((h) => same(h.origin, origin.value));
+      const kept = here ? connection?.key : recent?.keyKept ? "stored" : undefined;
       keyNote.textContent = kept === "stored" ? "A key is kept in the keyring for this address: leave the field empty to keep it, or type another to replace it."
         : kept === "flag" ? "The key was given on the command line: it holds for this session only."
         : kept === "session" ? "A key typed earlier is held for this session only: type it again to remember it."
@@ -1117,6 +1197,30 @@ export function openCoordinatorConnectDialog(opts) {
     };
     auth.addEventListener("change", update);
     origin.addEventListener("input", update);
+
+    const recents = createRecentList({
+      id: "d-coordinator-recents",
+      entries: connection?.history ?? [],
+      text: (entry) => entry.origin,
+      detail: (entry) => (entry.auth === "key" ? "with a key" : "through the browser"),
+      kept: (entry) => entry.keyKept,
+      empty: "No recent coordinator yet: a coordinator you connect and remember comes here.",
+      question: (entry) => `Delete ${entry.origin} from the recent coordinators?${entry.keyKept ? " The key kept for this address is deleted too." : ""} A coordinator connected now stays connected for this session.`,
+      pick: (entry) => {
+        origin.value = entry.origin;
+        auth.value = entry.auth === "key" ? "key" : "browser";
+        key.value = "";
+        removeKey.checked = false;
+        banner.hidden = true;
+        update();
+      },
+      remove: async (entry) => {
+        connection = await onForgetEntry(entry);
+        update();
+        return connection.history ?? [];
+      },
+      fail,
+    });
 
     test.addEventListener("click", async () => {
       if (busy) return;
@@ -1152,6 +1256,7 @@ export function openCoordinatorConnectDialog(opts) {
         settle(false);
       },
     },
+      el("div", { class: "dialog-field" }, el("span", { class: "hint" }, "Recent coordinators"), recents.element),
       el("div", { class: "dialog-field" }, el("label", { for: "d-coordinator-origin" }, "Address"), el("div", { class: "row" }, origin, test)),
       el("div", { class: "dialog-field" }, el("label", { for: "d-coordinator-auth" }, "Sign in"), auth),
       el("div", { class: "dialog-field" }, el("label", { for: "d-coordinator-key" }, "Key"), key, keyNote),
@@ -1190,12 +1295,15 @@ export function openCoordinatorConnectDialog(opts) {
 /**
  * Opens another folder: a path typed or one of the recent ones, tested on demand. A folder holding unsaved changes is refused
  * by the server, naming the cause; the dialog then offers to save them or to discard them, and does neither by itself.
+ * The recent folders are listed with the one the studio started on: a row fills the path, and `onForgetRecent(path)` removes a
+ * recent folder from the list (the start folder is never in it, and a folder gone from the disk is removed the same way).
  * @param {{ workspace: { root: string, start: string, recents: string[], canRemember: boolean, settingsWarning?: string | null },
  *   onTest: (path: string) => Promise<{ root: string, jobs: number }>, unsaved: () => boolean,
- *   onOpen: (request: { path: string, remember: boolean }, discard: boolean) => Promise<void>, onSave: () => Promise<boolean> }} opts
+ *   onOpen: (request: { path: string, remember: boolean }, discard: boolean) => Promise<void>, onSave: () => Promise<boolean>,
+ *   onForgetRecent: (path: string) => Promise<{ recents: string[] }> }} opts
  */
 export function openWorkspaceDialog(opts) {
-  const { workspace, onTest, unsaved, onOpen, onSave } = opts;
+  const { workspace, onTest, unsaved, onOpen, onSave, onForgetRecent } = opts;
   openDialog("d-workspace-dialog", "Open a folder", ({ body }) => {
     const pathInput = /** @type {HTMLInputElement} */ (el("input", {
       id: "d-workspace-path", type: "text", class: "mono", autocomplete: "off", "aria-label": "Folder", value: workspace.root, placeholder: "/path/to/folder",
@@ -1213,14 +1321,22 @@ export function openWorkspaceDialog(opts) {
     const settle = (value) => { busy = value; submit.disabled = value; test.disabled = value; };
 
     // The folder the studio started on is offered beside the recent ones, never written among them.
-    const known = [...new Set([...workspace.recents, workspace.start])].filter((p) => p && p !== workspace.root);
-    const recents = known.length
-      ? el("ul", { id: "d-workspace-recents", class: "dialog-list" }, known.map((p) => el("li", {},
-        el("button", {
-          type: "button", class: "small ghost mono", title: p, "aria-label": `Choose ${p}`,
-          onclick: () => { pathInput.value = p; banner.hidden = true; note.textContent = ""; submit.focus(); },
-        }, p))))
-      : el("p", { class: "hint" }, "No recent folder yet: a folder you open and remember comes here.");
+    let remembered = workspace.recents;
+    const known = () => [...new Set([...remembered, workspace.start])].filter((p) => p && p !== workspace.root);
+    const recents = createRecentList({
+      id: "d-workspace-recents",
+      entries: known(),
+      text: (path) => path,
+      removable: (path) => remembered.includes(path),
+      empty: "No recent folder yet: a folder you open and remember comes here.",
+      question: (path) => `Delete ${path} from the recent folders? The folder itself is not touched.`,
+      pick: (path) => { pathInput.value = path; banner.hidden = true; note.textContent = ""; submit.focus(); },
+      remove: async (path) => {
+        remembered = (await onForgetRecent(path)).recents;
+        return known();
+      },
+      fail,
+    });
 
     const open = async (discard) => {
       if (busy) return;
@@ -1269,7 +1385,7 @@ export function openWorkspaceDialog(opts) {
 
     const form = el("form", { class: "dialog-form", onsubmit: (e) => { e.preventDefault(); open(false); } },
       el("div", { class: "dialog-field" }, el("label", { for: "d-workspace-path" }, "Folder"), el("div", { class: "row" }, pathInput, test)),
-      el("div", { class: "dialog-field" }, el("span", { class: "hint" }, "Recent folders"), recents),
+      el("div", { class: "dialog-field" }, el("span", { class: "hint" }, "Recent folders"), recents.element),
       el("details", { class: "dialog-details" }, el("summary", {}, "Advanced"),
         el("label", {}, remember, " Remember among the recent folders on this machine")),
       note,

@@ -228,6 +228,9 @@ label.review { display: block; margin: 0 0 8px; }
 .dialog-collision p, .dialog-check-box p, .dialog-conflict p { margin: 0; }
 .dialog-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; max-height: 180px; overflow: auto; }
 .dialog-list button { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.dialog-list li { display: flex; align-items: center; gap: 6px; }
+.dialog-list li .pick { flex: 0 1 auto; min-width: 0; }
+.dialog-list li .forget { margin-left: auto; flex: none; }
 .dialog-details summary { cursor: pointer; font-size: 12.5px; color: var(--muted); }
 .dialog-pre { background: var(--code); padding: 8px 10px; border-radius: 6px; overflow: auto; max-height: 240px; margin: 4px 0 0; }
 .diff-box { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }

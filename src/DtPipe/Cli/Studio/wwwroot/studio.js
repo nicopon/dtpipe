@@ -702,6 +702,7 @@ async function openWorkspace() {
       location.reload();
     },
     onSave: async () => { await save(); return !holdsEdits(); },
+    onForgetRecent: (path) => api("/api/workspace/recents", { path }, "DELETE"),
   });
 }
 

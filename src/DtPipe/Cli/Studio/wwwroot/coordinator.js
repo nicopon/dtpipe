@@ -55,6 +55,11 @@ export async function openCoordinatorConnect() {
       await api("/api/coordinator/connection", undefined, "DELETE");
       await refreshCoordinator();
     },
+    onForgetEntry: async (entry) => {
+      const answer = await api("/api/coordinator/connection/history", { origin: entry.origin }, "DELETE");
+      await refreshCoordinator();
+      return answer;
+    },
   });
 }
 

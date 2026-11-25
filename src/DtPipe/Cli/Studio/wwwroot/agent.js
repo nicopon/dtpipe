@@ -130,6 +130,7 @@ async function openConnect() {
       await api("/api/agent/connection", undefined, "DELETE");
       await refreshAgent();
     },
+    onForgetEntry: (entry) => api("/api/agent/connection/history", { provider: entry.provider, url: entry.url }, "DELETE"),
   });
 }
 
