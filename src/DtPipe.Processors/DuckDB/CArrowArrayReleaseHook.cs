@@ -2,6 +2,8 @@ using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Apache.Arrow.C;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace DtPipe.Processors.DuckDB;
 
@@ -15,6 +17,12 @@ internal static unsafe class CArrowArrayReleaseHook
     // Keyed by private_data: a consumer that takes the array moves the struct and releases its own
     // copy, and private_data survives the move.
     private static readonly ConcurrentDictionary<IntPtr, IDisposable> RetainedExports = new();
+
+    /// <summary>
+    /// Where a fault of a release is told. The release is an unmanaged callback: an exception leaving it ends
+    /// the process, so each is caught and logged here. The processor opened last sets it.
+    /// </summary>
+    internal static ILogger Logger { get; set; } = NullLogger.Instance;
 
     // The release CArrowArrayExporter writes into every array it exports, captured from the first one.
     private static IntPtr _exporterRelease;
@@ -58,11 +66,26 @@ internal static unsafe class CArrowArrayReleaseHook
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static void ReleaseRetained(CArrowArray* array)
     {
-        RetainedExports.TryRemove((IntPtr)array->private_data, out var owner);
+        IDisposable? owner = null;
+        try
+        {
+            RetainedExports.TryRemove((IntPtr)array->private_data, out owner);
 
-        var inner = (delegate* unmanaged[Cdecl]<CArrowArray*, void>)_exporterRelease;
-        if (inner != null) inner(array);
+            var inner = (delegate* unmanaged[Cdecl]<CArrowArray*, void>)_exporterRelease;
+            if (inner != null) inner(array);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Releasing an exported Arrow array failed");
+        }
 
-        owner?.Dispose();
+        try
+        {
+            owner?.Dispose();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Disposing the owner of an exported Arrow array failed");
+        }
     }
 }

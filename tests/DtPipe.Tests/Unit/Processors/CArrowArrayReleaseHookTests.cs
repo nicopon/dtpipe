@@ -184,6 +184,58 @@ public unsafe class CArrowArrayReleaseHookTests
         ChainAndRelease();
     }
 
+    /// <summary>
+    /// A release is an unmanaged callback: an exception leaving it ends the process. The hook catches the fault
+    /// of the owner's disposal, tells it to its logger, and still ends the export.
+    /// </summary>
+    [Fact]
+    public void A_Fault_Of_The_Owners_Disposal_Is_Logged_And_Does_Not_Leave_The_Release()
+    {
+        var logger = new CapturingLogger();
+        var previous = CArrowArrayReleaseHook.Logger;
+        CArrowArrayReleaseHook.Logger = logger;
+        try
+        {
+            var pool = new TrackingMemoryPool();
+            var batch = ColumnBatch(pool, 4);
+            CArrowArray array = default;
+            CArrowArrayExporter.ExportRecordBatch(batch, &array);
+            CArrowArrayReleaseHook.Chain(&array, new ThrowingOwner(batch));
+
+            ReleaseAsAConsumerDoes(&array);
+
+            logger.Errors.Should().ContainSingle().Which.Should().Contain("Disposing the owner");
+            ReadRelease(&array).Should().Be(IntPtr.Zero, "the exporter's release ran before the owner's fault");
+        }
+        finally
+        {
+            CArrowArrayReleaseHook.Logger = previous;
+        }
+    }
+
+    private sealed class ThrowingOwner(RecordBatch batch) : IDisposable
+    {
+        public void Dispose()
+        {
+            batch.Dispose();
+            throw new InvalidOperationException("owner fault");
+        }
+    }
+
+    private sealed class CapturingLogger : Microsoft.Extensions.Logging.ILogger
+    {
+        public List<string> Errors { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel == Microsoft.Extensions.Logging.LogLevel.Error) Errors.Add(formatter(state, exception));
+        }
+    }
+
     private static void ChainAndRelease()
     {
         var pool = new TrackingMemoryPool();

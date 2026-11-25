@@ -59,6 +59,7 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, ISqlBearing, IDi
         _refAliases = refAliases;
         _refChannelAliases = refChannelAliases;
         _logger = logger;
+        CArrowArrayReleaseHook.Logger = logger;
         _edgesOnly = edgesOnly;
     }
 
