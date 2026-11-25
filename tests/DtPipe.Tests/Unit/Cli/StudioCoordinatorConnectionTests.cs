@@ -167,4 +167,39 @@ public sealed class StudioCoordinatorConnectionTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, (await publishing).Status);
         Assert.Equal(HttpStatusCode.OK, (await CallAsync(HttpMethod.Put, "/api/coordinator/connection", connect)).Status);
     }
+
+    [Fact]
+    public async Task A_coordinator_joins_the_recent_ones_once_it_answered_with_the_box_ticked_and_deleting_it_forgets_its_key_only()
+    {
+        await StartAsync();
+        var typed = new { origin = _fakes.CoordinatorUrl, auth = "key", key = Key };
+
+        // The box unticked remembers nothing; an origin that does not answer is connected for the session and never listed.
+        await CallAsync(HttpMethod.Put, "/api/coordinator/connection", new { typed.origin, typed.auth, typed.key, remember = false });
+        Assert.False(File.Exists(SettingsPath));
+        await CallAsync(HttpMethod.Put, "/api/coordinator/connection", new { origin = "http://127.0.0.1:1", auth = "browser", remember = true });
+        Assert.Empty(new StudioSettings(SettingsPath, _secrets).ReadCoordinators());
+
+        var put = await CallAsync(HttpMethod.Put, "/api/coordinator/connection", new { typed.origin, typed.auth, typed.key, remember = true });
+        await SignedInAsync();
+        var get = await CallAsync(HttpMethod.Get, "/api/coordinator/connection");
+
+        var history = JsonDocument.Parse(get.Body).RootElement.GetProperty("history").EnumerateArray().ToList();
+        Assert.Single(history);
+        Assert.Equal(("key", true), (history[0].GetProperty("auth").GetString(), history[0].GetProperty("keyKept").GetBoolean()));
+
+        // Another origin's key is not touched, and the link in place stays connected.
+        _secrets.SetSecret(StudioSettings.CoordinatorAlias("https://elsewhere.example.com"), "dtp_elsewhere");
+        var delete = await CallAsync(HttpMethod.Delete, "/api/coordinator/connection/history", new { origin = _fakes.CoordinatorUrl });
+        var view = JsonDocument.Parse(delete.Body).RootElement;
+        Assert.Equal(HttpStatusCode.OK, delete.Status);
+        Assert.Empty(view.GetProperty("history").EnumerateArray());
+        Assert.True(view.GetProperty("connected").GetBoolean());
+        Assert.Equal("session", view.GetProperty("key").GetString());
+        var next = new StudioSettings(SettingsPath, _secrets);
+        Assert.Null(next.ReadCoordinatorKey(_fakes.CoordinatorUrl));
+        Assert.Equal("dtp_elsewhere", next.ReadCoordinatorKey("https://elsewhere.example.com"));
+        Assert.Null(next.ReadCoordinator());
+        foreach (var answer in new[] { put.Body, get.Body, delete.Body }) Assert.DoesNotContain(Key[^20..], answer);
+    }
 }

@@ -41,6 +41,9 @@ public sealed partial class StudioServer
                 var tested = FolderAt((await BodyAsync<WorkspaceRequest>(context)).Path);
                 await JsonAsync(context, new { root = tested.Root, name = NameOf(tested.Root), jobs = tested.Jobs().Count });
                 break;
+            case ("DELETE", "/api/workspace/recents"):
+                await JsonAsync(context, ForgetRecent(await BodyAsync<WorkspaceRequest>(context)));
+                break;
             case ("PUT", "/api/workspace"):
                 await JsonAsync(context, await OpenWorkspaceAsync(await BodyAsync<WorkspaceRequest>(context)));
                 break;
@@ -149,5 +152,19 @@ public sealed partial class StudioServer
             lock (_runLock) _run = null;
             Opened();
         }
+    }
+
+    /// <summary>Removes a folder from the recent ones, by its path as the page shows it, whether or not it is still on the disk. The folder in place is untouched.</summary>
+    private object ForgetRecent(WorkspaceRequest request)
+    {
+        var settings = _tools.Settings ?? throw new StudioRefusal(404, "This studio keeps no recent folders.");
+        var path = request.Path?.Trim() ?? "";
+        if (!Path.IsPathFullyQualified(path)) throw new StudioRefusal(400, $"'{path}' is not a full path.");
+        try { settings.RemoveFolder(path); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return WorkspaceView("The settings file cannot be written: the folder stays among the recent ones.");
+        }
+        return WorkspaceView();
     }
 }

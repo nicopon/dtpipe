@@ -168,4 +168,50 @@ public sealed class StudioConnectionTests : IAsyncLifetime
 
         hold.SetResult();
     }
+
+    private static JsonElement Json(string body) => JsonDocument.Parse(body).RootElement.Clone();
+
+    [Fact]
+    public async Task The_recent_agents_grow_on_a_success_with_the_box_ticked_and_deleting_one_forgets_its_key_and_no_other()
+    {
+        await StartAsync();
+        const string One = "https://one.example.com/v1";
+        const string Two = "https://two.example.com/v1";
+        var keyOne = Key + "-one";
+        var keyTwo = Key + "-two";
+
+        // Nothing is remembered with the box unticked, and a refused connection adds nothing.
+        await CallAsync(HttpMethod.Put, "/api/agent/connection", new { provider = "openai", url = One, key = keyOne, remember = false });
+        await CallAsync(HttpMethod.Put, "/api/agent/connection", new { provider = "nobody", url = One, remember = true });
+        Assert.False(File.Exists(SettingsPath));
+
+        await CallAsync(HttpMethod.Put, "/api/agent/connection", new { provider = "openai", url = One, model = "m", key = keyOne, remember = true });
+        var put = await CallAsync(HttpMethod.Put, "/api/agent/connection", new { provider = "openai", url = Two, model = "n", key = keyTwo, remember = true });
+        var get = await CallAsync(HttpMethod.Get, "/api/agent/connection");
+
+        var history = Json(get.Body).GetProperty("history").EnumerateArray().ToList();
+        Assert.Equal([Two, One], history.Select(h => h.GetProperty("url").GetString()));
+        Assert.All(history, h => Assert.True(h.GetProperty("keyKept").GetBoolean()));
+        Assert.Equal("n", history[0].GetProperty("model").GetString());
+
+        // Deleting the entry of another address leaves the key of the connection in place; deleting the active one leaves it connected.
+        var other = await CallAsync(HttpMethod.Delete, "/api/agent/connection/history", new { provider = "openai", url = One });
+        Assert.Equal(HttpStatusCode.OK, other.Status);
+        Assert.Null(_settings!.ReadLlmKey(One));
+        Assert.Equal(keyTwo, _settings.ReadLlmKey(Two));
+        var active = await CallAsync(HttpMethod.Delete, "/api/agent/connection/history", new { provider = "openai", url = Two });
+        var view = Json(active.Body);
+        Assert.Empty(view.GetProperty("history").EnumerateArray());
+        Assert.True(view.GetProperty("connected").GetBoolean());
+        Assert.Equal("session", view.GetProperty("key").GetString());
+        Assert.Null(_settings.ReadLlmKey(Two));
+        Assert.Null(_settings.ReadAgent());
+
+        foreach (var answer in new[] { put.Body, get.Body, other.Body, active.Body })
+        {
+            Assert.DoesNotContain(keyOne, answer);
+            Assert.DoesNotContain(keyTwo, answer);
+        }
+        Assert.DoesNotContain("sk-test", File.ReadAllText(SettingsPath));
+    }
 }

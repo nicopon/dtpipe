@@ -12,6 +12,8 @@ public sealed partial class StudioServer
 {
     private sealed record CoordinatorConnectionRequest(string? Origin, string? Auth, string? Key, bool Remember, bool RemoveKey);
 
+    private sealed record CoordinatorEntryRequest(string? Origin);
+
     private sealed record PreparedCoordinator(string Origin, string Auth, string? Typed, string? Stored)
     {
         public string? Key => Typed ?? Stored;
@@ -31,7 +33,10 @@ public sealed partial class StudioServer
                 await JsonAsync(context, await DisconnectCoordinatorAsync());
                 break;
             case ("PUT", "/api/coordinator/connection"):
-                await JsonAsync(context, await ConnectCoordinatorAsync(await BodyAsync<CoordinatorConnectionRequest>(context)));
+                await JsonAsync(context, await ConnectCoordinatorAsync(await BodyAsync<CoordinatorConnectionRequest>(context), context.RequestAborted));
+                break;
+            case ("DELETE", "/api/coordinator/connection/history"):
+                await JsonAsync(context, ForgetCoordinatorEntry(await BodyAsync<CoordinatorEntryRequest>(context)));
                 break;
             case ("DELETE", "/api/coordinator/connection"):
                 await JsonAsync(context, await ForgetCoordinatorAsync());
@@ -50,6 +55,7 @@ public sealed partial class StudioServer
         var connection = _coordinator.Connection;
         var link = Coordinator;
         var status = link?.Status();
+        var history = CoordinatorHistory();
         return new
         {
             connected = link is not null,
@@ -62,9 +68,20 @@ public sealed partial class StudioServer
             unreachable = status?.Unreachable,
             keyring = _tools.CoordinatorStart?.Settings.KeyringUsable ?? true,
             canConnect = _tools.CoordinatorStart is not null,
+            history,
             settingsWarning = _tools.CoordinatorStart?.Settings.Warning,
             warning,
         };
+    }
+
+    /// <summary>The recent coordinators, the most recent first, each with whether a key is kept for its origin: the keyring's aliases are listed, never its values.</summary>
+    private object[] CoordinatorHistory()
+    {
+        if (_tools.CoordinatorStart?.Settings is not { } settings) return [];
+        var recent = settings.ReadCoordinators();
+        if (recent.Count == 0) return [];
+        var kept = settings.KeptAliases();
+        return recent.Select(c => (object)new { origin = StudioSettings.Shown(c.Origin), auth = c.Auth, keyKept = kept.Contains(StudioSettings.CoordinatorAlias(c.Origin)) }).ToArray();
     }
 
     private PreparedCoordinator PrepareCoordinator(CoordinatorConnectionRequest request, StudioCoordinatorStart start)
@@ -111,14 +128,33 @@ public sealed partial class StudioServer
         }
     }
 
-    private async Task<object> ConnectCoordinatorAsync(CoordinatorConnectionRequest request)
+    /// <summary>Whether the address is a coordinator that answers, with the checks a sign-in makes, within <see cref="CoordinatorLink.ProbeBound"/>.</summary>
+    private static async Task<bool> RecognisedAsync(CoordinatorLink link, CancellationToken ct)
+    {
+        using var bound = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        bound.CancelAfter(CoordinatorLink.ProbeBound);
+        try
+        {
+            await link.CheckAsync(bound.Token);
+            return true;
+        }
+        catch (Exception ex) when (ex is CoordinatorLinkException or HttpRequestException || ex is OperationCanceledException && !ct.IsCancellationRequested)
+        {
+            return false;
+        }
+    }
+
+    private async Task<object> ConnectCoordinatorAsync(CoordinatorConnectionRequest request, CancellationToken ct)
     {
         var start = CoordinatorStartOrRefuse();
         var prepared = PrepareCoordinator(request, start);
         var keyState = prepared.Typed is not null ? "session" : prepared.Stored is not null ? "stored" : "none";
         var link = NewCoordinatorLink(prepared);
+        bool recognised;
         try
         {
+            // A coordinator joins the recent ones only once it answered as one: asked before the link goes in place, and only to be remembered.
+            recognised = request.Remember && await RecognisedAsync(link, ct);
             using (TakeSlotFor("A change of coordinator"))
                 await _coordinator.ReplaceAsync(link, new CoordinatorConnection(prepared.Origin, prepared.Auth, "page", keyState), signIn: prepared.Auth == "key");
         }
@@ -134,7 +170,9 @@ public sealed partial class StudioServer
         {
             try
             {
-                start.Settings.WriteCoordinator(new CoordinatorSettings(prepared.Origin, prepared.Auth));
+                var remembered = new CoordinatorSettings(prepared.Origin, prepared.Auth);
+                start.Settings.WriteCoordinator(remembered);
+                if (recognised) start.Settings.RememberCoordinator(remembered);
                 if (prepared.Typed is not null && start.Settings.StoreCoordinatorKey(prepared.Origin, prepared.Typed)) keyState = "stored";
                 else if (prepared.Typed is not null) warning = "The keyring cannot keep the key: it lasts for this session only.";
             }
@@ -173,6 +211,26 @@ public sealed partial class StudioServer
         start.Settings.ClearCoordinator();
         foreach (var origin in new[] { remembered?.Origin, connection?.Origin }.OfType<string>().Distinct())
             start.Settings.ForgetCoordinatorKey(origin);
+        return CoordinatorConnectionView();
+    }
+
+    /// <summary>
+    /// Removes a recent coordinator by its origin, and the key kept for it. A connection in place is not closed: it goes on for this
+    /// session, a key the keyring held is now held by the link alone, and the next start no longer connects it.
+    /// </summary>
+    private object ForgetCoordinatorEntry(CoordinatorEntryRequest request)
+    {
+        var start = CoordinatorStartOrRefuse();
+        var origin = request.Origin?.Trim() ?? "";
+        if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
+            throw new StudioRefusal(400, "The address is an absolute http or https address.");
+        start.Settings.RemoveCoordinator(origin);
+        var connection = _coordinator.Connection;
+        if (connection is not null && StudioSettings.Shown(connection.Origin) == StudioSettings.Shown(origin))
+        {
+            if (Coordinator is null) _coordinator.Describe(null);
+            else _coordinator.Describe(connection with { Source = connection.Source == "remembered" ? "page" : connection.Source, Key = connection.Key == "stored" ? "session" : connection.Key });
+        }
         return CoordinatorConnectionView();
     }
 }

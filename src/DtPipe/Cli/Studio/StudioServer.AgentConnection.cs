@@ -12,6 +12,8 @@ public sealed partial class StudioServer
 {
     private sealed record AgentConnectionRequest(string? Provider, string? Url, string? Model, int? Timeout, int? NumCtx, string? Key, bool Remember, bool RemoveKey);
 
+    private sealed record AgentEntryRequest(string? Provider, string? Url);
+
     private sealed record PreparedConnection(string Provider, string Url, string? Model, TimeSpan Timeout, int? NumCtx, string? Typed, string? Stored, ILlmClient Client)
     {
         public string? Key => Typed ?? Stored;
@@ -34,6 +36,9 @@ public sealed partial class StudioServer
             case ("PUT", "/api/agent/connection"):
                 await JsonAsync(context, await ConnectAsync(await BodyAsync<AgentConnectionRequest>(context)));
                 break;
+            case ("DELETE", "/api/agent/connection/history"):
+                await JsonAsync(context, ForgetAgentEntry(await BodyAsync<AgentEntryRequest>(context)));
+                break;
             case ("DELETE", "/api/agent/connection"):
                 await JsonAsync(context, ForgetConnection());
                 break;
@@ -50,6 +55,7 @@ public sealed partial class StudioServer
     {
         var connection = _slot.Connection;
         var agent = Agent;
+        var history = AgentHistory();
         return new
         {
             connected = agent is not null,
@@ -64,9 +70,24 @@ public sealed partial class StudioServer
             key = connection?.Key ?? "none",
             keyring = _tools.AgentLink?.Settings.KeyringUsable ?? true,
             canConnect = _tools.AgentLink is not null,
+            history,
             settingsWarning = _tools.AgentLink?.Settings.Warning,
             warning,
         };
+    }
+
+    /// <summary>The recent agents, the most recent first, each with whether a key is kept for its address: the keyring's aliases are listed, never its values.</summary>
+    private object[] AgentHistory()
+    {
+        if (_tools.AgentLink?.Settings is not { } settings) return [];
+        var recent = settings.ReadAgents();
+        if (recent.Count == 0) return [];
+        var kept = settings.KeptAliases();
+        return recent.Select(a => (object)new
+        {
+            provider = a.Provider, url = StudioSettings.Shown(a.Url), model = a.Model, timeout = a.Timeout, numCtx = a.NumCtx,
+            keyKept = kept.Contains(StudioSettings.LlmAlias(a.Url)),
+        }).ToArray();
     }
 
     private PreparedConnection Prepare(AgentConnectionRequest request, StudioAgentLink link)
@@ -153,6 +174,28 @@ public sealed partial class StudioServer
         if (Agent is null) _slot.Describe(null);
         else if (connection is not null)
             _slot.Describe(connection with { Source = connection.Source == "remembered" ? "page" : connection.Source, Key = connection.Key == "stored" ? "session" : connection.Key });
+        return ConnectionView();
+    }
+
+    /// <summary>
+    /// Removes a recent agent by its provider and address, and the key kept for the address. The agent in place is not closed: it
+    /// goes on for this session, a key the keyring held is now held by the client alone, and the next start no longer connects it.
+    /// </summary>
+    private object ForgetAgentEntry(AgentEntryRequest request)
+    {
+        var link = AgentLinkOrRefuse();
+        var provider = request.Provider?.Trim().ToLowerInvariant();
+        if (provider is not ("ollama" or "openai")) throw new StudioRefusal(400, "A provider is ollama or openai.");
+        var url = request.Url?.Trim() ?? "";
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
+            throw new StudioRefusal(400, "The address is an absolute http or https address.");
+        link.Settings.RemoveAgent(provider, url);
+        var connection = _slot.Connection;
+        if (connection is not null && connection.Provider == provider && StudioSettings.Shown(connection.Url) == StudioSettings.Shown(url))
+        {
+            if (Agent is null) _slot.Describe(null);
+            else _slot.Describe(connection with { Source = connection.Source == "remembered" ? "page" : connection.Source, Key = connection.Key == "stored" ? "session" : connection.Key });
+        }
         return ConnectionView();
     }
 }

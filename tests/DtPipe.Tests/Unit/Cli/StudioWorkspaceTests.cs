@@ -165,4 +165,21 @@ public sealed class StudioWorkspaceTests : IAsyncLifetime
         Assert.True(File.Exists("a.yaml"));
         Assert.Equal("argument", (await CallAsync(HttpMethod.Get, "/api/workspace")).Body.GetProperty("source").GetString());
     }
+
+    [Fact]
+    public async Task A_recent_folder_is_removed_by_its_path_even_when_it_is_gone_and_the_folder_in_place_is_untouched()
+    {
+        await StartAsync();
+        Assert.Equal(HttpStatusCode.OK, (await OpenAsync(Second)).Status);
+        var gone = Path.Combine(_dir, "gone");
+        _settings!.RememberFolder(gone);
+
+        var (status, view) = await CallAsync(HttpMethod.Delete, "/api/workspace/recents", new { path = gone });
+
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.Equal([Second], view.GetProperty("recents").EnumerateArray().Select(r => r.GetString()));
+        Assert.Equal([Second], _settings.ReadFolders());
+        Assert.Equal(HttpStatusCode.BadRequest, (await CallAsync(HttpMethod.Delete, "/api/workspace/recents", new { path = "second" })).Status);
+        Assert.Equal(["b.yaml"], await JobsAsync());
+    }
 }
