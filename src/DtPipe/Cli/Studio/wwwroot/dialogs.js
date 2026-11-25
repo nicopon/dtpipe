@@ -945,6 +945,11 @@ export function openAgentConnectDialog(opts) {
     const model = /** @type {HTMLSelectElement} */ (el("select", { id: "d-agent-model", "aria-label": "Model" },
       el("option", { value: connection?.model || "" }, connection?.model || "(Test lists the models)")));
     const timeout = /** @type {HTMLInputElement} */ (el("input", { id: "d-agent-timeout", type: "number", min: "1", "aria-label": "Seconds with no token before a call fails", value: String(connection?.timeout || 300) }));
+    const bounds = connection?.numCtxBounds ?? { min: 4096, max: 1048576, default: 32768 };
+    const ctxSize = /** @type {HTMLInputElement} */ (el("input", {
+      id: "d-agent-numctx", type: "number", min: String(bounds.min), max: String(bounds.max), step: "1", "aria-label": "Context size in tokens",
+      value: String(connection?.numCtx || bounds.default),
+    }));
     const remember = /** @type {HTMLInputElement} */ (el("input", { id: "d-agent-remember", type: "checkbox", checked: true, "aria-label": "Remember on this machine" }));
     const note = el("p", { id: "d-agent-note", class: "hint" });
     const banner = el("p", { id: "d-agent-error", class: "bad dialog-error", hidden: true });
@@ -958,6 +963,7 @@ export function openAgentConnectDialog(opts) {
       url: url.value.trim(),
       model: model.value || undefined,
       timeout: Number(timeout.value) || undefined,
+      numCtx: provider.value === "ollama" && ctxSize.value.trim() !== "" ? Number(ctxSize.value) : undefined,
       key: key.value || undefined,
       removeKey: removeKey.checked,
       remember: remember.checked,
@@ -968,6 +974,7 @@ export function openAgentConnectDialog(opts) {
       const keyed = provider.value !== "ollama";
       key.disabled = !keyed;
       key.parentElement.hidden = !keyed;
+      ctxSize.parentElement.hidden = provider.value !== "ollama";
       const here = same(url.value, connection?.url);
       const kept = here && connection?.key;
       keyNote.hidden = !keyed;
@@ -1026,6 +1033,8 @@ export function openAgentConnectDialog(opts) {
       el("div", { class: "dialog-field" }, el("label", { for: "d-agent-model" }, "Model"), el("div", { class: "row" }, model, test)),
       el("details", { class: "dialog-details" }, el("summary", {}, "Advanced"),
         el("div", { class: "dialog-field" }, el("label", { for: "d-agent-timeout" }, "Seconds with no token before a call fails"), timeout),
+        el("div", { class: "dialog-field" }, el("label", { for: "d-agent-numctx" }, "Context size, in tokens"), ctxSize,
+          el("p", { class: "hint" }, `The model's window (Ollama's num_ctx), from ${bounds.min} to ${bounds.max}; ${bounds.default} when left as it is.`)),
         el("label", {}, remember, " Remember on this machine (the key goes to the system keyring, never to a file)")),
       note,
       banner,

@@ -10,9 +10,9 @@ namespace DtPipe.Cli.Studio;
 /// </summary>
 public sealed partial class StudioServer
 {
-    private sealed record AgentConnectionRequest(string? Provider, string? Url, string? Model, int? Timeout, string? Key, bool Remember, bool RemoveKey);
+    private sealed record AgentConnectionRequest(string? Provider, string? Url, string? Model, int? Timeout, int? NumCtx, string? Key, bool Remember, bool RemoveKey);
 
-    private sealed record PreparedConnection(string Provider, string Url, string? Model, TimeSpan Timeout, string? Typed, string? Stored, ILlmClient Client)
+    private sealed record PreparedConnection(string Provider, string Url, string? Model, TimeSpan Timeout, int? NumCtx, string? Typed, string? Stored, ILlmClient Client)
     {
         public string? Key => Typed ?? Stored;
     }
@@ -55,6 +55,8 @@ public sealed partial class StudioServer
             url = connection is null ? null : StudioSettings.Shown(connection.Url),
             model = agent?.Model ?? connection?.Model,
             timeout = connection?.TimeoutSeconds,
+            numCtx = connection?.Provider == "ollama" ? connection.NumCtx ?? AgentOptions.DefaultNumCtx : (int?)null,
+            numCtxBounds = new { min = StudioAgentClients.MinNumCtx, max = StudioAgentClients.MaxNumCtx, @default = AgentOptions.DefaultNumCtx },
             key = connection?.Key ?? "none",
             keyring = _tools.AgentLink?.Settings.KeyringUsable ?? true,
             canConnect = _tools.AgentLink is not null,
@@ -72,12 +74,16 @@ public sealed partial class StudioServer
             throw new StudioRefusal(400, "The address is an absolute http or https address.");
         if (uri.UserInfo.Length > 0) throw new StudioRefusal(400, "An address holds no credential: the key is a field of its own.");
         var timeout = request.Timeout is > 0 ? TimeSpan.FromSeconds(request.Timeout.Value) : AgentOptions.DefaultLlmTimeout;
+        // Only Ollama takes a window: another provider drops it, as a key typed for Ollama is dropped.
+        if (provider == "ollama" && request.NumCtx is { } window && !StudioAgentClients.IsNumCtx(window))
+            throw new StudioRefusal(400, $"The context size is a whole number of tokens from {StudioAgentClients.MinNumCtx} to {StudioAgentClients.MaxNumCtx}.");
+        var numCtx = provider == "ollama" ? request.NumCtx : null;
         // A key typed for a provider that takes none is dropped; no key typed uses the one kept for this very address.
         var typed = provider == "openai" && !string.IsNullOrEmpty(request.Key) ? request.Key : null;
         var stored = provider == "openai" && typed is null && !request.RemoveKey ? link.Settings.ReadLlmKey(url) : null;
         var client = link.NewClient(provider, typed ?? stored, timeout) ?? throw new StudioRefusal(400, "A provider is ollama or openai.");
         var model = string.IsNullOrWhiteSpace(request.Model) ? null : request.Model.Trim();
-        return new PreparedConnection(provider, url, model, timeout, typed, stored, client);
+        return new PreparedConnection(provider, url, model, timeout, numCtx, typed, stored, client);
     }
 
     /// <summary>A failure's words without the key it was made with, whatever the server echoed.</summary>
@@ -108,8 +114,8 @@ public sealed partial class StudioServer
         var keyState = prepared.Typed is not null ? "session" : prepared.Stored is not null ? "stored" : "none";
         var timeoutSeconds = (int)prepared.Timeout.TotalSeconds;
         await _slot.ReplaceAsync(
-            () => NewAgent(new StudioAgentSetup(prepared.Client, prepared.Url, prepared.Model, link.Tools, link.Trace)),
-            new AgentConnection(prepared.Provider, prepared.Url, prepared.Model, timeoutSeconds, "page", keyState));
+            () => NewAgent(new StudioAgentSetup(prepared.Client, prepared.Url, prepared.Model, link.Tools, link.Trace, prepared.NumCtx)),
+            new AgentConnection(prepared.Provider, prepared.Url, prepared.Model, timeoutSeconds, "page", keyState, NumCtx: prepared.NumCtx));
 
         string? warning = null;
         if (request.RemoveKey) link.Settings.ForgetLlmKey(prepared.Url);
@@ -117,7 +123,7 @@ public sealed partial class StudioServer
         {
             try
             {
-                link.Settings.WriteAgent(new AgentSettings(prepared.Provider, prepared.Url, prepared.Model, timeoutSeconds));
+                link.Settings.WriteAgent(new AgentSettings(prepared.Provider, prepared.Url, prepared.Model, timeoutSeconds, prepared.NumCtx));
                 if (prepared.Typed is not null && link.Settings.StoreLlmKey(prepared.Url, prepared.Typed)) keyState = "stored";
                 else if (prepared.Typed is not null) warning = "The keyring cannot keep the key: it lasts for this session only.";
             }
@@ -127,7 +133,7 @@ public sealed partial class StudioServer
             }
         }
         if (request.RemoveKey) keyState = "none";
-        _slot.Describe(new AgentConnection(prepared.Provider, prepared.Url, prepared.Model, timeoutSeconds, "page", keyState));
+        _slot.Describe(new AgentConnection(prepared.Provider, prepared.Url, prepared.Model, timeoutSeconds, "page", keyState, NumCtx: prepared.NumCtx));
         return ConnectionView(warning);
     }
 

@@ -243,11 +243,12 @@ public sealed class StudioCommand : Command
         if (remembered.Provider == "openai" && key is null)
         {
             Console.Error.WriteLine("[WARN] The remembered model needs its key again: connect it from the page.");
-            return (null, new AgentConnection(remembered.Provider, remembered.Url, remembered.Model, seconds, "remembered", "none", NeedsKey: true));
+            return (null, new AgentConnection(remembered.Provider, remembered.Url, remembered.Model, seconds, "remembered", "none", NeedsKey: true, NumCtx: remembered.NumCtx));
         }
         var client = StudioAgentClients.Create(remembered.Provider, key, timeout)!;
-        return (new StudioAgentSetup(client, remembered.Url, remembered.Model, tools, trace),
-            new AgentConnection(remembered.Provider, remembered.Url, remembered.Model, seconds, "remembered", key is null ? "none" : "stored"));
+        var window = remembered.Provider == "ollama" ? remembered.NumCtx : null;
+        return (new StudioAgentSetup(client, remembered.Url, remembered.Model, tools, trace, window),
+            new AgentConnection(remembered.Provider, remembered.Url, remembered.Model, seconds, "remembered", key is null ? "none" : "stored", NumCtx: window));
     }
 
     /// <summary>

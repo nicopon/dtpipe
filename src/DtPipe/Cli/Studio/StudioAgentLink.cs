@@ -6,8 +6,9 @@ namespace DtPipe.Cli.Studio;
 /// Where the agent's connection stands, as the page reads it. <see cref="Source"/> is <c>flag</c>, <c>remembered</c> or
 /// <c>page</c>; <see cref="Key"/> is <c>none</c>, <c>stored</c> (in the keyring), <c>flag</c> or <c>session</c> (held by this
 /// studio alone). <see cref="NeedsKey"/>: the connection was remembered but its key is not to be found, so no agent runs yet.
+/// <see cref="NumCtx"/> is the context window asked of a provider that takes one; null is <see cref="AgentOptions.DefaultNumCtx"/>.
 /// </summary>
-public sealed record AgentConnection(string Provider, string Url, string? Model, int TimeoutSeconds, string Source, string Key, bool NeedsKey = false);
+public sealed record AgentConnection(string Provider, string Url, string? Model, int TimeoutSeconds, string Source, string Key, bool NeedsKey = false, int? NumCtx = null);
 
 /// <summary>
 /// What the page may do to the agent: the settings it remembers, the client a provider and a key make, and what every agent of
@@ -27,6 +28,13 @@ public static class StudioAgentClients
     };
 
     public static string DefaultUrl(string provider) => provider == "openai" ? "https://api.openai.com" : "http://localhost:11434";
+
+    /// <summary>The bounds of the context window a connection may ask for, in tokens: below the lower one the tool catalogue alone does not fit.</summary>
+    public const int MinNumCtx = 4096;
+
+    public const int MaxNumCtx = 1_048_576;
+
+    public static bool IsNumCtx(int value) => value is >= MinNumCtx and <= MaxNumCtx;
 }
 
 /// <summary>

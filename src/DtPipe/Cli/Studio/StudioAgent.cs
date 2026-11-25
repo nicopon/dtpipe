@@ -10,9 +10,10 @@ namespace DtPipe.Cli.Studio;
 
 /// <summary>
 /// The model the studio's agent runs on: its client, the address it calls, the model to start with, dtpipe's tools as the model
-/// may be offered them, and the session trace when one was asked for.
+/// may be offered them, the session trace when one was asked for, and the context window to ask of a provider that takes one
+/// (null: <see cref="AgentOptions.DefaultNumCtx"/>).
 /// </summary>
-public sealed record StudioAgentSetup(ILlmClient Client, string BaseUrl, string? Model, IAgentToolProvider Tools, AgentTrace? Trace = null);
+public sealed record StudioAgentSetup(ILlmClient Client, string BaseUrl, string? Model, IAgentToolProvider Tools, AgentTrace? Trace = null, int? NumCtx = null);
 
 /// <summary>The job the person has open, as the server composed it from the page's cards.</summary>
 internal sealed record OpenJob(string? Path, bool Unsaved, string Text);
@@ -50,7 +51,7 @@ internal sealed class StudioAgent : IAsyncDisposable
     private int _turns;
     private int _stepsInTurn;
     private int _contextTokens;
-    private readonly AgentOptions _options = new();
+    private readonly AgentOptions _options;
 
     private sealed record Card(string Id, string Kind, object Body, string? Digest, string[] Choices, Func<string, string?, string?>? Check)
     {
@@ -61,6 +62,7 @@ internal sealed class StudioAgent : IAsyncDisposable
     {
         _setup = setup;
         _tools = tools;
+        _options = new AgentOptions { NumCtx = setup.NumCtx ?? AgentOptions.DefaultNumCtx };
         _model = setup.Model;
         _executor = NewExecutor();
     }

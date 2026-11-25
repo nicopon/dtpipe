@@ -5,7 +5,7 @@ using DtPipe.Sessions;
 namespace DtPipe.Cli.Studio;
 
 /// <summary>The agent's connection as <c>studio.json</c> keeps it: no secret, ever.</summary>
-public sealed record AgentSettings(string Provider, string Url, string? Model, int? Timeout);
+public sealed record AgentSettings(string Provider, string Url, string? Model, int? Timeout, int? NumCtx = null);
 
 /// <summary>The coordinator's connection as <c>studio.json</c> keeps it: its origin and how the person signs in (<c>browser</c> or <c>key</c>), never the key.</summary>
 public sealed record CoordinatorSettings(string Origin, string Auth);
@@ -107,6 +107,7 @@ public sealed class StudioSettings(string path, ISecretsManager secrets)
         if (agent is null) return null;
         if (agent.Provider is not ("ollama" or "openai")) return Ignore<AgentSettings>("its agent names no known provider");
         if (!IsAddress(agent.Url)) return Ignore<AgentSettings>("its agent has no http or https address");
+        if (agent.NumCtx is { } window && !StudioAgentClients.IsNumCtx(window)) return Ignore<AgentSettings>("its agent's context size is out of bounds");
         return agent;
     }
 
