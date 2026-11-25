@@ -109,13 +109,14 @@ none. One node per process, which is one replica of its node's identity; a secon
   database, so the coordinator never holds a path or a secret to open. Variables reach a child through `FragmentLaunch.ChildEnvironment`
   and `DtPipeCommand` (the node's own reads), never through this process's environment: the host
   is someone else's service. `[unchecked]`
-- **The token provider returns a fresh token.** TransportR retries a stream refused with 401
-  through `NodeClientOptions.AccessTokenProvider`, so `NodeAgent` binds it to
-  `OidcTokenClient.GetAsync(fresh: true)`, and asks once before connecting because TransportR
+- **The token provider returns a fresh token.** The control hub and TransportR retry a connection
+  refused with 401 through their token provider, so `NodeAgent` binds both to
+  `FreshTokenAsync` (`OidcTokenClient.GetAsync(fresh: true)`): a cached token may come from a
+  coordinator that is gone and would be presented until it expires. It asks once before connecting because TransportR
   swallows a provider that throws. The provider is `Oidc:Authority` or, left out, the first the coordinator's protected resource metadata names (never an HTTP provider for an HTTPS coordinator): its key issuer when it trusts no other; the client is `Oidc:ClientId` or the node's `Name`; the token endpoint comes from the provider's discovery document.
   A provider that answers and refuses the client is a `TokenRefusedException`: the connect loop logs it as a refusal that names the
   provider and the client to add or enable, and only a coordinator that does not answer reads as not reachable.
-  `[CI: Hosting.Tests KeyTokenTests]` `[unchecked: the fresh token on retry; the refusal's text]`
+  `[CI: Hosting.Tests KeyTokenTests]` `[unchecked: the refusal's text]`
 - **The node's secret has one source: a value, a file, or a provider.** `Oidc:ClientSecret` is the secret itself or, when it begins with
   `@`, the path of the file that holds it (a coordinator's key mounted in a container); `Oidc:ClientSecretFile` names that file without
   the `@`; `UseClientSecret` (`NodeOidcOptions.ClientSecretProvider`) is a host's own code, a vault or an environment variable. Setting

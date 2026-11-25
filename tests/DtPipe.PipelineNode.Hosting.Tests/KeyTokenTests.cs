@@ -129,6 +129,28 @@ public sealed class KeyTokenTests
     }
 
     [Fact]
+    public async Task A_connection_presents_a_fresh_token_each_time_so_one_from_a_gone_coordinator_is_not_kept()
+    {
+        await WithKeyedCoordinatorAsync(async (url, key) =>
+        {
+            var asked = 0;
+            using var tokens = new OidcTokenClient(new NodeOidcOptions
+            {
+                Authority = url,
+                ClientSecretProvider = _ =>
+                {
+                    Interlocked.Increment(ref asked);
+                    return ValueTask.FromResult(key);
+                },
+            }, "edge", url);
+
+            Assert.NotEmpty(await NodeAgent.FreshTokenAsync(tokens));
+            Assert.NotEmpty(await NodeAgent.FreshTokenAsync(tokens));
+            Assert.Equal(2, asked);
+        });
+    }
+
+    [Fact]
     public async Task A_provider_is_asked_for_each_token_so_a_rotated_key_is_the_one_a_retry_presents()
     {
         await WithKeyedCoordinatorAsync(async (url, key) =>

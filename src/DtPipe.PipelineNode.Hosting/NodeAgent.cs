@@ -104,7 +104,7 @@ internal sealed class NodeAgent : BackgroundService
         else
             _logger.LogInformation("Node {Name} data plane protection: {Protection}", _options.Name, _endToEnd.Protection);
         var hub = _hub = new HubConnectionBuilder()
-            .WithUrl(_options.CoordinatorUrl.TrimEnd('/') + NodeChannel.Path, o => o.AccessTokenProvider = async () => await _tokens.GetAsync())
+            .WithUrl(_options.CoordinatorUrl.TrimEnd('/') + NodeChannel.Path, o => o.AccessTokenProvider = async () => await FreshTokenAsync(_tokens))
             .WithAutomaticReconnect(new KeepRetrying())
             .Build();
 
@@ -166,6 +166,12 @@ internal sealed class NodeAgent : BackgroundService
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
     }
+
+    /// <summary>
+    /// The token a connection to the coordinator presents, asked for at each connection and each of its retries: a token kept from an
+    /// earlier try may have been issued by a coordinator that is gone, and one the coordinator refused would be presented again until it expired.
+    /// </summary>
+    internal static Task<string> FreshTokenAsync(OidcTokenClient tokens) => tokens.GetAsync(fresh: true);
 
     private static readonly TimeSpan ReconnectDelay = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan AnnounceTimeout = TimeSpan.FromSeconds(30);
@@ -258,7 +264,7 @@ internal sealed class NodeAgent : BackgroundService
             node = await PipelineNode.ConnectAsync(new NodeClientOptions
             {
                 HubUrl = _options.CoordinatorUrl.TrimEnd('/'),
-                AccessTokenProvider = () => _tokens.GetAsync(fresh: true),
+                AccessTokenProvider = () => FreshTokenAsync(_tokens),
                 BatchBytes = _options.BatchBytes,
                 MaxInFlightBatches = _options.MaxInFlightBatches,
                 EndToEndEncryption = _endToEnd.Enabled,
