@@ -11,8 +11,19 @@ internal static class ArrowColumnOperations
     {
         int colCount = batch.ColumnCount;
         var newArrays = new IArrowArray[colCount];
-        for (int colIdx = 0; colIdx < colCount; colIdx++)
-            newArrays[colIdx] = CompactArray(batch.Column(colIdx), batch.Schema.GetFieldByIndex(colIdx), mask, selectedCount);
+        int built = 0;
+        try
+        {
+            for (; built < colCount; built++)
+                newArrays[built] = CompactArray(batch.Column(built), batch.Schema.GetFieldByIndex(built), mask, selectedCount);
+        }
+        catch
+        {
+            // A column that fails leaves the ones built before it with no owner.
+            for (int i = 0; i < built; i++)
+                newArrays[i].Dispose();
+            throw;
+        }
 
         return new RecordBatch(batch.Schema, newArrays, selectedCount);
     }
@@ -277,8 +288,13 @@ internal static class ArrowColumnOperations
                     for (int i = 0; i < inLen; i++)
                     {
                         int rep = offsets[i + 1] - offsets[i];
+                        if (rep == 0) continue;
+                        var bytes = a.GetBytes(i, out bool isNull);
                         for (int r = 0; r < rep; r++)
-                            AppendCell(builder, a, i);
+                        {
+                            if (isNull) builder.AppendNull();
+                            else builder.Append(bytes);
+                        }
                     }
                     return builder.Build();
                 }
