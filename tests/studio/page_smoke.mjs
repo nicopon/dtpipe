@@ -6,7 +6,8 @@
 // save refused then accepted, a run, a question, a plan put on the cards, a job holding a credential, Stop, a reload mid-turn, an
 // edit made while a save waits, the person's save over the file the agent saved, a turn that fails); Undo of a deleted card and of
 // a plan, and the cards a plan names; a preview stopped
-// a model connected from the page with no flag, and read back by a studio started again;
+// a model connected from the page with no flag, and read back by a studio started again; another folder opened from the page,
+// refused while changes are unsaved, then discarded or saved first;
 // while its source is still answering; Tab to a card, a wire made and undone from the keyboard, every control named,
 // the text at 4.5:1 in both themes.
 //
@@ -1057,6 +1058,54 @@ const scenarios = {
       check("forgetting removes the remembered agent", await p.until(`!document.querySelector("#d-agent-dialog")`) && !JSON.parse(fs.readFileSync(file, "utf8")).agent);
     } finally {
       again.stop();
+    }
+  },
+
+  // A folder opened from the page: the header names it, Test counts its jobs, unsaved changes refuse the change by name and the
+  // person chooses (discard there, save here), the page reads the new folder whole, and the folders opened join the recent ones.
+  async "workspace-switch"({ page: p, folder }) {
+    const other = fs.mkdtempSync(path.join(os.tmpdir(), "dtpipe-smoke-other-"));
+    try {
+      fs.copyFileSync(path.join(here, "fixtures", "chain.yaml"), path.join(other, "other.yaml"));
+      const file = path.join(folder, ".smoke-state", "studio.json");
+      const header = `(document.querySelector("#folder")?.textContent ?? "")`;
+      const jobs = `[...document.querySelectorAll("#jobs button.job")].map((b) => b.textContent).join()`;
+      const unsavedEdit = async (job) => {
+        check(`${job} opens`, await p.openJob(job));
+        await p.pick("b");
+        await p.clickText("#d-inspector button", "Delete step");
+        check(`${job} holds an unsaved change`, await p.until(`!document.querySelector("#d-dirty").hidden`));
+      };
+      const refusedForChanges = () => p.until(`/not saved/.test(document.querySelector("#d-workspace-error")?.textContent ?? "") && !document.querySelector("#d-workspace-unsaved").hidden`);
+
+      check("the header names the folder, as a button", await p.until(`${header} === ${JSON.stringify(path.basename(folder))} && document.querySelector("#folder").tagName === "BUTTON"`), await p.ev(header));
+      await unsavedEdit("chain.yaml");
+      await p.click("#folder");
+      check("the dialog opens on the folder in place", await p.until(`document.querySelector("#d-workspace-path")?.value === ${JSON.stringify(folder)}`));
+      await p.ev(`(() => { const i = document.querySelector("#d-workspace-path"); i.value = ${JSON.stringify(other)}; i.dispatchEvent(new Event("input")); })()`);
+      await p.click("#d-workspace-test");
+      check("Test counts the folder's jobs", await p.until(`/holds 1 job/.test(document.querySelector("#d-workspace-note")?.textContent ?? "")`), await p.ev(`document.querySelector("#d-workspace-note")?.textContent`));
+      await p.click("#d-workspace-submit");
+      check("unsaved changes refuse the change by name, and the dialog offers to save or discard them", await refusedForChanges());
+      check("nothing changed meanwhile", await p.ev(`${header} === ${JSON.stringify(path.basename(folder))} && ${jobs} === "chain.yaml"`));
+      await p.click("#d-workspace-discard");
+      check("discarding opens the new folder, read again whole", await p.until(`${header} === ${JSON.stringify(path.basename(other))} && ${jobs} === "other.yaml" && !document.querySelector("#d-workspace-dialog")`, 30000), await p.ev(`${jobs} + " | " + (document.querySelector("#d-workspace-error")?.textContent ?? "no dialog")`));
+      check("the job left keeps its file as it was", fs.readFileSync(path.join(folder, "chain.yaml"), "utf8") === fs.readFileSync(path.join(here, "fixtures", "chain.yaml"), "utf8"));
+      check("the folder opened joins the recent ones, the start folder does not", JSON.stringify(JSON.parse(fs.readFileSync(file, "utf8")).folders) === JSON.stringify([other]), fs.readFileSync(file, "utf8"));
+      await p.shot("workspace-1-switched");
+
+      await unsavedEdit("other.yaml");
+      await p.click("#folder");
+      check("the folder the studio started on is offered", await p.until(`[...document.querySelectorAll("#d-workspace-recents button")].some((b) => b.title === ${JSON.stringify(folder)})`));
+      await p.ev(`[...document.querySelectorAll("#d-workspace-recents button")].find((b) => b.title === ${JSON.stringify(folder)}).click()`);
+      await p.click("#d-workspace-submit");
+      check("unsaved changes refuse again", await refusedForChanges());
+      await p.click("#d-workspace-save");
+      check("Save, then open: the start folder is open again", await p.until(`${header} === ${JSON.stringify(path.basename(folder))} && ${jobs} === "chain.yaml"`, 30000), await p.ev(header));
+      check("the job was saved first", fs.readFileSync(path.join(other, "other.yaml"), "utf8") !== fs.readFileSync(path.join(here, "fixtures", "chain.yaml"), "utf8"));
+      check("both folders are recent now, the last opened first", JSON.stringify(JSON.parse(fs.readFileSync(file, "utf8")).folders) === JSON.stringify([folder, other]), fs.readFileSync(file, "utf8"));
+    } finally {
+      fs.rmSync(other, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     }
   },
 

@@ -1,5 +1,5 @@
 // @ts-check
-// Modal dialogs for creating, importing, saving, renaming, deleting, inspecting and pulling jobs.
+// Modal dialogs for creating, importing, saving, renaming, deleting, inspecting and pulling jobs, and for opening a folder.
 // Built with DOM calls only: no HTML strings or inline styles are ever constructed here.
 
 import { api, el, fill, targetOf } from "./dom.js";
@@ -1158,5 +1158,103 @@ export function openCoordinatorConnectDialog(opts) {
     fill(body, form);
     update();
     origin.focus();
+  });
+}
+
+/**
+ * Opens another folder: a path typed or one of the recent ones, tested on demand. A folder holding unsaved changes is refused
+ * by the server, naming the cause; the dialog then offers to save them or to discard them, and does neither by itself.
+ * @param {{ workspace: { root: string, start: string, recents: string[], canRemember: boolean, settingsWarning?: string | null },
+ *   onTest: (path: string) => Promise<{ root: string, jobs: number }>, unsaved: () => boolean,
+ *   onOpen: (request: { path: string, remember: boolean }, discard: boolean) => Promise<void>, onSave: () => Promise<boolean> }} opts
+ */
+export function openWorkspaceDialog(opts) {
+  const { workspace, onTest, unsaved, onOpen, onSave } = opts;
+  openDialog("d-workspace-dialog", "Open a folder", ({ body }) => {
+    const pathInput = /** @type {HTMLInputElement} */ (el("input", {
+      id: "d-workspace-path", type: "text", class: "mono", autocomplete: "off", "aria-label": "Folder", value: workspace.root, placeholder: "/path/to/folder",
+    }));
+    const remember = /** @type {HTMLInputElement} */ (el("input", { id: "d-workspace-remember", type: "checkbox", checked: workspace.canRemember, disabled: !workspace.canRemember, "aria-label": "Remember among the recent folders" }));
+    const note = el("p", { id: "d-workspace-note", class: "hint" }, workspace.settingsWarning || "");
+    const banner = el("p", { id: "d-workspace-error", class: "bad dialog-error", hidden: true });
+    const choices = el("div", { id: "d-workspace-unsaved", class: "row dialog-actions", hidden: true });
+    const submit = /** @type {HTMLButtonElement} */ (el("button", { id: "d-workspace-submit", type: "submit", class: "primary" }, "Open"));
+    const test = /** @type {HTMLButtonElement} */ (el("button", { id: "d-workspace-test", type: "button" }, "Test"));
+    let busy = false;
+
+    const request = () => ({ path: pathInput.value.trim(), remember: remember.checked });
+    const fail = (message) => { banner.hidden = false; banner.textContent = message; };
+    const settle = (value) => { busy = value; submit.disabled = value; test.disabled = value; };
+
+    // The folder the studio started on is offered beside the recent ones, never written among them.
+    const known = [...new Set([...workspace.recents, workspace.start])].filter((p) => p && p !== workspace.root);
+    const recents = known.length
+      ? el("ul", { id: "d-workspace-recents", class: "dialog-list" }, known.map((p) => el("li", {},
+        el("button", {
+          type: "button", class: "small ghost mono", title: p, "aria-label": `Choose ${p}`,
+          onclick: () => { pathInput.value = p; banner.hidden = true; note.textContent = ""; submit.focus(); },
+        }, p))))
+      : el("p", { class: "hint" }, "No recent folder yet: a folder you open and remember comes here.");
+
+    const open = async (discard) => {
+      if (busy) return;
+      settle(true);
+      banner.hidden = true;
+      choices.hidden = true;
+      submit.textContent = "Opening…";
+      const held = !discard && unsaved();
+      try {
+        await onOpen(request(), discard);
+        return;
+      } catch (err) {
+        fail(err.message);
+        // Unsaved changes are refused first: a refusal while they are held is theirs, and the person chooses what becomes of them.
+        if (err.status === 409 && held) choices.hidden = false;
+      }
+      submit.textContent = "Open";
+      settle(false);
+    };
+
+    fill(choices,
+      el("button", {
+        id: "d-workspace-save", type: "button",
+        onclick: async () => {
+          if (busy) return;
+          if (await onSave()) await open(false);
+          else fail("The job is still not saved: save it from the page, or discard its changes.");
+        },
+      }, "Save, then open"),
+      el("button", { id: "d-workspace-discard", type: "button", class: "ghost", onclick: () => open(true) }, "Discard changes and open"));
+
+    test.addEventListener("click", async () => {
+      if (busy) return;
+      settle(true);
+      banner.hidden = true;
+      test.textContent = "Testing…";
+      try {
+        const answer = await onTest(request().path);
+        note.textContent = `${answer.root} holds ${answer.jobs === 1 ? "1 job" : `${answer.jobs} jobs`}.`;
+      } catch (err) {
+        fail(err.message);
+      }
+      test.textContent = "Test";
+      settle(false);
+    });
+
+    const form = el("form", { class: "dialog-form", onsubmit: (e) => { e.preventDefault(); open(false); } },
+      el("div", { class: "dialog-field" }, el("label", { for: "d-workspace-path" }, "Folder"), el("div", { class: "row" }, pathInput, test)),
+      el("div", { class: "dialog-field" }, el("span", { class: "hint" }, "Recent folders"), recents),
+      el("details", { class: "dialog-details" }, el("summary", {}, "Advanced"),
+        el("label", {}, remember, " Remember among the recent folders on this machine")),
+      note,
+      banner,
+      choices,
+      el("p", { class: "hint" }, "The page opens the folder's jobs, and the agent starts a new conversation."),
+      el("div", { class: "row dialog-actions" },
+        el("button", { type: "button", class: "ghost", onclick: () => closeActiveDialog() }, "Cancel"),
+        submit));
+    fill(body, form);
+    pathInput.focus();
+    pathInput.select();
   });
 }

@@ -5,7 +5,7 @@
 import { $, api, el, fill, forgetToken, plural, status, svg, token } from "./dom.js";
 import { onCoordinator, refreshCoordinator, signIn } from "./coordinator.js";
 import { bindSplit, closeDesigner, compose, editingText, holdsEdits, markSaved, mountDesigner, openBlank, openJob, restoreSizes, setCatalog, showTab } from "./designer.js";
-import { nextFreePath, openDeleteDialog, openFromCliDialog, openImportYamlDialog, openInspectLibraryDialog, openNewJobDialog, openPullDialog, openRenameDialog, openSaveAsDialog, shortCommit } from "./dialogs.js";
+import { nextFreePath, openDeleteDialog, openFromCliDialog, openImportYamlDialog, openInspectLibraryDialog, openNewJobDialog, openPullDialog, openRenameDialog, openSaveAsDialog, openWorkspaceDialog, shortCommit } from "./dialogs.js";
 import { readView, rememberView, sizesRead, viewRestored } from "./prefs.js";
 import { afterFlush, invalidate, onZone } from "./render.js";
 import { sequence, state } from "./state.js";
@@ -19,6 +19,8 @@ const MAX_DEBUG_ROWS = 100000;
 const opening = sequence();
 const openFolders = new Set();
 let lastShownDirty = null;
+// Set once the page leaves for another folder: the reload asks nothing, the person already chose what becomes of the changes.
+let leaving = false;
 
 // ---------------------------------------------------------------- workspace & library
 
@@ -304,7 +306,8 @@ function renderLibrary() {
 function renderJobs() {
   const { folder } = state.jobs;
   $("folder").textContent = folder;
-  $("folder").title = folder;
+  $("folder").title = `${folder}: open another folder`;
+  $("folder").setAttribute("aria-label", `Folder ${folder}: open another folder`);
   $("job-name").textContent = state.job ? `${state.job.path}${state.job.hash ? "" : " (new)"}` : "";
   $("job-name").title = state.job ? state.job.path : "";
   lastShownDirty = holdsEdits();
@@ -670,6 +673,30 @@ function barButtons() {
   ];
 }
 
+// ---------------------------------------------------------------- the folder
+
+/** Opens another folder; the page then reads everything again from it, as a reload does. */
+async function openWorkspace() {
+  let workspace;
+  try {
+    workspace = await api("/api/workspace");
+  } catch (e) {
+    status(e.message, "bad");
+    return;
+  }
+  openWorkspaceDialog({
+    workspace,
+    onTest: (path) => api("/api/workspace/test", { path }),
+    unsaved: holdsEdits,
+    onOpen: async (request, discard) => {
+      await api("/api/workspace", { ...request, unsaved: !discard && holdsEdits() }, "PUT");
+      leaving = true;
+      location.reload();
+    },
+    onSave: async () => { await save(); return !holdsEdits(); },
+  });
+}
+
 async function quit() {
   if (holdsEdits() && !confirm("Changes are not saved. Quit anyway?")) return;
   try {
@@ -779,6 +806,7 @@ async function openPlan(yaml) {
 // ---------------------------------------------------------------- wire controls
 
 $("quit").addEventListener("click", quit);
+$("folder").addEventListener("click", openWorkspace);
 $("new-blank").addEventListener("click", startNewBlank);
 $("new-from-cli").addEventListener("click", startFromCli);
 $("new-from-yaml").addEventListener("click", startFromYaml);
@@ -816,7 +844,7 @@ document.addEventListener("keydown", (e) => {
   }
   if (e.key === "s" && (e.ctrlKey || e.metaKey) && state.job) { e.preventDefault(); save(); }
 });
-window.addEventListener("beforeunload", (e) => { if (holdsEdits()) e.preventDefault(); });
+window.addEventListener("beforeunload", (e) => { if (holdsEdits() && !leaving) e.preventDefault(); });
 
 if (!token) status("Open the address dtpipe studio printed: it carries this session's token.", "bad");
 else start().catch((e) => status(e.message, "bad"));
