@@ -6,7 +6,7 @@ import { $, api, el, fill, forgetToken, plural, status, svg, token } from "./dom
 import { onCoordinator, refreshCoordinator, signIn } from "./coordinator.js";
 import { bindSplit, closeDesigner, compose, editingText, holdsEdits, markSaved, mountDesigner, openBlank, openJob, restoreSizes, setCatalog, showTab } from "./designer.js";
 import { nextFreePath, openDeleteDialog, openFromCliDialog, openImportYamlDialog, openInspectLibraryDialog, openNewJobDialog, openPullDialog, openRenameDialog, openSaveAsDialog, openWorkspaceDialog, shortCommit } from "./dialogs.js";
-import { readView, rememberView, sizesRead, viewRestored } from "./prefs.js";
+import { holdView, readView, rememberView, sizesRead, viewRestored } from "./prefs.js";
 import { afterFlush, invalidate, onZone } from "./render.js";
 import { sequence, state } from "./state.js";
 import { adoptDraft, cancelPreview, cardBadge, cardTool, cardTools, debugComposed, forgetPins, forgetPreview, heldBranch, heldTargets, previewView, restoreRows, runPreview, setDebugRows } from "./preview.js";
@@ -689,7 +689,14 @@ async function openWorkspace() {
     onTest: (path) => api("/api/workspace/test", { path }),
     unsaved: holdsEdits,
     onOpen: async (request, discard) => {
-      await api("/api/workspace", { ...request, unsaved: !discard && holdsEdits() }, "PUT");
+      const unsaved = !discard && holdsEdits();
+      holdView(true);
+      try {
+        await api("/api/workspace", { ...request, unsaved }, "PUT");
+      } catch (e) {
+        holdView(false);
+        throw e;
+      }
       leaving = true;
       location.reload();
     },

@@ -34,7 +34,8 @@ internal sealed class WorkspaceSlot(StudioWorkspace workspace, string source)
     // A page sends requests of its own as the person acts (the view it keeps, the composition): a change waits that long for them.
     private static readonly TimeSpan Drain = TimeSpan.FromSeconds(5);
 
-    private readonly SlotHolds _holds = new("The folder is being used by another request: wait for it to finish.");
+    private readonly SlotHolds _holds = new(
+        "The folder is being used by another request: wait for it to finish.", "Another folder is being opened: reload the page.");
     private StudioWorkspace _workspace = workspace;
     private string _source = source;
 

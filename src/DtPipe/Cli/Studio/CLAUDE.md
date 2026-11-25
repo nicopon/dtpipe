@@ -35,7 +35,8 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   A change is refused with 409 naming the cause when the page says its changes are unsaved, a run goes on, the engine slot is
   held (`TakeSlotFor`, shared with the coordinator's change), or the agent's turn runs or a card waits (`TryClose`, run under the
   slot's lock once no request holds it); it waits a few seconds for the requests in flight (`SlotHolds`, the coordinator's
-  slot's counting too), and one that arrives meanwhile waits for it. It then calls `Directory.SetCurrentDirectory`, which is
+  slot's counting too), and refuses one that arrives meanwhile, sent for the folder left; the page writes no view from the
+  moment it asks (`holdView`), so nothing of the old folder lands in the new one. It then calls `Directory.SetCurrentDirectory`, which is
   process-wide: a job's relative paths, `SessionResolver` and the agent's MCP tools (their confinement, `list-cursors`) read the
   current directory, so a folder or a path kept from before a change (a field, a closure, a cache) reads the old folder. The agent is
   replaced by a new one on its model (`AgentSlot.RenewAsync`: a plan or an answer of the old folder never reaches the new one),

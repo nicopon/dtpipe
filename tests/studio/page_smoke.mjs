@@ -1076,6 +1076,7 @@ const scenarios = {
         await p.clickText("#d-inspector button", "Delete step");
         check(`${job} holds an unsaved change`, await p.until(`!document.querySelector("#d-dirty").hidden`));
       };
+      const viewOf = (dir) => { const f = path.join(dir, ".dtpipe", "studio", "view.json"); return fs.existsSync(f) ? fs.readFileSync(f, "utf8") : ""; };
       const refusedForChanges = () => p.until(`/not saved/.test(document.querySelector("#d-workspace-error")?.textContent ?? "") && !document.querySelector("#d-workspace-unsaved").hidden`);
 
       check("the header names the folder, as a button", await p.until(`${header} === ${JSON.stringify(path.basename(folder))} && document.querySelector("#folder").tagName === "BUTTON"`), await p.ev(header));
@@ -1090,6 +1091,7 @@ const scenarios = {
       check("nothing changed meanwhile", await p.ev(`${header} === ${JSON.stringify(path.basename(folder))} && ${jobs} === "chain.yaml"`));
       await p.click("#d-workspace-discard");
       check("discarding opens the new folder, read again whole", await p.until(`${header} === ${JSON.stringify(path.basename(other))} && ${jobs} === "other.yaml" && !document.querySelector("#d-workspace-dialog")`, 30000), await p.ev(`${jobs} + " | " + (document.querySelector("#d-workspace-error")?.textContent ?? "no dialog")`));
+      check("the folder opened keeps no view of the folder left", !viewOf(other).includes("chain.yaml"), viewOf(other));
       check("the job left keeps its file as it was", fs.readFileSync(path.join(folder, "chain.yaml"), "utf8") === fs.readFileSync(path.join(here, "fixtures", "chain.yaml"), "utf8"));
       check("the folder opened joins the recent ones, the start folder does not", JSON.stringify(JSON.parse(fs.readFileSync(file, "utf8")).folders) === JSON.stringify([other]), fs.readFileSync(file, "utf8"));
       await p.shot("workspace-1-switched");
@@ -1102,6 +1104,7 @@ const scenarios = {
       check("unsaved changes refuse again", await refusedForChanges());
       await p.click("#d-workspace-save");
       check("Save, then open: the start folder is open again", await p.until(`${header} === ${JSON.stringify(path.basename(folder))} && ${jobs} === "chain.yaml"`, 30000), await p.ev(header));
+      check("the start folder keeps no view of the folder left", !viewOf(folder).includes("other.yaml"), viewOf(folder));
       check("the job was saved first", fs.readFileSync(path.join(other, "other.yaml"), "utf8") !== fs.readFileSync(path.join(here, "fixtures", "chain.yaml"), "utf8"));
       check("both folders are recent now, the last opened first", JSON.stringify(JSON.parse(fs.readFileSync(file, "utf8")).folders) === JSON.stringify([folder, other]), fs.readFileSync(file, "utf8"));
     } finally {

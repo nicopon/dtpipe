@@ -6,9 +6,10 @@ namespace DtPipe.Cli.Studio;
 /// The requests that use what a slot holds, counted under the slot's lock (<see cref="Gate"/>, which the slot takes for its own
 /// fields too). Each takes a lease and disposes it at its end; a replacement runs under that lock only while no lease is held,
 /// and is refused with 409 otherwise, so nothing is replaced under a request that uses it. A replacement may wait a while for
-/// the leases held to end; a request that arrives meanwhile waits for the replacement and then holds what it put in place.
+/// the leases held to end; a request that arrives meanwhile is refused with 409 (<c>changing</c>): it was sent for what is being
+/// replaced, and must not run against what replaces it.
 /// </summary>
-internal sealed class SlotHolds(string busy)
+internal sealed class SlotHolds(string busy, string changing = "")
 {
     private int _holds;
     private bool _draining;
@@ -20,7 +21,7 @@ internal sealed class SlotHolds(string busy)
     {
         lock (Gate)
         {
-            while (_draining) Monitor.Wait(Gate);
+            if (_draining) throw new StudioRefusal(409, changing);
             _holds++;
             return new Lease<T>(this, read());
         }
@@ -49,7 +50,6 @@ internal sealed class SlotHolds(string busy)
                 finally
                 {
                     _draining = false;
-                    Monitor.PulseAll(Gate);
                 }
             }
             if (_holds > 0) throw new StudioRefusal(409, busy);
