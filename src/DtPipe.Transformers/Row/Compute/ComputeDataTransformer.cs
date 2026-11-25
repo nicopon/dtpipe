@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using Apache.Arrow;
+using Apache.Arrow.Serialization.Mapping;
 using DtPipe.Core.Abstractions;
 using DtPipe.Core.Infrastructure.Arrow;
 using DtPipe.Core.Models;
@@ -18,6 +19,9 @@ namespace DtPipe.Transformers.Row.Compute;
 /// </summary>
 public sealed class ComputeDataTransformer : BaseColumnarTransformer, IRequiresOptions<DtPipe.Transformers.Row.Compute.ComputeOptions>
 {
+    private static bool IsNullCell(IArrowArray column, int row)
+        => column is DictionaryArray ? ArrowTypeMap.GetValue(column, row) is null : column.IsNull(row);
+
     private const int ParallelBatchThreshold = 1024;
 
     private readonly ComputeOptions _options;
@@ -263,7 +267,8 @@ public sealed class ComputeDataTransformer : BaseColumnarTransformer, IRequiresO
             if (_skipNull && proc.ColumnIndex < _inputColumnCount)
             {
                 var col = batch.Column(proc.ColumnIndex);
-                if (col.NullCount > 0) skipInputCols[p] = col;
+                // A dictionary's entry may be null while its index is not: the array's own null count misses it.
+                if (col.NullCount > 0 || col is DictionaryArray) skipInputCols[p] = col;
             }
         }
 
@@ -274,7 +279,7 @@ public sealed class ComputeDataTransformer : BaseColumnarTransformer, IRequiresO
             for (int p = 0; p < count; p++)
             {
                 var proc = processors[p];
-                if (skipInputCols[p]?.IsNull(rowIdx) == true)
+                if (skipInputCols[p] is { } skipCol && IsNullCell(skipCol, rowIdx))
                 {
                     JsValueConversion.AppendNullFast(builders[p]);
                     continue;

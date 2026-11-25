@@ -120,6 +120,33 @@ public class ComputeDataTransformerTests : IDisposable
     }
 
     [Fact]
+    public async Task SkipNull_Skips_A_Dictionary_Cell_Whose_Entry_Is_Null_On_Both_Paths()
+    {
+        var options = new ComputeOptions { Compute = new[] { "S:row.S === null ? 'RAN' : row.S + '!'" }, SkipNull = true };
+        var columns = new[] { new PipeColumnInfo("S", typeof(string), true) };
+
+        var onRows = new ComputeDataTransformer(options, _jsEngineProvider);
+        await onRows.InitializeAsync(columns);
+        var onBatches = new ComputeDataTransformer(options, _jsEngineProvider);
+        await onBatches.InitializeAsync(columns);
+
+        var dictionary = new Apache.Arrow.StringArray.Builder().Append("a").AppendNull().Build();
+        var indices = new Apache.Arrow.Int32Array.Builder().Append(0).Append(1).Append(0).Build();
+        var type = new Apache.Arrow.Types.DictionaryType(Apache.Arrow.Types.Int32Type.Default, Apache.Arrow.Types.StringType.Default, false);
+        var column = new Apache.Arrow.DictionaryArray(type, indices, dictionary);
+        var schema = new Apache.Arrow.Schema.Builder().Field(new Apache.Arrow.Field("S", type, true)).Build();
+        using var batch = new Apache.Arrow.RecordBatch(schema, [column], 3);
+
+        using var result = await onBatches.TransformBatchAsync(batch);
+
+        var values = ((Apache.Arrow.StringArray)result!.Column(0));
+        values.GetString(0).Should().Be("a!");
+        values.IsNull(1).Should().BeTrue("the row path skips a null entry, so the batch path does");
+        values.GetString(2).Should().Be("a!");
+        onRows.Transform(new object?[] { null })![0].Should().BeNull();
+    }
+
+    [Fact]
     public async Task Transform_SkipNull_DoesNotExecuteScript()
     {
         // Arrange
