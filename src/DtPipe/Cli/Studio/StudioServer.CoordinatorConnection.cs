@@ -27,6 +27,9 @@ public sealed partial class StudioServer
             case ("POST", "/api/coordinator/connection/test"):
                 await JsonAsync(context, await TestCoordinatorAsync(await BodyAsync<CoordinatorConnectionRequest>(context), context.RequestAborted));
                 break;
+            case ("POST", "/api/coordinator/connection/disconnect"):
+                await JsonAsync(context, await DisconnectCoordinatorAsync());
+                break;
             case ("PUT", "/api/coordinator/connection"):
                 await JsonAsync(context, await ConnectCoordinatorAsync(await BodyAsync<CoordinatorConnectionRequest>(context)));
                 break;
@@ -143,6 +146,20 @@ public sealed partial class StudioServer
         if (request.RemoveKey) keyState = "none";
         _coordinator.Describe(new CoordinatorConnection(prepared.Origin, prepared.Auth, "page", keyState));
         return CoordinatorConnectionView(warning);
+    }
+
+    /// <summary>
+    /// Closes the link for this session and keeps the description of the connection, with the memory and the keyring's key as they
+    /// are: the next start connects it again. A key held by the link alone went with it.
+    /// </summary>
+    private async Task<object> DisconnectCoordinatorAsync()
+    {
+        CoordinatorStartOrRefuse();
+        if (Coordinator is null) return CoordinatorConnectionView();
+        var connection = _coordinator.Connection;
+        using (TakeSlotFor("A change of coordinator"))
+            await _coordinator.ReplaceAsync(null, connection is null ? null : connection with { Key = connection.Key == "stored" ? "stored" : "none", NeedsKey = false }, signIn: false);
+        return CoordinatorConnectionView();
     }
 
     /// <summary>Disconnects, then forgets the file's coordinator and the keys of its origin and of the connection's.</summary>

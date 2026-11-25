@@ -47,6 +47,10 @@ export async function openCoordinatorConnect() {
       await refreshCoordinator();
       return answer;
     },
+    onDisconnect: async () => {
+      await api("/api/coordinator/connection/disconnect", {});
+      await refreshCoordinator();
+    },
     onForget: async () => {
       await api("/api/coordinator/connection", undefined, "DELETE");
       await refreshCoordinator();
@@ -58,22 +62,27 @@ onZone("coordinator", render);
 // A request the coordinator's side failed: what the link last met is read again, so the header says it.
 onLinkDoubt(() => { refreshCoordinator().catch(() => {}); });
 
+/**
+ * The header's zone for the coordinator: its status is the button that opens the connection dialog, in every state, and the
+ * actions of a state (Sign out, Open again, Sign in) sit beside it.
+ */
 function render() {
   const link = state.coordinator;
   const connection = state.coordinatorConnection;
   const host = $("coordinator");
   host.hidden = false;
-  const change = el("button", { id: "coordinator-change", class: "small ghost", onclick: openCoordinatorConnect,
-    title: connection?.source === "flag" ? "Set by the command line: a change holds for this session" : "Connect another coordinator, or forget this one" }, "Change…");
+  /** @param {string} dot @param {string} title @param {...any} content */
+  const zone = (dot, title, ...content) =>
+    el("button", { id: "coordinator-link", type: "button", class: "small ghost agent-link", onclick: openCoordinatorConnect, title },
+      el("span", { class: `dot ${dot}`.trim() }), " ", ...content);
+  const hold = connection?.source === "flag" ? "Set by the command line: a change holds for this session" : "Connect another coordinator, disconnect, or forget this one";
   if (!link) {
-    // Nothing is connected: the pill says so, or says that the remembered one waits for its key.
+    // Nothing is connected: the zone says so, or says that the remembered one waits for its key.
     const name = connection?.origin ? new URL(connection.origin).host : null;
     if (connection?.needsKey) {
-      fill(host, el("span", { class: "dot warn" }), " ", name, " · key needed ",
-        el("button", { id: "coordinator-connect", class: "small", onclick: openCoordinatorConnect, title: "This coordinator was remembered, but its key is not kept: connect it again" }, "Reconnect…"));
+      fill(host, zone("warn", "This coordinator was remembered, but its key is not kept: connect it again", name, " · key needed"));
     } else {
-      fill(host, el("span", { class: "dot" }), " no coordinator ",
-        el("button", { id: "coordinator-connect", class: "small ghost", onclick: openCoordinatorConnect, title: "Connect a coordinator to use its bricks and its library" }, "Connect…"));
+      fill(host, zone("", "Connect a coordinator to use its bricks and its library", "no coordinator"));
     }
     return;
   }
@@ -83,20 +92,20 @@ function render() {
   // button the state offers.
   const silent = link.unreachable ? el("span", { title: link.unreachable }, "unreachable: ", link.unreachable) : null;
   if (link.state === "signed-in" && silent) {
-    fill(host, el("span", { class: "dot warn" }), " ", name, origin, " · ", silent,
-      " ", el("button", { class: "small ghost", onclick: signOut, title: "Forget this studio's tokens" }, "Sign out"), " ", change);
+    fill(host, zone("warn", hold, name, origin, " · ", silent),
+      " ", el("button", { class: "small ghost", onclick: signOut, title: "Forget this studio's tokens" }, "Sign out"));
   } else if (link.state === "signed-in") {
-    fill(host, el("span", { class: "dot good" }), " ", name, origin, " · ", link.me?.email || link.me?.name || "signed in",
-      " ", el("button", { class: "small ghost", onclick: signOut, title: "Forget this studio's tokens" }, "Sign out"), " ", change);
+    fill(host, zone("good", hold, name, origin, " · ", link.me?.email || link.me?.name || "signed in"),
+      " ", el("button", { class: "small ghost", onclick: signOut, title: "Forget this studio's tokens" }, "Sign out"));
   } else if (link.state === "signing-in" && link.byKey) {
-    fill(host, el("span", { class: "dot warn" }), " ", name, origin, " · signing in with the key… ", change);
+    fill(host, zone("warn", hold, name, origin, " · signing in with the key…"));
   } else if (link.state === "signing-in") {
-    fill(host, el("span", { class: "dot warn" }), " ", name, origin, " · finish signing in in the other tab ",
-      " ", el("button", { class: "small ghost", onclick: signIn }, "Open again"), " ", change);
+    fill(host, zone("warn", hold, name, origin, " · finish signing in in the other tab"),
+      " ", el("button", { class: "small ghost", onclick: signIn }, "Open again"));
   } else {
     const label = link.byKey ? "Sign in with the key" : link.reason ? "Sign in again" : "Sign in";
-    fill(host, el("span", { class: "dot bad" }), " ", name, origin, " · ", silent ?? (link.reason || "not signed in"), " ",
-      el("button", { class: "small", onclick: signIn }, label), " ", change);
+    fill(host, zone("bad", hold, name, origin, " · ", silent ?? (link.reason || "not signed in")),
+      " ", el("button", { class: "small", onclick: signIn }, label));
   }
 }
 

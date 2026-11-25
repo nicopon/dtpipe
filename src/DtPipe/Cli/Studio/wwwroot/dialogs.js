@@ -1066,12 +1066,13 @@ export function openAgentConnectDialog(opts) {
 /**
  * The coordinator's connection: its address, how the person signs in (through the browser, or with a key the coordinator made)
  * and, under Advanced, whether to remember it on this machine. The key is typed here and sent once; the page never reads one
- * back, only whether one is kept and where. `onConnect(body)` makes the connection (false: the person declined) and
- * `onForget()` disconnects and forgets what is remembered.
- * @param {{ connection: any, onConnect: (body: any) => Promise<any>, onForget: () => Promise<void> }} opts
+ * back, only whether one is kept and where. `onConnect(body)` makes the connection (false: the person declined),
+ * `onDisconnect()` closes the link for this session and keeps what is remembered, and `onForget()` disconnects and forgets what
+ * is remembered.
+ * @param {{ connection: any, onConnect: (body: any) => Promise<any>, onDisconnect: () => Promise<void>, onForget: () => Promise<void> }} opts
  */
 export function openCoordinatorConnectDialog(opts) {
-  const { connection, onConnect, onForget } = opts;
+  const { connection, onConnect, onDisconnect, onForget } = opts;
   openDialog("d-coordinator-dialog", "Connect a coordinator", ({ body, close }) => {
     const origin = /** @type {HTMLInputElement} */ (el("input", {
       id: "d-coordinator-origin", type: "text", class: "mono", autocomplete: "off", "aria-label": "Address",
@@ -1160,6 +1161,15 @@ export function openCoordinatorConnectDialog(opts) {
       note,
       banner,
       el("div", { class: "row dialog-actions" },
+        connection?.connected
+          ? el("button", {
+            id: "d-coordinator-disconnect", type: "button", class: "ghost", title: "Close the link for this session; what is remembered stays, and the next start connects it again",
+            onclick: async () => {
+              if (busy) return;
+              try { await onDisconnect(); close(); } catch (err) { fail(err.message); }
+            },
+          }, "Disconnect")
+          : null,
         connection?.source && connection.source !== "none"
           ? el("button", {
             id: "d-coordinator-forget", type: "button", class: "ghost", title: "Disconnect, and forget the remembered coordinator and the key kept for its address",

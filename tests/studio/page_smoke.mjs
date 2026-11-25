@@ -1119,9 +1119,9 @@ const scenarios = {
   async "coordinator-connect"({ page: p, folder, studio }) {
     const file = path.join(folder, ".smoke-state", "studio.json");
     const pill = `document.querySelector("#coordinator")?.textContent ?? ""`;
-    check("the pill says no coordinator is connected and offers to connect one", await p.until(`/no coordinator/.test(${pill}) && !!document.querySelector("#coordinator-connect")`), await p.ev(pill));
+    check("the zone says no coordinator is connected and is the button that connects one", await p.until(`/no coordinator/.test(${pill}) && !!document.querySelector("#coordinator-link")`), await p.ev(pill));
     check("the library and the publication are not offered", await p.ev(`document.querySelector("#side-library").hidden`));
-    await p.click("#coordinator-connect");
+    await p.click("#coordinator-link");
     check("the dialog opens", await p.until(`!!document.querySelector("#d-coordinator-origin") && document.querySelector("#d-coordinator-key").parentElement.hidden`));
     await p.ev(`(() => {
       const set = (id, value) => { const n = document.querySelector(id); n.value = value; n.dispatchEvent(new Event("input")); n.dispatchEvent(new Event("change")); };
@@ -1138,7 +1138,7 @@ const scenarios = {
     check("nothing is remembered when the box is not ticked", !fs.existsSync(file));
     await p.shot("coordinator-1-connected");
 
-    await p.click("#coordinator-change");
+    await p.click("#coordinator-link");
     check("the dialog reads the connection back", await p.until(`document.querySelector("#d-coordinator-auth")?.value === "key" && !!document.querySelector("#d-coordinator-forget")`));
     await p.ev(`(() => { const a = document.querySelector("#d-coordinator-auth"); a.value = "browser"; a.dispatchEvent(new Event("change")); })()`);
     await p.click("#d-coordinator-submit");
@@ -1146,13 +1146,19 @@ const scenarios = {
     const written = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
     check("the coordinator is remembered, with no key", written.includes(fakeCoordinators.get(folder).url) && !/dtp_/.test(written), written || "no file");
 
+    await p.click("#coordinator-link");
+    check("the dialog offers to disconnect, beside forgetting", await p.until(`!!document.querySelector("#d-coordinator-disconnect") && !!document.querySelector("#d-coordinator-forget")`));
+    await p.click("#d-coordinator-disconnect");
+    check("Disconnect closes the link and keeps what is remembered",
+      await p.until(`!document.querySelector("#d-coordinator-dialog") && /no coordinator/.test(${pill})`) && fs.readFileSync(file, "utf8").includes(fakeCoordinators.get(folder).url));
+
     studio.stop();
     await sleep(500);
     const again = await startStudio(folder);
     try {
       await p.send("Page.navigate", { url: again.url });
-      check("a studio started without a flag connects the remembered coordinator", await p.until(`/127.0.0.1/.test(${pill}) && !!document.querySelector("#coordinator-change")`, 30000), await p.ev(pill));
-      await p.click("#coordinator-change");
+      check("a studio started without a flag connects the remembered coordinator", await p.until(`/127.0.0.1/.test(${pill}) && !!document.querySelector("#coordinator-link")`, 30000), await p.ev(pill));
+      await p.click("#coordinator-link");
       await p.click("#d-coordinator-forget");
       check("forgetting disconnects and removes the remembered coordinator", await p.until(`!document.querySelector("#d-coordinator-dialog") && /no coordinator/.test(${pill})`)
         && !JSON.parse(fs.readFileSync(file, "utf8")).coordinator);
