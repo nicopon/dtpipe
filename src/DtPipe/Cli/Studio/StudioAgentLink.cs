@@ -68,4 +68,23 @@ internal sealed class AgentSlot(StudioAgent? agent, AgentConnection? connection)
             _swap.Release();
         }
     }
+
+    /// <summary>
+    /// Puts the agent <paramref name="create"/> makes in place of <paramref name="closed"/>, which a change beside it closed: a
+    /// new conversation. An agent the page replaced meanwhile is new already and stays.
+    /// </summary>
+    public async Task RenewAsync(StudioAgent closed, Func<StudioAgent> create)
+    {
+        await _swap.WaitAsync();
+        try
+        {
+            if (!ReferenceEquals(Current, closed)) return;
+            Volatile.Write(ref _agent, create());
+        }
+        finally
+        {
+            _swap.Release();
+        }
+        await closed.DisposeAsync();
+    }
 }

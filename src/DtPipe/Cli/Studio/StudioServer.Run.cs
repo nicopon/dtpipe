@@ -88,11 +88,11 @@ public sealed partial class StudioServer
     private RunPlan PlanRun(RunRequest asked)
     {
         var path = JobPath(asked.Path) ?? throw new StudioRefusal(400, "Run a job saved in the folder: name its path.");
-        var job = _folder.ReadJob(path);
+        var job = Folder.ReadJob(path);
         if (asked.Hash is null || asked.Hash != job.Hash)
             throw new StudioRefusal(409, $"{path} is not the job saved last: save it, then run.");
         var sampling = RunnableHere(job.Text, asked.Bricks, "run");
-        var launch = _variables.LaunchEnvironment(path, sampling.Yaml);
+        var launch = Variables.LaunchEnvironment(path, sampling.Yaml);
         var staged = asked.Debug == true || asked.Review == true;
         // A suspended run has its rows; any run but its continuation would write the job again and leave them to be written twice.
         if (!staged && LoadDebug(DebugKey(path, null)).Real)
@@ -143,7 +143,7 @@ public sealed partial class StudioServer
     {
         var cutter = _tools.Engine.Cutter;
         var key = DebugKey(path, null);
-        _local.CheckDebug(key);
+        Local.CheckDebug(key);
         var review = asked.Review == true;
         var plan = sample
             ? PlanOf(cutter, text, CoordinatorApi.MaxSampleRows, SampleSalt(path, text))
@@ -329,7 +329,7 @@ public sealed partial class StudioServer
                 byte[] arrow;
                 try { arrow = await (Coordinator ?? throw new StudioRefusal(409, NoCoordinator)).SampleAsync(brick.Node, brick.Id, CoordinatorApi.MaxSampleRows, context.RequestAborted); }
                 catch (CoordinatorLinkException ex) { throw new StudioRefusal(502, $"'{alias}': {ex.Message}"); }
-                files.Add(_local.SampleFile(arrow));
+                files.Add(Local.SampleFile(arrow));
                 inputs.Add($"{alias}={Bindable(files[^1])}");
             }
             var outputs = new List<string>();
@@ -338,7 +338,7 @@ public sealed partial class StudioServer
                 if (plan.Cut?.Dropped.Contains(alias) == true) continue;
                 // A review ends every branch before its writer: the sink's output is gone from the cut, so nothing is left to bind.
                 if (plan.Staged?.Review == true) continue;
-                files.Add(_local.SampleFile(null));
+                files.Add(Local.SampleFile(null));
                 outputs.Add($"{alias}={Bindable(files[^1])}");
             }
             var bindings = new StudioBindings(inputs.Count > 0 ? string.Join(',', inputs) : null, outputs.Count > 0 ? string.Join(',', outputs) : null);

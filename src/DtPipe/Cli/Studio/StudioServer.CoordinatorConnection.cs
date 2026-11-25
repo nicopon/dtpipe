@@ -108,13 +108,6 @@ public sealed partial class StudioServer
         }
     }
 
-    /// <summary>Takes the engine slot for a change of coordinator, or refuses naming who holds it.</summary>
-    private IDisposable TakeSlotForCoordinator()
-    {
-        TakeSlot("A change of coordinator");
-        return new SlotLease(_sampling);
-    }
-
     private async Task<object> ConnectCoordinatorAsync(CoordinatorConnectionRequest request)
     {
         var start = CoordinatorStartOrRefuse();
@@ -123,7 +116,7 @@ public sealed partial class StudioServer
         var link = NewCoordinatorLink(prepared);
         try
         {
-            using (TakeSlotForCoordinator())
+            using (TakeSlotFor("A change of coordinator"))
                 await _coordinator.ReplaceAsync(link, new CoordinatorConnection(prepared.Origin, prepared.Auth, "page", keyState), signIn: prepared.Auth == "key");
         }
         catch
@@ -157,7 +150,7 @@ public sealed partial class StudioServer
     {
         var start = CoordinatorStartOrRefuse();
         var connection = _coordinator.Connection;
-        using (TakeSlotForCoordinator())
+        using (TakeSlotFor("A change of coordinator"))
             await _coordinator.ReplaceAsync(null, null, signIn: false);
         var remembered = start.Settings.ReadCoordinator();
         start.Settings.ClearCoordinator();

@@ -137,18 +137,25 @@ internal sealed class StudioAgent : IAsyncDisposable
     }
 
     /// <summary>
-    /// Closes this agent to new turns when nothing is in flight, so it can be replaced; otherwise the reason it stays. The check
-    /// and the closing are one step: a turn that starts after it is refused.
+    /// Closes this agent to new turns when nothing is in flight, so it can be replaced; otherwise the reason it stays, which
+    /// ends with <paramref name="before"/>, the change that waits. The check and the closing are one step: a turn that starts
+    /// after it is refused.
     /// </summary>
-    public string? TryClose()
+    public string? TryClose(string before = "connecting another model")
     {
         lock (_gate)
         {
-            if (!_turn.IsCompleted) return "A turn is running: stop it before connecting another model.";
-            if (_pending is not null) return "A card waits for your answer: answer it before connecting another model.";
+            if (!_turn.IsCompleted) return $"A turn is running: stop it before {before}.";
+            if (_pending is not null) return $"A card waits for your answer: answer it before {before}.";
             _closed = true;
             return null;
         }
+    }
+
+    /// <summary>What this agent was made with, on the model the person chose last: a new conversation starts from it.</summary>
+    public StudioAgentSetup Renewed()
+    {
+        lock (_gate) return _setup with { Model = _model };
     }
 
     public bool Busy

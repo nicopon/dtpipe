@@ -19,51 +19,30 @@ public sealed record StudioCoordinatorStart(StudioSettings Settings, Coordinator
 /// </summary>
 internal sealed class CoordinatorSlot(CoordinatorLink? link, CoordinatorConnection? connection) : IDisposable
 {
-    private readonly object _gate = new();
+    private readonly SlotHolds _holds = new("The coordinator is being used by another request: wait for it to finish.");
     private CoordinatorLink? _link = link;
     private CoordinatorConnection? _connection = connection;
-    private int _holds;
     private CancellationTokenSource? _signIn;
     private Task _signingIn = Task.CompletedTask;
 
     public CoordinatorLink? Current
     {
-        get { lock (_gate) return _link; }
+        get { lock (_holds.Gate) return _link; }
     }
 
     public CoordinatorConnection? Connection
     {
-        get { lock (_gate) return _connection; }
+        get { lock (_holds.Gate) return _connection; }
     }
 
     /// <summary>Another description of the connection in place, as it stands after a change of memory.</summary>
     public void Describe(CoordinatorConnection? updated)
     {
-        lock (_gate) _connection = updated;
+        lock (_holds.Gate) _connection = updated;
     }
 
-    /// <summary>Holds the link in place until the lease is disposed; <see cref="Lease.Link"/> is null when none is connected.</summary>
-    public Lease Hold()
-    {
-        lock (_gate)
-        {
-            _holds++;
-            return new Lease(this, _link);
-        }
-    }
-
-    internal sealed class Lease(CoordinatorSlot slot, CoordinatorLink? link) : IDisposable
-    {
-        private int _released;
-
-        public CoordinatorLink? Link => link;
-
-        public void Dispose()
-        {
-            if (Interlocked.Exchange(ref _released, 1) == 0)
-                lock (slot._gate) slot._holds--;
-        }
-    }
+    /// <summary>Holds the link in place until the lease is disposed; its value is null when none is connected.</summary>
+    public SlotHolds.Lease<CoordinatorLink?> Hold() => _holds.Hold(() => _link);
 
     /// <summary>
     /// Puts <paramref name="next"/> in place of the current link, or refuses with 409 while a request holds it. The sign-in the old
@@ -72,12 +51,11 @@ internal sealed class CoordinatorSlot(CoordinatorLink? link, CoordinatorConnecti
     /// </summary>
     public async Task ReplaceAsync(CoordinatorLink? next, CoordinatorConnection? described, bool signIn)
     {
-        CoordinatorLink? old;
-        CancellationTokenSource? stopped;
-        Task stopping;
-        lock (_gate)
+        CoordinatorLink? old = null;
+        CancellationTokenSource? stopped = null;
+        var stopping = Task.CompletedTask;
+        _holds.Replace(() =>
         {
-            if (_holds > 0) throw new StudioRefusal(409, "The coordinator is being used by another request: wait for it to finish.");
             old = _link;
             stopped = _signIn;
             stopping = _signingIn;
@@ -86,7 +64,7 @@ internal sealed class CoordinatorSlot(CoordinatorLink? link, CoordinatorConnecti
             _signIn = null;
             _signingIn = Task.CompletedTask;
             if (signIn && next is { ByKey: true }) StartSignIn(next);
-        }
+        });
         if (stopped is not null)
         {
             await stopped.CancelAsync();
@@ -104,7 +82,7 @@ internal sealed class CoordinatorSlot(CoordinatorLink? link, CoordinatorConnecti
     public void StartSignIn(CoordinatorLink link)
     {
         var cts = new CancellationTokenSource();
-        lock (_gate)
+        lock (_holds.Gate)
         {
             _signIn = cts;
             _signingIn = Run(link, cts.Token);

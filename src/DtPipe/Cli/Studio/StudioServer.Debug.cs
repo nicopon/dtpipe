@@ -97,21 +97,21 @@ public sealed partial class StudioServer
     private string? SampleSalt(string? path, string? yaml)
     {
         if (string.IsNullOrWhiteSpace(yaml)) return null;
-        var material = _variables.Fingerprint(JobPath(path), yaml);
+        var material = Variables.Fingerprint(JobPath(path), yaml);
         return material.Length == 0 ? null
             : Convert.ToHexStringLower(HMACSHA256.HashData(LevelKey(), Encoding.UTF8.GetBytes("sample\0" + material)));
     }
 
-    private CheckpointStore DebugStore() => new(SessionStore.Resolve(DebugCutter.SessionName, _folder.Root));
+    private CheckpointStore DebugStore() => new(SessionStore.Resolve(DebugCutter.SessionName, Folder.Root));
 
-    private void PurgeDrafts() => _local.PurgeDrafts(key => ForgetCheckpoint(DebugStore(), key));
+    private void PurgeDrafts() => Local.PurgeDrafts(key => ForgetCheckpoint(DebugStore(), key));
 
     private DebugState LoadDebug(string key)
     {
         var state = new DebugState();
         try
         {
-            var node = _local.ReadDebug(key);
+            var node = Local.ReadDebug(key);
             foreach (var w in node?["watch"] as JsonArray ?? [])
                 if ((string?)w?["branch"] is { } branch && (string?)w["at"] is "read" or "end")
                     state.Watch.Add(new DebugWatch(branch, (string?)w["at"] == "read" ? DebugAt.Read : DebugAt.End, (string?)w["card"]));
@@ -126,8 +126,8 @@ public sealed partial class StudioServer
 
     private void SaveDebug(string key, DebugState state)
     {
-        if (state.Watch.Count == 0 && state.Levels.Count == 0) { _local.ClearDebug(key); return; }
-        _local.WriteDebug(key, new JsonObject
+        if (state.Watch.Count == 0 && state.Levels.Count == 0) { Local.ClearDebug(key); return; }
+        Local.WriteDebug(key, new JsonObject
         {
             ["session"] = DebugCutter.SessionName,
             ["real"] = state.Real && state.Levels.Count > 0,
@@ -187,7 +187,7 @@ public sealed partial class StudioServer
     private DebugPlan SuspendedPlan(DebugCutter cutter, string? path, DebugPlan fallback)
     {
         if (JobPath(path) is not { } job) return fallback;
-        try { return cutter.Plan(_folder.ReadJob(job).Text, 0); }
+        try { return cutter.Plan(Folder.ReadJob(job).Text, 0); }
         catch (Exception ex) when (ex is StudioRefusal or InvalidOperationException or FormatException or YamlDotNet.Core.YamlException or IOException) { return fallback; }
     }
 
@@ -267,7 +267,7 @@ public sealed partial class StudioServer
         var asked = await BodyAsync<DebugRequest>(context);
         var rows = Math.Clamp(asked.Rows ?? 1000, 1, DebugMaxRows);
         var key = DebugKey(asked.Path, asked.Draft);
-        _local.CheckDebug(key);
+        Local.CheckDebug(key);
         var upTo = asked.UpTo is null ? null : WatchOf(asked.UpTo);
         var plan = PlanOf(cutter, asked.Yaml, rows, SampleSalt(asked.Path, asked.Yaml));
 
@@ -350,17 +350,17 @@ public sealed partial class StudioServer
         var asked = await BodyAsync<DebugStateRequest>(context);
         var rows = Math.Clamp(asked.Rows ?? 1000, 1, DebugMaxRows);
         var key = DebugKey(asked.Path, asked.Draft);
-        _local.CheckDebug(key);
+        Local.CheckDebug(key);
         var plan = PlanOf(cutter, asked.Yaml, rows, SampleSalt(asked.Path, asked.Yaml));
         var wanted = asked.Watch?.Select(WatchOf).ToList();
         var reset = (asked.Reset ?? []).Select(WatchOf).ToList();
         string? adopted = asked.Adopt is null || asked.Path is null ? null : DebugKey(null, asked.Adopt);
-        if (adopted is not null) _local.CheckDebug(adopted);
+        if (adopted is not null) Local.CheckDebug(adopted);
 
         TakeSlot("A preview");
         try
         {
-            if (adopted is not null) _local.AdoptDebug(adopted, key);
+            if (adopted is not null) Local.AdoptDebug(adopted, key);
             var state = LoadDebug(key);
             // Abandoning a suspended real run is the one change it allows: its rows belong to the text and the values it started with.
             // Asking what it holds changes nothing, and is answered as it is: a sample's plan would judge those rows by the wrong digest.
@@ -416,7 +416,7 @@ public sealed partial class StudioServer
     {
         var asked = await BodyAsync<DebugRowsRequest>(context);
         var key = DebugKey(asked.Path, asked.Draft);
-        _local.CheckDebug(key);
+        Local.CheckDebug(key);
         if (asked.Key is not { Length: > 0 } held || !LoadDebug(key).Levels.Any(l => l.Key == held))
             throw new StudioRefusal(404, "This job holds no such checkpoint.");
 

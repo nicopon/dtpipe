@@ -24,6 +24,13 @@ public sealed partial class StudioServer
         _slotHolder = who;
     }
 
+    /// <summary>Takes the engine slot now for a change of what the actions use, or refuses naming who holds it; the lease releases it.</summary>
+    private IDisposable TakeSlotFor(string who)
+    {
+        TakeSlot(who);
+        return new SlotLease(_sampling);
+    }
+
     /// <summary>Waits for the engine slot, as long as the turn is not stopped; the lease releases it.</summary>
     internal async Task<IDisposable> TakeSlotAsync(string who, CancellationToken ct)
     {
@@ -108,13 +115,13 @@ public sealed partial class StudioServer
         return new OpenJob(path, job.Unsaved || path is null, Design().Compose(job.Model).Yaml);
     }
 
-    internal string AgentJobs() => JsonSerializer.Serialize(new { jobs = _folder.Jobs() }, Json);
+    internal string AgentJobs() => JsonSerializer.Serialize(new { jobs = Folder.Jobs() }, Json);
 
     /// <summary>A job of the folder for the model, unless it holds a credential as a value and the person keeps it here.</summary>
     internal async Task<string> AgentReadJobAsync(string? path, CancellationToken ct)
     {
         var relative = JobPath(path) ?? throw new StudioRefusal(400, "read-job needs the job's 'path' in the folder.");
-        var job = _folder.ReadJob(relative);
+        var job = Folder.ReadJob(relative);
         using var linked = Linked(ct);
         if (await Agent!.MaySendAsync(relative, job.Text, ["send", "withhold"], linked.Token) != "send")
             return Answer(new { withheld = $"The person kept the text of '{relative}' from you: it holds a credential as a value. Ask them what you need to know of it." });
@@ -137,7 +144,7 @@ public sealed partial class StudioServer
         var composed = cards.Valid ? design.Compose(cards.Model) : cards;
         if (!composed.Valid) return Answer(new { error = "The job does not compose: " + string.Join(" ", composed.Errors) });
 
-        string? hash = File.Exists(_folder.ResolveForWrite(relative)) ? _folder.ReadJob(relative).Hash : null;
+        string? hash = File.Exists(Folder.ResolveForWrite(relative)) ? Folder.ReadJob(relative).Hash : null;
         var body = new { path = relative, replaces = hash is not null, yaml = composed.Yaml, rewrites = composed.Yaml != yaml.Replace("\r\n", "\n") };
         using var linked = Linked(ct);
         var choice = await Agent!.AskAsync("save", body, null, ["save", "refuse"],
@@ -145,7 +152,7 @@ public sealed partial class StudioServer
             linked.Token);
         return choice switch
         {
-            "save" => Answer(new { saved = relative, hash = _folder.WriteJob(relative, composed.Yaml, hash), yaml = composed.Yaml }),
+            "save" => Answer(new { saved = relative, hash = Folder.WriteJob(relative, composed.Yaml, hash), yaml = composed.Yaml }),
             "refuse" => Answer(new { refused = "The person declined to save this job. Nothing was written." }),
             _ => Answer(new { error = $"'{relative}' changed on disk since the card was shown: nothing was written." }),
         };
@@ -153,8 +160,8 @@ public sealed partial class StudioServer
 
     private bool Unchanged(string relative, string? hash)
     {
-        var exists = File.Exists(_folder.ResolveForWrite(relative));
-        return hash is null ? !exists : exists && _folder.ReadJob(relative).Hash == hash;
+        var exists = File.Exists(Folder.ResolveForWrite(relative));
+        return hash is null ? !exists : exists && Folder.ReadJob(relative).Hash == hash;
     }
 
     private static string Answer(object value) => JsonSerializer.Serialize(value, Json);

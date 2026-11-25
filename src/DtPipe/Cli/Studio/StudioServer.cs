@@ -120,10 +120,8 @@ public sealed partial class StudioServer : IAsyncDisposable
     private static readonly JsonSerializerOptions Json = JsonSerializerOptions.Web;
 
     private readonly WebApplication _app;
-    private readonly StudioFolder _folder;
+    private readonly WorkspaceSlot _workspace;
     private readonly StudioTools _tools;
-    private readonly StudioLocalFiles _local;
-    private readonly StudioVariables _variables;
     private readonly byte[] _token;
     private const string NoCoordinator = "No coordinator is connected to this studio: connect one from the page.";
 
@@ -134,12 +132,10 @@ public sealed partial class StudioServer : IAsyncDisposable
     private StudioServer(WebApplication app, StudioFolder folder, StudioTools tools, string token)
     {
         _app = app;
-        _folder = folder;
         _tools = tools;
-        _local = new StudioLocalFiles(folder);
-        _variables = new StudioVariables(_local, tools.Secrets);
-        _local.PurgeSamples();
-        PurgeDrafts();
+        _workspace = new WorkspaceSlot(new StudioWorkspace(folder, tools.Secrets), "argument");
+        _start = folder.Root;
+        Opened();
         Token = token;
         _token = Encoding.UTF8.GetBytes(token);
         _coordinator = new CoordinatorSlot(
@@ -221,7 +217,9 @@ public sealed partial class StudioServer : IAsyncDisposable
             if (!CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(request.Headers[TokenHeader].ToString()), _token))
                 throw new StudioRefusal(401, "This session's token is missing or wrong: open the address dtpipe studio printed.");
 
-            // A request that reaches the coordinator holds its link to the end: the connection cannot be replaced under it.
+            // A request that uses the folder holds it to the end, and one that reaches the coordinator holds its link: neither
+            // can be replaced under it.
+            using var workspace = LeavesWorkspace(request.Method, path) ? null : _workspace.Hold();
             using var hold = ReachesCoordinator(path) ? _coordinator.Hold() : null;
             switch (request.Method, path)
             {
@@ -259,16 +257,16 @@ public sealed partial class StudioServer : IAsyncDisposable
                 case ("POST", "/api/variables"):
                     var asked = await BodyAsync<VariablesRequest>(context);
                     // A brick's branch runs on its node, which resolves its variables: they are none of this machine's.
-                    var variables = _variables.Of(JobPath(asked.Path), WithoutBricks(asked.Yaml ?? "", asked.Bricks));
+                    var variables = Variables.Of(JobPath(asked.Path), WithoutBricks(asked.Yaml ?? "", asked.Bricks));
                     // The keyring's aliases are listed only for a job with a variable to launch.
-                    var aliases = variables.Any(v => v.Kind == "env") ? _variables.Aliases() : [];
+                    var aliases = variables.Any(v => v.Kind == "env") ? Variables.Aliases() : [];
                     await JsonAsync(context, new { variables, aliases });
                     break;
                 case ("PUT", "/api/launch"):
                     await LaunchAsync(context);
                     break;
                 case ("GET", "/api/view"):
-                    var viewed = _local.ReadView();
+                    var viewed = Local.ReadView();
                     var viewedJob = JobPath(request.Query["path"].ToString());
                     await JsonAsync(context, new { sizes = viewed["sizes"], side = viewed["side"], open = viewed["open"], job = viewedJob is null ? null : viewed["jobs"]?[viewedJob] });
                     break;
@@ -300,7 +298,7 @@ public sealed partial class StudioServer : IAsyncDisposable
                     context.Response.StatusCode = StatusCodes.Status204NoContent;
                     break;
                 case ("GET", "/api/publish"):
-                    var published = JobPath(request.Query["path"].ToString()) is { } publishedJob ? _local.ReadPublication(publishedJob) : null;
+                    var published = JobPath(request.Query["path"].ToString()) is { } publishedJob ? Local.ReadPublication(publishedJob) : null;
                     // An id the page proposes is judged by the rule a publication applies, before the person writes a message for it.
                     var proposed = request.Query["id"].ToString();
                     await JsonAsync(context, new
@@ -447,8 +445,8 @@ public sealed partial class StudioServer : IAsyncDisposable
     /// </summary>
     private async Task JobsAsync(HttpContext context)
     {
-        var jobs = _folder.Jobs();
-        var folders = _folder.Folders();
+        var jobs = Folder.Jobs();
+        var folders = Folder.Folders();
         var publications = new Dictionary<string, object>(StringComparer.Ordinal);
         if (Coordinator is { } link)
         {
@@ -456,19 +454,19 @@ public sealed partial class StudioServer : IAsyncDisposable
             foreach (var job in jobs)
             {
                 StudioPublication? pub;
-                try { pub = _local.ReadPublication(job); }
+                try { pub = Local.ReadPublication(job); }
                 catch (Exception ex) when (ex is StudioRefusal or IOException or UnauthorizedAccessException) { continue; }
                 if (pub is null || pub.Coordinator != origin) continue;
                 bool? localModified = null;
                 if (pub.LocalHash is not null)
                 {
-                    try { localModified = _folder.ReadJob(job).Hash != pub.LocalHash; }
+                    try { localModified = Folder.ReadJob(job).Hash != pub.LocalHash; }
                     catch (Exception ex) when (ex is StudioRefusal or IOException or UnauthorizedAccessException) { }
                 }
                 publications[job] = new { id = pub.Id, commit = pub.Commit, localModified };
             }
         }
-        await JsonAsync(context, new { folder = Path.GetFileName(_folder.Root), jobs, folders, publications });
+        await JsonAsync(context, new { folder = Path.GetFileName(Folder.Root), jobs, folders, publications });
     }
 
     /// <summary>
@@ -479,14 +477,14 @@ public sealed partial class StudioServer : IAsyncDisposable
         var asked = await BodyAsync<RenameJobRequest>(context);
         var from = JobPath(asked.From) ?? throw new StudioRefusal(400, "Name the job's current path as 'from'.");
         var to = JobPath(asked.To) ?? throw new StudioRefusal(400, "Name the job's new path as 'to'.");
-        _local.CheckJobFiles(from);
-        _local.CheckJobFiles(to);
+        Local.CheckJobFiles(from);
+        Local.CheckJobFiles(to);
         if (RunInProgressFor(from))
             throw new StudioRefusal(409, $"A run is in progress on '{from}': stop it, or wait for it, before renaming.");
         if (LoadDebug(from).Real)
             throw new StudioRefusal(409, $"A real run is suspended on '{from}': write or abandon it before renaming.");
-        var hash = _folder.RenameJob(from, to, asked.Hash);
-        _local.MoveJobFiles(from, to);
+        var hash = Folder.RenameJob(from, to, asked.Hash);
+        Local.MoveJobFiles(from, to);
         await JsonAsync(context, new { path = to, hash });
     }
 
@@ -499,13 +497,13 @@ public sealed partial class StudioServer : IAsyncDisposable
             ?? throw new StudioRefusal(400, "Name the job's path to delete.");
         var hashParam = context.Request.Query["hash"].ToString();
         var expectedHash = string.IsNullOrEmpty(hashParam) ? null : hashParam;
-        _local.CheckJobFiles(relative);
+        Local.CheckJobFiles(relative);
         if (RunInProgressFor(relative))
             throw new StudioRefusal(409, $"A run is in progress on '{relative}': stop it, or wait for it, before deleting.");
         if (LoadDebug(relative).Real)
             throw new StudioRefusal(409, $"A real run is suspended on '{relative}': write or abandon it before deleting.");
-        _folder.DeleteJob(relative, expectedHash);
-        _local.DeleteJobFiles(relative, key => ForgetCheckpoint(DebugStore(), key));
+        Folder.DeleteJob(relative, expectedHash);
+        Local.DeleteJobFiles(relative, key => ForgetCheckpoint(DebugStore(), key));
         context.Response.StatusCode = StatusCodes.Status204NoContent;
         return Task.CompletedTask;
     }
@@ -516,9 +514,9 @@ public sealed partial class StudioServer : IAsyncDisposable
     /// </summary>
     private async Task OpenAsync(HttpContext context, string relative)
     {
-        var job = _folder.ReadJob(relative);
+        var job = Folder.ReadJob(relative);
         var rewrites = (await DesignForAsync(job.Text, context.RequestAborted)).Decompose(job.Text).Yaml != job.Text.Replace("\r\n", "\n");
-        await JsonAsync(context, new { path = relative, yaml = job.Text, hash = job.Hash, layout = _local.ReadLayout(relative), rewrites });
+        await JsonAsync(context, new { path = relative, yaml = job.Text, hash = job.Hash, layout = Local.ReadLayout(relative), rewrites });
     }
 
     /// <summary>
@@ -533,10 +531,10 @@ public sealed partial class StudioServer : IAsyncDisposable
         var composed = Design().Compose(save.Model);
         if (!composed.Valid && !save.AcceptErrors)
             throw new StudioRefusal(422, "The steps do not compose into a job: " + string.Join(" ", composed.Errors));
-        _folder.ResolveForWrite(save.Path ?? "");
-        if (save.Model.Layout is not null) _local.CheckLayout(save.Path!);
-        var hash = _folder.WriteJob(save.Path!, composed.Yaml, save.Hash);
-        if (save.Model.Layout is { } layout) _local.WriteLayout(save.Path!, layout);
+        Folder.ResolveForWrite(save.Path ?? "");
+        if (save.Model.Layout is not null) Local.CheckLayout(save.Path!);
+        var hash = Folder.WriteJob(save.Path!, composed.Yaml, save.Hash);
+        if (save.Model.Layout is { } layout) Local.WriteLayout(save.Path!, layout);
         await JsonAsync(context, new { path = save.Path, hash, yaml = composed.Yaml });
     }
 
@@ -544,7 +542,7 @@ public sealed partial class StudioServer : IAsyncDisposable
     private string? JobPath(string? relative)
     {
         if (string.IsNullOrEmpty(relative)) return null;
-        _folder.ResolveForWrite(relative);
+        Folder.ResolveForWrite(relative);
         return relative;
     }
 
@@ -565,7 +563,7 @@ public sealed partial class StudioServer : IAsyncDisposable
                 throw new StudioRefusal(413, $"The text for '{name}' is too long.");
             overrides[name] = chosen;
         }
-        _local.WriteLaunch(job, overrides);
+        Local.WriteLaunch(job, overrides);
         context.Response.StatusCode = StatusCodes.Status204NoContent;
     }
 
@@ -609,7 +607,7 @@ public sealed partial class StudioServer : IAsyncDisposable
         }
 
         // The job open is a path of the folder like any other the page names: the one the studio opens again at its start.
-        _local.UpdateView(sizes, job, jobView, JobPath(view.Open), view.Side);
+        Local.UpdateView(sizes, job, jobView, JobPath(view.Open), view.Side);
         context.Response.StatusCode = StatusCodes.Status204NoContent;
     }
 
@@ -655,7 +653,7 @@ public sealed partial class StudioServer : IAsyncDisposable
         var sampling = RunnableHere(yaml, bricks, "sample");
 
         // Every variable resolves before anything runs, and is named when it would not.
-        var launch = _variables.LaunchEnvironment(JobPath(path), sampling.Yaml);
+        var launch = Variables.LaunchEnvironment(JobPath(path), sampling.Yaml);
 
         TakeSlot("A sample");
         var files = new List<string>();
@@ -667,13 +665,13 @@ public sealed partial class StudioServer : IAsyncDisposable
                 byte[] arrow;
                 try { arrow = await (Coordinator ?? throw new StudioRefusal(409, NoCoordinator)).SampleAsync(brick.Node, brick.Id, Math.Min(rows, CoordinatorApi.MaxSampleRows), ct); }
                 catch (CoordinatorLinkException ex) { throw new StudioRefusal(502, $"'{alias}': {ex.Message}"); }
-                files.Add(_local.SampleFile(arrow));
+                files.Add(Local.SampleFile(arrow));
                 inputs.Add((alias, Bindable(files[^1])));
             }
             var outputs = new List<(string Alias, string Path)>();
             foreach (var alias in sampling.Sinks)
             {
-                files.Add(_local.SampleFile(null));
+                files.Add(Local.SampleFile(null));
                 outputs.Add((alias, Bindable(files[^1])));
             }
             // The job to run, and the bindings of the branches it still has.
@@ -712,7 +710,7 @@ public sealed partial class StudioServer : IAsyncDisposable
         var asked = await BodyAsync<PublishRequest>(context);
         var path = JobPath(asked.Path) ?? throw new StudioRefusal(400, "Publish a job saved in the folder: name its path.");
         if (!CoordinatorApi.IsPipelineId(asked.Id)) throw new StudioRefusal(400, NotAPipelineId(asked.Id));
-        var job = _folder.ReadJob(path);
+        var job = Folder.ReadJob(path);
         if (asked.Hash is null || asked.Hash != job.Hash)
             throw new StudioRefusal(409, $"{path} is not the job saved last: save it, then publish.");
         if (SecretsRefusal(job.Text) is { } secrets)
@@ -723,7 +721,7 @@ public sealed partial class StudioServer : IAsyncDisposable
         }
 
         var origin = link.Origin.ToString();
-        var last = _local.ReadPublication(path) is { } p && p.Coordinator == origin && p.Id == asked.Id ? p : null;
+        var last = Local.ReadPublication(path) is { } p && p.Coordinator == origin && p.Id == asked.Id ? p : null;
         (LibrarySaved? Saved, LibraryConflict? Conflict, LibraryRefused? Refused) outcome;
         // Replace names the commit the person chose to replace; empty, it creates a pipeline gone since.
         var expected = asked.Replace is { } chosen ? (chosen.Length == 0 ? null : chosen) : last?.Commit;
@@ -742,7 +740,7 @@ public sealed partial class StudioServer : IAsyncDisposable
             return;
         }
         var saved = outcome.Saved!;
-        _local.WritePublication(path, new StudioPublication(origin, saved.Id, saved.Commit, job.Hash));
+        Local.WritePublication(path, new StudioPublication(origin, saved.Id, saved.Commit, job.Hash));
         await JsonAsync(context, saved);
     }
 
@@ -783,7 +781,7 @@ public sealed partial class StudioServer : IAsyncDisposable
         if (asked.Path is not { } asPath)
             return asked.Yaml ?? throw new StudioRefusal(400, "A check is asked as {\"yaml\": \"...\"} or {\"path\": \"...\", \"hash\": \"...\"}.");
         var path = JobPath(asPath) ?? throw new StudioRefusal(400, "Check a job saved in the folder: name its path.");
-        var job = _folder.ReadJob(path);
+        var job = Folder.ReadJob(path);
         if (asked.Hash is null || asked.Hash != job.Hash)
             throw new StudioRefusal(409, $"{path} is not the job saved last: save it, then check it.");
         return job.Text;
@@ -829,7 +827,7 @@ public sealed partial class StudioServer : IAsyncDisposable
         }
         var sampling = BrickSampling.Of(yaml, bound, catalog);
 
-        var directory = _local.CheckDirectory();
+        var directory = Local.CheckDirectory();
         try
         {
             var sources = new List<(string Alias, byte[] Arrow)>();
@@ -920,10 +918,10 @@ public sealed partial class StudioServer : IAsyncDisposable
         LibraryJob job;
         try { job = await link.LibraryJobAsync(asked.Id!, context.RequestAborted) ?? throw new StudioRefusal(404, $"'{asked.Id}' is not in the library."); }
         catch (Exception ex) when (ex is CoordinatorLinkException or HttpRequestException) { throw new StudioRefusal(502, ex.Message); }
-        _local.CheckPublication(path);
+        Local.CheckPublication(path);
         var expectedHash = string.IsNullOrEmpty(asked.OverwriteHash) ? null : asked.OverwriteHash;
-        var hash = _folder.WriteJob(path, job.Yaml, expectedHash);
-        _local.WritePublication(path, new StudioPublication(link.Origin.ToString(), job.Id, job.Commit, hash));
+        var hash = Folder.WriteJob(path, job.Yaml, expectedHash);
+        Local.WritePublication(path, new StudioPublication(link.Origin.ToString(), job.Id, job.Commit, hash));
         await JsonAsync(context, new { path, hash, commit = job.Commit });
     }
 
@@ -944,7 +942,7 @@ public sealed partial class StudioServer : IAsyncDisposable
     {
         // Held where the link is awaited, whichever route asks: opening a job and the agent's save ask it too.
         using var hold = _coordinator.Hold();
-        if (_tools.DesignWith is not { } with || hold.Link is not { } link) return _tools.Design;
+        if (_tools.DesignWith is not { } with || hold.Value is not { } link) return _tools.Design;
         string job;
         try { job = ForRecognition(yaml); }
         catch (Exception) { return Design(); }
