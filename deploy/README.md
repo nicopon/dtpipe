@@ -69,14 +69,14 @@ docker build -f deploy/Dockerfile --target runner \
   `dtpipe` binary or a host that does not report it; it is also the image's
   `org.opencontainers.image.revision` label, which is how a deployment tells what it runs. Left
   out, the build only warns: the binaries report no revision and the label says `unknown`.
-- The coordinator runs as `1654:1654` (the `app` user of the .NET images). The runner's image
-  starts as root, the time its entry point takes to install [its network
-  rules](#the-runners-network), and runs `dtpipe` as `1654:1654`, never as root. Both listen on
-  8080 when they serve and keep their state in `/state`, which that user owns. A named volume
-  mounted there inherits the owner; a bind mount must be owned by that uid. A runner started as
-  another uid runs `dtpipe` under it, with no rules (an empty list or `DTPIPE_EGRESS_RULES=off`),
-  and that uid must write `/state` and `/tmp`; the coordinator under a uid with no home is not
-  checked.
+- The coordinator runs as `1654:1654` (the `app` user of the .NET images). The runner's image starts
+  as root, the time its entry point takes to install [its network rules](#the-runners-network), and
+  runs `dtpipe` as `1654:1654`, never as root. The coordinator listens on 8080 and the runner on no
+  port, so a runner needs no ingress. Both keep their state in `/state`, which that user owns. A
+  named volume mounted there inherits the owner; a bind mount must be owned by that uid. A runner
+  started as another uid runs `dtpipe` under it, with no rules (an empty list or
+  `DTPIPE_EGRESS_RULES=off`), and that uid must write `/state` and `/tmp`; the coordinator under a
+  uid with no home is not checked.
 - Run them under an init (`docker run --init`, `init: true` in compose): the runner starts
   `dtpipe` child processes, and dotnet as PID 1 ignores the signal of its own crash.
 - The runner's entry point, `deploy/runner-entrypoint.sh`, ends in `dtpipe node --runner`
@@ -160,6 +160,11 @@ docker run -d --init --cap-add NET_ADMIN -e DTPIPE_EGRESS_ALLOW=10.20.0.0/24 \
   cannot apply (a capability missing, no `iptables`, a kernel that refuses a rule) stops the
   start with exit code 1 and an `[ERROR]` line that names the cause: a runner never runs as
   though it were protected.
+- **A platform that grants no `NET_ADMIN`** (a managed container service): leave
+  `DTPIPE_EGRESS_ALLOW` empty. The entry point then asks for no `NET_ADMIN`, only the three
+  capabilities that start `dtpipe` as `1654`, installs nothing and warns. A platform that withholds
+  one of those stops the start, naming it: start the image as another user, with
+  `DTPIPE_EGRESS_RULES=off`. The platform's own network then restricts the runner.
 - **Kubernetes**, and any profile that refuses `NET_ADMIN` or a start as root: set
   `DTPIPE_EGRESS_RULES=off` and restrict the runner with a NetworkPolicy (out: the coordinator
   and the provider; in: nothing) or its equivalent. The entry point then installs nothing and
@@ -412,6 +417,49 @@ nginx 1.29.7) and `client_max_body_size 0` (1 MB by default, then a 413). These 
 nginx's documentation and have not been tried here. A node may also reach the coordinator
 directly, inside the network.
 
+## On a managed container platform
+
+A platform that starts the containers for you (an App Service with sidecar containers, a container
+service of a cloud) gives them a local disk, a public TLS address and, often, a volume that the
+container's user cannot write. The coordinator keeps nothing it cannot lose in `/state`, and a
+runner runs beside it:
+
+```bash
+# the coordinator
+Coordinator__PublicUrl=https://coordinator.example
+Coordinator__Store=postgresql                          # or sqlserver
+Coordinator__ConnectionString=<the database, a secret of the platform>
+Coordinator__Library__Remote__Url=https://git.example/team/library.git
+Coordinator__Library__Remote__Token=<a secret of the platform>
+Coordinator__Bootstrap__AdminKey=<the first administrator's key>
+Coordinator__Initialize=true                           # the first start only
+# a runner in the same app
+DtPipeNode__CoordinatorUrl=http://127.0.0.1:8080
+DtPipeNode__Oidc__ClientSecret=<the runner's key>
+DTPIPE_EGRESS_RULES=off
+```
+
+- **The state is a database and a remote.** A [database](#keeping-the-state-in-a-database)
+  (PostgreSQL or SQL Server) holds the rights and the journal, and a git remote the library, so
+  `/state` stays on the container's own disk, owned by `1654`. A volume the platform mounts is
+  often not writable by that user, and neither a SQLite file nor a library kept on it opens: the
+  start names the file or the directory it cannot write. A managed PostgreSQL asks for TLS:
+  `SSL Mode=Require` in the connection string.
+- **Two addresses.** `Coordinator__PublicUrl` is the address of people, studios, remote nodes and
+  the token endpoint. A runner beside the coordinator reaches its node channel and its data plane
+  on loopback, `DtPipeNode__CoordinatorUrl`, which its rules always leave open; it still asks the
+  public address for its token, since that is where the coordinator's issuer is.
+- **Nothing to expose for a runner.** It listens on no port. Its end of a transfer is an
+  outgoing connection.
+- **An update that overlaps.** A platform that starts the new instance before it stops the old
+  one gives the new coordinator a database that is still held: it waits `Coordinator__StoreLockWait`
+  and stops. A runner of the new instance may also take its token from the old coordinator, which
+  the new one refuses with `401`; it asks again at each attempt, and gets a good one once the old
+  instance is gone. Stop, update and start the app, or choose a strategy that replaces the
+  instance (a single revision; on Kubernetes, `Recreate`). A [standby](#a-passive-standby) on a
+  platform is probed on `/livez`: `/healthz` answers 503 until it takes over.
+- **A setting the platform leaves empty** reads as not set, `Coordinator__Initialize` included.
+
 ## Secrets
 
 The database's connection string, the remote's token and the pages' client secret are given to the
@@ -421,7 +469,9 @@ gives as a file it mounts (`@path`). The coordinator keeps a key as its hash onl
 response. The token reaches git in the environment of the one process that talks to the remote. A
 person who may inspect the container (`docker inspect`, the pod's spec) can read its environment:
 give that right with the same care as the secrets. The nodes' end-to-end key is a file of the same
-kind, on the nodes only: the coordinator is never given it.
+kind, on the nodes only: the coordinator is never given it. A node's own key is given as
+`@path` or as the value in `DtPipeNode__Oidc__ClientSecret`, which a platform fills from its
+secret store; only the command line (`--client-secret`) takes a reference alone.
 
 What has been checked:
 
@@ -445,5 +495,9 @@ What has been checked:
 - **Where the key does not appear.** `docker inspect` of a node and of the runner shows the path of the key file. The
   key's value is in no log, no answer of the coordinator, no file of its state directory and nowhere in its database.
 
-Not checked: a real TLS proxy, a Linux Docker host, a volume owned by another uid, a SQLite file on a network volume, an
+- **A managed platform** (Azure App Service with sidecar containers, PostgreSQL, keys, by hand).
+  A pipeline ran from a node outside, through the public address, a coordinator and its runner
+  on loopback, and back, and the coordinator started again on the same database.
+
+Not checked: a platform other than that one, a real TLS proxy, a Linux Docker host, a volume owned by another uid, a SQLite file on a network volume, an
 https remote with a token.
