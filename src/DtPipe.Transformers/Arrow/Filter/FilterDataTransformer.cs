@@ -132,7 +132,7 @@ public partial class FilterDataTransformer : BaseColumnarTransformer, IRequiresO
         var stage = _stages[stageIndex];
         try
         {
-            var result = engine.Call(state.Functions[stage.Index], JsValue.Undefined, args);
+            var result = engine.CallAndSettle(state.Functions[stage.Index], JsValue.Undefined, args);
             return result.IsBoolean() && result.AsBoolean();
         }
         catch (JavaScriptException jsEx) when (IsNullPropertyRead(jsEx))

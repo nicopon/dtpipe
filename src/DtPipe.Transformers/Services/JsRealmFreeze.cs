@@ -15,7 +15,8 @@ namespace DtPipe.Transformers.Services;
 /// What the freeze does not reach: the objects a transformer hands a script (its row views refuse to
 /// lose their extensibility and take their prototype back at each row, a window gets a new array each
 /// call), a binding declared at the top level of a script the engine evaluates, and the engine's job
-/// queue. <c>JsRealmFreezeTests</c> holds each of them.
+/// queue (the transformers run it at the end of each call: <c>JsEngineExtensions.CallAndSettle</c>).
+/// <c>JsRealmFreezeTests</c> holds each of them.
 /// </remarks>
 internal static class JsRealmFreeze
 {

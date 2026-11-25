@@ -155,7 +155,7 @@ public class ExpandDataTransformer : BaseColumnarTransformer, IMultiRowTransform
                 JsValue result;
                 try
                 {
-                    result = engine.Call(state.Functions[e], JsValue.Undefined, callArgs);
+                    result = engine.CallAndSettle(state.Functions[e], JsValue.Undefined, callArgs);
                 }
                 catch (Exception ex)
                 {
@@ -357,7 +357,7 @@ public class ExpandDataTransformer : BaseColumnarTransformer, IMultiRowTransform
             JsValue result0;
             try
             {
-                result0 = engine.Call(state.Functions[0], JsValue.Undefined, state.ArrowArg);
+                result0 = engine.CallAndSettle(state.Functions[0], JsValue.Undefined, state.ArrowArg);
             }
             catch (Exception ex)
             {
@@ -412,7 +412,7 @@ public class ExpandDataTransformer : BaseColumnarTransformer, IMultiRowTransform
                         JsValue res;
                         try
                         {
-                            res = engine.Call(state.Functions[e], JsValue.Undefined, state.IntermediateArg);
+                            res = engine.CallAndSettle(state.Functions[e], JsValue.Undefined, state.IntermediateArg);
                         }
                         catch (Exception ex)
                         {

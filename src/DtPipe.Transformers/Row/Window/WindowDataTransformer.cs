@@ -428,7 +428,7 @@ public class WindowDataTransformer : BaseColumnarTransformer, IMultiRowTransform
     {
         try
         {
-            return engine.Call(fn, JsValue.Undefined, args);
+            return engine.CallAndSettle(fn, JsValue.Undefined, args);
         }
         catch (Exception ex)
         {

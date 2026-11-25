@@ -287,7 +287,7 @@ public sealed class ComputeDataTransformer : BaseColumnarTransformer, IRequiresO
 
                 try
                 {
-                    var result = engine.Call(state.Functions[proc.Index], JsValue.Undefined, state.ArrowArg);
+                    var result = engine.CallAndSettle(state.Functions[proc.Index], JsValue.Undefined, state.ArrowArg);
                     ValidateComputeResult(result, _columnNames![proc.ColumnIndex]);
                     JsValueConversion.AppendJsValueToBuilder(builders[p], result, appenders[p]);
                 }
@@ -342,7 +342,7 @@ public sealed class ComputeDataTransformer : BaseColumnarTransformer, IRequiresO
 
             try
             {
-                var result = engine.Call(state.Functions[processor.Index], JsValue.Undefined, state.SingleArg);
+                var result = engine.CallAndSettle(state.Functions[processor.Index], JsValue.Undefined, state.SingleArg);
                 ValidateComputeResult(result, _columnNames[processor.ColumnIndex]);
                 results[processor.Index] = JsValueConversion.JsValueToClr(result);
             }

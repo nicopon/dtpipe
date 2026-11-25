@@ -199,22 +199,38 @@ public class JsRealmFreezeTests : IDisposable
     }
 
     /// <summary>
-    /// A promise reaction a call queues does not run when the call returns: the engine keeps it, and what
-    /// it closes over, until its next evaluation, which runs it.
+    /// A promise reaction a call queues does not run when the engine's <c>Call</c> returns: the engine keeps it,
+    /// and what it closes over, until its next evaluation. The transformers call through
+    /// <see cref="JsEngineExtensions.CallAndSettle"/>, which runs it in the call that queued it.
     /// </summary>
     [Fact]
-    public void Persists_A_Promise_Reaction_Until_The_Engine_Evaluates_Again()
+    public void A_Promise_Reaction_Runs_In_The_Call_That_Queued_It()
     {
         var engine = _js.GetEngine();
         var call = engine.Evaluate("(function (box) { Promise.resolve().then(() => { box.ran = true; }); return 0; })");
-        var box = new JsObject(engine);
 
-        engine.Call(call, JsValue.Undefined, [box]);
-        box.Get("ran").IsUndefined().Should().BeTrue();
-
+        var kept = new JsObject(engine);
+        engine.Call(call, JsValue.Undefined, [kept]);
+        kept.Get("ran").IsUndefined().Should().BeTrue("a bare Call leaves the reaction queued");
         engine.Evaluate("0");
-        box.Get("ran").AsBoolean().Should().BeTrue();
+        kept.Get("ran").AsBoolean().Should().BeTrue();
+
+        var settled = new JsObject(engine);
+        engine.CallAndSettle(call, JsValue.Undefined, [settled]);
+        settled.Get("ran").AsBoolean().Should().BeTrue();
     }
+
+    [Fact]
+    public async Task A_Reaction_That_Never_Ends_Fails_Its_Own_Run_And_Not_The_Next()
+    {
+        var spinning = await ComputeAsync("Promise.resolve().then(() => { while (true) { } }); return String(row.A);");
+        var act = () => spinning.Transform(new object?[] { 1d });
+        act.Should().Throw<InvalidOperationException>();
+
+        var next = await ComputeAsync("return String(row.A + 1);");
+        PlayRows(next).Should().Equal("2", "3", "5");
+    }
+
 
     // ── (v) The objects the transformer hands the script ─────────────────────
 
