@@ -27,6 +27,24 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   `dom.js`) and positions them through the CSSOM; `replaceChildren` takes nodes, never a list.
 - **The folder only.** `StudioFolder` reads `.yaml`/`.yml` files under it: no segment starting with
   a dot, no symbolic link below it. The empty builder reads no `appsettings.json` from the folder.
+- **The folder is in a slot, every request holds it, and the current directory moves with it.** `WorkspaceSlot` holds one
+  `StudioWorkspace` (`StudioFolder`, `StudioLocalFiles`, `StudioVariables`); the server reads it through `Folder`, `Local` and
+  `Variables` at each use, and every `/api` request holds a lease on it to its end except those `LeavesWorkspace` names (the
+  workspace's own routes and what the page polls), so a new route holds it by default. The page opens another folder through
+  `/api/workspace` (`GET`, `POST …/test`, `PUT`): a path that is no readable folder is refused (400, 404) and changes nothing.
+  A change is refused with 409 naming the cause when the page says its changes are unsaved, a run goes on, the engine slot is
+  held (`TakeSlotFor`, shared with the coordinator's change), or the agent's turn runs or a card waits (`TryClose`, run under the
+  slot's lock once no request holds it); it waits a few seconds for the requests in flight (`SlotHolds`, the coordinator's
+  slot's counting too), and one that arrives meanwhile waits for it. It then calls `Directory.SetCurrentDirectory`, which is
+  process-wide: a job's relative paths, `SessionResolver` and the agent's MCP tools (their confinement, `list-cursors`) read the
+  current directory, so a folder or a path kept from before a change (a field, a closure, a cache) reads the old folder. The agent is
+  replaced by a new one on its model (`AgentSlot.RenewAsync`: a plan or an answer of the old folder never reaches the new one),
+  a finished run is forgotten, and the new folder's samples and drafts are purged as at start (`Opened`); the page then reloads
+  whole. A suspended real run stays in the old folder's `.dtpipe/studio/` and is found again there. At start the folder is the
+  argument, else the current directory, and `StudioCommand` sets the current directory; `studio.json` keeps only the folders the
+  page opened with *Remember* ticked (`ReadFolders`, bounded, most recent first), and no folder is opened again at start.
+  `[CI: StudioWorkspaceTests, StudioSettingsTests]` `[local: page_smoke.mjs workspace-switch]`
+  `[unchecked: Windows and Linux paths, a folder through a link or on a network share, the card-waiting refusal]`
 - **The server writes, from cards.** `PUT /api/job` composes the page's cards and writes that text
   (`WriteJob`): whole and atomic, only where a job could be read, into a folder that exists, against
   the hash the page opened (409 otherwise), never over a file with a new job. The one replacement the

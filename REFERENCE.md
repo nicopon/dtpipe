@@ -1269,6 +1269,16 @@ that also changes the coordinator or forgets it. A remembered coordinator connec
 one that does not answer never stops the studio. A key goes to the system keyring under the
 address of its coordinator, so another address asks for it again.
 
+The folder is the one given on the command line, else the current directory. Its name in the
+header opens **Open a folder…**: a full path typed (`~/` stands for your home) or a recent folder,
+`Test`, which counts its jobs, and `Remember among the recent folders`, ticked by default. The page
+then reads everything again from the new folder: its jobs, steps, variables and publication links.
+The agent starts a new conversation, and a job's relative paths resolve in the new folder. The
+change is refused, with the reason, while the open job holds unsaved changes (the dialog offers to
+save or discard them), while a run or a preview goes on, or while the agent's turn runs or waits
+for your answer. Only a folder opened from the page is remembered, in `studio.json`: starting on a
+folder writes nothing, and no folder is opened again at start.
+
 | Action | What it does |
 |:---|:---|
 | **▶ Preview** | Runs the job as `--dry-run` does, over the rows you ask for (up to 100 000 per source; a step shows up to 1 000). Each step then shows its rows, columns and types, and a badge with its state |
