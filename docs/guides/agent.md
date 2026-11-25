@@ -101,7 +101,7 @@ automation.
 - A credential under a key dtpipe does not know is not flagged; a column named like one may be.
 - A job that reads or writes a brick runs from the page, not from the agent.
 - A remembered model that needs a key asks for it again when the keyring cannot be read.
-- Opening another folder from the header starts a new conversation, and waits until a turn ends.
+- Opening another folder from the header starts a new conversation; a turn running refuses it.
 - Weaker models loop or invent YAML keys: the agent's `dry-run` catches most of it, read its plan.
 
 ---
