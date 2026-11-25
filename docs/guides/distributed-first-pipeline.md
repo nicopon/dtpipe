@@ -74,6 +74,7 @@ Coordinator__Bootstrap__AdminKey=@$PWD/admin.key \
 Coordinator__Bootstrap__Identities__0__Id=runner-1 \
 Coordinator__Bootstrap__Identities__0__Name=runner-1 \
 Coordinator__Bootstrap__Identities__0__Groups__0=runner \
+Coordinator__Bootstrap__Identities__0__Runner=true \
 Coordinator__Bootstrap__Identities__0__Key=@$PWD/runner-1.key \
 ASPNETCORE_URLS=$COORDINATOR_URL \
   path/to/coordinator/dtpipe-coordinator > coordinator.log 2>&1 &
@@ -117,8 +118,8 @@ this page's pipeline. The runner can only reach Docker's local networks:
 ### Sign in
 
 Open `COORDINATOR_URL` and paste the administrator's key. **Access** lists `admin` and `runner-1`,
-and the flow matrix is empty: nobody may send rows to anybody yet. In every other terminal of this
-page, export `COORDINATOR_URL` again.
+and the flow matrix is empty: no group may send rows to another yet. `runner-1` is a runner, open to
+every group. In every other terminal of this page, export `COORDINATOR_URL` again.
 
 ## 2. Seed a database
 
@@ -151,9 +152,9 @@ node will run (paste, then Enter):
 read -rs DTPIPE_NODE_KEY && export DTPIPE_NODE_KEY
 ```
 
-In the **flow matrix**, tick `*` → `runner`, `runner` → `*` and `data` → `data`, then **Apply**.
-Each group may then use the runner, and rows from `data` may return to `data`. A change applies to
-the next run.
+In the **flow matrix**, tick `data` → `data`, then **Apply**. Every group may use the runner already
+(its cells say `open`), and rows from `data` may now return to `data`. A change applies to the next
+run.
 
 ## 4. Declare the node
 

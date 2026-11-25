@@ -1355,7 +1355,7 @@ a setting allows it.
 | `Auth__PersonKeys` | `false` lets people sign in through the provider only. Default: `true`; refused without `Authority` |
 | `Auth__ServiceTokenLifetime` / `__PersonTokenLifetime` | How long a token exchanged for a service's or a person's key lasts, five minutes at least. Default: 10 minutes / 1 hour |
 | `Bootstrap__AdminKey` | The first administrator's key, `dtp_<id>_<secret>`, as `@path` to a file or a value of the environment. Required without `Authority`; added while the rights hold no administrator with a live key |
-| `Bootstrap__Identities__<n>__Id` / `__Key` / `__Kind` / `__Name` / `__Groups__<n>` / `__Pipelines__<n>` / `__Role` | An identity the deployment gives with its key (`@path` or the environment), added at start when its id is absent, never changed after. Default kind: `node` |
+| `Bootstrap__Identities__<n>__Id` / `__Key` / `__Kind` / `__Name` / `__Groups__<n>` / `__Pipelines__<n>` / `__Role` / `__Runner` | An identity the deployment gives with its key (`@path` or the environment), added at start when its id is absent, never changed after. Default kind: `node`. `Runner=true` makes a node a runner: the flows to and from its groups need no row of the flow matrix, and its host must start as a runner (`dtpipe node --runner`) |
 | `Store` | `sqlite` (default; a file in the state directory), `postgresql` or `sqlserver`: one coordinator holds a database |
 | `Sqlite__Directory` | Where the SQLite file lives, if not the state directory |
 | `ConnectionString` | The database of `Store=postgresql` or `sqlserver` (a secret: the environment or `@path`); refused with `sqlite` |
@@ -1511,6 +1511,10 @@ may do.
 
 - Each identity has a name and groups. The **flow matrix** lists which group may send rows to which;
   `*` stands for any group (`*` → `runner`, `runner` → `*`), and `*` → `*` is refused.
+- A node marked **runner** (Access, or `Bootstrap__Identities__<n>__Runner`) hosts no data and
+  serves every group: the matrix allows every flow to and from its groups without a row, and those
+  groups belong to runners alone. A host that announces data under its identity is refused. What
+  crosses it still needs its origins to reach their destination, so `data` → `data` stays a row.
 - An edge needs every group of the sender to be allowed to send to every group of the receiver.
   Through a runner, the origin groups carry over: an edge leaving a runner needs each upstream
   source group to be allowed to reach the destination. A branch carries the origins of the branches

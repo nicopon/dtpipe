@@ -62,6 +62,7 @@ services:
       Coordinator__Bootstrap__Identities__0__Id: runner-1
       Coordinator__Bootstrap__Identities__0__Name: runner-1
       Coordinator__Bootstrap__Identities__0__Groups__0: runner
+      Coordinator__Bootstrap__Identities__0__Runner: "true"
       Coordinator__Bootstrap__Identities__0__Key: "@/secrets/runner-1.key"
       Coordinator__LibrarySeed: /trial/library
     volumes:

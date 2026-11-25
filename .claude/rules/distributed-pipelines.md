@@ -135,6 +135,12 @@ the control plane, over each replica's node channel; TransportR carries the data
   Every fragment's child works with a run directory of its own as its temp directory, removed once it has ended; a runner's
   child also works in it. `[CI: Server.Tests PlanRightsTests; Hosting.Tests FragmentIntakeTests; PipelineNode.Tests
   FragmentIsolationTests; DtPipe.Tests EdgesOnlyRuleTests, DuckDBSqlProcessorEdgesOnlyTests]` `[unchecked: Windows]`
+- **A runner of the rights is open without a row, and only the rights say who is one.** A node identity flagged `Runner` hosts no
+  data and serves every group: `RightsStore.Allowed` allows any flow to or from a group it holds, and the closure of origins
+  still decides what crosses it. The flag is an administrator's word kept in the rights, never a host's announcement, so a group of
+  a runner belongs to runners alone (refused on every write and every load) and a host that announces data under such an identity
+  is refused. A runner not flagged keeps its explicit rows. `[CI: Server.Tests RunnerFlowTests, NodeChannelHubTests,
+  MatrixEdgesTests]` `[unchecked: the page's checkbox; the lab's runner is not flagged, so its explicit rows stay replayed]`
 - **A node host decides what it runs**: its `FragmentPolicy` comes from its own configuration, never
   from a message the coordinator sends. So does whether it ends a run's child (`FaultInjection`): a host
   that did not enable it answers the coordinator's `Kill` with `0` and logs why.

@@ -73,7 +73,7 @@ async function listKeys(id) {
 const setOf = (list) => new Set(list || []);
 const ROLES = ["reader", "designer", "admin"];
 const KINDS = [
-  { id: "node", label: "Nodes", desc: "A node hosts pipeline fragments and exchanges data. A node sends to another only if every one of its groups may send to every group of the receiver in the flow matrix. A change of name or groups, or disabling a node, drops the control connections of its hosts, which reconnect under the new rights. Reconnect drops connections without changing anything." },
+  { id: "node", label: "Nodes", desc: "A node hosts pipeline fragments and exchanges data. A node sends to another only if every one of its groups may send to every group of the receiver in the flow matrix. A runner hosts no data and serves every group: the flows to and from its groups need no row, and its groups belong to runners alone. A change of name, groups or runner, or disabling a node, drops the control connections of its hosts, which reconnect under the new rights. Reconnect drops connections without changing anything." },
   { id: "launcher", label: "Launchers", desc: "A launcher is a scheduler or CI/CD identity: it starts the runs of the pipelines listed on its row and reads their status via <code>/service/runs</code>, nothing else. With no pipeline listed, it can launch none." },
   { id: "monitor", label: "Monitors", desc: "A monitor is a supervisor identity: it reads <code>/health</code> and nothing else, belongs to no group and hosts nothing." },
   { id: "person", label: "Persons", desc: "A person signs in to these pages and the studio with the role on their row (<code>reader</code>, <code>designer</code>, or <code>admin</code>). One verified by the identity provider is identified by its account (an email by default); one verified by a key signs in with that key." },
@@ -90,6 +90,8 @@ function freeGroup(name) {
 
 function matrixCell(from, to) {
   if (from === "*" && to === "*") return `<td class="no" title="Each group-to-group flow is declared on its own row and column">—</td>`;
+  const open = rights.runnerGroups || [];
+  if (open.includes(from) || open.includes(to)) return `<td class="yes" title="A runner's groups are open: no row is needed">open</td>`;
   const allowed = matrixDraft ? matrixDraft[from]?.has(to) : (rights.matrix[from] || []).includes(to);
   const fromLabel = from === "*" ? "any group" : from;
   const toLabel = to === "*" ? "any group" : to;
@@ -128,7 +130,8 @@ function renderIdentityTable(kind, items) {
         <td><input class="mono narrow" data-field="name" value="${esc(i.name)}" aria-label="Node name of ${esc(i.clientId)}"></td>
         <td><input class="mono" data-field="groups" value="${esc(i.groups.join(", "))}" list="groups-list" aria-label="Groups of ${esc(i.clientId)}, separated by commas"></td>
         <td><input data-field="description" value="${esc(i.description)}" aria-label="Description of ${esc(i.clientId)}"></td>
-        <td><label class="check"><input type="checkbox" data-field="enabled" ${i.enabled ? "checked" : ""}> enabled</label></td>
+        <td><label class="check"><input type="checkbox" data-field="enabled" ${i.enabled ? "checked" : ""}> enabled</label>
+          <label class="check" title="A runner hosts no data and serves every group: the flows to and from its groups need no row of the matrix. Its host must run with --runner."><input type="checkbox" data-field="runner" ${i.runner ? "checked" : ""}> runner</label></td>
         <td>${i.connected ? `<span class="chip ok">connected</span>` : `<span class="chip">offline</span>`}</td>
         <td class="actions-cell">
           <button class="small" data-save-identity>Save</button>
@@ -260,6 +263,7 @@ function render() {
         <select id="a-auth" aria-label="Verified by"><option value="key" ${rights.idp ? "" : "selected"}>verified by a key this coordinator makes</option>${rights.idp ? `<option value="idp" selected>verified by the identity provider</option>` : ""}</select>
         <input id="a-name" class="mono" placeholder="name (the client id by default)">
         <input id="a-groups" class="mono" data-for="node" placeholder="groups, separated by commas" list="groups-list">
+        <label class="check" data-for="node"><input type="checkbox" id="a-runner"> runner</label>
         <input id="a-pipelines" class="mono" data-for="launcher" placeholder="pipelines it may launch, separated by commas">
         <select id="a-role" data-for="person" aria-label="Role">${ROLES.map((r) => `<option>${r}</option>`).join("")}</select>
         <input id="a-account" class="mono" data-for="person-idp" placeholder="account at the provider (an email by default)">
@@ -451,7 +455,7 @@ async function onClick(e) {
     else if (b.dataset.create !== undefined) {
       const v = (id) => document.getElementById(id).value.trim();
       const identity = { clientId: v("a-id"), name: v("a-name") || null, description: v("a-description"), kind: v("a-kind"), auth: v("a-auth") };
-      if (identity.kind === "node") Object.assign(identity, { groups: groupsOf(v("a-groups")) });
+      if (identity.kind === "node") Object.assign(identity, { groups: groupsOf(v("a-groups")), runner: document.getElementById("a-runner").checked });
       if (identity.kind === "launcher") identity.pipelines = groupsOf(v("a-pipelines"));
       if (identity.kind === "person") Object.assign(identity, { role: v("a-role"), account: identity.auth === "idp" ? v("a-account") : null });
       const usage = usageOf(identity);
@@ -491,6 +495,7 @@ async function onClick(e) {
         pipelines: groupsOf(row.querySelector('[data-field="pipelines"]')?.value ?? ""),
         role: row.querySelector('[data-field="role"]')?.value ?? null,
         enabled: row.querySelector('[data-field="enabled"]').checked,
+        runner: row.querySelector('[data-field="runner"]')?.checked,
       }, "PUT");
       if (page === visit) settle(sent);
       toast(`${id} saved.`, "info");

@@ -432,8 +432,13 @@ Coordinator__ConnectionString=<the database, a secret of the platform>
 Coordinator__Library__Remote__Url=https://git.example/team/library.git
 Coordinator__Library__Remote__Token=<a secret of the platform>
 Coordinator__Bootstrap__AdminKey=<the first administrator's key>
+Coordinator__Bootstrap__Identities__0__Id=runner-1
+Coordinator__Bootstrap__Identities__0__Groups__0=runner
+Coordinator__Bootstrap__Identities__0__Runner=true
+Coordinator__Bootstrap__Identities__0__Key=<the runner's key>
 Coordinator__Initialize=true                           # the first start only
 # a runner in the same app
+DtPipeNode__Name=runner-1
 DtPipeNode__CoordinatorUrl=http://127.0.0.1:8080
 DtPipeNode__Oidc__ClientSecret=<the runner's key>
 DTPIPE_EGRESS_RULES=off
@@ -449,6 +454,9 @@ DTPIPE_EGRESS_RULES=off
   the token endpoint. A runner beside the coordinator reaches its node channel and its data plane
   on loopback, `DtPipeNode__CoordinatorUrl`, which its rules always leave open; it still asks the
   public address for its token, since that is where the coordinator's issuer is.
+- **A runner of the rights.** The identity marked `Runner` hosts no data and serves every group:
+  the flow matrix needs no row to and from its groups, which belong to runners alone, and its host
+  must start as a runner. Only the flows between the data groups are left to declare.
 - **Nothing to expose for a runner.** It listens on no port. Its end of a transfer is an
   outgoing connection.
 - **An update that overlaps.** A platform that starts the new instance before it stops the old
