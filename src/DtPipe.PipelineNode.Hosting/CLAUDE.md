@@ -192,8 +192,10 @@ none. One node per process, which is one replica of its node's identity; a secon
   `NodeAgent` connects the channel and announces without `DataPlaneClientId`; when that announcement is
   accepted it connects the client and announces again with the client's id, and a replica announced without
   one is eligible to nothing. The coordinator accepts only an identity it knows and has enabled (any other
-  has its connection closed), so a host refused at the announcement asks the IdP for no new token and
-  connects no client, however often it is refused. `WatchDataPlaneAsync` acts only while an announcement
+  has its connection closed), so a host refused at the announcement connects no data plane client, takes
+  no token for one and resolves no rights for one, however often it is refused. Its control channel is
+  closed and connected again, and each connection presents a fresh token (the rule of the token provider
+  above), so a refused host still asks the IdP for tokens. `WatchDataPlaneAsync` acts only while an announcement
   stands: it connects the client as soon as it can and announces again, and registers again a client the hub
   has stopped knowing (a coordinator that lost it), which TransportR would otherwise do at its next presence
   heartbeat. One connection of the client at a time.
