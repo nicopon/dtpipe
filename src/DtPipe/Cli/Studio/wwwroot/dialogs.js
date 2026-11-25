@@ -912,15 +912,12 @@ export function openPullDialog(opts) {
 
 const AGENT_PROVIDERS = {
   ollama: { label: "Ollama", url: "http://localhost:11434", provider: "ollama" },
-  openai: { label: "OpenAI", url: "https://api.openai.com", provider: "openai" },
   compatible: { label: "OpenAI-compatible server", url: "", provider: "openai" },
 };
 
-/** The choice a connection stands for: an openai provider at another address than OpenAI's is a compatible server. @param {any} connection */
+/** The choice a connection stands for: an openai provider, at OpenAI's address too, is a compatible server. @param {any} connection */
 function providerChoice(connection) {
-  if (connection?.provider === "ollama") return "ollama";
-  if (connection?.provider === "openai") return connection.url && connection.url !== AGENT_PROVIDERS.openai.url ? "compatible" : "openai";
-  return "ollama";
+  return connection?.provider === "openai" ? "compatible" : "ollama";
 }
 
 /**

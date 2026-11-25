@@ -367,7 +367,7 @@ function renderEmpty() {
   fill(host,
     el("p", { class: "hint" }, needsKey
       ? "The model you remembered needs its key again."
-      : "No model is connected. Connect Ollama, OpenAI or a compatible server to ask the agent about your jobs."),
+      : "No model is connected. Connect Ollama or an OpenAI-compatible server to ask the agent about your jobs."),
     el("button", { id: "agent-connect", class: "primary", onclick: openConnect }, needsKey ? "Reconnect…" : "Connect a model…"));
 }
 
