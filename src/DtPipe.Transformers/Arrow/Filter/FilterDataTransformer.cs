@@ -123,7 +123,7 @@ public partial class FilterDataTransformer : BaseColumnarTransformer, IRequiresO
     }
 
     /// <summary>
-    /// Whether the stage keeps the row. A property read on a null or undefined value is "no match", on
+    /// Whether the stage keeps the row. A null or undefined value used as an object is "no match", on
     /// purpose; any other error of the script, a timeout or a memory limit included, fails the run naming
     /// the filter.
     /// </summary>
@@ -159,17 +159,27 @@ public partial class FilterDataTransformer : BaseColumnarTransformer, IRequiresO
         ex.Error is ObjectInstance error && error.Get("name").ToString() == "ReferenceError";
 
     /// <summary>
-    /// A property read on a null or undefined value. The engine raises it as a plain TypeError with no
+    /// A null or undefined value used as an object. The engine raises it as a plain TypeError with no
     /// structured kind, so its wording is the only handle: <c>Cannot read properties of null (reading 'x')</c>
-    /// for a property, <c>Cannot read property 'x' of null</c> for a method call. The tests of both forms
-    /// break if a newer engine words them otherwise.
+    /// for a property, <c>Cannot read property 'x' of null</c> for a method call, <c>Cannot convert undefined
+    /// or null to object</c> for a destructuring, a spread, an iteration or <c>Object.keys</c>, and
+    /// <c>Cannot use 'in' operator to search for 'x' in null</c> for <c>in</c>. The tests of each form break
+    /// if a newer engine words them otherwise. The wording cannot tell a null column from a null the script
+    /// made itself: both are "no match".
     /// </summary>
-    private static bool IsNullPropertyRead(JavaScriptException ex) =>
-        ex.Error is ObjectInstance error
-        && error.Get("name").ToString() == "TypeError"
-        && error.Get("message").ToString() is var message
-        && message.StartsWith("Cannot read propert", StringComparison.Ordinal)
-        && (message.Contains(" of null", StringComparison.Ordinal) || message.Contains(" of undefined", StringComparison.Ordinal));
+    private static bool IsNullPropertyRead(JavaScriptException ex)
+    {
+        if (ex.Error is not ObjectInstance error || error.Get("name").ToString() != "TypeError")
+            return false;
+
+        var message = error.Get("message").ToString();
+        if (message.StartsWith("Cannot read propert", StringComparison.Ordinal))
+            return message.Contains(" of null", StringComparison.Ordinal) || message.Contains(" of undefined", StringComparison.Ordinal);
+
+        return message == "Cannot convert undefined or null to object"
+            || (message.StartsWith("Cannot use 'in' operator to search for ", StringComparison.Ordinal)
+                && (message.EndsWith(" in null", StringComparison.Ordinal) || message.EndsWith(" in undefined", StringComparison.Ordinal)));
+    }
 
     private CompiledFilterState GetOrCreateState(Engine engine)
         => _engineCache.GetValue(engine, e =>

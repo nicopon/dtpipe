@@ -183,6 +183,20 @@ public class FilterDataTransformerTests : IDisposable
     }
 
     [Theory]
+    [InlineData("(() => { const { a } = row.Name; return a === 1; })()")]
+    [InlineData("Object.keys(row.Name).length > 0")]
+    [InlineData("(() => { for (const x of row.Name) { } return true; })()")]
+    [InlineData("[...row.Name].length > 0")]
+    [InlineData("'a' in row.Name")]
+    public async Task A_Null_Column_Used_As_An_Object_Is_No_Match_Whatever_The_Form(string expression)
+    {
+        var filter = Build(expression);
+        await filter.InitializeAsync(TextColumn("Name"));
+
+        filter.Transform([null]).Should().BeNull();
+    }
+
+    [Theory]
     [InlineData("row.Value > 10 && row.Value <= 50")]
     [InlineData("row.Value == 5 || row.Value === 20")]
     [InlineData("!(row.Value > 15)")]
