@@ -68,11 +68,11 @@ public sealed class TrustedIdpTests : IDisposable
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
-    /// <summary>A service is admitted to the node channel (200) and to TransportR's control plane (415: the route has no effect without a body).</summary>
+    /// <summary>A service is admitted to the node channel (200) and to TransportR's control plane (404: the hub admits the caller, then refuses a client it does not know).</summary>
     public static TheoryData<string, HttpStatusCode> DataPlane => new()
     {
         { "/node-channel/negotiate?negotiateVersion=1", HttpStatusCode.OK },
-        { WireRoutes.ClientBase + "/6f1c0d52-8d0b-4a39-9a5e-3f6d1d6a7b10/" + WireRoutes.TransfersSegment, HttpStatusCode.UnsupportedMediaType },
+        { WireRoutes.ClientBase + "/6f1c0d52-8d0b-4a39-9a5e-3f6d1d6a7b10/" + WireRoutes.TransfersSegment, HttpStatusCode.NotFound },
     };
 
     [Theory]

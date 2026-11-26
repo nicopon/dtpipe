@@ -42,8 +42,8 @@ public sealed class CoordinatorTransferTests
 
             var sendHandle = new TaskCompletionSource<ByteSend>(TaskCreationOptions.RunContinuationsAsynchronously);
             var receiveHandle = new TaskCompletionSource<ByteReceive>(TaskCreationOptions.RunContinuationsAsynchronously);
-            sender.OnSendRequested += send => { sendHandle.TrySetResult(send); return Task.CompletedTask; };
-            receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+            sender.OnSendRequested(send => { sendHandle.TrySetResult(send); return Task.CompletedTask; });
+            receiver.OnTransferStarted(receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; });
 
             await sender.ConnectAsync();
             await receiver.ConnectAsync();

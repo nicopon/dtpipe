@@ -39,13 +39,13 @@ public sealed class RouteTableTests
             .ToList();
     }
 
-    /// <summary>A control-plane route as the framework holds it: TransportR maps it without the leading slash of <see cref="WireRoutes.ClientBase"/>.</summary>
+    /// <summary>A control-plane route as the framework holds it: TransportR maps it under <see cref="WireRoutes.ClientBase"/>, leading slash included.</summary>
     private static string ClientRoute(string method, string tail) =>
-        $"{method} {WireRoutes.ClientBase.TrimStart('/')}/{{clientId:guid}}/{tail} [default]";
+        $"{method} {WireRoutes.ClientBase}/{{clientId:guid}}/{tail} [default]";
 
-    /// <summary>A data-plane route as the framework holds it, likewise without the leading slash of <see cref="WireRoutes.StreamBase"/>.</summary>
+    /// <summary>A data-plane route as the framework holds it, likewise under <see cref="WireRoutes.StreamBase"/>.</summary>
     private static string StreamRoute(string method, string tail) =>
-        $"{method} {WireRoutes.StreamBase.TrimStart('/')}/{{transferId}}/{tail} [default]";
+        $"{method} {WireRoutes.StreamBase}/{{transferId}}/{tail} [default]";
 
     private static readonly string[] Expected = [
         "* /node-channel [default]",
@@ -124,13 +124,13 @@ public sealed class RouteTableTests
 
     /// <summary>The write-transport probe's route, which answers outside any transfer: <c>GET</c> opens its WebSocket, <c>POST</c> is the segment fallback.</summary>
     private static string ProbeRoute(string method) =>
-        $"{method} {WireRoutes.StreamBase.TrimStart('/')}/{WireRoutes.ProbeSegment}/{WireRoutes.SendSegment} [default]";
+        $"{method} {WireRoutes.StreamBase}/{WireRoutes.ProbeSegment}/{WireRoutes.SendSegment} [default]";
 
     [Fact]
     public void The_Routes_Are_The_Ones_Listed_With_The_Authorization_Of_Each()
     {
         using var host = new CoordinatorHost();
-        Assert.Equal(Expected, TableOf(host));
+        Assert.Equal(Expected.Order(StringComparer.Ordinal), TableOf(host));
     }
 
     private static readonly string[] BenchRoutes = ["/api/pipelines", "/api/plan", "/api/deploy", "/api/fragments/{name}/kill"];

@@ -124,8 +124,8 @@ public sealed class PipelineNode : IAsyncDisposable
         var client = BuildClient(options, loggerFactory);
         var node = new PipelineNode(options, logger, client);
 
-        client.OnSendRequested += node.HandleSendRequested;
-        client.OnTransferStarted += node.HandleTransferStarted;
+        client.OnSendRequested(node.HandleSendRequested);
+        client.OnTransferStarted(node.HandleTransferStarted);
 
         try
         {
