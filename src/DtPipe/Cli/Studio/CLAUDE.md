@@ -43,7 +43,8 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   a finished run is forgotten, and the new folder's samples and drafts are purged as at start (`Opened`); the page then reloads
   whole. A suspended real run stays in the old folder's `.dtpipe/studio/` and is found again there. At start the folder is the
   argument, else the current directory, and `StudioCommand` sets the current directory; `studio.json` keeps only the folders the
-  page opened with *Remember* ticked (`ReadFolders`, bounded, most recent first), and no folder is opened again at start.
+  page opened with *Remember* ticked (`ReadFolders`, bounded, most recent first), and no folder is opened again at start. The
+  dialog deletes a recent folder (`DELETE /api/workspace/recents`, by its path, whether or not it is still on the disk).
   The header's folder name shows the root `GET /api/workspace` gives as its tooltip.
   `[CI: StudioWorkspaceTests, StudioSettingsTests]` `[local: page_smoke.mjs workspace-switch]`
   `[unchecked: Windows and Linux paths, a folder through a link or on a network share, the card-waiting refusal]`
@@ -85,8 +86,8 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   engine slot, and a replacement, taken under the engine slot, is refused with 409 while either is held, so a publication, a
   library read or a sample never finds its link closed. A replacement stops the sign-in the old link was making, makes the old
   link forget its tokens and closes it. At start the coordinator is the one `--coordinator` names or, with no flag, the one
-  remembered in `studio.json` (`StudioSettings`, `UserStatePaths.Root()`: the coordinators known, each an origin and `browser` or `key`,
-  the active one and whether it reconnects at start, never a key); a flag
+  remembered in `studio.json` (`StudioSettings`, `UserStatePaths.Root()`: the active coordinator, an origin and `browser` or `key`,
+  never a key); a flag
   never writes the file, and a connection of the page writes it only when *Remember* is ticked. A remembered key sign-in starts
   in the background and reads `signing-in` meanwhile, and a coordinator that does not answer never stops the start. The key is the
   keyring's, under `studio.coordinator:<normalized origin>`: another origin finds none and asks again, and a remembered key that
@@ -381,6 +382,23 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   key it cannot find at start builds no agent: the panel offers to connect it again. `ReservedAliases` keeps `studio.` aliases
   out of every list of aliases, `dtpipe secret list` included.
   `[CI: StudioConnectionTests, StudioSettingsTests]` `[local: page_smoke.mjs agent-connect]` `[unchecked: the dialog's wording of a key's state]`
+- **The recent lists are histories the person edits, never the connection.** `studio.json` keeps three lists beside the agent and
+  the coordinator to connect at start: the agents, the coordinators and the folders (`ReadAgents`, `ReadCoordinators`,
+  `ReadFolders`), `MaxRecent` each, most recent first, each identity once (an agent: provider and normalized address, carrying
+  the model, delay and context last used for it; a coordinator: its normalized origin; a folder: its full path), through one
+  `Distinct` on read and one `Recent` on write, and never a secret. An entry is added where the use succeeded and *Remember* is
+  ticked, by the one function of its list (`WriteAgent`, `RememberCoordinator`, `RememberFolder`): an agent once the connection
+  is in place, a coordinator once `CheckAsync` answered (`RecognisedAsync`, bounded by `ProbeBound`, asked before the link goes
+  in place and only to be remembered), a folder once opened. With the box unticked nothing is written, list or key. A click on
+  a row of the page fills the form and does nothing else. `DELETE …/history` (`/api/agent/connection`,
+  `/api/coordinator/connection`) takes the identity the page shows, never an alias or a reference, removes the entries at that
+  address (`RemoveAgent`, `RemoveCoordinator`) and deletes the key of each by its alias: the keyring is asked to delete, never
+  to read. The remembered agent or coordinator is cleared when it is that entry, so the next start does not connect an address
+  the person erased; a connection in place is not closed, and its key, if the keyring held it, reads `session`. The views mark
+  the entries that have a key kept (`keyKept`) from one listing of the keyring's aliases (`KeptAliases`: names only, values never
+  leave it), made only when a list is not empty. `[CI: StudioSettingsTests, StudioConnectionTests, StudioCoordinatorConnectionTests,
+  StudioWorkspaceTests]` `[local: page_smoke.mjs agent-connect, coordinator-connect, workspace-switch]`
+  `[unchecked: the badge of a key kept, which the page bench plays without a keyring]`
 - Quit from the page exits 0, Ctrl+C 130. A quit is refused while a run goes on; Ctrl+C cancels
   the run and the studio then exits.
 

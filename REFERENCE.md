@@ -1263,6 +1263,16 @@ stays, and the next start connects it again) and forgets it. The settings are
 holding no key. A key goes to the system keyring under the address it was given at; another
 address asks for it again. `dtpipe secret list` does not show it.
 
+The file also keeps three lists of what the page used with success and was asked to remember
+(`Remember on this machine`, or among the recent folders): the models, the coordinators and the
+folders, ten at most each, the most recent first, each identity once. A model is its provider and
+address, with the model, delay and context size it was last used with; a coordinator is its origin
+and how the person signs in, added once it answered; a folder is its full path. Never a key.
+With the box unticked nothing is written, neither an entry nor a key. A dialog lists its entries:
+a click fills the form and connects nothing, and the cross deletes an entry after a confirmation,
+and the key kept for its address with it (deleted by its alias, never read). A connection in place
+stays for the session; the next start no longer connects it.
+
 The coordinator is read the same way: `--coordinator` first, then what the studio remembers, then
 none, and a flag never writes what is remembered. The header always shows its state (connected,
 signing in, offline, signed out, or a remembered key to give again), and that zone is the button
@@ -1281,7 +1291,8 @@ conversation, and a job's relative paths resolve in the new folder. The change i
 reason, while the open job holds unsaved changes (the dialog offers to save or discard them), while
 a run or a preview goes on, or while the agent's turn runs or waits for your answer. Only a folder
 opened from the page is remembered, in `studio.json`: starting on a folder writes nothing, and no
-folder is opened again at start.
+folder is opened again at start. A recent folder is deleted from the list with its cross,
+whether or not it is still on the disk.
 
 | Action | What it does |
 |:---|:---|

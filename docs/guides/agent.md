@@ -40,6 +40,15 @@ lasts for the session, and the dialog says so. **Disconnect** closes the agent f
 keeps the model and its key: the next studio connects it again. **Forget what is remembered**
 removes the file's model and its key.
 
+**Recent models** lists the last models you connected with **Remember on this machine** ticked,
+the most recent first, up to ten, each provider and address once with the model, the delay and
+the context size it was last used with. A click on a row fills the form and does nothing else:
+**Test** and **Connect** stay yours, and the key kept for that address is used, not asked again.
+The × deletes an entry after a confirmation, and the key kept for its address with it; an entry
+with a key kept says so. A model connected at that moment stays connected for the session, and
+the next studio no longer connects it. **Forget what is remembered** takes the model's entry with
+it. With the box unticked, nothing is written: neither an entry nor a key.
+
 ## What the agent may do
 
 | The agent… | You confirm |
@@ -105,6 +114,8 @@ automation.
 - A job that reads or writes a brick runs from the page, not from the agent.
 - A remembered model that needs a key asks for it again when the keyring cannot be read.
 - Opening another folder from the header starts a new conversation; a turn running refuses it.
+- **Recent folders** lists the folders you opened with the box ticked; the × removes one, even a
+  folder gone from the disk, and touches nothing else.
 - Weaker models loop or invent YAML keys: the agent's `dry-run` catches most of it, read its plan.
 
 ---
