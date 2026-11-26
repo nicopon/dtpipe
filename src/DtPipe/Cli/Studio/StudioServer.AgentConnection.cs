@@ -48,11 +48,11 @@ public sealed partial class StudioServer
         _tools.AgentLink ?? throw new StudioRefusal(404, "This studio cannot connect a model from the page.");
 
     /// <summary>The connection as the page reads it: never the key, only whether one is kept and where.</summary>
-    private object ConnectionView(string? warning = null)
+    private object ConnectionView(string? warning = null, bool? keyringUsable = null)
     {
         var connection = _slot.Connection;
         var agent = Agent;
-        var history = AgentHistory();
+        var (history, settingsWarning, historyKeyring) = AgentHistory();
         return new
         {
             connected = agent is not null,
@@ -65,10 +65,10 @@ public sealed partial class StudioServer
             numCtx = connection?.Provider == "ollama" ? connection.NumCtx ?? AgentOptions.DefaultNumCtx : (int?)null,
             numCtxBounds = new { min = StudioAgentClients.MinNumCtx, max = StudioAgentClients.MaxNumCtx, @default = AgentOptions.DefaultNumCtx },
             key = connection?.Key ?? "none",
-            keyring = _tools.AgentLink?.Settings.KeyringUsable ?? true,
+            keyring = keyringUsable ?? historyKeyring,
             canConnect = _tools.AgentLink is not null,
             history,
-            settingsWarning = _tools.AgentLink?.Settings.Warning,
+            settingsWarning,
             warning,
         };
     }
@@ -78,18 +78,22 @@ public sealed partial class StudioServer
     /// never its values. The agent in place is not listed (it is a display rule: the file keeps its entry); after a disconnection
     /// it is.
     /// </summary>
-    private object[] AgentHistory()
+    private (object[] History, string? SettingsWarning, bool KeyringUsable) AgentHistory()
     {
-        if (_tools.AgentLink?.Settings is not { } settings) return [];
+        if (_tools.AgentLink?.Settings is not { } settings) return ([], null, true);
         var inPlace = Agent is not null && _slot.Connection is { } current ? new AgentSettings(current.Provider, current.Url, null, null) : null;
-        var recent = settings.ReadAgents().Where(a => inPlace is null || !StudioSettings.SameAgent(a, inPlace)).ToList();
-        if (recent.Count == 0) return [];
-        var kept = settings.KeptAliases();
-        return recent.Select(a => (object)new
+        var recent = settings.ReadAgents(out var settingsWarning).Where(a => inPlace is null || !StudioSettings.SameAgent(a, inPlace)).ToList();
+        if (recent.Count == 0) return ([], settingsWarning, true);
+        var keyringUsable = true;
+        IReadOnlySet<string> kept = recent.Any(a => a.Provider == "openai")
+            ? settings.KeptAliases(out keyringUsable)
+            : new HashSet<string>();
+        var history = recent.Select(a => (object)new
         {
             provider = a.Provider, url = StudioSettings.Shown(a.Url), model = a.Model, timeout = a.Timeout, numCtx = a.NumCtx,
-            keyKept = kept.Contains(StudioSettings.LlmAlias(a.Url)),
+            keyKept = a.Provider == "openai" && kept.Contains(StudioSettings.LlmAlias(a.Url)),
         }).ToArray();
+        return (history, settingsWarning, keyringUsable);
     }
 
     private PreparedConnection Prepare(AgentConnectionRequest request, StudioAgentLink link)
@@ -141,26 +145,38 @@ public sealed partial class StudioServer
         var prepared = Prepare(request, link);
         var keyState = prepared.Typed is not null ? "session" : prepared.Stored is not null ? "stored" : "none";
         var timeoutSeconds = (int)prepared.Timeout.TotalSeconds;
-        await _slot.ReplaceAsync(
+        var installed = await _slot.ReplaceAsync(
             () => NewAgent(new StudioAgentSetup(prepared.Client, prepared.Url, prepared.Model, link.Tools, link.Trace, prepared.NumCtx)),
             new AgentConnection(prepared.Provider, prepared.Url, prepared.Model, timeoutSeconds, "page", keyState, NumCtx: prepared.NumCtx));
 
         string? warning = null;
+        bool? keyringUsable = null;
         if (request.Remember)
         {
             try
             {
                 link.Settings.WriteAgent(new AgentSettings(prepared.Provider, prepared.Url, prepared.Model, timeoutSeconds, prepared.NumCtx));
-                if (prepared.Typed is not null && link.Settings.StoreLlmKey(prepared.Url, prepared.Typed)) keyState = "stored";
-                else if (prepared.Typed is not null) warning = "The keyring cannot keep the key: it lasts for this session only.";
+                if (prepared.Typed is not null)
+                {
+                    if (link.Settings.StoreLlmKey(prepared.Url, prepared.Typed))
+                    {
+                        keyState = "stored";
+                        keyringUsable = true;
+                    }
+                    else
+                    {
+                        keyringUsable = false;
+                        warning = "The keyring cannot keep the key: it lasts for this session only.";
+                    }
+                }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 warning = "The connection is made for this session, but the settings file cannot be written: nothing is remembered.";
             }
         }
-        _slot.Describe(new AgentConnection(prepared.Provider, prepared.Url, prepared.Model, timeoutSeconds, "page", keyState, NumCtx: prepared.NumCtx));
-        return ConnectionView(warning);
+        _slot.UpdateDescription((agent, conn) => ReferenceEquals(agent, installed) && conn is not null ? conn with { Key = keyState } : conn);
+        return ConnectionView(warning, keyringUsable);
     }
 
     /// <summary>
@@ -176,12 +192,15 @@ public sealed partial class StudioServer
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
             throw new StudioRefusal(400, "The address is an absolute http or https address.");
         link.Settings.RemoveAgent(provider, url);
-        var connection = _slot.Connection;
-        if (connection is not null && connection.Provider == provider && StudioSettings.Shown(connection.Url) == StudioSettings.Shown(url))
+        var targetShown = StudioSettings.Shown(url);
+        _slot.UpdateDescription((agent, connection) =>
         {
-            if (Agent is null) _slot.Describe(null);
-            else _slot.Describe(connection with { Source = connection.Source == "remembered" ? "page" : connection.Source, Key = connection.Key == "stored" ? "session" : connection.Key });
-        }
+            if (connection is null || connection.Provider != provider || StudioSettings.Shown(connection.Url) != targetShown)
+                return connection;
+            return agent is null
+                ? null
+                : connection with { Source = connection.Source == "remembered" ? "page" : connection.Source, Key = connection.Key == "stored" ? "session" : connection.Key };
+        });
         return ConnectionView();
     }
 }

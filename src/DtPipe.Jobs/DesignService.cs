@@ -533,7 +533,7 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
     }
 
     /// <summary>The leading <c>#</c> header comments of a job, read verbatim without parsing.</summary>
-    public static string? ReadHeader(string yaml) => JobYaml.ReadComments(yaml).Header;
+    public static string? ReadHeader(string yaml) => JobYaml.ReadComments(yaml, headerOnly: true).Header;
 
     private static string Indent(string text) =>
         string.Join('\n', text.Replace("\r\n", "\n").Split('\n').Select(l => "  " + l));

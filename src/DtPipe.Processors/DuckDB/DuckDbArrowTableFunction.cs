@@ -206,21 +206,19 @@ internal sealed unsafe class DuckDbArrowTableSource : IDisposable
         CArrowArray ffiArray = default;
         CArrowArrayExporter.ExportRecordBatch(emptyBatch, &ffiArray);
 
-        var err = DuckDbArrowNative.DuckDBDataChunkFromArrow(connection, &ffiArray, convertedSchema, out var chunk);
-        if (err != IntPtr.Zero)
-        {
-            CArrowArrayReleaseHook.ReleaseExportedIfUnclaimed(&ffiArray);
-            ThrowIfArrowError(err, "duckdb_data_chunk_from_arrow");
-        }
-
+        IntPtr chunk = IntPtr.Zero;
         try
         {
+            var err = DuckDbArrowNative.DuckDBDataChunkFromArrow(connection, &ffiArray, convertedSchema, out chunk);
+            ThrowIfArrowError(err, "duckdb_data_chunk_from_arrow");
             var vector = DuckDbArrowNative.DuckDBDataChunkGetVector(chunk, 0);
             return NativeMethods.Vectors.DuckDBVectorGetColumnType(vector);
         }
         finally
         {
-            DuckDbArrowNative.DuckDBDestroyDataChunk(ref chunk);
+            if (chunk != IntPtr.Zero)
+                DuckDbArrowNative.DuckDBDestroyDataChunk(ref chunk);
+            CArrowArrayReleaseHook.ReleaseExportedIfUnclaimed(&ffiArray);
         }
     }
 

@@ -58,8 +58,8 @@ public sealed class StudioFolder
             .Where(IsJob)
             .Select(f => Path.GetRelativePath(Root, f).Replace(Path.DirectorySeparatorChar, '/'))
             .Where(r => !r.Split('/').Any(s => s.StartsWith('.')))
-            .Order(StringComparer.Ordinal)
             .Take(MaxJobs)
+            .Order(StringComparer.Ordinal)
             .ToList();
 
     /// <summary>The folder and its subdirectories, as relative paths with '/' separators ("" for the root), in order.</summary>
@@ -68,8 +68,8 @@ public sealed class StudioFolder
             .Concat(Directory.EnumerateDirectories(Root, "*", Walk)
                 .Select(d => Path.GetRelativePath(Root, d).Replace(Path.DirectorySeparatorChar, '/'))
                 .Where(r => !r.Split('/').Any(s => s.StartsWith('.')))
-                .Order(StringComparer.Ordinal)
-                .Take(MaxFolders))
+                .Take(MaxFolders)
+                .Order(StringComparer.Ordinal))
             .ToList();
 
     public string Read(string relative) => ReadJob(relative).Text;
@@ -173,7 +173,7 @@ public sealed class StudioFolder
         return full;
     }
 
-    private string Confine(string relative)
+    internal string Confine(string relative)
     {
         if (string.IsNullOrWhiteSpace(relative) || Path.IsPathRooted(relative))
             throw new StudioRefusal(400, "A job is named by its path relative to the folder.");
@@ -183,7 +183,8 @@ public sealed class StudioFolder
             throw new StudioRefusal(400, $"'{relative}' is not a .yaml or .yml file.");
 
         var full = Path.GetFullPath(Path.Combine(Root, relative));
-        if (!full.StartsWith(Root + Path.DirectorySeparatorChar, PathComparison))
+        var prefix = Root.EndsWith(Path.DirectorySeparatorChar) ? Root : Root + Path.DirectorySeparatorChar;
+        if (!full.StartsWith(prefix, PathComparison))
             throw new StudioRefusal(400, $"'{relative}' leaves the folder.");
         return full;
     }

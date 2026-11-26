@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using DtPipe.Coordinator.Server.Deployments;
@@ -106,7 +107,10 @@ public sealed class RightsStore
     private const int MaxLiveKeys = 2;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
-    private sealed record State(RightsDocument Doc, long Version);
+    private sealed record State(RightsDocument Doc, long Version, IReadOnlySet<string> RunnerGroups)
+    {
+        public static State Of(RightsDocument doc, long version) => new(doc, version, ComputeRunnerGroups(doc));
+    }
 
     private readonly IRightsStore _store;
     private readonly CoordinatorServerOptions _options;
@@ -130,13 +134,13 @@ public sealed class RightsStore
             doc = Record(Prepared(doc), seed is null ? "Rights started empty" : $"Rights started from {Path.GetFileName(seed)}", null);
             if (store.Create(Serialize(doc)))
             {
-                _state = new State(doc, 1);
+                _state = State.Of(doc, 1);
                 return;
             }
             // A start that crossed this one wrote first: its document is the rights.
             stored = store.Load() ?? throw new InvalidOperationException("The rights document disappeared while the coordinator started.");
         }
-        _state = new State(Prepared(Read(stored.Document, "the rights store")), stored.Version);
+        _state = State.Of(Prepared(Read(stored.Document, "the rights store")), stored.Version);
     }
 
     public RightsDocument Snapshot() => Copy(_state.Doc);
@@ -172,35 +176,60 @@ public sealed class RightsStore
             : throw new ConflictException($"Node '{node}' is disabled: its identity may not connect, so no run is placed on it.");
     }
 
-    public IReadOnlyList<string> Groups()
+    public IReadOnlyList<string> Groups() => GroupsOf(_state.Doc);
+
+    /// <summary>A consistent snapshot of the rights document, its distinct groups and its runner groups.</summary>
+    internal (RightsDocument Doc, IReadOnlyList<string> Groups, IReadOnlySet<string> RunnerGroups) View()
     {
-        var doc = _state.Doc;
-        return doc.Identities.SelectMany(i => i.Groups).Concat(doc.Matrix.Keys).Concat(doc.Matrix.Values.SelectMany(v => v))
+        var state = _state;
+        return (Copy(state.Doc), GroupsOf(state.Doc), state.RunnerGroups);
+    }
+
+    private static IReadOnlyList<string> GroupsOf(RightsDocument doc) =>
+        doc.Identities.SelectMany(i => i.Groups).Concat(doc.Matrix.Keys).Concat(doc.Matrix.Values.SelectMany(v => v))
             .Where(g => g != "*")
             .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
-    }
 
     /// <summary>Whether every group of the sender may send to every group of the receiver; false when either has none.</summary>
     public bool CanSend(IReadOnlySet<string> from, IReadOnlySet<string> to)
     {
-        var doc = _state.Doc;
-        var runners = RunnerGroups(doc);
-        return from.Count > 0 && to.Count > 0 && from.All(f => to.All(t => Allowed(doc, runners, f, t)));
+        if (from.Count == 0 || to.Count == 0) return false;
+        var state = _state;
+        var doc = state.Doc;
+        var runners = state.RunnerGroups;
+        foreach (var f in from)
+            foreach (var t in to)
+                if (!Allowed(doc, runners, f, t)) return false;
+        return true;
     }
 
     /// <summary>
     /// The groups of the identities that are runners: a flow to or from one is allowed without a row. They belong to runners alone
     /// (<see cref="CheckIdentities"/>), so no data node is opened by sharing one.
     /// </summary>
-    public IReadOnlySet<string> RunnerGroups() => RunnerGroups(_state.Doc);
+    public IReadOnlySet<string> RunnerGroups() => _state.RunnerGroups;
+
+    private static IReadOnlySet<string> ComputeRunnerGroups(RightsDocument doc) =>
+        doc.Identities.Where(i => i is { IsNode: true, Runner: true }).SelectMany(i => i.Groups).ToFrozenSet(StringComparer.Ordinal);
 
     private static HashSet<string> RunnerGroups(RightsDocument doc) =>
         doc.Identities.Where(i => i is { IsNode: true, Runner: true }).SelectMany(i => i.Groups).ToHashSet(StringComparer.Ordinal);
 
     private static bool Allowed(RightsDocument doc, IReadOnlySet<string> runners, string from, string to) =>
         runners.Contains(from) || runners.Contains(to)
-        || (doc.Matrix.TryGetValue(from, out var targets) && (targets.Contains("*") || targets.Contains(to, StringComparer.OrdinalIgnoreCase)))
-        || (to != "*" && doc.Matrix.TryGetValue("*", out var any) && any.Contains(to, StringComparer.OrdinalIgnoreCase));
+        || (doc.Matrix.TryGetValue(from, out var targets) && ContainsTarget(targets, to, allowWildcard: true))
+        || (to != "*" && doc.Matrix.TryGetValue("*", out var any) && ContainsTarget(any, to, allowWildcard: false));
+
+    private static bool ContainsTarget(List<string> targets, string target, bool allowWildcard)
+    {
+        for (int i = 0; i < targets.Count; i++)
+        {
+            var entry = targets[i];
+            if ((allowWildcard && entry == "*") || string.Equals(entry, target, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
 
     public void SetMatrix(Dictionary<string, List<string>> matrix, string? by = null) => Edit(by, doc =>
     {
@@ -341,10 +370,10 @@ public sealed class RightsStore
             }
             return changes.Count > 0 ? string.Join("; ", changes) : null;
         }
-        // Read first, so that a start which has nothing to add writes nothing.
-        if (Additions(Snapshot(), DateTimeOffset.UtcNow) is null) return ([], left);
         try
         {
+            // Read first, so that a start which has nothing to add writes nothing.
+            if (Additions(Snapshot(), DateTimeOffset.UtcNow) is null) return ([], left);
             Edit(RightsBootstrap.Author, doc => Additions(doc, DateTimeOffset.UtcNow)!);
         }
         catch (ConflictException ex)
@@ -609,7 +638,7 @@ public sealed class RightsStore
                 throw new ConflictException(
                     "The rights changed in the store since this coordinator read them (another writer, or an earlier change that was kept after it reported failing). They have been read again: check them, and repeat the change if it is not there.");
             }
-            _state = new State(next, version);
+            _state = State.Of(next, version);
             Changed?.Invoke();
         }
     }
@@ -617,7 +646,7 @@ public sealed class RightsStore
     private void Reread()
     {
         if (_store.Load() is not { } stored) return;
-        _state = new State(Prepared(Read(stored.Document, "the rights store")), stored.Version);
+        _state = State.Of(Prepared(Read(stored.Document, "the rights store")), stored.Version);
         Changed?.Invoke();
     }
 

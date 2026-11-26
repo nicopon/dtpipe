@@ -275,6 +275,25 @@ public sealed class DesignServiceTests
         Assert.DoesNotContain("\noutput: csv:pwn.csv", composed.Yaml);
     }
 
+    [Fact]
+    public void ReadHeader_Stops_At_First_Root_Key_And_Ignores_Branch_Comments_Or_Later_Errors()
+    {
+        const string yaml = """
+            # Title
+            # Subtitle
+            first:
+              # Branch comment ignored in headerOnly mode
+              input: csv:a.csv
+            second: [unterminated
+            """;
+
+        var (header, branches) = JobYaml.ReadComments(yaml, headerOnly: true);
+
+        Assert.Equal("Title\nSubtitle", header);
+        Assert.Empty(branches);
+        Assert.Equal("Title\nSubtitle", DesignService.ReadHeader(yaml));
+    }
+
     /// <summary>
     /// A catalog of bricks offered here. Like the coordinator, it answers for a branch that is the reference to an offered
     /// brick in the right direction, and for nothing else.

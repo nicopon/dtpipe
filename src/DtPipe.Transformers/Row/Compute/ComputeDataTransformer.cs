@@ -20,7 +20,33 @@ namespace DtPipe.Transformers.Row.Compute;
 public sealed class ComputeDataTransformer : BaseColumnarTransformer, IRequiresOptions<DtPipe.Transformers.Row.Compute.ComputeOptions>
 {
     private static bool IsNullCell(IArrowArray column, int row)
-        => column is DictionaryArray ? ArrowTypeMap.GetValue(column, row) is null : column.IsNull(row);
+    {
+        if (column is DictionaryArray dict)
+        {
+            if (dict.IsNull(row) || dict.Indices.IsNull(row)) return true;
+            if (dict.Dictionary.NullCount == 0) return false;
+            int idx = DictionaryIndexAt(dict.Indices, row);
+            return (uint)idx >= (uint)dict.Dictionary.Length || IsNullCell(dict.Dictionary, idx);
+        }
+
+        return column.IsNull(row);
+    }
+
+    private static int DictionaryIndexAt(IArrowArray indices, int row) => indices switch
+    {
+        Int8Array a => a.Values[row] is var v && v >= 0 ? v : -1,
+        Int16Array a => a.Values[row] is var v && v >= 0 ? v : -1,
+        Int32Array a => a.Values[row] is var v && v >= 0 ? v : -1,
+        Int64Array a => a.Values[row] is var v and >= 0 and <= int.MaxValue ? (int)v : -1,
+        UInt8Array a => a.Values[row],
+        UInt16Array a => a.Values[row],
+        UInt32Array a => a.Values[row] <= int.MaxValue ? (int)a.Values[row] : -1,
+        UInt64Array a => a.Values[row] <= int.MaxValue ? (int)a.Values[row] : -1,
+        _ => ArrowTypeMap.GetValue(indices, row) is { } v
+            && Convert.ToInt64(v, System.Globalization.CultureInfo.InvariantCulture) is var l and >= 0 and <= int.MaxValue
+            ? (int)l
+            : -1,
+    };
 
     private const int ParallelBatchThreshold = 1024;
 
@@ -188,7 +214,8 @@ public sealed class ComputeDataTransformer : BaseColumnarTransformer, IRequiresO
         IArrowArray[] outArrays,
         CancellationToken ct)
     {
-        bool parallel = _jsEngineProvider.EnginePerThread
+        bool parallel = Environment.ProcessorCount > 1
+            && _jsEngineProvider.EnginePerThread
             && batch.Length >= ParallelBatchThreshold
             && processors.All(p => p.IsPure);
 
@@ -268,7 +295,8 @@ public sealed class ComputeDataTransformer : BaseColumnarTransformer, IRequiresO
             {
                 var col = batch.Column(proc.ColumnIndex);
                 // A dictionary's entry may be null while its index is not: the array's own null count misses it.
-                if (col.NullCount > 0 || col is DictionaryArray) skipInputCols[p] = col;
+                if (col.NullCount > 0 || (col is DictionaryArray dict && (dict.Indices.NullCount > 0 || dict.Dictionary.NullCount > 0)))
+                    skipInputCols[p] = col;
             }
         }
 
@@ -300,9 +328,18 @@ public sealed class ComputeDataTransformer : BaseColumnarTransformer, IRequiresO
         }
 
         var columns = new IArrowArray[count];
-        for (int p = 0; p < count; p++)
-            columns[p] = ArrowTypeMapper.BuildArray(builders[p]);
-        return columns;
+        try
+        {
+            for (int p = 0; p < count; p++)
+                columns[p] = ArrowTypeMapper.BuildArray(builders[p]);
+            return columns;
+        }
+        catch
+        {
+            for (int p = 0; p < count; p++)
+                columns[p]?.Dispose();
+            throw;
+        }
     }
 
     public override object?[]? Transform(IReadOnlyList<object?> row)

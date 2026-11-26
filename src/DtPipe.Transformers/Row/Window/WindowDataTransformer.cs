@@ -456,24 +456,42 @@ public class WindowDataTransformer : BaseColumnarTransformer, IMultiRowTransform
     {
         private readonly List<JsRowObjectInstance> _rowPool = new();
         private readonly List<ArrowRowObjectInstance> _arrowPool = new();
-        private readonly Dictionary<int, JsValue[]> _rowViewsBySize = new();
-        private readonly Dictionary<int, JsValue[]> _arrowViewsBySize = new();
+        private JsValue[] _rowViews = [];
+        private JsValue[] _arrowViews = [];
 
         public JsValue Function { get; } = function;
         public JsString[] ColJsKeys { get; } = colJsKeys;
 
         public List<JsRowObjectInstance> EnsureRowPool(int size)
         {
-            while (_rowPool.Count < size)
-                _rowPool.Add(new JsRowObjectInstance(engine, columnNames, columnNames.Length, refErrorCtor));
+            if (_rowPool.Count < size)
+            {
+                while (_rowPool.Count < size)
+                    _rowPool.Add(new JsRowObjectInstance(engine, columnNames, columnNames.Length, refErrorCtor));
+                _rowViews = GrowViews(_rowPool, _rowViews);
+            }
             return _rowPool;
         }
 
         public List<ArrowRowObjectInstance> EnsureArrowPool(int size)
         {
-            while (_arrowPool.Count < size)
-                _arrowPool.Add(new ArrowRowObjectInstance(engine, columnNames, columnNames.Length, refErrorCtor));
+            if (_arrowPool.Count < size)
+            {
+                while (_arrowPool.Count < size)
+                    _arrowPool.Add(new ArrowRowObjectInstance(engine, columnNames, columnNames.Length, refErrorCtor));
+                _arrowViews = GrowViews(_arrowPool, _arrowViews);
+            }
             return _arrowPool;
+        }
+
+        private static JsValue[] GrowViews<TView>(List<TView> pool, JsValue[] existing) where TView : JsValue
+        {
+            var next = new JsValue[pool.Count];
+            if (existing.Length > 0)
+                System.Array.Copy(existing, next, existing.Length);
+            for (int i = existing.Length; i < pool.Count; i++)
+                next[i] = pool[i];
+            return next;
         }
 
         /// <summary>
@@ -481,23 +499,19 @@ public class WindowDataTransformer : BaseColumnarTransformer, IMultiRowTransform
         /// The views are reused from window to window and the array is new each time: what a script puts
         /// in it, or sets on it, does not reach the next window.
         /// </summary>
-        public JsValue[] RowWindow(int count) => WindowOf(_rowPool, _rowViewsBySize, count);
+        public JsValue[] RowWindow(int count) => WindowOf(_rowViews, count);
 
         /// <summary><see cref="RowWindow"/> over the views of the Arrow pool.</summary>
-        public JsValue[] ArrowWindow(int count) => WindowOf(_arrowPool, _arrowViewsBySize, count);
+        public JsValue[] ArrowWindow(int count) => WindowOf(_arrowViews, count);
 
-        private JsValue[] WindowOf<TView>(List<TView> pool, Dictionary<int, JsValue[]> viewsBySize, int count) where TView : JsValue
+        private JsValue[] WindowOf(JsValue[] template, int count)
         {
-            if (!viewsBySize.TryGetValue(count, out var views))
-            {
-                views = new JsValue[count];
-                for (int i = 0; i < count; i++)
-                    views[i] = pool[i];
-                viewsBySize[count] = views;
-            }
+            var copy = new JsValue[count];
+            if (count > 0)
+                System.Array.Copy(template, copy, count);
 
-            // A JsArray stores into the array it is given, so it gets a copy of the cached views.
-            return [new JsArray(engine, (JsValue[])views.Clone())];
+            // A JsArray stores into the array it is given, so it gets a fresh copy of the slice.
+            return [new JsArray(engine, copy)];
         }
     }
 }

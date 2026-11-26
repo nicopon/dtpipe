@@ -3,6 +3,7 @@ using DtPipe.Core.Abstractions;
 using DtPipe.Core.Models;
 using Microsoft.Extensions.Logging;
 using Oracle.ManagedDataAccess.Client;
+using Oracle.ManagedDataAccess.Types;
 
 namespace DtPipe.Adapters.Oracle;
 
@@ -241,6 +242,7 @@ public sealed class OracleSchemaInspector : ISchemaInspector
     public static async Task<(string Schema, string Table)> ResolveTargetTableAsync(OracleConnection connection, string inputName, CancellationToken ct)
     {
         using var cmd = connection.CreateCommand();
+        cmd.BindByName = true;
         cmd.CommandText = @"
             DECLARE
               v_schema VARCHAR2(128);
@@ -274,11 +276,19 @@ public sealed class OracleSchemaInspector : ISchemaInspector
 
         await cmd.ExecuteNonQueryAsync(ct);
 
-        string schema = pSchema.Value.ToString() ?? "";
-        string table = pTable.Value.ToString() ?? "";
+        string schema = ReadOutputString(pSchema.Value);
+        string table = ReadOutputString(pTable.Value);
 
         return (schema, table);
     }
+
+    internal static string ReadOutputString(object? value) => value switch
+    {
+        null or DBNull => "",
+        OracleString os => os.IsNull ? "" : os.Value,
+        string s => s,
+        _ => value.ToString() ?? "",
+    };
 
     /// <summary>
     /// Quotes an identifier only if necessary (i.e. contains lowercase, spaces, or special characters).

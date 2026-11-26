@@ -19,19 +19,19 @@ public sealed class StudioSettingsTests : IDisposable
     public void An_unreadable_file_or_one_of_another_version_is_ignored_with_a_warning_and_a_round_trip_keeps_the_agent()
     {
         var settings = new StudioSettings(SettingsPath, _secrets);
-        Assert.Null(settings.Read().Agent);
-        Assert.Null(settings.Warning);
+        Assert.Null(settings.Read(out var warning).Agent);
+        Assert.Null(warning);
 
         settings.WriteAgent(new AgentSettings("ollama", "http://localhost:11434", "m", 30));
         Assert.Equal(new AgentSettings("ollama", "http://localhost:11434", "m", 30), settings.Read().Agent);
 
         File.WriteAllText(SettingsPath, "{ not json");
-        Assert.Null(settings.Read().Agent);
-        Assert.NotNull(settings.Warning);
+        Assert.Null(settings.Read(out warning).Agent);
+        Assert.NotNull(warning);
 
         File.WriteAllText(SettingsPath, """{"version":99,"agent":{"provider":"ollama","url":"http://localhost:11434"}}""");
-        Assert.Null(settings.Read().Agent);
-        Assert.Contains("version 99", settings.Warning);
+        Assert.Null(settings.Read(out warning).Agent);
+        Assert.Contains("version 99", warning);
     }
 
     [Fact]
@@ -78,8 +78,8 @@ public sealed class StudioSettingsTests : IDisposable
         Assert.NotNull(settings.Read().Agent);
 
         File.WriteAllText(SettingsPath, """{"version":1,"coordinator":{"origin":"https://x.example.com/path","auth":"key"}}""");
-        Assert.Null(settings.Read().Coordinator);
-        Assert.NotNull(settings.Warning);
+        Assert.Null(settings.Read(out var warning).Coordinator);
+        Assert.NotNull(warning);
     }
 
     [Fact]
@@ -111,10 +111,10 @@ public sealed class StudioSettingsTests : IDisposable
         Assert.DoesNotContain(settings.ReadAgents(), a => a.Url == "http://solo:11434");
 
         File.WriteAllText(SettingsPath, """{"version":1,"agents":[{"provider":"nobody","url":"http://a:1"},{"provider":"openai","url":"https://api.example.com/v1"}],"coordinators":[{"origin":"https://x.example.com/path","auth":"key"}]}""");
-        Assert.Equal(["https://api.example.com/v1"], settings.ReadAgents().Select(a => a.Url));
-        Assert.NotNull(settings.Warning);
-        Assert.Empty(settings.ReadCoordinators());
-        Assert.NotNull(settings.Warning);
+        Assert.Equal(["https://api.example.com/v1"], settings.ReadAgents(out var agentWarning).Select(a => a.Url));
+        Assert.NotNull(agentWarning);
+        Assert.Empty(settings.ReadCoordinators(out var coordWarning));
+        Assert.NotNull(coordWarning);
     }
 
     [Fact]
@@ -174,7 +174,51 @@ public sealed class StudioSettingsTests : IDisposable
         Assert.Equal(11, settings.ReadFolders().Count);
 
         File.WriteAllText(SettingsPath, $$"""{"version":1,"folders":["relative/path","",{{JsonSerializer.Serialize(folders[1])}}]}""");
-        Assert.Equal([folders[1]], settings.ReadFolders());
-        Assert.Contains("full path", settings.Warning);
+        Assert.Equal([folders[1]], settings.ReadFolders(out var warning));
+        Assert.Contains("full path", warning);
+    }
+
+    [Fact]
+    public void WriteCoordinator_with_remember_updates_both_active_and_recent_and_concurrent_writes_stay_valid()
+    {
+        var settings = new StudioSettings(SettingsPath, _secrets);
+        var coordinator = new CoordinatorSettings("https://coordinator.example.com", "key");
+        settings.WriteCoordinator(coordinator, remember: true);
+
+        Assert.Equal(coordinator, settings.Read().Coordinator);
+        Assert.Equal([coordinator], settings.ReadCoordinators());
+
+        Parallel.For(0, 16, i =>
+        {
+            settings.RememberFolder(Path.Combine(_dir, $"concurrent-{i}"));
+            settings.WriteAgent(new AgentSettings("ollama", $"http://h{i}:11434", "m", 30));
+        });
+
+        Assert.Equal(16, settings.ReadFolders(out var folderWarning).Count);
+        Assert.Null(folderWarning);
+        Assert.Equal(16, settings.ReadAgents(out var agentWarning).Count);
+        Assert.Null(agentWarning);
+    }
+
+    [Fact]
+    public void KeptAliases_reports_unusable_keyring_per_call_when_listing_throws()
+    {
+        var failing = new ThrowingSecretsManager();
+        var settings = new StudioSettings(SettingsPath, failing);
+
+        var aliases = settings.KeptAliases(out var usable);
+
+        Assert.Empty(aliases);
+        Assert.False(usable);
+        Assert.True(new StudioSettings(SettingsPath, _secrets).KeptAliases(out var ok) is not null && ok);
+    }
+
+    private sealed class ThrowingSecretsManager : ISecretsManager
+    {
+        public void SetSecret(string alias, string value) => throw new InvalidOperationException("locked");
+        public string? GetSecret(string alias) => throw new InvalidOperationException("locked");
+        public void DeleteSecret(string alias) => throw new InvalidOperationException("locked");
+        public Dictionary<string, string> ListSecrets() => throw new InvalidOperationException("locked");
+        public void Nuke() => throw new InvalidOperationException("locked");
     }
 }

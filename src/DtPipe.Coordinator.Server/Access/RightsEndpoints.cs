@@ -17,7 +17,7 @@ internal static class RightsEndpoints
 
         api.MapGet("/rights", (RightsStore rights, NodeInventory inventory, EnrollmentQueue enrollment, CoordinatorServerOptions options) =>
         {
-            var doc = rights.Snapshot();
+            var (doc, groups, runnerGroups) = rights.View();
             var online = inventory.Snapshot().Where(n => n.Online).Select(n => n.Name).ToHashSet();
             var now = DateTimeOffset.UtcNow;
             return new
@@ -30,8 +30,8 @@ internal static class RightsEndpoints
                     auth = i.Auth.Mode, hasKey = i.Auth.LiveAt(now).Any(),
                     connected = i.IsNode && online.Contains(i.Name) && inventory.ClientIdOf(i.Name) == i.ClientId,
                 }),
-                groups = rights.Groups(),
-                runnerGroups = rights.RunnerGroups().Order(StringComparer.Ordinal),
+                groups,
+                runnerGroups = runnerGroups.Order(StringComparer.Ordinal),
                 pending = enrollment.List(),
                 matrix = doc.Matrix,
                 audit = doc.Audit,
@@ -161,11 +161,18 @@ internal static class RightsEndpoints
     /// </summary>
     private static List<GroupEdge> RunnerEdges(IReadOnlyList<string> groups, NodeInventory inventory, RightsStore rights)
     {
-        var open = rights.RunnerGroups();
-        var runners = inventory.Snapshot().Where(n => n.Role == NodeRole.Runner)
-            .SelectMany(n => rights.NodeIdentity(n.Name) is { Enabled: true } runner ? runner.Groups : (IReadOnlyList<string>)[])
-            .Distinct(StringComparer.Ordinal).ToList();
-        if (runners.Count == 0 && open.Count == 0)
+        var (doc, _, open) = rights.View();
+        var byName = doc.Identities.Where(i => i.IsNode).ToDictionary(i => i.Name, StringComparer.Ordinal);
+        var runners = new HashSet<string>(StringComparer.Ordinal);
+        var hasEnabledRunner = doc.Identities.Any(i => i is { IsNode: true, Runner: true, Enabled: true });
+        foreach (var node in inventory.Snapshot())
+        {
+            if (node.Role != NodeRole.Runner) continue;
+            if (!byName.TryGetValue(node.Name, out var identity) || !identity.Enabled) continue;
+            hasEnabledRunner = true;
+            foreach (var g in identity.Groups) runners.Add(g);
+        }
+        if (!hasEnabledRunner)
             throw new ConflictException("No runner is known to this coordinator, so there is no group to exchange with: add it without, and allow its edges once a runner has announced itself.");
         return [.. groups.Select(g => g.Trim()).Where(g => g.Length > 0).Distinct(StringComparer.Ordinal)
             .SelectMany(g => runners.Where(r => !open.Contains(r)).SelectMany(r => new[] { new GroupEdge(g, r), new GroupEdge(r, g) })).Distinct()];

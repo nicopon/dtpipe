@@ -35,10 +35,10 @@ internal sealed class CoordinatorSlot(CoordinatorLink? link, CoordinatorConnecti
         get { lock (_holds.Gate) return _connection; }
     }
 
-    /// <summary>Another description of the connection in place, as it stands after a change of memory.</summary>
-    public void Describe(CoordinatorConnection? updated)
+    /// <summary>Updates the description of the connection atomically under the slot lock.</summary>
+    public void UpdateDescription(Func<CoordinatorLink?, CoordinatorConnection?, CoordinatorConnection?> update)
     {
-        lock (_holds.Gate) _connection = updated;
+        lock (_holds.Gate) _connection = update(_link, _connection);
     }
 
     /// <summary>Holds the link in place until the lease is disposed; its value is null when none is connected.</summary>
@@ -49,12 +49,12 @@ internal sealed class CoordinatorSlot(CoordinatorLink? link, CoordinatorConnecti
     /// link was making stops first, and the old link then forgets its tokens and closes. <paramref name="signIn"/> starts the key's
     /// sign-in on the new link, in the background: a coordinator that does not answer never delays the caller.
     /// </summary>
-    public async Task ReplaceAsync(CoordinatorLink? next, CoordinatorConnection? described, bool signIn)
+    public async Task ReplaceAsync(CoordinatorLink? next, CoordinatorConnection? described, bool signIn, CancellationToken ct = default)
     {
         CoordinatorLink? old = null;
         CancellationTokenSource? stopped = null;
         var stopping = Task.CompletedTask;
-        _holds.Replace(() =>
+        await _holds.ReplaceAsync(() =>
         {
             old = _link;
             stopped = _signIn;
@@ -64,7 +64,7 @@ internal sealed class CoordinatorSlot(CoordinatorLink? link, CoordinatorConnecti
             _signIn = null;
             _signingIn = Task.CompletedTask;
             if (signIn && next is { ByKey: true }) StartSignIn(next);
-        });
+        }, ct: ct);
         if (stopped is not null)
         {
             await stopped.CancelAsync();
@@ -97,10 +97,22 @@ internal sealed class CoordinatorSlot(CoordinatorLink? link, CoordinatorConnecti
 
     public void Dispose()
     {
-        _signIn?.Cancel();
-        try { _signingIn.Wait(TimeSpan.FromSeconds(5)); }
+        CancellationTokenSource? signIn;
+        Task signingIn;
+        CoordinatorLink? link;
+        lock (_holds.Gate)
+        {
+            signIn = _signIn;
+            signingIn = _signingIn;
+            link = _link;
+            _signIn = null;
+            _signingIn = Task.CompletedTask;
+            _link = null;
+        }
+        signIn?.Cancel();
+        try { signingIn.Wait(TimeSpan.FromSeconds(5)); }
         catch (AggregateException) { }
-        _signIn?.Dispose();
-        _link?.Dispose();
+        signIn?.Dispose();
+        link?.Dispose();
     }
 }

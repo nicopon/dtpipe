@@ -147,6 +147,40 @@ public class ComputeDataTransformerTests : IDisposable
     }
 
     [Fact]
+    public async Task SkipNull_Skips_Dictionary_Null_Indices_Out_Of_Range_And_Short_Circuits_NonNull_Dictionary()
+    {
+        var options = new ComputeOptions { Compute = new[] { "S:row.S === null ? 'RAN' : row.S + '!'" }, SkipNull = true };
+        var columns = new[] { new PipeColumnInfo("S", typeof(string), true) };
+
+        var transformer = new ComputeDataTransformer(options, _jsEngineProvider);
+        await transformer.InitializeAsync(columns);
+
+        // Null index + null dictionary entry + out-of-range Int64 index.
+        var dictWithNull = new Apache.Arrow.StringArray.Builder().Append("a").AppendNull().Build();
+        var indices64 = new Apache.Arrow.Int64Array.Builder().Append(0).AppendNull().Append(1).Append((long)int.MaxValue + 5).Build();
+        var type64 = new Apache.Arrow.Types.DictionaryType(Apache.Arrow.Types.Int64Type.Default, Apache.Arrow.Types.StringType.Default, false);
+        var col1 = new Apache.Arrow.DictionaryArray(type64, indices64, dictWithNull);
+        using var batch1 = new Apache.Arrow.RecordBatch(new Apache.Arrow.Schema.Builder().Field(new Apache.Arrow.Field("S", type64, true)).Build(), [col1], 4);
+        using var res1 = await transformer.TransformBatchAsync(batch1);
+        var out1 = (Apache.Arrow.StringArray)res1!.Column(0);
+        out1.GetString(0).Should().Be("a!");
+        out1.IsNull(1).Should().BeTrue();
+        out1.IsNull(2).Should().BeTrue();
+        out1.IsNull(3).Should().BeTrue();
+
+        // Zero-null dictionary short-circuits and transforms every row.
+        var dictNoNull = new Apache.Arrow.StringArray.Builder().Append("x").Append("y").Build();
+        var indicesNoNull = new Apache.Arrow.Int32Array.Builder().Append(0).Append(1).Build();
+        var type32 = new Apache.Arrow.Types.DictionaryType(Apache.Arrow.Types.Int32Type.Default, Apache.Arrow.Types.StringType.Default, false);
+        var col2 = new Apache.Arrow.DictionaryArray(type32, indicesNoNull, dictNoNull);
+        using var batch2 = new Apache.Arrow.RecordBatch(new Apache.Arrow.Schema.Builder().Field(new Apache.Arrow.Field("S", type32, true)).Build(), [col2], 2);
+        using var res2 = await transformer.TransformBatchAsync(batch2);
+        var out2 = (Apache.Arrow.StringArray)res2!.Column(0);
+        out2.GetString(0).Should().Be("x!");
+        out2.GetString(1).Should().Be("y!");
+    }
+
+    [Fact]
     public async Task Transform_SkipNull_DoesNotExecuteScript()
     {
         // Arrange

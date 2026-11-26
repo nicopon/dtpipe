@@ -374,4 +374,19 @@ public sealed class RightsStoreTests : IDisposable
         Assert.Equal(["crm"], provider.ResolveIdentity(Token("a"), null, null)!.Groups);
         Assert.Empty(provider.ResolveIdentity(Token("watch"), null, null)!.Groups);
     }
+
+    [Fact]
+    public void Bootstrap_Wraps_Identity_Conflicts_From_Its_Precheck_As_InvalidOperationException()
+    {
+        var store = StoreOf(Document);
+        var key = ClearKey.New("dup");
+        var bootstrap = new RightsBootstrap(null,
+        [
+            new BootstrapIdentity("dup", IdentityKinds.Node, "node-a", ["crm"], [], null, key.Hash, key.Hint),
+        ]);
+
+        var error = Assert.Throws<InvalidOperationException>(() => store.Bootstrap(bootstrap));
+        Assert.StartsWith("Coordinator:Bootstrap:", error.Message);
+        Assert.IsType<ConflictException>(error.InnerException);
+    }
 }

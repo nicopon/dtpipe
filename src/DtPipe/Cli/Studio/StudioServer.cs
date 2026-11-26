@@ -160,8 +160,7 @@ public sealed partial class StudioServer : IAsyncDisposable
     /// <summary>The routes that send something to the coordinator: the library, the bricks, a publication, a sign-in.</summary>
     private static bool ReachesCoordinator(string path) =>
         path == "/api/coordinator/login" || path.StartsWith("/api/bricks", StringComparison.Ordinal)
-        || path.StartsWith("/api/library", StringComparison.Ordinal) || path.StartsWith("/api/publish", StringComparison.Ordinal)
-        || path == "/api/design/decompose";
+        || path.StartsWith("/api/library", StringComparison.Ordinal) || path.StartsWith("/api/publish", StringComparison.Ordinal);
 
     public string Token { get; }
     public int Port { get; private set; }
@@ -1155,6 +1154,7 @@ public sealed partial class StudioServer : IAsyncDisposable
         if (agent is { } stopping) await stopping;
         await _app.StopAsync();
         await _app.DisposeAsync();
+        _slot.Dispose();
         _sampling.Dispose();
         _coordinator.Dispose();
     }

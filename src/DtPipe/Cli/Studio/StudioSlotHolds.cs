@@ -1,5 +1,3 @@
-using System.Diagnostics;
-
 namespace DtPipe.Cli.Studio;
 
 /// <summary>
@@ -13,6 +11,7 @@ internal sealed class SlotHolds(string busy, string changing = "")
 {
     private int _holds;
     private bool _draining;
+    private TaskCompletionSource? _drained;
 
     public object Gate { get; } = new();
 
@@ -22,38 +21,55 @@ internal sealed class SlotHolds(string busy, string changing = "")
         lock (Gate)
         {
             if (_draining) throw new StudioRefusal(409, changing);
+            var value = read();
             _holds++;
-            return new Lease<T>(this, read());
+            return new Lease<T>(this, value);
         }
     }
 
     /// <summary>
-    /// Runs <paramref name="replace"/> under the lock once no lease is held, waiting up to <paramref name="drain"/> for those held
-    /// to end, or refuses with 409.
+    /// Runs <paramref name="replace"/> under the lock once no lease is held, waiting asynchronously up to <paramref name="drain"/>
+    /// for those held to end, or refuses with 409.
     /// </summary>
-    public void Replace(Action replace, TimeSpan drain = default)
+    public async Task ReplaceAsync(Action replace, TimeSpan drain = default, CancellationToken ct = default)
     {
+        TaskCompletionSource drained;
         lock (Gate)
         {
-            if (_holds > 0 && drain > TimeSpan.Zero)
+            if (_draining) throw new StudioRefusal(409, string.IsNullOrEmpty(changing) ? busy : changing);
+            if (_holds == 0)
             {
-                _draining = true;
-                var waited = Stopwatch.StartNew();
-                try
-                {
-                    while (_holds > 0)
-                    {
-                        var left = drain - waited.Elapsed;
-                        if (left <= TimeSpan.Zero || !Monitor.Wait(Gate, left)) break;
-                    }
-                }
-                finally
-                {
-                    _draining = false;
-                }
+                replace();
+                return;
             }
-            if (_holds > 0) throw new StudioRefusal(409, busy);
-            replace();
+            if (drain <= TimeSpan.Zero) throw new StudioRefusal(409, busy);
+            _draining = true;
+            drained = _drained = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+
+        try
+        {
+            try
+            {
+                await drained.Task.WaitAsync(drain, ct);
+            }
+            catch (TimeoutException)
+            {
+            }
+
+            lock (Gate)
+            {
+                if (_holds > 0) throw new StudioRefusal(409, busy);
+                replace();
+            }
+        }
+        finally
+        {
+            lock (Gate)
+            {
+                _draining = false;
+                _drained = null;
+            }
         }
     }
 
@@ -66,11 +82,12 @@ internal sealed class SlotHolds(string busy, string changing = "")
         public void Dispose()
         {
             if (Interlocked.Exchange(ref _released, 1) != 0) return;
+            TaskCompletionSource? drained = null;
             lock (holds.Gate)
             {
-                holds._holds--;
-                Monitor.PulseAll(holds.Gate);
+                if (--holds._holds == 0) drained = holds._drained;
             }
+            drained?.TrySetResult();
         }
     }
 }

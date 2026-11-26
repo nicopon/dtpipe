@@ -135,4 +135,65 @@ public class WindowDataTransformerTests : IDisposable
         resFlush.Should().HaveCount(1);
         resFlush.First()[0].Should().Be(5d);
     }
+
+    [Fact]
+    public async Task ProcessBatch_VaryingKeyGroupSizes_ReusesTemplateSafelyAcrossSizes()
+    {
+        var options = new WindowOptions
+        {
+            Key = "Category",
+            Script = "const sum = rows.reduce((a, b) => a + b.Val, 0); rows.tag = 'mut'; return [{ Category: rows[0].Category, Val: sum }];"
+        };
+        var columns = new List<PipeColumnInfo>
+        {
+            new("Category", typeof(string), false),
+            new("Val", typeof(int), false)
+        };
+
+        var rowTransformer = new WindowDataTransformer(options, _jsProvider);
+        await rowTransformer.InitializeAsync(columns);
+        var batchTransformer = new WindowDataTransformer(options, _jsProvider);
+        await batchTransformer.InitializeAsync(columns);
+
+        // Groups of size 1, 3, 2, 5, 1.
+        var cats = new[] { "A", "B", "B", "B", "C", "C", "D", "D", "D", "D", "D", "E" };
+        var vals = new[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 };
+
+        var rowOut = new List<(string Cat, double Sum)>();
+        for (int i = 0; i < cats.Length; i++)
+            rowOut.AddRange(rowTransformer.TransformMany(new object?[] { cats[i], vals[i] }).Select(r => ((string)r[0]!, Convert.ToDouble(r[1]))));
+        rowOut.AddRange(rowTransformer.Flush().Select(r => ((string)r[0]!, Convert.ToDouble(r[1]))));
+
+        var catArray = new Apache.Arrow.StringArray.Builder().AppendRange(cats).Build();
+        var valArray = new Apache.Arrow.Int32Array.Builder().AppendRange(vals).Build();
+        var schema = new Apache.Arrow.Schema(
+            [new Apache.Arrow.Field("Category", Apache.Arrow.Types.StringType.Default, false),
+             new Apache.Arrow.Field("Val", Apache.Arrow.Types.Int32Type.Default, false)],
+            null);
+        using var batch = new Apache.Arrow.RecordBatch(schema, [catArray, valArray], cats.Length);
+
+        var batchOut = new List<(string Cat, double Sum)>();
+        using (var res = await batchTransformer.TransformBatchAsync(batch))
+        {
+            if (res is not null)
+            {
+                var c = (Apache.Arrow.StringArray)res.Column(0);
+                var v = (Apache.Arrow.Int32Array)res.Column(1);
+                for (int i = 0; i < res.Length; i++) batchOut.Add((c.GetString(i), v.GetValue(i)!.Value));
+            }
+        }
+        await foreach (var flushed in batchTransformer.FlushBatchAsync())
+        {
+            using (flushed)
+            {
+                var c = (Apache.Arrow.StringArray)flushed.Column(0);
+                var v = (Apache.Arrow.Int32Array)flushed.Column(1);
+                for (int i = 0; i < flushed.Length; i++) batchOut.Add((c.GetString(i), v.GetValue(i)!.Value));
+            }
+        }
+
+        var expected = new (string, double)[] { ("A", 1), ("B", 9), ("C", 11), ("D", 45), ("E", 12) };
+        rowOut.Should().Equal(expected);
+        batchOut.Should().Equal(expected);
+    }
 }

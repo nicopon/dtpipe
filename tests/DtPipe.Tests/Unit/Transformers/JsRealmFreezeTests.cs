@@ -323,6 +323,35 @@ public class JsRealmFreezeTests : IDisposable
         (await RunBatchesAsync(await ComputeAsync(body), column: 1)).Should().Equal(expected);
     }
 
+    [Fact]
+    public async Task DefineProperty_And_Delete_On_A_Row_Stay_Isolated_And_Take_Priority_Over_Schema()
+    {
+        const string definedBody =
+            "Object.defineProperty(row, 'A', { value: row.A * 10, configurable: true, enumerable: true }); "
+            + "Object.defineProperty(row, 'extra', { value: 'e', configurable: true, enumerable: true }); "
+            + "return row.A + ':' + Object.keys(row).join(',');";
+        string[] definedExpected = ["10:A,extra", "20:A,extra", "40:A,extra"];
+        PlayRows(await ComputeAsync(definedBody)).Should().Equal(definedExpected);
+        (await RunBatchesAsync(await ComputeAsync(definedBody), column: 1)).Should().Equal(definedExpected);
+
+        const string deletedBody =
+            "const before = row.A; delete row.A; "
+            + "const keys = Object.keys(row).join(','); "
+            + "const has = 'A' in row; "
+            + "return before + ':' + keys + ':' + has;";
+        string[] deletedExpected = ["1::false", "2::false", "4::false"];
+        PlayRows(await ComputeAsync(deletedBody)).Should().Equal(deletedExpected);
+        (await RunBatchesAsync(await ComputeAsync(deletedBody), column: 1)).Should().Equal(deletedExpected);
+
+        // Non-configurable defined property refuses delete on that row, yet is cleared when moving to the next row.
+        const string nonConfigurable =
+            "Object.defineProperty(row, 'k', { value: row.A, configurable: false }); "
+            + "return Reflect.deleteProperty(row, 'k') + ':' + row.k;";
+        string[] ncExpected = ["false:1", "false:2", "false:4"];
+        PlayRows(await ComputeAsync(nonConfigurable)).Should().Equal(ncExpected);
+        (await RunBatchesAsync(await ComputeAsync(nonConfigurable), column: 1)).Should().Equal(ncExpected);
+    }
+
     /// <summary>
     /// Each window gets an array of its own over the views the transformer reuses: a property set on it,
     /// or the order a sort in place leaves, does not reach the next window, and the sort itself stays the

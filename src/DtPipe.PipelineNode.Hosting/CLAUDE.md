@@ -109,11 +109,7 @@ none. One node per process, which is one replica of its node's identity; a secon
   database, so the coordinator never holds a path or a secret to open. Variables reach a child through `FragmentLaunch.ChildEnvironment`
   and `DtPipeCommand` (the node's own reads), never through this process's environment: the host
   is someone else's service. `[unchecked]`
-- **The token provider returns a fresh token.** The control hub and TransportR retry a connection
-  refused with 401 through their token provider, so `NodeAgent` binds both to
-  `FreshTokenAsync` (`OidcTokenClient.GetAsync(fresh: true)`): a cached token may come from a
-  coordinator that is gone and would be presented until it expires. It asks once before connecting because TransportR
-  swallows a provider that throws. The provider is `Oidc:Authority` or, left out, the first the coordinator's protected resource metadata names (never an HTTP provider for an HTTPS coordinator): its key issuer when it trusts no other; the client is `Oidc:ClientId` or the node's `Name`; the token endpoint comes from the provider's discovery document.
+- **The token provider reuses a valid token across transport calls and invalidates it on connection boundaries and 401.** The control hub and TransportR share `TokenAsync` (`OidcTokenClient.GetAsync(fresh: false)`), while `NodeAgent` calls `OidcTokenClient.Invalidate()` on open, reconnect, close, 401 and `ConnectNodeAsync` so a cached token from a gone coordinator is never kept past its lifecycle and SignalR SSE/LongPolling requests do not multiply token exchanges. It asks once before `PipelineNode.ConnectAsync` because TransportR swallows a provider that throws. The provider is `Oidc:Authority` or, left out, the first the coordinator's protected resource metadata names (never an HTTP provider for an HTTPS coordinator): its key issuer when it trusts no other; the client is `Oidc:ClientId` or the node's `Name`; the token endpoint comes from the provider's discovery document.
   A provider that answers and refuses the client is a `TokenRefusedException`: the connect loop logs it as a refusal that names the
   provider and the client to add or enable, and only a coordinator that does not answer reads as not reachable.
   `[CI: Hosting.Tests KeyTokenTests]` `[unchecked: the refusal's text]`

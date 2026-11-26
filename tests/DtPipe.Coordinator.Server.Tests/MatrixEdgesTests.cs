@@ -124,4 +124,18 @@ public sealed class MatrixEdgesTests : IDisposable
         Assert.StartsWith("Identity stranger added (node node-s, groups node-s); flow matrix: ", rights.Audit![0].Change);
         Assert.Null(enrollment.Find("stranger"));
     }
+
+    [Fact]
+    public async Task A_Disabled_Rights_Runner_Does_Not_Count_As_Known_For_RunnerEdges()
+    {
+        using var runner = await _admin.PostAsJsonAsync("/api/rights/identities",
+            new { clientId = "r", name = "runner", groups = new[] { "run" }, enabled = false, runner = true }, Web, Ct);
+        runner.EnsureSuccessStatusCode();
+
+        using var refused = await _admin.PostAsJsonAsync("/api/rights/identities",
+            new { clientId = "shop", name = "shop", groups = new[] { "data" }, exchangeWithRunners = true }, Web, Ct);
+
+        Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+        Assert.Contains("No runner is known", await refused.Content.ReadAsStringAsync(Ct));
+    }
 }

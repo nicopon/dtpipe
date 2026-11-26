@@ -53,11 +53,12 @@ internal sealed class WorkspaceSlot(StudioWorkspace workspace, string source)
     /// runs under the slot's lock once no request is counted, so a request that holds the workspace refuses the replacement
     /// before anything is closed, and none starts until the folder has moved.
     /// </summary>
-    public void Replace(StudioWorkspace next, string source, Func<string?> closeOthers) => _holds.Replace(() =>
-    {
-        if (closeOthers() is { } reason) throw new StudioRefusal(409, reason);
-        Directory.SetCurrentDirectory(next.Folder.Root);
-        Volatile.Write(ref _workspace, next);
-        Volatile.Write(ref _source, source);
-    }, Drain);
+    public Task ReplaceAsync(StudioWorkspace next, string source, Func<string?> closeOthers, CancellationToken ct = default) =>
+        _holds.ReplaceAsync(() =>
+        {
+            if (closeOthers() is { } reason) throw new StudioRefusal(409, reason);
+            Directory.SetCurrentDirectory(next.Folder.Root);
+            Volatile.Write(ref _workspace, next);
+            Volatile.Write(ref _source, source);
+        }, Drain, ct);
 }

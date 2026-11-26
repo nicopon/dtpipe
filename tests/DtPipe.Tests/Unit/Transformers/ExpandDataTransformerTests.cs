@@ -250,6 +250,18 @@ public class ExpandDataTransformerTests
         Assert.Equal(expected, schema[1].ClrType);
     }
 
+    [Fact]
+    public void MovesAsIs_Checks_Nullability_And_Compatibility()
+    {
+        var nullableInt = new Apache.Arrow.Field("x", Apache.Arrow.Types.Int32Type.Default, nullable: true);
+        var nonNullInt = new Apache.Arrow.Field("x", Apache.Arrow.Types.Int32Type.Default, nullable: false);
+
+        Assert.False(ExpandDataTransformer.MovesAsIs(nullableInt, nonNullInt));
+        Assert.True(ExpandDataTransformer.MovesAsIs(nonNullInt, nullableInt));
+        Assert.True(ExpandDataTransformer.MovesAsIs(nullableInt, nullableInt));
+        Assert.True(ExpandDataTransformer.MovesAsIs(nonNullInt, nonNullInt));
+    }
+
     private async Task<ExpandDataTransformer> Ready(string script)
     {
         var transformer = new ExpandDataTransformer(

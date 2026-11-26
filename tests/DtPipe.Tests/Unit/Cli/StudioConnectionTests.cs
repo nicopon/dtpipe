@@ -236,4 +236,34 @@ public sealed class StudioConnectionTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.BadRequest, test.Status);
         Assert.Equal(HttpStatusCode.BadRequest, put.Status);
     }
+
+    [Fact]
+    public async Task Connection_view_does_not_list_keyring_aliases_when_recent_agents_use_ollama_only()
+    {
+        var counting = new CountingSecretsManager();
+        var settings = new StudioSettings(SettingsPath, counting);
+        settings.WriteAgent(new AgentSettings("ollama", "http://127.0.0.1:11434", "m", 30));
+
+        var services = new ServiceCollection();
+        Program.ConfigureServices(services);
+        var tools = new McpToolProvider(McpCatalogue.Tools());
+        _server = await StudioServer.StartAsync(new StudioFolder(_dir), 0, new StudioTools(
+            StudioEngines.Real(services.BuildServiceProvider()), new DesignService(IBrickLookup.None), [], [], counting,
+            AgentLink: new StudioAgentLink(settings, tools, null, (_, key, _) => new Echoing(key, null))), Ct);
+
+        var get = await CallAsync(HttpMethod.Get, "/api/agent/connection");
+
+        Assert.Equal(HttpStatusCode.OK, get.Status);
+        Assert.Equal(0, counting.ListCalls);
+    }
+
+    private sealed class CountingSecretsManager : InMemorySecretsManager, ISecretsManager
+    {
+        public int ListCalls { get; private set; }
+        public new Dictionary<string, string> ListSecrets()
+        {
+            ListCalls++;
+            return base.ListSecrets();
+        }
+    }
 }

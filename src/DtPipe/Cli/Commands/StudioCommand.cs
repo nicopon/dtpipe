@@ -122,8 +122,8 @@ public sealed class StudioCommand : Command
             }
             var secrets = serviceProvider.GetRequiredService<ISecretsManager>();
             var settings = new StudioSettings(StudioSettings.DefaultPath(), secrets);
-            var remembered = settings.Read();
-            if (settings.Warning is { } ignored) Console.Error.WriteLine($"[WARN] {ignored}");
+            var remembered = settings.Read(out var warning);
+            if (warning is not null) Console.Error.WriteLine($"[WARN] {warning}");
             CoordinatorConnection? coordinatorStart = null;
             // Nothing named on the command line: the coordinator the person connected in the page and asked to remember.
             if (link is null && remembered.Coordinator is { } rememberedCoordinator)

@@ -45,7 +45,8 @@ internal abstract class RowViewObject : ObjectInstance, IRowObjectView
     private readonly ErrorConstructor _refErrorCtor;
     private readonly ObjectInstance _objectPrototype;
     private Dictionary<string, JsValue>? _overrides;
-    private List<JsValue>? _definedKeys;
+    private HashSet<JsValue>? _definedKeys;
+    private HashSet<string>? _deletedColumns;
 
     protected RowViewObject(Engine engine, IReadOnlyList<string> columnNames, int exposedColumnCount, ErrorConstructor refErrorCtor)
         : base(engine)
@@ -66,7 +67,7 @@ internal abstract class RowViewObject : ObjectInstance, IRowObjectView
         }
     }
 
-    public bool HasOverrides => _overrides is { Count: > 0 };
+    public bool HasOverrides => _overrides is { Count: > 0 } || _definedKeys is { Count: > 0 } || _deletedColumns is { Count: > 0 };
 
     /// <summary>The value of column <paramref name="idx"/> in the row the view stands on.</summary>
     protected abstract JsValue ReadColumn(int idx);
@@ -78,6 +79,7 @@ internal abstract class RowViewObject : ObjectInstance, IRowObjectView
     protected void ResetWrites()
     {
         _overrides?.Clear();
+        _deletedColumns?.Clear();
         if (_definedKeys is { Count: > 0 })
         {
             foreach (var key in _definedKeys)
@@ -94,15 +96,36 @@ internal abstract class RowViewObject : ObjectInstance, IRowObjectView
     {
         if (property.IsString())
         {
+            if (_definedKeys is { Count: > 0 } && _definedKeys.Contains(property))
+                return base.Get(property, receiver);
+
             var name = property.AsString();
             if (_overrides != null && _overrides.TryGetValue(name, out var overVal))
                 return overVal;
 
-            if (_nameToIndex.TryGetValue(name, out int idx))
+            if ((_deletedColumns is null || !_deletedColumns.Contains(name)) && _nameToIndex.TryGetValue(name, out int idx))
                 return ReadColumn(idx);
 
-            if (base.HasProperty(property))
-                return base.Get(property, receiver);
+            for (var proto = Prototype; proto is not null; proto = proto.Prototype)
+            {
+                if (proto.GetType().Name == "JsProxy")
+                {
+                    if (proto.HasProperty(property))
+                        return proto.Get(property, receiver);
+                    continue;
+                }
+
+                var desc = proto.GetOwnProperty(property);
+                if (desc != PropertyDescriptor.Undefined)
+                {
+                    if (desc.IsDataDescriptor())
+                        return desc.Value;
+                    var getter = desc.Get;
+                    return getter is null || getter.IsUndefined()
+                        ? JsValue.Undefined
+                        : Engine.Call(getter, receiver);
+                }
+            }
 
             throw new JavaScriptException(_refErrorCtor, $"Column '{name}' not found in schema");
         }
@@ -114,7 +137,12 @@ internal abstract class RowViewObject : ObjectInstance, IRowObjectView
     {
         if (property.IsString())
         {
-            (_overrides ??= new Dictionary<string, JsValue>(StringComparer.Ordinal))[property.AsString()] = value;
+            if (_definedKeys is { Count: > 0 } && _definedKeys.Contains(property))
+                return base.Set(property, value, receiver);
+
+            var name = property.AsString();
+            _deletedColumns?.Remove(name);
+            (_overrides ??= new Dictionary<string, JsValue>(StringComparer.Ordinal))[name] = value;
             return true;
         }
 
@@ -127,55 +155,145 @@ internal abstract class RowViewObject : ObjectInstance, IRowObjectView
     /// </summary>
     public override bool DefineOwnProperty(JsValue property, PropertyDescriptor desc)
     {
-        if (!base.DefineOwnProperty(property, desc))
-            return false;
+        bool alreadyDefined = _definedKeys is { Count: > 0 } && _definedKeys.Contains(property);
+        var materialized = PropertyDescriptor.Undefined;
+        if (!alreadyDefined)
+        {
+            materialized = GetOwnProperty(property);
+            if (materialized != PropertyDescriptor.Undefined)
+                FastSetProperty(property, materialized);
+            (_definedKeys ??= []).Add(property);
+        }
 
-        (_definedKeys ??= []).Add(property);
+        if (!base.DefineOwnProperty(property, desc))
+        {
+            if (!alreadyDefined)
+            {
+                _definedKeys!.Remove(property);
+                if (materialized != PropertyDescriptor.Undefined)
+                    RemoveOwnProperty(property);
+            }
+            return false;
+        }
+
+        if (property.IsString())
+        {
+            var name = property.AsString();
+            _overrides?.Remove(name);
+            _deletedColumns?.Remove(name);
+        }
         return true;
+    }
+
+    public override bool Delete(JsValue property)
+    {
+        if (_definedKeys is { Count: > 0 } && _definedKeys.Contains(property))
+        {
+            if (!base.Delete(property))
+                return false;
+            _definedKeys.Remove(property);
+            if (property.IsString())
+            {
+                var name = property.AsString();
+                if (_nameToIndex.ContainsKey(name))
+                    (_deletedColumns ??= new HashSet<string>(StringComparer.Ordinal)).Add(name);
+            }
+            return true;
+        }
+
+        if (property.IsString())
+        {
+            var name = property.AsString();
+            _overrides?.Remove(name);
+            if (_nameToIndex.ContainsKey(name))
+                (_deletedColumns ??= new HashSet<string>(StringComparer.Ordinal)).Add(name);
+            return true;
+        }
+
+        return base.Delete(property);
     }
 
     public override PropertyDescriptor GetOwnProperty(JsValue property)
     {
+        if (_definedKeys is { Count: > 0 } && _definedKeys.Contains(property))
+            return base.GetOwnProperty(property);
+
         if (property.IsString())
         {
             var name = property.AsString();
             if (_overrides != null && _overrides.TryGetValue(name, out var overVal))
                 return new PropertyDescriptor(overVal, PropertyFlag.ConfigurableEnumerableWritable);
 
-            if (_nameToIndex.TryGetValue(name, out int idx))
+            if ((_deletedColumns is null || !_deletedColumns.Contains(name)) && _nameToIndex.TryGetValue(name, out int idx))
                 return new PropertyDescriptor(ReadColumn(idx), PropertyFlag.ConfigurableEnumerableWritable);
         }
 
-        return _definedKeys is { Count: > 0 } ? base.GetOwnProperty(property) : PropertyDescriptor.Undefined;
+        return PropertyDescriptor.Undefined;
     }
 
     public override bool HasProperty(JsValue property)
     {
+        if (_definedKeys is { Count: > 0 } && _definedKeys.Contains(property))
+            return true;
+
         if (property.IsString())
         {
             var name = property.AsString();
-            if ((_overrides != null && _overrides.ContainsKey(name)) || _nameToIndex.ContainsKey(name))
+            if ((_overrides != null && _overrides.ContainsKey(name))
+                || ((_deletedColumns is null || !_deletedColumns.Contains(name)) && _nameToIndex.ContainsKey(name)))
                 return true;
         }
 
-        return base.HasProperty(property);
+        return Prototype is { } proto && proto.HasProperty(property);
     }
 
     public override List<JsValue> GetOwnPropertyKeys(JsTypes types = JsTypes.String | JsTypes.Symbol)
     {
-        if ((types & JsTypes.String) == JsTypes.Empty)
-            return [];
+        bool wantString = (types & JsTypes.String) != JsTypes.Empty;
+        bool wantSymbol = (types & JsTypes.Symbol) != JsTypes.Empty;
 
-        if (_overrides == null || _overrides.Count == 0)
-            return _cachedKeys;
+        if (!HasOverrides)
+            return wantString ? _cachedKeys : [];
 
-        var keys = new List<JsValue>(_cachedKeys.Count + _overrides.Count);
-        keys.AddRange(_cachedKeys);
-        foreach (var key in _overrides.Keys)
+        var keys = new List<JsValue>(
+            (wantString ? _cachedKeys.Count + (_overrides?.Count ?? 0) : 0) + (_definedKeys?.Count ?? 0));
+
+        if (wantString)
         {
-            if (!_nameToIndex.ContainsKey(key))
-                keys.Add(JsString.Create(key));
+            for (int i = 0; i < _columnNames.Length; i++)
+            {
+                if (_deletedColumns is null || !_deletedColumns.Contains(_columnNames[i]))
+                    keys.Add(_cachedKeys[i]);
+            }
+
+            if (_overrides is { Count: > 0 })
+            {
+                foreach (var key in _overrides.Keys)
+                {
+                    if (!_nameToIndex.ContainsKey(key))
+                        keys.Add(JsString.Create(key));
+                }
+            }
+
+            if (_definedKeys is { Count: > 0 })
+            {
+                foreach (var key in _definedKeys)
+                {
+                    if (key.IsString() && !_nameToIndex.ContainsKey(key.AsString()))
+                        keys.Add(key);
+                }
+            }
         }
+
+        if (wantSymbol && _definedKeys is { Count: > 0 })
+        {
+            foreach (var key in _definedKeys)
+            {
+                if (key.IsSymbol())
+                    keys.Add(key);
+            }
+        }
+
         return keys;
     }
 
@@ -184,11 +302,21 @@ internal abstract class RowViewObject : ObjectInstance, IRowObjectView
         for (int i = 0; i < _columnNames.Length; i++)
         {
             var name = _columnNames[i];
+            if (_deletedColumns is not null && _deletedColumns.Contains(name))
+                continue;
+
+            var key = _cachedKeys[i];
+            if (_definedKeys is { Count: > 0 } && _definedKeys.Contains(key))
+            {
+                yield return new KeyValuePair<JsValue, PropertyDescriptor>(key, base.GetOwnProperty(key));
+                continue;
+            }
+
             var val = _overrides != null && _overrides.TryGetValue(name, out var overVal)
                 ? overVal
                 : ReadColumn(i);
             yield return new KeyValuePair<JsValue, PropertyDescriptor>(
-                _cachedKeys[i],
+                key,
                 new PropertyDescriptor(val, PropertyFlag.ConfigurableEnumerableWritable));
         }
 
@@ -202,6 +330,15 @@ internal abstract class RowViewObject : ObjectInstance, IRowObjectView
                         JsString.Create(kvp.Key),
                         new PropertyDescriptor(kvp.Value, PropertyFlag.ConfigurableEnumerableWritable));
                 }
+            }
+        }
+
+        if (_definedKeys != null)
+        {
+            foreach (var key in _definedKeys)
+            {
+                if (!key.IsString() || !_nameToIndex.ContainsKey(key.AsString()))
+                    yield return new KeyValuePair<JsValue, PropertyDescriptor>(key, base.GetOwnProperty(key));
             }
         }
     }

@@ -67,21 +67,32 @@ internal sealed class OidcTokenClient(NodeOidcOptions options, string nodeName, 
         [property: JsonPropertyName("access_token")] string AccessToken,
         [property: JsonPropertyName("expires_in")] int ExpiresIn);
 
+    private sealed record CachedToken(string Value, DateTimeOffset Expires);
+
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(15) };
     private readonly SemaphoreSlim _gate = new(1, 1);
     private string? _tokenEndpoint;
-    private string? _token;
-    private DateTimeOffset _expires;
+    private volatile CachedToken? _cached;
+    private long _generation;
 
     public string ClientId => string.IsNullOrWhiteSpace(options.ClientId) ? nodeName : options.ClientId;
 
+    /// <summary>Discards any cached token so the next <see cref="GetAsync"/> fetches a new one.</summary>
+    public void Invalidate()
+    {
+        Interlocked.Increment(ref _generation);
+        _cached = null;
+    }
+
     public async Task<string> GetAsync(bool fresh = false, CancellationToken ct = default)
     {
+        if (!fresh && _cached is { } fast && DateTimeOffset.UtcNow < fast.Expires - Margin) return fast.Value;
         await _gate.WaitAsync(ct);
         try
         {
-            if (!fresh && _token is not null && DateTimeOffset.UtcNow < _expires - Margin) return _token;
-            _tokenEndpoint ??= await DiscoverAsync();
+            if (!fresh && _cached is { } cached && DateTimeOffset.UtcNow < cached.Expires - Margin) return cached.Value;
+            var generation = Volatile.Read(ref _generation);
+            _tokenEndpoint ??= await DiscoverAsync(ct);
 
             var form = new Dictionary<string, string>
             {
@@ -90,12 +101,14 @@ internal sealed class OidcTokenClient(NodeOidcOptions options, string nodeName, 
                 ["client_secret"] = await _secret(ct),
             };
             if (!string.IsNullOrWhiteSpace(options.Scope)) form["scope"] = options.Scope;
-            using var response = await _http.PostAsync(_tokenEndpoint, new FormUrlEncodedContent(form));
+            using var content = new FormUrlEncodedContent(form);
+            using var response = await _http.PostAsync(_tokenEndpoint, content, ct);
             if (!response.IsSuccessStatusCode)
-                throw new TokenRefusedException(ClientId, new Uri(_tokenEndpoint!).GetLeftPart(UriPartial.Authority), Describe((int)response.StatusCode, await response.Content.ReadAsStringAsync()));
-            var token = await response.Content.ReadFromJsonAsync<TokenResponse>() ?? throw new InvalidOperationException("Empty token response.");
-            (_token, _expires) = (token.AccessToken, DateTimeOffset.UtcNow.AddSeconds(token.ExpiresIn));
-            return _token;
+                throw new TokenRefusedException(ClientId, new Uri(_tokenEndpoint!).GetLeftPart(UriPartial.Authority), Describe((int)response.StatusCode, await response.Content.ReadAsStringAsync(ct)));
+            var token = await response.Content.ReadFromJsonAsync<TokenResponse>(ct) ?? throw new InvalidOperationException("Empty token response.");
+            var next = new CachedToken(token.AccessToken, DateTimeOffset.UtcNow.AddSeconds(token.ExpiresIn));
+            if (Volatile.Read(ref _generation) == generation) _cached = next;
+            return next.Value;
         }
         finally
         {
@@ -119,20 +132,20 @@ internal sealed class OidcTokenClient(NodeOidcOptions options, string nodeName, 
         return $"{status} {body}";
     }
 
-    private async Task<string> DiscoverAsync()
+    private async Task<string> DiscoverAsync(CancellationToken ct)
     {
-        var authority = string.IsNullOrWhiteSpace(options.Authority) ? await AuthorityOfCoordinatorAsync() : options.Authority;
+        var authority = string.IsNullOrWhiteSpace(options.Authority) ? await AuthorityOfCoordinatorAsync(ct) : options.Authority;
         var url = authority.TrimEnd('/') + "/.well-known/openid-configuration";
-        var discovery = await _http.GetFromJsonAsync<Discovery>(url)
+        var discovery = await _http.GetFromJsonAsync<Discovery>(url, ct)
             ?? throw new InvalidOperationException($"{url}: empty discovery document.");
         return discovery.TokenEndpoint;
     }
 
     // The node posts its secret to whatever this names: a coordinator reached over HTTPS names a provider over HTTPS only.
-    private async Task<string> AuthorityOfCoordinatorAsync()
+    private async Task<string> AuthorityOfCoordinatorAsync(CancellationToken ct)
     {
         var url = coordinatorUrl.TrimEnd('/') + "/.well-known/oauth-protected-resource";
-        var metadata = await _http.GetFromJsonAsync<ResourceMetadata>(url) ?? throw new InvalidOperationException($"{url}: empty document.");
+        var metadata = await _http.GetFromJsonAsync<ResourceMetadata>(url, ct) ?? throw new InvalidOperationException($"{url}: empty document.");
         var issuer = metadata.AuthorizationServers?.FirstOrDefault()
             ?? throw new InvalidOperationException($"{coordinatorUrl} names no identity provider: set Oidc:Authority.");
         if (!Uri.TryCreate(issuer, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))

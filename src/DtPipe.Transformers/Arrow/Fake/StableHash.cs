@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -248,13 +249,43 @@ internal static class ArrowSeedKeyExtractor
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static ulong TimeKey(TimeOnly value) => StableHash.Compute64(value.Ticks);
 
+    private static ulong StringKey(string value)
+    {
+        int maxBytes = Encoding.UTF8.GetMaxByteCount(value.Length);
+        if (maxBytes <= 512)
+        {
+            Span<byte> buffer = stackalloc byte[maxBytes];
+            int written = Encoding.UTF8.GetBytes(value, buffer);
+            return StableHash.Compute64(buffer[..written]);
+        }
+
+        byte[] rented = ArrayPool<byte>.Shared.Rent(maxBytes);
+        try
+        {
+            int written = Encoding.UTF8.GetBytes(value, rented);
+            return StableHash.Compute64(rented.AsSpan(0, written));
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(rented);
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static ulong GuidKey(Guid value)
+    {
+        Span<byte> bytes = stackalloc byte[16];
+        value.TryWriteBytes(bytes, bigEndian: true, out _);
+        return StableHash.Compute64(bytes);
+    }
+
     /// <summary>
     /// The key of a value read as a boxed object, for a cell that is not read in place: it gives the
     /// key the typed loop of the same value gives.
     /// </summary>
     private static ulong HashValue(object value) => value switch
     {
-        string s => StableHash.Compute64(Encoding.UTF8.GetBytes(s)),
+        string s => StringKey(s),
         bool b => StableHash.Compute64(b ? 1UL : 0UL),
         sbyte v => StableHash.Compute64((long)v),
         short v => StableHash.Compute64((long)v),
@@ -271,8 +302,9 @@ internal static class ArrowSeedKeyExtractor
         DateTime v => DateTimeKey(v),
         DateTimeOffset v => InstantKey(v),
         TimeOnly v => TimeKey(v),
+        Guid v => GuidKey(v),
         byte[] v => StableHash.Compute64(v),
-        System.Collections.IDictionary d => CollectionKey(Entries(d)),
+        System.Collections.IDictionary d => DictionaryKey(d),
         System.Collections.IEnumerable l => CollectionKey(l),
         _ => DisplayKey(value)
     };
@@ -290,23 +322,44 @@ internal static class ArrowSeedKeyExtractor
     }
 
     /// <summary>
-    /// The key of a list, a map or a struct: its elements' keys in reading order, each under its position,
-    /// so that two values that differ in an element differ in key. The text of such a value is its type's name.
+    /// The key of a dictionary/map: each (key, value) pair hashed in reading order without boxing
+    /// <see cref="System.Collections.DictionaryEntry"/> or allocating pair arrays.
     /// </summary>
-    private static IEnumerable<System.Collections.DictionaryEntry> Entries(System.Collections.IDictionary dictionary)
+    private static ulong DictionaryKey(System.Collections.IDictionary dictionary)
     {
-        foreach (System.Collections.DictionaryEntry entry in dictionary)
-            yield return entry;
+        ulong acc = InitialAccumulator;
+        int position = 0;
+        var enumerator = dictionary.GetEnumerator();
+        try
+        {
+            while (enumerator.MoveNext())
+            {
+                var key = enumerator.Key;
+                var val = enumerator.Value;
+                ulong pair = InitialAccumulator;
+                pair = StableHash.Combine64(pair, 0, key is null ? NullLaneSentinel : HashValue(key));
+                pair = StableHash.Combine64(pair, 1, val is null ? NullLaneSentinel : HashValue(val));
+                acc = StableHash.Combine64(acc, position++, pair);
+            }
+        }
+        finally
+        {
+            (enumerator as IDisposable)?.Dispose();
+        }
+        return acc;
     }
 
+    /// <summary>
+    /// The key of a list or struct: its elements' keys in reading order, each under its position,
+    /// so that two values that differ in an element differ in key. The text of such a value is its type's name.
+    /// </summary>
     private static ulong CollectionKey(System.Collections.IEnumerable items)
     {
         ulong acc = InitialAccumulator;
         int position = 0;
         foreach (var item in items)
         {
-            var element = item is System.Collections.DictionaryEntry e ? CollectionKey(new object?[] { e.Key, e.Value }) :
-                item is null ? NullLaneSentinel : HashValue(item);
+            ulong element = item is null ? NullLaneSentinel : HashValue(item);
             acc = StableHash.Combine64(acc, position++, element);
         }
 
@@ -523,51 +576,11 @@ internal static class ArrowSeedKeyExtractor
 
             // Decimal128Array/Decimal256Array derive from FixedSizeBinaryArray and must precede it.
             case Decimal128Array a:
-                for (int i = 0; i < rowCount; i++)
-                {
-                    if (!noNulls && a.IsNull(i))
-                    {
-                        keys[i] = StableHash.Combine64(keys[i], lane, NullLaneSentinel);
-                    }
-                    else
-                    {
-                        ulong valHash;
-                        try
-                        {
-                            valHash = ComputeDecimal64(a.GetValue(i)!.Value);
-                        }
-                        catch (OverflowException)
-                        {
-                            valHash = StableHash.Compute64(a.GetBytes(i));
-                        }
-                        keys[i] = StableHash.Combine64(keys[i], lane, valHash);
-                        hasKey[i] = true;
-                    }
-                }
+                AccumulateWideDecimal(a, noNulls, lane, rowCount, keys, hasKey);
                 break;
 
             case Decimal256Array a:
-                for (int i = 0; i < rowCount; i++)
-                {
-                    if (!noNulls && a.IsNull(i))
-                    {
-                        keys[i] = StableHash.Combine64(keys[i], lane, NullLaneSentinel);
-                    }
-                    else
-                    {
-                        ulong valHash;
-                        try
-                        {
-                            valHash = ComputeDecimal64(a.GetValue(i)!.Value);
-                        }
-                        catch (OverflowException)
-                        {
-                            valHash = StableHash.Compute64(a.GetBytes(i));
-                        }
-                        keys[i] = StableHash.Combine64(keys[i], lane, valHash);
-                        hasKey[i] = true;
-                    }
-                }
+                AccumulateWideDecimal(a, noNulls, lane, rowCount, keys, hasKey);
                 break;
 
             // Decimal32Array/Decimal64Array derive from FixedSizeBinaryArray too: their bytes depend on the
@@ -639,7 +652,7 @@ internal static class ArrowSeedKeyExtractor
                 break;
 
             case DictionaryArray a:
-                AccumulateDictionary(a, lane, rowCount, keys, hasKey);
+                AccumulateDictionary(a, field, lane, rowCount, keys, hasKey);
                 break;
 
             default:
@@ -663,51 +676,118 @@ internal static class ArrowSeedKeyExtractor
         }
     }
 
-    /// <summary>
-    /// A dictionary column is the values its indices point at: each entry is hashed once, as the value
-    /// <see cref="ArrowTypeMap.GetValue"/> reads from the dictionary, and a row takes the key of its
-    /// entry. A null index, a null entry and an index out of range are a null, as the reader reads them.
-    /// </summary>
-    private static void AccumulateDictionary(DictionaryArray array, int lane, int rowCount, ulong[] keys, bool[] hasKey)
+    private static void AccumulateWideDecimal(FixedSizeBinaryArray array, bool noNulls, int lane, int rowCount, ulong[] keys, bool[] hasKey)
     {
-        var dictionary = array.Dictionary;
-        var entryKeys = new ulong[dictionary.Length];
-        var entryPresent = new bool[dictionary.Length];
-        for (int j = 0; j < entryKeys.Length; j++)
-        {
-            if (ArrowTypeMap.GetValue(dictionary, j) is { } entry)
-            {
-                entryKeys[j] = HashValue(entry);
-                entryPresent[j] = true;
-            }
-        }
-
-        var indices = array.Indices;
+        var dec128 = array as Decimal128Array;
+        var dec256 = array as Decimal256Array;
         for (int i = 0; i < rowCount; i++)
         {
-            int position = indices.IsNull(i) ? -1 : PositionAt(indices, i);
-            if ((uint)position < (uint)entryPresent.Length && entryPresent[position])
-            {
-                keys[i] = StableHash.Combine64(keys[i], lane, entryKeys[position]);
-                hasKey[i] = true;
-            }
-            else
+            if (!noNulls && array.IsNull(i))
             {
                 keys[i] = StableHash.Combine64(keys[i], lane, NullLaneSentinel);
             }
+            else
+            {
+                ulong valHash;
+                try
+                {
+                    decimal value = dec128 is not null ? dec128.GetValue(i)!.Value : dec256!.GetValue(i)!.Value;
+                    valHash = ComputeDecimal64(value);
+                }
+                catch (OverflowException)
+                {
+                    valHash = StableHash.Compute64(array.GetBytes(i));
+                }
+                keys[i] = StableHash.Combine64(keys[i], lane, valHash);
+                hasKey[i] = true;
+            }
+        }
+    }
+
+    /// <summary>
+    /// A dictionary column is the values its indices point at: each referenced entry is decoded and
+    /// hashed once on demand (with <paramref name="field"/> metadata for extensions such as
+    /// <c>arrow.bool8</c>, <c>arrow.uuid</c>, and <c>arrow.opaque</c>), and a row takes the key of its
+    /// entry. A null index, a null entry and an index out of range are a null, as the reader reads them.
+    /// </summary>
+    private static void AccumulateDictionary(DictionaryArray array, Field field, int lane, int rowCount, ulong[] keys, bool[] hasKey)
+    {
+        var dictionary = array.Dictionary;
+        int dictLen = dictionary.Length;
+        if (dictLen == 0)
+        {
+            for (int i = 0; i < rowCount; i++)
+                keys[i] = StableHash.Combine64(keys[i], lane, NullLaneSentinel);
+            return;
+        }
+
+        var valueField = field.HasMetadata
+            ? new Field(field.Name, dictionary.Data.DataType, true, field.Metadata)
+            : new Field(field.Name, dictionary.Data.DataType, true);
+        var reader = ArrowTypeMap.CompileValueReader(dictionary, valueField);
+
+        ulong[] entryKeys = ArrayPool<ulong>.Shared.Rent(dictLen);
+        byte[] entryState = ArrayPool<byte>.Shared.Rent(dictLen);
+        entryState.AsSpan(0, dictLen).Clear();
+
+        try
+        {
+            var indices = array.Indices;
+            bool checkArrayNulls = array.NullCount > 0;
+            bool checkIndexNulls = indices.NullCount > 0;
+            for (int i = 0; i < rowCount; i++)
+            {
+                int position = (checkArrayNulls && array.IsNull(i)) || (checkIndexNulls && indices.IsNull(i))
+                    ? -1
+                    : PositionAt(indices, i);
+                if ((uint)position >= (uint)dictLen)
+                {
+                    keys[i] = StableHash.Combine64(keys[i], lane, NullLaneSentinel);
+                    continue;
+                }
+
+                byte state = entryState[position];
+                if (state == 0)
+                {
+                    if (reader(position) is { } entry)
+                    {
+                        entryKeys[position] = HashValue(entry);
+                        entryState[position] = state = 2;
+                    }
+                    else
+                    {
+                        entryState[position] = state = 1;
+                    }
+                }
+
+                if (state == 2)
+                {
+                    keys[i] = StableHash.Combine64(keys[i], lane, entryKeys[position]);
+                    hasKey[i] = true;
+                }
+                else
+                {
+                    keys[i] = StableHash.Combine64(keys[i], lane, NullLaneSentinel);
+                }
+            }
+        }
+        finally
+        {
+            ArrayPool<ulong>.Shared.Return(entryKeys);
+            ArrayPool<byte>.Shared.Return(entryState);
         }
     }
 
     private static int PositionAt(IArrowArray indices, int i) => indices switch
     {
-        Int8Array a => a.Values[i],
-        Int16Array a => a.Values[i],
-        Int32Array a => a.Values[i],
-        Int64Array a => checked((int)a.Values[i]),
+        Int8Array a => a.Values[i] is var v && v >= 0 ? v : -1,
+        Int16Array a => a.Values[i] is var v && v >= 0 ? v : -1,
+        Int32Array a => a.Values[i] is var v && v >= 0 ? v : -1,
+        Int64Array a => a.Values[i] is var v and >= 0 and <= int.MaxValue ? (int)v : -1,
         UInt8Array a => a.Values[i],
         UInt16Array a => a.Values[i],
-        UInt32Array a => checked((int)a.Values[i]),
-        UInt64Array a => checked((int)a.Values[i]),
-        _ => Convert.ToInt32(ArrowTypeMap.GetValue(indices, i), CultureInfo.InvariantCulture)
+        UInt32Array a => a.Values[i] <= int.MaxValue ? (int)a.Values[i] : -1,
+        UInt64Array a => a.Values[i] <= int.MaxValue ? (int)a.Values[i] : -1,
+        _ => ArrowTypeMap.GetValue(indices, i) is { } v && Convert.ToInt64(v, CultureInfo.InvariantCulture) is var l and >= 0 and <= int.MaxValue ? (int)l : -1,
     };
 }

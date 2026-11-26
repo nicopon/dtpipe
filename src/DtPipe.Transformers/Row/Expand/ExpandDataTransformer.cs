@@ -242,8 +242,11 @@ public class ExpandDataTransformer : BaseColumnarTransformer, IMultiRowTransform
     // A TypeId alone leaves a decimal's precision and scale, a timestamp's unit and zone and a fixed width
     // unchecked: the batch's schema would then misdescribe the buffer, and every reader would misread it.
     // A type not named here, nested or parameterised, takes the JavaScript path.
-    private static bool MovesAsIs(Field values, Field target)
+    internal static bool MovesAsIs(Field values, Field target)
     {
+        if (!target.IsNullable && values.IsNullable)
+            return false;
+
         var (a, b) = (values.DataType, target.DataType);
         if (a.TypeId != b.TypeId || !SameMetadata(values, target))
             return false;

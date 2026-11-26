@@ -22,12 +22,15 @@ public sealed partial class StudioServer
     private StudioVariables Variables => _workspace.Current.Variables;
 
     /// <summary>
-    /// The requests that hold no lease on the workspace: its own routes, so a change does not count itself, and what the page asks
+    /// The requests that hold no lease on the workspace: its own routes, connection and static routes, quit, and what the page polls
     /// while it waits for an answer (the agent's turn, a run, the coordinator's sign-in), none of which reads the folder. Every
     /// other request holds it.
     /// </summary>
     private static bool LeavesWorkspace(string method, string path) =>
         path == "/api/workspace" || path.StartsWith("/api/workspace/", StringComparison.Ordinal)
+        || path == "/api/agent/connection" || path.StartsWith("/api/agent/connection/", StringComparison.Ordinal)
+        || path == "/api/coordinator/connection" || path.StartsWith("/api/coordinator/connection/", StringComparison.Ordinal)
+        || path is "/api/components" or "/api/quit"
         || (method == "GET" && path is "/api/agent" or "/api/run" or "/api/coordinator");
 
     private async Task WorkspaceRouteAsync(HttpContext context, string method, string path)
@@ -45,7 +48,7 @@ public sealed partial class StudioServer
                 await JsonAsync(context, ForgetRecent(await BodyAsync<WorkspaceRequest>(context)));
                 break;
             case ("PUT", "/api/workspace"):
-                await JsonAsync(context, await OpenWorkspaceAsync(await BodyAsync<WorkspaceRequest>(context)));
+                await JsonAsync(context, await OpenWorkspaceAsync(await BodyAsync<WorkspaceRequest>(context), context.RequestAborted));
                 break;
             default:
                 throw new StudioRefusal(404, $"No {method} {path}.");
@@ -59,7 +62,9 @@ public sealed partial class StudioServer
     private object WorkspaceView(string? warning = null)
     {
         var root = Folder.Root;
-        var recents = (_tools.Settings?.ReadFolders() ?? []).Where(f => !StudioSettings.SameFolder(f, root)).ToList();
+        string? settingsWarning = null;
+        var recents = (_tools.Settings is { } s ? s.ReadFolders(out settingsWarning) : [])
+            .Where(f => !StudioSettings.SameFolder(f, root)).ToList();
         return new
         {
             root,
@@ -68,20 +73,31 @@ public sealed partial class StudioServer
             start = _start,
             recents,
             canRemember = _tools.Settings is not null,
-            settingsWarning = _tools.Settings?.Warning,
+            settingsWarning,
             warning,
         };
     }
 
     private static string NameOf(string root) => Path.GetFileName(root) is { Length: > 0 } name ? name : root;
 
+    /// <summary>Expands a leading <c>~</c> against <paramref name="home"/> (or the user profile), refusing when none is configured.</summary>
+    internal static string ExpandHome(string path, string? home = null)
+    {
+        if (path != "~" && !path.StartsWith("~/", StringComparison.Ordinal) && !path.StartsWith("~" + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+            return path;
+        var profile = home ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (string.IsNullOrWhiteSpace(profile))
+            throw new StudioRefusal(400, "Cannot expand '~': the home directory is not set. Type the folder's full path.");
+        if (path.Length <= 2) return profile;
+        return Path.Join(profile, path[2..]);
+    }
+
     /// <summary>The folder at a path the person typed, opened as the studio opens one, or refused with the reason: nothing changes.</summary>
     private static StudioFolder FolderAt(string? typed)
     {
         var path = typed?.Trim() ?? "";
         if (path.Length == 0) throw new StudioRefusal(400, "Type the folder's full path.");
-        if (path == "~" || path.StartsWith("~/", StringComparison.Ordinal) || path.StartsWith("~" + Path.DirectorySeparatorChar, StringComparison.Ordinal))
-            path = Path.Join(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), path[1..]);
+        path = ExpandHome(path);
         if (!Path.IsPathFullyQualified(path)) throw new StudioRefusal(400, $"'{path}' is not a full path: type the folder's whole path.");
         StudioFolder folder;
         try { folder = new StudioFolder(path); }
@@ -102,11 +118,11 @@ public sealed partial class StudioServer
     /// Opens the folder the person chose, in place of the one open. The page alone knows whether its steps are saved: it says so,
     /// and the change waits for them to be saved or discarded. The folder joins the recent ones only when the person asks.
     /// </summary>
-    private async Task<object> OpenWorkspaceAsync(WorkspaceRequest request)
+    private async Task<object> OpenWorkspaceAsync(WorkspaceRequest request, CancellationToken ct)
     {
         var folder = FolderAt(request.Path);
         if (request.Unsaved) throw new StudioRefusal(409, "The open job has changes that are not saved: save them, or discard them, before opening another folder.");
-        await ChangeWorkspaceAsync(folder);
+        await ChangeWorkspaceAsync(folder, ct);
         string? warning = null;
         if (request.Remember && _tools.Settings is { } settings)
         {
@@ -130,7 +146,7 @@ public sealed partial class StudioServer
     /// Puts <paramref name="folder"/> in place of the folder the studio works on, or refuses with 409 naming what still uses the
     /// one in place. The agent is closed in the same step as the folder moves, and a new conversation starts on its model.
     /// </summary>
-    private async Task ChangeWorkspaceAsync(StudioFolder folder)
+    private async Task ChangeWorkspaceAsync(StudioFolder folder, CancellationToken ct)
     {
         if (RunInProgress) throw new StudioRefusal(409, "A run is in progress: stop it, or wait for it, before opening another folder.");
         var next = new StudioWorkspace(folder, _tools.Secrets);
@@ -139,13 +155,13 @@ public sealed partial class StudioServer
             StudioAgent? closed = null;
             try
             {
-                _workspace.Replace(next, "page", () =>
+                await _workspace.ReplaceAsync(next, "page", () =>
                 {
                     var agent = Agent;
                     if (agent?.TryClose("opening another folder") is { } reason) return reason;
                     closed = agent;
                     return null;
-                });
+                }, ct);
             }
             finally
             {

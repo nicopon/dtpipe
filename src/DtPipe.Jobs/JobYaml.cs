@@ -136,18 +136,21 @@ public static class JobYaml
 
     private static readonly string[] YamlLineBreaks = ["\r\n", "\r", "\n", "\u0085", "\u2028", "\u2029"];
 
+    private static readonly IReadOnlyDictionary<string, string> EmptyBranchComments = new Dictionary<string, string>(StringComparer.Ordinal);
+
     /// <summary>
     /// Reads the raw leading <c>#</c> header comments of a job and any <c>#</c> comments placed directly
     /// under each top-level branch key before its first entry. Uses the YAML scanner so <c>#</c> inside
-    /// scalars is never treated as a comment.
+    /// scalars is never treated as a comment. When <paramref name="headerOnly"/> is true, stops as soon
+    /// as the first top-level entry begins.
     /// </summary>
-    public static (string? Header, IReadOnlyDictionary<string, string> BranchComments) ReadComments(string yaml)
+    public static (string? Header, IReadOnlyDictionary<string, string> BranchComments) ReadComments(string yaml, bool headerOnly = false)
     {
         var normalized = yaml.TrimStart('\uFEFF').Replace("\r\n", "\n").Replace('\r', '\n');
         var rawLines = normalized.Split('\n');
         var headerLines = new List<string>();
-        var branchComments = new Dictionary<string, string>(StringComparer.Ordinal);
-        var pendingBranchLines = new List<string>();
+        var branchComments = headerOnly ? null : new Dictionary<string, string>(StringComparer.Ordinal);
+        var pendingBranchLines = headerOnly ? null : new List<string>();
 
         static string CommentText(Comment c, string[] lines)
         {
@@ -180,15 +183,15 @@ public static class JobYaml
                 {
                     case DocumentEnd:
                     case StreamEnd:
-                        return (headerLines.Count > 0 ? string.Join('\n', headerLines) : null, branchComments);
+                        return (headerLines.Count > 0 ? string.Join('\n', headerLines) : null, branchComments ?? EmptyBranchComments);
 
                     case Comment c:
                         if (c.IsInline) break;
                         var line = CommentText(c, rawLines);
                         if (rootKeyCount == 0 && (depth == 0 || (depth == 1 && rootMapping && expectingRootKey)))
                             headerLines.Add(line);
-                        else if (currentBranch is not null && (awaitingBranchMapping || inBranchLeading))
-                            pendingBranchLines.Add(line);
+                        else if (!headerOnly && currentBranch is not null && (awaitingBranchMapping || inBranchLeading))
+                            pendingBranchLines!.Add(line);
                         break;
 
                     case MappingStart:
@@ -211,10 +214,10 @@ public static class JobYaml
                         break;
 
                     case MappingEnd:
-                        if (depth == 2 && currentBranch is not null)
+                        if (!headerOnly && depth == 2 && currentBranch is not null)
                         {
-                            if (pendingBranchLines.Count > 0)
-                                branchComments[currentBranch] = string.Join('\n', pendingBranchLines);
+                            if (pendingBranchLines!.Count > 0)
+                                branchComments![currentBranch] = string.Join('\n', pendingBranchLines);
                             pendingBranchLines.Clear();
                             currentBranch = null;
                             inBranchLeading = false;
@@ -232,6 +235,8 @@ public static class JobYaml
                         depth++;
                         awaitingBranchMapping = false;
                         inBranchLeading = false;
+                        if (headerOnly && depth == 1 && !rootMapping)
+                            return (headerLines.Count > 0 ? string.Join('\n', headerLines) : null, EmptyBranchComments);
                         break;
 
                     case SequenceEnd:
@@ -248,21 +253,23 @@ public static class JobYaml
                         {
                             currentBranch = s.Value;
                             rootKeyCount++;
+                            if (headerOnly)
+                                return (headerLines.Count > 0 ? string.Join('\n', headerLines) : null, EmptyBranchComments);
                             expectingRootKey = false;
                             awaitingBranchMapping = true;
-                            pendingBranchLines.Clear();
+                            pendingBranchLines!.Clear();
                         }
                         else if (depth == 1 && rootMapping && awaitingBranchMapping)
                         {
                             awaitingBranchMapping = false;
                             currentBranch = null;
                             expectingRootKey = true;
-                            pendingBranchLines.Clear();
+                            pendingBranchLines!.Clear();
                         }
-                        else if (depth == 2 && inBranchLeading)
+                        else if (!headerOnly && depth == 2 && inBranchLeading)
                         {
-                            if (pendingBranchLines.Count > 0 && currentBranch is not null)
-                                branchComments[currentBranch] = string.Join('\n', pendingBranchLines);
+                            if (pendingBranchLines!.Count > 0 && currentBranch is not null)
+                                branchComments![currentBranch] = string.Join('\n', pendingBranchLines);
                             pendingBranchLines.Clear();
                             inBranchLeading = false;
                         }
@@ -284,7 +291,7 @@ public static class JobYaml
             }
         }
 
-        return (headerLines.Count > 0 ? string.Join('\n', headerLines) : null, branchComments);
+        return (headerLines.Count > 0 ? string.Join('\n', headerLines) : null, branchComments ?? EmptyBranchComments);
     }
 
     /// <summary>Formats raw comment lines as <c>#</c> lines with optional indentation.</summary>

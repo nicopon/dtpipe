@@ -184,4 +184,50 @@ public sealed class StudioWorkspaceTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.BadRequest, (await CallAsync(HttpMethod.Delete, "/api/workspace/recents", new { path = "second" })).Status);
         Assert.Equal(["b.yaml"], await JobsAsync());
     }
+
+    [Fact]
+    public void Folder_confine_handles_filesystem_root_and_expand_home_refuses_empty_profile()
+    {
+        var rootPath = Path.GetPathRoot(_dir)!;
+        var rootFolder = new StudioFolder(rootPath);
+        Assert.Equal(Path.GetFullPath(Path.Combine(rootFolder.Root, "job.yaml")), rootFolder.Confine("job.yaml"));
+
+        Assert.Equal("/home/alice", StudioServer.ExpandHome("~", "/home/alice"));
+        Assert.Equal("/home/alice", StudioServer.ExpandHome("~/", "/home/alice"));
+        Assert.Equal(Path.Join("/home/alice", "jobs"), StudioServer.ExpandHome("~/jobs", "/home/alice"));
+        Assert.Throws<StudioRefusal>(() => StudioServer.ExpandHome("~/jobs", ""));
+    }
+
+    [Fact]
+    public async Task SlotHolds_does_not_leak_on_read_failure_drains_async_and_guards_concurrent_replacements()
+    {
+        var holds = new SlotHolds("busy", "changing");
+
+        Assert.Throws<InvalidOperationException>(() => holds.Hold<int>(() => throw new InvalidOperationException("boom")));
+        var replacedAfterError = false;
+        await holds.ReplaceAsync(() => replacedAfterError = true, TimeSpan.FromSeconds(1), Ct);
+        Assert.True(replacedAfterError);
+
+        var lease = holds.Hold(() => 42);
+        var draining = holds.ReplaceAsync(() => { }, TimeSpan.FromSeconds(5), Ct);
+
+        // Wait until _draining is active before issuing concurrent requests/replacements.
+        var deadline = DateTime.UtcNow.AddSeconds(2);
+        while (DateTime.UtcNow < deadline)
+        {
+            var refused = Assert.Throws<StudioRefusal>(() => holds.Hold(() => 1));
+            if (refused.Message == "changing") break;
+            await Task.Delay(10, Ct);
+        }
+
+        var concurrentReplace = await Assert.ThrowsAsync<StudioRefusal>(() => holds.ReplaceAsync(() => { }, TimeSpan.FromSeconds(1), Ct));
+        Assert.Equal(409, concurrentReplace.Status);
+
+        lease.Dispose();
+        await draining;
+
+        // After the first replacement ends, the slot is usable again.
+        using var after = holds.Hold(() => 99);
+        Assert.Equal(99, after.Value);
+    }
 }

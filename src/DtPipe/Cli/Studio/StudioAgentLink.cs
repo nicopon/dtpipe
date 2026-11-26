@@ -41,35 +41,58 @@ public static class StudioAgentClients
 /// The studio's agent, which the page may replace. A replacement closes the agent in place (refused while a turn runs or a card
 /// waits) and opens a new conversation, as changing the model does.
 /// </summary>
-internal sealed class AgentSlot(StudioAgent? agent, AgentConnection? connection)
+internal sealed class AgentSlot(StudioAgent? agent, AgentConnection? connection) : IDisposable
 {
     private readonly SemaphoreSlim _swap = new(1, 1);
+    private readonly object _gate = new();
     private StudioAgent? _agent = agent;
     private AgentConnection? _connection = connection;
 
-    public StudioAgent? Current => Volatile.Read(ref _agent);
+    public StudioAgent? Current
+    {
+        get { lock (_gate) return _agent; }
+    }
 
-    public AgentConnection? Connection => Volatile.Read(ref _connection);
+    public AgentConnection? Connection
+    {
+        get { lock (_gate) return _connection; }
+    }
 
-    /// <summary>Another description of the connection in place, as it stands after a change of memory.</summary>
-    public void Describe(AgentConnection? updated) => Volatile.Write(ref _connection, updated);
+    /// <summary>Updates the description of the connection atomically under the slot lock.</summary>
+    public void UpdateDescription(Func<StudioAgent?, AgentConnection?, AgentConnection?> update)
+    {
+        lock (_gate) _connection = update(_agent, _connection);
+    }
 
     /// <summary>Puts the agent <paramref name="create"/> makes in place of the current one, or refuses with 409 naming why it stays.</summary>
-    public async Task ReplaceAsync(Func<StudioAgent> create, AgentConnection described)
+    public async Task<StudioAgent> ReplaceAsync(Func<StudioAgent> create, AgentConnection described)
     {
         await _swap.WaitAsync();
         try
         {
-            var old = Current;
+            StudioAgent? old = null;
+            string? refusal = null;
             var next = create();
-            if (old?.TryClose() is { } reason)
+            lock (_gate)
+            {
+                if (_agent?.TryClose() is { } reason)
+                {
+                    refusal = reason;
+                }
+                else
+                {
+                    old = _agent;
+                    _agent = next;
+                    _connection = described;
+                }
+            }
+            if (refusal is not null)
             {
                 await next.DisposeAsync();
-                throw new StudioRefusal(409, reason);
+                throw new StudioRefusal(409, refusal);
             }
-            Volatile.Write(ref _agent, next);
-            Volatile.Write(ref _connection, described);
             if (old is not null) await old.DisposeAsync();
+            return next;
         }
         finally
         {
@@ -86,12 +109,16 @@ internal sealed class AgentSlot(StudioAgent? agent, AgentConnection? connection)
         await _swap.WaitAsync();
         try
         {
-            var old = Current;
-            if (old is null) return;
-            if (old.TryClose("disconnecting the model") is { } reason) throw new StudioRefusal(409, reason);
-            Volatile.Write(ref _agent, null);
-            // A key held by the client alone (flag, typed) went with it; the keyring's stays.
-            if (Connection is { } held && held.Key != "stored") Volatile.Write(ref _connection, held with { Key = "none" });
+            StudioAgent? old;
+            lock (_gate)
+            {
+                old = _agent;
+                if (old is null) return;
+                if (old.TryClose("disconnecting the model") is { } reason) throw new StudioRefusal(409, reason);
+                _agent = null;
+                // A key held by the client alone (flag, typed) went with it; the keyring's stays.
+                if (_connection is { } held && held.Key != "stored") _connection = held with { Key = "none" };
+            }
             await old.DisposeAsync();
         }
         finally
@@ -109,8 +136,11 @@ internal sealed class AgentSlot(StudioAgent? agent, AgentConnection? connection)
         await _swap.WaitAsync();
         try
         {
-            if (!ReferenceEquals(Current, closed)) return;
-            Volatile.Write(ref _agent, create());
+            lock (_gate)
+            {
+                if (!ReferenceEquals(_agent, closed)) return;
+                _agent = create();
+            }
         }
         finally
         {
@@ -118,4 +148,6 @@ internal sealed class AgentSlot(StudioAgent? agent, AgentConnection? connection)
         }
         await closed.DisposeAsync();
     }
+
+    public void Dispose() => _swap.Dispose();
 }
