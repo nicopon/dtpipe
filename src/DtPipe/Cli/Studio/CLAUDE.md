@@ -43,7 +43,7 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   a finished run is forgotten, and the new folder's samples and drafts are purged as at start (`Opened`); the page then reloads
   whole. A suspended real run stays in the old folder's `.dtpipe/studio/` and is found again there. At start the folder is the
   argument, else the current directory, and `StudioCommand` sets the current directory; `studio.json` keeps only the folders the
-  page opened with *Remember* ticked (`ReadFolders`, bounded, most recent first), and no folder is opened again at start. The
+  page opened with *Remember* ticked (`ReadFolders`, no bound, most recent first, the folder in place left out of what the view lists), and no folder is opened again at start. The
   dialog deletes a recent folder (`DELETE /api/workspace/recents`, by its path, whether or not it is still on the disk).
   The header's folder name shows the root `GET /api/workspace` gives as its tooltip.
   `[CI: StudioWorkspaceTests, StudioSettingsTests]` `[local: page_smoke.mjs workspace-switch]`
@@ -91,8 +91,8 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   never writes the file, and a connection of the page writes it only when *Remember* is ticked. A remembered key sign-in starts
   in the background and reads `signing-in` meanwhile, and a coordinator that does not answer never stops the start. The key is the
   keyring's, under `studio.coordinator:<normalized origin>`: another origin finds none and asks again, and a remembered key that
-  is missing builds no link, described as needing its key (`needsKey`). The page connects, tests, changes, disconnects and
-  forgets through `/api/coordinator/connection` (`GET`, `POST …/test`, `PUT`, `POST …/disconnect`, `DELETE`), reads back whether a
+  is missing builds no link, described as needing its key (`needsKey`). The page connects, tests, changes and disconnects
+  through `/api/coordinator/connection` (`GET`, `POST …/test`, `PUT`, `POST …/disconnect`), reads back whether a
   key is kept and where (`none`, `stored`, `flag`, `session`), and names no alias; a disconnection closes the link for the
   session under the replacement's refusals (409) and keeps the file and the keyring's key, and the header's coordinator zone
   (`#coordinator-link`) is the button that opens the dialog in every state, the actions of a state sitting beside it; no answer, refusal or message of these routes holds the key (`Mask`, then the
@@ -367,13 +367,12 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   `--llm-provider` names (its key a reference, read once, kept in the client) or, with no flag, the connection remembered in
   `studio.json` (`StudioSettings`, under `UserStatePaths.Root()`, never `~/.dtpipe`: a `.dtpipe/` is a project's store); a flag
   never writes the file, and a file that cannot be read or is of another version is ignored with a warning. The page connects,
-  tests, replaces, disconnects and forgets the model through `/api/agent/connection` (`GET`, `POST …/test`, `PUT`,
-  `POST …/disconnect`, `DELETE`), under the session's token. `AgentSlot` holds the agent: a replacement closes the old one in a
+  tests, replaces and disconnects the model through `/api/agent/connection` (`GET`, `POST …/test`, `PUT`,
+  `POST …/disconnect`), under the session's token. `AgentSlot` holds the agent: a replacement closes the old one in a
   single step with the check that no turn runs and no card waits (`StudioAgent.TryClose`, 409 otherwise), so a turn that starts
   after is refused, and opens a new conversation. **Disconnecting is not forgetting**: `AgentSlot.CloseAsync` closes the agent under
   the same check and leaves none, keeping the connection's description, the file and the keyring's key, so a studio started again
-  connects it; only a key the client alone held (flag, typed) goes with it. `DELETE` clears the file and the keys, and the page
-  offers both as two buttons. The context window is a field of the connection (`AgentConnection.NumCtx`, `AgentSettings.NumCtx`,
+  connects it; only a key the client alone held (flag, typed) goes with it. The context window is a field of the connection (`AgentConnection.NumCtx`, `AgentSettings.NumCtx`,
   `StudioAgentSetup.NumCtx`), read only from an Ollama connection, null for `AgentOptions.DefaultNumCtx`, bounded by
   `StudioAgentClients.IsNumCtx` on the route and on the file (a value out of bounds ignores the remembered agent, with a warning). The file holds no secret: a key is the keyring's, under `studio.llm:<normalized address>`, so another address
   finds none and asks again. The page sends a value, never an alias or a `keyring://` reference, and reads back only whether a
@@ -384,13 +383,18 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   `[CI: StudioConnectionTests, StudioSettingsTests]` `[local: page_smoke.mjs agent-connect]` `[unchecked: the dialog's wording of a key's state]`
 - **The recent lists are histories the person edits, never the connection.** `studio.json` keeps three lists beside the agent and
   the coordinator to connect at start: the agents, the coordinators and the folders (`ReadAgents`, `ReadCoordinators`,
-  `ReadFolders`), `MaxRecent` each, most recent first, each identity once (an agent: provider and normalized address, carrying
+  `ReadFolders`), no bound, most recent first, each identity once (an agent: provider and normalized address, carrying
   the model, delay and context last used for it; a coordinator: its normalized origin; a folder: its full path), through one
   `Distinct` on read and one `Recent` on write, and never a secret. An entry is added where the use succeeded and *Remember* is
   ticked, by the one function of its list (`WriteAgent`, `RememberCoordinator`, `RememberFolder`): an agent once the connection
   is in place, a coordinator once `CheckAsync` answered (`RecognisedAsync`, bounded by `ProbeBound`, asked before the link goes
   in place and only to be remembered), a folder once opened. With the box unticked nothing is written, list or key. A click on
-  a row of the page fills the form and does nothing else. `DELETE …/history` (`/api/agent/connection`,
+  a row of the page fills the form and does nothing else. **A list never shows the value in place**: an agent or a coordinator that is
+  connected, whatever its source, and the open folder are left out of `history` and `recents` by the identity of their list
+  (`SameAgent`, `SameCoordinator`, `SameFolder`), once the connection is closed they show again. It is a display rule: the file keeps
+  the entry first and the rule of addition is the same. **Forgetting is the list's alone**: the × of an entry, after *Disconnect* for
+  the value in place; no route clears the remembered connection otherwise. The page draws what it is given, says where forgetting is
+  above the list and in an empty list, and scrolls a long one inside the dialog. `DELETE …/history` (`/api/agent/connection`,
   `/api/coordinator/connection`) takes the identity the page shows, never an alias or a reference, removes the entries at that
   address (`RemoveAgent`, `RemoveCoordinator`) and deletes the key of each by its alias: the keyring is asked to delete, never
   to read. The remembered agent or coordinator is cleared when it is that entry, so the next start does not connect an address

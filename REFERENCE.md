@@ -1255,30 +1255,31 @@ The agent's connection is read from the command line first, then from what the s
 then none: a studio started with no flag and nothing remembered has no agent, and the panel offers
 to connect one. A flag never writes what is remembered. The page connects a model (Ollama or an
 OpenAI-compatible server: address, key, model, `Test`, and under Advanced the delay, for Ollama the
-context size, and `Remember on this machine`), disconnects it for the session (what is remembered
-stays, and the next start connects it again) and forgets it. The settings are
-`studio.json` under the user state folder (`DTPIPE_STATE_HOME` first; else macOS
-`~/Library/Application Support/dtpipe`, Windows `%LOCALAPPDATA%\dtpipe`, Linux
-`$XDG_STATE_HOME/dtpipe` or `~/.local/state/dtpipe`), written with the user's rights alone and
-holding no key. A key goes to the system keyring under the address it was given at; another
-address asks for it again. `dtpipe secret list` does not show it.
+context size, and `Remember on this machine`), and disconnects it for the session (what is
+remembered stays, and the next start connects it again). The settings are `studio.json` under the
+user state folder (`DTPIPE_STATE_HOME` first; else macOS `~/Library/Application Support/dtpipe`,
+Windows `%LOCALAPPDATA%\dtpipe`, Linux `$XDG_STATE_HOME/dtpipe` or `~/.local/state/dtpipe`), written
+with the user's rights alone and holding no key. A key goes to the system keyring under the address
+it was given at; another address asks for it again. `dtpipe secret list` does not show it.
 
 The file also keeps three lists of what the page used with success and was asked to remember
 (`Remember on this machine`, or among the recent folders): the models, the coordinators and the
-folders, ten at most each, the most recent first, each identity once. A model is its provider and
+folders, with no limit, the most recent first, each identity once. A model is its provider and
 address, with the model, delay and context size it was last used with; a coordinator is its origin
 and how the person signs in, added once it answered; a folder is its full path. Never a key.
-With the box unticked nothing is written, neither an entry nor a key. A dialog lists its entries:
-a click fills the form and connects nothing, and the cross deletes an entry after a confirmation,
-and the key kept for its address with it (deleted by its alias, never read). A connection in place
-stays for the session; the next start no longer connects it.
+With the box unticked nothing is written, neither an entry nor a key. A dialog lists its entries,
+the value in place left out, in a list that scrolls: a click fills the form and connects nothing,
+and the cross deletes an entry after a confirmation, and the key kept for its address with it
+(deleted by its alias, never read). That is how a remembered value is forgotten: disconnect it, and
+it joins the list. Deleting the remembered model or coordinator means the next start no longer
+connects it.
 
 The coordinator is read the same way: `--coordinator` first, then what the studio remembers, then
 none, and a flag never writes what is remembered. The header always shows its state (connected,
 signing in, offline, signed out, or a remembered key to give again), and that zone is the button
 that opens a dialog (address, sign in through the browser or with a key, `Test`,
-`Remember on this machine`) which also changes the coordinator, disconnects it for the session
-(what is remembered stays) or forgets it. A remembered coordinator connects again at start;
+`Remember on this machine`) which also changes the coordinator or disconnects it for the session
+(what is remembered stays). A remembered coordinator connects again at start;
 one that does not answer never stops the studio. A key goes to the system keyring under the
 address of its coordinator, so another address asks for it again.
 
@@ -1291,8 +1292,8 @@ conversation, and a job's relative paths resolve in the new folder. The change i
 reason, while the open job holds unsaved changes (the dialog offers to save or discard them), while
 a run or a preview goes on, or while the agent's turn runs or waits for your answer. Only a folder
 opened from the page is remembered, in `studio.json`: starting on a folder writes nothing, and no
-folder is opened again at start. A recent folder is deleted from the list with its cross,
-whether or not it is still on the disk.
+folder is opened again at start. The recent folders leave out the folder in place, and a
+recent folder is deleted from the list with its cross, whether or not it is still on the disk.
 
 | Action | What it does |
 |:---|:---|

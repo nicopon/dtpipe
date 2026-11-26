@@ -37,17 +37,16 @@ never a key. The key goes to the system keyring, under the address it was given 
 address asks for it again; `dtpipe secret list` does not show it. A model named with
 `--llm-provider` wins over the remembered one and writes nothing. Without a usable keyring the key
 lasts for the session, and the dialog says so. **Disconnect** closes the agent for this session and
-keeps the model and its key: the next studio connects it again. **Forget what is remembered**
-removes the file's model and its key.
+keeps the model and its key: the next studio connects it again.
 
-**Recent models** lists the last models you connected with **Remember on this machine** ticked,
-the most recent first, up to ten, each provider and address once with the model, the delay and
-the context size it was last used with. A click on a row fills the form and does nothing else:
-**Test** and **Connect** stay yours, and the key kept for that address is used, not asked again.
-The × deletes an entry after a confirmation, and the key kept for its address with it; an entry
-with a key kept says so. A model connected at that moment stays connected for the session, and
-the next studio no longer connects it. **Forget what is remembered** takes the model's entry with
-it. With the box unticked, nothing is written: neither an entry nor a key.
+**Recent models** lists the models you connected with **Remember on this machine** ticked, the
+most recent first, each provider and address once with the model, the delay and the context size
+it was last used with. The list has no limit and scrolls; the model in place is not in it. A click
+on a row fills the form and does nothing else: **Test** and **Connect** stay yours, and the key
+kept for that address is used, not asked again. The × deletes an entry after a confirmation, and
+the key kept for its address with it; an entry with a key kept says so. To forget the model in
+place, **Disconnect** it: it joins the list, and its × forgets it and its key, so the next studio
+no longer connects it. With the box unticked, nothing is written: neither an entry nor a key.
 
 ## What the agent may do
 
@@ -114,8 +113,8 @@ automation.
 - A job that reads or writes a brick runs from the page, not from the agent.
 - A remembered model that needs a key asks for it again when the keyring cannot be read.
 - Opening another folder from the header starts a new conversation; a turn running refuses it.
-- **Recent folders** lists the folders you opened with the box ticked; the × removes one, even a
-  folder gone from the disk, and touches nothing else.
+- **Recent folders** lists the folders you opened with the box ticked, except the one open; the ×
+  removes one, even a folder gone from the disk, and touches nothing else.
 - Weaker models loop or invent YAML keys: the agent's `dry-run` catches most of it, read its plan.
 
 ---

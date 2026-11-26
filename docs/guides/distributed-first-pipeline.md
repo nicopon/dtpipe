@@ -192,11 +192,10 @@ dtpipe studio ./jobs --coordinator "$COORDINATOR_URL" --key '${{DTPIPE_KEY}}'
 Without the flags, press **no coordinator** in the header, paste the address and the key, and tick
 **Remember on this machine**: the next studio connects the same coordinator by itself. The same
 zone, now named after the coordinator, opens the dialog again; **Disconnect** there closes the link
-for this session and keeps what is remembered.
-for this session and keeps what is remembered. **Recent coordinators** lists the last ones that
+for this session and keeps what is remembered. **Recent coordinators** lists the other ones that
 answered while the box was ticked, with how you sign in to each; a click fills the address and
 the sign-in and connects nothing. The × deletes an entry after a confirmation, with the key kept
-for its address, and the coordinator in place stays connected for the session.
+for its address; **Disconnect** the coordinator in place first to delete its entry.
 
 The studio offers the nodes' bricks. Open the **Library** panel on the left, pull
 `shop-orders-by-country` into `./jobs` to edit, and use **Publish** to save it back.
