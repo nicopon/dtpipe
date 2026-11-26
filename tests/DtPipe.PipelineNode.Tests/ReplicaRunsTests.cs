@@ -58,7 +58,7 @@ public class ReplicaRunsTests : IDisposable
     private async Task<(CoordinatorTestHost Host, PipelineNode Node, ReplicaRuns Runs)> StartAsync(TimeSpan unwired, int maxRuns = 0)
     {
         var host = await CoordinatorTestHost.StartAsync(o => o.Groups["test"] = new TransportR.Hub.GroupAccess { CanSendTo = ["test"] });
-        var node = await PipelineNode.ConnectAsync(new NodeClientOptions { HubUrl = host.Url });
+        var node = await PipelineNode.ConnectAsync(new NodeClientOptions { HubUrl = host.HubUrl });
         var runs = new ReplicaRuns(
             host.CreateNodeChannel(), node, "A", DtPipeExecutableLocator.Path, new Dictionary<string, string>(), _dir.FullName,
             spec => FragmentIntake.JobOf(spec, FragmentPolicy.Bricks, (_, _) => null, (_, _) => null, (_, _) => null, []),

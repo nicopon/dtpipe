@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using DtPipe.Coordinator.Contracts;
 using DtPipe.Coordinator.Server.Access;
 using DtPipe.Coordinator.Server.Nodes;
 using DtPipe.Jobs.Coordinator;
@@ -24,7 +25,7 @@ public sealed class KeyIssuerTests : IDisposable
     private const string PublicUrl = "https://coordinator.test";
     private const string Negotiate = "/node-channel/negotiate?negotiateVersion=1";
     // A route of TransportR's control plane that has no effect for a client the hub does not know: a caller it admits is answered 404, one it does not, 401.
-    private const string ControlPlane = WireRoutes.ClientBase + "/6f1c0d52-8d0b-4a39-9a5e-3f6d1d6a7b10/" + WireRoutes.TransfersSegment;
+    private const string ControlPlane = DataPlaneRoutes.Prefix + WireRoutes.ClientBase + "/6f1c0d52-8d0b-4a39-9a5e-3f6d1d6a7b10/" + WireRoutes.TransfersSegment;
 
     private static readonly JsonSerializerOptions Web = new(JsonSerializerDefaults.Web);
 

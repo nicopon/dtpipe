@@ -242,7 +242,7 @@ public static class CoordinatorServer
         });
         app.UseRouting();
         app.UseAuthorization();
-        app.MapDataHub(requireAuth: true);
+        app.MapDataHub(DataPlaneRoutes.Prefix, requireAuth: true);
         app.MapHub<NodeChannelHub>(NodeChannel.Path).RequireAuthorization();
 
         // Anonymous: whether the server serves, its store open (readiness), and whether the process answers at all (liveness), which a
@@ -276,7 +276,7 @@ public static class CoordinatorServer
         // /api serves the pages by the session cookie, and dtpipe studio by a person's bearer token, with
         // three cumulative roles: a reader sees everything, a designer also changes pipelines, deploys and
         // runs them, an admin also changes the rights and uses what a host maps on the admin group. A request that changes something carries
-        // the CSRF header. TransportR's own routes under /api (client, stream) are mapped by MapDataHub, not here.
+        // the CSRF header. TransportR's routes are not under /api: MapDataHub mounts them under DataPlaneRoutes.Prefix.
         var account = app.MapGroup("/api").RequireAuthorization(TrustedIdp.SignedIn).AddEndpointFilter(RequireCsrfHeader);
         account.MapGet(CoordinatorApi.MeRoute, (HttpContext context) => new CoordinatorMe(
             context.User.Identity?.Name, context.User.FindFirst("email")?.Value, [.. CoordinatorRoles.All.Where(context.User.IsInRole)]));

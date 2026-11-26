@@ -18,7 +18,7 @@ public class WireEdgeAliasTests
         await using var host = await NodeTestHost.StartAsync();
 
         await using var producer = await HandWiredNode.StartAsync(
-            new NodeClientOptions { HubUrl = host.Url },
+            new NodeClientOptions { HubUrl = host.HubUrl },
             new FragmentLaunch
             {
                 DtPipeExecutable = DtPipeExecutableLocator.Path,
@@ -26,7 +26,7 @@ public class WireEdgeAliasTests
                 Edges = [new EdgeBinding("main", EdgeDirection.Outbound)],
             });
         await using var consumer = await HandWiredNode.StartAsync(
-            new NodeClientOptions { HubUrl = host.Url },
+            new NodeClientOptions { HubUrl = host.HubUrl },
             new FragmentLaunch
             {
                 DtPipeExecutable = DtPipeExecutableLocator.Path,
@@ -52,7 +52,7 @@ public class WireEdgeAliasTests
     {
         using var fixture = SplitFixture.Create(rowCount: 10);
         await using var host = await NodeTestHost.StartAsync();
-        await using var node = await PipelineNode.ConnectAsync(new NodeClientOptions { HubUrl = host.Url }, ct: TestContext.Current.CancellationToken);
+        await using var node = await PipelineNode.ConnectAsync(new NodeClientOptions { HubUrl = host.HubUrl }, ct: TestContext.Current.CancellationToken);
 
         var ex = Assert.Throws<ArgumentException>(() => node.Launch(new FragmentLaunch
         {

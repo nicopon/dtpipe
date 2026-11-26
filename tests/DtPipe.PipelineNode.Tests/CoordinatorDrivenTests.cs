@@ -104,7 +104,7 @@ public class CoordinatorDrivenTests
         Task<TestNode> Connect(string job, string name, params EdgeBinding[] edges) => TestNode.StartAsync(
             host, name, job, edges, client: new NodeClientOptions
             {
-                HubUrl = host.Url,
+                HubUrl = host.HubUrl,
                 EndToEndEncryption = sealedWithAKey,
                 EndToEndPreSharedKey = sealedWithAKey ? _ => key : null,
             });
@@ -138,7 +138,7 @@ public class CoordinatorDrivenTests
         Task<TestNode> Connect(string job, string name, bool seals, params EdgeBinding[] edges) => TestNode.StartAsync(
             host, name, job, edges, client: new NodeClientOptions
             {
-                HubUrl = host.Url,
+                HubUrl = host.HubUrl,
                 EndToEndEncryption = seals,
                 EndToEndPreSharedKey = seals ? _ => key : null,
             });

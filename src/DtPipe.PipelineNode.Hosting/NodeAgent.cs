@@ -263,7 +263,7 @@ internal sealed class NodeAgent : BackgroundService
         {
             node = await PipelineNode.ConnectAsync(new NodeClientOptions
             {
-                HubUrl = _options.CoordinatorUrl.TrimEnd('/'),
+                HubUrl = _options.CoordinatorUrl.TrimEnd('/') + DataPlaneRoutes.Prefix,
                 AccessTokenProvider = () => FreshTokenAsync(_tokens),
                 BatchBytes = _options.BatchBytes,
                 MaxInFlightBatches = _options.MaxInFlightBatches,

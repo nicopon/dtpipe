@@ -30,7 +30,7 @@ public class RefreshRegistrationTests
     private static Task<PipelineNode> ConnectAsync(CoordinatorTestHost host, TestJwt jwt, string subject) =>
         PipelineNode.ConnectAsync(new NodeClientOptions
         {
-            HubUrl = host.Url,
+            HubUrl = host.HubUrl,
             AccessTokenProvider = () => Task.FromResult(jwt.Mint(subject, "unused", TimeSpan.FromHours(1))),
         });
 

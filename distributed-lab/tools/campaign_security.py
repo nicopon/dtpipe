@@ -83,9 +83,13 @@ class ClientRegistration:
         self._connection.close()
 
 
+# Where the coordinator mounts TransportR's hub (DataPlaneRoutes.Prefix); nothing of it is under /api.
+DATA_PLANE_PREFIX = "/transportr"
+
+
 def events_path(client_id):
     """The control plane's registration route for a client; the heartbeat is what a refusal must not be mistaken for."""
-    return f"/api/client/{client_id}/events?heartbeatMs=15000"
+    return f"{DATA_PLANE_PREFIX}/api/client/{client_id}/events?heartbeatMs=15000"
 
 
 def events_status(base, token, client_id):
@@ -98,7 +102,7 @@ def events_status(base, token, client_id):
 def stream_status(base, token):
     """The data plane's HTTP endpoint, called with no transfer behind it."""
     headers = {"Authorization": f"Bearer {token}"} if token else {}
-    return http(f"{base}/api/stream/00000000-0000-0000-0000-000000000000/send", "POST", headers, b"")[0]
+    return http(f"{base}{DATA_PLANE_PREFIX}/api/stream/00000000-0000-0000-0000-000000000000/send", "POST", headers, b"")[0]
 
 
 class LongPollingHub:

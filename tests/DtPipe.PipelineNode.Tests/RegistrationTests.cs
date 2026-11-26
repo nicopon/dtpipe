@@ -12,7 +12,7 @@ public class RegistrationTests
     public async Task AClientTheHubKnows_IsRegistered_AndOneItHasForgotten_IsNot()
     {
         await using var host = await CoordinatorTestHost.StartAsync(o => o.Groups["test"] = new TransportR.Hub.GroupAccess { CanSendTo = ["test"] });
-        await using var node = await PipelineNode.ConnectAsync(new NodeClientOptions { HubUrl = host.Url }, ct: TestContext.Current.CancellationToken);
+        await using var node = await PipelineNode.ConnectAsync(new NodeClientOptions { HubUrl = host.HubUrl }, ct: TestContext.Current.CancellationToken);
 
         Assert.True(await node.IsRegisteredAsync(TestContext.Current.CancellationToken));
 

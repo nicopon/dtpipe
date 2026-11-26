@@ -21,7 +21,7 @@ public class FailedLaunchTests : IDisposable
     {
         await using var host = await CoordinatorTestHost.StartAsync(
             o => o.Groups["test"] = new TransportR.Hub.GroupAccess { CanSendTo = ["test"] });
-        await using var node = await PipelineNode.ConnectAsync(new NodeClientOptions { HubUrl = host.Url }, ct: TestContext.Current.CancellationToken);
+        await using var node = await PipelineNode.ConnectAsync(new NodeClientOptions { HubUrl = host.HubUrl }, ct: TestContext.Current.CancellationToken);
         await using var runs = new ReplicaRuns(
             host.CreateNodeChannel(), node, "A", Path.Combine(_dir.FullName, "no-such-dtpipe"), new Dictionary<string, string>(), _dir.FullName,
             spec => FragmentIntake.JobOf(spec, FragmentPolicy.Bricks, (_, _) => null, (_, _) => null, (_, _) => null, []),
@@ -43,7 +43,7 @@ public class FailedLaunchTests : IDisposable
             o => o.Groups["test"] = new TransportR.Hub.GroupAccess { CanSendTo = ["test"] });
         var job = Path.Combine(_dir.FullName, "job.yaml");
         await File.WriteAllTextAsync(job, "a:\n  input: generate:1\n  output: arrow:-\n", TestContext.Current.CancellationToken);
-        var node = await PipelineNode.ConnectAsync(new NodeClientOptions { HubUrl = host.Url }, ct: TestContext.Current.CancellationToken);
+        var node = await PipelineNode.ConnectAsync(new NodeClientOptions { HubUrl = host.HubUrl }, ct: TestContext.Current.CancellationToken);
 
         Assert.ThrowsAny<Exception>(() => node.Launch(new FragmentLaunch
         {

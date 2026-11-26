@@ -24,7 +24,7 @@ public class TerminateTests
         await using var host = await NodeTestHost.StartAsync();
 
         await using var producer = await HandWiredNode.StartAsync(
-            new NodeClientOptions { HubUrl = host.Url },
+            new NodeClientOptions { HubUrl = host.HubUrl },
             new FragmentLaunch
             {
                 DtPipeExecutable = DtPipeExecutableLocator.Path,
@@ -32,7 +32,7 @@ public class TerminateTests
                 Edges = [new EdgeBinding("main", EdgeDirection.Outbound)],
             });
         await using var consumer = await HandWiredNode.StartAsync(
-            new NodeClientOptions { HubUrl = host.Url },
+            new NodeClientOptions { HubUrl = host.HubUrl },
             new FragmentLaunch
             {
                 DtPipeExecutable = DtPipeExecutableLocator.Path,

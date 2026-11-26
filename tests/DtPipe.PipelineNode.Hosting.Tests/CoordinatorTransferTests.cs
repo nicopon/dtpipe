@@ -1,3 +1,4 @@
+using DtPipe.Coordinator.Contracts;
 using DtPipe.Coordinator.Server.Access;
 using Microsoft.Extensions.DependencyInjection;
 using TransportR.Client;
@@ -80,7 +81,7 @@ public sealed class CoordinatorTransferTests
     }
 
     private static ByteStreamClient Client(string url, OidcTokenClient tokens) => new ByteStreamClientBuilder(batchBytes: 65536)
-        .WithUrl(url)
+        .WithUrl(url + DataPlaneRoutes.Prefix)
         .WithTokenProvider(() => tokens.GetAsync())
         .Build();
 }
