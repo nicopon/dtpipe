@@ -78,8 +78,10 @@ public sealed class StudioAgentTests : IAsyncLifetime
         var services = new ServiceCollection();
         Program.ConfigureServices(services);
         _server = await StudioServer.StartAsync(new StudioFolder(_dir), 0, new StudioTools(
-            StudioEngines.Real(services.BuildServiceProvider()), new DesignService(IBrickLookup.None), [], [], new InMemorySecretsManager(),
-            Agent: llm is null ? null : new StudioAgentSetup(llm, "http://127.0.0.1:1", "m", new McpToolProvider(McpCatalogue.Tools()), trace)), Ct);
+            StudioEngines.Real(services.BuildServiceProvider()), new DesignService(IBrickLookup.None), [], [], new InMemorySecretsManager())
+        {
+            Agent = llm is null ? null : new StudioAgentSetup(llm, "http://127.0.0.1:1", "m", new McpToolProvider(McpCatalogue.Tools()), trace),
+        }, Ct);
     }
 
     private async Task<(HttpStatusCode Status, JsonElement Body)> CallAsync(HttpMethod method, string path, object? body = null)

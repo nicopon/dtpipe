@@ -4,7 +4,8 @@
 
 import { api, el, fill, info, status, tabOf } from "./dom.js";
 import { brickBranches, holdsEdits, showTab } from "./designer.js";
-import { openDialog, renderDiff, shortCommit } from "./dialogs.js";
+import { openDialog, shortCommit } from "./dialog.js";
+import { renderDiff } from "./job-dialogs.js";
 import { openCoordinatorConnect } from "./coordinator.js";
 import { invalidate } from "./render.js";
 import { sequence, state } from "./state.js";

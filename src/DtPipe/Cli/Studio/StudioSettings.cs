@@ -15,8 +15,7 @@ public sealed record RememberedSettings(AgentSettings? Agent, CoordinatorSetting
 
 /// <summary>
 /// What the studio remembers for the person on this machine: <c>studio.json</c> under <see cref="UserStatePaths.Root"/>, holding
-/// no secret, and the secrets in the keyring's blob under aliases derived from the address they belong to
-/// (<c>studio.llm:&lt;address&gt;</c>, <c>studio.coordinator:&lt;origin&gt;</c>), so a key is never offered to another address. A file that cannot be read, or that a
+/// no secret, with keyring operations delegated to <see cref="StudioSecretStore"/>. A file that cannot be read, or that a
 /// newer studio wrote, is ignored with a warning and never stops the start. Nothing the command line gives (a flag, the folder)
 /// is written here.
 /// </summary>
@@ -27,8 +26,11 @@ public sealed class StudioSettings(string path, ISecretsManager secrets)
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
     private readonly object _fileLock = new();
+    private readonly StudioSecretStore _secrets = new(secrets);
 
     private delegate T? Validator<T>(T? item, ref string? warning) where T : class;
+
+    public StudioSecretStore Secrets => _secrets;
 
     public static string DefaultPath() => Path.Combine(UserStatePaths.Root(), "studio.json");
 
@@ -72,26 +74,14 @@ public sealed class StudioSettings(string path, ISecretsManager secrets)
     public static bool SameFolder(string a, string b) => string.Equals(a, b, StudioFolder.PathComparison);
 
     /// <summary>The agents the page connected and the person asked to remember, the most recent first, each provider and address once.</summary>
-    public IReadOnlyList<AgentSettings> ReadAgents(out string? warning)
-    {
-        lock (_fileLock)
-        {
-            warning = null;
-            return Distinct(ReadFile(ref warning)?.Agents, ValidAgent, SameAgent, ref warning);
-        }
-    }
+    public IReadOnlyList<AgentSettings> ReadAgents(out string? warning) =>
+        ReadRecent(file => file.Agents, ValidAgent, SameAgent, out warning);
 
     public IReadOnlyList<AgentSettings> ReadAgents() => ReadAgents(out _);
 
     /// <summary>The coordinators the page connected and the person asked to remember, the most recent first, each origin once.</summary>
-    public IReadOnlyList<CoordinatorSettings> ReadCoordinators(out string? warning)
-    {
-        lock (_fileLock)
-        {
-            warning = null;
-            return Distinct(ReadFile(ref warning)?.Coordinators, ValidCoordinator, SameCoordinator, ref warning);
-        }
-    }
+    public IReadOnlyList<CoordinatorSettings> ReadCoordinators(out string? warning) =>
+        ReadRecent(file => file.Coordinators, ValidCoordinator, SameCoordinator, out warning);
 
     public IReadOnlyList<CoordinatorSettings> ReadCoordinators() => ReadCoordinators(out _);
 
@@ -99,19 +89,45 @@ public sealed class StudioSettings(string path, ISecretsManager secrets)
     /// The folders the page opened and the person asked to remember, the most recent first, each once, as full paths. One that is
     /// not a full path is left out, and <paramref name="warning"/> says so.
     /// </summary>
-    public IReadOnlyList<string> ReadFolders(out string? warning)
+    public IReadOnlyList<string> ReadFolders(out string? warning) =>
+        ReadRecent(file => file.Folders, ValidFolder, SameFolder, out warning);
+
+    public IReadOnlyList<string> ReadFolders() => ReadFolders(out _);
+
+    private IReadOnlyList<T> ReadRecent<T>(Func<FileModel, T?[]?> list, Validator<T> valid, Func<T, T, bool> same, out string? warning) where T : class
     {
         lock (_fileLock)
         {
             warning = null;
-            return Distinct(ReadFile(ref warning)?.Folders, ValidFolder, SameFolder, ref warning);
+            return Distinct(ReadFile(ref warning) is { } file ? list(file) : null, valid, same, ref warning);
         }
     }
 
-    public IReadOnlyList<string> ReadFolders() => ReadFolders(out _);
+    private List<T> RemoveRecent<T>(
+        Func<FileModel, T?[]?> list,
+        Func<FileModel, T?>? activeSelector,
+        Validator<T> valid,
+        Func<T, T, bool> same,
+        Func<T, bool> match,
+        Func<FileModel, T?, T[], FileModel> apply) where T : class
+    {
+        var removed = new List<T>();
+        Clear(file =>
+        {
+            string? ignored = null;
+            var recent = Distinct(list(file), valid, same, ref ignored);
+            removed.AddRange(recent.Where(match));
+            var active = activeSelector is not null ? valid(activeSelector(file), ref ignored) : null;
+            var activeGoes = active is not null && match(active);
+            if (activeGoes) removed.Add(active!);
+            var nextActive = activeSelector is null ? null : activeGoes ? null : activeSelector(file);
+            return apply(file, nextActive, recent.Where(item => !match(item)).ToArray());
+        });
+        return removed;
+    }
 
     /// <summary>The valid entries of a list, each identity once, the first (the most recent) kept. A list has no bound.</summary>
-    private List<T> Distinct<T>(IEnumerable<T?>? stored, Validator<T> valid, Func<T, T, bool> same, ref string? warning) where T : class
+    private static List<T> Distinct<T>(IEnumerable<T?>? stored, Validator<T> valid, Func<T, T, bool> same, ref string? warning) where T : class
     {
         var kept = new List<T>();
         foreach (var item in stored ?? [])
@@ -119,7 +135,7 @@ public sealed class StudioSettings(string path, ISecretsManager secrets)
         return kept;
     }
 
-    private List<T> Distinct<T>(IEnumerable<T?>? stored, Validator<T> valid, Func<T, T, bool> same) where T : class
+    private static List<T> Distinct<T>(IEnumerable<T?>? stored, Validator<T> valid, Func<T, T, bool> same) where T : class
     {
         string? ignored = null;
         return Distinct(stored, valid, same, ref ignored);
@@ -189,19 +205,14 @@ public sealed class StudioSettings(string path, ISecretsManager secrets)
     public void RemoveAgent(string provider, string url)
     {
         var shown = Shown(url);
-        bool Is(AgentSettings agent) => agent.Provider == provider && Shown(agent.Url) == shown;
-        var removed = new List<AgentSettings>();
-        Clear(file =>
-        {
-            string? ignored = null;
-            var recent = Distinct(file.Agents, ValidAgent, SameAgent, ref ignored);
-            removed.AddRange(recent.Where(Is));
-            var active = ValidAgent(file.Agent, ref ignored);
-            var activeGoes = active is not null && Is(active);
-            if (activeGoes) removed.Add(active!);
-            return file with { Agent = activeGoes ? null : file.Agent, Agents = recent.Where(a => !Is(a)).ToArray() };
-        });
-        foreach (var address in removed.Select(a => a.Url).Distinct()) ForgetLlmKey(address);
+        var removed = RemoveRecent(
+            file => file.Agents,
+            file => file.Agent,
+            ValidAgent,
+            SameAgent,
+            agent => agent.Provider == provider && Shown(agent.Url) == shown,
+            (file, active, remaining) => file with { Agent = active, Agents = remaining });
+        foreach (var address in removed.Select(a => a.Url).Distinct()) _secrets.ForgetLlmKey(address);
     }
 
     /// <summary>Makes the coordinator the one connected again at start, optionally putting it first among the recent ones in the same write.</summary>
@@ -224,19 +235,14 @@ public sealed class StudioSettings(string path, ISecretsManager secrets)
     public void RemoveCoordinator(string origin)
     {
         var shown = Shown(origin);
-        bool Is(CoordinatorSettings coordinator) => Shown(coordinator.Origin) == shown;
-        var removed = new List<CoordinatorSettings>();
-        Clear(file =>
-        {
-            string? ignored = null;
-            var recent = Distinct(file.Coordinators, ValidCoordinator, SameCoordinator, ref ignored);
-            removed.AddRange(recent.Where(Is));
-            var active = ValidCoordinator(file.Coordinator, ref ignored);
-            var activeGoes = active is not null && Is(active);
-            if (activeGoes) removed.Add(active!);
-            return file with { Coordinator = activeGoes ? null : file.Coordinator, Coordinators = recent.Where(c => !Is(c)).ToArray() };
-        });
-        foreach (var address in removed.Select(c => c.Origin).Distinct()) ForgetCoordinatorKey(address);
+        var removed = RemoveRecent(
+            file => file.Coordinators,
+            file => file.Coordinator,
+            ValidCoordinator,
+            SameCoordinator,
+            coordinator => Shown(coordinator.Origin) == shown,
+            (file, active, remaining) => file with { Coordinator = active, Coordinators = remaining });
+        foreach (var address in removed.Select(c => c.Origin).Distinct()) _secrets.ForgetCoordinatorKey(address);
     }
 
     /// <summary>Puts the folder first among the recent ones, once.</summary>
@@ -250,7 +256,13 @@ public sealed class StudioSettings(string path, ISecretsManager secrets)
     public void RemoveFolder(string folder)
     {
         var normalized = StudioFolder.Normalize(folder);
-        Clear(file => file with { Folders = Distinct(file.Folders, ValidFolder, SameFolder).Where(f => !SameFolder(f, normalized)).ToArray() });
+        RemoveRecent(
+            file => file.Folders,
+            null,
+            ValidFolder,
+            SameFolder,
+            f => SameFolder(f, normalized),
+            (file, _, remaining) => file with { Folders = remaining });
     }
 
     /// <summary>Changes one section and keeps the others as they are; a file that cannot be read is replaced, since the person asked to write.</summary>
@@ -318,75 +330,23 @@ public sealed class StudioSettings(string path, ISecretsManager secrets)
     public static string Shown(string url) =>
         Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https" ? NormalizeUrl(url).Split('?')[0] : "";
 
-    public static string LlmAlias(string url) => ReservedAliases.StudioPrefix + "llm:" + NormalizeUrl(url);
+    public static string LlmAlias(string url) => StudioSecretStore.LlmAlias(url);
 
-    public static string CoordinatorAlias(string origin) => ReservedAliases.StudioPrefix + "coordinator:" + NormalizeUrl(origin);
+    public static string CoordinatorAlias(string origin) => StudioSecretStore.CoordinatorAlias(origin);
 
-    /// <summary>The key kept for this model address, or null when there is none or the keyring cannot be read.</summary>
-    public string? ReadLlmKey(string url) => ReadKey(LlmAlias(url));
+    public string? ReadLlmKey(string url) => _secrets.ReadLlmKey(url);
 
-    /// <summary>Keeps the key for this model address; false when the keyring refuses, and the key then lasts the session alone.</summary>
-    public bool StoreLlmKey(string url, string key) => StoreKey(LlmAlias(url), key);
+    public bool StoreLlmKey(string url, string key) => _secrets.StoreLlmKey(url, key);
 
-    public void ForgetLlmKey(string url) => ForgetKey(LlmAlias(url));
+    public void ForgetLlmKey(string url) => _secrets.ForgetLlmKey(url);
 
-    /// <summary>The key kept for this coordinator, or null when there is none or the keyring cannot be read.</summary>
-    public string? ReadCoordinatorKey(string origin) => ReadKey(CoordinatorAlias(origin));
+    public string? ReadCoordinatorKey(string origin) => _secrets.ReadCoordinatorKey(origin);
 
-    /// <summary>Keeps the key for this coordinator; false when the keyring refuses, and the key then lasts the session alone.</summary>
-    public bool StoreCoordinatorKey(string origin, string key) => StoreKey(CoordinatorAlias(origin), key);
+    public bool StoreCoordinatorKey(string origin, string key) => _secrets.StoreCoordinatorKey(origin, key);
 
-    public void ForgetCoordinatorKey(string origin) => ForgetKey(CoordinatorAlias(origin));
+    public void ForgetCoordinatorKey(string origin) => _secrets.ForgetCoordinatorKey(origin);
 
-    /// <summary>
-    /// The aliases the keyring holds now, and nothing of what they hold: the page learns from them which recent entries have a key
-    /// kept. Empty when the keyring cannot be read.
-    /// </summary>
-    public IReadOnlySet<string> KeptAliases(out bool keyringUsable)
-    {
-        try
-        {
-            var aliases = secrets.ListSecrets().Keys.ToHashSet(StringComparer.Ordinal);
-            keyringUsable = true;
-            return aliases;
-        }
-        catch (Exception)
-        {
-            keyringUsable = false;
-            return new HashSet<string>();
-        }
-    }
+    public IReadOnlySet<string> KeptAliases(out bool keyringUsable) => _secrets.KeptAliases(out keyringUsable);
 
-    public IReadOnlySet<string> KeptAliases() => KeptAliases(out _);
-
-    private string? ReadKey(string alias)
-    {
-        try
-        {
-            return secrets.GetSecret(alias);
-        }
-        catch (Exception)
-        {
-            return null;
-        }
-    }
-
-    private bool StoreKey(string alias, string key)
-    {
-        try
-        {
-            secrets.SetSecret(alias, key);
-            return true;
-        }
-        catch (Exception)
-        {
-            return false;
-        }
-    }
-
-    private void ForgetKey(string alias)
-    {
-        try { secrets.DeleteSecret(alias); }
-        catch (Exception) { }
-    }
+    public IReadOnlySet<string> KeptAliases() => _secrets.KeptAliases();
 }

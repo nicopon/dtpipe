@@ -6,7 +6,7 @@
 
 import { $, api, el, fill, status, svg } from "./dom.js";
 import { applySizes, bindSplit, cardChanges, editingText, showTab } from "./designer.js";
-import { openAgentConnectDialog } from "./dialogs.js";
+import { openAgentConnectDialog } from "./connect-dialogs.js";
 import { invalidate, onZone } from "./render.js";
 import { sequence, state } from "./state.js";
 

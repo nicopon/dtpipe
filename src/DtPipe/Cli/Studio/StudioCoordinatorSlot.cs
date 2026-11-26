@@ -8,9 +8,6 @@ namespace DtPipe.Cli.Studio;
 /// </summary>
 public sealed record CoordinatorConnection(string Origin, string Auth, string Source, string Key, bool NeedsKey = false);
 
-/// <summary>What the page may do to the coordinator's link: the settings it remembers, and the connection the studio started with.</summary>
-public sealed record StudioCoordinatorStart(StudioSettings Settings, CoordinatorConnection? Start = null);
-
 /// <summary>
 /// The studio's coordinator link, which the page may replace. Every request that reaches the coordinator holds the link for its
 /// whole length (<see cref="Hold"/>), and a replacement is refused while one is held, so a publication or a library read never
@@ -42,7 +39,7 @@ internal sealed class CoordinatorSlot(CoordinatorLink? link, CoordinatorConnecti
     }
 
     /// <summary>Holds the link in place until the lease is disposed; its value is null when none is connected.</summary>
-    public SlotHolds.Lease<CoordinatorLink?> Hold() => _holds.Hold(() => _link);
+    public OneShotLease<CoordinatorLink?> Hold() => _holds.Hold(() => _link);
 
     /// <summary>
     /// Puts <paramref name="next"/> in place of the current link, or refuses with 409 while a request holds it. The sign-in the old

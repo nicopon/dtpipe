@@ -15,16 +15,19 @@ using YamlDotNet.RepresentationModel;
 namespace DtPipe.Cli.Studio;
 
 /// <summary>
-/// The studio's real run of the job saved in the folder. One engine action runs at a time: a run holds the
-/// same slot as a sample (409 otherwise). What runs is the saved file, read again and checked against the
-/// hash the page opened; the page confirms what the run would write first, and the run is refused when the
-/// job or the values it launches with are no longer what was confirmed.
+/// Real run endpoints of the saved job: preparation (confirmation digest, staged/target preview), background execution
+/// under the engine slot, status polling, and stop/cancellation.
 /// </summary>
-public sealed partial class StudioServer
+internal sealed class RunRoutes(
+    WorkspaceSlot workspace,
+    CoordinatorSlot coordinator,
+    EngineSlot engineSlot,
+    AgentSlot agentSlot,
+    IStudioEngine engine,
+    StudioDesignContext design,
+    DebugRoutes debug,
+    byte[] token)
 {
-    /// <summary>The verdict of a run its person stopped.</summary>
-    public const int Stopped = 130;
-
     private readonly object _runLock = new();
     private RunState? _run;
 
@@ -64,18 +67,38 @@ public sealed partial class StudioServer
     /// kept for the run and never pinned.
     /// </summary>
     private sealed record StagedRun(
-        DebugPlan Plan, DebugState State, bool Review, List<DebugWatch> Holds, List<DebugWatch> Watch, List<HeldLevel> Keep, HashSet<string> Drop,
+        DebugPlan Plan, DebugRoutes.DebugState State, bool Review, List<DebugWatch> Holds, List<DebugWatch> Watch, List<DebugRoutes.HeldLevel> Keep, HashSet<string> Drop,
         DebugCut Cut, object Stages, object Held, int Discards, string Signature, bool Sample, IReadOnlySet<string>? Only = null);
 
-    private bool RunInProgress
+    private StudioWorkspace CurrentWorkspace => workspace.Current;
+
+    public bool RunInProgress
     {
         get { lock (_runLock) return _run is { Running: true }; }
     }
 
-    private bool RunInProgressFor(string path)
+    public bool RunInProgressFor(string path)
     {
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         lock (_runLock) return _run is { Running: true } r && string.Equals(r.Path, path, comparison);
+    }
+
+    public void ClearRun()
+    {
+        lock (_runLock) _run = null;
+    }
+
+    public void Register(StudioRouteTable routes)
+    {
+        routes.Map("POST", "/api/run/prepare", PrepareRunAsync);
+        routes.Map("POST", "/api/run", StartRunAsync);
+        routes.Map("GET", "/api/run", context => StudioHttp.JsonAsync(context, RunStatus()), RouteLocks.None);
+        routes.Map("POST", "/api/run/stop", context =>
+        {
+            StopRun();
+            context.Response.StatusCode = StatusCodes.Status202Accepted;
+            return Task.CompletedTask;
+        });
     }
 
     /// <summary>
@@ -87,15 +110,16 @@ public sealed partial class StudioServer
     /// </summary>
     private RunPlan PlanRun(RunRequest asked)
     {
-        var path = JobPath(asked.Path) ?? throw new StudioRefusal(400, "Run a job saved in the folder: name its path.");
-        var job = Folder.ReadJob(path);
+        var path = design.JobPath(asked.Path) ?? throw new StudioRefusal(400, "Run a job saved in the folder: name its path.");
+        var ws = CurrentWorkspace;
+        var job = ws.Folder.ReadJob(path);
         if (asked.Hash is null || asked.Hash != job.Hash)
             throw new StudioRefusal(409, $"{path} is not the job saved last: save it, then run.");
-        var sampling = RunnableHere(job.Text, asked.Bricks, "run");
-        var launch = Variables.LaunchEnvironment(path, sampling.Yaml);
+        var sampling = design.RunnableHere(job.Text, asked.Bricks, "run");
+        var launch = ws.Variables.LaunchEnvironment(path, sampling.Yaml);
         var staged = asked.Debug == true || asked.Review == true;
         // A suspended run has its rows; any run but its continuation would write the job again and leave them to be written twice.
-        if (!staged && LoadDebug(DebugKey(path, null)).Real)
+        if (!staged && debug.LoadDebug(debug.DebugKey(path, null)).Real)
             throw new StudioRefusal(409, "A real run is suspended before its outputs are written: write it or abandon it from the output steps first.");
 
         var writes = new List<RunWrite>();
@@ -130,7 +154,7 @@ public sealed partial class StudioServer
         foreach (var alias in sampling.Sinks.Order(StringComparer.Ordinal)) material.Append("throwaway:").Append(alias).Append('\0');
         if (stagedRun is not null) material.Append("staged:").Append(stagedRun.Signature).Append('\0');
         if (only is not null) material.Append("targets:").Append(string.Join(',', only.Order(StringComparer.OrdinalIgnoreCase))).Append('\0');
-        var digest = Convert.ToHexStringLower(HMACSHA256.HashData(_token, Encoding.UTF8.GetBytes(material.ToString())));
+        var digest = Convert.ToHexStringLower(HMACSHA256.HashData(token, Encoding.UTF8.GetBytes(material.ToString())));
         return new RunPlan(path, sampling, launch, writes, digest, sample, stagedRun, subset, only?.Order(StringComparer.OrdinalIgnoreCase).ToList());
     }
 
@@ -141,22 +165,22 @@ public sealed partial class StudioServer
     /// </summary>
     private StagedRun Stage(RunRequest asked, string path, string text, BrickSampling sampling, IReadOnlyDictionary<string, string> launch, bool sample, IReadOnlySet<string>? only = null)
     {
-        var cutter = _tools.Engine.Cutter;
-        var key = DebugKey(path, null);
-        Local.CheckDebug(key);
+        var cutter = engine.Cutter;
+        var key = debug.DebugKey(path, null);
+        CurrentWorkspace.Local.CheckDebug(key);
         var review = asked.Review == true;
         var plan = sample
-            ? PlanOf(cutter, text, CoordinatorApi.MaxSampleRows, SampleSalt(path, text))
-            : PlanOf(cutter, text, 0, RealSalt(text, launch));
-        var state = LoadDebug(key);
+            ? DebugRoutes.PlanOf(cutter, text, CoordinatorApi.MaxSampleRows, debug.SampleSalt(path, text))
+            : DebugRoutes.PlanOf(cutter, text, 0, RealSalt(text, launch));
+        var state = debug.LoadDebug(key);
         if (state.Real && review)
             throw new StudioRefusal(409, "A real run is suspended before its outputs are written: write it or abandon it before reviewing another.");
-        var (watch, keep, drop) = Judge(state, plan, []);
+        var (watch, keep, drop) = debug.Judge(state, plan, []);
 
         // A suspended run is continued whole or not at all: a target that holds nothing would be read from its source and written unreviewed.
         if (state.Real)
         {
-            var missing = plan.Branches.Where(b => b.Writes && (only is null || only.Contains(b.Branch)) && !keep.Any(h => Same(h.Branch, b.Branch) && h.Level == b.Transformers)).Select(b => b.Branch).ToList();
+            var missing = plan.Branches.Where(b => b.Writes && (only is null || only.Contains(b.Branch)) && !keep.Any(h => DebugRoutes.Same(h.Branch, b.Branch) && h.Level == b.Transformers)).Select(b => b.Branch).ToList();
             if (missing.Count > 0)
                 throw new StudioRefusal(409, $"The suspended run does not hold the rows of every output ({string.Join(", ", missing)}): abandon it, then review again.");
         }
@@ -177,16 +201,16 @@ public sealed partial class StudioServer
             writes = kv.Value.Output is { Length: > 0 } output && output != "null:" ? ConnectionStringSanitizer.Redact(output) : null,
         }).ToList();
 
-        var store = DebugStore();
+        var store = debug.DebugStore();
         var held = keep.Select(h =>
         {
             var file = new FileInfo(store.PathFor(h.Key));
-            var at = watch.FirstOrDefault(w => Same(w.Branch, h.Branch) && plan.Resolve(w) == h.Level);
-            return new { branch = h.Branch, card = at?.Card, at = at is null ? null : AtName(at.At), bytes = file.Exists ? file.Length : 0L, readAt = file.Exists ? (DateTime?)file.LastWriteTimeUtc : null };
+            var at = watch.FirstOrDefault(w => DebugRoutes.Same(w.Branch, h.Branch) && plan.Resolve(w) == h.Level);
+            return new { branch = h.Branch, card = at?.Card, at = at is null ? null : DebugRoutes.AtName(at.At), bytes = file.Exists ? file.Length : 0L, readAt = file.Exists ? (DateTime?)file.LastWriteTimeUtc : null };
         }).ToList();
 
         var signature = string.Join('|', new[] { $"review={(review ? 1 : 0)}" }
-            .Concat(watch.Select(w => $"w:{w.Branch}/{AtName(w.At)}").Order(StringComparer.Ordinal))
+            .Concat(watch.Select(w => $"w:{w.Branch}/{DebugRoutes.AtName(w.At)}").Order(StringComparer.Ordinal))
             .Concat(keep.Select(h => $"h:{h.Branch}/{h.Level}/{h.Key}").Order(StringComparer.Ordinal)));
         return new StagedRun(plan, state, review, holds, watch, keep, drop, cut, stages, held, state.Levels.Count - keep.Count, signature, sample, only);
     }
@@ -206,7 +230,7 @@ public sealed partial class StudioServer
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { content = "?"; }
             material.Append("state:").Append(path).Append('=').Append(content).Append('\0');
         }
-        return Convert.ToHexStringLower(HMACSHA256.HashData(_token, Encoding.UTF8.GetBytes(material.ToString())));
+        return Convert.ToHexStringLower(HMACSHA256.HashData(token, Encoding.UTF8.GetBytes(material.ToString())));
     }
 
     /// <summary>
@@ -231,10 +255,10 @@ public sealed partial class StudioServer
     private DebugCut SubsetCut(string yaml, IReadOnlySet<string> only, IReadOnlyList<RunWrite> writes)
     {
         DebugCut cut;
-        try { cut = _tools.Engine.Cutter.Cut(yaml, [], null, null, write: true, only: only); }
+        try { cut = engine.Cutter.Cut(yaml, [], null, null, write: true, only: only); }
         catch (InvalidOperationException ex) { throw new StudioRefusal(422, ShownFailure.Of(ex)); }
         RefuseWritersOutside(cut, writes.Select(w => w.Alias), only);
-        RefuseCursorsOthersRead(cut, _tools.Engine.Cutter.Plan(yaml, 0), writes.Select(w => w.Alias), only);
+        RefuseCursorsOthersRead(cut, engine.Cutter.Plan(yaml, 0), writes.Select(w => w.Alias), only);
         return cut;
     }
 
@@ -277,14 +301,14 @@ public sealed partial class StudioServer
     }
 
     /// <summary>Rows held before a writer that the run just done did not write: its target was not chosen.</summary>
-    private static bool WaitsForWriter(StagedRun staged, HeldLevel held) =>
+    private static bool WaitsForWriter(StagedRun staged, DebugRoutes.HeldLevel held) =>
         staged.Only is { } only && !only.Contains(held.Branch)
-        && staged.Plan.Branches.Any(b => b.Writes && Same(b.Branch, held.Branch) && b.Transformers == held.Level);
+        && staged.Plan.Branches.Any(b => b.Writes && DebugRoutes.Same(b.Branch, held.Branch) && b.Transformers == held.Level);
 
     private async Task PrepareRunAsync(HttpContext context)
     {
-        var plan = PlanRun(await BodyAsync<RunRequest>(context));
-        await JsonAsync(context, new
+        var plan = PlanRun(await StudioHttp.BodyAsync<RunRequest>(context));
+        await StudioHttp.JsonAsync(context, new
         {
             digest = plan.Digest,
             writes = plan.Writes,
@@ -304,12 +328,12 @@ public sealed partial class StudioServer
 
     private async Task StartRunAsync(HttpContext context)
     {
-        var asked = await BodyAsync<RunRequest>(context);
+        var asked = await StudioHttp.BodyAsync<RunRequest>(context);
         var plan = PlanRun(asked);
         const string Changed = "The job or the values it launches with changed since you confirmed: confirm what it writes again.";
         if (asked.Digest != plan.Digest) throw new StudioRefusal(409, Changed);
-        if (Agent?.Busy == true) throw new StudioRefusal(409, "The agent's turn is running: stop it, or wait for it, before running.");
-        TakeSlot("A run");
+        if (agentSlot.Current?.Busy == true) throw new StudioRefusal(409, "The agent's turn is running: stop it, or wait for it, before running.");
+        var lease = engineSlot.Take("A run");
 
         var files = new List<string>();
         try
@@ -320,6 +344,7 @@ public sealed partial class StudioServer
                 plan = PlanRun(asked);
                 if (asked.Digest != plan.Digest) throw new StudioRefusal(409, Changed);
             }
+            var local = CurrentWorkspace.Local;
             // A source brick reads its rows from its node through the coordinator; a sink brick is written to a throwaway file here, never to its node.
             var inputs = new List<string>();
             foreach (var (alias, brick) in plan.Sampling.Sources)
@@ -327,10 +352,10 @@ public sealed partial class StudioServer
                 if (plan.Cut?.Dropped.Contains(alias) == true) continue;
                 if (plan.Cut?.Unread.Contains(alias) == true) continue;
                 byte[] arrow;
-                try { arrow = await (Coordinator ?? throw new StudioRefusal(409, NoCoordinator)).SampleAsync(brick.Node, brick.Id, CoordinatorApi.MaxSampleRows, context.RequestAborted); }
+                try { arrow = await (coordinator.Current ?? throw new StudioRefusal(409, StudioHttp.NoCoordinator)).SampleAsync(brick.Node, brick.Id, CoordinatorApi.MaxSampleRows, context.RequestAborted); }
                 catch (CoordinatorLinkException ex) { throw new StudioRefusal(502, $"'{alias}': {ex.Message}"); }
-                files.Add(Local.SampleFile(arrow));
-                inputs.Add($"{alias}={Bindable(files[^1])}");
+                files.Add(local.SampleFile(arrow));
+                inputs.Add($"{alias}={StudioDesignContext.Bindable(files[^1])}");
             }
             var outputs = new List<string>();
             foreach (var alias in plan.Sampling.Sinks)
@@ -338,35 +363,35 @@ public sealed partial class StudioServer
                 if (plan.Cut?.Dropped.Contains(alias) == true) continue;
                 // A review ends every branch before its writer: the sink's output is gone from the cut, so nothing is left to bind.
                 if (plan.Staged?.Review == true) continue;
-                files.Add(Local.SampleFile(null));
-                outputs.Add($"{alias}={Bindable(files[^1])}");
+                files.Add(local.SampleFile(null));
+                outputs.Add($"{alias}={StudioDesignContext.Bindable(files[^1])}");
             }
             var bindings = new StudioBindings(inputs.Count > 0 ? string.Join(',', inputs) : null, outputs.Count > 0 ? string.Join(',', outputs) : null);
             if (plan.Staged is { } staged)
             {
                 // The session keeps what the cut relies on, and nothing else: a run of every row is not a sample's.
-                var store = DebugStore();
-                foreach (var gone in staged.Drop) ForgetCheckpoint(store, gone);
+                var store = debug.DebugStore();
+                foreach (var gone in staged.Drop) DebugRoutes.ForgetCheckpoint(store, gone);
                 staged.State.Watch = staged.Watch;
                 staged.State.Levels = staged.Keep;
                 staged.State.Real = !plan.Sample && staged.Keep.Count > 0;
-                SaveDebug(DebugKey(plan.Path, null), staged.State);
+                debug.SaveDebug(debug.DebugKey(plan.Path, null), staged.State);
             }
             var state = new RunState(plan.Path, new CancellationTokenSource());
             lock (_runLock) _run = state;
-            state.Task = Task.Run(() => RunAsync(plan, bindings, state, files));
+            state.Task = Task.Run(() => RunAsync(plan, bindings, state, files, lease));
         }
         catch
         {
             foreach (var file in files) File.Delete(file);
-            _sampling.Release();
+            lease.Dispose();
             throw;
         }
         context.Response.StatusCode = StatusCodes.Status202Accepted;
-        await JsonAsync(context, new { started = true });
+        await StudioHttp.JsonAsync(context, new { started = true });
     }
 
-    private async Task RunAsync(RunPlan plan, StudioBindings bindings, RunState state, List<string> files)
+    private async Task RunAsync(RunPlan plan, StudioBindings bindings, RunState state, List<string> files, OneShotLease lease)
     {
         var code = 1;
         string? error = null;
@@ -376,16 +401,16 @@ public sealed partial class StudioServer
             // Armed inside the task, for this run's call chain alone; the environment is never written.
             using var armed = LaunchValues.Arm(plan.Launch);
             using var quiet = NonInteractiveGuard.Suppress();
-            var outcome = await _tools.Engine.RunAsync(plan.Cut?.Yaml ?? plan.Sampling.Yaml, bindings, state.Cts.Token);
+            var outcome = await engine.RunAsync(plan.Cut?.Yaml ?? plan.Sampling.Yaml, bindings, state.Cts.Token);
             code = outcome.ExitCode;
             checkpoints = outcome.Checkpoints;
             foreach (var (alias, reason) in outcome.Failures) state.Failures[alias] = ConnectionStringSanitizer.Sanitize(ShownFailure.Of(reason));
             // The engine answers a fault and a cancellation alike as a fault: a stop asked decides the verdict below.
             if (outcome.Fault is not null && outcome.Fault is not OperationCanceledException)
-                error = Shown(outcome.Fault);
+                error = StudioHttp.Shown(outcome.Fault);
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { error = Shown(ex); }
+        catch (Exception ex) { error = StudioHttp.Shown(ex); }
         finally
         {
             foreach (var file in files) { try { File.Delete(file); } catch (IOException) { } }
@@ -394,23 +419,23 @@ public sealed partial class StudioServer
             {
                 bool stopped;
                 lock (_runLock) stopped = state.StopRequested;
-                try { state.View = await FinishStagedAsync(plan.Path, staged, checkpoints, stopped ? Stopped : code); }
+                try { state.View = await FinishStagedAsync(plan.Path, staged, checkpoints, stopped ? StudioServer.Stopped : code); }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    error ??= "The checkpoints of this run could not be settled: " + Shown(ex);
+                    error ??= "The checkpoints of this run could not be settled: " + StudioHttp.Shown(ex);
                 }
             }
             lock (_runLock)
             {
                 // A stop asked while the run had not finished is its verdict, whatever the engine returned:
                 // a linear job throws on cancellation and a DAG answers 1, and neither may read as success.
-                state.Code = state.StopRequested ? Stopped : code;
+                state.Code = state.StopRequested ? StudioServer.Stopped : code;
                 if (state.StopRequested) error = null;
                 state.Error = error;
                 state.Running = false;
                 state.Finished = DateTimeOffset.UtcNow;
             }
-            _sampling.Release();
+            lease.Dispose();
         }
     }
 
@@ -421,20 +446,20 @@ public sealed partial class StudioServer
     /// </summary>
     private async Task<object> FinishStagedAsync(string path, StagedRun staged, IReadOnlyDictionary<string, string> keys, int code)
     {
-        var key = DebugKey(path, null);
+        var key = debug.DebugKey(path, null);
         var state = staged.State;
         // The ends a review held are kept for this run and are no pin: they leave the watchers before the state is saved.
         var pins = state.Watch;
-        state.Watch = pins.Concat(staged.Holds.Where(h => !pins.Any(p => Same(p.Branch, h.Branch) && p.At == h.At))).ToList();
-        Keep(key, state, staged.Plan, staged.Cut, keys);
+        state.Watch = pins.Concat(staged.Holds.Where(h => !pins.Any(p => DebugRoutes.Same(p.Branch, h.Branch) && p.At == h.At))).ToList();
+        debug.Keep(key, state, staged.Plan, staged.Cut, keys);
         state.Watch = pins;
         if (code == 0 && !staged.Review && !staged.Sample)
         {
-            var store = DebugStore();
+            var store = debug.DebugStore();
             // A target the run did not write keeps its held rows.
             foreach (var held in state.Levels.Where(h => !WaitsForWriter(staged, h)).ToList())
             {
-                ForgetCheckpoint(store, held.Key);
+                DebugRoutes.ForgetCheckpoint(store, held.Key);
                 state.Levels.Remove(held);
             }
         }
@@ -442,16 +467,16 @@ public sealed partial class StudioServer
         if (staged.Review)
         {
             // Nothing on disk says how many rows a level holds, and the page tells the person how many wait: counted once, here.
-            var store = DebugStore();
+            var store = debug.DebugStore();
             for (var i = 0; i < state.Levels.Count; i++)
             {
                 var held = state.Levels[i];
-                if (staged.Plan.Branches.Any(b => b.Writes && Same(b.Branch, held.Branch) && b.Transformers == held.Level))
+                if (staged.Plan.Branches.Any(b => b.Writes && DebugRoutes.Same(b.Branch, held.Branch) && b.Transformers == held.Level))
                     state.Levels[i] = held with { Rows = await CountRowsAsync(store, held.Key) };
             }
         }
-        SaveDebug(key, state);
-        return DebugView(staged.Plan, state, staged.Cut.Pieces);
+        debug.SaveDebug(key, state);
+        return debug.DebugView(staged.Plan, state, staged.Cut.Pieces);
     }
 
     private static async Task<long?> CountRowsAsync(CheckpointStore store, string key)
@@ -500,7 +525,7 @@ public sealed partial class StudioServer
         run.Cts.Cancel();
     }
 
-    private async Task StopRunAndWaitAsync()
+    public async Task StopRunAndWaitAsync()
     {
         RunState? run;
         lock (_runLock)

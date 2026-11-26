@@ -48,8 +48,10 @@ public sealed class StudioCoordinatorConnectionTests : IAsyncLifetime
     {
         _settings = new StudioSettings(SettingsPath, _secrets);
         _studio = await StudioServer.StartAsync(new StudioFolder(_dir), 0, new StudioTools(
-            new FakeStudioEngine(), new DesignService(IBrickLookup.None), [], [], _secrets, flag, lookup => new DesignService(lookup),
-            CoordinatorStart: new StudioCoordinatorStart(_settings)), Ct);
+            new FakeStudioEngine(), new DesignService(IBrickLookup.None), [], [], _secrets, flag, lookup => new DesignService(lookup))
+        {
+            Settings = _settings,
+        }, Ct);
     }
 
     private async Task<(HttpStatusCode Status, string Body)> CallAsync(HttpMethod method, string path, object? body = null)

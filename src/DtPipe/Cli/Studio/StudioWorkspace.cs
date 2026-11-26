@@ -44,7 +44,7 @@ internal sealed class WorkspaceSlot(StudioWorkspace workspace, string source)
     public string Source => Volatile.Read(ref _source);
 
     /// <summary>Holds the workspace in place until the lease is disposed.</summary>
-    public SlotHolds.Lease<StudioWorkspace> Hold() => _holds.Hold(() => _workspace);
+    public OneShotLease<StudioWorkspace> Hold() => _holds.Hold(() => _workspace);
 
     /// <summary>
     /// Puts <paramref name="next"/> in place and moves the process's current directory to its folder, or refuses with 409 while a

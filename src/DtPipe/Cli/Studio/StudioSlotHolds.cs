@@ -1,5 +1,50 @@
 namespace DtPipe.Cli.Studio;
 
+/// <summary>A single-use disposal token that invokes its release callback at most once.</summary>
+internal class OneShotLease(Action release) : IDisposable
+{
+    private int _released;
+
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _released, 1) == 0) release();
+    }
+}
+
+/// <summary>A single-use disposal token carrying a captured value.</summary>
+internal sealed class OneShotLease<T>(T value, Action release) : OneShotLease(release)
+{
+    public T Value => value;
+}
+
+/// <summary>
+/// Serializes engine actions (samples, previews, runs, and slot-wide changes) behind a non-blocking gate that names
+/// the active holder when busy, or an async wait for agent pipeline tools.
+/// </summary>
+internal sealed class EngineSlot : IDisposable
+{
+    private readonly SemaphoreSlim _gate = new(1, 1);
+    private string _holder = "An action";
+
+    /// <summary>Takes the engine slot immediately, or refuses naming who holds it.</summary>
+    public OneShotLease Take(string who)
+    {
+        if (!_gate.Wait(0)) throw new StudioRefusal(409, $"{_holder} is already running: wait for it to finish.");
+        _holder = who;
+        return new OneShotLease(() => _gate.Release());
+    }
+
+    /// <summary>Waits asynchronously for the engine slot until <paramref name="ct"/> cancels.</summary>
+    public async Task<OneShotLease> WaitAsync(string who, CancellationToken ct)
+    {
+        await _gate.WaitAsync(ct);
+        _holder = who;
+        return new OneShotLease(() => _gate.Release());
+    }
+
+    public void Dispose() => _gate.Dispose();
+}
+
 /// <summary>
 /// The requests that use what a slot holds, counted under the slot's lock (<see cref="Gate"/>, which the slot takes for its own
 /// fields too). Each takes a lease and disposes it at its end; a replacement runs under that lock only while no lease is held,
@@ -16,15 +61,25 @@ internal sealed class SlotHolds(string busy, string changing = "")
     public object Gate { get; } = new();
 
     /// <summary>A lease on what <paramref name="read"/> answers under the lock: it stays in place until the lease is disposed.</summary>
-    public Lease<T> Hold<T>(Func<T> read)
+    public OneShotLease<T> Hold<T>(Func<T> read)
     {
         lock (Gate)
         {
             if (_draining) throw new StudioRefusal(409, changing);
             var value = read();
             _holds++;
-            return new Lease<T>(this, value);
+            return new OneShotLease<T>(value, Release);
         }
+    }
+
+    private void Release()
+    {
+        TaskCompletionSource? drained = null;
+        lock (Gate)
+        {
+            if (--_holds == 0) drained = _drained;
+        }
+        drained?.TrySetResult();
     }
 
     /// <summary>
@@ -70,24 +125,6 @@ internal sealed class SlotHolds(string busy, string changing = "")
                 _draining = false;
                 _drained = null;
             }
-        }
-    }
-
-    internal sealed class Lease<T>(SlotHolds holds, T value) : IDisposable
-    {
-        private int _released;
-
-        public T Value => value;
-
-        public void Dispose()
-        {
-            if (Interlocked.Exchange(ref _released, 1) != 0) return;
-            TaskCompletionSource? drained = null;
-            lock (holds.Gate)
-            {
-                if (--holds._holds == 0) drained = holds._drained;
-            }
-            drained?.TrySetResult();
         }
     }
 }

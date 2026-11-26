@@ -1,3 +1,4 @@
+using DtPipe.Cli.Security;
 using Microsoft.AspNetCore.Http;
 
 namespace DtPipe.Cli.Studio;
@@ -9,72 +10,59 @@ namespace DtPipe.Cli.Studio;
 /// run goes on, or the agent's turn runs or a card waits. It moves the process's current directory, starts a new conversation
 /// with the agent, and forgets the run the old folder ended; the page then reads everything again.
 /// </summary>
-public sealed partial class StudioServer
+internal sealed class WorkspaceRoutes(
+    WorkspaceSlot workspace,
+    AgentSlot agentSlot,
+    EngineSlot engineSlot,
+    StudioSettings? settings,
+    ISecretsManager secrets,
+    string startFolder,
+    Func<bool> runInProgress,
+    Action onWorkspaceChanged,
+    Func<StudioAgentSetup, StudioAgent> createAgent)
 {
     private sealed record WorkspaceRequest(string? Path, bool Remember, bool Unsaved);
 
-    private readonly string _start;
-
-    private StudioFolder Folder => _workspace.Current.Folder;
-
-    private StudioLocalFiles Local => _workspace.Current.Local;
-
-    private StudioVariables Variables => _workspace.Current.Variables;
-
-    /// <summary>
-    /// The requests that hold no lease on the workspace: its own routes, connection and static routes, quit, and what the page polls
-    /// while it waits for an answer (the agent's turn, a run, the coordinator's sign-in), none of which reads the folder. Every
-    /// other request holds it.
-    /// </summary>
-    private static bool LeavesWorkspace(string method, string path) =>
-        path == "/api/workspace" || path.StartsWith("/api/workspace/", StringComparison.Ordinal)
-        || path == "/api/agent/connection" || path.StartsWith("/api/agent/connection/", StringComparison.Ordinal)
-        || path == "/api/coordinator/connection" || path.StartsWith("/api/coordinator/connection/", StringComparison.Ordinal)
-        || path is "/api/components" or "/api/quit"
-        || (method == "GET" && path is "/api/agent" or "/api/run" or "/api/coordinator");
-
-    private async Task WorkspaceRouteAsync(HttpContext context, string method, string path)
+    public void Register(StudioRouteTable routes)
     {
-        switch (method, path)
-        {
-            case ("GET", "/api/workspace"):
-                await JsonAsync(context, WorkspaceView());
-                break;
-            case ("POST", "/api/workspace/test"):
-                var tested = FolderAt((await BodyAsync<WorkspaceRequest>(context)).Path);
-                await JsonAsync(context, new { root = tested.Root, name = NameOf(tested.Root), jobs = tested.Jobs().Count });
-                break;
-            case ("DELETE", "/api/workspace/recents"):
-                await JsonAsync(context, ForgetRecent(await BodyAsync<WorkspaceRequest>(context)));
-                break;
-            case ("PUT", "/api/workspace"):
-                await JsonAsync(context, await OpenWorkspaceAsync(await BodyAsync<WorkspaceRequest>(context), context.RequestAborted));
-                break;
-            default:
-                throw new StudioRefusal(404, $"No {method} {path}.");
-        }
+        routes.Map("GET", "/api/workspace", context => StudioHttp.JsonAsync(context, View()), RouteLocks.None);
+        routes.Map("POST", "/api/workspace/test", TestAsync, RouteLocks.None);
+        routes.Map("DELETE", "/api/workspace/recents", ForgetAsync, RouteLocks.None);
+        routes.Map("PUT", "/api/workspace", OpenAsync, RouteLocks.None);
     }
+
+    private async Task TestAsync(HttpContext context)
+    {
+        var tested = FolderAt((await StudioHttp.BodyAsync<WorkspaceRequest>(context)).Path);
+        await StudioHttp.JsonAsync(context, new { root = tested.Root, name = NameOf(tested.Root), jobs = tested.Jobs().Count });
+    }
+
+    private async Task ForgetAsync(HttpContext context) =>
+        await StudioHttp.JsonAsync(context, ForgetRecent(await StudioHttp.BodyAsync<WorkspaceRequest>(context)));
+
+    private async Task OpenAsync(HttpContext context) =>
+        await StudioHttp.JsonAsync(context, await OpenWorkspaceAsync(await StudioHttp.BodyAsync<WorkspaceRequest>(context), context.RequestAborted));
 
     /// <summary>
     /// The folder as the page reads it: where it is, how it was chosen, the one the studio started on and the recent ones, the
     /// folder in place left out (a display rule: the file keeps its entry).
     /// </summary>
-    private object WorkspaceView(string? warning = null)
+    private object View(string? warning = null)
     {
-        var root = Folder.Root;
+        var root = workspace.Current.Folder.Root;
         string? settingsWarning = null;
-        var all = _tools.Settings is { } s ? s.ReadFolders(out settingsWarning) : [];
+        var all = settings is { } s ? s.ReadFolders(out settingsWarning) : [];
         var currentRemembered = all.Any(f => StudioSettings.SameFolder(f, root));
         var recents = all.Where(f => !StudioSettings.SameFolder(f, root)).ToList();
         return new
         {
             root,
             name = NameOf(root),
-            source = _workspace.Source,
-            start = _start,
+            source = workspace.Source,
+            start = startFolder,
             recents,
             currentRemembered,
-            canRemember = _tools.Settings is not null,
+            canRemember = settings is not null,
             settingsWarning,
             warning,
         };
@@ -83,7 +71,7 @@ public sealed partial class StudioServer
     private static string NameOf(string root) => Path.GetFileName(root) is { Length: > 0 } name ? name : root;
 
     /// <summary>Expands a leading <c>~</c> against <paramref name="home"/> (or the user profile), refusing when none is configured.</summary>
-    internal static string ExpandHome(string path, string? home = null)
+    public static string ExpandHome(string path, string? home = null)
     {
         if (path != "~" && !path.StartsWith("~/", StringComparison.Ordinal) && !path.StartsWith("~" + Path.DirectorySeparatorChar, StringComparison.Ordinal))
             return path;
@@ -126,22 +114,15 @@ public sealed partial class StudioServer
         if (request.Unsaved) throw new StudioRefusal(409, "The open job has changes that are not saved: save them, or discard them, before opening another folder.");
         await ChangeWorkspaceAsync(folder, ct);
         string? warning = null;
-        if (request.Remember && _tools.Settings is { } settings)
+        if (request.Remember && settings is { } store)
         {
-            try { settings.RememberFolder(folder.Root); }
+            try { store.RememberFolder(folder.Root); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 warning = "The folder is open, but the settings file cannot be written: it is not among the recent folders.";
             }
         }
-        return WorkspaceView(warning);
-    }
-
-    /// <summary>What the studio does with a folder it opens, at start and after a change: the samples and drafts an earlier studio left there go.</summary>
-    private void Opened()
-    {
-        Local.PurgeSamples();
-        PurgeDrafts();
+        return View(warning);
     }
 
     /// <summary>
@@ -150,16 +131,16 @@ public sealed partial class StudioServer
     /// </summary>
     private async Task ChangeWorkspaceAsync(StudioFolder folder, CancellationToken ct)
     {
-        if (RunInProgress) throw new StudioRefusal(409, "A run is in progress: stop it, or wait for it, before opening another folder.");
-        var next = new StudioWorkspace(folder, _tools.Secrets);
-        using (TakeSlotFor("A change of folder"))
+        if (runInProgress()) throw new StudioRefusal(409, "A run is in progress: stop it, or wait for it, before opening another folder.");
+        var next = new StudioWorkspace(folder, secrets);
+        using (engineSlot.Take("A change of folder"))
         {
             StudioAgent? closed = null;
             try
             {
-                await _workspace.ReplaceAsync(next, "page", () =>
+                await workspace.ReplaceAsync(next, "page", () =>
                 {
-                    var agent = Agent;
+                    var agent = agentSlot.Current;
                     if (agent?.TryClose("opening another folder") is { } reason) return reason;
                     closed = agent;
                     return null;
@@ -168,24 +149,23 @@ public sealed partial class StudioServer
             finally
             {
                 // The conversation was about the folder left: a new one starts on the same model, as a change of model does.
-                if (closed is { } old) await _slot.RenewAsync(old, () => NewAgent(old.Renewed()));
+                if (closed is { } old) await agentSlot.RenewAsync(old, () => createAgent(old.Renewed()));
             }
-            lock (_runLock) _run = null;
-            Opened();
+            onWorkspaceChanged();
         }
     }
 
     /// <summary>Removes a folder from the recent ones, by its path as the page shows it, whether or not it is still on the disk. The folder in place is untouched.</summary>
     private object ForgetRecent(WorkspaceRequest request)
     {
-        var settings = _tools.Settings ?? throw new StudioRefusal(404, "This studio keeps no recent folders.");
+        var store = settings ?? throw new StudioRefusal(404, "This studio keeps no recent folders.");
         var path = request.Path?.Trim() ?? "";
         if (!Path.IsPathFullyQualified(path)) throw new StudioRefusal(400, $"'{path}' is not a full path.");
-        try { settings.RemoveFolder(path); }
+        try { store.RemoveFolder(path); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            return WorkspaceView("The settings file cannot be written: the folder stays among the recent ones.");
+            return View("The settings file cannot be written: the folder stays among the recent ones.");
         }
-        return WorkspaceView();
+        return View();
     }
 }

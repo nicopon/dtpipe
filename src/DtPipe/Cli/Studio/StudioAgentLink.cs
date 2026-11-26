@@ -11,11 +11,11 @@ namespace DtPipe.Cli.Studio;
 public sealed record AgentConnection(string Provider, string Url, string? Model, int TimeoutSeconds, string Source, string Key, bool NeedsKey = false, int? NumCtx = null);
 
 /// <summary>
-/// What the page may do to the agent: the settings it remembers, the client a provider and a key make, and what every agent of
+/// What the page may do to the agent: the client a provider and a key make, and what every agent of
 /// this studio shares (the tools, the trace). <see cref="Start"/> describes the connection the studio started with.
 /// </summary>
 public sealed record StudioAgentLink(
-    StudioSettings Settings, IAgentToolProvider Tools, AgentTrace? Trace, Func<string, string?, TimeSpan, ILlmClient?> NewClient, AgentConnection? Start = null);
+    IAgentToolProvider Tools, AgentTrace? Trace, Func<string, string?, TimeSpan, ILlmClient?> NewClient, AgentConnection? Start = null);
 
 /// <summary>The clients the studio knows how to make, by provider name.</summary>
 public static class StudioAgentClients
@@ -56,6 +56,12 @@ internal sealed class AgentSlot(StudioAgent? agent, AgentConnection? connection)
     public AgentConnection? Connection
     {
         get { lock (_gate) return _connection; }
+    }
+
+    /// <summary>Sets the initial agent once the routes are wired.</summary>
+    public void SetInitial(StudioAgent agent)
+    {
+        lock (_gate) _agent = agent;
     }
 
     /// <summary>Updates the description of the connection atomically under the slot lock.</summary>

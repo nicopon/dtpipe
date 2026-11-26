@@ -73,9 +73,11 @@ public sealed class StudioWorkspaceTests : IAsyncLifetime
         _settings = new StudioSettings(Path.Combine(_dir, "state", "studio.json"), _secrets);
         var engine = new FakeStudioEngine { Run = async (_, _, _, ct) => { if (run is not null) await run.Task.WaitAsync(ct); return 0; } };
         _server = await StudioServer.StartAsync(new StudioFolder(First), 0, new StudioTools(
-            engine, new DesignService(IBrickLookup.None), [], [], _secrets,
-            Agent: new StudioAgentSetup(new Model(turn), "http://127.0.0.1:1", "m", new McpToolProvider(McpCatalogue.Tools())),
-            Settings: _settings), Ct);
+            engine, new DesignService(IBrickLookup.None), [], [], _secrets)
+        {
+            Agent = new StudioAgentSetup(new Model(turn), "http://127.0.0.1:1", "m", new McpToolProvider(McpCatalogue.Tools())),
+            Settings = _settings,
+        }, Ct);
     }
 
     private async Task<(HttpStatusCode Status, JsonElement Body)> CallAsync(HttpMethod method, string path, object? body = null)

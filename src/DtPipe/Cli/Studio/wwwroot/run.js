@@ -3,6 +3,7 @@
 // reviews first stops before every writer and is left suspended; the sink cards write it or abandon it.
 
 import { api, el, fill, plural, status, tabOf, targetOf } from "./dom.js";
+import { captureFocus, restoreFocus } from "./dialog.js";
 import { brickBranches, holdsEdits, showTab } from "./designer.js";
 import { invalidate } from "./render.js";
 import { showHeld } from "./preview.js";
@@ -28,6 +29,8 @@ export function restoreReview(review) {
 
 /** The open confirmation's dialog; there is at most one. @type {HTMLDialogElement | null} */
 let dialog = null;
+/** @type {HTMLElement | null} */
+let opener = null;
 // One counter for the confirmations asked: the answer to an earlier choice never replaces the one to the latest.
 const preparing = sequence();
 
@@ -39,10 +42,13 @@ function listedOf(run) {
 
 function closeDialog() {
   const old = dialog;
+  const prevOpener = opener;
   dialog = null;
+  opener = null;
   if (!old) return;
   if (old.open) old.close();
   old.remove();
+  restoreFocus(prevOpener);
 }
 
 /** Escape and Cancel: the confirmation is dropped, nothing runs. */
@@ -110,6 +116,7 @@ function drawDialog() {
   const run = state.run;
   if (!run || run.phase !== "confirm") { closeDialog(); return; }
   if (!dialog) {
+    opener = captureFocus();
     dialog = /** @type {HTMLDialogElement} */ (el("dialog", { id: "d-run-dialog", class: "run-dialog", "aria-labelledby": "d-run-title" }));
     dialog.addEventListener("cancel", dropConfirmation);
     document.body.append(dialog);

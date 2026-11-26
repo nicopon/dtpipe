@@ -5,7 +5,9 @@
 import { $, api, el, fill, forgetToken, plural, status, svg, token } from "./dom.js";
 import { onCoordinator, refreshCoordinator, signIn } from "./coordinator.js";
 import { bindSplit, closeDesigner, compose, editingText, holdsEdits, markSaved, mountDesigner, openBlank, openJob, restoreSizes, setCatalog, showTab } from "./designer.js";
-import { nextFreePath, openDeleteDialog, openFromCliDialog, openImportYamlDialog, openInspectLibraryDialog, openNewJobDialog, openPullDialog, openRenameDialog, openSaveAsDialog, openWorkspaceDialog, shortCommit } from "./dialogs.js";
+import { shortCommit } from "./dialog.js";
+import { openWorkspaceDialog } from "./connect-dialogs.js";
+import { nextFreePath, openDeleteDialog, openFromCliDialog, openImportYamlDialog, openInspectLibraryDialog, openNewJobDialog, openPullDialog, openRenameDialog, openSaveAsDialog } from "./job-dialogs.js";
 import { holdView, readView, rememberView, sizesRead, viewRestored } from "./prefs.js";
 import { afterFlush, invalidate, onZone } from "./render.js";
 import { HELD, sequence, state } from "./state.js";

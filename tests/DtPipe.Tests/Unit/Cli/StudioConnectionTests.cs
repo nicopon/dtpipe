@@ -71,8 +71,11 @@ public sealed class StudioConnectionTests : IAsyncLifetime
         Program.ConfigureServices(services);
         var tools = new McpToolProvider(McpCatalogue.Tools());
         _server = await StudioServer.StartAsync(new StudioFolder(_dir), 0, new StudioTools(
-            StudioEngines.Real(services.BuildServiceProvider()), new DesignService(IBrickLookup.None), [], [], _secrets,
-            AgentLink: new StudioAgentLink(_settings, tools, null, (_, key, _) => new Echoing(key, hold))), Ct);
+            StudioEngines.Real(services.BuildServiceProvider()), new DesignService(IBrickLookup.None), [], [], _secrets)
+        {
+            Settings = _settings,
+            AgentLink = new StudioAgentLink(tools, null, (_, key, _) => new Echoing(key, hold)),
+        }, Ct);
     }
 
     private async Task<(HttpStatusCode Status, string Body)> CallAsync(HttpMethod method, string path, object? body = null)
@@ -248,8 +251,11 @@ public sealed class StudioConnectionTests : IAsyncLifetime
         Program.ConfigureServices(services);
         var tools = new McpToolProvider(McpCatalogue.Tools());
         _server = await StudioServer.StartAsync(new StudioFolder(_dir), 0, new StudioTools(
-            StudioEngines.Real(services.BuildServiceProvider()), new DesignService(IBrickLookup.None), [], [], counting,
-            AgentLink: new StudioAgentLink(settings, tools, null, (_, key, _) => new Echoing(key, null))), Ct);
+            StudioEngines.Real(services.BuildServiceProvider()), new DesignService(IBrickLookup.None), [], [], counting)
+        {
+            Settings = settings,
+            AgentLink = new StudioAgentLink(tools, null, (_, key, _) => new Echoing(key, null)),
+        }, Ct);
 
         var get = await CallAsync(HttpMethod.Get, "/api/agent/connection");
 

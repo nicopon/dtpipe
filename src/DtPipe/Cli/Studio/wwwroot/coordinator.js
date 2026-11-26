@@ -4,7 +4,7 @@
 // reads a status.
 
 import { $, api, el, fill, onLinkDoubt, status } from "./dom.js";
-import { openCoordinatorConnectDialog } from "./dialogs.js";
+import { openCoordinatorConnectDialog } from "./connect-dialogs.js";
 import { invalidate, onZone } from "./render.js";
 import { sequence, state } from "./state.js";
 

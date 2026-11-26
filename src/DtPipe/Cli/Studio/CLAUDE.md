@@ -28,9 +28,7 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
 - **The folder only.** `StudioFolder` reads `.yaml`/`.yml` files under it: no segment starting with
   a dot, no symbolic link below it. The empty builder reads no `appsettings.json` from the folder.
 - **The folder is in a slot, every request holds it, and the current directory moves with it.** `WorkspaceSlot` holds one
-  `StudioWorkspace` (`StudioFolder`, `StudioLocalFiles`, `StudioVariables`); the server reads it through `Folder`, `Local` and
-  `Variables` at each use, and every `/api` request holds a lease on it to its end except those `LeavesWorkspace` names (the
-  workspace's own routes and what the page polls), so a new route holds it by default. The page opens another folder through
+  `StudioWorkspace` (`StudioFolder`, `StudioLocalFiles`, `StudioVariables`); the server reads it through the slot at each use, and every `/api` request holds a `OneShotLease` on it to its end unless its route in `StudioRouteTable` declares `RouteLocks.None` (the workspace's and connection routes, components/quit, and what the page polls), so a new route holds `RouteLocks.Workspace` by default. The page opens another folder through
   `/api/workspace` (`GET`, `POST …/test`, `PUT`): a path that is no readable folder is refused (400, 404) and changes nothing.
   A change is refused with 409 naming the cause when the page says its changes are unsaved, a run goes on, the engine slot is
   held (`TakeSlotFor`, shared with the coordinator's change), or the agent's turn runs or a card waits (`TryClose`, run under the
@@ -82,7 +80,7 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   the CSRF header. `[CI: StudioCoordinatorTests, StudioKeyTests]`
 - **The link is in a slot, held by whoever uses it, and a key stays bound to its origin.** `CoordinatorSlot` holds the link
   (`StudioTools.CoordinatorAtStart` is only what the studio starts with: read the slot, never that field). A request that
-  awaits the coordinator holds the link to its end (`ReachesCoordinator` by route, the callback and `DesignForAsync` where the link is awaited), an engine action holds the
+  awaits the coordinator holds the link to its end (`RouteLocks.Coordinator` in `StudioRouteTable`, the callback and `DesignForAsync` where the link is awaited), an engine action holds the
   engine slot, and a replacement, taken under the engine slot, is refused with 409 while either is held, so a publication, a
   library read or a sample never finds its link closed. A replacement stops the sign-in the old link was making, makes the old
   link forget its tokens and closes it. At start the coordinator is the one `--coordinator` names or, with no flag, the one
@@ -302,7 +300,7 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   answer about a job is dropped once another job is open. The page keeps nothing in `localStorage`:
   how it was left (the job open, tab, rows, selected card, pane sizes, the side panel chosen — `jobs`, `library`, `steps` or `none`) goes through `PUT /api/view` to
   `.dtpipe/studio/view.json`, whose values the server checks and rewrites, and which is read only as a
-  preference. Modal dialogs (`dialogs.js`) handle creation, CLI/YAML import, save-as, rename, delete, and library inspection/pull. A new script needs its route in `StudioServer.Assets`.
+  preference. Modal dialogs (`dialog.js`, `recent-list.js`, `connect-dialogs.js`, `job-dialogs.js`) handle creation, CLI/YAML import, save-as, rename, delete, connection/workspace switching, and library inspection/pull. A new script needs its route in `StudioServer.Assets`.
   `[CI: StudioServerTests (every module is served, every import resolves; the view's bounds)]`
 - **What the pointer does, the keyboard does, through the same function.** A card is a stop of Tab and Enter or Space chooses
   it (`selectCard`, which a click calls too); a wire is made by the inspector's Connect and undone by the × of its Inputs list,
@@ -384,7 +382,7 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   the same check and leaves none, keeping the connection's description, the file and the keyring's key, so a studio started again
   connects it; only a key the client alone held (flag, typed) goes with it. The context window is a field of the connection (`AgentConnection.NumCtx`, `AgentSettings.NumCtx`,
   `StudioAgentSetup.NumCtx`), read only from an Ollama connection, null for `AgentOptions.DefaultNumCtx`, bounded by
-  `StudioAgentClients.IsNumCtx` on the route and on the file (a value out of bounds ignores the remembered agent, with a warning). The file holds no secret: a key is the keyring's, under `studio.llm:<normalized address>`, so another address
+  `StudioAgentClients.IsNumCtx` on the route and on the file (a value out of bounds ignores the remembered agent, with a warning). The file holds no secret: keyring operations live in `StudioSecretStore`, and a key is kept under `studio.llm:<normalized address>`, so another address
   finds none and asks again. The page sends a value, never an alias or a `keyring://` reference, and reads back only whether a
   key is kept and where (`none`, `stored`, `flag`, `session`); a typed key the keyring refuses lasts the session and the page
   says so. No answer, refusal or message of these routes holds the key (`Mask`, then the sanitizer), and a provider that needs a
