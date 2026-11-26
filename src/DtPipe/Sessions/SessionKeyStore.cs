@@ -50,14 +50,9 @@ public static class SessionKeyStore
             Directory.CreateDirectory(dir);
             // Bounded: a creator that died after creating the file leaves it short for good, and
             // only that is replaced, since a key can only produce unreadable artefacts if truncated.
-            for (var attempt = 0; attempt < 100; attempt++)
-            {
-                if (TryCreate(path) is { } created) return created;
-                if (TryGetKey(sessionName) is { } existing) return existing;
-                Thread.Sleep(10);
-            }
-            File.Delete(path);
-            return TryCreate(path) ?? TryGetKey(sessionName)
+            if (TryAcquireKey(sessionName, path, attempts: 100) is { } key) return key;
+            try { File.Delete(path); } catch (IOException) { }
+            return TryAcquireKey(sessionName, path, attempts: 10)
                 ?? throw new IOException($"The key file '{path}' is held without holding a key.");
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
@@ -67,6 +62,17 @@ public static class SessionKeyStore
                 $"than writing artefacts unencrypted — the guarantee is a property of the whole store, " +
                 $"so one cleartext session would void it for all of them. Original error: {ex.Message}", ex);
         }
+    }
+
+    private static byte[]? TryAcquireKey(string sessionName, string path, int attempts)
+    {
+        for (var attempt = 0; attempt < attempts; attempt++)
+        {
+            if (TryCreate(path) is { } created) return created;
+            if (TryReadKeyWhileCreating(sessionName) is { } existing) return existing;
+            Thread.Sleep(10);
+        }
+        return null;
     }
 
     /// <summary>Creates the file and writes a new key into it, or returns null if the file exists.</summary>
@@ -97,6 +103,14 @@ public static class SessionKeyStore
         if (!File.Exists(path)) return null;
         var key = File.ReadAllBytes(path);
         return key.Length == KeySizeBytes ? key : null;
+    }
+
+    // A creator holding FileShare.None causes a sharing-violation IOException until it closes the file;
+    // treat that as "not ready yet" so the retry loop waits instead of aborting the race.
+    private static byte[]? TryReadKeyWhileCreating(string sessionName)
+    {
+        try { return TryGetKey(sessionName); }
+        catch (IOException) { return null; }
     }
 
     /// <summary>Destroys a session's key. This is what makes its artefacts unreadable.</summary>
