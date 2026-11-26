@@ -1,7 +1,7 @@
 // Library: the pipelines kept in the coordinator's git repository, their deployment state and their last run. A
 // pipeline is written with dtpipe studio and published into it. The list is searched and filtered here; a pipeline's
 // plan, runs and versions are on its own page, `library-detail.js`.
-import { $, ROWS_CROSSED_HINT, ago, api, deploymentOf, esc, healthOf, isActive, lastRunOf, plural, rowsCrossed, runHref, runStateLabel, toast } from "./core.js";
+import { $, ROWS_CROSSED_HINT, ago, api, deploymentOf, esc, healthOf, info, isActive, lastRunOf, plural, rowsCrossed, runHref, runStateLabel, toast } from "./core.js";
 import { deploymentChip, statusChip } from "./pipeline-status.js";
 import * as detail from "./library-detail.js";
 
@@ -45,7 +45,7 @@ export function mount(el, params, query) {
   host.innerHTML = `
     <div class="view-head">
       <h1>Library</h1>
-      <p class="hint">Pipelines kept in the coordinator's own git repository. Each save is a commit; each one is a plain dtpipe job that also runs whole on one machine. Write one with <code>dtpipe studio --coordinator</code> and publish it here.</p>
+      <p class="hint">Pipelines in the coordinator's git repository. ${info("Each save is a commit. Each pipeline is a plain dtpipe job. Write one with dtpipe studio --coordinator and publish it here.")}</p>
     </div>
     <div class="lib-bar">
       <input id="lib-q" type="search" placeholder="Search by id or comments" aria-label="Search pipelines" value="${esc(filter.q)}">
@@ -194,7 +194,7 @@ function item(e) {
       </div>
       ${printed}
       <div class="lib-actions">
-        <a class="button small primary" href="#/library/${encodeURIComponent(e.id)}" title="The plan a launch would make, the bricks' modes, deploy, runs and versions">Open</a>
+        <a class="button small primary" href="#/library/${encodeURIComponent(e.id)}" title="Plan, brick modes, deploy, runs, versions">Open</a>
         ${runRowActions(e)}
         ${moreMenu(e)}
         ${savedCell(e)}

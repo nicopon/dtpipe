@@ -25,7 +25,7 @@ function route() {
   for (const a of document.querySelectorAll("#nav a[data-view]")) a.classList.toggle("active", !unknown && a.dataset.view === view);
   if (unknown) {
     current = null;
-    host.innerHTML = `<h2>No such page</h2><p>There is no page at <code>#/${esc(name)}</code>. <a href="#/library">Back to the library</a></p>`;
+    host.innerHTML = `<h2>Page not found</h2><p><code>#/${esc(name)}</code> · <a href="#/library">← Library</a></p>`;
   } else {
     current = views[view];
     current.mount(host, params, query);
@@ -43,7 +43,7 @@ function renderBadge() {
   el.hidden = total === 0;
   el.textContent = total > 99 ? "99+" : String(total);
   el.className = `count ${errors ? "bad" : "warn"}`;
-  el.title = `${errors} error${errors === 1 ? "" : "s"} and ${warnings} warning${warnings === 1 ? "" : "s"} since Events was last open`;
+  el.title = `${errors} ✕ · ${warnings} ⚠ since Events was last open`;
 }
 
 function renderPills() {

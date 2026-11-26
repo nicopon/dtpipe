@@ -53,11 +53,11 @@ export function deploymentChip(e) {
       : `${word} · library has other bindings`;
   const problems = e.bindingProblems || [];
   const bindings = problems.length
-    ? ` ${problems.some((p) => p.blocking) ? "Deploying the library's version would be refused" : "The library's bindings report"}: ${problems.map((p) => p.message).join(" ")}`
+    ? ` ${problems.some((p) => p.blocking) ? "Deploying the library version would be refused" : "Library bindings report"}: ${problems.map((p) => p.message).join(" ")}`
     : "";
   const title = d.state === "deploying" ? "The pipeline is being armed."
     : d.state === "failed" ? "The deployment failed."
-    : `${armed ? `Armed at version ${armed}${d.deployedAt ? `, ${ago(d.deployedAt)}` : ""}. ` : ""}Runs use this version, not the latest one in the library.${newer ? ` The library holds a later version: open the pipeline and deploy it again to run that one.${bindings}` : ""}`;
+    : `${armed ? `Armed at version ${armed}${d.deployedAt ? `, ${ago(d.deployedAt)}` : ""}. ` : ""}Runs use this version.${newer ? ` A later version is in the library: deploy again to use it.${bindings}` : ""}`;
   return d.state === "failed" && d.message
     ? `<span class="tip"><span class="chip ${tone} tip-t" tabindex="0">${esc(text)}</span><span class="tip-b"><b>Why</b>${esc(d.message)}</span></span>`
     : `<span class="chip ${newer ? "warn" : tone}" title="${esc(title)}">${esc(text)}</span>`;

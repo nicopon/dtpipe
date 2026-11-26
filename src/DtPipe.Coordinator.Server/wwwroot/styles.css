@@ -56,6 +56,11 @@ body {
 h2 { font-size: 15px; margin: 0; }
 h3 { font-size: 13px; margin: 14px 0 6px; color: var(--muted); font-weight: 600; }
 .hint { color: var(--muted); font-size: 12.5px; margin: 6px 0; }
+.info { all: unset; display: inline-block; margin-left: 5px; cursor: help; color: var(--accent); font-size: 13px; line-height: 1; vertical-align: baseline; }
+.info:hover { color: var(--text); }
+.info:focus-visible { outline: 2px solid var(--accent); border-radius: 4px; }
+.info-text { position: fixed; left: 0; top: 0; z-index: 50; width: max-content; max-width: min(320px, 90vw); padding: 6px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); box-shadow: 0 4px 14px rgba(0, 0, 0, .18); font-weight: 400; text-align: left; white-space: normal; visibility: hidden; opacity: 0; pointer-events: none; transition: opacity .12s; }
+.info:hover > .info-text, .info:focus > .info-text { visibility: visible; opacity: 1; }
 button, select, input, textarea {
   font: inherit; color: var(--text); background: var(--surface);
   border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px;

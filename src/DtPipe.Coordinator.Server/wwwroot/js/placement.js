@@ -65,7 +65,7 @@ function marksOf(plan, edgeProtections) {
 // The legend of the plan's edges: it names a lock only when the diagram draws one.
 export function legendFor(plan, edgeProtections) {
   const kinds = new Set(marksOf(plan, edgeProtections).map((m) => m?.kind));
-  return `<div class="legend"><span><i class="sw network"></i>arrow edge between nodes</span><span><i class="sw forbidden"></i>refused by the flow matrix</span>${kinds.has("sealed") ? `<span>${lockIcon("sealed")}held sealed</span>` : ""}${kinds.has("broken") ? `<span>${lockIcon("broken")}ends that cannot join: hover the lock for why</span>` : ""}</div>`;
+  return `<div class="legend"><span><i class="sw network"></i>edge between nodes</span><span><i class="sw forbidden"></i>refused by the matrix</span>${kinds.has("sealed") ? `<span>${lockIcon("sealed")}sealed</span>` : ""}${kinds.has("broken") ? `<span>${lockIcon("broken")}cannot join (hover the lock)</span>` : ""}</div>`;
 }
 
 // A mark on an edge, by its consumer's end stub at `(x, y)` with label baseline `py`: its word, and for a lock,

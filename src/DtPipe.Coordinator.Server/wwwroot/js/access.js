@@ -1,7 +1,7 @@
 // Access: who may send what to whom. Identities (who: verified by a key this coordinator makes or by the IdP it trusts, a node's
 // name and groups, a person's role), their keys, the hosts waiting for approval, the flow matrix between groups (to whom, enforced
 // by the hub on every transfer), and the audit of every change.
-import { api, can, esc, nodeColor, plural, store, toast } from "./core.js";
+import { api, can, esc, info, nodeColor, plural, store, toast } from "./core.js";
 
 let host = null;
 let rights = null;
@@ -30,7 +30,7 @@ export function mount(el) {
   keysOf = {};
   // Rights are an administrator's: any other role is told so here rather than met by a refusal of each request.
   if (!can("admin")) {
-    host.innerHTML = `<h2>Access</h2><p>Who may send what to whom is for administrators. Your role is ${esc(store.me?.roles?.[0] || "none")}: ask an administrator.</p>`;
+    host.innerHTML = `<h2>Access</h2><p>Administrators only. Your role: ${esc(store.me?.roles?.[0] || "none")}.</p>`;
     return;
   }
   host.addEventListener("click", onClick);
@@ -73,10 +73,10 @@ async function listKeys(id) {
 const setOf = (list) => new Set(list || []);
 const ROLES = ["reader", "designer", "admin"];
 const KINDS = [
-  { id: "node", label: "Nodes", desc: "A node hosts pipeline fragments and exchanges data. A node sends to another only if every one of its groups may send to every group of the receiver in the flow matrix. A runner hosts no data and serves every group: the flows to and from its groups need no row, and its groups belong to runners alone. A change of name, groups or runner, or disabling a node, drops the control connections of its hosts, which reconnect under the new rights. Reconnect drops connections without changing anything." },
-  { id: "launcher", label: "Launchers", desc: "A launcher is a scheduler or CI/CD identity: it starts the runs of the pipelines listed on its row and reads their status via <code>/service/runs</code>, nothing else. With no pipeline listed, it can launch none." },
-  { id: "monitor", label: "Monitors", desc: "A monitor is a supervisor identity: it reads <code>/health</code> and nothing else, belongs to no group and hosts nothing." },
-  { id: "person", label: "Persons", desc: "A person signs in to these pages and the studio with the role on their row (<code>reader</code>, <code>designer</code>, or <code>admin</code>). One verified by the identity provider is identified by its account (an email by default); one verified by a key signs in with that key." },
+  { id: "node", label: "Nodes", desc: "Hosts pipeline fragments and exchanges data. " + info("A node sends to another only if every group of the sender may send to every group of the receiver in the flow matrix. A runner has no data, serves every group and needs no matrix row.") },
+  { id: "launcher", label: "Launchers", desc: "Scheduler or CI identity: starts the listed pipelines and reads <code>/service/runs</code>. None listed, none launched." },
+  { id: "monitor", label: "Monitors", desc: "Supervisor identity: reads <code>/health</code> only." },
+  { id: "person", label: "Persons", desc: "Signs in to these pages and the studio with a role (<code>reader</code>, <code>designer</code>, <code>admin</code>). An IdP account (email by default) or a key." },
 ];
 const groupsOf = (text) => text.split(",").map((g) => g.trim()).filter(Boolean);
 const when = (date) => (date ? new Date(date).toLocaleString() : "");
@@ -100,7 +100,7 @@ function matrixCell(from, to) {
 
 function verification(i) {
   if (i.auth !== "key") return `<span class="chip" title="The identity provider verifies it">idp</span>`;
-  return `${i.hasKey ? `<span class="chip ok" title="Verified by a key this coordinator made">key</span>` : `<span class="chip warn" title="Verified by a key, and none is live: it cannot sign in or connect">no live key</span>`}
+  return `${i.hasKey ? `<span class="chip ok" title="Verified by a key this coordinator made">key</span>` : `<span class="chip warn" title="No live key: cannot connect">no live key</span>`}
     <button class="small ghost" data-keys>${openKeys.has(i.clientId) ? "Hide keys" : "Keys"}</button>`;
 }
 
@@ -117,7 +117,7 @@ function keysRow(i, colspan = 8) {
     <div class="row"><input data-key-label placeholder="label (optional)" aria-label="Label of the next key of ${esc(i.clientId)}">
       <label class="check">expires <input type="datetime-local" data-key-expires aria-label="When the next key of ${esc(i.clientId)} expires (optional)"></label>
       <button class="small" data-make-key>${answer.hasKey ? "Rotate: make a second key" : "Make a key"}</button></div>
-    <p class="hint">A key is shown once, when it is made: the coordinator keeps its hash only. One made while another is live starts a rotation: both open until the old one is revoked, and a third is refused. Revoking a key disconnects the identity's hosts and ends a person's session at the next request.</p>
+    <p class="hint">A key is shown once; only its hash is kept. ${info("A second key starts a rotation: both work until the old one is revoked; a third is refused. Revoking disconnects the identity's hosts and ends a person's session.")}</p>
   </td></tr>`;
 }
 
@@ -131,7 +131,7 @@ function renderIdentityTable(kind, items) {
         <td><input class="mono" data-field="groups" value="${esc(i.groups.join(", "))}" list="groups-list" aria-label="Groups of ${esc(i.clientId)}, separated by commas"></td>
         <td><input data-field="description" value="${esc(i.description)}" aria-label="Description of ${esc(i.clientId)}"></td>
         <td><label class="check"><input type="checkbox" data-field="enabled" ${i.enabled ? "checked" : ""}> enabled</label>
-          <label class="check" title="A runner hosts no data and serves every group: the flows to and from its groups need no row of the matrix. Its host must run with --runner."><input type="checkbox" data-field="runner" ${i.runner ? "checked" : ""}> runner</label></td>
+          <label class="check" title="No data, serves every group, needs no matrix row. Host runs with --runner."><input type="checkbox" data-field="runner" ${i.runner ? "checked" : ""}> runner</label></td>
         <td>${i.connected ? `<span class="chip ok">connected</span>` : `<span class="chip">offline</span>`}</td>
         <td class="actions-cell">
           <button class="small" data-save-identity>Save</button>
@@ -224,7 +224,7 @@ function render() {
       <td><input class="mono" data-field="groups" value="${esc(freeGroup(name))}" placeholder="groups, separated by commas" list="groups-list" aria-label="Groups for ${esc(p.subject)}, separated by commas"></td>
       <td class="actions-cell">
         <button class="small primary" data-accept>Accept</button>
-        <button class="small ghost" data-ignore title="Set it aside for 24 hours: it is not shown again until then">Ignore for 24 h</button>
+        <button class="small ghost" data-ignore title="Snooze 24 h">Ignore for 24 h</button>
       </td>
     </tr>`;
   }).join("");
@@ -233,24 +233,24 @@ function render() {
   const focused = focusOf();
   host.innerHTML = `
     <div class="view-head"><h1>Access</h1>
-      <p class="hint">Who may send what to whom. Every identity is verified by a key this coordinator makes or by an identity provider it trusts, which says who it is; the coordinator decides its name, its groups and its role, never the token or the node.</p></div>
+      <p class="hint">Who may send what to whom. ${info("Identities are verified by a key this coordinator makes or by a trusted identity provider. The coordinator sets the name, groups and role, never the token or the node.")}</p></div>
 
     ${rights.idp ? `<section class="card">
       <h2>Identity provider</h2>
-      <p class="hint">An external OpenID Connect provider, trusted for the <code>${esc(rights.idp.grant)}</code> tokens it signs for this coordinator's audience. It holds the clients and their secrets; a token names its client (<code>sub</code>) and nothing more.</p>
+      <p class="hint">External OpenID Connect provider: trusted for <code>${esc(rights.idp.grant)}</code> tokens for this audience. A token names its client (<code>sub</code>) only.</p>
       <table class="kv-table">
         <tr><th>issuer</th><td><code>${esc(rights.idp.issuer)}</code></td></tr>
         <tr><th>audience</th><td><code>${esc(rights.idp.audience)}</code></td></tr>
       </table>
-      <p class="hint">A node host presents its token on the control channel, and gives its pipeline node a token provider (<code>NodeClientOptions.AccessTokenProvider</code>) for the data hub.</p>
+      <p class="hint">A node host presents its token on the control channel and gives its pipeline node a token provider for the data hub.</p>
     </section>` : `<section class="card">
       <h2>Identity provider</h2>
-      <p class="hint">None: this coordinator trusts no external provider, and every identity is verified by a key it makes, exchanged for a token of its own.</p>
+      <p class="hint">None: identities are verified by keys this coordinator makes.</p>
     </section>`}
 
     ${pending ? `<section class="card">
       <h2>Waiting for approval <span class="hint">${rights.pending.length}</span></h2>
-      <p class="hint">A host presented a valid token of the identity provider that no identity knows. Its name, description and bricks are what it <i>proposes</i>: you decide its node name and its groups, a group of its own by default. Nothing runs on it, and it receives no group, until you accept it.</p>
+      <p class="hint">Valid provider token, unknown identity. It only <i>proposes</i> its name and bricks; you set node name and groups. ${info("Nothing runs on it and it has no group until you accept it.")}</p>
       <table><tr><th>client</th><th>proposes</th><th>bricks</th><th>node name</th><th>groups</th><th></th></tr>${pending}</table>
     </section>` : ""}
 
@@ -278,7 +278,7 @@ function render() {
     <section class="card">
       <div class="card-head"><h2>Flow matrix <span class="hint">to whom</span></h2>
         <span class="actions">${matrixDraft ? `<button class="ghost" data-matrix-reset>Discard</button><button class="primary" data-matrix-save>Apply</button>` : ""}</span></div>
-      <p class="hint">Rows send, columns receive; <code>*</code> stands for any group (for instance <code>* → runner</code> and <code>runner → *</code> so every group may exchange with the runners while still requiring each source group to reach its destination group). A node sends to another only if every group of the sender may send to every group of the receiver. The hub checks it on every transfer it opens, so a change applies to the next run with no redeployment; every plan is checked against it too.</p>
+      <p class="hint">Rows send, columns receive; <code>*</code> is any group. ${info("A node sends to another only if every group of the sender may send to every group of the receiver. Checked on every transfer and every plan: a change applies to the next run, no redeployment. Use * → runner and runner → * to let every group exchange with runners.")}</p>
       <table class="matrix edit"><tr><th>from \\ to</th>${matrixGroups.map((g) => `<th${g === "*" ? ` title="Any group"` : ""}>${esc(g)}</th>`).join("")}</tr>
         ${matrixGroups.map((g) => `<tr><th${g === "*" ? ` title="Any group"` : ""}>${esc(g)}</th>${matrixGroups.map((t) => matrixCell(g, t)).join("")}</tr>`).join("")}</table>
     </section>
@@ -382,7 +382,7 @@ function usageOf(identity) {
     ...(rights.idp ? [`  export DtPipeNode__Oidc__Authority=${origin}   (the key is this coordinator's, not the provider's)`] : []),
     "Then start the node:",
     `  dtpipe node --name ${identity.clientId} --coordinator ${origin} --client-secret '\${{DTPIPE_NODE_KEY}}'`,
-    "Or keep the key in the keyring and give --client-secret keyring://<alias>; a host of its own reads it as Oidc:ClientSecret.",
+    "Or keep it in the keyring: --client-secret keyring://<alias>.",
   ].join("\n");
   if (identity.kind === "person") return [
     `Sign in at ${origin}/account/login with it, or open the studio with the key in a variable:`,
@@ -402,7 +402,7 @@ function showKey(identity, made, usage) {
   dialog.className = "key-window";
   dialog.innerHTML = `
     <h2>Key ${esc(made.id)} of <code>${esc(identity.clientId)}</code></h2>
-    <p class="hint">Shown this once: the coordinator keeps its hash only, and closing this window forgets it here. It ends in …${esc(made.hint)}.</p>
+    <p class="hint">Shown once; ends in …${esc(made.hint)}. Closing this window forgets it.</p>
     <code class="mono key-secret" data-key-secret></code>
     <div class="row"><button class="primary" data-copy-key>Copy the key</button></div>
     <div class="key-scroll"><h3>How to use it</h3>
@@ -481,7 +481,7 @@ async function onClick(e) {
       if (page === visit) settle(sent);
     } else if (b.dataset.revokeKey !== undefined) {
       const id = keys.dataset.keysOf;
-      if (!confirm(`Revoke key ${b.dataset.revokeKey} of ${id}? It opens nothing more, its hosts are disconnected and a session it opened ends.`)) return;
+      if (!confirm(`Revoke key ${b.dataset.revokeKey} of ${id}? Its hosts disconnect and its sessions end.`)) return;
       await api(`/api/rights/identities/${encodeURIComponent(id)}/keys/${encodeURIComponent(b.dataset.revokeKey)}/revoke`, {});
       toast(`Key ${b.dataset.revokeKey} of ${id} revoked.`, "info");
     } else if (b.dataset.saveIdentity !== undefined) {

@@ -1,7 +1,7 @@
 // Runs: the runs in flight and the queue behind them, the journal of finished runs (filtered by pipeline and by state at the
 // server, counted, paged), and the deployments that are no library pipeline's. A run opens its own page, `run.js`:
 // the address `#/runs/<runId>` is this view's too, and it hands the page over.
-import { $, ROWS_CROSSED_HINT, api, apiPage, causeKindChip, causeLine, duration, esc, fmt, nodeColor, plural, rowsCrossed, runHref, runStateLabel, store, toast } from "./core.js";
+import { $, ROWS_CROSSED_HINT, api, apiPage, causeKindChip, causeLine, duration, esc, fmt, info, nodeColor, plural, rowsCrossed, runHref, runStateLabel, store, toast } from "./core.js";
 import * as runPage from "./run.js";
 
 const PAGE = 50;       // what the journal asks for first and what Show more adds
@@ -44,7 +44,7 @@ export function mount(el, params, query) {
   loaded = false;
   pipelines = "";
   host.innerHTML = `
-    <div class="view-head"><h1>Runs</h1><p class="hint">Runs that share no data node are in flight together; a run that shares one waits its turn, in the order runs came, until that run ends and its own fragments are registered again. The runner never counts. A run opens its page.</p></div>
+    <div class="view-head"><h1>Runs</h1><p class="hint">Runs sharing a data node queue in order; others run together. ${info("A run waits until the earlier run that shares a data node ends. Runners never count. Open a run for its page.")}</p></div>
     <section class="card"><h2>In flight and queued</h2><div id="r-queue"></div></section>
     <section class="card"><div class="card-head"><h2>Journal <span id="r-count" class="hint"></span></h2>
       <div class="actions"><select id="r-filter" aria-label="Pipeline"></select><select id="r-state" aria-label="Outcome"></select></div></div>
@@ -120,7 +120,7 @@ function awayNotes(run) {
   const nodes = new Set((run.plan?.fragments || []).map((f) => f.node));
   const seconds = (from, to) => Math.max(0, Math.round((to - from) / 1000));
   return store.nodes.filter((n) => nodes.has(n.name)).flatMap((n) => (n.replicas || []).filter((r) => !r.connected && r.awaySince).map((r) =>
-    `<p class="hint mismatch">Node ${esc(n.name)} lost its connection ${seconds(new Date(r.awaySince), Date.now())} s ago: the coordinator waits ${seconds(Date.now(), new Date(r.givenUpAt))} s more for its host to return before it gives the node up.</p>`)).join("");
+    `<p class="hint mismatch">Node ${esc(n.name)} offline for ${seconds(new Date(r.awaySince), Date.now())} s: giving up in ${seconds(Date.now(), new Date(r.givenUpAt))} s.</p>`)).join("");
 }
 
 // The deployments that are no library pipeline's (a plan fixed by hand): a block that exists only while there is one.
@@ -129,7 +129,7 @@ function renderOutside() {
   if (!el) return;
   const outside = store.deployments.filter((d) => d.origin !== "library");
   el.innerHTML = outside.length ? `<section class="card"><h2>Deployments outside the library</h2>
-    <p class="hint">Plans fixed by hand: no library pipeline has them, so they are run and removed here.</p>
+    <p class="hint">Hand-fixed plans: not in the library, run and removed here.</p>
     <table>
     <tr><th>pipeline</th><th>from</th><th>state</th><th>fragments</th><th>edges</th><th>queued</th><th></th></tr>
     ${outside.map((d) => `<tr>
@@ -177,7 +177,7 @@ function renderJournal() {
     }).join("")}</table>` : `<p class="hint">${!loaded ? "Reading the journal…" : filter.pipeline || filter.state ? "No run answers these filters." : "No run yet."}</p>`;
   $("r-more").innerHTML = runs.length >= total ? ""
     : limit < MAX_PAGE ? `<p><button id="r-show-more" class="ghost small">Show more</button></p>`
-      : `<p class="hint">The journal shows its latest ${MAX_PAGE} runs: filter by pipeline or outcome to reach the others.</p>`;
+      : `<p class="hint">Latest ${MAX_PAGE} runs: filter to reach others.</p>`;
 }
 
 async function onClick(e) {

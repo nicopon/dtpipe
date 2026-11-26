@@ -1,6 +1,6 @@
 // A run's own page, `#/runs/<runId>`: its outcome and report, the pipeline it ran, and the lines of the stream that name it.
 // A run in flight is the queue's and follows it to its end; a run that is over is the server's, read once.
-import { $, api, cursorsOf, duration, endNotes, esc, fmt, isActive, linesOfRun, protectionOf, protectionWord, ranPlan, runStateLabel, shortNode, store, toast } from "./core.js";
+import { $, api, cursorsOf, duration, endNotes, esc, fmt, info, isActive, linesOfRun, protectionOf, protectionWord, ranPlan, runStateLabel, shortNode, store, toast } from "./core.js";
 import { crumbs } from "./crumbs.js";
 import { lineHtml } from "./events.js";
 
@@ -22,7 +22,7 @@ export function mount(el, params) {
     <div id="run-head" class="view-head"></div>
     <section class="card"><div id="run-report"></div></section>
     <section class="card"><div class="card-head"><h2>Events <span id="run-ev-count" class="hint"></span></h2><a href="#/events">all events →</a></div>
-      <p class="hint">The lines this page holds that name this run, as its nodes wrote them: the ones that arrived while the page was open and those the stream replayed when it connected. A line that names no run is in Events only.</p>
+      <p class="hint">Log lines naming this run. ${info("Lines that arrived while the page was open, plus those replayed on connect. Lines naming no run are in Events only.")}</p>
       <div id="run-log" class="log mono"></div></section>`;
   host.addEventListener("click", onClick);
   drawHead();
@@ -94,7 +94,7 @@ function drawReport() {
   const el = $("run-report");
   if (!el) return;
   if (failure) el.innerHTML = `<p class="mismatch">${esc(failure)}</p>`;
-  else if (missing) el.innerHTML = `<h2>No such run</h2><p>The coordinator holds no run <code>${esc(id)}</code>: it keeps the latest runs of each pipeline, so an older one is gone, or the id is wrong. <a href="#/runs">Back to the runs</a></p>`;
+  else if (missing) el.innerHTML = `<h2>Run not found</h2><p><code>${esc(id)}</code> was purged or the id is wrong. <a href="#/runs">← Runs</a></p>`;
   else if (!run) el.innerHTML = `<p class="hint">Reading the run…</p>`;
   else el.innerHTML = report(run);
 }
@@ -102,7 +102,7 @@ function drawReport() {
 // What an end of an edge reported it applied, in the words its own client gave: a word per end, "unknown" for an end that reported none.
 // The page draws no verdict from the two; the run's cause is the server's.
 const protectionCell = (level) => `<td${protectionOf(level) ? "" : ` class="muted"`}>${esc(protectionWord(level))}</td>`;
-const PROTECTION_HINT = "What this end's client reported it applied to the edge's transfer. Unknown: the end reported nothing.";
+const PROTECTION_HINT = "Protection this end reported for the edge. Unknown: nothing reported.";
 
 function report(r) {
   const res = r.result;
@@ -110,7 +110,7 @@ function report(r) {
     <td class="num">${e.sent == null ? "?" : fmt(e.sent)}</td><td class="num ${e.sent === e.received && e.sent != null ? "" : "mismatch"}">${e.received == null ? "?" : fmt(e.received)}</td>${protectionCell(e.producerProtection)}${protectionCell(e.consumerProtection)}</tr>`).join("");
   const exits = res ? Object.values(res.reports).map((p) => `<tr><td>${esc(shortNode(p.fragment))}</td><td class="num">${p.exitCode}</td><td>${esc(p.origin ?? "")}</td><td class="wrap">${esc(p.firstFault ?? "")}</td></tr>`).join("") : "";
   return `<div class="run-report">
-    ${isActive(r) ? `<p class="hint">The run is ${esc(runStateLabel(r.state))}: its report appears here when it ends.</p>` : ""}
+    ${isActive(r) ? `<p class="hint">${esc(runStateLabel(r.state))}: the report appears when it ends.</p>` : ""}
     ${endNotes(r)}
     ${res?.consequences?.length ? `<p><b>Consequences:</b> ${res.consequences.map((c) => esc(shortNode(c))).join(", ")}</p>` : ""}
     ${edges ? `<table><tr><th>from</th><th>to</th><th>sent</th><th>received</th><th title="${esc(PROTECTION_HINT)}">from end</th><th title="${esc(PROTECTION_HINT)}">to end</th></tr>${edges}</table>` : ""}
