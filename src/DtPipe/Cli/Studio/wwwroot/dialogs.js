@@ -375,7 +375,7 @@ export function openFromCliDialog(opts) {
       el("div", { class: "dialog-field" },
         el("label", { for: "d-cli-command" }, "Command line"),
         cmdInput,
-        el("p", { class: "hint" }, "Multi-line commands with trailing \\ are supported. ${{…}} references stay as typed; --bind-input and --bind-output are refused.")),
+        el("p", { class: "hint" }, "Trailing \\ continues a line. ${{…}} stays as typed. --bind-input/--bind-output are refused.")),
       picker.element,
       errorBanner,
       el("div", { class: "row dialog-actions" },
@@ -634,7 +634,7 @@ export function openDeleteDialog(opts) {
     });
 
     fill(body,
-      el("p", {}, "Delete ", el("code", {}, path), " and its local studio metadata from this folder? This cannot be undone."),
+      el("p", {}, "Delete ", el("code", {}, path), " and its studio metadata? Cannot be undone."),
       isOpen && hasEdits ? el("p", { class: "warn" }, "Unsaved changes in the open editor will be lost.") : null,
       publicationId ? el("p", { class: "hint" }, "Only the local file is removed: pipeline ", el("code", {}, publicationId), " remains in the coordinator's library.") : null,
       errorBanner,
@@ -958,6 +958,25 @@ const AGENT_PROVIDERS = {
 };
 
 /** The choice a connection stands for: an openai provider, at OpenAI's address too, is a compatible server. @param {any} connection */
+/**
+ * Where a connection's key is, in one line: the model's and the coordinator's dialogs say it the same way.
+ * @param {string | undefined} kept `stored`, `flag` or `session` (what the server reads back), absent when none
+ * @param {boolean} missing the connection was remembered and its key is not kept
+ */
+function keyState(kept, missing) {
+  return kept === "stored" ? "🔑 In the keyring. Leave empty to keep it, or type another."
+    : kept === "flag" ? "🔑 Given on the command line: this session only."
+    : kept === "session" ? "🔑 This session only. Type it again to remember it."
+    : missing ? "🔑 Missing: type it again."
+    : "🔑 Kept per address.";
+}
+
+/** What shapes where a connection lives, empty when nothing does: set by the command line, or no keyring to remember a key. @param {any} connection */
+function connectionNote(connection) {
+  return connection?.source === "flag" ? "Set by the command line: changes last this session unless Remember is ticked."
+    : connection?.keyring === false ? "No system keyring: the key lasts this session only." : "";
+}
+
 function providerChoice(connection) {
   return connection?.provider === "openai" ? "compatible" : "ollama";
 }
@@ -1020,13 +1039,8 @@ export function openAgentConnectDialog(opts) {
       const recent = (connection?.history ?? []).find((h) => same(h.url, url.value));
       const kept = here ? connection?.key : recent?.keyKept ? "stored" : undefined;
       keyNote.hidden = !keyed;
-      keyNote.textContent = kept === "stored" ? "A key is kept in the keyring for this address: leave the field empty to keep it, or type another to replace it."
-        : kept === "flag" ? "The key was given on the command line: it holds for this session only."
-        : kept === "session" ? "A key typed earlier is held for this session only: type it again to remember it."
-        : connection?.needsKey && here ? "This model was remembered, but its key is not kept: type it again."
-        : "A key is kept only for the address it is given at: another address asks for it again.";
-      note.textContent = connection?.source === "flag" ? "This model is set by the command line: a change holds for this session, and is remembered only when ticked."
-        : connection?.keyring === false ? "The system keyring cannot be used: a key lasts for this session only." : "";
+      keyNote.textContent = keyState(kept, !!(connection?.needsKey && here));
+      note.textContent = connectionNote(connection);
     };
     provider.addEventListener("change", () => { url.value = AGENT_PROVIDERS[provider.value].url; update(); });
     url.addEventListener("input", update);
@@ -1037,9 +1051,9 @@ export function openAgentConnectDialog(opts) {
       text: (entry) => entry.url,
       detail: (entry) => [AGENT_PROVIDERS[providerChoice(entry)].label, entry.model].filter(Boolean).join(" · "),
       kept: (entry) => entry.keyKept,
-      note: "Past connections are listed below; × forgets one and its key. The connection in place is listed once disconnected.",
+      note: "Past connections: × forgets one and its key.",
       empty: "No other model is remembered.",
-      question: (entry) => `Delete ${entry.url} from the recent models?${entry.keyKept ? " The key kept for this address is deleted too." : ""} A model connected now stays connected for this session.`,
+      question: (entry) => `Forget ${entry.url}${entry.keyKept ? " and its key" : ""}?`,
       pick: (entry) => {
         provider.value = providerChoice(entry);
         url.value = entry.url;
@@ -1103,13 +1117,13 @@ export function openAgentConnectDialog(opts) {
         el("div", { class: "dialog-field" }, el("label", { for: "d-agent-timeout" }, "Seconds with no token before a call fails"), timeout),
         el("div", { class: "dialog-field" }, el("label", { for: "d-agent-numctx" }, "Context size, in tokens"), ctxSize,
           el("p", { class: "hint" }, `The model's window (Ollama's num_ctx), from ${bounds.min} to ${bounds.max}; ${bounds.default} when left as it is.`)),
-        el("label", {}, remember, " Remember on this machine (the key goes to the system keyring, never to a file)")),
+        el("label", {}, remember, " Remember (key goes to the keyring)")),
       note,
       banner,
       el("div", { class: "row dialog-actions" },
         connection?.connected
           ? el("button", {
-            id: "d-agent-disconnect", type: "button", class: "ghost", title: "Close the agent for this session; what is remembered stays, and the next start connects it again",
+            id: "d-agent-disconnect", type: "button", class: "ghost", title: "Disconnect for this session. Remembered settings stay.",
             onclick: async () => {
               if (busy) return;
               try { await onDisconnect(); close(); } catch (err) { fail(err.message); }
@@ -1169,13 +1183,8 @@ export function openCoordinatorConnectDialog(opts) {
       const here = same(origin.value, connection?.origin);
       const recent = (connection?.history ?? []).find((h) => same(h.origin, origin.value));
       const kept = here ? connection?.key : recent?.keyKept ? "stored" : undefined;
-      keyNote.textContent = kept === "stored" ? "A key is kept in the keyring for this address: leave the field empty to keep it, or type another to replace it."
-        : kept === "flag" ? "The key was given on the command line: it holds for this session only."
-        : kept === "session" ? "A key typed earlier is held for this session only: type it again to remember it."
-        : connection?.needsKey && here ? "This coordinator was remembered, but its key is not kept: type it again."
-        : "A key is kept only for the address it is given at: another address asks for it again.";
-      note.textContent = connection?.source === "flag" ? "This coordinator is set by the command line: a change holds for this session, and is remembered only when ticked."
-        : connection?.keyring === false ? "The system keyring cannot be used: a key lasts for this session only." : "";
+      keyNote.textContent = keyState(kept, !!(connection?.needsKey && here));
+      note.textContent = connectionNote(connection);
     };
     auth.addEventListener("change", update);
     origin.addEventListener("input", update);
@@ -1186,9 +1195,9 @@ export function openCoordinatorConnectDialog(opts) {
       text: (entry) => entry.origin,
       detail: (entry) => (entry.auth === "key" ? "with a key" : "through the browser"),
       kept: (entry) => entry.keyKept,
-      note: "Past connections are listed below; × forgets one and its key. The connection in place is listed once disconnected.",
+      note: "Past connections: × forgets one and its key.",
       empty: "No other coordinator is remembered.",
-      question: (entry) => `Delete ${entry.origin} from the recent coordinators?${entry.keyKept ? " The key kept for this address is deleted too." : ""} A coordinator connected now stays connected for this session.`,
+      question: (entry) => `Forget ${entry.origin}${entry.keyKept ? " and its key" : ""}?`,
       pick: (entry) => {
         origin.value = entry.origin;
         auth.value = entry.auth === "key" ? "key" : "browser";
@@ -1243,13 +1252,13 @@ export function openCoordinatorConnectDialog(opts) {
       el("div", { class: "dialog-field" }, el("label", { for: "d-coordinator-auth" }, "Sign in"), auth),
       el("div", { class: "dialog-field" }, el("label", { for: "d-coordinator-key" }, "Key"), key, keyNote),
       el("details", { class: "dialog-details" }, el("summary", {}, "Advanced"),
-        el("label", {}, remember, " Remember on this machine (the key goes to the system keyring, never to a file)")),
+        el("label", {}, remember, " Remember (key goes to the keyring)")),
       note,
       banner,
       el("div", { class: "row dialog-actions" },
         connection?.connected
           ? el("button", {
-            id: "d-coordinator-disconnect", type: "button", class: "ghost", title: "Close the link for this session; what is remembered stays, and the next start connects it again",
+            id: "d-coordinator-disconnect", type: "button", class: "ghost", title: "Disconnect for this session. Remembered settings stay.",
             onclick: async () => {
               if (busy) return;
               try { await onDisconnect(); close(); } catch (err) { fail(err.message); }
@@ -1301,9 +1310,9 @@ export function openWorkspaceDialog(opts) {
       entries: known(),
       text: (path) => path,
       removable: (path) => remembered.includes(path),
-      note: "Past folders are listed below; × forgets one. The folder in place is not listed.",
+      note: "Past folders: × forgets one.",
       empty: "No other folder is remembered.",
-      question: (path) => `Delete ${path} from the recent folders? The folder itself is not touched.`,
+      question: (path) => `Forget ${path}? The folder is untouched.`,
       pick: (path) => { pathInput.value = path; banner.hidden = true; note.textContent = ""; submit.focus(); },
       remove: async (path) => {
         remembered = (await onForgetRecent(path)).recents;
@@ -1337,7 +1346,7 @@ export function openWorkspaceDialog(opts) {
         onclick: async () => {
           if (busy) return;
           if (await onSave()) await open(false);
-          else fail("The job is still not saved: save it from the page, or discard its changes.");
+          else fail("Job not saved: save it or discard its changes.");
         },
       }, "Save, then open"),
       el("button", { id: "d-workspace-discard", type: "button", class: "ghost", onclick: () => open(true) }, "Discard changes and open"));
@@ -1365,7 +1374,7 @@ export function openWorkspaceDialog(opts) {
       note,
       banner,
       choices,
-      el("p", { class: "hint" }, "The page opens the folder's jobs, and the agent starts a new conversation."),
+      el("p", { class: "hint" }, "Reloads the page and starts a new agent conversation."),
       el("div", { class: "row dialog-actions" },
         el("button", { type: "button", class: "ghost", onclick: () => closeActiveDialog() }, "Cancel"),
         submit));

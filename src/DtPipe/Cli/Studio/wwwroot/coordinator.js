@@ -76,12 +76,12 @@ function render() {
   const zone = (dot, title, ...content) =>
     el("button", { id: "coordinator-link", type: "button", class: "small ghost agent-link", onclick: openCoordinatorConnect, title },
       el("span", { class: `dot ${dot}`.trim() }), " ", ...content);
-  const hold = connection?.source === "flag" ? "Set by the command line: a change holds for this session" : "Connect another coordinator, or disconnect";
+  const hold = connection?.source === "flag" ? "Set by the command line: changes last this session" : "Connect another coordinator, or disconnect";
   if (!link) {
     // Nothing is connected: the zone says so, or says that the remembered one waits for its key.
     const name = connection?.origin ? new URL(connection.origin).host : null;
     if (connection?.needsKey) {
-      fill(host, zone("warn", "This coordinator was remembered, but its key is not kept: connect it again", name, " · key needed"));
+      fill(host, zone("warn", "Key not kept: connect again", name, " · key needed"));
     } else {
       fill(host, zone("", "Connect a coordinator to use its bricks and its library", "no coordinator"));
     }

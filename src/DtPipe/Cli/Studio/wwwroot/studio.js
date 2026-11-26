@@ -8,7 +8,7 @@ import { bindSplit, closeDesigner, compose, editingText, holdsEdits, markSaved, 
 import { nextFreePath, openDeleteDialog, openFromCliDialog, openImportYamlDialog, openInspectLibraryDialog, openNewJobDialog, openPullDialog, openRenameDialog, openSaveAsDialog, openWorkspaceDialog, shortCommit } from "./dialogs.js";
 import { holdView, readView, rememberView, sizesRead, viewRestored } from "./prefs.js";
 import { afterFlush, invalidate, onZone } from "./render.js";
-import { sequence, state } from "./state.js";
+import { HELD, sequence, state } from "./state.js";
 import { adoptDraft, cancelPreview, cardBadge, cardTool, cardTools, debugComposed, forgetPins, forgetPreview, heldBranch, heldTargets, previewView, restoreRows, runPreview, setDebugRows } from "./preview.js";
 import { forgetRun, prepareRun, restoreReview, runView } from "./run.js";
 import { computeSyncState, forgetPublication, publicationProblems, publicationView, publish } from "./publish.js";
@@ -222,7 +222,7 @@ function renderLibrary() {
         el("button", { type: "button", class: "small", onclick: () => signIn() }, "Open sign-in tab"));
     } else {
       fill(gate,
-        el("p", { class: "hint" }, link.reason || `Sign in to ${host} to browse and pull pipelines from the coordinator library.`),
+        el("p", { class: "hint" }, link.reason || `Sign in to ${host} to browse the library.`),
         el("button", { type: "button", class: "small primary", onclick: () => signIn() }, link.byKey ? "Sign in with the key" : "Sign in"));
     }
     return;
@@ -419,7 +419,7 @@ function forgetResults() {
   forgetRun();
 }
 
-const leaveCurrent = () => !holdsEdits() || confirm(`${state.job?.path || "This job"} has changes that are not saved. Leave it anyway?`);
+const leaveCurrent = () => !holdsEdits() || confirm(`${state.job?.path || "This job"} has unsaved changes. Leave anyway?`);
 
 async function open(path, left = false, replacing = null) {
   if (!left && !leaveCurrent()) return false;
@@ -540,8 +540,8 @@ async function deleteJob(path) {
         state.job = null;
         forgetResults();
         fill($("designer"), el("p", { class: "muted intro" },
-          "Open a job from Workspace, on the left. It opens as steps, from its sources to its outputs. Preview runs it through the real engine over the first source rows, with the outputs neutralised, and every step shows the rows it delivers: nothing is written. Save writes the job the studio composes, and keeps where its steps are under .dtpipe/, outside git."));
-        fill($("side-steps-view"), el("p", { class: "hint" }, "Open a job: its sources, steps and outputs are placed from here."));
+          "Open a job from Workspace (left). ▶ Preview runs it on the first rows, nothing written; Save keeps its layout in .dtpipe/, outside git."));
+        fill($("side-steps-view"), el("p", { class: "hint" }, "Open a job to place its steps here."));
         loadVariables({ yaml: "", steps: [], errors: [], warnings: [] });
       }
       await loadJobs();
@@ -556,9 +556,9 @@ async function save() {
   if (editingText()) { showTab("yaml"); status("The YAML is not applied: apply or revert it, then save.", "bad"); return; }
   const result = await compose();
   if (result.unanswered) return;
-  if (job.rewrites && !confirm("Saving writes this job as the studio composes it: comments inside it and the order of its keys are not kept. Save anyway?")) return;
+  if (job.rewrites && !confirm("Save? Comments and key order are not kept.")) return;
   const acceptErrors = result.errors?.length > 0;
-  if (acceptErrors && !confirm(`${plural(result.errors.length, "problem")} ${result.errors.length === 1 ? "remains" : "remain"}: the job written may not run. Save anyway?`)) return;
+  if (acceptErrors && !confirm(`${plural(result.errors.length, "problem")} left: the job may not run. Save anyway?`)) return;
   const write = (hash) => api("/api/job", { path: job.path, hash, model: state.cards.model, acceptErrors }, "PUT");
   try {
     let answer;
@@ -567,7 +567,7 @@ async function save() {
     } catch (e) {
       if (e.status !== 409 || !job.hash || state.agent.behind?.saved !== job.path) throw e;
       const disk = await api(`/api/job?path=${encodeURIComponent(job.path)}`);
-      if (!confirm(`The agent saved ${job.path} after you opened it. Saving replaces the agent's text with your steps: what the agent wrote is lost (its notice's Apply shows it on the steps instead). Replace it?`)) throw e;
+      if (!confirm(`The agent saved ${job.path} after you opened it. Replace its text with your steps?`)) throw e;
       answer = await write(disk.hash);
       fileReplaced(job.path);
     }
@@ -589,7 +589,7 @@ async function saveAs() {
   const result = await compose();
   if (result.unanswered) return;
   const acceptErrors = result.errors?.length > 0;
-  if (acceptErrors && !confirm(`${plural(result.errors.length, "problem")} ${result.errors.length === 1 ? "remains" : "remain"}: the job written may not run. Save anyway?`)) return;
+  if (acceptErrors && !confirm(`${plural(result.errors.length, "problem")} left: the job may not run. Save anyway?`)) return;
 
   const suggested = job.hash
     ? nextFreePath(job.path, state.jobs.paths)
@@ -644,9 +644,9 @@ function writeHeld(alias) {
   const branch = heldBranch(alias);
   return branch ? prepareRun(true, heldTargets(), [branch]) : undefined;
 }
-const SUSPENDED = "A real run is suspended before its outputs are written: write it or abandon it from the output steps.";
-const PREVIEW_TITLE = "Run the whole job over the first source rows, with the writers neutralised: every step shows the rows it delivers";
-const RUN_TITLE = "Run the saved job here and write its outputs, after you confirm what it writes";
+const SUSPENDED = HELD;
+const PREVIEW_TITLE = "Run the job on the first source rows, nothing written";
+const RUN_TITLE = "Run the saved job and write its outputs (you confirm first)";
 
 async function publishAndRead() {
   await publish({
@@ -663,11 +663,11 @@ function barButtons() {
     el("button", { id: "d-save", title: "Write the job and its layout (Ctrl+S)", onclick: () => save() }, "Save"),
     el("button", { id: "d-save-as", class: "ghost", title: "Save a copy of this job under another path", onclick: () => saveAs() }, "Save as…"),
     el("button", { id: "d-preview", class: "primary", title: PREVIEW_TITLE, onclick: () => runPreview(null) }, "▶ Preview"),
-    el("button", { id: "d-preview-cancel", class: "ghost danger", hidden: true, title: "Stop the preview: the engine stops at its next batch of rows", onclick: cancelPreview }, "Stop"),
-    el("label", { id: "d-watch-rows-label", class: "rows", title: "Source rows each source reads, up to the preview's cap: a step says when a source stopped there" },
+    el("button", { id: "d-preview-cancel", class: "ghost danger", hidden: true, title: "Stop the preview (at the next batch)", onclick: cancelPreview }, "Stop"),
+    el("label", { id: "d-watch-rows-label", class: "rows", title: "Source rows read by the preview" },
       "rows ", el("input", { id: "d-watch-rows", type: "number", min: "1", max: String(MAX_DEBUG_ROWS), value: String(state.preview.rows), onchange: setDebugRows })),
     el("button", { id: "d-forget-pins", class: "ghost small", hidden: true, title: "Unpin every step and forget the checkpoints they kept", onclick: forgetPins }, "Forget pins"),
-    el("span", { id: "d-suspended", class: "suspended", hidden: true, title: SUSPENDED }, "⏸ run suspended: write or abandon it on the output steps"),
+    el("span", { id: "d-suspended", class: "suspended", hidden: true, title: SUSPENDED }, HELD),
     el("button", { id: "d-run", class: "danger", title: RUN_TITLE, onclick: () => prepareRun() }, "Run for real…"),
     el("button", { id: "d-publish", hidden: !state.coordinator, title: "Send the saved job to the coordinator's library", onclick: () => publishAndRead() }, "Publish"),
   ];

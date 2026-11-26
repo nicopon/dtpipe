@@ -620,7 +620,7 @@ const scenarios = {
       await p.pick(a);
       const text = await p.drawerText();
       const sink = a === aliases[aliases.length - 1];
-      check(`a click on ${a} shows its ${sink ? "absence of rows" : "rows"}`, sink ? /holds no rows/.test(text) : /rows delivered/.test(text), text.slice(0, 120));
+      check(`a click on ${a} shows its ${sink ? "absence of rows" : "rows"}`, sink ? /is an output/.test(text) : /rows delivered/.test(text), text.slice(0, 120));
     }
 
     const mid = aliases.includes("b") ? "b" : aliases[1];
@@ -663,7 +663,7 @@ const scenarios = {
     await p.click("#d-run");
     check("Run opens its confirmation", await p.until(`!!document.querySelector("#d-run-dialog[open]")`));
     const text = await p.dialogText();
-    check("Run is the plain real run", /This run is real: its outputs are written/.test(text) && !/stops at/.test(text), text.slice(0, 200));
+    check("Run is the plain real run", /REAL: outputs are written/.test(text) && !/stops at/.test(text), text.slice(0, 200));
     await p.click("#d-run-cancel");
 
     await p.click(`.dcard[data-alias="${mid}"] [data-card-tool="pin"]`);
@@ -700,7 +700,7 @@ const scenarios = {
     await p.click("#d-run");
     check("the confirmation opens", await p.until(`!!document.querySelector("#d-run-confirm")`));
     check("the case is not ticked", (await p.ev(`document.querySelector("#d-review")?.checked`)) === false);
-    check("the confirmation says the targets are written", /reaches the end|real: its outputs are written/.test(await p.dialogText()), (await p.dialogText()).slice(0, 200));
+    check("the confirmation says the targets are written", /last stage writes|REAL: outputs are written/.test(await p.dialogText()), (await p.dialogText()).slice(0, 200));
     check("nothing is written before the confirmation", !fs.existsSync(path.join(folder, "c.csv")) && !fs.existsSync(path.join(folder, "e.csv")));
     await p.click("#d-run-confirm");
     check("the run succeeds", await p.waitStatus(/run succeeded/, 30000), await p.status());

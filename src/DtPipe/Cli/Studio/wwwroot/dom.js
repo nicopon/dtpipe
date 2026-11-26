@@ -54,6 +54,26 @@ export function tabOf(body, actions, options = {}) {
   return { tab: true, body, actions: (actions || []).filter(Boolean), fill: !!options.fill };
 }
 
+/** Puts a tip beside its anchor, kept in the window: the tip is fixed so no scrolling panel clips it. @param {Element} anchor @param {HTMLElement} tip */
+export function placeTip(anchor, tip) {
+  const box = anchor.getBoundingClientRect();
+  const left = Math.max(8, Math.min(box.left - 12, window.innerWidth - tip.offsetWidth - 8));
+  const below = box.bottom + 6;
+  const top = below + tip.offsetHeight > window.innerHeight - 8 ? Math.max(8, box.top - tip.offsetHeight - 6) : below;
+  tip.style.left = `${left}px`;
+  tip.style.top = `${top}px`;
+}
+
+/** A ⓘ right after the text it explains: its text shows on hover or focus, so a screen states its label and leaves the explanation to who asks. @param {string} text */
+export function info(text) {
+  const tip = el("span", { class: "info-text", "aria-hidden": "true" }, text);
+  const node = el("button", { type: "button", class: "info", "aria-label": text }, "ⓘ", tip);
+  const place = () => placeTip(node, tip);
+  node.addEventListener("mouseenter", place);
+  node.addEventListener("focus", place);
+  return node;
+}
+
 const SVG = "http://www.w3.org/2000/svg";
 export function svg(tag, attrs = {}) {
   const node = document.createElementNS(SVG, tag);

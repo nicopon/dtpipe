@@ -66,15 +66,15 @@ export async function mountAgent(pane, host) {
       el("button", { id: "agent-new", class: "small ghost", title: "Forget this conversation", onclick: reset }, "new")),
     el("div", { id: "agent-empty", class: "agent-empty", hidden: true }),
     el("div", { id: "agent-body", class: "agent-body", hidden: true },
-      el("p", { id: "agent-endpoint", class: "hint mono", title: "The provider and the address of this conversation: the model button of the header changes them" }),
-      el("p", { id: "agent-meter", class: "hint mono", hidden: true, title: "The turn, its step, and the prompt the model read for its last call (what a turn adds to the conversation grows it)" }),
+      el("p", { id: "agent-endpoint", class: "hint mono", title: "Provider and address (change them with the header's model button)" }),
+      el("p", { id: "agent-meter", class: "hint mono", hidden: true, title: "Turn · step · prompt tokens of the last call" }),
       el("p", { id: "agent-warning", class: "hint warn", hidden: true }),
       el("p", { id: "agent-behind", class: "hint warn", hidden: true }),
       el("div", { id: "agent-log", class: "agent-log" }, live),
       el("div", { class: "agent-input" },
         el("textarea", { id: "agent-prompt", "aria-label": "Message to the agent", rows: "3", placeholder: "Ask the agent… (Ctrl+Enter sends)", onkeydown: onPromptKey }),
         el("div", { class: "row" },
-          el("span", { class: "hint", title: "The open job goes with every message, and what the agent gives lands on its steps, unsaved" }, "works on the open job"),
+          el("span", { class: "hint", title: "The open job goes with every message; results land unsaved" }, "works on the open job"),
           el("button", { id: "agent-send", class: "primary", onclick: () => send() }, "Send"),
           el("button", { id: "agent-stop", class: "danger", hidden: true, onclick: stop }, "Stop")))));
   // Its width is the pane's own: the pointer's distance to the pane's right edge.
@@ -137,7 +137,7 @@ async function loadModels() {
     const names = model && !models.includes(model) ? [model, ...models] : models;
     fill(select, names.map((name) => el("option", { value: name, selected: name === (state.agent.status?.model ?? model) }, name)));
     state.agent.problem = model && !models.includes(model)
-      ? { short: "model not listed", text: `The model ${model} is not among the ${models.length} its provider lists: a message would fail until another is chosen.` }
+      ? { short: "model not listed", text: `${model} is not among the ${models.length} listed models: pick another.` }
       : null;
   } catch (e) {
     // A studio that does not answer is the header's studio line; the model's server is this one's.
@@ -347,7 +347,7 @@ function renderAgentLink() {
   if (!state.agent.enabled) {
     const needsKey = connection?.needsKey;
     fill(host, el("span", { class: needsKey ? "dot warn" : "dot" }), needsKey ? " model: key needed" : " no agent");
-    host.title = needsKey ? "This model was remembered, but its key is not kept: connect it again" : "Connect a model to ask an agent";
+    host.title = needsKey ? "Key not kept: connect again" : "Connect a model to ask an agent";
     return;
   }
   const problem = state.agent.problem;
@@ -364,7 +364,7 @@ function renderEmpty() {
   fill(host,
     el("p", { class: "hint" }, needsKey
       ? "The model you remembered needs its key again."
-      : "No model is connected. Connect Ollama or an OpenAI-compatible server to ask the agent about your jobs."),
+      : "No model connected. Connect Ollama or an OpenAI-compatible server."),
     el("button", { id: "agent-connect", class: "primary", onclick: openConnect }, needsKey ? "Reconnect…" : "Connect a model…"));
 }
 
@@ -377,7 +377,7 @@ function renderAgent() {
   $("agent-endpoint").textContent = `${s.provider} · ${s.endpoint}`;
   const warning = $("agent-warning");
   const notes = [
-    s.local ? null : `The model is at ${s.endpoint}: what its tools read (schemas, rows) and the open job go there.`,
+    s.local ? null : `Sent to ${s.endpoint}: tool results (schemas, rows) and the open job.`,
     state.agent.problem?.text,
   ].filter(Boolean);
   warning.hidden = notes.length === 0;
@@ -406,8 +406,8 @@ function renderBehind(given) {
   notice.hidden = !given;
   fill(notice, !given ? null : [
     given.saved
-      ? `You changed the job while the agent saved ${given.saved}: your steps are kept, and the saved file replaces them only if you apply it. `
-      : "You changed the job while the agent worked: your steps are kept, and its plan replaces them only if you apply it. ",
+      ? `Job edited while the agent saved ${given.saved}: your steps are kept; Apply replaces them. `
+      : "Job edited while the agent worked: your steps are kept; Apply replaces them. ",
     given.yaml ? marksView(given.yaml, false) : null,
     el("button", { class: "small", title: "Replace the open job's steps with what the agent gave", disabled: refused(given.yaml), onclick: () => apply(given) }, "Apply"),
     refused(given.yaml) ? el("span", { class: "hint" }, " The check refused this plan: it does not apply.") : null]);
@@ -421,7 +421,7 @@ function renderBehind(given) {
 function marksView(yaml, applied) {
   const marks = state.agent.marks;
   if (!marks || marks.yaml !== yaml) return null;
-  if (marks.unknown) return el("span", { class: "plan-marks hint" }, "The steps it changes cannot be named: the open job or the plan does not take apart into steps. ");
+  if (marks.unknown) return el("span", { class: "plan-marks hint" }, "Changed steps cannot be named. ");
   const items = [
     ...marks.added.map((a) => el("span", { class: "mark mark-added" }, `${a} added`)),
     ...marks.changed.map((a) => el("span", { class: "mark mark-changed" }, `${a} changed`)),
@@ -451,10 +451,10 @@ function renderMeter(s) {
 function cardView(card) {
   const b = card.body || {};
   const text = card.kind === "save"
-    ? [el("p", {}, `The agent asks to save ${b.path} (${b.replaces ? "replaces the file" : "a new file"}).`),
-      b.rewrites ? el("p", { class: "hint" }, "The studio composes the job: comments and key order of the agent's text are not kept.") : null,
+    ? [el("p", {}, `The agent asks to save ${b.path} (${b.replaces ? "replaces file" : "new file"}).`),
+      b.rewrites ? el("p", { class: "hint" }, "Comments and key order are not kept.") : null,
       el("pre", {}, b.yaml)]
-    : [el("p", {}, `${b.path || "The open job"} holds credentials as values at: ${(b.at || []).join(", ")}.`),
+    : [el("p", {}, `${b.path || "The open job"} has credentials as values at: ${(b.at || []).join(", ")}.`),
         el("p", { class: "hint" }, `They would reach the model at ${state.agent.status?.endpoint}.`)];
   return el("div", { class: "agent-card" }, text,
     el("div", { class: "row agent-actions" }, card.choices.map((choice) =>
@@ -492,9 +492,9 @@ function planView(plan) {
       state.job && !state.agent.behind && (plan.yaml !== appliedYaml || moved()) ? el("button", { class: "small", title: "Replace the open job's steps with the plan; nothing is saved", disabled: blocked, "aria-describedby": blocked ? "agent-plan-refused" : null, onclick: () => apply({ yaml: plan.yaml }) }, "Apply to the open job") : null,
       el("button", { class: "small", title: "Open the plan as a new job, not saved yet", disabled: blocked, "aria-describedby": blocked ? "agent-plan-refused" : null, onclick: async () => { if (await hooks.openPlan(plan.yaml)) settled(); } }, "Open as a new job")),
     // The check's words keep their lines: a parser's error carries the line it read and a caret under the column.
-    blocked ? el("div", { id: "agent-plan-refused", class: "hint" }, "The check refused this plan, so it neither replaces the steps nor opens as a job",
+    blocked ? el("div", { id: "agent-plan-refused", class: "hint" }, "The check refused this plan: nothing applied or opened",
       plan.message ? [":", el("pre", {}, plan.message)] : ".", " Ask the agent to correct it.")
-      : failed(plan.yaml) && plan.yaml !== appliedYaml ? el("p", { class: "hint" }, "The agent's try of this plan failed, so it is not on the steps: it waits here until you apply it or open it.") : null);
+      : failed(plan.yaml) && plan.yaml !== appliedYaml ? el("p", { class: "hint" }, "This plan's try failed: it waits until you apply or open it.") : null);
 }
 
 async function answer(card, choice) {

@@ -136,3 +136,6 @@ export function sequence() {
     cancel: () => { last++; },
   };
 }
+
+/** What a real run left suspended says wherever it is shown. */
+export const HELD = "⏸ Held: nothing written yet. Write or abandon from the outputs.";
