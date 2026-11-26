@@ -10,7 +10,7 @@ namespace DtPipe.Cli.Studio;
 /// </summary>
 public sealed partial class StudioServer
 {
-    private sealed record AgentConnectionRequest(string? Provider, string? Url, string? Model, int? Timeout, int? NumCtx, string? Key, bool Remember, bool RemoveKey);
+    private sealed record AgentConnectionRequest(string? Provider, string? Url, string? Model, int? Timeout, int? NumCtx, string? Key, bool Remember);
 
     private sealed record AgentEntryRequest(string? Provider, string? Url);
 
@@ -107,7 +107,7 @@ public sealed partial class StudioServer
         var numCtx = provider == "ollama" ? request.NumCtx : null;
         // A key typed for a provider that takes none is dropped; no key typed uses the one kept for this very address.
         var typed = provider == "openai" && !string.IsNullOrEmpty(request.Key) ? request.Key : null;
-        var stored = provider == "openai" && typed is null && !request.RemoveKey ? link.Settings.ReadLlmKey(url) : null;
+        var stored = provider == "openai" && typed is null ? link.Settings.ReadLlmKey(url) : null;
         var client = link.NewClient(provider, typed ?? stored, timeout) ?? throw new StudioRefusal(400, "A provider is ollama or openai.");
         var model = string.IsNullOrWhiteSpace(request.Model) ? null : request.Model.Trim();
         return new PreparedConnection(provider, url, model, timeout, numCtx, typed, stored, client);
@@ -145,7 +145,6 @@ public sealed partial class StudioServer
             new AgentConnection(prepared.Provider, prepared.Url, prepared.Model, timeoutSeconds, "page", keyState, NumCtx: prepared.NumCtx));
 
         string? warning = null;
-        if (request.RemoveKey) link.Settings.ForgetLlmKey(prepared.Url);
         if (request.Remember)
         {
             try
@@ -159,7 +158,6 @@ public sealed partial class StudioServer
                 warning = "The connection is made for this session, but the settings file cannot be written: nothing is remembered.";
             }
         }
-        if (request.RemoveKey) keyState = "none";
         _slot.Describe(new AgentConnection(prepared.Provider, prepared.Url, prepared.Model, timeoutSeconds, "page", keyState, NumCtx: prepared.NumCtx));
         return ConnectionView(warning);
     }

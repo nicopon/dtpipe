@@ -10,7 +10,7 @@ namespace DtPipe.Cli.Studio;
 /// </summary>
 public sealed partial class StudioServer
 {
-    private sealed record CoordinatorConnectionRequest(string? Origin, string? Auth, string? Key, bool Remember, bool RemoveKey);
+    private sealed record CoordinatorConnectionRequest(string? Origin, string? Auth, string? Key, bool Remember);
 
     private sealed record CoordinatorEntryRequest(string? Origin);
 
@@ -99,7 +99,7 @@ public sealed partial class StudioServer
         var origin = uri.GetLeftPart(UriPartial.Authority);
         // A key typed for a browser sign-in is dropped; no key typed uses the one kept for this very origin.
         var typed = auth == "key" && !string.IsNullOrEmpty(request.Key) ? request.Key : null;
-        var stored = auth == "key" && typed is null && !request.RemoveKey ? start.Settings.ReadCoordinatorKey(origin) : null;
+        var stored = auth == "key" && typed is null ? start.Settings.ReadCoordinatorKey(origin) : null;
         if (auth == "key" && typed is null && stored is null)
             throw new StudioRefusal(400, "A key is needed: paste the key the coordinator made for you.");
         return new PreparedCoordinator(origin, auth, typed, stored);
@@ -167,7 +167,6 @@ public sealed partial class StudioServer
         }
 
         string? warning = null;
-        if (request.RemoveKey) start.Settings.ForgetCoordinatorKey(prepared.Origin);
         if (request.Remember)
         {
             try
@@ -183,7 +182,6 @@ public sealed partial class StudioServer
                 warning = "The connection is made for this session, but the settings file cannot be written: nothing is remembered.";
             }
         }
-        if (request.RemoveKey) keyState = "none";
         _coordinator.Describe(new CoordinatorConnection(prepared.Origin, prepared.Auth, "page", keyState));
         return CoordinatorConnectionView(warning);
     }
