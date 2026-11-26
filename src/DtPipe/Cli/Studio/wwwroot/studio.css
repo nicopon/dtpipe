@@ -124,13 +124,14 @@ textarea { width: 100%; resize: vertical; }
 /* The designer */
 .designer {
   --insp-w: 330px; --drawer-h: 260px;
-  display: flex; flex-direction: column; gap: 10px; padding: 10px; min-width: 0; min-height: 0; overflow: hidden;
+  display: flex; flex-direction: column; gap: 10px; padding: 10px; min-width: 0; min-height: 0; overflow-x: hidden; overflow-y: auto;
 }
 .designer-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; flex: none; }
 .designer-bar .grow { flex: 1; min-width: 140px; }
 .designer-bar .actions { display: flex; gap: 6px 8px; align-items: center; flex-wrap: wrap; margin-left: auto; }
 .designer-bar .rows input { width: 70px; }
-.designer-body { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) var(--insp-w); gap: 12px; flex: 1; min-height: 0; }
+/* The canvas keeps its floor (--canvas-min): a short window takes the height from the drawer, down to its own floor. */
+.designer-body { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) var(--insp-w); gap: 12px; flex: 1 1 0; min-height: var(--canvas-min); }
 .designer-body > .card { min-height: 0; }
 /* The handles lie over the side panel's edge, the 12px gap beside the inspector, and the drawer's top edge. */
 .split { position: absolute; z-index: 4; background: transparent; touch-action: none; }
@@ -194,7 +195,7 @@ textarea { width: 100%; resize: vertical; }
 .designer-bar .suspended { color: var(--warn); font-size: 12px; }
 label.review { display: block; margin: 0 0 8px; }
 /* The confirmation of a real run: a modal dialog, so what is about to be written is what the person is reading. */
-.run-dialog { width: min(640px, calc(100vw - 32px)); max-height: calc(100vh - 64px); padding: 16px 20px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--ink); box-shadow: 0 8px 32px rgba(0, 0, 0, .3); }
+.run-dialog { width: min(640px, calc(100vw - 32px)); max-height: calc(100vh - 64px); overflow: hidden; padding: 16px 20px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--ink); box-shadow: 0 8px 32px rgba(0, 0, 0, .3); }
 .run-dialog::backdrop { background: rgba(0, 0, 0, .45); }
 .run-dialog h3 { margin: 0 0 4px; font-size: 16px; }
 .run-dialog p { margin: 6px 0; }
@@ -203,9 +204,13 @@ label.review { display: block; margin: 0 0 8px; }
 .run-dialog .run-write label { display: block; }
 .run-dialog details { margin: 2px 0 0 22px; }
 .run-dialog summary { cursor: pointer; color: var(--muted); font-size: 12.5px; }
-.run-dialog .run-actions { justify-content: flex-end; margin-top: 14px; }
-.studio-dialog { width: min(680px, calc(100vw - 32px)); max-height: calc(100vh - 64px); overflow: auto; padding: 16px 20px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--ink); box-shadow: 0 8px 32px rgba(0, 0, 0, .3); }
+.run-dialog .run-actions { flex: none; justify-content: flex-end; margin-top: 14px; }
+/* A dialog is a head and a body that scrolls: the actions at the end of the body stay at its foot (.dialog-actions), the close button in the head. */
+.studio-dialog { width: min(680px, calc(100vw - 32px)); max-height: calc(100vh - 64px); overflow: hidden; padding: 16px 20px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--ink); box-shadow: 0 8px 32px rgba(0, 0, 0, .3); }
 .studio-dialog::backdrop { background: rgba(0, 0, 0, .45); }
+.studio-dialog[open], .run-dialog[open] { display: flex; flex-direction: column; }
+.studio-dialog .dialog-head { flex: none; }
+.studio-dialog .dialog-body, .run-dialog .run-body { flex: 1 1 auto; min-height: 6em; overflow: auto; }
 .dialog-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px; }
 .dialog-head h3 { margin: 0; font-size: 16px; }
 .studio-dialog .dialog-body > p { margin: 0 0 10px; }
@@ -220,7 +225,7 @@ label.review { display: block; margin: 0 0 8px; }
 .dialog-path-row input { flex: 1; min-width: 0; }
 .dialog-path-preview { font-size: 12px; }
 .dialog-inline-error, .dialog-error { margin: 0; font-size: 12.5px; }
-.dialog-actions { flex-wrap: wrap; justify-content: flex-end; margin-top: 6px; gap: 8px; }
+.dialog-actions { flex-wrap: wrap; justify-content: flex-end; margin-top: 6px; gap: 8px; position: sticky; bottom: 0; z-index: 1; background: var(--panel); padding-top: 8px; }
 .dialog-radio-group { display: flex; flex-direction: column; gap: 6px; }
 .dialog-radio-group label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 .dialog-collision, .dialog-check-box, .dialog-conflict { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--panel); display: flex; flex-direction: column; gap: 8px; }
@@ -295,22 +300,28 @@ label.review { display: block; margin: 0 0 8px; }
 .transformer .sub { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; margin-top: 4px; }
 .kv-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 4px; margin: 3px 0; }
 .kv-row input { min-width: 0; padding: 2px 6px; font-size: 12px; }
-.drawer { flex: none; height: var(--drawer-h); padding: 6px 12px 10px; display: flex; flex-direction: column; min-height: 0; }
+/* A tab is a body that scrolls and an action bar that never does, so no button leaves the drawer whatever its height. */
+.drawer { flex: 0 1 var(--drawer-h); min-height: var(--drawer-min); padding: 6px 12px 10px; display: flex; flex-direction: column; }
 .drawer-body { flex: 1; overflow: auto; min-height: 0; }
+.drawer-body.fill { display: flex; flex-direction: column; }
+.drawer-body.fill > .scroll { flex: 1 1 0; min-height: 5em; overflow: auto; }
+.drawer-actions { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding-top: 8px; margin-top: 6px; border-top: 1px solid var(--line); }
 .drawer-body .row { flex-wrap: wrap; gap: 6px 8px; }
 .drawer pre { background: var(--code); padding: 10px; border-radius: 6px; overflow: auto; margin: 6px 0 0; }
-.tabs { display: flex; gap: 4px; align-items: center; border-bottom: 1px solid var(--line); margin-bottom: 8px; flex-wrap: wrap; flex: none; }
-.tabs button { border: none; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; padding: 6px 10px; }
+.tabs { display: flex; gap: 4px; align-items: center; border-bottom: 1px solid var(--line); margin-bottom: 8px; flex-wrap: nowrap; overflow-x: auto; flex: none; }
+.tabs button { flex: none; white-space: nowrap; border: none; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; padding: 6px 10px; }
 .tabs button.active { border-bottom-color: var(--accent); color: var(--accent); }
 .tabs .count { background: var(--bad); color: var(--on-solid); border-radius: 999px; padding: 0 6px; font-size: 11px; margin-left: 4px; }
 .tabs .count.warn { background: var(--warn); }
-.yaml-edit { display: block; background: var(--code); margin: 6px 0; }
+.yaml-edit { display: block; background: var(--code); margin: 6px 0 0; resize: none; flex: 1 1 0; min-height: 4.5em; }
 /* The steps while the YAML tab holds a text not applied: greyed, and inert in the page. */
 .held { opacity: .45; filter: grayscale(1); }
 .held-note { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 5; margin: 0; padding: 6px 10px;
   background: var(--panel); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 2px 8px rgba(0, 0, 0, .15); }
 .msgs { margin: 4px 0; padding-left: 20px; }
 .msgs li, .agent-log .verdict { white-space: pre-wrap; overflow-wrap: anywhere; }
+.vars { width: 100%; }
+.vars input { max-width: 100%; }
 .vars td { font-family: inherit; font-size: 12.5px; vertical-align: middle; white-space: nowrap; max-width: none; }
 .vars td.wrap { white-space: normal; }
 .vars input { width: 220px; margin-left: 6px; }
@@ -347,7 +358,9 @@ td.null { color: var(--muted); font-style: italic; }
   .designer-body { grid-template-columns: minmax(0, 1fr); flex: none; }
   .designer-body > .canvas { height: 60vh; }
   .split { display: none; }
-  .drawer { height: auto; max-height: 420px; }
+  .drawer { flex: none; height: auto; max-height: 420px; min-height: 0; }
+  .drawer-body.fill .yaml-edit { flex: none; min-height: 14em; }
+  .drawer-body.fill > .scroll { flex: none; }
 }
 
 /* The coordinator's bricks and versions */
@@ -368,7 +381,8 @@ main.with-agent.side-closed { grid-template-columns: 40px minmax(0, 1fr) var(--a
 .agent-body[hidden], .agent-empty[hidden] { display: none; }
 .agent-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
 .agent-empty p { margin: 0; }
-.agent-log { flex: 1; min-height: 120px; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
+.agent-log { flex: 1 1 0; min-height: 4em; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
+.agent-input { flex: none; }
 .agent-log .turn { display: flex; flex-direction: column; gap: 6px; }
 .agent-log .msg { padding: 6px 8px; border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .agent-log .msg.user { background: var(--code); border-left: 3px solid var(--accent); }
@@ -388,6 +402,9 @@ main.with-agent.side-closed { grid-template-columns: 40px minmax(0, 1fr) var(--a
 .agent-pane pre { max-height: 220px; overflow: auto; background: var(--code); padding: 6px; margin: 4px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .agent-card { border: 1px solid var(--accent); border-radius: 8px; padding: 8px; margin: 4px 0; }
 .agent-card p { margin: 0 0 6px; }
+/* What waits for the person (a card's choices, a plan's buttons) stays at the foot of the log while the text above it scrolls. */
+.agent-actions { position: sticky; bottom: 0; z-index: 1; background: var(--panel); padding: 6px 0 2px; }
+.agent-card .agent-actions { margin: 0 -8px -8px; padding: 6px 8px 8px; border-radius: 0 0 8px 8px; }
 .agent-card ul { margin: 0 0 6px; padding-left: 18px; }
 .plan-marks .mark { display: inline-block; font-size: 12px; padding: 0 6px; margin: 0 4px 2px 0; border-radius: 8px; border: 1px solid currentColor; }
 .plan-marks .mark-added { color: var(--good); }

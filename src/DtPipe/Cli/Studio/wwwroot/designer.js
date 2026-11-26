@@ -4,7 +4,7 @@
 // (POST /api/design/decompose); this page never writes YAML itself. Built with DOM calls only: the
 // page's policy forbids inline script and style, and every value is set as text.
 
-import { $, api, el, fill, plural, status, svg, tagOf, targetOf } from "./dom.js";
+import { $, api, el, fill, plural, status, svg, tabOf, tagOf, targetOf } from "./dom.js";
 import { KEPT_TABS } from "./prefs.js";
 import { flush, invalidate, onZone } from "./render.js";
 import { sequence, state } from "./state.js";
@@ -32,8 +32,11 @@ const TRANSFORMERS = {
 const KIND_LABEL = { source: "source", sink: "output", transform: "transform", sql: "sql", merge: "merge", branch: "branch" };
 
 // The panels' sizes, kept across visits.
-const SIZE_LIMITS = { pal: [160, 420], insp: [240, 640], drawer: [100, 640], agent: [260, 720] };
+const SIZE_LIMITS = { pal: [160, 420], insp: [240, 640], drawer: [210, 640], agent: [260, 720] };
 const SIZE_VARS = { pal: "--pal-w", insp: "--insp-w", drawer: "--drawer-h", agent: "--agent-w" };
+// The drawer's floor holds its tabs, a few lines and its action bar; the canvas keeps a floor of its own. The layout reads both
+// (`--drawer-min`, `--canvas-min`), so a window too short for the size asked shrinks the drawer, never its actions out of sight.
+const CANVAS_MIN = 120;
 
 const cards = state.cards;
 let host = null;
@@ -535,9 +538,25 @@ export function applySizes() {
     state.view.sizes[name] = Math.min(hi, Math.max(lo, Math.round(+state.view.sizes[name] || lo)));
     (name === "agent" || name === "pal" ? document.querySelector("main") : host)?.style.setProperty(SIZE_VARS[name], `${state.view.sizes[name]}px`);
   }
+  host?.style.setProperty("--drawer-min", `${SIZE_LIMITS.drawer[0]}px`);
+  host?.style.setProperty("--canvas-min", `${CANVAS_MIN}px`);
 }
 
+/**
+ * The tallest the drawer can be now: what it and the canvas share, less the canvas's floor. Measured, so the gaps and the bar
+ * are never restated here. Null when the drawer is not laid out (a window narrow enough to stack the panels).
+ */
+function drawerRoom() {
+  const drawer = $("d-drawer");
+  const body = host?.querySelector(".designer-body");
+  return drawer && body && drawer.offsetHeight ? drawer.offsetHeight + body.offsetHeight - CANVAS_MIN : null;
+}
+
+/** The size a pane shows now: the drawer's is shrunk by the layout when the window is too short for what was asked. */
+const shownSize = (name) => (name === "drawer" ? $("d-drawer")?.offsetHeight || state.view.sizes.drawer : state.view.sizes[name]);
+
 function resize(name, value, persist) {
+  if (name === "drawer") value = Math.min(value, drawerRoom() ?? value);
   state.view.sizes[name] = value;
   applySizes();
   // The sizes are kept after a drawing (prefs.js): asking for one is how a finished move is noticed.
@@ -571,7 +590,7 @@ export function bindSplit(handle, name, target) {
   handle.addEventListener("keydown", (e) => {
     const [grow, shrink] = SPLIT_KEYS[name];
     if (e.key !== grow && e.key !== shrink) return;
-    resize(name, state.view.sizes[name] + (e.key === grow ? 16 : -16), true);
+    resize(name, shownSize(name) + (e.key === grow ? 16 : -16), true);
     e.preventDefault();
   });
 }
@@ -1220,28 +1239,32 @@ function renderDrawer() {
   // A redraw while the person types keeps the text (it is state) and gives the editor back its caret.
   const typing = document.activeElement?.id === "d-edit" ? /** @type {HTMLTextAreaElement} */ (document.activeElement) : null;
   const caret = typing ? { start: typing.selectionStart, end: typing.selectionEnd, top: typing.scrollTop } : null;
-  let body;
+  // A tab is its content, which scrolls, and its actions, which never do: both come from `tabOf`, or a tab with no action gives its content alone.
+  let drawn;
   if (state.view.drawer === "yaml") {
-    body = [el("div", { class: "row" }, el("span", { id: "d-verdict" })),
-      el("textarea", { id: "d-edit", "aria-label": "The job, as YAML", class: "mono yaml-edit", rows: "16", spellcheck: "false", value: cards.text ?? cards.result.yaml }),
-      el("div", { class: "row" },
-        el("button", { "data-copy": true, title: "Copy the text shown" }, "Copy"),
-        el("button", { id: "d-apply", "data-apply": true, title: "Take this text apart into steps again" }, "Apply"),
-        el("button", { id: "d-revert", "data-revert": true, title: "Show the job the steps compose again, and free the steps" }, "Revert"),
-        el("span", { class: "hint" }, "Apply takes the text apart into steps again: steps that keep their alias keep their place. Until then the steps are held."))];
+    drawn = tabOf([el("div", { class: "row" }, el("span", { id: "d-verdict" })),
+      el("textarea", { id: "d-edit", "aria-label": "The job, as YAML", class: "mono yaml-edit", spellcheck: "false", value: cards.text ?? cards.result.yaml })],
+    [el("button", { "data-copy": true, title: "Copy the text shown" }, "Copy"),
+      el("button", { id: "d-apply", "data-apply": true, title: "Take this text apart into steps again: steps that keep their alias keep their place. Until then the steps are held." }, "Apply"),
+      el("button", { id: "d-revert", "data-revert": true, title: "Show the job the steps compose again, and free the steps" }, "Revert")],
+    { fill: true });
   } else if (state.view.drawer === "problems") {
     // Two verdicts, never mixed: what the composition says of a run here, and what a publication would refuse (the host's).
-    body = [el("h3", {}, "Will not run here"),
+    const publication = hooks.publicationProblems?.() ?? tabOf(null, null);
+    drawn = tabOf([el("h3", {}, "Will not run here"),
       errors ? [el("h4", {}, `Errors (${errors})`), el("ul", { class: "msgs bad" }, cards.result.errors.map((m) => el("li", {}, m)))] : null,
       warnings ? [el("h4", {}, `Warnings (${warnings})`), el("ul", { class: "msgs warn" }, cards.result.warnings.map((m) => el("li", {}, m)))] : null,
       problems ? null : el("p", { class: "hint" }, "Nothing to report."),
-      hooks.publicationProblems?.() || null];
+      publication.body], publication.actions);
   } else if (state.view.drawer === "preview") {
-    body = hooks.previewView?.(cards.selected?.alias || null) || null;
+    drawn = hooks.previewView?.(cards.selected?.alias || null) || null;
   } else {
-    body = (hooks.extraTabs || []).find((t) => t.name === state.view.drawer)?.render() || null;
+    drawn = (hooks.extraTabs || []).find((t) => t.name === state.view.drawer)?.render() || null;
   }
-  fill(view, tabs, el("div", { class: "drawer-body" }, body));
+  const { body, actions, fill: fills } = drawn?.tab ? drawn : { body: drawn, actions: null, fill: false };
+  fill(view, tabs,
+    el("div", { class: fills ? "drawer-body fill" : "drawer-body" }, body),
+    actions?.length ? el("div", { class: "drawer-actions" }, actions) : null);
   drawHold();
   const editor = /** @type {HTMLTextAreaElement | null} */ ($("d-edit"));
   if (caret && editor) { editor.focus(); editor.setSelectionRange(caret.start, caret.end); editor.scrollTop = caret.top; }

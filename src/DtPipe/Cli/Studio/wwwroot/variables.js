@@ -77,7 +77,7 @@ function variableRow(v) {
   return el("tr", {},
     el("td", {}, el("span", { class: `dot ${state_}` }), " ", el("code", {}, `\${{${v.expression}}}`)),
     el("td", { class: "wrap" }, describe(v)),
-    el("td", {}, control));
+    el("td", {}, el("div", { class: "row" }, control)));
 }
 
 export function variablesView() {

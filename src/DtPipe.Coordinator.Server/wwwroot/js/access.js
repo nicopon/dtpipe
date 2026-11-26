@@ -405,8 +405,8 @@ function showKey(identity, made, usage) {
     <p class="hint">Shown this once: the coordinator keeps its hash only, and closing this window forgets it here. It ends in …${esc(made.hint)}.</p>
     <code class="mono key-secret" data-key-secret></code>
     <div class="row"><button class="primary" data-copy-key>Copy the key</button></div>
-    <h3>How to use it</h3>
-    <pre class="usage">${esc(usage)}</pre>
+    <div class="key-scroll"><h3>How to use it</h3>
+    <pre class="usage">${esc(usage)}</pre></div>
     <div class="row"><button data-close-key>Close</button></div>`;
   const secret = dialog.querySelector("[data-key-secret]");
   secret.textContent = made.key;

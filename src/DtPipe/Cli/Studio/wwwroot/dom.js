@@ -45,6 +45,15 @@ export function fill(node, ...children) {
   return node;
 }
 
+/**
+ * What a drawer tab draws when it has actions: `body` scrolls, `actions` (the buttons that act on it, never a text) sit in a bar
+ * under it that is always in view, and `fill` lets one element of the body take the height left (the editor, a table).
+ * @param {any} body @param {any[] | null} actions @param {{ fill?: boolean }} [options]
+ */
+export function tabOf(body, actions, options = {}) {
+  return { tab: true, body, actions: (actions || []).filter(Boolean), fill: !!options.fill };
+}
+
 const SVG = "http://www.w3.org/2000/svg";
 export function svg(tag, attrs = {}) {
   const node = document.createElementNS(SVG, tag);

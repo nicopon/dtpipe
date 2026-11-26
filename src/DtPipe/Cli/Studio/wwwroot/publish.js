@@ -2,7 +2,7 @@
 // Publishing the saved job to the coordinator's library: pre-checks (runner dry run and edge protections),
 // unified publish modal, 412 conflict diff & resolution, and the Publish tab view.
 
-import { api, el, fill, status } from "./dom.js";
+import { api, el, fill, status, tabOf } from "./dom.js";
 import { brickBranches, holdsEdits, showTab } from "./designer.js";
 import { openDialog, renderDiff, shortCommit } from "./dialogs.js";
 import { openCoordinatorConnect } from "./coordinator.js";
@@ -120,31 +120,33 @@ const refusalView = (check) => [
 ];
 
 export function publicationProblems() {
-  return [refusalProblems(), edgeProblems()];
+  const refusal = refusalProblems();
+  return tabOf([refusal.body, edgeProblems()], refusal.actions);
 }
 
+/** The first verdict of Problems: its words, and the button that asks for it, which sits in the drawer's action bar. */
 function refusalProblems() {
   const title = el("h3", {}, "Would be refused at publication");
   if (!state.coordinator) {
-    return [title, el("p", { class: "hint" }, "No verdict: no coordinator is connected, whose runner judges a publication.")];
+    return { body: [title, el("p", { class: "hint" }, "No verdict: no coordinator is connected, whose runner judges a publication.")], actions: [] };
   }
   if (!signedIn()) {
-    return [title, el("p", { class: "hint" }, "No verdict while signed out: the check reads each brick's rows through the coordinator. Sign in to ask for it.")];
+    return { body: [title, el("p", { class: "hint" }, "No verdict while signed out: the check reads each brick's rows through the coordinator. Sign in to ask for it.")], actions: [] };
   }
   const check = publication.check;
   const current = currentCheck();
-  const ask = el("div", { class: "row" },
-    el("button", { class: "small", disabled: !!check?.pending, onclick: () => askPublication(false) },
-      check?.pending ? "Checking…" : current ? "Check again" : "Check publication"),
-    el("span", { class: "hint" }, "The runner's dry run over one row of each brick: it starts a process, so it runs when asked and before Publish, never as you edit."));
-  if (check?.pending) return [title, ask, el("p", { class: "hint" }, "The runner's dry run is running…")];
-  if (!current) return [title, ask, check ? el("p", { class: "hint" }, "The steps changed since the last check.") : null];
-  if (current.error) return [title, ask, el("p", { class: "warn" }, `The check did not run: ${current.error}`)];
+  const ask = el("button", { class: "small", disabled: !!check?.pending, onclick: () => askPublication(false) },
+    check?.pending ? "Checking…" : current ? "Check again" : "Check publication");
+  const why = el("p", { class: "hint" }, "The runner's dry run over one row of each brick: it starts a process, so it runs when asked and before Publish, never as you edit.");
+  const said = (...parts) => ({ body: [title, why, ...parts], actions: [ask] });
+  if (check?.pending) return said(el("p", { class: "hint" }, "The runner's dry run is running…"));
+  if (!current) return said(check ? el("p", { class: "hint" }, "The steps changed since the last check.") : null);
+  if (current.error) return said(el("p", { class: "warn" }, `The check did not run: ${current.error}`));
   if (current.ok) {
-    return [title, ask, el("p", { class: "good" }, "Nothing: the runner's dry run takes this job."),
-      el("p", { class: "hint" }, "A publication also has each sink brick's node judge its output, which this check does not ask.")];
+    return said(el("p", { class: "good" }, "Nothing: the runner's dry run takes this job."),
+      el("p", { class: "hint" }, "A publication also has each sink brick's node judge its output, which this check does not ask."));
   }
-  return [title, ask, refusalView(current)];
+  return said(refusalView(current));
 }
 
 function edgeProblems() {
@@ -447,8 +449,8 @@ export async function publish(options = {}) {
 /** The Publish tab. */
 export function publicationView() {
   if (!state.coordinator) {
-    return [el("p", { class: "hint" }, "No coordinator is connected: connect one to publish a job into its library."),
-      el("button", { id: "publish-connect", class: "small primary", onclick: openCoordinatorConnect }, "Connect a coordinator…")];
+    return tabOf(el("p", { class: "hint" }, "No coordinator is connected: connect one to publish a job into its library."),
+      [el("button", { id: "publish-connect", class: "small primary", onclick: openCoordinatorConnect }, "Connect a coordinator…")]);
   }
   const check = currentCheck();
   return [check && check.ok === false ? refusalView(check) : null, outcomeView(publication.outcome)];

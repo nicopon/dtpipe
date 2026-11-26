@@ -185,6 +185,9 @@ table.matrix.edit input { cursor: pointer; }
 tr.keys-row > td { background: var(--surface-2); white-space: normal; padding: 10px 12px; }
 tr.keys-row .row { margin-top: 8px; }
 dialog.key-window { max-width: 680px; padding: 18px 20px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: inherit; box-shadow: var(--shadow); }
+/* The usage may be long: it scrolls, and the key, Copy and Close stay in view. */
+dialog.key-window[open] { display: flex; flex-direction: column; max-height: calc(100vh - 32px); overflow: hidden; }
+dialog.key-window .key-scroll { flex: 1 1 auto; min-height: 5em; overflow: auto; }
 dialog.key-window::backdrop { background: rgb(0 0 0 / 0.35); }
 .key-secret { display: block; margin: 8px 0; padding: 8px; background: var(--surface-2); border-radius: 4px; overflow-wrap: anywhere; user-select: all; }
 dialog.key-window .row { margin-top: 10px; }

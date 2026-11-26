@@ -457,7 +457,7 @@ function cardView(card) {
     : [el("p", {}, `${b.path || "The open job"} holds credentials as values at: ${(b.at || []).join(", ")}.`),
         el("p", { class: "hint" }, `They would reach the model at ${state.agent.status?.endpoint}.`)];
   return el("div", { class: "agent-card" }, text,
-    el("div", { class: "row" }, card.choices.map((choice) =>
+    el("div", { class: "row agent-actions" }, card.choices.map((choice) =>
       el("button", { class: choice === "refuse" || choice === "cancel" ? "" : choice === "send" ? "danger" : "primary", onclick: () => answer(card, choice) },
         CHOICE_LABEL[choice] || choice))));
 }
@@ -488,7 +488,7 @@ function planView(plan) {
       el("summary", {}, `The agent's plan: ${PLAN_LABEL[plan.state.toLowerCase()] || plan.state.toLowerCase()}`, plan.message ? el("span", { class: "hint" }, ` · ${plan.message.split("\n")[0]}`) : null),
       el("pre", {}, plan.yaml)),
     marks ? el("p", {}, marks) : null,
-    el("div", { class: "row" },
+    el("div", { class: "row agent-actions" },
       state.job && !state.agent.behind && (plan.yaml !== appliedYaml || moved()) ? el("button", { class: "small", title: "Replace the open job's steps with the plan; nothing is saved", disabled: blocked, "aria-describedby": blocked ? "agent-plan-refused" : null, onclick: () => apply({ yaml: plan.yaml }) }, "Apply to the open job") : null,
       el("button", { class: "small", title: "Open the plan as a new job, not saved yet", disabled: blocked, "aria-describedby": blocked ? "agent-plan-refused" : null, onclick: async () => { if (await hooks.openPlan(plan.yaml)) settled(); } }, "Open as a new job")),
     // The check's words keep their lines: a parser's error carries the line it read and a caret under the column.

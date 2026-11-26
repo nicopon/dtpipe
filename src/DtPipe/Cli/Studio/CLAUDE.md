@@ -311,6 +311,16 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   status is a live region, and what holds the focus when its zone is drawn again gets it back. Text colours are tokens that reach
   4.5:1 on the panel, the page and the code background in both themes, and a solid fill (`--accent`, `--bad`, `--warn`) carries
   `--on-solid`, never a literal white. `[local: page_smoke.mjs keyboard — the tree's names and the contrast of what the screens draw]`
+- **A drawer tab's actions never scroll and never leave the screen.** A tab draws its content, which scrolls, and its actions,
+  which sit in a bar under it (`tabOf` in `dom.js`; a tab with no action gives its content alone), so a new tab inherits the rule
+  by using it. The drawer's floor (`SIZE_LIMITS.drawer`) holds the tabs, a few lines and the bar, and the canvas keeps its own
+  (`CANVAS_MIN`); both reach the layout as `--drawer-min` and `--canvas-min`, so a window too short for the size asked shrinks the
+  drawer and the size kept in `view.json` stays what the person chose. The handle's drag and keys are bounded by what is
+  laid out (`drawerRoom`, measured). **The rule holds for every panel that holds buttons.** A dialog is a head and a body that
+  scrolls (`.dialog-body`, `.run-body`), the dialog itself never: the `.dialog-actions` that end a body stick at its foot, so a
+  builder puts them last and nothing else does the work. The agent's input is `flex: none` under a log that keeps a small floor,
+  and what a card or a plan waits for (`.agent-actions`) sticks at the log's foot.
+  `[local: page_smoke.mjs drawer-actions, dialog-actions, agent-actions]`
 - **A YAML text not applied holds the cards, so the two never say different things.** The YAML tab edits the composed
   job; what the person types is `state.cards.text`, never read off the editor, so a redraw keeps it. While it differs from
   the composed text (`editingText`), the canvas, inspector, palette and Undo are inert, Save, Preview and a message

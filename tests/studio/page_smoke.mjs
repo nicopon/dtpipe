@@ -9,7 +9,7 @@
 // a model connected from the page with no flag, and read back by a studio started again; another folder opened from the page,
 // refused while changes are unsaved, then discarded or saved first;
 // while its source is still answering; Tab to a card, a wire made and undone from the keyboard, every control named,
-// the text at 4.5:1 in both themes.
+// the text at 4.5:1 in both themes; the drawer's actions in view at its smallest and tallest and in a short window.
 //
 // Local only: it needs Node 22+ (native WebSocket, no dependency), Chrome, and a built dtpipe. CI never
 // runs it. The page is embedded in the DLL, so build before playing it.
@@ -930,6 +930,143 @@ const scenarios = {
     check("the caret stays at the end", field.caret, JSON.stringify(field));
   },
 
+  // No action of the drawer leaves the screen: whatever tab is open, at the drawer's smallest and tallest and in a short window,
+  // each button of the action bar lies inside the drawer and the window, with no scrolling to reach it.
+  async "drawer-actions"({ page: p }) {
+    check("the job opens", await p.openJob("chain.yaml"));
+    await p.click("#d-preview");
+    check("Preview finishes", await p.waitStatus(/preview (done|failed)/, 30000));
+    await p.pick("b");
+    const tabs = await p.ev(`[...document.querySelectorAll("#d-drawer .tabs button")].map((b) => b.dataset.tab)`);
+    // The handle's own keys, as a person moves it: each press is 16 px, and the layout bounds the result.
+    const press = (key, times) => p.ev(`(() => { const h = document.querySelector('.split-row'); for (let i = 0; i < ${times}; i++) h.dispatchEvent(new KeyboardEvent("keydown", { key: ${JSON.stringify(key)}, bubbles: true, cancelable: true })); })()`);
+    const lost = () => p.ev(`(() => {
+      const drawer = document.querySelector("#d-drawer").getBoundingClientRect();
+      const bar = document.querySelector("#d-drawer .drawer-actions");
+      const out = [];
+      if (bar) for (const b of bar.querySelectorAll("button")) {
+        const r = b.getBoundingClientRect();
+        if (r.width === 0 || r.top < drawer.top - 0.5 || r.bottom > drawer.bottom + 0.5 || r.top < 0 || r.bottom > innerHeight) out.push(b.textContent);
+      }
+      const body = document.querySelector("#d-drawer .drawer-body");
+      const edit = document.querySelector("#d-edit");
+      if (edit && bar && edit.getBoundingClientRect().bottom > bar.getBoundingClientRect().top + 0.5) out.push("the editor overlaps the bar");
+      if (edit && edit.getBoundingClientRect().height < 40) out.push("the editor is " + Math.round(edit.getBoundingClientRect().height) + " px");
+      for (const t of document.querySelectorAll("#d-drawer .drawer-body.fill > .scroll")) if (t.getBoundingClientRect().bottom > body.getBoundingClientRect().bottom + 0.5) out.push("a table leaves the body");
+      if (document.querySelector("#d-drawer .tabs").getBoundingClientRect().height > 50) out.push("the tabs wrap");
+      return out.join(", ");
+    })()`);
+    const geometry = () => p.ev(`(() => { const r = (s) => Math.round(document.querySelector(s).getBoundingClientRect().height); return { drawer: r("#d-drawer"), canvas: r("#d-canvas") }; })()`);
+    const everyTab = async (when) => {
+      for (const tab of tabs) {
+        await p.click(`#d-drawer .tabs button[data-tab="${tab}"]`);
+        check(`${when}: no action leaves the ${tab} tab`, (await lost()) === "", `${await lost()} ${JSON.stringify(await geometry())}`);
+      }
+    };
+    const hasBar = async (tab) => { await p.click(`#d-drawer .tabs button[data-tab="${tab}"]`); return p.ev(`document.querySelectorAll("#d-drawer .drawer-actions button").length`); };
+    check("the YAML tab has Copy, Apply and Revert in its bar", (await hasBar("yaml")) === 3);
+    check("the Publish tab has its button in its bar", (await hasBar("publish")) === 1);
+
+    await everyTab("at the default size");
+    await press("ArrowDown", 40);
+    await p.frame();
+    const small = await geometry();
+    check("the drawer stops at its floor", small.drawer >= 210 && small.drawer <= 230, JSON.stringify(small));
+    await everyTab("at the drawer's smallest");
+
+    await press("ArrowUp", 60);
+    await p.frame();
+    const tall = await geometry();
+    check("the drawer leaves the canvas its floor", tall.canvas >= 120, JSON.stringify(tall));
+    await everyTab("at the drawer's tallest");
+
+    // A window too short for the size kept: the layout shrinks the drawer, and what was asked stays for a taller window.
+    await p.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 520, deviceScaleFactor: 1, mobile: false });
+    await p.frame();
+    const short = await geometry();
+    check("in a short window the canvas keeps its floor", short.canvas >= 120 && short.drawer >= 210, JSON.stringify(short));
+    await everyTab("in a short window");
+    await press("ArrowUp", 60);
+    await p.frame();
+    check("in a short window the drawer cannot be dragged over the canvas", (await geometry()).canvas >= 120, JSON.stringify(await geometry()));
+    await everyTab("in a short window, drawer asked tallest");
+    await p.send("Emulation.clearDeviceMetricsOverride");
+    await p.frame();
+  },
+
+  // No action of a dialog leaves the screen: its head and its body are apart, the body scrolls, and the buttons that end the body
+  // stay at its foot, whatever the window's height.
+  async "dialog-actions"({ page: p }) {
+    check("the job opens", await p.openJob("chain.yaml"));
+    const lost = () => p.ev(`(() => {
+      const d = document.querySelector(".studio-dialog[open], #d-run-dialog[open]");
+      if (!d) return "no dialog";
+      const box = d.getBoundingClientRect();
+      const out = [];
+      if (box.top < -0.5 || box.bottom > innerHeight + 0.5) out.push("the dialog leaves the window");
+      for (const b of d.querySelectorAll(".dialog-actions button, .run-actions button, [aria-label='Close dialog']")) {
+        if (!b.offsetParent) continue;
+        const r = b.getBoundingClientRect();
+        const limit = (b.closest(".dialog-body, .run-body") ?? d).getBoundingClientRect();
+        if (r.top < Math.max(0, limit.top) - 0.5 || r.bottom > Math.min(innerHeight, limit.bottom) + 0.5) out.push((b.textContent.trim() || b.getAttribute("aria-label")) + " " + Math.round(r.top) + ".." + Math.round(r.bottom) + " of " + Math.round(limit.top) + ".." + Math.round(limit.bottom));
+      }
+      return out.join(", ");
+    })()`);
+    const opened = (selector) => p.until(`!!document.querySelector(${JSON.stringify(selector)})`);
+    const dialogs = {
+      "Connect a model": async () => { await p.click("#agent-link"); return opened(".studio-dialog[open] #d-agent-submit"); },
+      "Connect a coordinator": async () => { await p.click('#d-drawer .tabs button[data-tab="publish"]'); await p.click("#publish-connect"); return opened("#d-coordinator-dialog[open]"); },
+      "Open a folder": async () => { await p.click("#folder"); return opened("#d-workspace-dialog[open]"); },
+      "New job from CLI": async () => { if (await p.ev(`document.querySelector("#side-jobs-view").hidden`)) await p.click("#side-jobs"); await p.click("#new-job-trigger"); await p.click("#new-from-cli"); return opened("#d-cli-dialog[open]"); },
+      "Run for real": async () => {
+        await p.click("#d-run");
+        if (!(await opened("#d-run-dialog[open]"))) return false;
+        await p.ev(`(() => { const r = document.querySelector("#d-review"); if (r) { r.checked = true; r.dispatchEvent(new Event("change")); } })()`);
+        return p.until(`/stops before every writer|holds every row/.test(document.querySelector("#d-run-dialog")?.innerText ?? "")`);
+      },
+    };
+    const closeAll = async () => {
+      await p.ev(`document.querySelector("#d-run-cancel")?.click(); document.querySelector(".studio-dialog[open] [aria-label='Close dialog']")?.click()`);
+      await p.until(`!document.querySelector("dialog[open]")`);
+    };
+    for (const height of [700, 520, 420, 360]) {
+      await p.send("Emulation.setDeviceMetricsOverride", { width: 1280, height, deviceScaleFactor: 1, mobile: false });
+      await p.frame();
+      for (const [name, open] of Object.entries(dialogs)) {
+        check(`${height} px: ${name} opens`, await open());
+        check(`${height} px: no action of ${name} leaves the screen`, (await lost()) === "", await lost());
+        await closeAll();
+      }
+    }
+    await p.send("Emulation.clearDeviceMetricsOverride");
+    await p.frame();
+  },
+
+  // The agent's panel keeps its input in view down to a short window, and what a card or a plan waits for stays at the foot of the
+  // log, however far the person has scrolled up.
+  async "agent-actions"({ page: p }) {
+    const idle = () => p.until(`document.querySelector("#agent-stop").hidden && !document.querySelector("#agent-now .agent-card button")`, 30000);
+    check("the job opens", await p.openJob("chain.yaml"));
+    await p.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 420, deviceScaleFactor: 1, mobile: false });
+    await p.frame();
+    const sendLost = () => p.ev(`(() => { const r = document.querySelector("#agent-send").getBoundingClientRect(); const pane = document.querySelector("#agent-pane").getBoundingClientRect();
+      return r.top < pane.top || r.bottom > Math.min(innerHeight, pane.bottom) + 0.5 ? "Send " + Math.round(r.top) + ".." + Math.round(r.bottom) + " of " + Math.round(pane.top) + ".." + Math.round(pane.bottom) : ""; })()`);
+    check("in a window of 420 px Send is in view", (await sendLost()) === "", await sendLost());
+    await p.ev(`(() => { const t = document.querySelector("#agent-prompt"); t.value = "overwrite it"; })()`);
+    await p.click("#agent-send");
+    check("a save over the open job waits on a card", await p.until(`/asks to save chain\\.yaml/.test(document.querySelector("#agent-now")?.textContent ?? "")`));
+    await p.ev(`document.querySelector("#agent-log").scrollTop = 0`);
+    await p.frame();
+    const choicesLost = () => p.ev(`(() => { const log = document.querySelector("#agent-log").getBoundingClientRect(); const out = [];
+      for (const b of document.querySelectorAll("#agent-now .agent-card .agent-actions button")) { const r = b.getBoundingClientRect(); if (r.top < log.top - 0.5 || r.bottom > Math.min(innerHeight, log.bottom) + 0.5) out.push(b.textContent); }
+      return out.join(","); })()`);
+    check("the card's choices are in view with the log scrolled to its top", (await choicesLost()) === "" && await p.ev(`document.querySelectorAll("#agent-now .agent-card .agent-actions button").length > 0`), await choicesLost());
+    await p.clickText("#agent-now button", "Save");
+    check("the save ends the turn", await idle());
+    await p.send("Emulation.clearDeviceMetricsOverride");
+    await p.frame();
+  },
+
   // What a pointer does, the keyboard does: Tab reaches every card, a card is chosen with Enter, and a wire is undone and
   // made again from its inspector; the drag of a wire still works. Every control has a name, and the text reads at 4.5:1
   // in both themes, across the screens a person opens.
@@ -1524,6 +1661,8 @@ const argsOf = {
   "agent-edit": () => ["--llm-provider", "ollama", "--llm-url", fakeLlm.url],
   undo: () => ["--llm-provider", "ollama", "--llm-url", fakeLlm.url],
   keyboard: () => ["--llm-provider", "ollama", "--llm-url", fakeLlm.url],
+  "dialog-actions": () => ["--llm-provider", "ollama", "--llm-url", fakeLlm.url],
+  "agent-actions": () => ["--llm-provider", "ollama", "--llm-url", fakeLlm.url],
 };
 
 const fixturesOf = {

@@ -5,7 +5,7 @@
 // rereading its source. The server holds the pins and the checkpoints beside the job and settles them against the job's
 // text; the page only shows what it answers, and never decides what is still true.
 
-import { api, el, status } from "./dom.js";
+import { api, el, status, tabOf } from "./dom.js";
 import { brickBranches, cardBranch, cardWatch, compose, editingText, focusCard, showTab, stageTable } from "./designer.js";
 import { invalidate } from "./render.js";
 import { freshPreview, sequence, state } from "./state.js";
@@ -371,7 +371,7 @@ export async function forgetPins() {
 export function previewView(alias) {
   const place = alias ? cardWatch(alias) : null;
   const parts = [];
-  if (dbg.running) parts.push(el("p", { class: "warn" }, "Running… ", el("button", { class: "ghost small", onclick: cancelPreview }, "Stop")));
+  if (dbg.running) parts.push(el("p", { class: "warn" }, "Running…"));
   const waiting = alias && !place ? queueOf(alias) : null;
   if (waiting) {
     const held = dbg.held.get(waiting.branch);
@@ -426,7 +426,8 @@ export function previewView(alias) {
         : el("p", { class: "hint" }, `The engine returned no reason. Check each endpoint's address and component; dtpipe --job on the saved file${state.job ? ` (${state.job.path}, in the folder ${state.jobs.folder})` : ""} prints the error.`));
   }
   if (dbg.notice) parts.push(el("p", { class: "hint warn" }, dbg.notice));
-  return parts;
+  // The rows take the height the drawer has, and scroll in both directions there: their scrollbars stay in view.
+  return tabOf(parts, dbg.running ? [el("button", { class: "ghost small", onclick: cancelPreview }, "Stop")] : [], { fill: true });
 }
 
 // ---------------------------------------------------------------- a real run left holding rows
