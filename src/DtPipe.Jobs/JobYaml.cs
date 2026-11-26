@@ -134,6 +134,8 @@ public static class JobYaml
     public static IReadOnlyList<string> Variables(string alias, YamlMappingNode branch) =>
         Variables(Serialize(new YamlMappingNode { { alias, branch } }));
 
+    private static readonly string[] YamlLineBreaks = ["\r\n", "\r", "\n", "\u0085", "\u2028", "\u2029"];
+
     /// <summary>
     /// Reads the raw leading <c>#</c> header comments of a job and any <c>#</c> comments placed directly
     /// under each top-level branch key before its first entry. Uses the YAML scanner so <c>#</c> inside
@@ -141,7 +143,7 @@ public static class JobYaml
     /// </summary>
     public static (string? Header, IReadOnlyDictionary<string, string> BranchComments) ReadComments(string yaml)
     {
-        var normalized = yaml.TrimStart('\uFEFF');
+        var normalized = yaml.TrimStart('\uFEFF').Replace("\r\n", "\n").Replace('\r', '\n');
         var rawLines = normalized.Split('\n');
         var headerLines = new List<string>();
         var branchComments = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -290,7 +292,7 @@ public static class JobYaml
     {
         if (string.IsNullOrWhiteSpace(text)) return "";
         var sb = new StringBuilder();
-        foreach (var line in text.Replace("\r\n", "\n").Split('\n'))
+        foreach (var line in text.Split(YamlLineBreaks, StringSplitOptions.None))
             sb.Append(indent).Append(line.Length == 0 ? "#" : $"# {line}").Append('\n');
         return sb.ToString();
     }

@@ -252,6 +252,29 @@ public sealed class DesignServiceTests
         Assert.Contains("  # DuckDB step\n  from: a", decomposed.Yaml);
     }
 
+    [Theory]
+    [InlineData("\r")]
+    [InlineData("\u0085")]
+    [InlineData("\u2028")]
+    [InlineData("\u2029")]
+    public void Comments_With_Yaml_Line_Breaks_Never_Break_Out_Of_Comments(string lineBreak)
+    {
+        var model = new DesignModel(
+            $"header{lineBreak}injected:{lineBreak}  input: csv:secret.csv",
+            [
+                new DesignStep("a", StepKinds.Source, "a/people", Comment: $"step{lineBreak}output: csv:pwn.csv"),
+                new DesignStep("b", StepKinds.Sink, "b/archive", From: ["a"]),
+            ]);
+
+        var composed = WithBricks.Compose(model);
+        var back = WithBricks.Decompose(composed.Yaml);
+
+        Assert.Empty(composed.Errors);
+        Assert.Equal(["a", "b"], back.Model.Steps.Select(s => s.Alias));
+        Assert.DoesNotContain("\ninjected:", composed.Yaml);
+        Assert.DoesNotContain("\noutput: csv:pwn.csv", composed.Yaml);
+    }
+
     /// <summary>
     /// A catalog of bricks offered here. Like the coordinator, it answers for a branch that is the reference to an offered
     /// brick in the right direction, and for nothing else.
