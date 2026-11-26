@@ -91,4 +91,28 @@ public sealed class RunnerFlowTests : IDisposable
 
         Assert.Contains("only a node can be a runner", refused.Message);
     }
+
+    [Fact]
+    public void Promoting_To_Runner_Strips_Stale_Matrix_Rows_So_Demoting_Closes_Flows()
+    {
+        _rights.AllowEdges([new GroupEdge("data", "legacy-run"), new GroupEdge("*", "legacy-run"), new GroupEdge("legacy-run", "data")]);
+        _rights.AddIdentity(new Identity("legacy", "legacy", "", ["legacy-run"]) { Runner = false });
+        Assert.True(_rights.CanSend(Set("data"), Set("legacy-run")));
+
+        var (before, after) = _rights.UpdateIdentity("legacy", null, null, null, null, runner: true);
+        Assert.False(before.Runner);
+        Assert.True(after.Runner);
+        Assert.False(_rights.Snapshot().Matrix.ContainsKey("legacy-run"));
+        Assert.DoesNotContain("legacy-run", _rights.Snapshot().Matrix.GetValueOrDefault("data") ?? []);
+        Assert.DoesNotContain("legacy-run", _rights.Snapshot().Matrix.GetValueOrDefault("*") ?? []);
+
+        // Saving a matrix containing stale runner edges strips them as well.
+        _rights.SetMatrix(new Dictionary<string, List<string>> { ["data"] = ["legacy-run"], ["legacy-run"] = ["data"] });
+        Assert.False(_rights.Snapshot().Matrix.ContainsKey("legacy-run"));
+        Assert.DoesNotContain("legacy-run", _rights.Snapshot().Matrix.GetValueOrDefault("data") ?? []);
+
+        _rights.UpdateIdentity("legacy", null, null, null, null, runner: false);
+        Assert.False(_rights.CanSend(Set("data"), Set("legacy-run")));
+        Assert.False(_rights.CanSend(Set("legacy-run"), Set("data")));
+    }
 }

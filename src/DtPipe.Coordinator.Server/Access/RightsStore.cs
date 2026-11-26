@@ -206,20 +206,25 @@ public sealed class RightsStore
     {
         if (matrix.TryGetValue("*", out var wildcardTargets) && wildcardTargets.Contains("*"))
             throw new ConflictException("'* → *' cannot be allowed: declare each flow between groups, or between '*' and a specific group.");
+        var runners = RunnerGroups(doc);
+        var sanitized = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        foreach (var (group, targets) in matrix)
+        {
+            if (runners.Contains(group)) continue;
+            var kept = targets.Where(t => !runners.Contains(t)).Distinct().Order(StringComparer.Ordinal).ToList();
+            if (group != "*" || kept.Count > 0) sanitized[group] = kept;
+        }
         var changes = new List<string>();
-        foreach (var group in matrix.Keys.Union(doc.Matrix.Keys).Order(StringComparer.Ordinal))
+        foreach (var group in sanitized.Keys.Union(doc.Matrix.Keys).Order(StringComparer.Ordinal))
         {
             var before = doc.Matrix.GetValueOrDefault(group) ?? [];
-            var after = matrix.GetValueOrDefault(group) ?? [];
+            var after = sanitized.GetValueOrDefault(group) ?? [];
             foreach (var t in after.Except(before)) changes.Add($"{group} → {t} allowed");
             foreach (var t in before.Except(after)) changes.Add($"{group} → {t} revoked");
         }
         doc.Matrix.Clear();
-        foreach (var (group, targets) in matrix)
-        {
-            var distinct = targets.Distinct().Order(StringComparer.Ordinal).ToList();
-            if (group != "*" || distinct.Count > 0) doc.Matrix[group] = distinct;
-        }
+        foreach (var (group, targets) in sanitized)
+            doc.Matrix[group] = targets;
         return changes.Count > 0 ? "Flow matrix: " + string.Join(", ", changes) : "Flow matrix saved, unchanged";
     });
 
@@ -250,6 +255,30 @@ public sealed class RightsStore
         return added.Count > 0 ? string.Join(", ", added) : "every edge asked was allowed already";
     }
 
+    private static List<string> StripRunnerMatrixRows(RightsDocument doc, IReadOnlySet<string> runnerGroups)
+    {
+        var revoked = new List<string>();
+        if (runnerGroups.Count == 0) return revoked;
+
+        foreach (var group in doc.Matrix.Keys.Where(runnerGroups.Contains).Order(StringComparer.Ordinal).ToList())
+        {
+            foreach (var target in doc.Matrix[group]) revoked.Add($"{group} → {target} revoked");
+            doc.Matrix.Remove(group);
+        }
+
+        foreach (var group in doc.Matrix.Keys.Order(StringComparer.Ordinal).ToList())
+        {
+            var targets = doc.Matrix[group];
+            var removed = targets.Where(runnerGroups.Contains).ToList();
+            if (removed.Count == 0) continue;
+            foreach (var target in removed) revoked.Add($"{group} → {target} revoked");
+            targets.RemoveAll(runnerGroups.Contains);
+            if (group == "*" && targets.Count == 0) doc.Matrix.Remove("*");
+        }
+
+        return revoked;
+    }
+
     /// <summary>Adds <paramref name="identity"/>, and allows <paramref name="edges"/> in the same change when there are any.</summary>
     public void AddIdentity(Identity identity, string? by = null, IReadOnlyList<GroupEdge>? edges = null) => Edit(by, doc =>
     {
@@ -257,7 +286,10 @@ public sealed class RightsStore
         var added = Normalized(identity);
         CheckIdentities([.. doc.Identities, added]);
         doc.Identities.Add(added);
-        return edges is { Count: > 0 } ? $"{Added(added)}; flow matrix: {Allow(doc, edges)}" : Added(added);
+        var stripped = added.Runner ? StripRunnerMatrixRows(doc, RunnerGroups(doc)) : [];
+        var note = Added(added);
+        if (stripped.Count > 0) note += $"; flow matrix: {string.Join(", ", stripped)}";
+        return edges is { Count: > 0 } ? $"{note}; flow matrix: {Allow(doc, edges)}" : note;
     });
 
     private static string Added(Identity added)
@@ -303,6 +335,7 @@ public sealed class RightsStore
                 var normalized = Normalized(identity.ToIdentity(now));
                 CheckIdentities([.. doc.Identities, normalized]);
                 doc.Identities.Add(normalized);
+                if (normalized.Runner) StripRunnerMatrixRows(doc, RunnerGroups(doc));
                 added.Add(normalized.ClientId);
                 changes.Add(Added(normalized));
             }
@@ -337,8 +370,11 @@ public sealed class RightsStore
     /// Edits an identity. An argument that is null is left as the identity has it: an edit says what it changes, and a field it
     /// leaves out is neither emptied, renamed nor enabled by the omission. The identity is read and written as one change.
     /// </summary>
-    public void UpdateIdentity(string clientId, string? name, string? description, IReadOnlyList<string>? groups, bool? enabled, string? by = null,
-        IReadOnlyList<string>? pipelines = null, string? role = null, string? account = null, bool? runner = null) =>
+    public (Identity Before, Identity After) UpdateIdentity(string clientId, string? name, string? description, IReadOnlyList<string>? groups, bool? enabled, string? by = null,
+        IReadOnlyList<string>? pipelines = null, string? role = null, string? account = null, bool? runner = null)
+    {
+        Identity? capturedBefore = null;
+        Identity? capturedAfter = null;
         Edit(by, doc =>
         {
             var index = doc.Identities.FindIndex(i => i.ClientId == clientId);
@@ -357,6 +393,8 @@ public sealed class RightsStore
             });
             CheckIdentities(doc.Identities.Select((i, at) => at == index ? after : i).ToList());
             doc.Identities[index] = after;
+            capturedBefore = before;
+            capturedAfter = after;
             var changes = new List<string>();
             if (!before.Groups.SequenceEqual(after.Groups)) changes.Add($"groups {string.Join("+", before.Groups)} → {string.Join("+", after.Groups)}");
             if (!(before.Pipelines ?? []).SequenceEqual(after.Pipelines!)) changes.Add($"pipelines {string.Join("+", before.Pipelines ?? [])} → {string.Join("+", after.Pipelines!)}");
@@ -366,8 +404,13 @@ public sealed class RightsStore
             if (before.Runner != after.Runner) changes.Add(after.Runner ? "made a runner" : "no longer a runner");
             if (before.Enabled != after.Enabled) changes.Add(after.Enabled ? "enabled" : "disabled");
             if (before.Description != after.Description) changes.Add("described again");
+            if (after.Runner)
+                foreach (var revoked in StripRunnerMatrixRows(doc, RunnerGroups(doc)))
+                    changes.Add(revoked);
             return $"Identity {clientId}: " + (changes.Count > 0 ? string.Join(", ", changes) : "unchanged");
         });
+        return (capturedBefore!, capturedAfter!);
+    }
 
     public void RemoveIdentity(string clientId, string? by = null) => Edit(by, doc =>
     {
