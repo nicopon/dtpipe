@@ -23,7 +23,7 @@ public static class StudioAgentClients
     public static ILlmClient? Create(string provider, string? key, TimeSpan timeout) => provider.ToLowerInvariant() switch
     {
         "ollama" => new OllamaClient(timeout),
-        "openai" => new OpenAiClient(key, timeout),
+        "openai" => new OpenAiClient(key ?? "", timeout),
         _ => null,
     };
 

@@ -222,4 +222,18 @@ public sealed class StudioConnectionTests : IAsyncLifetime
         }
         Assert.DoesNotContain("sk-test", File.ReadAllText(SettingsPath));
     }
+
+    [Theory]
+    [InlineData("https://api.example.com/v1?api_key=secret")]
+    [InlineData("https://api.example.com/v1#frag")]
+    public async Task Agent_address_with_query_or_fragment_is_refused(string badUrl)
+    {
+        await StartAsync();
+
+        var test = await CallAsync(HttpMethod.Post, "/api/agent/connection/test", new { provider = "openai", url = badUrl });
+        var put = await CallAsync(HttpMethod.Put, "/api/agent/connection", new { provider = "openai", url = badUrl });
+
+        Assert.Equal(HttpStatusCode.BadRequest, test.Status);
+        Assert.Equal(HttpStatusCode.BadRequest, put.Status);
+    }
 }

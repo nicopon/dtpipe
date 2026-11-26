@@ -100,6 +100,7 @@ public sealed partial class StudioServer
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
             throw new StudioRefusal(400, "The address is an absolute http or https address.");
         if (uri.UserInfo.Length > 0) throw new StudioRefusal(400, "An address holds no credential: the key is a field of its own.");
+        if (uri.Query.Length > 0 || uri.Fragment.Length > 0) throw new StudioRefusal(400, "An address holds no query or fragment.");
         var timeout = request.Timeout is > 0 ? TimeSpan.FromSeconds(request.Timeout.Value) : AgentOptions.DefaultLlmTimeout;
         // Only Ollama takes a window: another provider drops it, as a key typed for Ollama is dropped.
         if (provider == "ollama" && request.NumCtx is { } window && !StudioAgentClients.IsNumCtx(window))

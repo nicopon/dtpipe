@@ -174,7 +174,7 @@ public sealed class StudioCommand : Command
                 start = new AgentConnection(client.ProviderName, url, model, (int)timeout.TotalSeconds, "flag", llmKey is null ? "none" : "flag");
             }
             // With a key the studio signs in at once; a refusal leaves it signed out with the reason, which the page shows too.
-            if (link is { ByKey: true })
+            if (link is { ByKey: true } && coordinatorStart is null)
             {
                 try { Console.Error.WriteLine($"Signed in to {link.Origin.GetLeftPart(UriPartial.Authority)} as {await link.SignInWithKeyAsync(ct)}."); }
                 catch (CoordinatorLinkException ex) { Console.Error.WriteLine(ex.Message); }
