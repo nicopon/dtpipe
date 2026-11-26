@@ -243,10 +243,10 @@ public sealed class OracleSchemaInspector : ISchemaInspector
         using var cmd = connection.CreateCommand();
         cmd.CommandText = @"
             DECLARE
-              v_schema VARCHAR2(30);
-              v_part1  VARCHAR2(30);
-              v_part2  VARCHAR2(30);
-              v_dblink VARCHAR2(30);
+              v_schema VARCHAR2(128);
+              v_part1  VARCHAR2(128);
+              v_part2  VARCHAR2(128);
+              v_dblink VARCHAR2(128);
               v_part1_type NUMBER;
               v_object_number NUMBER;
             BEGIN
@@ -266,8 +266,8 @@ public sealed class OracleSchemaInspector : ISchemaInspector
 
         cmd.Parameters.Add(new OracleParameter("name", inputName));
 
-        var pSchema = new OracleParameter("out_schema", OracleDbType.Varchar2, 100) { Direction = ParameterDirection.Output };
-        var pTable = new OracleParameter("out_table", OracleDbType.Varchar2, 100) { Direction = ParameterDirection.Output };
+        var pSchema = new OracleParameter("out_schema", OracleDbType.Varchar2, 128) { Direction = ParameterDirection.Output };
+        var pTable = new OracleParameter("out_table", OracleDbType.Varchar2, 128) { Direction = ParameterDirection.Output };
 
         cmd.Parameters.Add(pSchema);
         cmd.Parameters.Add(pTable);
