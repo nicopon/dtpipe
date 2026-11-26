@@ -11,8 +11,10 @@ import { sequence, state } from "./state.js";
 
 const CARD_W = 210;
 const CARD_H = 114;
-const PORT_IN_Y = 34;
-const PORT_REF_Y = 66;
+// A wire ends on a port's centre. The ports are positioned from the card's padding box (below its
+// 4px top border) in studio.css: .port.in/.out top 27px and .port.ref top 59px, each 14px tall.
+const PORT_IN_Y = 4 + 27 + 7;
+const PORT_REF_Y = 4 + 59 + 7;
 
 // The transformer types the page offers, each with the shape its YAML takes (REFERENCE.md,
 // "Transformer YAML reference"). dtpipe validates the result: a sample runs it.
