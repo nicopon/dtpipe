@@ -113,10 +113,10 @@ public sealed class ComputeDataTransformer : BaseColumnarTransformer, IRequiresO
             }
 
             writtenIndices.Add(colIndex);
-            var (function, wrappedScript) = CompileBody(engine, script);
+            var (function, compiledBody) = JsScriptCompiler.Compile(engine, "row", script);
             compiledInitialFunctions[procIdx] = function;
-            bool isPure = JsAstAnalyzer.IsPureForParallel(wrappedScript);
-            processors[procIdx] = new ScriptColumnProcessor(procIdx, colIndex, wrappedScript, isPure);
+            bool isPure = JsAstAnalyzer.IsPureForParallel(JsScriptCompiler.AsFunctionExpression("row", compiledBody));
+            processors[procIdx] = new ScriptColumnProcessor(procIdx, colIndex, compiledBody, isPure);
             procIdx++;
         }
 
@@ -378,40 +378,12 @@ public sealed class ComputeDataTransformer : BaseColumnarTransformer, IRequiresO
         }
     }
 
-    /// <summary>
-    /// Compiles a column's script as <c>function(row)</c>. A body that parses as one expression is
-    /// returned as such, so an expression containing the word "return" (an immediately invoked
-    /// function) still yields its value; anything else is taken as the statements of the function.
-    /// </summary>
-    private static (JsValue Function, string WrappedScript) CompileBody(Engine engine, string script)
-    {
-        var body = script.Trim();
-        var expression = body.TrimEnd(';').Trim();
-
-        if (expression.Length > 0)
-        {
-            var asExpression = $"function(row) {{ return ({expression}\n); }}";
-            try
-            {
-                return (engine.Evaluate($"({asExpression})"), asExpression);
-            }
-            catch (JavaScriptException)
-            {
-                // Defining a function runs nothing, so the only failure here is a syntax error: the
-                // body is not one expression. Fall through to the statement form below.
-            }
-        }
-
-        var asStatements = $"function(row) {{ {body} }}";
-        return (engine.Evaluate($"({asStatements})"), asStatements);
-    }
-
     private CompiledComputeState GetOrCreateState(Engine engine)
         => _engineCache.GetValue(engine, e =>
         {
             var functions = new JsValue[_processors!.Length];
             for (int i = 0; i < _processors.Length; i++)
-                functions[i] = e.Evaluate($"({_processors[i].WrappedScript})");
+                functions[i] = JsScriptCompiler.CompilePrepared(e, "row", _processors[i].CompiledBody);
             return CreateState(e, functions);
         });
 
@@ -436,6 +408,6 @@ public sealed class ComputeDataTransformer : BaseColumnarTransformer, IRequiresO
     private sealed record ScriptColumnProcessor(
         int Index,
         int ColumnIndex,
-        string WrappedScript,
+        string CompiledBody,
         bool IsPure);
 }

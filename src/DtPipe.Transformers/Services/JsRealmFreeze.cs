@@ -49,6 +49,14 @@ internal static class JsRealmFreeze
                 }
                 roots.push(Object.getPrototypeOf(Iterator.from({ next() { return { done: true }; } })));
             }
+            if (typeof AsyncIterator === 'function') {
+                roots.push(Object.getPrototypeOf(AsyncIterator.from([1])));
+                roots.push(Object.getPrototypeOf(AsyncIterator.from({ next() { return Promise.resolve({ done: true }); } })));
+                if (typeof AsyncIterator.prototype.map === 'function') {
+                    roots.push(Object.getPrototypeOf((async function* () {})().map(x => x)));
+                }
+            }
+            delete globalThis.ShadowRealm;
             for (const key of ['input', '$_', 'lastMatch', '$&', 'lastParen', '$+', 'leftContext', '$`',
                 'rightContext', "$'", '$1', '$2', '$3', '$4', '$5', '$6', '$7', '$8', '$9']) {
                 delete RegExp[key];

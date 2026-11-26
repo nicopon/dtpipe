@@ -69,6 +69,9 @@ public class JsRealmFreezeTests : IDisposable
                 ['%RegExpStringIteratorPrototype%', Object.getPrototypeOf(/a/[Symbol.matchAll]('a'))],
                 ['%IteratorHelperPrototype%', Object.getPrototypeOf([].values().map(x => x))],
                 ['%WrapForValidIteratorPrototype%', Object.getPrototypeOf(Iterator.from({ next() { return { done: true }; } }))],
+                ['%AsyncFromSyncIteratorPrototype%', Object.getPrototypeOf(AsyncIterator.from([1]))],
+                ['%WrapForValidAsyncIteratorPrototype%', Object.getPrototypeOf(AsyncIterator.from({ next() { return Promise.resolve({ done: true }); } }))],
+                ['%AsyncIteratorHelperPrototype%', Object.getPrototypeOf((async function* () {})().map(x => x))],
                 ['%ThrowTypeError%', Object.getOwnPropertyDescriptor(arguments, 'callee').get],
             ];
             const seen = new Set();
@@ -158,8 +161,12 @@ public class JsRealmFreezeTests : IDisposable
         { "Iterator.prototype.constructor = row.A; return 'x';", "throws: Cannot set property on Iterator prototype directly" },
         { "const o = Object.create(Iterator.prototype); o.constructor = row.A; return String(o.constructor);", "1|2|4" },
         { "Object.getPrototypeOf([1].values().map(x => x)).__p = row.A; return 'x';", "throws: Cannot assign to read only property '__p' of Object" },
-{ "Object.getPrototypeOf(Iterator.from({ next() { return { done: true }; } })).__p = row.A; return 'x';", "throws: Cannot assign to read only property '__p' of Object" },
-{ "Error.prototype.stack = String(row.A); return 'x';", "throws: Cannot set the \"stack\" property directly on %Error.prototype%" },
+        { "Object.getPrototypeOf(Iterator.from({ next() { return { done: true }; } })).__p = row.A; return 'x';", "throws: Cannot assign to read only property '__p' of Object" },
+        { "Object.getPrototypeOf(AsyncIterator.from([1])).__p = row.A; return 'x';", "throws: Cannot assign to read only property '__p' of Object" },
+        { "Object.getPrototypeOf(AsyncIterator.from({ next() { return Promise.resolve({ done: true }); } })).__p = row.A; return 'x';", "throws: Cannot assign to read only property '__p' of Object" },
+        { "Object.getPrototypeOf((async function* () {})().map(x => x)).__p = row.A; return 'x';", "throws: Cannot assign to read only property '__p' of Object" },
+        { "return typeof ShadowRealm;", "undefined|undefined|undefined" },
+        { "Error.prototype.stack = String(row.A); return 'x';", "throws: Cannot set the \"stack\" property directly on %Error.prototype%" },
         { "Error.stackTraceLimit = row.A; return 'x';", "throws: Cannot assign to read only property 'stackTraceLimit' of Object" },
         { "Object.prototype.__proto__ = { k: row.A }; return 'x';", "throws: Invalid prototype" },
         // (iii) Declarations by indirect eval, direct eval and Function: strict code, so each is local or refused.
@@ -186,16 +193,15 @@ public class JsRealmFreezeTests : IDisposable
     }
 
     /// <summary>
-    /// A binding declared at the top level of a script the engine evaluates lives in the global lexical
-    /// environment, which freezing the global object does not reach. A script reaches it by closing the
-    /// function a transformer wraps it in: the engine evaluates that text whole.
+    /// Compiling scripts as a <c>Function</c> body prevents closing a function wrapper to declare bindings
+    /// in the global lexical environment.
     /// </summary>
     [Fact]
-    public async Task Persists_A_Top_Level_Binding_Declared_By_Closing_The_Wrapper()
+    public async Task Refuses_Closing_The_Wrapper_To_Declare_A_Top_Level_Binding()
     {
-        var compute = await ComputeAsync("0); }); let __n = 0; (function (row) { return (String(++__n)");
+        var act = async () => await ComputeAsync("0); }); let __n = 0; (function (row) { return (String(++__n)");
 
-        PlayRows(compute).Should().Equal("1", "2", "3");
+        await act.Should().ThrowAsync<Jint.Runtime.JavaScriptException>();
     }
 
     /// <summary>

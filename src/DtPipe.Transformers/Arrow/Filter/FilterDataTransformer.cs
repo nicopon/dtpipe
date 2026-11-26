@@ -51,15 +51,9 @@ public partial class FilterDataTransformer : BaseColumnarTransformer, IRequiresO
         for (int i = 0; i < _options.Filters.Length; i++)
         {
             var rawExpr = _options.Filters[i];
-            var filterScript = rawExpr.Trim();
-
-            string body = filterScript;
-            if (!body.Contains("return ") && !body.EndsWith(";"))
-                body = "return " + body + ";";
-
-            var wrappedScript = $"function(row) {{ {body} }}";
-            initialFunctions[i] = engine.Evaluate($"({wrappedScript})");
-            stages[i] = new FilterStage(i, rawExpr, wrappedScript);
+            var (function, compiledBody) = JsScriptCompiler.Compile(engine, "row", rawExpr);
+            initialFunctions[i] = function;
+            stages[i] = new FilterStage(i, rawExpr, compiledBody);
         }
 
         _stages = stages;
@@ -186,7 +180,7 @@ public partial class FilterDataTransformer : BaseColumnarTransformer, IRequiresO
         {
             var functions = new JsValue[_stages.Length];
             for (int i = 0; i < _stages.Length; i++)
-                functions[i] = e.Evaluate($"({_stages[i].WrappedScript})");
+                functions[i] = JsScriptCompiler.CompilePrepared(e, "row", _stages[i].CompiledBody);
             return CreateState(e, functions);
         });
 
@@ -210,5 +204,5 @@ public partial class FilterDataTransformer : BaseColumnarTransformer, IRequiresO
     private sealed record FilterStage(
         int Index,
         string RawExpression,
-        string WrappedScript);
+        string CompiledBody);
 }

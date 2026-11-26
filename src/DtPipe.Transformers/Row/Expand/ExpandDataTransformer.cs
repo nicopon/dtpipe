@@ -61,13 +61,9 @@ public class ExpandDataTransformer : BaseColumnarTransformer, IMultiRowTransform
         for (int i = 0; i < _options.Expand.Length; i++)
         {
             var expandScript = _options.Expand[i];
-            string body = expandScript.Trim();
-            if (!body.Contains("return ") && !body.EndsWith(";"))
-                body = "return " + body + ";";
-
-            var wrappedScript = $"function(row) {{ {body} }}";
-            initialFunctions[i] = engine.Evaluate($"({wrappedScript})");
-            stages[i] = new ExpandStage(i, expandScript.Trim(), wrappedScript);
+            var (function, compiledBody) = JsScriptCompiler.Compile(engine, "row", expandScript);
+            initialFunctions[i] = function;
+            stages[i] = new ExpandStage(i, expandScript.Trim(), compiledBody);
         }
 
         var updatedColumns = new List<PipeColumnInfo>(sourceColumns);
@@ -565,7 +561,7 @@ public class ExpandDataTransformer : BaseColumnarTransformer, IMultiRowTransform
         {
             var functions = new JsValue[_stages.Length];
             for (int i = 0; i < _stages.Length; i++)
-                functions[i] = e.Evaluate($"({_stages[i].WrappedScript})");
+                functions[i] = JsScriptCompiler.CompilePrepared(e, "row", _stages[i].CompiledBody);
             return CreateState(e, functions);
         });
 
@@ -596,5 +592,5 @@ public class ExpandDataTransformer : BaseColumnarTransformer, IMultiRowTransform
         public JsString[] ColumnJsKeys { get; } = columnJsKeys;
     }
 
-    private sealed record ExpandStage(int Index, string SourceExpression, string WrappedScript);
+    private sealed record ExpandStage(int Index, string SourceExpression, string CompiledBody);
 }

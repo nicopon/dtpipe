@@ -12,8 +12,26 @@ internal static class JsEngineExtensions
     /// </summary>
     public static JsValue CallAndSettle(this Engine engine, JsValue function, JsValue thisObject, JsValue[] arguments)
     {
-        var result = engine.Call(function, thisObject, arguments);
-        engine.Advanced.ProcessTasks();
-        return result;
+        Exception? callException = null;
+        try
+        {
+            return engine.Call(function, thisObject, arguments);
+        }
+        catch (Exception ex)
+        {
+            callException = ex;
+            throw;
+        }
+        finally
+        {
+            try
+            {
+                engine.Advanced.ProcessTasks();
+            }
+            catch (Exception) when (callException is not null and not Jint.Runtime.JavaScriptException)
+            {
+                // Preserve a fatal engine constraint fault from Call rather than masking it.
+            }
+        }
     }
 }

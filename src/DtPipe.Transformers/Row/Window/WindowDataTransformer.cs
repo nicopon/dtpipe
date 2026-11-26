@@ -45,15 +45,8 @@ public class WindowDataTransformer : BaseColumnarTransformer, IMultiRowTransform
         if (!string.IsNullOrWhiteSpace(_options.Script))
         {
             var engine = _jsEngineProvider.GetEngine();
-            var script = _options.Script.Trim();
-
-            if (!script.Contains("return ") && !script.EndsWith(";"))
-                script = "return " + script + ";";
-
-            var wrappedScript = $"function(rows) {{ {script} }}";
-            _wrappedScript = wrappedScript;
-
-            var fn = engine.Evaluate($"({wrappedScript})");
+            var (fn, compiledBody) = JsScriptCompiler.Compile(engine, "rows", _options.Script);
+            _wrappedScript = compiledBody;
             _engineCache.AddOrUpdate(engine, CreateState(engine, fn));
         }
 
@@ -445,7 +438,7 @@ public class WindowDataTransformer : BaseColumnarTransformer, IMultiRowTransform
     }
 
     private CompiledWindowState GetOrCreateState(Engine engine)
-        => _engineCache.GetValue(engine, e => CreateState(e, e.Evaluate($"({_wrappedScript})")));
+        => _engineCache.GetValue(engine, e => CreateState(e, JsScriptCompiler.CompilePrepared(e, "rows", _wrappedScript!)));
 
     private CompiledWindowState CreateState(Engine engine, JsValue fn)
     {
