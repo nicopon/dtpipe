@@ -1,3 +1,5 @@
+<img src="docs/assets/dtpipe.svg" alt="" width="64" align="left">
+
 # DtPipe
 
 A command-line tool that moves data between databases, files and object storage, and transforms or

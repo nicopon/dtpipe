@@ -117,6 +117,7 @@ public sealed partial class StudioServer : IAsyncDisposable
         ["/variables.js"] = ("studio/variables.js", "text/javascript; charset=utf-8"),
         ["/agent.js"] = ("studio/agent.js", "text/javascript; charset=utf-8"),
         ["/studio.css"] = ("studio/studio.css", "text/css; charset=utf-8"),
+        ["/favicon.svg"] = ("studio/favicon.svg", "image/svg+xml"),
     };
 
     private static readonly JsonSerializerOptions Json = JsonSerializerOptions.Web;
