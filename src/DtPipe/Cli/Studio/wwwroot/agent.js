@@ -110,7 +110,7 @@ async function refreshAgent() {
   invalidate("agent");
 }
 
-/** The connection dialog: what the server says of the connection now, and the page's way to connect or to forget. */
+/** The connection dialog: what the server says of the connection now, and the page's way to connect, disconnect or delete a past one. */
 async function openConnect() {
   let connection;
   try { connection = await api("/api/agent/connection"); } catch (e) { status(e.message, "bad"); return; }
@@ -124,10 +124,6 @@ async function openConnect() {
     },
     onDisconnect: async () => {
       await api("/api/agent/connection/disconnect", {});
-      await refreshAgent();
-    },
-    onForget: async () => {
-      await api("/api/agent/connection", undefined, "DELETE");
       await refreshAgent();
     },
     onForgetEntry: (entry) => api("/api/agent/connection/history", { provider: entry.provider, url: entry.url }, "DELETE"),

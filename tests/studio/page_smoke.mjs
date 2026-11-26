@@ -1024,7 +1024,8 @@ const scenarios = {
   },
 
   // A model connected from the page, with no flag: the empty panel offers it, Test lists the models, Connect opens the
-  // conversation, and a studio started again reads the remembered connection back, which holds no secret.
+  // conversation, and a studio started again reads the remembered connection back, which holds no secret; the list leaves out the
+  // model in place, and a disconnected model is deleted by its ×.
   async "agent-connect"({ page: p, folder, studio }) {
     check("the empty panel offers to connect a model", await p.until(`!document.querySelector("#agent-pane").hidden && !!document.querySelector("#agent-connect") && document.querySelector("#agent-body").hidden`));
     check("the header says there is no agent", await p.ev(`document.querySelector("#agent-link").textContent.includes("no agent")`));
@@ -1055,15 +1056,17 @@ const scenarios = {
       check("a studio started without a flag reads the connection back", await p.until(`!document.querySelector("#agent-body")?.hidden && document.querySelector("#agent-model")?.value === "fake:1"`, 30000));
       check("the header says the model", await p.until(`/fake:1 · ollama/.test(document.querySelector("#agent-link").textContent)`));
       await p.click("#agent-link");
-      check("the dialog reads the context size back and offers to disconnect, beside forgetting",
-        await p.until(`document.querySelector("#d-agent-numctx")?.value === "16384" && !!document.querySelector("#d-agent-disconnect") && !!document.querySelector("#d-agent-forget")`));
+      check("the dialog reads the context size back and offers to disconnect, and no button forgets what is remembered",
+        await p.until(`document.querySelector("#d-agent-numctx")?.value === "16384" && !!document.querySelector("#d-agent-disconnect") && !document.querySelector("#d-agent-forget")`));
+      check("the list leaves out the model in place, says where forgetting is, and the file still holds it",
+        await p.until(`document.querySelectorAll("#d-agent-recents li").length === 0 && /No other model is remembered/.test(document.querySelector("#d-agent-recents").textContent) && /× forgets one/.test(document.querySelector("#d-agent-recents").textContent)`)
+        && JSON.parse(fs.readFileSync(file, "utf8")).agents?.length === 1);
       await p.click("#d-agent-disconnect");
       check("Disconnect closes the agent and keeps what is remembered",
         await p.until(`!document.querySelector("#d-agent-dialog") && document.querySelector("#agent-body").hidden && document.querySelector("#agent-link").textContent.includes("no agent")`)
         && !!JSON.parse(fs.readFileSync(file, "utf8")).agent);
       await p.click("#agent-link");
-      check("the dialog offers to forget it", await p.until(`!!document.querySelector("#d-agent-forget")`));
-      check("the dialog lists the model as a recent one, and the file holds it with no key",
+      check("the dialog lists the model once disconnected, and the file holds it with no key",
         await p.until(`document.querySelectorAll("#d-agent-recents li").length === 1 && document.querySelector("#d-agent-recents .pick").title.includes(${JSON.stringify(new URL(fakeLlm.url).host)})`)
         && JSON.parse(fs.readFileSync(file, "utf8")).agents?.length === 1 && !/"key"/i.test(fs.readFileSync(file, "utf8")));
       await p.ev(`(() => { const u = document.querySelector("#d-agent-url"); u.value = "http://elsewhere.example.com"; u.dispatchEvent(new Event("input")); document.querySelector("#d-agent-numctx").value = "8192"; })()`);
@@ -1071,11 +1074,9 @@ const scenarios = {
       check("a click on a recent model fills the form and connects nothing",
         await p.ev(`document.querySelector("#d-agent-url").value.includes(${JSON.stringify(new URL(fakeLlm.url).host)}) && document.querySelector("#d-agent-numctx").value === "16384" && document.querySelector("#d-agent-model").value === "fake:1" && !!document.querySelector("#d-agent-dialog[open]") && document.querySelector("#agent-body").hidden && document.querySelector("#agent-link").textContent.includes("no agent")`));
       await p.click("#d-agent-recents .forget");
-      check("deleting the entry empties the list without closing the dialog, and the file forgets the agent and its entry",
-        await p.until(`!!document.querySelector("#d-agent-dialog[open]") && document.querySelectorAll("#d-agent-recents li").length === 0 && /No recent model/.test(document.querySelector("#d-agent-recents").textContent)`)
+      check("deleting the entry of the disconnected model empties the list without closing the dialog, and the file forgets the agent and its entry",
+        await p.until(`!!document.querySelector("#d-agent-dialog[open]") && document.querySelectorAll("#d-agent-recents li").length === 0 && /No other model is remembered/.test(document.querySelector("#d-agent-recents").textContent)`)
         && JSON.parse(fs.readFileSync(file, "utf8")).agents?.length === 0 && !JSON.parse(fs.readFileSync(file, "utf8")).agent);
-      await p.click("#d-agent-forget");
-      check("forgetting removes the remembered agent", await p.until(`!document.querySelector("#d-agent-dialog")`) && !JSON.parse(fs.readFileSync(file, "utf8")).agent);
     } finally {
       again.stop();
     }
@@ -1133,7 +1134,7 @@ const scenarios = {
       check("the dialog lists the other folder, with a way to delete it", await p.until(`document.querySelectorAll("#d-workspace-recents li").length === 1 && document.querySelector("#d-workspace-recents .pick").title === ${JSON.stringify(other)} && !!document.querySelector("#d-workspace-recents .forget")`));
       await p.click("#d-workspace-recents .forget");
       check("deleting it empties the list without closing the dialog, and the file keeps the other folder only",
-        await p.until(`!!document.querySelector("#d-workspace-dialog[open]") && document.querySelectorAll("#d-workspace-recents li").length === 0 && /No recent folder/.test(document.querySelector("#d-workspace-recents").textContent)`)
+        await p.until(`!!document.querySelector("#d-workspace-dialog[open]") && document.querySelectorAll("#d-workspace-recents li").length === 0 && /No other folder is remembered/.test(document.querySelector("#d-workspace-recents").textContent)`)
         && JSON.stringify(JSON.parse(fs.readFileSync(file, "utf8")).folders) === JSON.stringify([folder]), fs.readFileSync(file, "utf8"));
     } finally {
       fs.rmSync(other, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
@@ -1141,8 +1142,8 @@ const scenarios = {
   },
 
   // A coordinator connected from the page, with no flag: the pill offers it, a key signs in for the session, another connection
-  // is remembered with no key, a studio started again reads it back, and
-  // forgetting disconnects. Nothing here writes the keyring: a key is typed without *Remember*, and forgetting only reads it.
+  // is remembered with no key, a studio started again reads it back, the list leaves out the one in place, and a disconnected
+  // coordinator is deleted by its ×. Nothing here writes the keyring: a key is typed without *Remember*, and deleting only asks it to delete.
   async "coordinator-connect"({ page: p, folder, studio }) {
     const file = path.join(folder, ".smoke-state", "studio.json");
     const pill = `document.querySelector("#coordinator")?.textContent ?? ""`;
@@ -1166,7 +1167,7 @@ const scenarios = {
     await p.shot("coordinator-1-connected");
 
     await p.click("#coordinator-link");
-    check("the dialog reads the connection back", await p.until(`document.querySelector("#d-coordinator-auth")?.value === "key" && !!document.querySelector("#d-coordinator-forget")`));
+    check("the dialog reads the connection back", await p.until(`document.querySelector("#d-coordinator-auth")?.value === "key" && !document.querySelector("#d-coordinator-forget")`));
     await p.ev(`(() => { const a = document.querySelector("#d-coordinator-auth"); a.value = "browser"; a.dispatchEvent(new Event("change")); })()`);
     await p.click("#d-coordinator-submit");
     check("Connect replaces the link: signed out, to sign in through the browser", await p.until(`!document.querySelector("#d-coordinator-dialog") && /Sign in/.test(${pill}) && !/alice@test.local/.test(${pill})`), await p.ev(pill));
@@ -1174,7 +1175,7 @@ const scenarios = {
     check("the coordinator is remembered, with no key", written.includes(fakeCoordinators.get(folder).url) && !/dtp_/.test(written), written || "no file");
 
     await p.click("#coordinator-link");
-    check("the dialog offers to disconnect, beside forgetting", await p.until(`!!document.querySelector("#d-coordinator-disconnect") && !!document.querySelector("#d-coordinator-forget")`));
+    check("the dialog offers to disconnect", await p.until(`!!document.querySelector("#d-coordinator-disconnect")`));
     await p.click("#d-coordinator-disconnect");
     check("Disconnect closes the link and keeps what is remembered",
       await p.until(`!document.querySelector("#d-coordinator-dialog") && /no coordinator/.test(${pill})`) && fs.readFileSync(file, "utf8").includes(fakeCoordinators.get(folder).url));
@@ -1186,20 +1187,23 @@ const scenarios = {
       await p.send("Page.navigate", { url: again.url });
       check("a studio started without a flag connects the remembered coordinator", await p.until(`/127.0.0.1/.test(${pill}) && !!document.querySelector("#coordinator-link")`, 30000), await p.ev(pill));
       await p.click("#coordinator-link");
-      check("the dialog lists the coordinator as a recent one, with how the person signs in",
+      check("the list leaves out the coordinator in place, says where forgetting is, and the file still holds it",
+        await p.until(`document.querySelectorAll("#d-coordinator-recents li").length === 0 && /No other coordinator is remembered/.test(document.querySelector("#d-coordinator-recents").textContent) && /× forgets one/.test(document.querySelector("#d-coordinator-recents").textContent)`)
+        && JSON.parse(fs.readFileSync(file, "utf8")).coordinators?.length === 1);
+      await p.click("#d-coordinator-disconnect");
+      check("Disconnect closes the link", await p.until(`!document.querySelector("#d-coordinator-dialog") && /no coordinator/.test(${pill})`));
+      await p.click("#coordinator-link");
+      check("the dialog lists the coordinator once disconnected, with how the person signs in",
         await p.until(`document.querySelectorAll("#d-coordinator-recents li").length === 1 && /through the browser/.test(document.querySelector("#d-coordinator-recents li").textContent)`)
         && JSON.parse(fs.readFileSync(file, "utf8")).coordinators?.length === 1);
       await p.ev(`(() => { const o = document.querySelector("#d-coordinator-origin"); o.value = "http://elsewhere.example.com"; o.dispatchEvent(new Event("input")); const a = document.querySelector("#d-coordinator-auth"); a.value = "key"; a.dispatchEvent(new Event("change")); })()`);
       await p.click("#d-coordinator-recents .pick");
       check("a click on a recent coordinator fills the address and the sign-in and changes nothing",
-        await p.ev(`document.querySelector("#d-coordinator-origin").value.includes("127.0.0.1") && document.querySelector("#d-coordinator-auth").value === "browser" && !!document.querySelector("#d-coordinator-dialog[open]") && /127.0.0.1/.test(${pill})`));
+        await p.ev(`document.querySelector("#d-coordinator-origin").value.includes("127.0.0.1") && document.querySelector("#d-coordinator-auth").value === "browser" && !!document.querySelector("#d-coordinator-dialog[open]") && /no coordinator/.test(${pill})`));
       await p.click("#d-coordinator-recents .forget");
-      check("deleting the entry of the connected coordinator leaves it connected for the session and removes it from the file",
-        await p.until(`!!document.querySelector("#d-coordinator-dialog[open]") && document.querySelectorAll("#d-coordinator-recents li").length === 0 && /No recent coordinator/.test(document.querySelector("#d-coordinator-recents").textContent)`)
-        && /127.0.0.1/.test(await p.ev(pill)) && JSON.parse(fs.readFileSync(file, "utf8")).coordinators?.length === 0 && !JSON.parse(fs.readFileSync(file, "utf8")).coordinator);
-      await p.click("#d-coordinator-forget");
-      check("forgetting disconnects and removes the remembered coordinator", await p.until(`!document.querySelector("#d-coordinator-dialog") && /no coordinator/.test(${pill})`)
-        && !JSON.parse(fs.readFileSync(file, "utf8")).coordinator);
+      check("deleting the entry of the disconnected coordinator empties the list without closing the dialog and removes it from the file",
+        await p.until(`!!document.querySelector("#d-coordinator-dialog[open]") && document.querySelectorAll("#d-coordinator-recents li").length === 0 && /No other coordinator is remembered/.test(document.querySelector("#d-coordinator-recents").textContent)`)
+        && /no coordinator/.test(await p.ev(pill)) && JSON.parse(fs.readFileSync(file, "utf8")).coordinators?.length === 0 && !JSON.parse(fs.readFileSync(file, "utf8")).coordinator);
     } finally {
       again.stop();
     }

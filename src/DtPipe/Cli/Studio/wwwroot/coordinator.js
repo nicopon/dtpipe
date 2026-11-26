@@ -1,6 +1,6 @@
 // @ts-check
 // The coordinator connected to this studio, if any: who is signed in, signing in through the browser, and the connection
-// dialog that sets, changes or forgets it. The page never sees a token or a key: it asks the studio, which keeps them, and
+// dialog that sets, changes or disconnects it. The page never sees a token or a key: it asks the studio, which keeps them, and
 // reads a status.
 
 import { $, api, el, fill, onLinkDoubt, status } from "./dom.js";
@@ -36,7 +36,7 @@ export async function refreshCoordinator() {
   return state.coordinator;
 }
 
-/** The connection dialog: what the server says of the connection now, and the page's way to connect, change or forget it. */
+/** The connection dialog: what the server says of the connection now, and the page's way to connect, change or disconnect it, and to delete a past one. */
 export async function openCoordinatorConnect() {
   let connection;
   try { connection = await api("/api/coordinator/connection"); } catch (e) { status(e.message, "bad"); return; }
@@ -49,10 +49,6 @@ export async function openCoordinatorConnect() {
     },
     onDisconnect: async () => {
       await api("/api/coordinator/connection/disconnect", {});
-      await refreshCoordinator();
-    },
-    onForget: async () => {
-      await api("/api/coordinator/connection", undefined, "DELETE");
       await refreshCoordinator();
     },
     onForgetEntry: async (entry) => {
@@ -80,7 +76,7 @@ function render() {
   const zone = (dot, title, ...content) =>
     el("button", { id: "coordinator-link", type: "button", class: "small ghost agent-link", onclick: openCoordinatorConnect, title },
       el("span", { class: `dot ${dot}`.trim() }), " ", ...content);
-  const hold = connection?.source === "flag" ? "Set by the command line: a change holds for this session" : "Connect another coordinator, disconnect, or forget this one";
+  const hold = connection?.source === "flag" ? "Set by the command line: a change holds for this session" : "Connect another coordinator, or disconnect";
   if (!link) {
     // Nothing is connected: the zone says so, or says that the remembered one waits for its key.
     const name = connection?.origin ? new URL(connection.origin).host : null;
