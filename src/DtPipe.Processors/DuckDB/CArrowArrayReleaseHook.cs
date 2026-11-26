@@ -14,15 +14,11 @@ namespace DtPipe.Processors.DuckDB;
 /// </summary>
 internal static unsafe class CArrowArrayReleaseHook
 {
+    private readonly record struct RetainedExport(IDisposable Owner, ILogger Logger);
+
     // Keyed by private_data: a consumer that takes the array moves the struct and releases its own
     // copy, and private_data survives the move.
-    private static readonly ConcurrentDictionary<IntPtr, IDisposable> RetainedExports = new();
-
-    /// <summary>
-    /// Where a fault of a release is told. The release is an unmanaged callback: an exception leaving it ends
-    /// the process, so each is caught and logged here. The processor opened last sets it.
-    /// </summary>
-    internal static ILogger Logger { get; set; } = NullLogger.Instance;
+    private static readonly ConcurrentDictionary<IntPtr, RetainedExport> RetainedExports = new();
 
     // The release CArrowArrayExporter writes into every array it exports, captured from the first one.
     private static IntPtr _exporterRelease;
@@ -32,10 +28,34 @@ internal static unsafe class CArrowArrayReleaseHook
     /// run the exporter's release and then dispose <paramref name="owner"/>. An array that carries a
     /// release other than the one captured is released, its owner disposed, and refused.
     /// </summary>
-    public static void Chain(CArrowArray* array, IDisposable owner)
+    public static void Chain(CArrowArray* array, IDisposable owner, ILogger? logger = null)
     {
+        if (array == null)
+        {
+            owner.Dispose();
+            throw new ArgumentNullException(nameof(array));
+        }
+
         var slot = ReleaseSlot(array);
         var innerRelease = *slot;
+        var selfRelease = (IntPtr)(delegate* unmanaged[Cdecl]<CArrowArray*, void>)&ReleaseRetained;
+        if (innerRelease == IntPtr.Zero)
+        {
+            owner.Dispose();
+            throw new InvalidOperationException("Cannot chain release on an already-released Arrow array.");
+        }
+        if (innerRelease == selfRelease)
+        {
+            owner.Dispose();
+            throw new InvalidOperationException("Arrow array release hook is already chained.");
+        }
+        if (array->private_data == null)
+        {
+            ((delegate* unmanaged[Cdecl]<CArrowArray*, void>)innerRelease)(array);
+            owner.Dispose();
+            throw new InvalidOperationException("Exported Arrow array has null private_data.");
+        }
+
         var existing = Interlocked.CompareExchange(ref _exporterRelease, innerRelease, IntPtr.Zero);
         if (existing != IntPtr.Zero && existing != innerRelease)
         {
@@ -44,8 +64,13 @@ internal static unsafe class CArrowArrayReleaseHook
             throw new InvalidOperationException("Unexpected Arrow exporter release callback mismatch.");
         }
 
-        RetainedExports[(IntPtr)array->private_data] = owner;
-        *slot = (IntPtr)(delegate* unmanaged[Cdecl]<CArrowArray*, void>)&ReleaseRetained;
+        if (!RetainedExports.TryAdd((IntPtr)array->private_data, new RetainedExport(owner, logger ?? NullLogger.Instance)))
+        {
+            ((delegate* unmanaged[Cdecl]<CArrowArray*, void>)innerRelease)(array);
+            owner.Dispose();
+            throw new InvalidOperationException("Duplicate private_data while retaining exported Arrow array.");
+        }
+        *slot = selfRelease;
     }
 
     /// <summary>
@@ -66,26 +91,42 @@ internal static unsafe class CArrowArrayReleaseHook
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static void ReleaseRetained(CArrowArray* array)
     {
-        IDisposable? owner = null;
+        if (array == null) return;
+
+        RetainedExport retained = default;
+        bool hasRetained = false;
         try
         {
-            RetainedExports.TryRemove((IntPtr)array->private_data, out owner);
+            hasRetained = RetainedExports.TryRemove((IntPtr)array->private_data, out retained);
 
-            var inner = (delegate* unmanaged[Cdecl]<CArrowArray*, void>)_exporterRelease;
+            var inner = (delegate* unmanaged[Cdecl]<CArrowArray*, void>)Volatile.Read(ref _exporterRelease);
             if (inner != null) inner(array);
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Releasing an exported Arrow array failed");
+            *ReleaseSlot(array) = IntPtr.Zero;
+            SafeLogError(hasRetained ? retained.Logger : NullLogger.Instance, ex, "Releasing an exported Arrow array failed");
         }
 
         try
         {
-            owner?.Dispose();
+            if (hasRetained) retained.Owner.Dispose();
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Disposing the owner of an exported Arrow array failed");
+            SafeLogError(retained.Logger, ex, "Disposing the owner of an exported Arrow array failed");
+        }
+    }
+
+    private static void SafeLogError(ILogger logger, Exception ex, string message)
+    {
+        try
+        {
+            logger.LogError(ex, "{Message}", message);
+        }
+        catch
+        {
+            // Never let a logging fault unwind across an unmanaged callback.
         }
     }
 }
