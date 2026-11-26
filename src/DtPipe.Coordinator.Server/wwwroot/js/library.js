@@ -1,7 +1,7 @@
 // Library: the pipelines kept in the coordinator's git repository, their deployment state and their last run. A
 // pipeline is written with dtpipe studio and published into it. The list is searched and filtered here; a pipeline's
 // plan, runs and versions are on its own page, `library-detail.js`.
-import { $, ROWS_CROSSED_HINT, ago, api, deploymentOf, esc, healthOf, info, isActive, lastRunOf, plural, rowsCrossed, runHref, runStateLabel, toast } from "./core.js";
+import { $, ROWS_CROSSED_HINT, ago, api, deploymentOf, esc, healthOf, info, infoChip, isActive, lastRunOf, plural, rowsCrossed, runHref, runStateLabel, toast } from "./core.js";
 import { deploymentChip, statusChip } from "./pipeline-status.js";
 import * as detail from "./library-detail.js";
 
@@ -116,10 +116,10 @@ function runCell(id) {
   const run = lastRunOf(id);
   if (!run) return `${label}<span class="hint">none</span>`;
   const rows = rowsCrossed(run);
-  const state = esc(runStateLabel(run.state));
+  const state = runStateLabel(run.state);
   const chip = run.reason
-    ? `<span class="tip"><span class="outcome-chip ${esc(run.state)} tip-t" tabindex="0">${state}</span><span class="tip-b"><b>Why</b>${esc(run.reason)}</span></span>`
-    : `<span class="outcome-chip ${esc(run.state)}">${state}</span>`;
+    ? infoChip(state, `outcome-chip ${esc(run.state)}`, run.reason)
+    : `<span class="outcome-chip ${esc(run.state)}">${esc(state)}</span>`;
   const link = `<a class="mono" href="${esc(runHref(run.runId))}" title="This run's page">${esc(run.runId)}</a>`;
   const when = [isActive(run) ? "" : ago(run.finishedAt), rows ? `${rows.toLocaleString("en-US")} rows moved` : ""].filter(Boolean).join(" · ");
   return `${label}${link}${chip}<span title="${esc(ROWS_CROSSED_HINT)}">${esc(when)}</span>`;
@@ -172,10 +172,10 @@ function severity(e) {
   return "";
 }
 
-// The header comments: a popover where a pointer hovers, a printed block where none does.
+// The header comments: a tooltip where a pointer hovers, a printed block where none does.
 function headerTip(e) {
   if (!e.header) return "";
-  return `<span class="tip"><span class="info-dot tip-t" tabindex="0" role="note" aria-label="Comments">i</span><span class="tip-b"><b>Comments</b><span class="lib-header">${esc(e.header)}</span></span></span>`;
+  return info(e.header, { label: "Comments", heading: "Comments", preline: true });
 }
 
 // One pipeline. The reasons of a failed deployment and of the last run are also printed, for where no pointer hovers.

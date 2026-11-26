@@ -211,9 +211,12 @@ function render() {
     : "Deploys the version the library holds";
   const entry = { ...doc, id };
   const hasBricks = Object.keys(offers).length > 0;
+  const firstLine = (doc.yaml || "").split(/\r?\n/, 1)[0];
+  const title = firstLine.startsWith("#") ? firstLine.replace(/^#+\s*/, "").trim() : "";
+  const crumbHtml = title ? `${esc(title)} <span class="mono muted">${esc(id)}</span>` : `<span class="mono">${esc(id)}</span>`;
   host.innerHTML = `
     <div class="view-head">
-      ${crumbs([{ html: "Library", href: "#/library" }, { html: `${esc(doc.yaml.split("\n")[0].replace(/^#\s*/, ""))} <span class="mono muted">${esc(id)}</span>` }])}
+      ${crumbs([{ html: "Library", href: "#/library" }, { html: crumbHtml }])}
       <p class="hint">Planned at each launch. ${plan.deployable ? `Would run${runner ? ` on ${esc(runner)}` : ""} now.` : armable ? "Refused until Deploy pins the bricks." : "Would be refused now."} ${info("Bricks run on their node, every other step on a runner chosen at launch. A source wired straight into an output crosses no runner.")}</p>
     </div>
     ${planProblems(plan).length ? `<section class="card"><ul class="msgs errors">${planProblems(plan).map((e) => `<li>${esc(e)}</li>`).join("")}</ul></section>` : ""}

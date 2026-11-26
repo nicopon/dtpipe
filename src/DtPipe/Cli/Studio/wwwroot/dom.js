@@ -64,14 +64,140 @@ export function placeTip(anchor, tip) {
   tip.style.top = `${top}px`;
 }
 
-/** A ⓘ right after the text it explains: its text shows on hover or focus, so a screen states its label and leaves the explanation to who asks. @param {string} text */
-export function info(text) {
-  const tip = el("span", { class: "info-text", "aria-hidden": "true" }, text);
-  const node = el("button", { type: "button", class: "info", "aria-label": text }, "ⓘ", tip);
-  const place = () => placeTip(node, tip);
-  node.addEventListener("mouseenter", place);
-  node.addEventListener("focus", place);
-  return node;
+let tipSeq = 0;
+/** @type {HTMLElement | null} */
+let activeTip = null;
+/** @type {HTMLElement | null} */
+let pinnedTip = null;
+/** @type {ReturnType<typeof setTimeout> | null} */
+let hideTimer = null;
+let pointerOpening = false;
+let ignoreFocusScrollUntil = 0;
+
+/** @param {HTMLElement} trigger @returns {HTMLElement | null} */
+const tipOf = (trigger) => trigger.querySelector(".info-text");
+
+/** @param {HTMLElement} trigger @param {boolean} [pin] */
+function openTip(trigger, pin = false) {
+  const tip = tipOf(trigger);
+  if (!tip) return;
+  clearTimeout(hideTimer);
+  hideTimer = null;
+  if (activeTip && activeTip !== trigger) closeTip(activeTip);
+  activeTip = trigger;
+  if (pin) pinnedTip = trigger;
+  trigger.setAttribute("aria-expanded", "true");
+  placeTip(trigger, tip);
+}
+
+/** @param {HTMLElement | null} [trigger] */
+function closeTip(trigger = activeTip) {
+  clearTimeout(hideTimer);
+  hideTimer = null;
+  ignoreFocusScrollUntil = 0;
+  if (!trigger) return;
+  trigger.setAttribute("aria-expanded", "false");
+  if (activeTip === trigger) activeTip = null;
+  if (pinnedTip === trigger) pinnedTip = null;
+}
+
+/** @param {HTMLElement} trigger */
+function scheduleClose(trigger) {
+  clearTimeout(hideTimer);
+  hideTimer = setTimeout(() => {
+    if (activeTip === trigger && pinnedTip !== trigger && !trigger.matches(":focus-within")) closeTip(trigger);
+  }, 150);
+}
+
+document.addEventListener("pointerover", (e) => {
+  if (e.pointerType === "touch") return;
+  const target = e.target instanceof Element ? e.target : null;
+  const trigger = /** @type {HTMLElement | null} */ (target?.closest(".info") ?? null);
+  if (trigger) openTip(trigger, false);
+});
+
+document.addEventListener("pointerout", (e) => {
+  if (e.pointerType === "touch" || !activeTip) return;
+  const related = e.relatedTarget instanceof Node ? e.relatedTarget : null;
+  if (related && activeTip.contains(related)) return;
+  scheduleClose(activeTip);
+});
+
+document.addEventListener("pointerdown", (e) => {
+  const target = e.target instanceof Element ? e.target : null;
+  if (target?.closest(".info") && !target.closest(".info-text")) {
+    pointerOpening = true;
+    setTimeout(() => { pointerOpening = false; }, 0);
+  }
+});
+
+document.addEventListener("focusin", (e) => {
+  if (pointerOpening) return;
+  const target = e.target instanceof Element ? e.target : null;
+  const trigger = /** @type {HTMLElement | null} */ (target?.closest(".info") ?? null);
+  if (trigger) {
+    ignoreFocusScrollUntil = performance.now() + 80;
+    openTip(trigger, false);
+  }
+});
+
+document.addEventListener("focusout", (e) => {
+  if (!activeTip || pinnedTip === activeTip) return;
+  const related = e.relatedTarget instanceof Node ? e.relatedTarget : null;
+  if (related && activeTip.contains(related)) return;
+  closeTip(activeTip);
+});
+
+document.addEventListener("click", (e) => {
+  pointerOpening = false;
+  const target = e.target instanceof Element ? e.target : null;
+  if (target?.closest(".info-text")) return;
+  const trigger = /** @type {HTMLElement | null} */ (target?.closest(".info") ?? null);
+  if (trigger) {
+    if (pinnedTip === trigger || (e.detail === 0 && activeTip === trigger)) closeTip(trigger);
+    else openTip(trigger, true);
+  } else if (activeTip) {
+    closeTip(activeTip);
+  }
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && activeTip) {
+    e.preventDefault();
+    e.stopPropagation();
+    closeTip(activeTip);
+  }
+}, true);
+
+document.addEventListener("scroll", (e) => {
+  if (!activeTip) return;
+  const target = e.target instanceof Node ? e.target : null;
+  if (target instanceof Element && target.closest(".info-text")) return;
+  if (performance.now() < ignoreFocusScrollUntil && target?.contains(activeTip)) {
+    const tip = tipOf(activeTip);
+    if (tip) placeTip(activeTip, tip);
+    return;
+  }
+  closeTip(activeTip);
+}, { capture: true, passive: true });
+
+window.addEventListener("resize", () => { if (activeTip) closeTip(activeTip); });
+
+/**
+ * A ⓘ right after the text it explains: its tooltip opens on hover, focus, or click and dismisses on Escape or scroll.
+ * @param {string} text @param {string} [label]
+ */
+export function info(text, label = "More information") {
+  const tipId = `info-tip-${++tipSeq}`;
+  const tip = el("span", { id: tipId, class: "info-text", role: "tooltip" }, text);
+  const glyph = el("span", { "aria-hidden": "true" }, "ⓘ");
+  return el("button", {
+    type: "button",
+    class: "info",
+    "aria-label": label,
+    "aria-expanded": "false",
+    "aria-describedby": tipId,
+  }, glyph, tip);
 }
 
 const SVG = "http://www.w3.org/2000/svg";

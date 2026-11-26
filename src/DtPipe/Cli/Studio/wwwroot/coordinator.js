@@ -6,10 +6,11 @@
 import { $, api, el, fill, onLinkDoubt, status } from "./dom.js";
 import { openCoordinatorConnectDialog } from "./dialogs.js";
 import { invalidate, onZone } from "./render.js";
-import { state } from "./state.js";
+import { sequence, state } from "./state.js";
 
 const POLL_MS = 2000;
 const POLL_FOR_MS = 10 * 60 * 1000;
+const coordinatorRead = sequence();
 
 /** @type {ReturnType<typeof setInterval> | null} */
 let polling = null;
@@ -19,9 +20,11 @@ const listeners = [];
 export function onCoordinator(listener) { listeners.push(listener); }
 
 export async function refreshCoordinator() {
+  const ticket = coordinatorRead.begin();
+  const [next, connection] = await Promise.all([api("/api/coordinator"), api("/api/coordinator/connection")]);
+  if (coordinatorRead.stale(ticket)) return state.coordinator;
   const before = state.coordinator?.state;
   const beforeUrl = state.coordinator?.url;
-  const [next, connection] = await Promise.all([api("/api/coordinator"), api("/api/coordinator/connection")]);
   state.coordinator = next.url ? next : null;
   state.coordinatorConnection = connection;
   invalidate("coordinator");
@@ -43,11 +46,14 @@ export async function openCoordinatorConnect() {
   openCoordinatorConnectDialog({
     connection,
     onConnect: async (body) => {
+      stopPoll();
       const answer = await api("/api/coordinator/connection", body, "PUT");
       await refreshCoordinator();
+      if (answer?.warning) status(answer.warning, "warn");
       return answer;
     },
     onDisconnect: async () => {
+      stopPoll();
       await api("/api/coordinator/connection/disconnect", {});
       await refreshCoordinator();
     },
@@ -131,6 +137,7 @@ export async function signIn() {
 }
 
 async function signOut() {
+  stopPoll();
   try {
     await api("/api/coordinator/logout", {});
     await refreshCoordinator();

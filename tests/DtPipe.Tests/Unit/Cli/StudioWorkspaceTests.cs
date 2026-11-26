@@ -126,6 +126,7 @@ public sealed class StudioWorkspaceTests : IAsyncLifetime
         var (opened, view) = await OpenAsync(Second);
         Assert.Equal(HttpStatusCode.OK, opened);
         Assert.Equal("page", view.GetProperty("source").GetString());
+        Assert.True(view.GetProperty("currentRemembered").GetBoolean());
         // The folder in place is the file's first entry and the list leaves it out.
         Assert.Equal([Second], _settings!.ReadFolders());
         Assert.Empty(view.GetProperty("recents").EnumerateArray());
@@ -180,7 +181,13 @@ public sealed class StudioWorkspaceTests : IAsyncLifetime
 
         Assert.Equal(HttpStatusCode.OK, status);
         Assert.Empty(view.GetProperty("recents").EnumerateArray());
+        Assert.True(view.GetProperty("currentRemembered").GetBoolean());
         Assert.Equal([Second], _settings.ReadFolders());
+
+        var (currentStatus, currentView) = await CallAsync(HttpMethod.Delete, "/api/workspace/recents", new { path = Second });
+        Assert.Equal(HttpStatusCode.OK, currentStatus);
+        Assert.False(currentView.GetProperty("currentRemembered").GetBoolean());
+        Assert.Empty(_settings.ReadFolders());
         Assert.Equal(HttpStatusCode.BadRequest, (await CallAsync(HttpMethod.Delete, "/api/workspace/recents", new { path = "second" })).Status);
         Assert.Equal(["b.yaml"], await JobsAsync());
     }

@@ -1,7 +1,7 @@
 // The two short indicators of a pipeline, one rule for every page that shows them: what its deployment is, and whether it can be
 // launched. `e` carries the pipeline's `id`, the `commit` of its job and its `bindingProblems`, as the library's list and
 // `GET /api/library/{id}` both give them.
-import { ago, deploymentOf, esc, healthOf } from "./core.js";
+import { ago, deploymentOf, esc, healthOf, infoChip } from "./core.js";
 // Why the bindings of the library's version do not hold: a node it names is absent or does not offer the brick, a brick has
 // none, or its text is no longer the brick it was bound to. Shown for a pipeline that is not deployed; a deployed one speaks
 // through its health.
@@ -59,6 +59,6 @@ export function deploymentChip(e) {
     : d.state === "failed" ? "The deployment failed."
     : `${armed ? `Armed at version ${armed}${d.deployedAt ? `, ${ago(d.deployedAt)}` : ""}. ` : ""}Runs use this version.${newer ? ` A later version is in the library: deploy again to use it.${bindings}` : ""}`;
   return d.state === "failed" && d.message
-    ? `<span class="tip"><span class="chip ${tone} tip-t" tabindex="0">${esc(text)}</span><span class="tip-b"><b>Why</b>${esc(d.message)}</span></span>`
+    ? infoChip(text, `chip ${tone}`, d.message)
     : `<span class="chip ${newer ? "warn" : tone}" title="${esc(title)}">${esc(text)}</span>`;
 }

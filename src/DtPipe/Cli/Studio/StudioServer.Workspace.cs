@@ -63,8 +63,9 @@ public sealed partial class StudioServer
     {
         var root = Folder.Root;
         string? settingsWarning = null;
-        var recents = (_tools.Settings is { } s ? s.ReadFolders(out settingsWarning) : [])
-            .Where(f => !StudioSettings.SameFolder(f, root)).ToList();
+        var all = _tools.Settings is { } s ? s.ReadFolders(out settingsWarning) : [];
+        var currentRemembered = all.Any(f => StudioSettings.SameFolder(f, root));
+        var recents = all.Where(f => !StudioSettings.SameFolder(f, root)).ToList();
         return new
         {
             root,
@@ -72,6 +73,7 @@ public sealed partial class StudioServer
             source = _workspace.Source,
             start = _start,
             recents,
+            currentRemembered,
             canRemember = _tools.Settings is not null,
             settingsWarning,
             warning,

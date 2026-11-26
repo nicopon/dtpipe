@@ -231,6 +231,7 @@ function session(ws) {
   };
   s.tabKey = () => s.key("Tab", "Tab", 9);
   s.enterKey = () => s.key("Enter", "Enter", 13, "\r");
+  s.escapeKey = () => s.key("Escape", "Escape", 27);
   // A drag with the mouse from the centre of one element to the centre of another: the pointer's path, which the keyboard's must not replace.
   s.drag = async (from, to) => {
     const centre = (selector) => s.ev(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e) return null; const b = e.getBoundingClientRect(); return [b.x + b.width / 2, b.y + b.height / 2]; })()`);
@@ -1213,6 +1214,7 @@ const scenarios = {
       await p.click("#d-agent-recents .forget");
       check("deleting the entry of the disconnected model empties the list without closing the dialog, and the file forgets the agent and its entry",
         await p.until(`!!document.querySelector("#d-agent-dialog[open]") && document.querySelectorAll("#d-agent-recents li").length === 0 && /No other model is remembered/.test(document.querySelector("#d-agent-recents").textContent)`)
+        && await p.ev(`document.activeElement?.id === "d-agent-url"`)
         && JSON.parse(fs.readFileSync(file, "utf8")).agents?.length === 0 && !JSON.parse(fs.readFileSync(file, "utf8")).agent);
     } finally {
       again.stop();
@@ -1239,6 +1241,7 @@ const scenarios = {
 
       check("the header names the folder, as a button", await p.until(`${header} === ${JSON.stringify(path.basename(folder))} && document.querySelector("#folder").tagName === "BUTTON"`), await p.ev(header));
       check("the folder's full path is its tooltip", await p.ev(`document.querySelector("#folder").title === ${JSON.stringify(folder)}`), await p.ev(`document.querySelector("#folder").title`));
+      const beforeUnsaved = p.seen.length;
       await unsavedEdit("chain.yaml");
       await p.click("#folder");
       check("the dialog opens on the folder in place", await p.until(`document.querySelector("#d-workspace-path")?.value === ${JSON.stringify(folder)}`));
@@ -1247,7 +1250,27 @@ const scenarios = {
       check("Test counts the folder's jobs", await p.until(`/holds 1 job/.test(document.querySelector("#d-workspace-note")?.textContent ?? "")`), await p.ev(`document.querySelector("#d-workspace-note")?.textContent`));
       await p.click("#d-workspace-submit");
       check("unsaved changes refuse the change by name, and the dialog offers to save or discard them", await refusedForChanges());
+      await p.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 420, deviceScaleFactor: 1, mobile: false });
+      await p.frame();
+      const unsavedLayout = await p.ev(`(() => {
+        const body = document.querySelector("#d-workspace-dialog .dialog-body");
+        body.scrollTop = body.scrollHeight;
+        const unsaved = document.querySelector("#d-workspace-unsaved");
+        const actions = document.querySelector("#d-workspace-dialog .dialog-actions");
+        const ur = unsaved.getBoundingClientRect();
+        const ar = actions.getBoundingClientRect();
+        return {
+          hasActionsClass: unsaved.classList.contains("dialog-actions"),
+          sticky: getComputedStyle(unsaved).position === "sticky",
+          overlaps: ur.bottom > ar.top + 0.5,
+        };
+      })()`);
+      check("unsaved choices do not form a second sticky bar or overlap Cancel/Open",
+        !unsavedLayout.hasActionsClass && !unsavedLayout.sticky && !unsavedLayout.overlaps, JSON.stringify(unsavedLayout));
+      await p.send("Emulation.clearDeviceMetricsOverride");
+      await p.frame();
       check("nothing changed meanwhile", await p.ev(`${header} === ${JSON.stringify(path.basename(folder))} && ${jobs} === "chain.yaml"`));
+      await p.waitSeen("/api/debug/state", beforeUnsaved);
       // The page reloads at once: a click that waits for the next frame would find the page gone.
       await p.ev(`document.querySelector("#d-workspace-discard").click()`);
       check("discarding opens the new folder, read again whole", await p.until(`${header} === ${JSON.stringify(path.basename(other))} && ${jobs} === "other.yaml" && !document.querySelector("#d-workspace-dialog")`, 30000), await p.ev(`${jobs} + " | " + (document.querySelector("#d-workspace-error")?.textContent ?? "no dialog")`));
@@ -1272,7 +1295,15 @@ const scenarios = {
       await p.click("#d-workspace-recents .forget");
       check("deleting it empties the list without closing the dialog, and the file keeps the other folder only",
         await p.until(`!!document.querySelector("#d-workspace-dialog[open]") && document.querySelectorAll("#d-workspace-recents li").length === 0 && /No other folder is remembered/.test(document.querySelector("#d-workspace-recents").textContent)`)
+        && await p.ev(`document.activeElement?.id === "d-workspace-path"`)
         && JSON.stringify(JSON.parse(fs.readFileSync(file, "utf8")).folders) === JSON.stringify([folder]), fs.readFileSync(file, "utf8"));
+      check("the remembered current folder can be removed from recents in place",
+        await p.until(`!document.querySelector("#d-workspace-current-recent")?.hidden && !!document.querySelector("#d-workspace-forget-current")`));
+      await p.click("#d-workspace-forget-current");
+      check("forgetting the current folder clears it from studio.json without leaving or reloading",
+        await p.until(`!!document.querySelector("#d-workspace-dialog[open]") && document.querySelector("#d-workspace-current-recent").hidden`)
+        && await p.ev(`${header} === ${JSON.stringify(path.basename(folder))}`)
+        && JSON.parse(fs.readFileSync(file, "utf8")).folders?.length === 0, fs.readFileSync(file, "utf8"));
     } finally {
       fs.rmSync(other, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     }
@@ -1340,6 +1371,7 @@ const scenarios = {
       await p.click("#d-coordinator-recents .forget");
       check("deleting the entry of the disconnected coordinator empties the list without closing the dialog and removes it from the file",
         await p.until(`!!document.querySelector("#d-coordinator-dialog[open]") && document.querySelectorAll("#d-coordinator-recents li").length === 0 && /No other coordinator is remembered/.test(document.querySelector("#d-coordinator-recents").textContent)`)
+        && await p.ev(`document.activeElement?.id === "d-coordinator-origin"`)
         && /no coordinator/.test(await p.ev(pill)) && JSON.parse(fs.readFileSync(file, "utf8")).coordinators?.length === 0 && !JSON.parse(fs.readFileSync(file, "utf8")).coordinator);
     } finally {
       again.stop();
@@ -1538,6 +1570,116 @@ const scenarios = {
     check("the header says the model is not listed", await p.until(`/model not listed/.test(document.querySelector("#agent-link")?.textContent ?? "")`, 20000), await p.ev(`document.querySelector("#agent-link")?.textContent ?? "none"`));
     check("the panel's warning names the model", await p.ev(`/absent:9/.test(document.querySelector("#agent-warning").textContent)`));
   },
+
+  // P1b UX & accessibility: CLI flag Remember default, settingsWarning + server warning visibility, and WCAG 1.4.13 tooltips.
+  async "p1b-ux"({ page: p, folder }) {
+    await p.until(`!document.querySelector("#agent-body")?.hidden && !!document.querySelector("#coordinator-link")`, 20000);
+
+    // 1. source === "flag": Remember is unchecked by default in Agent & Coordinator dialogs
+    await p.click("#agent-link");
+    check("Agent dialog unchecks Remember when source is flag and shows CLI note",
+      await p.until(`!!document.querySelector("#d-agent-dialog[open]")`)
+      && await p.ev(`!document.querySelector("#d-agent-remember").checked && /Set by the command line/.test(document.querySelector("#d-agent-note").textContent)`));
+    await p.clickText("#d-agent-dialog button", "Cancel");
+    await p.until(`!document.querySelector("#d-agent-dialog")`);
+
+    await p.click("#coordinator-link");
+    check("Coordinator dialog unchecks Remember when source is flag and shows CLI note",
+      await p.until(`!!document.querySelector("#d-coordinator-dialog[open]")`)
+      && await p.ev(`!document.querySelector("#d-coordinator-remember").checked && /Set by the command line/.test(document.querySelector("#d-coordinator-note").textContent)`));
+    await p.clickText("#d-coordinator-dialog button", "Cancel");
+    await p.until(`!document.querySelector("#d-coordinator-dialog")`);
+
+    // 2. settingsWarning shown alongside CLI flag note and preserved across Test
+    const stateDir = path.join(folder, ".smoke-state");
+    const stateFile = path.join(stateDir, "studio.json");
+    fs.mkdirSync(stateDir, { recursive: true });
+    fs.writeFileSync(stateFile, "{corrupt");
+    await p.click("#agent-link");
+    check("Agent dialog shows settingsWarning together with CLI flag note",
+      await p.until(`!!document.querySelector("#d-agent-dialog[open]")`)
+      && await p.ev(`/Set by the command line/.test(document.querySelector("#d-agent-note").textContent) && /ignored/.test(document.querySelector("#d-agent-note").textContent)`),
+      await p.ev(`document.querySelector("#d-agent-note")?.textContent`));
+    await p.click("#d-agent-test");
+    check("Test updates model count without overwriting connectionNote",
+      await p.until(`/models listed/.test(document.querySelector("#d-agent-note")?.textContent ?? "")`)
+      && await p.ev(`/Set by the command line/.test(document.querySelector("#d-agent-note").textContent) && /ignored/.test(document.querySelector("#d-agent-note").textContent)`),
+      await p.ev(`document.querySelector("#d-agent-note")?.textContent`));
+    await p.clickText("#d-agent-dialog button", "Cancel");
+    await p.until(`!document.querySelector("#d-agent-dialog")`);
+
+    // 3. Server warning from PUT /api/agent/connection is surfaced in #status as warn
+    fs.rmSync(stateFile, { force: true });
+    fs.mkdirSync(stateFile, { recursive: true });
+    await p.click("#agent-link");
+    await p.until(`!!document.querySelector("#d-agent-dialog[open]")`);
+    await p.ev(`(() => { const r = document.querySelector("#d-agent-remember"); r.checked = true; })()`);
+    await p.click("#d-agent-submit");
+    check("Server warning appears in #status with warn class",
+      await p.waitStatus(/cannot be written/, 15000)
+      && await p.ev(`document.querySelector("#status").classList.contains("warn")`),
+      `${await p.status()} | ${await p.ev(`document.querySelector("#status").className`)}`);
+
+    // 4. Keyboard navigation & WCAG 1.4.13 on .info / Escape / scroll
+    check("chain.yaml opens", await p.openJob("chain.yaml"));
+    if (await p.ev(`document.querySelector("#side-steps-view").hidden`)) await p.click("#side-steps");
+    const infoCheck = await p.ev(`(() => {
+      const btn = document.querySelector("#side-steps-view .info");
+      if (!btn) return null;
+      const tipId = btn.getAttribute("aria-describedby");
+      const tip = tipId ? document.getElementById(tipId) : null;
+      const r = btn.getBoundingClientRect();
+      return {
+        labelLen: (btn.getAttribute("aria-label") || "").length,
+        expanded: btn.getAttribute("aria-expanded"),
+        role: tip?.getAttribute("role"),
+        width: r.width,
+        height: r.height,
+      };
+    })()`);
+    check(".info has short aria-label, aria-describedby -> role=tooltip, and >= 24x24 target",
+      !!infoCheck && infoCheck.labelLen > 0 && infoCheck.labelLen < 40 && infoCheck.expanded === "false"
+      && infoCheck.role === "tooltip" && infoCheck.width >= 24 && infoCheck.height >= 24,
+      JSON.stringify(infoCheck));
+
+    await p.ev(`document.querySelector("#side-steps-view .info").focus()`);
+    await p.frame();
+    check("Focusing .info opens its tooltip",
+      await p.ev(`(() => {
+        const btn = document.querySelector("#side-steps-view .info");
+        const tip = document.getElementById(btn.getAttribute("aria-describedby"));
+        return btn.getAttribute("aria-expanded") === "true" && getComputedStyle(tip).visibility === "visible";
+      })()`));
+
+    await p.escapeKey();
+    check("Escape dismisses tooltip while keeping focus on .info",
+      await p.ev(`(() => {
+        const btn = document.querySelector("#side-steps-view .info");
+        const tip = document.getElementById(btn.getAttribute("aria-describedby"));
+        return btn.getAttribute("aria-expanded") === "false" && getComputedStyle(tip).visibility === "hidden" && document.activeElement === btn;
+      })()`));
+
+    await p.enterKey();
+    check("Enter toggles tooltip open",
+      await p.ev(`document.querySelector("#side-steps-view .info").getAttribute("aria-expanded") === "true"`));
+    await p.enterKey();
+    check("Enter again toggles tooltip closed",
+      await p.ev(`document.querySelector("#side-steps-view .info").getAttribute("aria-expanded") === "false"`));
+
+    await p.enterKey();
+    await p.ev(`document.querySelector("#side-steps-view").dispatchEvent(new Event("scroll"))`);
+    await p.frame();
+    check("Scroll closes open tooltip",
+      await p.ev(`document.querySelector("#side-steps-view .info").getAttribute("aria-expanded") === "false"`));
+
+    check("Controls have accessible names", (await p.unnamed()).length === 0, (await p.unnamed()).join(" | "));
+    for (const theme of ["light", "dark"]) {
+      await p.theme(theme);
+      const low = await p.contrast();
+      check(`Reads at 4.5:1 in ${theme} theme`, low.length === 0, low.join(" | "));
+    }
+    await p.theme("light");
+  },
 };
 
 // ---------------------------------------------------------------- the runner
@@ -1624,6 +1766,9 @@ async function seed(name, folder) {
   if (name === "workspace-files") {
     fs.mkdirSync(path.join(folder, "sub"), { recursive: true });
   }
+  if (name === "p1b-ux") {
+    fakeCoordinators.set(folder, await startFakeCoordinator(Buffer.alloc(0)));
+  }
   if (name === "library-sync" || name === "coordinator-connect") {
     const keyPath = path.join(folder, "studio.key");
     fs.writeFileSync(keyPath, "dtp_alice_0123456789abcdefghijklmnopqrstuvwxyzABCDEFG\n");
@@ -1663,6 +1808,7 @@ const argsOf = {
   keyboard: () => ["--llm-provider", "ollama", "--llm-url", fakeLlm.url],
   "dialog-actions": () => ["--llm-provider", "ollama", "--llm-url", fakeLlm.url],
   "agent-actions": () => ["--llm-provider", "ollama", "--llm-url", fakeLlm.url],
+  "p1b-ux": (folder) => ["--llm-provider", "ollama", "--llm-url", fakeLlm.url, "--coordinator", fakeCoordinators.get(folder).url],
 };
 
 const fixturesOf = {

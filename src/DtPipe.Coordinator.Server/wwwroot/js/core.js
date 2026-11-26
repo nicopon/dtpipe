@@ -26,14 +26,15 @@ export const $ = (id) => document.getElementById(id);
 export const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 /** A count with its noun, in the plural unless the count is one. */
 export const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
-/** A ⓘ right after the text it explains: its text shows on hover or focus (an HTML string; `placeInfoTips` positions the tip). */
-export const info = (text) => `<button type="button" class="info" aria-label="${esc(text)}">ⓘ<span class="info-text" aria-hidden="true">${esc(text)}</span></button>`;
+let tipSeq = 0;
+let activeTip = null;
+let pinnedTip = null;
+let hideTimer = null;
+let pointerOpening = false;
+let ignoreFocusScrollUntil = 0;
 
-// The tip is fixed so no scrolling card clips it; it is placed beside its icon when the pointer or the focus reaches it.
-function placeInfoTip(event) {
-  const anchor = event.target instanceof Element ? event.target.closest(".info") : null;
-  const tip = anchor?.querySelector(".info-text");
-  if (!anchor || !tip) return;
+/** Puts a tip beside its anchor, kept in the window: the tip is fixed so no scrolling card clips it. */
+function placeTip(anchor, tip) {
   const box = anchor.getBoundingClientRect();
   const left = Math.max(8, Math.min(box.left - 12, window.innerWidth - tip.offsetWidth - 8));
   const below = box.bottom + 6;
@@ -41,8 +42,122 @@ function placeInfoTip(event) {
   tip.style.left = `${left}px`;
   tip.style.top = `${top}px`;
 }
-document.addEventListener("mouseover", placeInfoTip);
-document.addEventListener("focusin", placeInfoTip);
+
+function openTip(trigger, pin = false) {
+  const tip = trigger.querySelector(".info-text");
+  if (!tip) return;
+  clearTimeout(hideTimer);
+  hideTimer = null;
+  if (activeTip && activeTip !== trigger) closeTip(activeTip);
+  activeTip = trigger;
+  if (pin) pinnedTip = trigger;
+  trigger.setAttribute("aria-expanded", "true");
+  placeTip(trigger, tip);
+}
+
+function closeTip(trigger = activeTip) {
+  clearTimeout(hideTimer);
+  hideTimer = null;
+  ignoreFocusScrollUntil = 0;
+  if (!trigger) return;
+  trigger.setAttribute("aria-expanded", "false");
+  if (activeTip === trigger) activeTip = null;
+  if (pinnedTip === trigger) pinnedTip = null;
+}
+
+function scheduleClose(trigger) {
+  clearTimeout(hideTimer);
+  hideTimer = setTimeout(() => {
+    if (activeTip === trigger && pinnedTip !== trigger && !trigger.matches(":focus-within")) closeTip(trigger);
+  }, 150);
+}
+
+const tipTriggerOf = (target) => (target instanceof Element ? target.closest(".info, .info-chip") : null);
+
+document.addEventListener("pointerover", (e) => {
+  if (e.pointerType === "touch") return;
+  const trigger = tipTriggerOf(e.target);
+  if (trigger) openTip(trigger, false);
+});
+
+document.addEventListener("pointerout", (e) => {
+  if (e.pointerType === "touch" || !activeTip) return;
+  const related = e.relatedTarget instanceof Node ? e.relatedTarget : null;
+  if (related && activeTip.contains(related)) return;
+  scheduleClose(activeTip);
+});
+
+document.addEventListener("pointerdown", (e) => {
+  const target = e.target instanceof Element ? e.target : null;
+  if (tipTriggerOf(target) && !target?.closest(".info-text")) {
+    pointerOpening = true;
+    setTimeout(() => { pointerOpening = false; }, 0);
+  }
+});
+
+document.addEventListener("focusin", (e) => {
+  if (pointerOpening) return;
+  const trigger = tipTriggerOf(e.target);
+  if (trigger) {
+    ignoreFocusScrollUntil = performance.now() + 80;
+    openTip(trigger, false);
+  }
+});
+
+document.addEventListener("focusout", (e) => {
+  if (!activeTip || pinnedTip === activeTip) return;
+  const related = e.relatedTarget instanceof Node ? e.relatedTarget : null;
+  if (related && activeTip.contains(related)) return;
+  closeTip(activeTip);
+});
+
+document.addEventListener("click", (e) => {
+  pointerOpening = false;
+  const target = e.target instanceof Element ? e.target : null;
+  if (target?.closest(".info-text")) return;
+  const trigger = tipTriggerOf(target);
+  if (trigger) {
+    if (pinnedTip === trigger || (e.detail === 0 && activeTip === trigger)) closeTip(trigger);
+    else openTip(trigger, true);
+  } else if (activeTip) {
+    closeTip(activeTip);
+  }
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && activeTip) {
+    e.preventDefault();
+    e.stopPropagation();
+    closeTip(activeTip);
+  }
+}, true);
+
+document.addEventListener("scroll", (e) => {
+  if (!activeTip) return;
+  const target = e.target instanceof Node ? e.target : null;
+  if (target instanceof Element && target.closest(".info-text")) return;
+  if (performance.now() < ignoreFocusScrollUntil && target?.contains(activeTip)) {
+    const tip = activeTip.querySelector(".info-text");
+    if (tip) placeTip(activeTip, tip);
+    return;
+  }
+  closeTip(activeTip);
+}, { capture: true, passive: true });
+
+window.addEventListener("resize", () => { if (activeTip) closeTip(activeTip); });
+
+/** A ⓘ right after the text it explains: opens on hover, focus, or click and dismisses on Escape or scroll. */
+export function info(text, { label = "More information", heading = "", preline = false } = {}) {
+  const tipId = `info-tip-${++tipSeq}`;
+  const body = preline ? `<span class="lib-header">${esc(text)}</span>` : esc(text);
+  return `<button type="button" class="info" aria-label="${esc(label)}" aria-expanded="false" aria-describedby="${tipId}"><span aria-hidden="true">ⓘ</span><span id="${tipId}" class="info-text" role="tooltip">${heading ? `<b>${esc(heading)}</b>` : ""}${body}</span></button>`;
+}
+
+/** A status chip button with a rich tooltip explaining why it has that state. */
+export function infoChip(label, cls, text, heading = "Why") {
+  const tipId = `info-tip-${++tipSeq}`;
+  return `<button type="button" class="info-chip ${cls}" aria-expanded="false" aria-describedby="${tipId}">${esc(label)}<span id="${tipId}" class="info-text" role="tooltip">${heading ? `<b>${esc(heading)}</b>` : ""}${esc(text)}</span></button>`;
+}
 // A version without its build metadata: "1.17.0+<commit>" reads "1.17.0".
 export const tagOf = (version) => (version ? String(version).split("+")[0] : "");
 export const fmt = (n) => (n ?? 0).toLocaleString("en-US");

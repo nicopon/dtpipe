@@ -913,18 +913,20 @@ export function openPullDialog(opts) {
  * @template T
  * @param {{ id: string, entries: T[], text: (entry: T) => string, detail?: (entry: T) => string, kept?: (entry: T) => boolean,
  *   removable?: (entry: T) => boolean, note: string, empty: string, question: (entry: T) => string, pick: (entry: T) => void,
- *   remove: (entry: T) => Promise<T[]>, fail: (message: string) => void }} opts
+ *   remove: (entry: T) => Promise<T[]>, fail: (message: string) => void, isBusy?: () => boolean, setBusy?: (busy: boolean) => void,
+ *   isClosed?: () => boolean, fallbackFocus?: () => void }} opts
  */
 function createRecentList(opts) {
   const host = el("div", { id: opts.id });
   let entries = opts.entries;
+  let disabled = false;
   const draw = () => {
     const note = el("p", { class: "hint" }, opts.note);
     if (entries.length === 0) {
       fill(host, note, el("p", { class: "hint" }, opts.empty));
       return;
     }
-    fill(host, note, el("ul", { class: "dialog-list" }, entries.map((entry) => {
+    fill(host, note, el("ul", { class: "dialog-list" }, entries.map((entry, index) => {
       const text = opts.text(entry);
       const detail = opts.detail?.(entry);
       return el("li", {},
@@ -933,15 +935,24 @@ function createRecentList(opts) {
         opts.kept?.(entry) ? el("span", { class: "pill good", title: "A key is kept in the system keyring for this address" }, "key kept") : null,
         opts.removable?.(entry) ?? true
           ? el("button", {
-            type: "button", class: "small ghost forget", title: "Delete this entry", "aria-label": `Delete ${text} from the recent ones`,
+            type: "button", class: "small ghost forget", disabled, title: "Delete this entry", "aria-label": `Delete ${text} from the recent ones`,
             onclick: async () => {
+              if (opts.isBusy?.() || opts.isClosed?.()) return;
               if (!confirm(opts.question(entry))) return;
+              if (opts.isBusy?.() || opts.isClosed?.()) return;
+              opts.setBusy?.(true);
               try {
                 entries = await opts.remove(entry);
+                if (opts.isClosed?.()) return;
                 draw();
-                host.querySelector("button.pick")?.focus();
+                const picks = host.querySelectorAll("button.pick");
+                if (picks.length) /** @type {HTMLElement} */ (picks[Math.min(index, picks.length - 1)]).focus();
+                else if (opts.fallbackFocus) opts.fallbackFocus();
+                else /** @type {HTMLElement | null} */ (host.closest("dialog")?.querySelector("input:not([disabled]), select:not([disabled]), button:not([disabled])"))?.focus();
               } catch (err) {
-                opts.fail(err.message);
+                if (!opts.isClosed?.()) opts.fail(err.message);
+              } finally {
+                if (!opts.isClosed?.()) opts.setBusy?.(false);
               }
             },
           }, "×")
@@ -949,7 +960,14 @@ function createRecentList(opts) {
     })));
   };
   draw();
-  return { element: host, update: (/** @type {T[]} */ next) => { entries = next; draw(); } };
+  return {
+    element: host,
+    update: (/** @type {T[]} */ next) => { entries = next; draw(); },
+    setDisabled: (/** @type {boolean} */ value) => {
+      disabled = value;
+      for (const btn of host.querySelectorAll("button.forget")) /** @type {HTMLButtonElement} */ (btn).disabled = value;
+    },
+  };
 }
 
 const AGENT_PROVIDERS = {
@@ -957,7 +975,8 @@ const AGENT_PROVIDERS = {
   compatible: { label: "OpenAI-compatible server", url: "", provider: "openai" },
 };
 
-/** The choice a connection stands for: an openai provider, at OpenAI's address too, is a compatible server. @param {any} connection */
+const sameAddress = (a, b) => String(a || "").trim().toLowerCase().replace(/\/+$/, "") === String(b || "").trim().toLowerCase().replace(/\/+$/, "");
+
 /**
  * Where a connection's key is, in one line: the model's and the coordinator's dialogs say it the same way.
  * @param {string | undefined} kept `stored`, `flag` or `session` (what the server reads back), absent when none
@@ -971,10 +990,13 @@ function keyState(kept, missing) {
     : "🔑 Kept per address.";
 }
 
-/** What shapes where a connection lives, empty when nothing does: set by the command line, or no keyring to remember a key. @param {any} connection */
+/** What shapes where a connection lives, empty when nothing does: set by the command line, no keyring, or a settings warning. @param {any} connection */
 function connectionNote(connection) {
-  return connection?.source === "flag" ? "Set by the command line: changes last this session unless Remember is ticked."
-    : connection?.keyring === false ? "No system keyring: the key lasts this session only." : "";
+  return [
+    connection?.source === "flag" ? "Set by the command line: changes last this session unless Remember is ticked." : null,
+    connection?.keyring === false ? "No system keyring: the key lasts this session only." : null,
+    connection?.settingsWarning || null,
+  ].filter(Boolean).join(" ");
 }
 
 function providerChoice(connection) {
@@ -993,6 +1015,7 @@ function providerChoice(connection) {
 export function openAgentConnectDialog(opts) {
   const { onConnect, onDisconnect, onForgetEntry } = opts;
   let connection = opts.connection;
+  let closed = false;
   openDialog("d-agent-dialog", "Connect a model", ({ body, close }) => {
     const choice = providerChoice(connection);
     const provider = /** @type {HTMLSelectElement} */ (el("select", { id: "d-agent-provider", "aria-label": "Provider" },
@@ -1001,7 +1024,7 @@ export function openAgentConnectDialog(opts) {
       id: "d-agent-url", type: "text", class: "mono", autocomplete: "off", "aria-label": "Address",
       value: connection?.url || AGENT_PROVIDERS[choice].url, placeholder: "https://models.example.com/v1",
     }));
-    const key = /** @type {HTMLInputElement} */ (el("input", { id: "d-agent-key", type: "password", autocomplete: "off", "aria-label": "Key", placeholder: "API key, if the server asks for one" }));
+    const key = /** @type {HTMLInputElement} */ (el("input", { id: "d-agent-key", type: "password", autocomplete: "new-password", "aria-label": "Key", placeholder: "API key, if the server asks for one" }));
     const keyNote = el("p", { id: "d-agent-key-note", class: "hint" });
     const model = /** @type {HTMLSelectElement} */ (el("select", { id: "d-agent-model", "aria-label": "Model" },
       el("option", { value: connection?.model || "" }, connection?.model || "(Test lists the models)")));
@@ -1011,39 +1034,55 @@ export function openAgentConnectDialog(opts) {
       id: "d-agent-numctx", type: "number", min: String(bounds.min), max: String(bounds.max), step: "1", "aria-label": "Context size in tokens",
       value: String(connection?.numCtx || bounds.default),
     }));
-    const remember = /** @type {HTMLInputElement} */ (el("input", { id: "d-agent-remember", type: "checkbox", checked: true, "aria-label": "Remember on this machine" }));
+    const remember = /** @type {HTMLInputElement} */ (el("input", { id: "d-agent-remember", type: "checkbox", checked: connection?.source !== "flag", "aria-label": "Remember on this machine" }));
     const note = el("p", { id: "d-agent-note", class: "hint" });
     const banner = el("p", { id: "d-agent-error", class: "bad dialog-error", hidden: true });
     const connect = /** @type {HTMLButtonElement} */ (el("button", { id: "d-agent-submit", type: "submit", class: "primary" }, "Connect"));
     const test = /** @type {HTMLButtonElement} */ (el("button", { id: "d-agent-test", type: "button" }, "Test"));
+    const disconnectBtn = connection?.connected
+      ? /** @type {HTMLButtonElement} */ (el("button", {
+        id: "d-agent-disconnect", type: "button", class: "ghost",
+        title: "Disconnect for this session. To forget this model and its key, disconnect first, then reopen and click × in Recent models.",
+      }, "Disconnect"))
+      : null;
     let busy = false;
+    let testMessage = "";
 
-    const same = (a, b) => String(a || "").toLowerCase().replace(/\/+$/, "") === String(b || "").toLowerCase().replace(/\/+$/, "");
+    const renderNote = () => {
+      note.textContent = [testMessage, connectionNote(connection)].filter(Boolean).join(" ");
+    };
     const request = () => ({
       provider: AGENT_PROVIDERS[provider.value].provider,
       url: url.value.trim(),
       model: model.value || undefined,
       timeout: Number(timeout.value) || undefined,
       numCtx: provider.value === "ollama" && ctxSize.value.trim() !== "" ? Number(ctxSize.value) : undefined,
-      key: key.value || undefined,
+      key: provider.value !== "ollama" && key.value ? key.value : undefined,
       remember: remember.checked,
     });
     const fail = (message) => { banner.hidden = false; banner.textContent = message; };
-    const settle = (value) => { busy = value; connect.disabled = value; test.disabled = value; };
+    const settle = (value) => {
+      busy = value;
+      connect.disabled = value;
+      test.disabled = value;
+      if (disconnectBtn) disconnectBtn.disabled = value;
+      recents.setDisabled(value);
+    };
     const update = () => {
       const keyed = provider.value !== "ollama";
       key.disabled = !keyed;
       key.parentElement.hidden = !keyed;
+      ctxSize.disabled = provider.value !== "ollama";
       ctxSize.parentElement.hidden = provider.value !== "ollama";
-      const here = same(url.value, connection?.url);
-      const recent = (connection?.history ?? []).find((h) => same(h.url, url.value));
+      const here = sameAddress(url.value, connection?.url);
+      const recent = (connection?.history ?? []).find((h) => sameAddress(h.url, url.value));
       const kept = here ? connection?.key : recent?.keyKept ? "stored" : undefined;
       keyNote.hidden = !keyed;
       keyNote.textContent = keyState(kept, !!(connection?.needsKey && here));
-      note.textContent = connectionNote(connection);
+      renderNote();
     };
-    provider.addEventListener("change", () => { url.value = AGENT_PROVIDERS[provider.value].url; update(); });
-    url.addEventListener("input", update);
+    provider.addEventListener("change", () => { testMessage = ""; url.value = AGENT_PROVIDERS[provider.value].url; update(); });
+    url.addEventListener("input", () => { testMessage = ""; update(); });
 
     const recents = createRecentList({
       id: "d-agent-recents",
@@ -1051,8 +1090,12 @@ export function openAgentConnectDialog(opts) {
       text: (entry) => entry.url,
       detail: (entry) => [AGENT_PROVIDERS[providerChoice(entry)].label, entry.model].filter(Boolean).join(" · "),
       kept: (entry) => entry.keyKept,
-      note: "Past connections: × forgets one and its key.",
-      empty: "No other model is remembered.",
+      note: connection?.connected
+        ? "Past connections: × forgets one and its key. Disconnect first to forget the current one."
+        : "Past connections: × forgets one and its key.",
+      empty: connection?.connected
+        ? "No other model is remembered. Disconnect first, then click × here to forget the current model and its key."
+        : "No other model is remembered.",
       question: (entry) => `Forget ${entry.url}${entry.keyKept ? " and its key" : ""}?`,
       pick: (entry) => {
         provider.value = providerChoice(entry);
@@ -1061,47 +1104,79 @@ export function openAgentConnectDialog(opts) {
         timeout.value = String(entry.timeout || 300);
         ctxSize.value = String(entry.numCtx || bounds.default);
         key.value = "";
+        testMessage = "";
         banner.hidden = true;
         update();
       },
       remove: async (entry) => {
         connection = await onForgetEntry(entry);
-        update();
+        if (!closed) update();
         return connection.history ?? [];
       },
       fail,
+      isBusy: () => busy,
+      setBusy: settle,
+      isClosed: () => closed,
+      fallbackFocus: () => url.focus(),
     });
 
+    if (disconnectBtn) {
+      disconnectBtn.addEventListener("click", async () => {
+        if (busy || closed) return;
+        settle(true);
+        banner.hidden = true;
+        try {
+          await onDisconnect();
+          if (!closed) close();
+          return;
+        } catch (err) {
+          if (!closed) fail(err.message);
+        }
+        if (!closed) settle(false);
+      });
+    }
+
     test.addEventListener("click", async () => {
-      if (busy) return;
+      if (busy || closed) return;
       settle(true);
       banner.hidden = true;
       test.textContent = "Testing…";
       try {
         const { models } = await api("/api/agent/connection/test", request());
+        if (closed) return;
         const wanted = model.value;
-        fill(model, models.map((name) => el("option", { value: name, selected: name === wanted }, name)));
-        note.textContent = `${models.length} model${models.length === 1 ? "" : "s"} listed.`;
+        fill(model, models.length
+          ? models.map((name) => el("option", { value: name, selected: name === wanted }, name))
+          : el("option", { value: "" }, "(No models listed)"));
+        testMessage = `${models.length} model${models.length === 1 ? "" : "s"} listed.`;
+        renderNote();
       } catch (err) {
-        fail(err.message);
+        if (!closed) fail(err.message);
       }
-      test.textContent = "Test";
-      settle(false);
+      if (!closed) {
+        test.textContent = "Test";
+        settle(false);
+      }
     });
 
     const form = el("form", {
       class: "dialog-form",
       onsubmit: async (e) => {
         e.preventDefault();
-        if (busy) return;
+        if (busy || closed) return;
         settle(true);
         banner.hidden = true;
         connect.textContent = "Connecting…";
         try {
           const answer = await onConnect(request());
-          key.value = "";
-          if (answer !== false) { close(); return; }
+          if (answer !== false) {
+            key.value = "";
+            if (!closed) close();
+            return;
+          }
+          if (closed) return;
         } catch (err) {
+          if (closed) return;
           fail(err.message);
         }
         connect.textContent = "Connect";
@@ -1121,21 +1196,17 @@ export function openAgentConnectDialog(opts) {
       note,
       banner,
       el("div", { class: "row dialog-actions" },
-        connection?.connected
-          ? el("button", {
-            id: "d-agent-disconnect", type: "button", class: "ghost", title: "Disconnect for this session. Remembered settings stay.",
-            onclick: async () => {
-              if (busy) return;
-              try { await onDisconnect(); close(); } catch (err) { fail(err.message); }
-            },
-          }, "Disconnect")
-          : null,
+        disconnectBtn,
         el("button", { type: "button", class: "ghost", onclick: close }, "Cancel"),
         connect));
+    form.addEventListener("invalid", (e) => {
+      const details = /** @type {HTMLElement} */ (e.target).closest("details");
+      if (details && !details.open) details.open = true;
+    }, true);
     fill(body, form);
     update();
     url.focus();
-  });
+  }, { onClose: () => { closed = true; } });
 }
 
 /**
@@ -1151,6 +1222,7 @@ export function openAgentConnectDialog(opts) {
 export function openCoordinatorConnectDialog(opts) {
   const { onConnect, onDisconnect, onForgetEntry } = opts;
   let connection = opts.connection;
+  let closed = false;
   openDialog("d-coordinator-dialog", "Connect a coordinator", ({ body, close }) => {
     const origin = /** @type {HTMLInputElement} */ (el("input", {
       id: "d-coordinator-origin", type: "text", class: "mono", autocomplete: "off", "aria-label": "Address",
@@ -1159,35 +1231,51 @@ export function openCoordinatorConnectDialog(opts) {
     const auth = /** @type {HTMLSelectElement} */ (el("select", { id: "d-coordinator-auth", "aria-label": "Sign in" },
       el("option", { value: "browser", selected: connection?.auth !== "key" }, "Through the browser"),
       el("option", { value: "key", selected: connection?.auth === "key" }, "With a key the coordinator made for me")));
-    const key = /** @type {HTMLInputElement} */ (el("input", { id: "d-coordinator-key", type: "password", autocomplete: "off", "aria-label": "Key", placeholder: "dtp_…" }));
+    const key = /** @type {HTMLInputElement} */ (el("input", { id: "d-coordinator-key", type: "password", autocomplete: "new-password", "aria-label": "Key", placeholder: "dtp_…" }));
     const keyNote = el("p", { id: "d-coordinator-key-note", class: "hint" });
-    const remember = /** @type {HTMLInputElement} */ (el("input", { id: "d-coordinator-remember", type: "checkbox", checked: true, "aria-label": "Remember on this machine" }));
+    const remember = /** @type {HTMLInputElement} */ (el("input", { id: "d-coordinator-remember", type: "checkbox", checked: connection?.source !== "flag", "aria-label": "Remember on this machine" }));
     const note = el("p", { id: "d-coordinator-note", class: "hint" });
     const banner = el("p", { id: "d-coordinator-error", class: "bad dialog-error", hidden: true });
     const connect = /** @type {HTMLButtonElement} */ (el("button", { id: "d-coordinator-submit", type: "submit", class: "primary" }, "Connect"));
     const test = /** @type {HTMLButtonElement} */ (el("button", { id: "d-coordinator-test", type: "button" }, "Test"));
+    const disconnectBtn = connection?.connected
+      ? /** @type {HTMLButtonElement} */ (el("button", {
+        id: "d-coordinator-disconnect", type: "button", class: "ghost",
+        title: "Disconnect for this session. To forget this coordinator and its key, disconnect first, then reopen and click × in Recent coordinators.",
+      }, "Disconnect"))
+      : null;
     let busy = false;
+    let testMessage = "";
 
-    const same = (a, b) => String(a || "").toLowerCase().replace(/\/+$/, "") === String(b || "").toLowerCase().replace(/\/+$/, "");
+    const renderNote = () => {
+      note.textContent = [testMessage, connectionNote(connection)].filter(Boolean).join(" ");
+    };
     const request = () => ({
       origin: origin.value.trim(),
       auth: auth.value,
-      key: key.value || undefined,
+      key: auth.value === "key" && key.value ? key.value : undefined,
       remember: remember.checked,
     });
     const fail = (message) => { banner.hidden = false; banner.textContent = message; };
-    const settle = (value) => { busy = value; connect.disabled = value; test.disabled = value; };
+    const settle = (value) => {
+      busy = value;
+      connect.disabled = value;
+      test.disabled = value;
+      if (disconnectBtn) disconnectBtn.disabled = value;
+      recents.setDisabled(value);
+    };
     const update = () => {
       const keyed = auth.value === "key";
+      key.disabled = !keyed;
       key.parentElement.hidden = !keyed;
-      const here = same(origin.value, connection?.origin);
-      const recent = (connection?.history ?? []).find((h) => same(h.origin, origin.value));
+      const here = sameAddress(origin.value, connection?.origin);
+      const recent = (connection?.history ?? []).find((h) => sameAddress(h.origin, origin.value));
       const kept = here ? connection?.key : recent?.keyKept ? "stored" : undefined;
       keyNote.textContent = keyState(kept, !!(connection?.needsKey && here));
-      note.textContent = connectionNote(connection);
+      renderNote();
     };
-    auth.addEventListener("change", update);
-    origin.addEventListener("input", update);
+    auth.addEventListener("change", () => { testMessage = ""; update(); });
+    origin.addEventListener("input", () => { testMessage = ""; update(); });
 
     const recents = createRecentList({
       id: "d-coordinator-recents",
@@ -1195,52 +1283,86 @@ export function openCoordinatorConnectDialog(opts) {
       text: (entry) => entry.origin,
       detail: (entry) => (entry.auth === "key" ? "with a key" : "through the browser"),
       kept: (entry) => entry.keyKept,
-      note: "Past connections: × forgets one and its key.",
-      empty: "No other coordinator is remembered.",
+      note: connection?.connected
+        ? "Past connections: × forgets one and its key. Disconnect first to forget the current one."
+        : "Past connections: × forgets one and its key.",
+      empty: connection?.connected
+        ? "No other coordinator is remembered. Disconnect first, then click × here to forget the current coordinator and its key."
+        : "No other coordinator is remembered.",
       question: (entry) => `Forget ${entry.origin}${entry.keyKept ? " and its key" : ""}?`,
       pick: (entry) => {
         origin.value = entry.origin;
         auth.value = entry.auth === "key" ? "key" : "browser";
         key.value = "";
+        testMessage = "";
         banner.hidden = true;
         update();
       },
       remove: async (entry) => {
         connection = await onForgetEntry(entry);
-        update();
+        if (!closed) update();
         return connection.history ?? [];
       },
       fail,
+      isBusy: () => busy,
+      setBusy: settle,
+      isClosed: () => closed,
+      fallbackFocus: () => origin.focus(),
     });
 
+    if (disconnectBtn) {
+      disconnectBtn.addEventListener("click", async () => {
+        if (busy || closed) return;
+        settle(true);
+        banner.hidden = true;
+        try {
+          await onDisconnect();
+          if (!closed) close();
+          return;
+        } catch (err) {
+          if (!closed) fail(err.message);
+        }
+        if (!closed) settle(false);
+      });
+    }
+
     test.addEventListener("click", async () => {
-      if (busy) return;
+      if (busy || closed) return;
       settle(true);
       banner.hidden = true;
       test.textContent = "Testing…";
       try {
         const answer = await api("/api/coordinator/connection/test", request());
-        note.textContent = answer.signedInAs ? `The coordinator answers, and the key signs in as ${answer.signedInAs}.` : "The coordinator answers.";
+        if (closed) return;
+        testMessage = answer.signedInAs ? `The coordinator answers, and the key signs in as ${answer.signedInAs}.` : "The coordinator answers.";
+        renderNote();
       } catch (err) {
-        fail(err.message);
+        if (!closed) fail(err.message);
       }
-      test.textContent = "Test";
-      settle(false);
+      if (!closed) {
+        test.textContent = "Test";
+        settle(false);
+      }
     });
 
     const form = el("form", {
       class: "dialog-form",
       onsubmit: async (e) => {
         e.preventDefault();
-        if (busy) return;
+        if (busy || closed) return;
         settle(true);
         banner.hidden = true;
         connect.textContent = "Connecting…";
         try {
           const answer = await onConnect(request());
-          key.value = "";
-          if (answer !== false) { close(); return; }
+          if (answer !== false) {
+            key.value = "";
+            if (!closed) close();
+            return;
+          }
+          if (closed) return;
         } catch (err) {
+          if (closed) return;
           fail(err.message);
         }
         connect.textContent = "Connect";
@@ -1256,21 +1378,13 @@ export function openCoordinatorConnectDialog(opts) {
       note,
       banner,
       el("div", { class: "row dialog-actions" },
-        connection?.connected
-          ? el("button", {
-            id: "d-coordinator-disconnect", type: "button", class: "ghost", title: "Disconnect for this session. Remembered settings stay.",
-            onclick: async () => {
-              if (busy) return;
-              try { await onDisconnect(); close(); } catch (err) { fail(err.message); }
-            },
-          }, "Disconnect")
-          : null,
+        disconnectBtn,
         el("button", { type: "button", class: "ghost", onclick: close }, "Cancel"),
         connect));
     fill(body, form);
     update();
     origin.focus();
-  });
+  }, { onClose: () => { closed = true; } });
 }
 
 /**
@@ -1279,33 +1393,59 @@ export function openCoordinatorConnectDialog(opts) {
  * The recent folders are listed with the one the studio started on, the folder in place left out: a row fills the path, and
  * `onForgetRecent(path)` removes a recent folder from the list (the start folder is never in it, and a folder gone from the disk
  * is removed the same way).
- * @param {{ workspace: { root: string, start: string, recents: string[], canRemember: boolean, settingsWarning?: string | null },
+ * @param {{ workspace: { root: string, start: string, recents: string[], currentRemembered?: boolean, canRemember: boolean, settingsWarning?: string | null },
  *   onTest: (path: string) => Promise<{ root: string, jobs: number }>, unsaved: () => boolean,
- *   onOpen: (request: { path: string, remember: boolean }, discard: boolean) => Promise<void>, onSave: () => Promise<boolean>,
- *   onForgetRecent: (path: string) => Promise<{ recents: string[] }> }} opts
+ *   onOpen: (request: { path: string, remember: boolean }, discard: boolean, isClosed: () => boolean) => Promise<void>, onSave: () => Promise<boolean>,
+ *   onForgetRecent: (path: string) => Promise<{ recents: string[], currentRemembered?: boolean, warning?: string | null }> }} opts
  */
 export function openWorkspaceDialog(opts) {
   const { workspace, onTest, unsaved, onOpen, onSave, onForgetRecent } = opts;
-  openDialog("d-workspace-dialog", "Open a folder", ({ body }) => {
+  let closed = false;
+  openDialog("d-workspace-dialog", "Open a folder", ({ body, close }) => {
     const pathInput = /** @type {HTMLInputElement} */ (el("input", {
       id: "d-workspace-path", type: "text", class: "mono", autocomplete: "off", "aria-label": "Folder", value: workspace.root, placeholder: "/path/to/folder",
     }));
     const remember = /** @type {HTMLInputElement} */ (el("input", { id: "d-workspace-remember", type: "checkbox", checked: workspace.canRemember, disabled: !workspace.canRemember, "aria-label": "Remember among the recent folders" }));
-    const note = el("p", { id: "d-workspace-note", class: "hint" }, workspace.settingsWarning || "");
+    const note = el("p", { id: "d-workspace-note", class: "hint" });
     const banner = el("p", { id: "d-workspace-error", class: "bad dialog-error", hidden: true });
-    const choices = el("div", { id: "d-workspace-unsaved", class: "row dialog-actions", hidden: true });
+    const choices = el("div", { id: "d-workspace-unsaved", class: "row wrap dialog-unsaved-actions", hidden: true });
     const submit = /** @type {HTMLButtonElement} */ (el("button", { id: "d-workspace-submit", type: "submit", class: "primary" }, "Open"));
     const test = /** @type {HTMLButtonElement} */ (el("button", { id: "d-workspace-test", type: "button" }, "Test"));
+    const forgetCurrentBtn = /** @type {HTMLButtonElement} */ (el("button", {
+      id: "d-workspace-forget-current", type: "button", class: "small ghost",
+      title: "Remove the current folder from recent folders without changing folder",
+      "aria-label": "Remove current folder from recent folders",
+    }, "Remove from recents"));
+    let currentRemembered = !!workspace.currentRemembered;
+    const currentRecentRow = el("div", { id: "d-workspace-current-recent", class: "row wrap", hidden: !currentRemembered },
+      el("span", { class: "hint" }, "Current folder is remembered."),
+      forgetCurrentBtn);
     let busy = false;
+    let testMessage = "";
 
+    const renderNote = () => {
+      note.textContent = [testMessage, workspace.settingsWarning || ""].filter(Boolean).join(" ");
+    };
     const request = () => ({ path: pathInput.value.trim(), remember: remember.checked });
     const fail = (message) => { banner.hidden = false; banner.textContent = message; };
-    const settle = (value) => { busy = value; submit.disabled = value; test.disabled = value; };
 
     // The folder the studio started on is offered beside the recent ones, never written among them.
     let remembered = workspace.recents;
     const known = () => [...new Set([...remembered, workspace.start])].filter((p) => p && p !== workspace.root);
-    const recents = createRecentList({
+    let saveBtn = /** @type {HTMLButtonElement | null} */ (null);
+    let discardBtn = /** @type {HTMLButtonElement | null} */ (null);
+    let recents;
+    const settle = (value) => {
+      busy = value;
+      submit.disabled = value;
+      test.disabled = value;
+      if (saveBtn) saveBtn.disabled = value;
+      if (discardBtn) discardBtn.disabled = value;
+      forgetCurrentBtn.disabled = value;
+      recents?.setDisabled(value);
+    };
+
+    recents = createRecentList({
       id: "d-workspace-recents",
       entries: known(),
       text: (path) => path,
@@ -1313,62 +1453,116 @@ export function openWorkspaceDialog(opts) {
       note: "Past folders: × forgets one.",
       empty: "No other folder is remembered.",
       question: (path) => `Forget ${path}? The folder is untouched.`,
-      pick: (path) => { pathInput.value = path; banner.hidden = true; note.textContent = ""; submit.focus(); },
+      pick: (path) => { pathInput.value = path; banner.hidden = true; testMessage = ""; renderNote(); submit.focus(); },
       remove: async (path) => {
-        remembered = (await onForgetRecent(path)).recents;
+        const answer = await onForgetRecent(path);
+        if (answer?.warning && !closed) fail(answer.warning);
+        remembered = answer.recents;
+        currentRemembered = !!answer.currentRemembered;
+        currentRecentRow.hidden = !currentRemembered;
         return known();
       },
       fail,
+      isBusy: () => busy,
+      setBusy: settle,
+      isClosed: () => closed,
+      fallbackFocus: () => pathInput.focus(),
     });
 
+    forgetCurrentBtn.addEventListener("click", async () => {
+      if (busy || closed) return;
+      if (!confirm(`Forget ${workspace.root}? The folder stays open and untouched.`)) return;
+      if (busy || closed) return;
+      settle(true);
+      banner.hidden = true;
+      try {
+        const answer = await onForgetRecent(workspace.root);
+        if (closed) return;
+        if (answer?.warning) fail(answer.warning);
+        remembered = answer.recents;
+        currentRemembered = !!answer.currentRemembered;
+        currentRecentRow.hidden = !currentRemembered;
+        recents.update(known());
+        pathInput.focus();
+      } catch (err) {
+        if (!closed) fail(err.message);
+      } finally {
+        if (!closed) settle(false);
+      }
+    });
+
+    pathInput.addEventListener("input", () => { testMessage = ""; renderNote(); });
+
     const open = async (discard) => {
-      if (busy) return;
+      if (busy || closed) return;
       settle(true);
       banner.hidden = true;
       choices.hidden = true;
       submit.textContent = "Opening…";
       const held = !discard && unsaved();
       try {
-        await onOpen(request(), discard);
+        await onOpen(request(), discard, () => closed);
         return;
       } catch (err) {
+        if (closed) return;
         fail(err.message);
         // Unsaved changes are refused first: a refusal while they are held is theirs, and the person chooses what becomes of them.
         if (err.status === 409 && held) choices.hidden = false;
       }
-      submit.textContent = "Open";
-      settle(false);
+      if (!closed) {
+        submit.textContent = "Open";
+        settle(false);
+      }
     };
 
-    fill(choices,
-      el("button", {
-        id: "d-workspace-save", type: "button",
-        onclick: async () => {
-          if (busy) return;
-          if (await onSave()) await open(false);
-          else fail("Job not saved: save it or discard its changes.");
-        },
-      }, "Save, then open"),
-      el("button", { id: "d-workspace-discard", type: "button", class: "ghost", onclick: () => open(true) }, "Discard changes and open"));
+    saveBtn = /** @type {HTMLButtonElement} */ (el("button", {
+      id: "d-workspace-save", type: "button",
+      onclick: async () => {
+        if (busy || closed) return;
+        settle(true);
+        banner.hidden = true;
+        choices.hidden = true;
+        let saved = false;
+        try {
+          saved = await onSave();
+        } catch (err) {
+          if (!closed) { fail(err.message); settle(false); }
+          return;
+        }
+        if (closed) return;
+        settle(false);
+        if (saved) await open(false);
+        else {
+          fail("Job not saved: save it or discard its changes.");
+          choices.hidden = false;
+        }
+      },
+    }, "Save, then open"));
+    discardBtn = /** @type {HTMLButtonElement} */ (el("button", { id: "d-workspace-discard", type: "button", class: "ghost", onclick: () => open(true) }, "Discard changes and open"));
+    fill(choices, saveBtn, discardBtn);
 
     test.addEventListener("click", async () => {
-      if (busy) return;
+      if (busy || closed) return;
       settle(true);
       banner.hidden = true;
       test.textContent = "Testing…";
       try {
         const answer = await onTest(request().path);
-        note.textContent = `${answer.root} holds ${answer.jobs === 1 ? "1 job" : `${answer.jobs} jobs`}.`;
+        if (closed) return;
+        testMessage = `${answer.root} holds ${answer.jobs === 1 ? "1 job" : `${answer.jobs} jobs`}.`;
+        renderNote();
       } catch (err) {
-        fail(err.message);
+        if (!closed) fail(err.message);
       }
-      test.textContent = "Test";
-      settle(false);
+      if (!closed) {
+        test.textContent = "Test";
+        settle(false);
+      }
     });
 
     const form = el("form", { class: "dialog-form", onsubmit: (e) => { e.preventDefault(); open(false); } },
       el("div", { class: "dialog-field" }, el("label", { for: "d-workspace-path" }, "Folder"), el("div", { class: "row" }, pathInput, test)),
-      el("div", { class: "dialog-field" }, el("span", { class: "hint" }, "Recent folders"), recents.element),
+      el("div", { class: "dialog-field" }, el("span", { class: "hint" }, "Recent folders"), recents.element, currentRecentRow),
       el("details", { class: "dialog-details" }, el("summary", {}, "Advanced"),
         el("label", {}, remember, " Remember among the recent folders on this machine")),
       note,
@@ -1376,10 +1570,11 @@ export function openWorkspaceDialog(opts) {
       choices,
       el("p", { class: "hint" }, "Reloads the page and starts a new agent conversation."),
       el("div", { class: "row dialog-actions" },
-        el("button", { type: "button", class: "ghost", onclick: () => closeActiveDialog() }, "Cancel"),
+        el("button", { type: "button", class: "ghost", onclick: close }, "Cancel"),
         submit));
     fill(body, form);
+    renderNote();
     pathInput.focus();
     pathInput.select();
-  });
+  }, { onClose: () => { closed = true; } });
 }

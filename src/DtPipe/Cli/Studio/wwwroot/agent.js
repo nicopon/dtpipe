@@ -8,9 +8,12 @@ import { $, api, el, fill, status, svg } from "./dom.js";
 import { applySizes, bindSplit, cardChanges, editingText, showTab } from "./designer.js";
 import { openAgentConnectDialog } from "./dialogs.js";
 import { invalidate, onZone } from "./render.js";
-import { state } from "./state.js";
+import { sequence, state } from "./state.js";
 
 const POLL_MS = 800;
+const agentRead = sequence();
+const agentPoll = sequence();
+const modelsRead = sequence();
 const CHOICE_LABEL = {
   save: "Save", run: "Run", refuse: "Refuse",
   send: "Send anyway", cancel: "Stop the turn", withhold: "Keep it here",
@@ -26,7 +29,6 @@ const PLAN_LABEL = {
 
 let hooks = {};
 let pollTimer = null;
-let polling = false;
 let shown = 0;
 // The last plan of the agent the page took (or left): the next revision the server answers is a newer one.
 let appliedRevision = 0;
@@ -90,8 +92,12 @@ export async function mountAgent(pane, host) {
  */
 async function refreshAgent() {
   clearTimeout(pollTimer);
-  state.agent.connection = await api("/api/agent/connection");
-  const first = await api("/api/agent?after=0");
+  agentPoll.cancel();
+  modelsRead.cancel();
+  const ticket = agentRead.begin();
+  const [connection, first] = await Promise.all([api("/api/agent/connection"), api("/api/agent?after=0")]);
+  if (agentRead.stale(ticket)) return;
+  state.agent.connection = connection;
   dropLog();
   synced = null;
   appliedRevision = first.job?.revision ?? 0;
@@ -105,6 +111,7 @@ async function refreshAgent() {
   if (state.agent.enabled) {
     accept(first, true);
     await loadModels();
+    if (agentRead.stale(ticket)) return;
     if (first.busy || first.pending) poll();
   }
   invalidate("agent");
@@ -120,19 +127,28 @@ async function openConnect() {
       if (shown > 0 && !confirm("Connecting a model starts a new conversation: forget this one?")) return false;
       const answer = await api("/api/agent/connection", body, "PUT");
       await refreshAgent();
+      if (answer?.warning) status(answer.warning, "warn");
       return answer;
     },
     onDisconnect: async () => {
       await api("/api/agent/connection/disconnect", {});
       await refreshAgent();
     },
-    onForgetEntry: (entry) => api("/api/agent/connection/history", { provider: entry.provider, url: entry.url }, "DELETE"),
+    onForgetEntry: async (entry) => {
+      const answer = await api("/api/agent/connection/history", { provider: entry.provider, url: entry.url }, "DELETE");
+      state.agent.connection = answer;
+      if (!state.agent.enabled) await refreshAgent();
+      else invalidate("agent");
+      return answer;
+    },
   });
 }
 
 async function loadModels() {
+  const ticket = modelsRead.begin();
   try {
     const { models, model } = await api("/api/agent/models");
+    if (modelsRead.stale(ticket)) return;
     const select = /** @type {HTMLSelectElement} */ ($("agent-model"));
     const names = model && !models.includes(model) ? [model, ...models] : models;
     fill(select, names.map((name) => el("option", { value: name, selected: name === (state.agent.status?.model ?? model) }, name)));
@@ -140,6 +156,7 @@ async function loadModels() {
       ? { short: "model not listed", text: `${model} is not among the ${models.length} listed models: pick another.` }
       : null;
   } catch (e) {
+    if (modelsRead.stale(ticket)) return;
     // A studio that does not answer is the header's studio line; the model's server is this one's.
     if (!e.transport) state.agent.problem = { short: "model's server not answering", text: e.message };
   }
@@ -464,7 +481,7 @@ function cardView(card) {
 
 function questionView(question) {
   return el("div", { class: "agent-card" }, el("p", {}, question.text),
-    question.options?.length ? el("div", { class: "row wrap" }, question.options.map((o) => el("button", { class: "small", onclick: () => send(o) }, o))) : null);
+    question.options?.length ? el("div", { class: "row wrap agent-actions" }, question.options.map((o) => el("button", { class: "small", onclick: () => send(o) }, o))) : null);
 }
 
 /**
@@ -488,13 +505,13 @@ function planView(plan) {
       el("summary", {}, `The agent's plan: ${PLAN_LABEL[plan.state.toLowerCase()] || plan.state.toLowerCase()}`, plan.message ? el("span", { class: "hint" }, ` · ${plan.message.split("\n")[0]}`) : null),
       el("pre", {}, plan.yaml)),
     marks ? el("p", {}, marks) : null,
-    el("div", { class: "row agent-actions" },
-      state.job && !state.agent.behind && (plan.yaml !== appliedYaml || moved()) ? el("button", { class: "small", title: "Replace the open job's steps with the plan; nothing is saved", disabled: blocked, "aria-describedby": blocked ? "agent-plan-refused" : null, onclick: () => apply({ yaml: plan.yaml }) }, "Apply to the open job") : null,
-      el("button", { class: "small", title: "Open the plan as a new job, not saved yet", disabled: blocked, "aria-describedby": blocked ? "agent-plan-refused" : null, onclick: async () => { if (await hooks.openPlan(plan.yaml)) settled(); } }, "Open as a new job")),
     // The check's words keep their lines: a parser's error carries the line it read and a caret under the column.
     blocked ? el("div", { id: "agent-plan-refused", class: "hint" }, "The check refused this plan: nothing applied or opened",
       plan.message ? [":", el("pre", {}, plan.message)] : ".", " Ask the agent to correct it.")
-      : failed(plan.yaml) && plan.yaml !== appliedYaml ? el("p", { class: "hint" }, "This plan's try failed: it waits until you apply or open it.") : null);
+      : failed(plan.yaml) && plan.yaml !== appliedYaml ? el("p", { class: "hint" }, "This plan's try failed: it waits until you apply or open it.") : null,
+    el("div", { class: "row agent-actions" },
+      state.job && !state.agent.behind && (plan.yaml !== appliedYaml || moved()) ? el("button", { class: "small", title: "Replace the open job's steps with the plan; nothing is saved", disabled: blocked, "aria-describedby": blocked ? "agent-plan-refused" : null, onclick: () => apply({ yaml: plan.yaml }) }, "Apply to the open job") : null,
+      el("button", { class: "small", title: "Open the plan as a new job, not saved yet", disabled: blocked, "aria-describedby": blocked ? "agent-plan-refused" : null, onclick: async () => { if (await hooks.openPlan(plan.yaml)) settled(); } }, "Open as a new job")));
 }
 
 async function answer(card, choice) {
@@ -559,21 +576,21 @@ async function forget(question) {
 /** Reads what changed since the last entry shown, again while a turn runs or a card waits. */
 async function poll() {
   clearTimeout(pollTimer);
-  if (polling) { pollTimer = setTimeout(poll, POLL_MS); return; }
-  polling = true;
+  const ticket = agentPoll.begin();
   let answer = null;
   try {
     answer = await api(`/api/agent?after=${shown}&rev=${appliedRevision}`);
+    if (agentPoll.stale(ticket)) return;
     // Fewer entries than the page drew: the server reset the conversation, and what it holds now is read from its start.
     if (answer.count < shown) {
       dropLog();
       answer = await api(`/api/agent?after=0&rev=${appliedRevision}`);
+      if (agentPoll.stale(ticket)) return;
     }
     accept(answer);
   } catch (e) {
+    if (agentPoll.stale(ticket)) return;
     status(e.message, "bad");
-  } finally {
-    polling = false;
   }
-  if (answer?.busy || answer?.pending) pollTimer = setTimeout(poll, POLL_MS);
+  if (!agentPoll.stale(ticket) && (answer?.busy || answer?.pending)) pollTimer = setTimeout(poll, POLL_MS);
 }

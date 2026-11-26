@@ -263,7 +263,7 @@ function render() {
         <select id="a-auth" aria-label="Verified by"><option value="key" ${rights.idp ? "" : "selected"}>verified by a key this coordinator makes</option>${rights.idp ? `<option value="idp" selected>verified by the identity provider</option>` : ""}</select>
         <input id="a-name" class="mono" placeholder="name (the client id by default)">
         <input id="a-groups" class="mono" data-for="node" placeholder="groups, separated by commas" list="groups-list">
-        <label class="check" data-for="node"><input type="checkbox" id="a-runner"> runner</label>
+        <label class="check" data-for="node" title="No data, serves every group, needs no matrix row. Host runs with --runner."><input type="checkbox" id="a-runner"> runner</label>
         <input id="a-pipelines" class="mono" data-for="launcher" placeholder="pipelines it may launch, separated by commas">
         <select id="a-role" data-for="person" aria-label="Role">${ROLES.map((r) => `<option>${r}</option>`).join("")}</select>
         <input id="a-account" class="mono" data-for="person-idp" placeholder="account at the provider (an email by default)">
@@ -278,7 +278,7 @@ function render() {
     <section class="card">
       <div class="card-head"><h2>Flow matrix <span class="hint">to whom</span></h2>
         <span class="actions">${matrixDraft ? `<button class="ghost" data-matrix-reset>Discard</button><button class="primary" data-matrix-save>Apply</button>` : ""}</span></div>
-      <p class="hint">Rows send, columns receive; <code>*</code> is any group. ${info("A node sends to another only if every group of the sender may send to every group of the receiver. Checked on every transfer and every plan: a change applies to the next run, no redeployment. Use * → runner and runner → * to let every group exchange with runners.")}</p>
+      <p class="hint">Rows send, columns receive; <code>*</code> is any group. ${info("A node sends to another only if every group of the sender may send to every group of the receiver. Checked on every transfer and every plan: a change applies to the next run, no redeployment. Runners are open to every group and need no matrix row.")}</p>
       <table class="matrix edit"><tr><th>from \\ to</th>${matrixGroups.map((g) => `<th${g === "*" ? ` title="Any group"` : ""}>${esc(g)}</th>`).join("")}</tr>
         ${matrixGroups.map((g) => `<tr><th${g === "*" ? ` title="Any group"` : ""}>${esc(g)}</th>${matrixGroups.map((t) => matrixCell(g, t)).join("")}</tr>`).join("")}</table>
     </section>

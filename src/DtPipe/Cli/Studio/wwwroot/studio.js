@@ -688,7 +688,7 @@ async function openWorkspace() {
     workspace,
     onTest: (path) => api("/api/workspace/test", { path }),
     unsaved: holdsEdits,
-    onOpen: async (request, discard) => {
+    onOpen: async (request, discard, isClosed) => {
       const unsaved = !discard && holdsEdits();
       holdView(true);
       try {
@@ -696,6 +696,10 @@ async function openWorkspace() {
       } catch (e) {
         holdView(false);
         throw e;
+      }
+      if (isClosed?.()) {
+        holdView(false);
+        return;
       }
       leaving = true;
       location.reload();
@@ -752,17 +756,16 @@ async function start() {
   sizesRead();
   await loadJobs();
   if (typeof kept.open === "string" && state.jobs.paths.includes(kept.open)) await open(kept.open, true);
+  await refreshCoordinator();
+  // Another coordinator has other publications; what a publication showed was said by the one that is gone.
+  let connectedTo = state.coordinator?.url ?? null;
   onCoordinator(loadBricks);
   onCoordinator(loadLibrary);
-  // Another coordinator has other publications; what a publication showed was said by the one that is gone.
-  let connectedTo = null;
   onCoordinator((link) => {
     if ((link?.url ?? null) !== connectedTo) { connectedTo = link?.url ?? null; forgetPublication(); }
     loadJobs().catch(() => {});
   });
-  await refreshCoordinator();
-  await loadBricks();
-  await loadLibrary();
+  await Promise.all([loadBricks(), loadLibrary()]);
   await mountAgent($("agent-pane"), { applyPlan, openPlan, reopen: (path, ask = false) => open(path, !ask, "the file the agent saved"), jobsChanged: loadJobs, followPlan });
 }
 

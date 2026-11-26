@@ -23,6 +23,7 @@ header { flex: none; display: flex; align-items: center; flex-wrap: wrap; gap: 6
 header b, header #job-sync, header #quit { white-space: nowrap; }
 header #folder { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 header #job-name { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+header #coordinator-link { max-width: min(340px, 60vw); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
 header #quit { margin-left: auto; }
 header .links { margin-left: auto; display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; font-size: 12.5px; }
 header .links + #quit { margin-left: 0; }
@@ -108,11 +109,12 @@ textarea { width: 100%; resize: vertical; }
 .mono, textarea.mono, pre, code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
 .muted, .hint { color: var(--muted); }
 .hint { font-size: 12.5px; }
-.info { all: unset; display: inline-block; margin-left: 5px; cursor: help; color: var(--accent); font-size: 13px; line-height: 1; vertical-align: baseline; }
+.info { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; min-width: 24px; min-height: 24px; padding: 2px; margin: -4px 0 -4px 2px; cursor: help; color: var(--accent); font-size: 13px; line-height: 1; vertical-align: middle; border-radius: 4px; }
 .info:hover { color: var(--ink); }
-.info:focus-visible { outline: 2px solid var(--accent); border-radius: 4px; }
-.info-text { position: fixed; left: 0; top: 0; z-index: 50; width: max-content; max-width: min(320px, 90vw); padding: 6px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); box-shadow: 0 4px 14px rgba(0, 0, 0, .18); font-weight: 400; text-align: left; white-space: normal; visibility: hidden; opacity: 0; pointer-events: none; transition: opacity .12s; }
-.info:hover > .info-text, .info:focus > .info-text { visibility: visible; opacity: 1; }
+.info:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 4px; }
+.info-text { position: fixed; left: 0; top: 0; z-index: 60; width: max-content; max-width: min(320px, 90vw); padding: 6px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); box-shadow: 0 4px 14px rgba(0, 0, 0, .18); font-size: 12.5px; font-weight: 400; line-height: 1.45; text-align: left; white-space: normal; visibility: hidden; opacity: 0; pointer-events: none; transition: opacity .12s; }
+.info[aria-expanded="true"] > .info-text { visibility: visible; opacity: 1; pointer-events: auto; }
+@media (prefers-reduced-motion: reduce) { .info-text { transition: none; } }
 .good { color: var(--good); }
 .bad { color: var(--bad); }
 .warn { color: var(--warn); }
@@ -231,6 +233,7 @@ label.review { display: block; margin: 0 0 8px; }
 .dialog-path-preview { font-size: 12px; }
 .dialog-inline-error, .dialog-error { margin: 0; font-size: 12.5px; }
 .dialog-actions { flex-wrap: wrap; justify-content: flex-end; margin-top: 6px; gap: 8px; position: sticky; bottom: 0; z-index: 1; background: var(--panel); padding-top: 8px; }
+.dialog-unsaved-actions { justify-content: flex-end; gap: 8px; }
 .dialog-radio-group { display: flex; flex-direction: column; gap: 6px; }
 .dialog-radio-group label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 .dialog-collision, .dialog-check-box, .dialog-conflict { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--panel); display: flex; flex-direction: column; gap: 8px; }
