@@ -264,4 +264,27 @@ public class CheckpointStoreTests : IDisposable
         schema!.FieldsList.Select(f => f.Name).Should().Equal("Id", "Name");
         schema.GetFieldByName("Name").IsNullable.Should().BeTrue();
     }
+
+    [Fact]
+    public async Task SessionKeyStore_Recovers_Truncated_Key_Without_Split_Brain_And_Rejects_Oversized_Key()
+    {
+        const string sessionName = "split-brain-test";
+        var keyPath = SessionKeyStore.KeyPath(sessionName);
+        Directory.CreateDirectory(Path.GetDirectoryName(keyPath)!);
+
+        // Oversized key file is rejected by TryGetKey.
+        await File.WriteAllBytesAsync(keyPath, new byte[64]);
+        SessionKeyStore.TryGetKey(sessionName).Should().BeNull();
+
+        // Stale 0-byte truncated key file is recovered safely under concurrent callers.
+        await File.WriteAllBytesAsync(keyPath, []);
+        var tasks = Enumerable.Range(0, 8)
+            .Select(_ => Task.Run(() => SessionKeyStore.GetOrCreateKey(sessionName)))
+            .ToArray();
+        var keys = await Task.WhenAll(tasks);
+
+        keys.Should().AllSatisfy(k => k.Should().HaveCount(32));
+        for (var i = 1; i < keys.Length; i++)
+            keys[i].Should().Equal(keys[0]);
+    }
 }

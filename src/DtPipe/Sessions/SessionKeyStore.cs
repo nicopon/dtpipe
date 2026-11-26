@@ -47,12 +47,13 @@ public static class SessionKeyStore
         var dir = Path.GetDirectoryName(path)!;
         try
         {
-            Directory.CreateDirectory(dir);
+            if (OperatingSystem.IsWindows()) Directory.CreateDirectory(dir);
+            else Directory.CreateDirectory(dir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             // Bounded: a creator that died after creating the file leaves it short for good, and
-            // only that is replaced, since a key can only produce unreadable artefacts if truncated.
-            if (TryAcquireKey(sessionName, path, attempts: 100) is { } key) return key;
-            try { File.Delete(path); } catch (IOException) { }
-            return TryAcquireKey(sessionName, path, attempts: 10)
+            // only that is replaced under an exclusive lock file, since a key can only produce
+            // unreadable artefacts if truncated.
+            if (TryAcquireKey(path, attempts: 100) is { } key) return key;
+            return RecoverTruncatedKey(path)
                 ?? throw new IOException($"The key file '{path}' is held without holding a key.");
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
@@ -64,15 +65,57 @@ public static class SessionKeyStore
         }
     }
 
-    private static byte[]? TryAcquireKey(string sessionName, string path, int attempts)
+    private static byte[]? TryAcquireKey(string path, int attempts)
     {
         for (var attempt = 0; attempt < attempts; attempt++)
         {
+            if (TryReadKeyWhileCreating(path) is { } existing) return existing;
             if (TryCreate(path) is { } created) return created;
-            if (TryReadKeyWhileCreating(sessionName) is { } existing) return existing;
             Thread.Sleep(10);
         }
         return null;
+    }
+
+    private static byte[]? RecoverTruncatedKey(string path)
+    {
+        var lockPath = path + ".lock";
+        var lockOptions = new FileStreamOptions
+        {
+            Mode = FileMode.OpenOrCreate,
+            Access = FileAccess.ReadWrite,
+            Share = FileShare.None,
+        };
+        if (!OperatingSystem.IsWindows()) lockOptions.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+
+        FileStream? lockStream = null;
+        for (var attempt = 0; attempt < 100; attempt++)
+        {
+            try
+            {
+                lockStream = new FileStream(lockPath, lockOptions);
+                break;
+            }
+            catch (IOException)
+            {
+                if (TryReadKeyWhileCreating(path) is { } ready) return ready;
+                Thread.Sleep(10);
+            }
+        }
+        if (lockStream is null) return TryReadKeyWhileCreating(path);
+
+        try
+        {
+            using (lockStream)
+            {
+                if (TryReadKeyWhileCreating(path) is { } existing) return existing;
+                try { File.Delete(path); } catch (IOException) { }
+                return TryAcquireKey(path, attempts: 10);
+            }
+        }
+        finally
+        {
+            try { File.Delete(lockPath); } catch (IOException) { }
+        }
     }
 
     /// <summary>Creates the file and writes a new key into it, or returns null if the file exists.</summary>
@@ -88,28 +131,51 @@ public static class SessionKeyStore
         FileStream file;
         try { file = new FileStream(path, options); }
         catch (IOException) when (File.Exists(path)) { return null; }
-        using (file)
+        try
         {
-            var key = RandomNumberGenerator.GetBytes(KeySizeBytes);
-            file.Write(key);
-            return key;
+            using (file)
+            {
+                var key = RandomNumberGenerator.GetBytes(KeySizeBytes);
+                file.Write(key);
+                return key;
+            }
+        }
+        catch
+        {
+            try { File.Delete(path); } catch (IOException) { }
+            throw;
         }
     }
 
     /// <summary>Returns the key if it exists, or null. Never creates one.</summary>
-    public static byte[]? TryGetKey(string sessionName)
+    public static byte[]? TryGetKey(string sessionName) => TryReadKey(KeyPath(sessionName));
+
+    private static byte[]? TryReadKey(string path)
     {
-        var path = KeyPath(sessionName);
-        if (!File.Exists(path)) return null;
-        var key = File.ReadAllBytes(path);
-        return key.Length == KeySizeBytes ? key : null;
+        FileStream file;
+        try { file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read); }
+        catch (FileNotFoundException) { return null; }
+        catch (DirectoryNotFoundException) { return null; }
+
+        using (file)
+        {
+            var buffer = new byte[KeySizeBytes + 1];
+            var total = 0;
+            while (total < buffer.Length)
+            {
+                var read = file.Read(buffer, total, buffer.Length - total);
+                if (read == 0) break;
+                total += read;
+            }
+            return total == KeySizeBytes ? buffer[..KeySizeBytes] : null;
+        }
     }
 
     // A creator holding FileShare.None causes a sharing-violation IOException until it closes the file;
     // treat that as "not ready yet" so the retry loop waits instead of aborting the race.
-    private static byte[]? TryReadKeyWhileCreating(string sessionName)
+    private static byte[]? TryReadKeyWhileCreating(string path)
     {
-        try { return TryGetKey(sessionName); }
+        try { return TryReadKey(path); }
         catch (IOException) { return null; }
     }
 
