@@ -1063,6 +1063,17 @@ const scenarios = {
         && !!JSON.parse(fs.readFileSync(file, "utf8")).agent);
       await p.click("#agent-link");
       check("the dialog offers to forget it", await p.until(`!!document.querySelector("#d-agent-forget")`));
+      check("the dialog lists the model as a recent one, and the file holds it with no key",
+        await p.until(`document.querySelectorAll("#d-agent-recents li").length === 1 && document.querySelector("#d-agent-recents .pick").title.includes(${JSON.stringify(new URL(fakeLlm.url).host)})`)
+        && JSON.parse(fs.readFileSync(file, "utf8")).agents?.length === 1 && !/"key"/i.test(fs.readFileSync(file, "utf8")));
+      await p.ev(`(() => { const u = document.querySelector("#d-agent-url"); u.value = "http://elsewhere.example.com"; u.dispatchEvent(new Event("input")); document.querySelector("#d-agent-numctx").value = "8192"; })()`);
+      await p.click("#d-agent-recents .pick");
+      check("a click on a recent model fills the form and connects nothing",
+        await p.ev(`document.querySelector("#d-agent-url").value.includes(${JSON.stringify(new URL(fakeLlm.url).host)}) && document.querySelector("#d-agent-numctx").value === "16384" && document.querySelector("#d-agent-model").value === "fake:1" && !!document.querySelector("#d-agent-dialog[open]") && document.querySelector("#agent-body").hidden && document.querySelector("#agent-link").textContent.includes("no agent")`));
+      await p.click("#d-agent-recents .forget");
+      check("deleting the entry empties the list without closing the dialog, and the file forgets the agent and its entry",
+        await p.until(`!!document.querySelector("#d-agent-dialog[open]") && document.querySelectorAll("#d-agent-recents li").length === 0 && /No recent model/.test(document.querySelector("#d-agent-recents").textContent)`)
+        && JSON.parse(fs.readFileSync(file, "utf8")).agents?.length === 0 && !JSON.parse(fs.readFileSync(file, "utf8")).agent);
       await p.click("#d-agent-forget");
       check("forgetting removes the remembered agent", await p.until(`!document.querySelector("#d-agent-dialog")`) && !JSON.parse(fs.readFileSync(file, "utf8")).agent);
     } finally {
@@ -1118,6 +1129,12 @@ const scenarios = {
       check("the start folder keeps no view of the folder left", !viewOf(folder).includes("other.yaml"), viewOf(folder));
       check("the job was saved first", fs.readFileSync(path.join(other, "other.yaml"), "utf8") !== fs.readFileSync(path.join(here, "fixtures", "chain.yaml"), "utf8"));
       check("both folders are recent now, the last opened first", JSON.stringify(JSON.parse(fs.readFileSync(file, "utf8")).folders) === JSON.stringify([folder, other]), fs.readFileSync(file, "utf8"));
+      await p.click("#folder");
+      check("the dialog lists the other folder, with a way to delete it", await p.until(`document.querySelectorAll("#d-workspace-recents li").length === 1 && document.querySelector("#d-workspace-recents .pick").title === ${JSON.stringify(other)} && !!document.querySelector("#d-workspace-recents .forget")`));
+      await p.click("#d-workspace-recents .forget");
+      check("deleting it empties the list without closing the dialog, and the file keeps the other folder only",
+        await p.until(`!!document.querySelector("#d-workspace-dialog[open]") && document.querySelectorAll("#d-workspace-recents li").length === 0 && /No recent folder/.test(document.querySelector("#d-workspace-recents").textContent)`)
+        && JSON.stringify(JSON.parse(fs.readFileSync(file, "utf8")).folders) === JSON.stringify([folder]), fs.readFileSync(file, "utf8"));
     } finally {
       fs.rmSync(other, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     }
@@ -1169,6 +1186,17 @@ const scenarios = {
       await p.send("Page.navigate", { url: again.url });
       check("a studio started without a flag connects the remembered coordinator", await p.until(`/127.0.0.1/.test(${pill}) && !!document.querySelector("#coordinator-link")`, 30000), await p.ev(pill));
       await p.click("#coordinator-link");
+      check("the dialog lists the coordinator as a recent one, with how the person signs in",
+        await p.until(`document.querySelectorAll("#d-coordinator-recents li").length === 1 && /through the browser/.test(document.querySelector("#d-coordinator-recents li").textContent)`)
+        && JSON.parse(fs.readFileSync(file, "utf8")).coordinators?.length === 1);
+      await p.ev(`(() => { const o = document.querySelector("#d-coordinator-origin"); o.value = "http://elsewhere.example.com"; o.dispatchEvent(new Event("input")); const a = document.querySelector("#d-coordinator-auth"); a.value = "key"; a.dispatchEvent(new Event("change")); })()`);
+      await p.click("#d-coordinator-recents .pick");
+      check("a click on a recent coordinator fills the address and the sign-in and changes nothing",
+        await p.ev(`document.querySelector("#d-coordinator-origin").value.includes("127.0.0.1") && document.querySelector("#d-coordinator-auth").value === "browser" && !!document.querySelector("#d-coordinator-dialog[open]") && /127.0.0.1/.test(${pill})`));
+      await p.click("#d-coordinator-recents .forget");
+      check("deleting the entry of the connected coordinator leaves it connected for the session and removes it from the file",
+        await p.until(`!!document.querySelector("#d-coordinator-dialog[open]") && document.querySelectorAll("#d-coordinator-recents li").length === 0 && /No recent coordinator/.test(document.querySelector("#d-coordinator-recents").textContent)`)
+        && /127.0.0.1/.test(await p.ev(pill)) && JSON.parse(fs.readFileSync(file, "utf8")).coordinators?.length === 0 && !JSON.parse(fs.readFileSync(file, "utf8")).coordinator);
       await p.click("#d-coordinator-forget");
       check("forgetting disconnects and removes the remembered coordinator", await p.until(`!document.querySelector("#d-coordinator-dialog") && /no coordinator/.test(${pill})`)
         && !JSON.parse(fs.readFileSync(file, "utf8")).coordinator);
@@ -1398,9 +1426,9 @@ function startFakeCoordinator(sampleArrow) {
     req.on("end", () => {
       const json = (code, data) => { res.writeHead(code, { "Content-Type": "application/json" }); res.end(JSON.stringify(data)); };
       if (urlPath === "/.well-known/oauth-protected-resource") {
-        json(200, { resource: baseUrl, authorization_servers: [baseUrl], bearer_methods_supported: ["header"], dtpipe_contract: 12, dtpipe_studio_client_id: "studio", dtpipe_auth: ["key"] });
+        json(200, { resource: baseUrl, authorization_servers: [baseUrl], bearer_methods_supported: ["header"], dtpipe_contract: 12, dtpipe_studio_client_id: "studio", dtpipe_auth: ["idp", "key"] });
       } else if (urlPath === "/.well-known/openid-configuration") {
-        json(200, { issuer: baseUrl, token_endpoint: `${baseUrl}/connect/token` });
+        json(200, { issuer: baseUrl, authorization_endpoint: `${baseUrl}/authorize`, token_endpoint: `${baseUrl}/connect/token` });
       } else if (urlPath === "/connect/token") {
         json(200, { access_token: "fake-smoke-token", expires_in: 600, token_type: "Bearer" });
       } else if (urlPath === "/api/me") {

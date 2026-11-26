@@ -104,6 +104,12 @@ public sealed class StudioSettingsTests : IDisposable
         Assert.Equal(StudioSettings.MaxRecent, settings.ReadCoordinators().Count);
         Assert.Equal("key", settings.ReadCoordinators()[0].Auth);
 
+        // Forgetting the remembered agent takes its entry with it.
+        settings.WriteAgent(new AgentSettings("ollama", "http://solo:11434", "m", 30));
+        settings.ClearAgent();
+        Assert.Null(settings.ReadAgent());
+        Assert.DoesNotContain(settings.ReadAgents(), a => a.Url == "http://solo:11434");
+
         File.WriteAllText(SettingsPath, """{"version":1,"agents":[{"provider":"nobody","url":"http://a:1"},{"provider":"openai","url":"https://api.example.com/v1"}],"coordinators":[{"origin":"https://x.example.com/path","auth":"key"}]}""");
         Assert.Equal(["https://api.example.com/v1"], settings.ReadAgents().Select(a => a.Url));
         Assert.NotNull(settings.Warning);
