@@ -393,7 +393,7 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   connected, whatever its source, and the open folder are left out of `history` and `recents` by the identity of their list
   (`SameAgent`, `SameCoordinator`, `SameFolder`), once the connection is closed they show again. It is a display rule: the file keeps
   the entry first and the rule of addition is the same. **Forgetting is the list's alone**: the × of an entry, after *Disconnect* for
-  the value in place; no route clears the remembered connection otherwise. The page draws what it is given, says where forgetting is
+  the value in place; no route clears the remembered connection otherwise, and a connection request carries no instruction to forget a key: a key typed in the form wins over the one kept, and nothing else sets it aside. The page draws what it is given, says where forgetting is
   above the list and in an empty list, and scrolls a long one inside the dialog. `DELETE …/history` (`/api/agent/connection`,
   `/api/coordinator/connection`) takes the identity the page shows, never an alias or a reference, removes the entries at that
   address (`RemoveAgent`, `RemoveCoordinator`) and deletes the key of each by its alias: the keyring is asked to delete, never

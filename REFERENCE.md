@@ -1266,13 +1266,14 @@ The file also keeps three lists of what the page used with success and was asked
 (`Remember on this machine`, or among the recent folders): the models, the coordinators and the
 folders, with no limit, the most recent first, each identity once. A model is its provider and
 address, with the model, delay and context size it was last used with; a coordinator is its origin
-and how the person signs in, added once it answered; a folder is its full path. Never a key.
-With the box unticked nothing is written, neither an entry nor a key. A dialog lists its entries,
-the value in place left out, in a list that scrolls: a click fills the form and connects nothing,
-and the cross deletes an entry after a confirmation, and the key kept for its address with it
-(deleted by its alias, never read). That is how a remembered value is forgotten: disconnect it, and
-it joins the list. Deleting the remembered model or coordinator means the next start no longer
-connects it.
+and how the person signs in, added once it answered; a folder is its full path. Never a key. With
+the box unticked nothing is written, neither an entry nor a key. A dialog lists its entries, the
+value in place left out, in a list that scrolls: a click fills the form and connects nothing, and
+the cross deletes an entry after a confirmation, and the key kept for its address with it (deleted
+by its alias, never read). That is how a remembered value is forgotten: disconnect it, and it joins
+the list. A key typed in the form wins over the one kept for the address; to connect without the
+kept key, delete the entry and type again. Deleting the remembered model or coordinator means the
+next start no longer connects it.
 
 The coordinator is read the same way: `--coordinator` first, then what the studio remembers, then
 none, and a flag never writes what is remembered. The header always shows its state (connected,
