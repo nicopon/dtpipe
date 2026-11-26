@@ -15,7 +15,9 @@ public sealed class KeyringInterpolator : IHostInterpolator
     {
         if (expression.StartsWith("keyring://", StringComparison.OrdinalIgnoreCase))
         {
-            var keyName = expression["keyring://".Length..];
+            var keyName = expression["keyring://".Length..].Trim();
+            if (ReservedAliases.IsReserved(keyName))
+                return Task.FromResult<string?>(null);
             return Task.FromResult(_secretsManager.GetSecret(keyName));
         }
 

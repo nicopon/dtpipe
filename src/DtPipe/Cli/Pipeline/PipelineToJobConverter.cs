@@ -427,7 +427,11 @@ public static class PipelineToJobConverter
         if (!raw.StartsWith(keyringPrefix, StringComparison.OrdinalIgnoreCase))
             return connectionString;
 
-        return secretsManager.GetSecret(raw[keyringPrefix.Length..].Trim()) ?? connectionString;
+        var alias = raw[keyringPrefix.Length..].Trim();
+        if (DtPipe.Cli.Security.ReservedAliases.IsReserved(alias))
+            return connectionString;
+
+        return secretsManager.GetSecret(alias) ?? connectionString;
     }
 
     /// <summary>

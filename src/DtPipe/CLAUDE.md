@@ -315,11 +315,11 @@ publishing it. Look first at what dtpipe tells the model about itself.
 ## The keyring
 
 `KeyringSecretsManager` keeps `dtpipe secret`'s aliases in one JSON blob. KeySharp raises the same exception for an entry that
-does not exist and for one it cannot read, and its error type is not reliable, so nothing decides on the type: a marker entry
-is written after every blob, and a failed read of the blob with the marker present is unreadable (`KeyringUnreadableException`,
-no write follows, since a write would replace every alias with the one being set), without it absent (empty). A blob written
-before the marker reads as absent when its read fails; a keyring locked so that the marker cannot be read either reads as
-absent too. `[CI: KeyringSecretsManagerTests]`
+does not exist and for one it cannot read, and its error type is not reliable, so nothing decides on the type: a marker file
+outside the keyring (`UserStatePaths.Root()/keyring.present`) is written beside every save (and deleted before the entries on
+`nuke`), and a failed read of the blob with the marker present is unreadable (`KeyringUnreadableException`, no write follows,
+since a write would replace every alias with the one being set), without it absent (empty). `ReservedAliases` keeps `studio.`
+aliases out of CLI commands and `KeyringInterpolator`. `[CI: KeyringSecretsManagerTests]`
 
 ## Studio
 

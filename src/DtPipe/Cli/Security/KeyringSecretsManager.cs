@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Text.Json;
+using DtPipe.Sessions;
 using KeySharp;
 
 namespace DtPipe.Cli.Security;
@@ -29,65 +31,94 @@ public sealed class KeyringUnreadableException(string message, Exception? inner 
 
 /// <summary>
 /// The secrets of <c>dtpipe secret</c>: one JSON blob in one keyring entry. KeySharp raises the same exception for an entry
-/// that does not exist and for one that cannot be read (its error type is not reliable), so a second entry, the marker, is
-/// written with every blob: a failed read of the blob with the marker present is "unreadable" and throws, and no write follows
-/// it, since a write would replace every alias with the one being set. Without the marker the blob is "absent" and reads as
-/// empty. A blob written before the marker existed reads as absent when its read fails.
+/// that does not exist and for one that cannot be read (its error type is not reliable), so an out-of-keyring marker file
+/// is written alongside every save: a failed read of the blob with the marker present is "unreadable" and throws, and no
+/// write follows it, since a write would replace every alias with the one being set. Without the marker (neither the file
+/// nor a legacy keyring marker), the blob is "absent" and reads as empty.
 /// </summary>
 public class KeyringSecretsManager : ISecretsManager
 {
     private const string BlobUserName = "configuration";
-    private const string MarkerUserName = "configuration.present";
+    private const string LegacyMarkerUserName = "configuration.present";
 
     private readonly IKeyringBackend _backend;
+    private readonly string _markerPath;
+    private readonly object _gate = new();
 
-    public KeyringSecretsManager() : this(new KeySharpBackend())
+    public KeyringSecretsManager() : this(new KeySharpBackend(), DefaultMarkerPath())
     {
     }
 
-    internal KeyringSecretsManager(IKeyringBackend backend)
+    internal KeyringSecretsManager(IKeyringBackend backend, string markerPath)
     {
         _backend = backend;
+        _markerPath = markerPath;
     }
+
+    private static string DefaultMarkerPath() => Path.Combine(UserStatePaths.Root(), "keyring.present");
 
     public void SetSecret(string alias, string value)
     {
-        var secrets = LoadSecrets();
-        secrets[alias] = value;
-        SaveSecrets(secrets);
+        lock (_gate)
+        {
+            var secrets = LoadSecrets();
+            secrets[alias] = value;
+            SaveSecrets(secrets);
+        }
     }
 
     public string? GetSecret(string alias)
     {
-        var secrets = LoadSecrets();
-        return secrets.TryGetValue(alias, out var val) ? val : null;
+        lock (_gate)
+        {
+            var secrets = LoadSecrets();
+            return secrets.TryGetValue(alias, out var val) ? val : null;
+        }
     }
 
     public void DeleteSecret(string alias)
     {
-        var secrets = LoadSecrets();
-        if (secrets.Remove(alias))
+        lock (_gate)
         {
-            SaveSecrets(secrets);
+            var secrets = LoadSecrets();
+            if (secrets.Remove(alias))
+            {
+                SaveSecrets(secrets);
+            }
         }
     }
 
     public Dictionary<string, string> ListSecrets()
     {
-        return LoadSecrets();
+        lock (_gate)
+        {
+            return LoadSecrets();
+        }
     }
 
     public void Nuke()
     {
-        foreach (var user in new[] { BlobUserName, MarkerUserName })
+        lock (_gate)
         {
             try
             {
-                _backend.Delete(user);
+                if (File.Exists(_markerPath)) File.Delete(_markerPath);
             }
             catch
             {
-                // Ignore if not found
+                // Ignore if unavailable
+            }
+
+            foreach (var user in new[] { LegacyMarkerUserName, BlobUserName })
+            {
+                try
+                {
+                    _backend.Delete(user);
+                }
+                catch
+                {
+                    // Ignore if not found
+                }
             }
         }
     }
@@ -119,9 +150,10 @@ public class KeyringSecretsManager : ISecretsManager
 
     private bool MarkerPresent()
     {
+        if (File.Exists(_markerPath)) return true;
         try
         {
-            return !string.IsNullOrEmpty(_backend.Get(MarkerUserName));
+            return !string.IsNullOrEmpty(_backend.Get(LegacyMarkerUserName));
         }
         catch (Exception)
         {
@@ -133,6 +165,34 @@ public class KeyringSecretsManager : ISecretsManager
     {
         var json = JsonSerializer.Serialize(secrets);
         _backend.Set(BlobUserName, json);
-        _backend.Set(MarkerUserName, "1");
+        WriteMarker();
+    }
+
+    private void WriteMarker()
+    {
+        var dir = Path.GetDirectoryName(_markerPath);
+        if (!string.IsNullOrEmpty(dir))
+        {
+            if (OperatingSystem.IsWindows()) Directory.CreateDirectory(dir);
+            else Directory.CreateDirectory(dir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
+        if (File.Exists(_markerPath)) return;
+
+        var options = new FileStreamOptions
+        {
+            Mode = FileMode.CreateNew,
+            Access = FileAccess.Write,
+            Share = FileShare.None,
+        };
+        if (!OperatingSystem.IsWindows()) options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        try
+        {
+            using var stream = new FileStream(_markerPath, options);
+            stream.WriteByte((byte)'1');
+        }
+        catch (IOException) when (File.Exists(_markerPath))
+        {
+        }
     }
 }

@@ -34,6 +34,11 @@ public class SecretCommand : Command
             var alias = parseResult.GetValue(aliasArg);
             var value = parseResult.GetValue(valueArg);
             if (string.IsNullOrEmpty(alias) || string.IsNullOrEmpty(value)) return;
+            if (ReservedAliases.IsReserved(alias))
+            {
+                _console.MarkupLine($"[red]Secret alias '{Markup.Escape(alias)}' is reserved for dtpipe studio.[/]");
+                return;
+            }
 
             try
             {
@@ -59,6 +64,11 @@ public class SecretCommand : Command
         {
             var alias = parseResult.GetValue(aliasArg);
             if (string.IsNullOrEmpty(alias)) return;
+            if (ReservedAliases.IsReserved(alias))
+            {
+                _console.MarkupLine($"[red]Secret alias '{Markup.Escape(alias)}' is reserved for dtpipe studio.[/]");
+                return;
+            }
 
             try
             {
@@ -121,6 +131,11 @@ public class SecretCommand : Command
         {
             var alias = parseResult.GetValue(aliasArg);
             if (string.IsNullOrEmpty(alias)) return;
+            if (ReservedAliases.IsReserved(alias))
+            {
+                _console.MarkupLine($"[red]Secret alias '{Markup.Escape(alias)}' is reserved for dtpipe studio.[/]");
+                return;
+            }
 
             try
             {
