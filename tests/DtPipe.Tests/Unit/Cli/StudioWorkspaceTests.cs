@@ -126,13 +126,15 @@ public sealed class StudioWorkspaceTests : IAsyncLifetime
         var (opened, view) = await OpenAsync(Second);
         Assert.Equal(HttpStatusCode.OK, opened);
         Assert.Equal("page", view.GetProperty("source").GetString());
-        Assert.Equal(Second, view.GetProperty("recents")[0].GetString());
+        // The folder in place is the file's first entry and the list leaves it out.
+        Assert.Equal([Second], _settings!.ReadFolders());
+        Assert.Empty(view.GetProperty("recents").EnumerateArray());
         Assert.Equal(["b.yaml"], await JobsAsync());
         // A relative path resolves in the new folder, as a job's query file or local input does.
         Assert.Equal("second", File.ReadAllText("marker.txt"));
         Assert.Equal(0, (await CallAsync(HttpMethod.Get, "/api/agent")).Body.GetProperty("count").GetInt32());
         // The folder the studio started on is never remembered for it.
-        Assert.DoesNotContain(First, _settings!.ReadFolders());
+        Assert.DoesNotContain(First, _settings.ReadFolders());
     }
 
     [Fact]
@@ -177,7 +179,7 @@ public sealed class StudioWorkspaceTests : IAsyncLifetime
         var (status, view) = await CallAsync(HttpMethod.Delete, "/api/workspace/recents", new { path = gone });
 
         Assert.Equal(HttpStatusCode.OK, status);
-        Assert.Equal([Second], view.GetProperty("recents").EnumerateArray().Select(r => r.GetString()));
+        Assert.Empty(view.GetProperty("recents").EnumerateArray());
         Assert.Equal([Second], _settings.ReadFolders());
         Assert.Equal(HttpStatusCode.BadRequest, (await CallAsync(HttpMethod.Delete, "/api/workspace/recents", new { path = "second" })).Status);
         Assert.Equal(["b.yaml"], await JobsAsync());

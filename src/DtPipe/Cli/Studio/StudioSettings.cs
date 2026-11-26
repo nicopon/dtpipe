@@ -44,19 +44,10 @@ public sealed class StudioSettings(string path, ISecretsManager secrets)
         int Version, AgentSettings? Agent, CoordinatorSettings? Coordinator = null, AgentSettings[]? Agents = null,
         CoordinatorSettings[]? Coordinators = null, string[]? Folders = null);
 
-    /// <summary>How many entries each list of the file keeps: the recent agents, coordinators and folders.</summary>
-    public const int MaxRecent = 10;
-
-    /// <summary>The remembered agent, or null: nothing remembered, or a file that is ignored (see <see cref="Warning"/>).</summary>
-    public AgentSettings? ReadAgent() => Read().Agent;
-
     /// <summary>
-    /// The coordinator to connect at start: the one the file remembers as active, or null (nothing remembered, or a file that is
-    /// ignored: see <see cref="Warning"/>).
+    /// Every section the file holds and this studio reads: the agent and the coordinator to connect at start, each null when
+    /// nothing is remembered or the section is ignored. One that is invalid is left out, and <see cref="Warning"/> says why.
     /// </summary>
-    public CoordinatorSettings? ReadCoordinator() => Read().Coordinator;
-
-    /// <summary>Every section the file holds and this studio reads; one that is invalid is left out, and <see cref="Warning"/> says why.</summary>
     public RememberedSettings Read()
     {
         Warning = null;
@@ -66,11 +57,14 @@ public sealed class StudioSettings(string path, ISecretsManager secrets)
 
     private static bool SameAddress(string a, string b) => NormalizeUrl(a) == NormalizeUrl(b);
 
-    private static bool SameAgent(AgentSettings a, AgentSettings b) => a.Provider == b.Provider && SameAddress(a.Url, b.Url);
+    /// <summary>The identity of a recent agent: its provider and its normalized address.</summary>
+    public static bool SameAgent(AgentSettings a, AgentSettings b) => a.Provider == b.Provider && SameAddress(a.Url, b.Url);
 
-    private static bool SameCoordinator(CoordinatorSettings a, CoordinatorSettings b) => SameAddress(a.Origin, b.Origin);
+    /// <summary>The identity of a recent coordinator: its normalized origin.</summary>
+    public static bool SameCoordinator(CoordinatorSettings a, CoordinatorSettings b) => SameAddress(a.Origin, b.Origin);
 
-    private static bool SameFolder(string a, string b) => string.Equals(a, b, StudioFolder.PathComparison);
+    /// <summary>The identity of a recent folder: its full path.</summary>
+    public static bool SameFolder(string a, string b) => string.Equals(a, b, StudioFolder.PathComparison);
 
     /// <summary>The agents the page connected and the person asked to remember, the most recent first, each provider and address once.</summary>
     public IReadOnlyList<AgentSettings> ReadAgents()
@@ -96,18 +90,18 @@ public sealed class StudioSettings(string path, ISecretsManager secrets)
         return Distinct(ReadFile()?.Folders, ValidFolder, SameFolder);
     }
 
-    /// <summary>The valid entries of a list, each identity once, the first (the most recent) kept, bounded by <see cref="MaxRecent"/>.</summary>
+    /// <summary>The valid entries of a list, each identity once, the first (the most recent) kept. A list has no bound.</summary>
     private List<T> Distinct<T>(IEnumerable<T?>? stored, Func<T?, T?> valid, Func<T, T, bool> same) where T : class
     {
         var kept = new List<T>();
         foreach (var item in stored ?? [])
             if (valid(item) is { } entry && !kept.Any(k => same(k, entry))) kept.Add(entry);
-        return kept.Take(MaxRecent).ToList();
+        return kept;
     }
 
-    /// <summary>The list with the entry put first, once, and the most recent <see cref="MaxRecent"/> kept.</summary>
+    /// <summary>The list with the entry put first, once.</summary>
     private static T[] Recent<T>(IReadOnlyList<T> current, T entry, Func<T, T, bool> same) =>
-        [.. new[] { entry }.Concat(current.Where(c => !same(c, entry))).Take(MaxRecent)];
+        [.. new[] { entry }.Concat(current.Where(c => !same(c, entry)))];
 
     private FileModel? ReadFile()
     {
@@ -162,13 +156,6 @@ public sealed class StudioSettings(string path, ISecretsManager secrets)
         Agents = Recent(Distinct(file.Agents, ValidAgent, SameAgent), agent, SameAgent),
     });
 
-    /// <summary>Forgets the remembered agent and its entry among the recent ones; the file stays only for what else it holds.</summary>
-    public void ClearAgent() => Clear(file => file with
-    {
-        Agent = null,
-        Agents = ValidAgent(file.Agent) is { } active ? Distinct(file.Agents, ValidAgent, SameAgent).Where(a => !SameAgent(a, active)).ToArray() : file.Agents,
-    });
-
     /// <summary>
     /// Removes the recent agents the page shows at this provider and address, the remembered agent too when it is one of them, and
     /// forgets the key kept for each address. The key is deleted by its alias, never read.
@@ -199,15 +186,6 @@ public sealed class StudioSettings(string path, ISecretsManager secrets)
         Coordinators = Recent(Distinct(file.Coordinators, ValidCoordinator, SameCoordinator), coordinator, SameCoordinator),
     });
 
-    /// <summary>Forgets the remembered coordinator and its entry among the recent ones: nothing is connected at the next start.</summary>
-    public void ClearCoordinator() => Clear(file => file with
-    {
-        Coordinator = null,
-        Coordinators = ValidCoordinator(file.Coordinator) is { } active
-            ? Distinct(file.Coordinators, ValidCoordinator, SameCoordinator).Where(c => !SameCoordinator(c, active)).ToArray()
-            : file.Coordinators,
-    });
-
     /// <summary>
     /// Removes the recent coordinator at this origin, the remembered coordinator too when it is that one, and forgets the key kept
     /// for the origin. The key is deleted by its alias, never read.
@@ -229,7 +207,7 @@ public sealed class StudioSettings(string path, ISecretsManager secrets)
         foreach (var address in removed.Select(c => c.Origin).Distinct()) ForgetCoordinatorKey(address);
     }
 
-    /// <summary>Puts the folder first among the recent ones, once, and keeps the most recent <see cref="MaxRecent"/>.</summary>
+    /// <summary>Puts the folder first among the recent ones, once.</summary>
     public void RememberFolder(string folder)
     {
         var normalized = StudioFolder.Normalize(folder);

@@ -38,9 +38,6 @@ public sealed partial class StudioServer
             case ("DELETE", "/api/coordinator/connection/history"):
                 await JsonAsync(context, ForgetCoordinatorEntry(await BodyAsync<CoordinatorEntryRequest>(context)));
                 break;
-            case ("DELETE", "/api/coordinator/connection"):
-                await JsonAsync(context, await ForgetCoordinatorAsync());
-                break;
             default:
                 throw new StudioRefusal(404, $"No {method} {path}.");
         }
@@ -74,11 +71,16 @@ public sealed partial class StudioServer
         };
     }
 
-    /// <summary>The recent coordinators, the most recent first, each with whether a key is kept for its origin: the keyring's aliases are listed, never its values.</summary>
+    /// <summary>
+    /// The recent coordinators, the most recent first, each with whether a key is kept for its origin: the keyring's aliases are
+    /// listed, never its values. The coordinator in place is not listed (it is a display rule: the file keeps its entry); after a
+    /// disconnection it is.
+    /// </summary>
     private object[] CoordinatorHistory()
     {
         if (_tools.CoordinatorStart?.Settings is not { } settings) return [];
-        var recent = settings.ReadCoordinators();
+        var inPlace = Coordinator is not null && _coordinator.Connection is { } current ? new CoordinatorSettings(current.Origin, current.Auth) : null;
+        var recent = settings.ReadCoordinators().Where(c => inPlace is null || !StudioSettings.SameCoordinator(c, inPlace)).ToList();
         if (recent.Count == 0) return [];
         var kept = settings.KeptAliases();
         return recent.Select(c => (object)new { origin = StudioSettings.Shown(c.Origin), auth = c.Auth, keyKept = kept.Contains(StudioSettings.CoordinatorAlias(c.Origin)) }).ToArray();
@@ -197,20 +199,6 @@ public sealed partial class StudioServer
         var connection = _coordinator.Connection;
         using (TakeSlotFor("A change of coordinator"))
             await _coordinator.ReplaceAsync(null, connection is null ? null : connection with { Key = connection.Key == "stored" ? "stored" : "none", NeedsKey = false }, signIn: false);
-        return CoordinatorConnectionView();
-    }
-
-    /// <summary>Disconnects, then forgets the file's coordinator and the keys of its origin and of the connection's.</summary>
-    private async Task<object> ForgetCoordinatorAsync()
-    {
-        var start = CoordinatorStartOrRefuse();
-        var connection = _coordinator.Connection;
-        using (TakeSlotFor("A change of coordinator"))
-            await _coordinator.ReplaceAsync(null, null, signIn: false);
-        var remembered = start.Settings.ReadCoordinator();
-        start.Settings.ClearCoordinator();
-        foreach (var origin in new[] { remembered?.Origin, connection?.Origin }.OfType<string>().Distinct())
-            start.Settings.ForgetCoordinatorKey(origin);
         return CoordinatorConnectionView();
     }
 

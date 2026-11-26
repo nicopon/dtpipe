@@ -94,14 +94,15 @@ public sealed class StudioCoordinatorConnectionTests : IAsyncLifetime
         // What the next start reads: the file holds no secret, the alias follows the origin.
         Assert.DoesNotContain(Key[^20..], File.ReadAllText(SettingsPath));
         var next = new StudioSettings(SettingsPath, _secrets);
-        Assert.Equal(new CoordinatorSettings(_fakes.CoordinatorUrl, "key"), next.ReadCoordinator());
+        Assert.Equal(new CoordinatorSettings(_fakes.CoordinatorUrl, "key"), next.Read().Coordinator);
         Assert.Equal(Key, next.ReadCoordinatorKey(_fakes.CoordinatorUrl));
         Assert.Null(next.ReadCoordinatorKey("https://elsewhere.example.com"));
 
-        // Forgetting disconnects: the routes that need the link refuse again, the file and the key are gone.
-        Assert.Equal(HttpStatusCode.OK, (await CallAsync(HttpMethod.Delete, "/api/coordinator/connection")).Status);
+        // Disconnecting closes the link, so the routes that need it refuse; deleting its entry then takes the remembered coordinator and the key.
+        Assert.Equal(HttpStatusCode.OK, (await CallAsync(HttpMethod.Post, "/api/coordinator/connection/disconnect")).Status);
         Assert.Equal(HttpStatusCode.NotFound, (await CallAsync(HttpMethod.Post, "/api/publish/check", new { yaml = "a: 1" })).Status);
-        Assert.Null(new StudioSettings(SettingsPath, _secrets).ReadCoordinator());
+        Assert.Equal(HttpStatusCode.OK, (await CallAsync(HttpMethod.Delete, "/api/coordinator/connection/history", new { origin = _fakes.CoordinatorUrl })).Status);
+        Assert.Null(new StudioSettings(SettingsPath, _secrets).Read().Coordinator);
         Assert.Null(next.ReadCoordinatorKey(_fakes.CoordinatorUrl));
     }
 
@@ -121,7 +122,7 @@ public sealed class StudioCoordinatorConnectionTests : IAsyncLifetime
         Assert.Equal("stored", view.GetProperty("key").GetString());
         Assert.Equal(HttpStatusCode.NotFound, (await CallAsync(HttpMethod.Post, "/api/publish/check", new { yaml = "a: 1" })).Status);
         var next = new StudioSettings(SettingsPath, _secrets);
-        Assert.Equal(new CoordinatorSettings(_fakes.CoordinatorUrl, "key"), next.ReadCoordinator());
+        Assert.Equal(new CoordinatorSettings(_fakes.CoordinatorUrl, "key"), next.Read().Coordinator);
         Assert.Equal(Key, next.ReadCoordinatorKey(_fakes.CoordinatorUrl));
     }
 
@@ -143,7 +144,7 @@ public sealed class StudioCoordinatorConnectionTests : IAsyncLifetime
         Assert.False(File.Exists(SettingsPath));
 
         await CallAsync(HttpMethod.Put, "/api/coordinator/connection", new { origin = other, auth = "browser", remember = true });
-        Assert.Equal(new CoordinatorSettings(other, "browser"), new StudioSettings(SettingsPath, _secrets).ReadCoordinator());
+        Assert.Equal(new CoordinatorSettings(other, "browser"), new StudioSettings(SettingsPath, _secrets).Read().Coordinator);
     }
 
     [Fact]
@@ -160,7 +161,6 @@ public sealed class StudioCoordinatorConnectionTests : IAsyncLifetime
         await _fakes.SaveReached.Task.WaitAsync(TimeSpan.FromSeconds(10), Ct);
 
         Assert.Equal(HttpStatusCode.Conflict, (await CallAsync(HttpMethod.Put, "/api/coordinator/connection", connect)).Status);
-        Assert.Equal(HttpStatusCode.Conflict, (await CallAsync(HttpMethod.Delete, "/api/coordinator/connection")).Status);
         Assert.Equal(HttpStatusCode.Conflict, (await CallAsync(HttpMethod.Post, "/api/coordinator/connection/disconnect")).Status);
 
         _fakes.SaveGate.SetResult();
@@ -184,22 +184,25 @@ public sealed class StudioCoordinatorConnectionTests : IAsyncLifetime
         await SignedInAsync();
         var get = await CallAsync(HttpMethod.Get, "/api/coordinator/connection");
 
-        var history = JsonDocument.Parse(get.Body).RootElement.GetProperty("history").EnumerateArray().ToList();
+        // The coordinator in place is the file's entry and is not listed; once disconnected it is, with its key kept.
+        Assert.Empty(JsonDocument.Parse(get.Body).RootElement.GetProperty("history").EnumerateArray());
+        Assert.Single(new StudioSettings(SettingsPath, _secrets).ReadCoordinators());
+        var disconnect = await CallAsync(HttpMethod.Post, "/api/coordinator/connection/disconnect");
+        var history = JsonDocument.Parse(disconnect.Body).RootElement.GetProperty("history").EnumerateArray().ToList();
         Assert.Single(history);
         Assert.Equal(("key", true), (history[0].GetProperty("auth").GetString(), history[0].GetProperty("keyKept").GetBoolean()));
 
-        // Another origin's key is not touched, and the link in place stays connected.
+        // Another origin's key is not touched.
         _secrets.SetSecret(StudioSettings.CoordinatorAlias("https://elsewhere.example.com"), "dtp_elsewhere");
         var delete = await CallAsync(HttpMethod.Delete, "/api/coordinator/connection/history", new { origin = _fakes.CoordinatorUrl });
         var view = JsonDocument.Parse(delete.Body).RootElement;
         Assert.Equal(HttpStatusCode.OK, delete.Status);
         Assert.Empty(view.GetProperty("history").EnumerateArray());
-        Assert.True(view.GetProperty("connected").GetBoolean());
-        Assert.Equal("session", view.GetProperty("key").GetString());
+        Assert.False(view.GetProperty("connected").GetBoolean());
         var next = new StudioSettings(SettingsPath, _secrets);
         Assert.Null(next.ReadCoordinatorKey(_fakes.CoordinatorUrl));
         Assert.Equal("dtp_elsewhere", next.ReadCoordinatorKey("https://elsewhere.example.com"));
-        Assert.Null(next.ReadCoordinator());
-        foreach (var answer in new[] { put.Body, get.Body, delete.Body }) Assert.DoesNotContain(Key[^20..], answer);
+        Assert.Null(next.Read().Coordinator);
+        foreach (var answer in new[] { put.Body, get.Body, disconnect.Body, delete.Body }) Assert.DoesNotContain(Key[^20..], answer);
     }
 }

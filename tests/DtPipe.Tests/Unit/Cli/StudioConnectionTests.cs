@@ -93,12 +93,12 @@ public sealed class StudioConnectionTests : IAsyncLifetime
         var test = await CallAsync(HttpMethod.Post, "/api/agent/connection/test", connect);
         var put = await CallAsync(HttpMethod.Put, "/api/agent/connection", connect);
         var get = await CallAsync(HttpMethod.Get, "/api/agent/connection");
-        var forget = await CallAsync(HttpMethod.Delete, "/api/agent/connection");
+        var disconnect = await CallAsync(HttpMethod.Post, "/api/agent/connection/disconnect");
 
         Assert.Equal(HttpStatusCode.BadGateway, test.Status);
         Assert.Equal(HttpStatusCode.OK, put.Status);
         Assert.Equal("stored", JsonDocument.Parse(put.Body).RootElement.GetProperty("key").GetString());
-        foreach (var answer in new[] { test.Body, put.Body, get.Body, forget.Body })
+        foreach (var answer in new[] { test.Body, put.Body, get.Body, disconnect.Body })
             Assert.DoesNotContain(Key, answer);
 
         // Remembered once more, as the next start reads it: the file holds no secret, the alias follows the address.
@@ -118,13 +118,13 @@ public sealed class StudioConnectionTests : IAsyncLifetime
         var put = await CallAsync(HttpMethod.Put, "/api/agent/connection", connect);
 
         Assert.Equal(8192, JsonDocument.Parse(put.Body).RootElement.GetProperty("numCtx").GetInt32());
-        Assert.Equal(8192, new StudioSettings(SettingsPath, _secrets).ReadAgent()?.NumCtx);
+        Assert.Equal(8192, new StudioSettings(SettingsPath, _secrets).Read().Agent?.NumCtx);
         foreach (var numCtx in new[] { StudioAgentClients.MinNumCtx - 1, StudioAgentClients.MaxNumCtx + 1 })
             Assert.Equal(HttpStatusCode.BadRequest, (await CallAsync(HttpMethod.Put, "/api/agent/connection", new { provider = "ollama", url = "http://127.0.0.1:1", numCtx })).Status);
 
         var absent = await CallAsync(HttpMethod.Put, "/api/agent/connection", new { provider = "ollama", url = "http://127.0.0.1:1", model = "m", remember = true });
         Assert.Equal(AgentOptions.DefaultNumCtx, JsonDocument.Parse(absent.Body).RootElement.GetProperty("numCtx").GetInt32());
-        Assert.Null(new StudioSettings(SettingsPath, _secrets).ReadAgent()?.NumCtx);
+        Assert.Null(new StudioSettings(SettingsPath, _secrets).Read().Agent?.NumCtx);
     }
 
     [Fact]
@@ -150,7 +150,7 @@ public sealed class StudioConnectionTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, disconnect.Status);
         Assert.DoesNotContain(Key, disconnect.Body);
         Assert.False(JsonDocument.Parse(disconnect.Body).RootElement.GetProperty("connected").GetBoolean());
-        Assert.Equal("m", new StudioSettings(SettingsPath, _secrets).ReadAgent()?.Model);
+        Assert.Equal("m", new StudioSettings(SettingsPath, _secrets).Read().Agent?.Model);
         Assert.Equal(Key, new StudioSettings(SettingsPath, _secrets).ReadLlmKey(Url));
         Assert.Equal(HttpStatusCode.NotFound, (await CallAsync(HttpMethod.Post, "/api/agent/turn", new { prompt = "again" })).Status);
     }
@@ -189,25 +189,33 @@ public sealed class StudioConnectionTests : IAsyncLifetime
         var put = await CallAsync(HttpMethod.Put, "/api/agent/connection", new { provider = "openai", url = Two, model = "n", key = keyTwo, remember = true });
         var get = await CallAsync(HttpMethod.Get, "/api/agent/connection");
 
+        // The connection in place is the file's first entry and is not listed: the list shows the other values only.
         var history = Json(get.Body).GetProperty("history").EnumerateArray().ToList();
-        Assert.Equal([Two, One], history.Select(h => h.GetProperty("url").GetString()));
+        Assert.Equal([Two, One], _settings!.ReadAgents().Select(a => a.Url));
+        Assert.Equal([One], history.Select(h => h.GetProperty("url").GetString()));
         Assert.All(history, h => Assert.True(h.GetProperty("keyKept").GetBoolean()));
-        Assert.Equal("n", history[0].GetProperty("model").GetString());
+        Assert.Equal("m", history[0].GetProperty("model").GetString());
 
-        // Deleting the entry of another address leaves the key of the connection in place; deleting the active one leaves it connected.
+        // Deleting the entry of another address leaves the key of the connection in place.
         var other = await CallAsync(HttpMethod.Delete, "/api/agent/connection/history", new { provider = "openai", url = One });
         Assert.Equal(HttpStatusCode.OK, other.Status);
-        Assert.Null(_settings!.ReadLlmKey(One));
+        Assert.Empty(Json(other.Body).GetProperty("history").EnumerateArray());
+        Assert.Null(_settings.ReadLlmKey(One));
         Assert.Equal(keyTwo, _settings.ReadLlmKey(Two));
+
+        // Disconnecting puts the value among the others; deleting it takes the entry, the remembered connection and the key of its address.
+        var disconnect = await CallAsync(HttpMethod.Post, "/api/agent/connection/disconnect");
+        var listed = Json(disconnect.Body).GetProperty("history").EnumerateArray().ToList();
+        Assert.Equal([Two], listed.Select(h => h.GetProperty("url").GetString()));
+        Assert.True(listed[0].GetProperty("keyKept").GetBoolean());
         var active = await CallAsync(HttpMethod.Delete, "/api/agent/connection/history", new { provider = "openai", url = Two });
         var view = Json(active.Body);
         Assert.Empty(view.GetProperty("history").EnumerateArray());
-        Assert.True(view.GetProperty("connected").GetBoolean());
-        Assert.Equal("session", view.GetProperty("key").GetString());
+        Assert.False(view.GetProperty("connected").GetBoolean());
         Assert.Null(_settings.ReadLlmKey(Two));
-        Assert.Null(_settings.ReadAgent());
+        Assert.Null(_settings.Read().Agent);
 
-        foreach (var answer in new[] { put.Body, get.Body, other.Body, active.Body })
+        foreach (var answer in new[] { put.Body, get.Body, other.Body, disconnect.Body, active.Body })
         {
             Assert.DoesNotContain(keyOne, answer);
             Assert.DoesNotContain(keyTwo, answer);

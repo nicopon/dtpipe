@@ -52,11 +52,14 @@ public sealed partial class StudioServer
         }
     }
 
-    /// <summary>The folder as the page reads it: where it is, how it was chosen, the one the studio started on and the recent ones.</summary>
+    /// <summary>
+    /// The folder as the page reads it: where it is, how it was chosen, the one the studio started on and the recent ones, the
+    /// folder in place left out (a display rule: the file keeps its entry).
+    /// </summary>
     private object WorkspaceView(string? warning = null)
     {
         var root = Folder.Root;
-        var recents = _tools.Settings?.ReadFolders() ?? [];
+        var recents = (_tools.Settings?.ReadFolders() ?? []).Where(f => !StudioSettings.SameFolder(f, root)).ToList();
         return new
         {
             root,

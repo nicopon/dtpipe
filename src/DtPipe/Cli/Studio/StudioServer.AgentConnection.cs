@@ -39,9 +39,6 @@ public sealed partial class StudioServer
             case ("DELETE", "/api/agent/connection/history"):
                 await JsonAsync(context, ForgetAgentEntry(await BodyAsync<AgentEntryRequest>(context)));
                 break;
-            case ("DELETE", "/api/agent/connection"):
-                await JsonAsync(context, ForgetConnection());
-                break;
             default:
                 throw new StudioRefusal(404, $"No {method} {path}.");
         }
@@ -76,11 +73,16 @@ public sealed partial class StudioServer
         };
     }
 
-    /// <summary>The recent agents, the most recent first, each with whether a key is kept for its address: the keyring's aliases are listed, never its values.</summary>
+    /// <summary>
+    /// The recent agents, the most recent first, each with whether a key is kept for its address: the keyring's aliases are listed,
+    /// never its values. The agent in place is not listed (it is a display rule: the file keeps its entry); after a disconnection
+    /// it is.
+    /// </summary>
     private object[] AgentHistory()
     {
         if (_tools.AgentLink?.Settings is not { } settings) return [];
-        var recent = settings.ReadAgents();
+        var inPlace = Agent is not null && _slot.Connection is { } current ? new AgentSettings(current.Provider, current.Url, null, null) : null;
+        var recent = settings.ReadAgents().Where(a => inPlace is null || !StudioSettings.SameAgent(a, inPlace)).ToList();
         if (recent.Count == 0) return [];
         var kept = settings.KeptAliases();
         return recent.Select(a => (object)new
@@ -160,21 +162,6 @@ public sealed partial class StudioServer
         if (request.RemoveKey) keyState = "none";
         _slot.Describe(new AgentConnection(prepared.Provider, prepared.Url, prepared.Model, timeoutSeconds, "page", keyState, NumCtx: prepared.NumCtx));
         return ConnectionView(warning);
-    }
-
-    /// <summary>Forgets the file's agent and the keys of its address and of the connection's: the agent in place keeps running with what it holds.</summary>
-    private object ForgetConnection()
-    {
-        var link = AgentLinkOrRefuse();
-        var remembered = link.Settings.ReadAgent();
-        var connection = _slot.Connection;
-        link.Settings.ClearAgent();
-        foreach (var url in new[] { remembered?.Url, connection?.Url }.OfType<string>().Distinct())
-            link.Settings.ForgetLlmKey(url);
-        if (Agent is null) _slot.Describe(null);
-        else if (connection is not null)
-            _slot.Describe(connection with { Source = connection.Source == "remembered" ? "page" : connection.Source, Key = connection.Key == "stored" ? "session" : connection.Key });
-        return ConnectionView();
     }
 
     /// <summary>
