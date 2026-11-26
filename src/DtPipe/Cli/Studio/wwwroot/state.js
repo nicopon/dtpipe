@@ -5,8 +5,8 @@
 // strings, it never decides what is still true.
 
 /** @typedef {{ x: number, y: number }} Point */
-/** @typedef {{ alias: string, kind: string, from: string[], ref: string[], yaml?: string, query?: string, brick?: string, transformers?: any[] }} Step */
-/** @typedef {{ title: string, description: string, directives: string[], steps: Step[], layout: Record<string, Point> }} Model */
+/** @typedef {{ alias: string, kind: string, from: string[], ref: string[], yaml?: string, query?: string, brick?: string, transformers?: any[], comment?: string | null }} Step */
+/** @typedef {{ header: string | null, steps: Step[], layout: Record<string, Point> }} Model */
 /** @typedef {{ yaml: string, steps: any[], errors: string[], warnings: string[], unanswered?: boolean }} Composed `unanswered`: a result a request got back when the studio gave no verdict */
 /** @typedef {{ alias?: string, t?: number, edge?: { from: string, to: string, port: string } }} Selection */
 /** @typedef {{ path: string, hash: string | null, rewrites: boolean }} Job */

@@ -1,3 +1,4 @@
+using System.Text;
 using YamlDotNet.Core;
 using YamlDotNet.Core.Events;
 using YamlDotNet.RepresentationModel;
@@ -132,4 +133,165 @@ public static class JobYaml
     /// <summary>The variables one branch reads, as <see cref="Variables(string)"/> reads them from its text.</summary>
     public static IReadOnlyList<string> Variables(string alias, YamlMappingNode branch) =>
         Variables(Serialize(new YamlMappingNode { { alias, branch } }));
+
+    /// <summary>
+    /// Reads the raw leading <c>#</c> header comments of a job and any <c>#</c> comments placed directly
+    /// under each top-level branch key before its first entry. Uses the YAML scanner so <c>#</c> inside
+    /// scalars is never treated as a comment.
+    /// </summary>
+    public static (string? Header, IReadOnlyDictionary<string, string> BranchComments) ReadComments(string yaml)
+    {
+        var normalized = yaml.TrimStart('\uFEFF');
+        var rawLines = normalized.Split('\n');
+        var headerLines = new List<string>();
+        var branchComments = new Dictionary<string, string>(StringComparer.Ordinal);
+        var pendingBranchLines = new List<string>();
+
+        static string CommentText(Comment c, string[] lines)
+        {
+            if (c.Start.Line == c.End.Line && c.Start.Line >= 1 && c.Start.Line <= lines.Length)
+            {
+                var trimmed = lines[(int)c.Start.Line - 1].TrimEnd('\r').TrimStart();
+                if (trimmed.StartsWith('#'))
+                {
+                    var afterHash = trimmed[1..];
+                    return afterHash.StartsWith(' ') ? afterHash[1..] : afterHash;
+                }
+            }
+            return c.Value.StartsWith(' ') ? c.Value[1..] : c.Value;
+        }
+
+        var depth = 0;
+        var rootMapping = false;
+        var expectingRootKey = false;
+        var rootKeyCount = 0;
+        string? currentBranch = null;
+        var awaitingBranchMapping = false;
+        var inBranchLeading = false;
+
+        try
+        {
+            var parser = new Parser(new Scanner(new StringReader(normalized), skipComments: false));
+            while (parser.MoveNext())
+            {
+                switch (parser.Current)
+                {
+                    case DocumentEnd:
+                    case StreamEnd:
+                        return (headerLines.Count > 0 ? string.Join('\n', headerLines) : null, branchComments);
+
+                    case Comment c:
+                        if (c.IsInline) break;
+                        var line = CommentText(c, rawLines);
+                        if (rootKeyCount == 0 && (depth == 0 || (depth == 1 && rootMapping && expectingRootKey)))
+                            headerLines.Add(line);
+                        else if (currentBranch is not null && (awaitingBranchMapping || inBranchLeading))
+                            pendingBranchLines.Add(line);
+                        break;
+
+                    case MappingStart:
+                        depth++;
+                        if (depth == 1)
+                        {
+                            rootMapping = true;
+                            expectingRootKey = true;
+                        }
+                        else if (depth == 2 && awaitingBranchMapping)
+                        {
+                            awaitingBranchMapping = false;
+                            inBranchLeading = true;
+                        }
+                        else
+                        {
+                            awaitingBranchMapping = false;
+                            inBranchLeading = false;
+                        }
+                        break;
+
+                    case MappingEnd:
+                        if (depth == 2 && currentBranch is not null)
+                        {
+                            if (pendingBranchLines.Count > 0)
+                                branchComments[currentBranch] = string.Join('\n', pendingBranchLines);
+                            pendingBranchLines.Clear();
+                            currentBranch = null;
+                            inBranchLeading = false;
+                            expectingRootKey = true;
+                        }
+                        depth--;
+                        if (depth == 0)
+                        {
+                            rootMapping = false;
+                            expectingRootKey = false;
+                        }
+                        break;
+
+                    case SequenceStart:
+                        depth++;
+                        awaitingBranchMapping = false;
+                        inBranchLeading = false;
+                        break;
+
+                    case SequenceEnd:
+                        depth--;
+                        if (depth == 1 && rootMapping)
+                        {
+                            currentBranch = null;
+                            expectingRootKey = true;
+                        }
+                        break;
+
+                    case Scalar s:
+                        if (depth == 1 && rootMapping && expectingRootKey)
+                        {
+                            currentBranch = s.Value;
+                            rootKeyCount++;
+                            expectingRootKey = false;
+                            awaitingBranchMapping = true;
+                            pendingBranchLines.Clear();
+                        }
+                        else if (depth == 1 && rootMapping && awaitingBranchMapping)
+                        {
+                            awaitingBranchMapping = false;
+                            currentBranch = null;
+                            expectingRootKey = true;
+                            pendingBranchLines.Clear();
+                        }
+                        else if (depth == 2 && inBranchLeading)
+                        {
+                            if (pendingBranchLines.Count > 0 && currentBranch is not null)
+                                branchComments[currentBranch] = string.Join('\n', pendingBranchLines);
+                            pendingBranchLines.Clear();
+                            inBranchLeading = false;
+                        }
+                        break;
+                }
+            }
+        }
+        catch (YamlException)
+        {
+            if (headerLines.Count == 0)
+            {
+                foreach (var raw in rawLines)
+                {
+                    var trimmed = raw.TrimEnd('\r').TrimStart();
+                    if (!trimmed.StartsWith('#')) break;
+                    var afterHash = trimmed[1..];
+                    headerLines.Add(afterHash.StartsWith(' ') ? afterHash[1..] : afterHash);
+                }
+            }
+        }
+
+        return (headerLines.Count > 0 ? string.Join('\n', headerLines) : null, branchComments);
+    }
+
+    /// <summary>Formats raw comment lines as <c>#</c> lines with optional indentation.</summary>
+    public static string FormatComments(string? text, string indent = "")
+    {
+        if (string.IsNullOrWhiteSpace(text)) return "";
+        var sb = new StringBuilder();
+        foreach (var line in text.Replace("\r\n", "\n").Split('\n'))
+            sb.Append(indent).Append(line.Length == 0 ? "#" : $"# {line}").Append('\n');
+        return sb.ToString();
+    }
 }

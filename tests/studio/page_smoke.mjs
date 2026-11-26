@@ -495,8 +495,8 @@ const scenarios = {
     await send("overwrite it again");
     check("a second save waits on a card", await p.until(`/asks to save chain\\.yaml/.test(document.querySelector("#agent-now")?.textContent ?? "")`));
     const before = p.seen.length;
-    await p.type("#d-title", " kept");
-    check("the title is composed while the card waits", await p.waitSeen("/api/design/compose", before));
+    await p.type("#i-header", " kept");
+    check("the header comment is composed while the card waits", await p.waitSeen("/api/design/compose", before));
     await p.clickText("#agent-now button", "Save");
     check("the second save ends the turn", await idle());
     check("the notice says the saved file waits again", await p.until(`!document.querySelector("#agent-behind").hidden`));
@@ -1350,16 +1350,20 @@ const scenarios = {
     check("Pull writes orders-pipeline.yaml, opens it, and shows in sync", await p.until(`document.querySelector("#job-name")?.textContent === "orders-pipeline.yaml" && /in sync/.test(document.querySelector("#job-sync")?.innerText ?? "")`)
       && fs.existsSync(path.join(folder, "orders-pipeline.yaml")));
 
-    // Local edit -> modified
-    await p.type("#d-title", " edited", 15);
+    // Local edit -> modified (including header and step comments)
+    await p.type("#i-header", " edited", 15);
+    await p.click('.dcard[data-alias="orders"]');
+    await p.until(`!!document.querySelector("#i-comment")`);
+    await p.type("#i-comment", "branch note", 15);
     await p.click("#d-save");
-    check("Local save marks job as modified", await p.until(`/modified/.test(document.querySelector("#job-sync")?.innerText ?? "")`, 15000));
+    check("Local save marks job as modified and writes comments", await p.until(`/modified/.test(document.querySelector("#job-sync")?.innerText ?? "")`, 15000)
+      && /edited/.test(fs.readFileSync(path.join(folder, "orders-pipeline.yaml"), "utf8"))
+      && /# branch note/.test(fs.readFileSync(path.join(folder, "orders-pipeline.yaml"), "utf8")));
 
     // Remote advances -> diverged + update badge on Library icon
     coord.library.set("orders-pipeline", {
       id: "orders-pipeline",
-      title: "Orders export",
-      description: "Moves orders from shop to archive",
+      header: "Orders export\nMoves orders from shop to archive",
       yaml: "# Orders export v2\norders:\n  input: brick:n1/orders\narchive:\n  from: orders\n  output: brick:n1/archive\n",
       commit: "bbbb2222bbbb2222",
     });
@@ -1408,15 +1412,13 @@ function startFakeCoordinator(sampleArrow) {
   const library = new Map([
     ["orders-pipeline", {
       id: "orders-pipeline",
-      title: "Orders export",
-      description: "Moves orders from shop to archive",
+      header: "Orders export\nMoves orders from shop to archive",
       yaml: "# Orders export\norders:\n  input: brick:n1/orders\narchive:\n  from: orders\n  output: brick:n1/archive\n",
       commit: "aaaa1111aaaa1111",
     }],
     ["unlinked-pipeline", {
       id: "unlinked-pipeline",
-      title: "Unlinked report",
-      description: "Another pipeline in the library",
+      header: "Unlinked report\nAnother pipeline in the library",
       yaml: "# Unlinked\norders:\n  input: brick:n1/orders\narchive:\n  from: orders\n  output: brick:n1/archive\n",
       commit: "cccc3333cccc3333",
     }],
@@ -1430,7 +1432,7 @@ function startFakeCoordinator(sampleArrow) {
     req.on("end", () => {
       const json = (code, data) => { res.writeHead(code, { "Content-Type": "application/json" }); res.end(JSON.stringify(data)); };
       if (urlPath === "/.well-known/oauth-protected-resource") {
-        json(200, { resource: baseUrl, authorization_servers: [baseUrl], bearer_methods_supported: ["header"], dtpipe_contract: 12, dtpipe_studio_client_id: "studio", dtpipe_auth: ["idp", "key"] });
+        json(200, { resource: baseUrl, authorization_servers: [baseUrl], bearer_methods_supported: ["header"], dtpipe_contract: 13, dtpipe_studio_client_id: "studio", dtpipe_auth: ["idp", "key"] });
       } else if (urlPath === "/.well-known/openid-configuration") {
         json(200, { issuer: baseUrl, authorization_endpoint: `${baseUrl}/authorize`, token_endpoint: `${baseUrl}/connect/token` });
       } else if (urlPath === "/connect/token") {
@@ -1453,7 +1455,7 @@ function startFakeCoordinator(sampleArrow) {
         res.writeHead(200, { "Content-Type": "application/vnd.apache.arrow.stream" });
         res.end(sampleArrow);
       } else if (urlPath === "/api/library") {
-        json(200, [...library.values()].map((p) => ({ id: p.id, title: p.title, description: p.description, commit: p.commit })));
+        json(200, [...library.values()].map((p) => ({ id: p.id, header: p.header, commit: p.commit })));
       } else if (urlPath.startsWith("/api/library/")) {
         const id = decodeURIComponent(urlPath.slice("/api/library/".length));
         if (req.method === "GET") {
@@ -1470,7 +1472,7 @@ function startFakeCoordinator(sampleArrow) {
           }
           const save = JSON.parse(body);
           const commit = `commit-${++seq}`.padEnd(16, "0");
-          library.set(id, { id, title: id, description: null, yaml: save.yaml, commit });
+          library.set(id, { id, header: null, yaml: save.yaml, commit });
           json(200, { id, commit, deployed: false });
         } else json(405, { error: "Method not allowed" });
       } else {

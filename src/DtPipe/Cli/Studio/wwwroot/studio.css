@@ -89,7 +89,7 @@ main.side-closed { grid-template-columns: 40px minmax(0, 1fr); }
 .lib-title { font-weight: 600; overflow-wrap: anywhere; }
 .lib-commit { font-size: 11px; color: var(--muted); flex: none; }
 .lib-id { font-size: 12px; overflow-wrap: anywhere; }
-.lib-desc { margin: 2px 0; font-size: 12px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.lib-desc { margin: 2px 0; font-size: 12px; white-space: pre-line; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .lib-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; }
 .lib-meta code { overflow-wrap: anywhere; }
 .lib-actions { margin-top: 4px; margin-bottom: 0; gap: 4px; flex-wrap: wrap; justify-content: flex-start; }
@@ -130,7 +130,6 @@ textarea { width: 100%; resize: vertical; }
 .designer-bar .grow { flex: 1; min-width: 140px; }
 .designer-bar .actions { display: flex; gap: 6px 8px; align-items: center; flex-wrap: wrap; margin-left: auto; }
 .designer-bar .rows input { width: 70px; }
-.title-input { font-weight: 700; min-width: 160px; flex: 0 1 220px; }
 .designer-body { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) var(--insp-w); gap: 12px; flex: 1; min-height: 0; }
 .designer-body > .card { min-height: 0; }
 /* The handles lie over the side panel's edge, the 12px gap beside the inspector, and the drawer's top edge. */

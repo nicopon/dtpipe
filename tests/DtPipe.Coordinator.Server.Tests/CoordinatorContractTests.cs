@@ -70,7 +70,7 @@ public sealed class CoordinatorContractTests
         Assert.Equal("""{"id":"p","commit":"abc","deployed":false,"bindingProblems":null}""", Write(new LibrarySaved("p", "abc", false)));
         Assert.Equal("""{"error":"e","commit":null}""", Write(new LibraryConflict("e", null)));
         Assert.Equal("""{"error":"e","report":"r"}""", Write(new LibraryRefused("e", "r")));
-        Assert.Equal("""{"id":"p","title":"T","description":null,"commit":"abc"}""", Write(new LibraryItem("p", "T", null, "abc")));
+        Assert.Equal("""{"id":"p","header":"H","commit":"abc"}""", Write(new LibraryItem("p", "H", "abc")));
         Assert.Equal("""{"id":"p","yaml":"a: {}","commit":"abc"}""", Write(new LibraryJob("p", "a: {}", "abc")));
         // A body that still carries a layout is read: the field is ignored.
         var save = JsonSerializer.Deserialize<LibrarySave>("""{"yaml":"a: {}","layout":null,"message":"m"}""", Server)!;

@@ -313,7 +313,7 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   `--on-solid`, never a literal white. `[local: page_smoke.mjs keyboard — the tree's names and the contrast of what the screens draw]`
 - **A YAML text not applied holds the cards, so the two never say different things.** The YAML tab edits the composed
   job; what the person types is `state.cards.text`, never read off the editor, so a redraw keeps it. While it differs from
-  the composed text (`editingText`), the canvas, inspector, palette, title and Undo are inert, Save, Preview and a message
+  the composed text (`editingText`), the canvas, inspector, palette and Undo are inert, Save, Preview and a message
   to the agent refuse, the agent's plan waits behind its notice (`moved`), and a run or a publication refuses and leaving the job asks, as with unsaved
   cards (`holdsEdits`); a text typed back to the composed one is none. *Apply* or
   *Revert* frees them. The tab's light is the composition's verdict on the cards and says only "not applied" while a text
@@ -352,7 +352,7 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   Apply, which asks before it replaces an unsaved edit. A plan whose state the server gives as refused or failed never lands on
   the cards by itself (`follow` reads the server's `plan.state` and never revalidates the text): its buttons stay, the refused
   one disabled. `[unchecked: that guard, which no page_smoke scenario plays: its refused plan does not take apart into cards]`
-  A plan with no header comment keeps the title of the cards it replaces (`openJob`). A turn that ends without a result gives
+  A plan with no header comment keeps the header comments of the steps it replaces (`openJob`). A turn that ends without a result gives
   the person's text back to an empty prompt. A text that `JobSecrets.Literals` flags reaches the model, open job or `read-job`, only
   after a card that names `branch.path`, never the value; the answer holds for that text, by hash, for the session.
   **The panel shows what the trace holds, never more**: every text of the conversation the page reads (the person's message, the

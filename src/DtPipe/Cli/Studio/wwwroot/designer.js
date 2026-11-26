@@ -77,8 +77,8 @@ export async function openJob(yaml, layout, unsaved = false, kept = null, replac
   if (opening.stale(ticket)) return false;
   const show = () => {
     const model = normalize(answer.model);
-    // A text with no header comment says nothing of the job's title, description or directives: the cards it replaces keep theirs.
-    if (replacing && cards.model && !yaml.startsWith("#")) Object.assign(model, { title: cards.model.title, description: cards.model.description, directives: cards.model.directives });
+    // A text with no header comment says nothing of the job's header: the steps it replaces keep theirs.
+    if (replacing && cards.model && !model.header) model.header = cards.model.header;
     putCards(model, answer, kept);
   };
   if (replacing && cards.model) remember(replacing, show);
@@ -169,10 +169,10 @@ export function cardChanges(before, after) {
 }
 
 /** Starts from no step at all. */
-export async function openBlank(title) {
+export async function openBlank() {
   opening.cancel();
   cards.history = [];
-  cards.model = normalize({ title, steps: [], layout: {} });
+  cards.model = normalize({ header: null, steps: [], layout: {} });
   cards.result = null; cards.selected = null; cards.zoom = null; cards.dirty = true; cards.text = null; state.view.drawer = "yaml";
   renderShell();
   await compose();
@@ -243,8 +243,8 @@ export const holdsEdits = () => cards.dirty || editingText();
 
 function normalize(m) {
   return {
-    title: m.title || "Untitled job", description: m.description || "", directives: m.directives || [],
-    steps: (m.steps || []).map((s) => ({ ...s, from: s.from || [], ref: s.ref || [] })),
+    header: m.header || null,
+    steps: (m.steps || []).map((s) => ({ ...s, from: s.from || [], ref: s.ref || [], comment: s.comment || null })),
     layout: m.layout || {},
   };
 }
@@ -270,8 +270,9 @@ export async function compose() {
     if (!composing.stale(seq)) cards.result = { yaml: "", steps: [], errors: [e.message], warnings: [] };
   }
   invalidate("canvas", "drawer", "bar");
-  // With no wire and no card of the job selected the inspector shows the job's steps, and holds no field a redraw would take.
-  if (!cards.selected?.edge && !(cards.selected?.alias && cards.model && stepOf(cards.selected.alias))) invalidate("inspector");
+  // With no wire and no step selected the inspector shows the job's summary; skip redrawing while typing in its comments.
+  if (!cards.selected?.edge && !(cards.selected?.alias && cards.model && stepOf(cards.selected.alias)) && document.activeElement?.id !== "i-header")
+    invalidate("inspector");
   hooks.onComposed?.(cards.result);
   return cards.result;
 }
@@ -479,7 +480,7 @@ function renderChain() {
   ]);
   fill(view,
     el("nav", { class: "crumbs" },
-      el("a", { href: "#", "data-crumb": true, title: "Back to the job (Esc)" }, cards.model.title), el("span", { class: "sep" }, "›"), el("b", {}, step.alias)),
+      el("a", { href: "#", "data-crumb": true, title: "Back to the job (Esc)" }, state.job?.path || "Job"), el("span", { class: "sep" }, "›"), el("b", {}, step.alias)),
     el("div", { class: "chain" },
       el("div", { class: "chain-end" }, el("span", { class: "kind" }, "input"),
         step.from.length ? step.from.map((a) => el("code", {}, a)) : el("span", { class: "hint" }, "not wired")),
@@ -497,8 +498,6 @@ function renderShell() {
   const seg = (id, label, title) => el("button", { id, title }, label);
   fill(host,
     el("div", { class: "designer-bar" },
-      el("input", { id: "d-title", class: "title-input", value: cards.model.title, "aria-label": "Title" }),
-      el("input", { id: "d-description", class: "grow", value: cards.model.description, placeholder: "What this job does", "aria-label": "Description" }),
       el("span", { id: "d-dirty", class: "pill warn", hidden: true }, "unsaved"),
       el("span", { class: "actions" },
         seg("d-undo", "Undo", "Nothing to undo"),
@@ -517,8 +516,6 @@ function renderShell() {
   // The palette lives in the page's side panel (Steps), a new one for each job like the rest of the designer.
   fill($("side-steps-view"), el("div", { class: "palette", id: "d-palette" }));
 
-  $("d-title").addEventListener("input", (e) => { cards.model.title = targetOf(e).value; touch({ canvas: !!cards.zoom }); });
-  $("d-description").addEventListener("input", (e) => { cards.model.description = targetOf(e).value; touch({ canvas: false }); });
   $("d-layout").addEventListener("click", () => autoLayout());
   $("d-undo").addEventListener("click", () => { undo().catch((e) => status(e.message, "bad")); });
   applySizes();
@@ -1014,7 +1011,16 @@ function renderInspector() {
     fill(view, el("h2", {}, "Job"),
       el("p", { class: "hint" }, `${plural(cards.model.steps.length, "step")}.`),
       el("p", { class: "hint" }, "Select a step to edit it. A source and an output of their own carry their endpoint as YAML; the server joins a source, its transform and its output back into one branch when nothing else reads between them."),
-      cards.model.directives.length ? [el("h3", {}, "Header directives"), el("ul", { class: "inputs" }, cards.model.directives.map((d) => el("li", {}, el("code", {}, d))))] : null);
+      el("h3", {}, "Comments"),
+      el("textarea", {
+        id: "i-header",
+        "aria-label": "Job header comments",
+        class: "mono",
+        rows: "5",
+        spellcheck: "true",
+        placeholder: "Optional # comments at the top of the YAML file",
+        value: cards.model.header || "",
+      }));
     return;
   }
   if (cards.zoom && step.alias === cards.zoom) {
@@ -1050,7 +1056,17 @@ function renderInspector() {
   fill(view,
     el("div", { class: "row" }, el("h2", {}, KIND_LABEL[step.kind] || step.kind), el("button", { class: "small ghost danger", "data-remove-step": true }, "Delete step")),
     el("label", { class: "field" }, "Alias ", el("input", { id: "i-alias", class: "mono", value: step.alias })),
-    body);
+    body,
+    el("h3", {}, "Comments"),
+    el("textarea", {
+      id: "i-comment",
+      "aria-label": `Comments for ${step.alias}`,
+      class: "mono",
+      rows: "3",
+      spellcheck: "true",
+      placeholder: "Optional # comments written under this branch",
+      value: step.comment || "",
+    }));
 }
 
 // A brick card: what the coordinator's catalog says of it. Its branch is its node's, never edited here.
@@ -1122,9 +1138,16 @@ function bindInspector() {
   });
 
   view.addEventListener("input", (e) => {
+    if (targetOf(e).id === "i-header") {
+      if (!cards.model) return;
+      cards.model.header = targetOf(e).value || null;
+      touch({ canvas: false });
+      return;
+    }
     const step = current();
     if (!step) return;
-    if (targetOf(e).id === "i-query") { step.query = targetOf(e).value; touch(); }
+    if (targetOf(e).id === "i-comment") { step.comment = targetOf(e).value || null; touch({ canvas: false }); }
+    else if (targetOf(e).id === "i-query") { step.query = targetOf(e).value; touch(); }
     else if (targetOf(e).id === "i-yaml") { step.yaml = targetOf(e).value; touch(); }
     else if (targetOf(e).dataset.kv) {
       const kv = targetOf(e).closest(".kv");
@@ -1225,7 +1248,7 @@ function renderDrawer() {
 }
 
 // What the steps hold while the YAML tab has a text they do not: these are greyed and take no input.
-const HELD = ["d-canvas", "d-inspector", "d-palette", "d-title", "d-description", "d-undo", "d-layout"];
+const HELD = ["d-canvas", "d-inspector", "d-palette", "d-undo", "d-layout"];
 
 /**
  * The verdict the YAML tab's light gives: the composition's on the cards, unless the tab holds a text not applied, of which

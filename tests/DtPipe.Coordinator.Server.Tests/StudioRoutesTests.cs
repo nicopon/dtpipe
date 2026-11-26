@@ -387,17 +387,18 @@ public sealed class StudioRoutesTests : IDisposable
     [Fact]
     public async Task The_Library_Is_Listed_And_Read_At_The_Version_Of_Its_Job()
     {
-        var created = await Save("orders", "a:\n  input: x\n");
+        var created = await Save("orders", "# Orders job\na:\n  input: x\n");
         await _host.Services.GetRequiredService<PipelineLibrary>().SaveBindingsAsync(
             "orders", new Dictionary<string, Binding> { ["a"] = new Binding("node-a") }, "bind", Ct);
 
         var reader = As(CoordinatorHost.Reader);
         var listing = await reader.GetFromJsonAsync<LibraryItem[]>(CoordinatorApi.LibraryList, Ct);
-        Assert.Equal(("orders", created.Saved!.Commit), (Assert.Single(listing!).Id, listing![0].Commit));
+        var item = Assert.Single(listing!);
+        Assert.Equal(("orders", "Orders job", created.Saved!.Commit), (item.Id, item.Header, item.Commit));
 
         // The bindings saved beside the job are a commit of the folder, not an edit: the job's version stays.
         var job = await reader.GetFromJsonAsync<LibraryJob>(CoordinatorApi.Library("orders"), Ct);
-        Assert.Equal(new LibraryJob("orders", "a:\n  input: x\n", created.Saved.Commit), job);
+        Assert.Equal(new LibraryJob("orders", "# Orders job\na:\n  input: x\n", created.Saved.Commit), job);
 
         using var missing = await reader.GetAsync(CoordinatorApi.Library("nothing"), Ct);
         Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);

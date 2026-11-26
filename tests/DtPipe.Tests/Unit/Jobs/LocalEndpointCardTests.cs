@@ -148,7 +148,7 @@ public sealed class LocalEndpointCardTests
     [Fact]
     public void Cards_Drawn_By_Hand_Join_Into_One_Branch()
     {
-        var model = new DesignModel("Hand", null, null,
+        var model = new DesignModel("Hand",
         [
             new DesignStep("read", StepKinds.Source, Yaml: "input: csv:in.csv\n"),
             new DesignStep("write", StepKinds.Sink, From: ["read"], Yaml: "output: csv:out.csv\n"),
@@ -172,9 +172,38 @@ public sealed class LocalEndpointCardTests
             ? new[] { new DesignStep("e", kind, Yaml: yaml), new DesignStep("w", StepKinds.Sink, From: ["e"], Yaml: "output: csv:o.csv\n") }
             : [new DesignStep("r", StepKinds.Source, Yaml: "input: csv:i.csv\n"), new DesignStep("e", kind, From: ["r"], Yaml: yaml)];
 
-        var result = Design.Compose(new DesignModel("T", null, null, steps));
+        var result = Design.Compose(new DesignModel("T", steps));
 
         Assert.Contains(result.Errors, e => e.Contains(expected));
+    }
+
+    [Fact]
+    public void Branch_Comments_Attach_To_The_Alias_Card_And_Join_Combines_Them()
+    {
+        const string job = """
+            main:
+              # Linear branch comment
+              input: csv:people.csv
+              output: duck:archive.duckdb
+              transformers:
+              - type: overwrite
+                mappings:
+                  email: hidden
+            """;
+
+        var decomposed = Design.Decompose(job);
+        Assert.Equal("Linear branch comment", decomposed.Model.Steps.Single(s => s.Alias == "main").Comment);
+        Assert.Null(decomposed.Model.Steps.Single(s => s.Alias == "main_source").Comment);
+        Assert.Null(decomposed.Model.Steps.Single(s => s.Alias == "main_sink").Comment);
+        Assert.Contains("  # Linear branch comment\n", decomposed.Yaml);
+
+        var joined = Design.Compose(new DesignModel(null,
+        [
+            new DesignStep("read", StepKinds.Source, Yaml: "input: csv:in.csv\n", Comment: "From source"),
+            new DesignStep("write", StepKinds.Sink, From: ["read"], Yaml: "output: csv:out.csv\n", Comment: "To sink"),
+        ]));
+        Assert.Empty(joined.Errors);
+        Assert.Contains("read:\n  # From source\n  # To sink\n", joined.Yaml);
     }
 
     private sealed class Reader(string name, string extension) : IStreamReaderFactory

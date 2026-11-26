@@ -241,7 +241,7 @@ function renderLibrary() {
   }
   const q = library.filter.trim().toLowerCase();
   const items = q
-    ? library.pipelines.filter((p) => [p.id, p.title, p.description].some((v) => v && String(v).toLowerCase().includes(q)))
+    ? library.pipelines.filter((p) => [p.id, p.header].some((v) => v && String(v).toLowerCase().includes(q)))
     : library.pipelines;
   if (!items.length) {
     fill(list, el("li", { class: "muted" }, library.pipelines.length ? "No matching pipeline." : "The library holds no pipeline."));
@@ -280,10 +280,9 @@ function renderLibrary() {
 
     return el("li", { class: "lib-entry" },
       el("div", { class: "lib-head" },
-        el("span", { class: "lib-title", title: p.title || p.id }, p.title || p.id),
+        el("span", { class: "lib-title mono", title: p.id }, p.id),
         p.commit ? el("code", { class: "lib-commit" }, shortCommit(p.commit)) : null),
-      el("div", { class: "lib-id mono muted" }, p.id),
-      p.description ? el("p", { class: "lib-desc hint" }, p.description) : null,
+      p.header ? el("p", { class: "lib-desc hint" }, p.header) : null,
       linkedPath ? el("div", { class: "lib-meta" },
         el("span", { class: "hint" }, "Local: ", el("code", {}, linkedPath)),
         syncStatusText ? el("span", { class: `sync-tag sync-${syncStatusCls}` }, syncStatusText) : null) : null,
@@ -461,12 +460,12 @@ function startNewBlank() {
   openNewJobDialog({
     folders: state.jobs.folders,
     existingPaths: state.jobs.paths,
-    onCreate: async ({ path, title }) => {
+    onCreate: async ({ path }) => {
       opening.cancel();
       state.job = { path, hash: null, rewrites: false };
       forgetResults();
       viewRestored(path);
-      await openBlank(title || path.replace(/^.*\//, "").replace(/\.ya?ml$/i, ""));
+      await openBlank();
       await loadJobs();
     },
   });
@@ -802,7 +801,6 @@ async function openPlan(yaml) {
       existingPaths: state.jobs.paths,
       initialPath: suggested,
       title: "Open agent plan as new job",
-      hideTitle: true,
       onCreate: async ({ path }) => {
         const opened = await openDraftYaml(path, yaml, "the agent's plan: save it to keep it");
         finish(opened);

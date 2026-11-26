@@ -95,7 +95,8 @@ table.matrix td.no { color: var(--muted); }
 .lib-title { flex: 1 1 18rem; display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .lib-title a { font-weight: 650; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lib-title a:hover { text-decoration: underline; }
-.lib-title .mono { color: var(--muted); white-space: nowrap; }
+.lib-title .mono { white-space: nowrap; }
+.lib-header { white-space: pre-line; }
 .lib-facts .chips-wrap { flex: 0 1 auto; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .lib-run { flex: 1 1 16rem; display: flex; gap: 8px; align-items: center; min-width: 0; color: var(--muted); font-size: 12.5px; }
 .lib-run .tip-b { left: auto; right: 0; }

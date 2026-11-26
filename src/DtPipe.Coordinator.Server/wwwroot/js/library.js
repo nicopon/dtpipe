@@ -22,11 +22,11 @@ let filter = { q: "", show: "all" };
 let addressTimer = null;   // the pending write of the search into the address
 let page = null;           // the detail page, when #/library/{id} is open
 
-/** The pipelines `f` keeps: the search text in the title or the id, without case, and the show filter. */
+/** The pipelines `f` keeps: the search text in the id or the comments, without case, and the show filter. */
 export function visible(list, f) {
   const text = f.q.trim().toLowerCase();
   const keep = SHOWS[f.show][1];
-  return list.filter((e) => (!text || [e.title, e.id].some((v) => v && String(v).toLowerCase().includes(text))) && keep(e));
+  return list.filter((e) => (!text || [e.id, e.header].some((v) => v && String(v).toLowerCase().includes(text))) && keep(e));
 }
 
 /** What the count says: the pipelines the list shows of those the library holds. */
@@ -48,7 +48,7 @@ export function mount(el, params, query) {
       <p class="hint">Pipelines kept in the coordinator's own git repository. Each save is a commit; each one is a plain dtpipe job that also runs whole on one machine. Write one with <code>dtpipe studio --coordinator</code> and publish it here.</p>
     </div>
     <div class="lib-bar">
-      <input id="lib-q" type="search" placeholder="Search by title or id" aria-label="Search pipelines" value="${esc(filter.q)}">
+      <input id="lib-q" type="search" placeholder="Search by id or comments" aria-label="Search pipelines" value="${esc(filter.q)}">
       <select id="lib-show" aria-label="Show">${Object.entries(SHOWS).map(([key, [label]]) => `<option value="${key}" ${key === filter.show ? "selected" : ""}>${label}</option>`).join("")}</select>
       <span id="lib-count" class="hint"></span>
     </div>
@@ -154,7 +154,7 @@ function savedCell(e) {
 function moreMenu(e) {
   const deployment = deploymentOf(e.id);
   const active = isActive(lastRunOf(e.id));
-  return `<details class="menu"><summary aria-label="More actions for ${esc(e.title)}" title="More actions">⋯</summary>
+  return `<details class="menu"><summary aria-label="More actions for ${esc(e.id)}" title="More actions">⋯</summary>
     <div class="menu-pop">
       ${deployment ? `<button class="small" data-needs="designer" data-undeploy="${esc(e.id)}" ${active ? "disabled" : ""}>Undeploy</button><div class="sep"></div>` : ""}
       <button class="small danger" data-needs="designer" data-delete="${esc(e.id)}">Delete…</button>
@@ -172,23 +172,23 @@ function severity(e) {
   return "";
 }
 
-// The description: a popover where a pointer hovers, a printed line where none does.
-function descriptionTip(e) {
-  if (!e.description) return "";
-  return `<span class="tip"><span class="info-dot tip-t" tabindex="0" role="note" aria-label="Description">i</span><span class="tip-b"><b>Description</b>${esc(e.description)}</span></span>`;
+// The header comments: a popover where a pointer hovers, a printed block where none does.
+function headerTip(e) {
+  if (!e.header) return "";
+  return `<span class="tip"><span class="info-dot tip-t" tabindex="0" role="note" aria-label="Comments">i</span><span class="tip-b"><b>Comments</b><span class="lib-header">${esc(e.header)}</span></span></span>`;
 }
 
 // One pipeline. The reasons of a failed deployment and of the last run are also printed, for where no pointer hovers.
 function item(e) {
   const run = lastRunOf(e.id);
   const d = deploymentOf(e.id);
-  const printed = [e.description ? `<div class="lib-printed">${esc(e.description)}</div>` : "",
+  const printed = [e.header ? `<div class="lib-printed lib-header">${esc(e.header)}</div>` : "",
     d && d.state === "failed" && d.message ? `<div class="lib-printed bad">${esc(d.message)}</div>` : "",
     run && run.reason ? `<div class="lib-printed bad">${esc(run.reason)}</div>` : ""].join("");
   return `
     <article class="lib-item ${severity(e)}">
       <div class="lib-facts">
-        <div class="lib-title"><a href="#/library/${encodeURIComponent(e.id)}" title="${esc(e.title)}">${esc(e.title)}</a>${descriptionTip(e)}<span class="mono">${esc(e.id)}</span></div>
+        <div class="lib-title"><a class="mono" href="#/library/${encodeURIComponent(e.id)}" title="${esc(e.id)}">${esc(e.id)}</a>${headerTip(e)}</div>
         <div class="chips-wrap">${deploymentChip(e)} ${statusChip(e)}</div>
         <div class="lib-run">${runCell(e.id)}</div>
       </div>

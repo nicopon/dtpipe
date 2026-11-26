@@ -228,7 +228,7 @@ internal sealed class StudioFakes : IAsyncDisposable
                 break;
             case CoordinatorApi.Prefix + CoordinatorApi.LibraryListRoute:
                 await context.Response.WriteAsJsonAsync(
-                    Library.Select(p => new LibraryItem(p.Key, p.Key, null, p.Value.Commit)).ToArray(), JsonSerializerOptions.Web);
+                    Library.Select(p => new LibraryItem(p.Key, null, p.Value.Commit)).ToArray(), JsonSerializerOptions.Web);
                 break;
             case { } library when library.StartsWith("/api/library/", StringComparison.Ordinal) && context.Request.Method == "GET":
                 var wanted = library["/api/library/".Length..];
