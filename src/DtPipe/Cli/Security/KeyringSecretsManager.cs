@@ -32,7 +32,7 @@ public sealed class KeyringUnreadableException(string message, Exception? inner 
 /// <summary>
 /// The secrets of <c>dtpipe secret</c>: one JSON blob in one keyring entry. KeySharp raises the same exception for an entry
 /// that does not exist and for one that cannot be read (its error type is not reliable), so an out-of-keyring marker file
-/// is written alongside every save: a failed read of the blob with the marker present is "unreadable" and throws, and no
+/// is written before every save: a failed read of the blob with the marker present is "unreadable" and throws, and no
 /// write follows it, since a write would replace every alias with the one being set. Without the marker (neither the file
 /// nor a legacy keyring marker), the blob is "absent" and reads as empty.
 /// </summary>
@@ -161,14 +161,31 @@ public class KeyringSecretsManager : ISecretsManager
         }
     }
 
+    /// <summary>
+    /// The marker goes first: a blob saved without it reads as absent once the keyring is locked, and the next save then replaces
+    /// every alias. A marker that cannot be written refuses the save before the keyring is touched. A save the keyring refuses
+    /// removes the marker it created, so a first save refused is not read afterwards as secrets that cannot be read.
+    /// </summary>
     private void SaveSecrets(Dictionary<string, string> secrets)
     {
         var json = JsonSerializer.Serialize(secrets);
-        _backend.Set(BlobUserName, json);
-        WriteMarker();
+        var created = WriteMarker();
+        try
+        {
+            _backend.Set(BlobUserName, json);
+        }
+        catch
+        {
+            if (created)
+            {
+                try { File.Delete(_markerPath); } catch (IOException) { }
+            }
+            throw;
+        }
     }
 
-    private void WriteMarker()
+    /// <summary>Writes the marker file if it is not there; true when this call created it.</summary>
+    private bool WriteMarker()
     {
         var dir = Path.GetDirectoryName(_markerPath);
         if (!string.IsNullOrEmpty(dir))
@@ -177,7 +194,7 @@ public class KeyringSecretsManager : ISecretsManager
             else Directory.CreateDirectory(dir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         }
 
-        if (File.Exists(_markerPath)) return;
+        if (File.Exists(_markerPath)) return false;
 
         var options = new FileStreamOptions
         {
@@ -190,9 +207,11 @@ public class KeyringSecretsManager : ISecretsManager
         {
             using var stream = new FileStream(_markerPath, options);
             stream.WriteByte((byte)'1');
+            return true;
         }
         catch (IOException) when (File.Exists(_markerPath))
         {
+            return false;
         }
     }
 }

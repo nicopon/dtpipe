@@ -30,7 +30,14 @@ public class KeyringSecretsManagerTests : IDisposable
             return Entries.TryGetValue(userName, out var value) ? value : throw new InvalidOperationException("absent");
         }
 
-        public void Set(string userName, string value) { Writes++; Entries[userName] = value; }
+        public bool FailWrites { get; set; }
+
+        public void Set(string userName, string value)
+        {
+            if (FailWrites) throw new InvalidOperationException("keyring refused");
+            Writes++;
+            Entries[userName] = value;
+        }
 
         public void Delete(string userName) => Entries.Remove(userName);
     }
@@ -68,6 +75,24 @@ public class KeyringSecretsManagerTests : IDisposable
         Assert.Throws<KeyringUnreadableException>(() => secrets.DeleteSecret("kept"));
         Assert.Equal(writes, backend.Writes);
         Assert.Equal(blob, backend.Entries["configuration"]);
+    }
+
+    [Fact]
+    public void A_save_never_reaches_the_keyring_without_its_marker()
+    {
+        var blocker = Path.Combine(_tmp, "blocker");
+        File.WriteAllText(blocker, "");
+        var backend = new FakeBackend();
+        var unmarkable = new KeyringSecretsManager(backend, Path.Combine(blocker, "keyring.present"));
+
+        Assert.ThrowsAny<IOException>(() => unmarkable.SetSecret("a", "1"));
+        Assert.Equal(0, backend.Writes);
+
+        backend.FailWrites = true;
+        var secrets = new KeyringSecretsManager(backend, MarkerPath);
+        Assert.Throws<InvalidOperationException>(() => secrets.SetSecret("a", "1"));
+        Assert.False(File.Exists(MarkerPath));
+        Assert.Empty(secrets.ListSecrets());
     }
 
     [Fact]
