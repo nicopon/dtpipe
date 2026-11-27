@@ -25,7 +25,7 @@ function route() {
   for (const a of document.querySelectorAll("#nav a[data-view]")) a.classList.toggle("active", !unknown && a.dataset.view === view);
   if (unknown) {
     current = null;
-    host.innerHTML = `<h2>Page not found</h2><p><code>#/${esc(name)}</code> · <a href="#/library">← Library</a></p>`;
+    host.innerHTML = `<h2>No such page</h2><p><code>#/${esc(name)}</code> · <a href="#/library">← Library</a></p>`;
   } else {
     current = views[view];
     current.mount(host, params, query);
