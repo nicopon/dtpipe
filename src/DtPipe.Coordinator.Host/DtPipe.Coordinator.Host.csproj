@@ -3,7 +3,8 @@
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <IsPackable>false</IsPackable>
-    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- Never invariant: SQL Server's driver refuses to open a connection in invariant globalization mode. -->
+    <InvariantGlobalization>false</InvariantGlobalization>
     <!-- The executable's name, here and not on a command line: a global -p:AssemblyName would rename every referenced project. -->
     <AssemblyName>dtpipe-coordinator</AssemblyName>
   </PropertyGroup>
