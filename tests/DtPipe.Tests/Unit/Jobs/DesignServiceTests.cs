@@ -294,6 +294,17 @@ public sealed class DesignServiceTests
         Assert.Equal("Title\nSubtitle", DesignService.ReadHeader(yaml));
     }
 
+    [Fact]
+    public void A_Branch_Comment_Is_Read_From_Its_Own_Line_Below_A_Scalar_Holding_A_Unicode_Line_Break()
+    {
+        // The scalar folds across the break, which the scanner counts as a line; a reader off by one line takes "Two" for "One".
+        var yaml = "first:\n  input: \"csv:a\u2028    b.csv\"\nsecond:\n  # One\n  # Two\n  input: csv:c.csv\n";
+
+        var (_, branches) = JobYaml.ReadComments(yaml);
+
+        Assert.Equal("One\nTwo", branches["second"]);
+    }
+
     /// <summary>
     /// A catalog of bricks offered here. Like the coordinator, it answers for a branch that is the reference to an offered
     /// brick in the right direction, and for nothing else.

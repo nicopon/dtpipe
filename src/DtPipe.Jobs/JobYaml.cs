@@ -147,7 +147,8 @@ public static class JobYaml
     public static (string? Header, IReadOnlyDictionary<string, string> BranchComments) ReadComments(string yaml, bool headerOnly = false)
     {
         var normalized = yaml.TrimStart('\uFEFF').Replace("\r\n", "\n").Replace('\r', '\n');
-        var rawLines = normalized.Split('\n');
+        // Split where the scanner counts a line, so a comment's line number finds its own line.
+        var rawLines = normalized.Split(YamlLineBreaks, StringSplitOptions.None);
         var headerLines = new List<string>();
         var branchComments = headerOnly ? null : new Dictionary<string, string>(StringComparer.Ordinal);
         var pendingBranchLines = headerOnly ? null : new List<string>();
