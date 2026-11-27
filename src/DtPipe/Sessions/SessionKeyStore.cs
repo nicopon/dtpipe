@@ -27,6 +27,7 @@ namespace DtPipe.Sessions;
 public static class SessionKeyStore
 {
     private const int KeySizeBytes = 32; // AES-256
+    private const string LockSuffix = ".lock";
 
     public static string KeyPath(string sessionName)
         => Path.Combine(UserStatePaths.KeysDirectory(), $"{SessionResolver.Sanitize(sessionName)}.key");
@@ -76,9 +77,15 @@ public static class SessionKeyStore
         return null;
     }
 
+    /// <summary>
+    /// Replaces a key file left short for good, under an exclusive lock file. The lock file is never deleted: a waiter that opened it
+    /// and a newcomer creating a fresh one would both hold an exclusive lock. Under the lock a file is removed only once it has been
+    /// read short twice, a moment apart: a creator holds its file exclusively while it writes, so a file busy or short only once
+    /// may be one being written.
+    /// </summary>
     private static byte[]? RecoverTruncatedKey(string path)
     {
-        var lockPath = path + ".lock";
+        var lockPath = path + LockSuffix;
         var lockOptions = new FileStreamOptions
         {
             Mode = FileMode.OpenOrCreate,
@@ -103,18 +110,33 @@ public static class SessionKeyStore
         }
         if (lockStream is null) return TryReadKeyWhileCreating(path);
 
-        try
+        using (lockStream)
         {
-            using (lockStream)
+            var seenShort = false;
+            for (var attempt = 0; attempt < 100; attempt++)
             {
-                if (TryReadKeyWhileCreating(path) is { } existing) return existing;
-                try { File.Delete(path); } catch (IOException) { }
-                return TryAcquireKey(path, attempts: 10);
+                switch (ProbeKeyFile(path, out var key))
+                {
+                    case KeyFileState.Ready:
+                        return key;
+                    case KeyFileState.Absent:
+                        if (TryCreate(path) is { } created) return created;
+                        seenShort = false;
+                        break;
+                    case KeyFileState.WrongLength when seenShort:
+                        try { File.Delete(path); } catch (IOException) { }
+                        seenShort = false;
+                        continue;
+                    case KeyFileState.WrongLength:
+                        seenShort = true;
+                        break;
+                    default:
+                        seenShort = false;
+                        break;
+                }
+                Thread.Sleep(10);
             }
-        }
-        finally
-        {
-            try { File.Delete(lockPath); } catch (IOException) { }
+            return null;
         }
     }
 
@@ -131,6 +153,13 @@ public static class SessionKeyStore
         FileStream file;
         try { file = new FileStream(path, options); }
         catch (IOException) when (File.Exists(path)) { return null; }
+        catch (IOException)
+        {
+            // Refused, and nothing is there now: a recoverer removed the file in between. Once more, so that a refusal that lasts
+            // (a full or read-only disk) is reported as itself rather than read as a file another caller holds.
+            try { file = new FileStream(path, options); }
+            catch (IOException) when (File.Exists(path)) { return null; }
+        }
         try
         {
             using (file)
@@ -150,12 +179,17 @@ public static class SessionKeyStore
     /// <summary>Returns the key if it exists, or null. Never creates one.</summary>
     public static byte[]? TryGetKey(string sessionName) => TryReadKey(KeyPath(sessionName));
 
-    private static byte[]? TryReadKey(string path)
+    private static byte[]? TryReadKey(string path) => ReadKeyFile(path, out var key) == KeyFileState.Ready ? key : null;
+
+    private enum KeyFileState { Ready, Absent, WrongLength, Busy }
+
+    private static KeyFileState ReadKeyFile(string path, out byte[]? key)
     {
+        key = null;
         FileStream file;
         try { file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read); }
-        catch (FileNotFoundException) { return null; }
-        catch (DirectoryNotFoundException) { return null; }
+        catch (FileNotFoundException) { return KeyFileState.Absent; }
+        catch (DirectoryNotFoundException) { return KeyFileState.Absent; }
 
         using (file)
         {
@@ -167,22 +201,27 @@ public static class SessionKeyStore
                 if (read == 0) break;
                 total += read;
             }
-            return total == KeySizeBytes ? buffer[..KeySizeBytes] : null;
+            if (total != KeySizeBytes) return KeyFileState.WrongLength;
+            key = buffer[..KeySizeBytes];
+            return KeyFileState.Ready;
         }
     }
 
     // A creator holding FileShare.None causes a sharing-violation IOException until it closes the file;
-    // treat that as "not ready yet" so the retry loop waits instead of aborting the race.
-    private static byte[]? TryReadKeyWhileCreating(string path)
+    // that is "busy", so the retry loops wait instead of aborting the race or taking the file for a short one.
+    private static KeyFileState ProbeKeyFile(string path, out byte[]? key)
     {
-        try { return TryReadKey(path); }
-        catch (IOException) { return null; }
+        try { return ReadKeyFile(path, out key); }
+        catch (IOException) { key = null; return KeyFileState.Busy; }
     }
+
+    private static byte[]? TryReadKeyWhileCreating(string path) => ProbeKeyFile(path, out var key) == KeyFileState.Ready ? key : null;
 
     /// <summary>Destroys a session's key. This is what makes its artefacts unreadable.</summary>
     public static void DeleteKey(string sessionName)
     {
         var path = KeyPath(sessionName);
         if (File.Exists(path)) File.Delete(path);
+        try { File.Delete(path + LockSuffix); } catch (IOException) { }
     }
 }
