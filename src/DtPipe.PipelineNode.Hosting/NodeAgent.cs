@@ -175,10 +175,18 @@ internal sealed class NodeAgent : BackgroundService
     }
 
     /// <summary>
-    /// Supplies the cached token for SignalR and TransportR transport requests; callers call <see cref="OidcTokenClient.Invalidate"/>
-    /// on open, reconnect, close and 401 so a valid token is reused across negotiation and polling while rejections force a renewal.
+    /// The control hub's token: the cached one, reused across negotiation and polling. The hub's callers call
+    /// <see cref="OidcTokenClient.Invalidate"/> on open, reconnect, close and 401 (<see cref="InvalidateOnUnauthorizedHandler"/>), so a
+    /// token the coordinator refused is not presented again.
     /// </summary>
     internal static Task<string> TokenAsync(OidcTokenClient tokens) => tokens.GetAsync(fresh: false);
+
+    /// <summary>
+    /// The data plane's token, asked for at each of TransportR's calls: it asks at a connection, at the retry of a 401 and at a
+    /// renewal, none of which the control hub's invalidation sees, and a cached token would be the one the coordinator refused, or
+    /// the one a renewal is replacing.
+    /// </summary>
+    internal static Task<string> DataPlaneTokenAsync(OidcTokenClient tokens) => tokens.GetAsync(fresh: true);
 
     private static readonly TimeSpan ReconnectDelay = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan AnnounceTimeout = TimeSpan.FromSeconds(30);
@@ -269,17 +277,15 @@ internal sealed class NodeAgent : BackgroundService
     private async Task<bool> ConnectNodeAsync(CancellationToken ct)
     {
         // TransportR keeps the previous token when its provider throws, and a refused identity would then surface as a
-        // bare 401 after its connection retries: invalidate and ask once here so the provider's refusal is reported and
-        // the cached token is reused when ConnectAsync calls AccessTokenProvider.
-        _tokens.Invalidate();
-        await _tokens.GetAsync(fresh: false, ct);
+        // bare 401 after its connection retries: ask once here so the provider's refusal is what gets reported.
+        await _tokens.GetAsync(fresh: true, ct);
         PipelineNode node;
         try
         {
             node = await PipelineNode.ConnectAsync(new NodeClientOptions
             {
                 HubUrl = _options.CoordinatorUrl.TrimEnd('/') + DataPlaneRoutes.Prefix,
-                AccessTokenProvider = () => TokenAsync(_tokens),
+                AccessTokenProvider = () => DataPlaneTokenAsync(_tokens),
                 BatchBytes = _options.BatchBytes,
                 MaxInFlightBatches = _options.MaxInFlightBatches,
                 EndToEndEncryption = _endToEnd.Enabled,
