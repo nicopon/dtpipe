@@ -37,26 +37,35 @@ public sealed class StudioSecretStore(ISecretsManager secrets)
         try
         {
             var aliases = secrets.ListSecrets().Keys.ToHashSet(StringComparer.Ordinal);
-            keyringUsable = true;
+            keyringUsable = Usable = true;
             return aliases;
         }
         catch (Exception)
         {
-            keyringUsable = false;
+            keyringUsable = Usable = false;
             return new HashSet<string>();
         }
     }
 
     public IReadOnlySet<string> KeptAliases() => KeptAliases(out _);
 
+    /// <summary>
+    /// Whether the keyring answered the last operation asked of it, a read included: a key read that failed quietly at start
+    /// makes it false, so a view does not promise to keep a key the keyring is refusing. True until an operation fails.
+    /// </summary>
+    public bool Usable { get; private set; } = true;
+
     private string? ReadKey(string alias)
     {
         try
         {
-            return secrets.GetSecret(alias);
+            var key = secrets.GetSecret(alias);
+            Usable = true;
+            return key;
         }
         catch (Exception)
         {
+            Usable = false;
             return null;
         }
     }
@@ -66,17 +75,24 @@ public sealed class StudioSecretStore(ISecretsManager secrets)
         try
         {
             secrets.SetSecret(alias, key);
-            return true;
+            return Usable = true;
         }
         catch (Exception)
         {
-            return false;
+            return Usable = false;
         }
     }
 
     private void ForgetKey(string alias)
     {
-        try { secrets.DeleteSecret(alias); }
-        catch (Exception) { }
+        try
+        {
+            secrets.DeleteSecret(alias);
+            Usable = true;
+        }
+        catch (Exception)
+        {
+            Usable = false;
+        }
     }
 }

@@ -45,8 +45,8 @@ internal static class StudioConnectionHelpers
     {
         if (settings is null) return ([], null, true);
         var recent = read(settings, out var settingsWarning).Where(e => !isInPlace(e)).ToList();
-        if (recent.Count == 0) return ([], settingsWarning, true);
-        var keyringUsable = true;
+        if (recent.Count == 0) return ([], settingsWarning, settings.Secrets.Usable);
+        var keyringUsable = settings.Secrets.Usable;
         IReadOnlySet<string> kept = recent.Any(needsKeyCheck)
             ? settings.Secrets.KeptAliases(out keyringUsable)
             : new HashSet<string>();

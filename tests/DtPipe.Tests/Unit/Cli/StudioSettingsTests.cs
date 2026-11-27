@@ -201,7 +201,7 @@ public sealed class StudioSettingsTests : IDisposable
     }
 
     [Fact]
-    public void KeptAliases_reports_unusable_keyring_per_call_when_listing_throws()
+    public void A_failing_keyring_reads_as_unusable_from_a_listing_or_a_quiet_key_read()
     {
         var failing = new ThrowingSecretsManager();
         var settings = new StudioSettings(SettingsPath, failing);
@@ -211,6 +211,12 @@ public sealed class StudioSettingsTests : IDisposable
         Assert.Empty(aliases);
         Assert.False(usable);
         Assert.True(new StudioSettings(SettingsPath, _secrets).KeptAliases(out var ok) is not null && ok);
+
+        // A view with no recent entry lists nothing, so it reads what the last key read found.
+        var reading = new StudioSettings(SettingsPath, failing);
+        Assert.True(reading.Secrets.Usable);
+        Assert.Null(reading.Secrets.ReadCoordinatorKey("https://coord.example"));
+        Assert.False(reading.Secrets.Usable);
     }
 
     private sealed class ThrowingSecretsManager : ISecretsManager
