@@ -52,24 +52,27 @@ public sealed class StudioFolder
         if (!Directory.Exists(Root)) throw new DirectoryNotFoundException($"No folder at {Root}.");
     }
 
-    /// <summary>The jobs under the folder, as relative paths with '/' separators, in order.</summary>
+    /// <summary>
+    /// The first jobs under the folder by name, as relative paths with '/' separators. Ordered before the cut: the walk's order is
+    /// the file system's, so a cut taken first would list a set that changes from one machine or one call to the next.
+    /// </summary>
     public IReadOnlyList<string> Jobs() =>
         Directory.EnumerateFiles(Root, "*", Walk)
             .Where(IsJob)
             .Select(f => Path.GetRelativePath(Root, f).Replace(Path.DirectorySeparatorChar, '/'))
             .Where(r => !r.Split('/').Any(s => s.StartsWith('.')))
-            .Take(MaxJobs)
             .Order(StringComparer.Ordinal)
+            .Take(MaxJobs)
             .ToList();
 
-    /// <summary>The folder and its subdirectories, as relative paths with '/' separators ("" for the root), in order.</summary>
+    /// <summary>The folder and its first subdirectories by name, as relative paths with '/' separators ("" for the root), ordered as <see cref="Jobs"/>.</summary>
     public IReadOnlyList<string> Folders() =>
         new[] { "" }
             .Concat(Directory.EnumerateDirectories(Root, "*", Walk)
                 .Select(d => Path.GetRelativePath(Root, d).Replace(Path.DirectorySeparatorChar, '/'))
                 .Where(r => !r.Split('/').Any(s => s.StartsWith('.')))
-                .Take(MaxFolders)
-                .Order(StringComparer.Ordinal))
+                .Order(StringComparer.Ordinal)
+                .Take(MaxFolders))
             .ToList();
 
     public string Read(string relative) => ReadJob(relative).Text;
