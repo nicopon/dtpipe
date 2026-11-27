@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using System.ClientModel;
+using System.ClientModel.Primitives;
 using OpenAI;
 using OpenAI.Chat;
 
@@ -19,11 +20,24 @@ namespace DtPipe.Cli.Agent;
 
 public class OpenAiClient : ILlmClient, IStreamingLlmClient
 {
+    private static readonly SocketsHttpHandler SharedHandler = new()
+    {
+        AllowAutoRedirect = false,
+        UseCookies = false,
+        PooledConnectionLifetime = TimeSpan.FromMinutes(2),
+    };
+
+    private static readonly HttpClient SharedHttp = new(SharedHandler, disposeHandler: false)
+    {
+        Timeout = System.Threading.Timeout.InfiniteTimeSpan,
+    };
+
     private readonly string _apiKey;
     private readonly TimeSpan _chatTimeout;
     private readonly int _maxOutputTokens;
 
     public string ProviderName => "openai";
+    internal bool HasApiKey => !string.IsNullOrEmpty(_apiKey);
 
     public OpenAiClient(string? apiKey = null, TimeSpan? chatTimeout = null, int? maxOutputTokens = null)
     {
@@ -36,17 +50,17 @@ public class OpenAiClient : ILlmClient, IStreamingLlmClient
     {
         try
         {
-            using var client = new HttpClient();
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(10));
 
             var url = baseUrl.TrimEnd('/') + "/v1/models";
+            using var req = new HttpRequestMessage(HttpMethod.Get, url);
             if (!string.IsNullOrEmpty(_apiKey))
             {
-                client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _apiKey);
+                req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _apiKey);
             }
 
-            using var response = await client.GetAsync(url, cts.Token);
+            using var response = await SharedHttp.SendAsync(req, cts.Token);
             if (!response.IsSuccessStatusCode)
                 throw new HttpRequestException($"{url} answered {(int)response.StatusCode}.");
 
@@ -85,7 +99,11 @@ public class OpenAiClient : ILlmClient, IStreamingLlmClient
     /// </summary>
     internal static OpenAIClientOptions BuildClientOptions(string baseUrl)
     {
-        var options = new OpenAIClientOptions { NetworkTimeout = System.Threading.Timeout.InfiniteTimeSpan };
+        var options = new OpenAIClientOptions
+        {
+            NetworkTimeout = System.Threading.Timeout.InfiniteTimeSpan,
+            Transport = new HttpClientPipelineTransport(SharedHttp),
+        };
         if (!string.IsNullOrEmpty(baseUrl))
             options.Endpoint = new Uri(baseUrl.TrimEnd('/') + "/v1");
         return options;

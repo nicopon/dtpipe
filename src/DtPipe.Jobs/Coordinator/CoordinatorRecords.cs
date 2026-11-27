@@ -139,7 +139,7 @@ public sealed record LibraryConflict(string Error, string? Commit);
 public sealed record LibraryRefused(string Error, string? Report);
 
 /// <summary>One pipeline of the library as the studio lists it; <see cref="Commit"/> is the job's version.</summary>
-public sealed record LibraryItem(string Id, string? Title, string? Description, string? Commit);
+public sealed record LibraryItem(string Id, string? Header, string? Commit);
 
 /// <summary>A pipeline's job as the library holds it, at <see cref="Commit"/>, the version a later <c>If-Match</c> names.</summary>
 public sealed record LibraryJob(string Id, string Yaml, string? Commit);

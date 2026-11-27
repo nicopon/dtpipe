@@ -5,8 +5,8 @@
 // strings, it never decides what is still true.
 
 /** @typedef {{ x: number, y: number }} Point */
-/** @typedef {{ alias: string, kind: string, from: string[], ref: string[], yaml?: string, query?: string, brick?: string, transformers?: any[] }} Step */
-/** @typedef {{ title: string, description: string, directives: string[], steps: Step[], layout: Record<string, Point> }} Model */
+/** @typedef {{ alias: string, kind: string, from: string[], ref: string[], yaml?: string, query?: string, brick?: string, transformers?: any[], comment?: string | null }} Step */
+/** @typedef {{ header: string | null, steps: Step[], layout: Record<string, Point> }} Model */
 /** @typedef {{ yaml: string, steps: any[], errors: string[], warnings: string[], unanswered?: boolean }} Composed `unanswered`: a result a request got back when the studio gave no verdict */
 /** @typedef {{ alias?: string, t?: number, edge?: { from: string, to: string, port: string } }} Selection */
 /** @typedef {{ path: string, hash: string | null, rewrites: boolean }} Job */
@@ -103,20 +103,22 @@ export const state = {
   /** The coordinator's catalog read last (its nodes and bricks) and this studio's version; empty with none. */
   catalog: { nodes: /** @type {any[]} */ ([]), bricks: /** @type {any[]} */ ([]), studioVersion: "" },
   /** The jobs of the folder, its subfolders, coordinator links, and the coordinator's library when signed in.
-   * @type {{ folder: string, paths: string[], folders: string[], publications: Record<string, { id: string, commit: string | null, localModified: boolean | null }>, filter: string,
+   * @type {{ folder: string, root: string, paths: string[], folders: string[], publications: Record<string, { id: string, commit: string | null, localModified: boolean | null }>, filter: string,
    *   library: { shown: boolean, pipelines: any[] | null, error: string | null, filter: string } }} */
-  jobs: { folder: "", paths: [], folders: [""], publications: {}, filter: "", library: { shown: false, pipelines: null, error: null, filter: "" } },
-  /** The coordinator the command line named, or null: { url, state, reason, me, studioVersion, contract }. @type {any} */
+  jobs: { folder: "", root: "", paths: [], folders: [""], publications: {}, filter: "", library: { shown: false, pipelines: null, error: null, filter: "" } },
+  /** The coordinator connected now, or null: { url, state, reason, me, studioVersion, contract, byKey, unreachable }. @type {any} */
   coordinator: null,
+  /** How the coordinator is connected, as the server says it (never the key): { connected, needsKey, source, origin, auth, key, canConnect, ... }. @type {any} */
+  coordinatorConnection: null,
   /** The agent's panel: whether the command line opened one, the server's last answer (GET /api/agent), and what the agent gave
    * that waits for the person's Apply because they changed the cards since the agent read them (a plan, or the file it saved),
    * and the cards the agent's last plan adds, changes and removes against the cards it came to (`unknown` when either side does
    * not take apart into cards). `problem` is what the provider's list of models says is wrong with the agent before a first
    * message: its server does not answer, or the model the command line names is not among those it lists.
-   * @type {{ enabled: boolean, status: any, behind: { yaml?: string, saved?: string } | null,
+   * @type {{ enabled: boolean, connection: any, status: any, behind: { yaml?: string, saved?: string } | null,
    *   marks: { yaml: string, unknown?: boolean, added: string[], changed: string[], removed: string[] } | null,
    *   problem: { short: string, text: string } | null }} */
-  agent: { enabled: false, status: null, behind: null, marks: null, problem: null },
+  agent: { enabled: false, connection: null, status: null, behind: null, marks: null, problem: null },
 };
 
 /**
@@ -134,3 +136,6 @@ export function sequence() {
     cancel: () => { last++; },
   };
 }
+
+/** What a real run left suspended says wherever it is shown. */
+export const HELD = "⏸ Held: nothing written yet. Write or abandon from the outputs.";

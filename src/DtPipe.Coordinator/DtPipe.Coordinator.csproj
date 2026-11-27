@@ -23,8 +23,8 @@
   <ItemGroup>
     <!-- DefaultFlowControlService, the plan's edge check, is in the TransportR.Hub package's assembly,
          namespace TransportR.Hub. -->
-    <PackageReference Include="TransportR" Version="0.13.0" />
-    <PackageReference Include="TransportR.Hub" Version="0.13.0" />
+    <PackageReference Include="TransportR" Version="0.14.0" />
+    <PackageReference Include="TransportR.Hub" Version="0.14.0" />
   </ItemGroup>
 
 </Project>

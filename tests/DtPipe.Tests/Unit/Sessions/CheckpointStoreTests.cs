@@ -135,6 +135,23 @@ public class CheckpointStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task Writers_Starting_Together_On_A_Fresh_Session_Share_One_Key()
+    {
+        const int writers = 16;
+        var name = $"fresh-{Guid.NewGuid():N}";
+        using var gate = new Barrier(writers);
+
+        var keys = await Task.WhenAll(Enumerable.Range(0, writers).Select(_ => Task.Factory.StartNew(
+            () => { gate.SignalAndWait(); return SessionKeyStore.GetOrCreateKey(name); },
+            TaskCreationOptions.LongRunning)));
+
+        var onDisk = SessionKeyStore.TryGetKey(name);
+        onDisk.Should().NotBeNull();
+        keys.Select(Convert.ToHexString).Should().OnlyContain(k => k == Convert.ToHexString(onDisk!),
+            "two branches of one run checkpointing into a new session must write under the key a later read finds");
+    }
+
+    [Fact]
     public async Task A_Foreign_Key_Yields_Nothing()
     {
         await _store.WriteAsync("key1", Batches(1, 4));
@@ -246,5 +263,28 @@ public class CheckpointStoreTests : IDisposable
 
         schema!.FieldsList.Select(f => f.Name).Should().Equal("Id", "Name");
         schema.GetFieldByName("Name").IsNullable.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task SessionKeyStore_Recovers_Truncated_Key_Without_Split_Brain_And_Rejects_Oversized_Key()
+    {
+        const string sessionName = "split-brain-test";
+        var keyPath = SessionKeyStore.KeyPath(sessionName);
+        Directory.CreateDirectory(Path.GetDirectoryName(keyPath)!);
+
+        // Oversized key file is rejected by TryGetKey.
+        await File.WriteAllBytesAsync(keyPath, new byte[64]);
+        SessionKeyStore.TryGetKey(sessionName).Should().BeNull();
+
+        // Stale 0-byte truncated key file is recovered safely under concurrent callers.
+        await File.WriteAllBytesAsync(keyPath, []);
+        var tasks = Enumerable.Range(0, 8)
+            .Select(_ => Task.Run(() => SessionKeyStore.GetOrCreateKey(sessionName)))
+            .ToArray();
+        var keys = await Task.WhenAll(tasks);
+
+        keys.Should().AllSatisfy(k => k.Should().HaveCount(32));
+        for (var i = 1; i < keys.Length; i++)
+            keys[i].Should().Equal(keys[0]);
     }
 }

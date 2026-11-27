@@ -31,15 +31,14 @@ public static class StepKinds
 /// </summary>
 public sealed record DesignStep(
     string Alias, string Kind, string? Brick = null, IReadOnlyList<string>? From = null, IReadOnlyList<string>? Ref = null,
-    string? Query = null, JsonArray? Transformers = null, string? Yaml = null);
+    string? Query = null, JsonArray? Transformers = null, string? Yaml = null, string? Comment = null);
 
 /// <summary>
-/// The cards of a job and its header: the first comment line is the title, the next ones the
-/// description, and <see cref="Directives"/> the header lines of the form <c>some-name: value</c>,
-/// which belong to whoever reads them and are written back as they came.
+/// The steps of a job and its header: <see cref="Header"/> holds the leading <c>#</c> comments of
+/// the job verbatim, without parsing.
 /// </summary>
 public sealed record DesignModel(
-    string Title, string? Description, IReadOnlyList<string>? Directives, IReadOnlyList<DesignStep> Steps, JsonObject? Layout = null);
+    string? Header, IReadOnlyList<DesignStep> Steps, JsonObject? Layout = null);
 
 /// <summary>
 /// What the designer shows for a step besides the step itself: its brick, its node, and the branch
@@ -89,7 +88,7 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
 
         // A step whose alias is unusable or taken is reported above and composes into nothing.
         var usable = new HashSet<string>(aliases, StringComparer.Ordinal);
-        var branches = new List<(string Alias, YamlMappingNode Branch)>();
+        var branches = new List<(string Alias, YamlMappingNode Branch, string? Comment)>();
         var joinable = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var step in steps)
         {
@@ -168,7 +167,8 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
             }
 
             if (branch is null) continue;
-            branches.Add((step.Alias!, branch));
+            var comment = string.IsNullOrWhiteSpace(step.Comment) ? null : step.Comment;
+            branches.Add((step.Alias!, branch, comment));
             var dependsOn = JobYaml.Aliases(branch, JobKeys.From).Concat(JobYaml.Aliases(branch, JobKeys.Ref)).ToList();
             infos.Add(new StepInfo(step.Alias!, brick?.Node, brick?.Version, brick?.Title, dependsOn));
         }
@@ -184,7 +184,7 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
                 consumed.Add(dep);
             }
         }
-        foreach (var (alias, branch) in branches)
+        foreach (var (alias, branch, _) in branches)
         {
             if (!consumed.Contains(alias) && !JobYaml.Has(branch, JobKeys.Output))
                 errors.Add($"'{alias}' leads nowhere: connect it to a sink, or remove it.");
@@ -193,10 +193,18 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
         var ordered = Join(TopologicalOrder(branches, infos, errors), joinable, branchOf);
         infos = infos.Select(i => i with { Branch = branchOf[i.Alias] }).ToList();
 
-        var root = new YamlMappingNode();
-        foreach (var (alias, branch) in ordered) root.Add(alias, branch);
-        var yaml = Header(model) + (ordered.Count > 0 ? JobYaml.Serialize(root) : "");
-        return new DesignResult(model, yaml, infos, errors.Distinct().ToList(), warnings);
+        var text = new StringBuilder(JobYaml.FormatComments(model.Header));
+        foreach (var (alias, branch, comment) in ordered)
+        {
+            var block = JobYaml.Serialize(new YamlMappingNode { { alias, branch } });
+            if (!string.IsNullOrWhiteSpace(comment) && branch.Children.Count > 0)
+            {
+                var nl = block.IndexOf('\n');
+                if (nl >= 0) block = block.Insert(nl + 1, JobYaml.FormatComments(comment, "  "));
+            }
+            text.Append(block);
+        }
+        return new DesignResult(model, text.ToString(), infos, errors.Distinct().ToList(), warnings);
     }
 
     /// <summary>
@@ -208,12 +216,12 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
     /// </summary>
     public DesignResult Decompose(string yaml, JsonObject? layout = null)
     {
-        var (title, description, directives) = ReadHeader(yaml);
+        var (header, branchComments) = JobYaml.ReadComments(yaml);
         YamlMappingNode job;
         try { job = JobYaml.Parse(yaml); }
         catch (Exception ex)
         {
-            return new DesignResult(new DesignModel(title, description, directives, []), yaml, [], [$"The job is not readable: {ShownFailure.Of(ex)}"], []);
+            return new DesignResult(new DesignModel(header, []), yaml, [], [$"The job is not readable: {ShownFailure.Of(ex)}"], []);
         }
 
         var taken = JobYaml.Branches(job).Select(b => b.Alias).ToHashSet(StringComparer.Ordinal);
@@ -226,9 +234,14 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
 
         var steps = new List<DesignStep>();
         foreach (var (alias, branch) in JobYaml.Branches(job))
-            steps.AddRange(Split(alias, branch, Fresh));
+        {
+            var split = Split(alias, branch, Fresh).ToList();
+            if (branchComments.TryGetValue(alias, out var comment))
+                split = split.Select(s => s.Alias == alias ? s with { Comment = comment } : s).ToList();
+            steps.AddRange(split);
+        }
 
-        var composed = Compose(new DesignModel(title, description, directives, steps, layout));
+        var composed = Compose(new DesignModel(header, steps, layout));
         return composed;
     }
 
@@ -392,8 +405,8 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
     /// is none, as <see cref="Decompose"/> gave it. A brick never joins: its branch is what its node
     /// runs.
     /// </summary>
-    private static List<(string Alias, YamlMappingNode Branch)> Join(
-        List<(string Alias, YamlMappingNode Branch)> ordered, Dictionary<string, string> joinable, Dictionary<string, string> branchOf)
+    private static List<(string Alias, YamlMappingNode Branch, string? Comment)> Join(
+        List<(string Alias, YamlMappingNode Branch, string? Comment)> ordered, Dictionary<string, string> joinable, Dictionary<string, string> branchOf)
     {
         var list = ordered.ToList();
         var kinds = new Dictionary<string, string>(joinable, StringComparer.Ordinal);
@@ -402,12 +415,12 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
         {
             for (var i = 0; i < list.Count; i++)
             {
-                var (up, upBranch) = list[i];
+                var (up, upBranch, upComment) = list[i];
                 if (kinds.GetValueOrDefault(up) != upstreamKind || JobYaml.Has(upBranch, JobKeys.Output)) continue;
 
                 var readers = list.Where(b => JobYaml.Aliases(b.Branch, JobKeys.From).Concat(JobYaml.Aliases(b.Branch, JobKeys.Ref)).Contains(up)).ToList();
                 if (readers.Count != 1) continue;
-                var (down, downBranch) = readers[0];
+                var (down, downBranch, downComment) = readers[0];
                 var downKind = kinds.GetValueOrDefault(down);
                 var accepts = downKind == StepKinds.Sink || upstreamKind == StepKinds.Source && downKind == StepKinds.Transform;
                 if (!accepts || JobYaml.Has(downBranch, JobKeys.Input) || JobYaml.Has(downBranch, JobKeys.Ref)
@@ -418,7 +431,7 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
                 if (joined is null) continue;
                 var alias = downKind == StepKinds.Transform ? down : up;
                 var j = list.FindIndex(b => b.Alias == down);
-                list[i] = (alias, joined);
+                list[i] = (alias, joined, CombineComments(upComment, downComment));
                 list.RemoveAt(j);
                 foreach (var card in branchOf.Where(kv => kv.Value == up || kv.Value == down).Select(kv => kv.Key).ToList())
                     branchOf[card] = alias;
@@ -434,6 +447,15 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
         while (JoinPass(StepKinds.Transform)) { }
         return list;
     }
+
+    private static string? CombineComments(string? first, string? second) =>
+        (string.IsNullOrWhiteSpace(first), string.IsNullOrWhiteSpace(second)) switch
+        {
+            (false, false) => $"{first}\n{second}",
+            (false, true) => first,
+            (true, false) => second,
+            (true, true) => null,
+        };
 
     /// <summary>
     /// The upstream branch's keys, then the downstream's without its <c>from</c>, their
@@ -486,12 +508,12 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
     private static DesignStep RawStep(string alias, YamlMappingNode branch) =>
         new(alias, StepKinds.Branch, From: JobYaml.Aliases(branch, JobKeys.From), Ref: JobYaml.Aliases(branch, JobKeys.Ref), Yaml: BodyText(branch));
 
-    private static List<(string Alias, YamlMappingNode Branch)> TopologicalOrder(
-        List<(string Alias, YamlMappingNode Branch)> branches, List<StepInfo> infos, List<string> errors)
+    private static List<(string Alias, YamlMappingNode Branch, string? Comment)> TopologicalOrder(
+        List<(string Alias, YamlMappingNode Branch, string? Comment)> branches, List<StepInfo> infos, List<string> errors)
     {
         var deps = infos.ToDictionary(i => i.Alias, i => i.DependsOn, StringComparer.Ordinal);
-        var byAlias = branches.ToDictionary(b => b.Alias, b => b.Branch, StringComparer.Ordinal);
-        var ordered = new List<(string, YamlMappingNode)>();
+        var byAlias = branches.ToDictionary(b => b.Alias, b => (b.Branch, b.Comment), StringComparer.Ordinal);
+        var ordered = new List<(string, YamlMappingNode, string?)>();
         var state = new Dictionary<string, int>(StringComparer.Ordinal);
         void Visit(string alias)
         {
@@ -503,47 +525,15 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
             state[alias] = 1;
             foreach (var dep in deps.GetValueOrDefault(alias) ?? []) if (byAlias.ContainsKey(dep)) Visit(dep);
             state[alias] = 2;
-            ordered.Add((alias, byAlias[alias]));
+            var entry = byAlias[alias];
+            ordered.Add((alias, entry.Branch, entry.Comment));
         }
-        foreach (var (alias, _) in branches) Visit(alias);
+        foreach (var (alias, _, _) in branches) Visit(alias);
         return ordered;
     }
 
-    private static string Header(DesignModel model)
-    {
-        var text = new StringBuilder();
-        text.Append("# ").Append(OneLine(model.Title) is { Length: > 0 } t ? t : "Untitled pipeline").Append('\n');
-        foreach (var line in Wrap(OneLine(model.Description ?? ""), 96)) text.Append("# ").Append(line).Append('\n');
-        foreach (var directive in model.Directives ?? [])
-            if (OneLine(directive) is { Length: > 0 } line) text.Append("# ").Append(line).Append('\n');
-        return text.ToString();
-    }
-
-    /// <summary>
-    /// The header of a job: its leading comment lines. A line of the form <c>some-name: value</c> is
-    /// a directive, kept whole; the first other line is the title, the rest the description.
-    /// </summary>
-    public static (string Title, string? Description, IReadOnlyList<string> Directives) ReadHeader(string yaml)
-    {
-        var header = yaml.Split('\n').TakeWhile(l => l.StartsWith('#')).Select(l => l.TrimStart('#').Trim()).ToList();
-        var directives = header.Where(l => DirectivePattern().IsMatch(l)).ToList();
-        var prose = header.Where(l => !DirectivePattern().IsMatch(l)).ToList();
-        return (prose.FirstOrDefault() ?? "Untitled pipeline", prose.Count > 1 ? string.Join(' ', prose.Skip(1)) : null, directives);
-    }
-
-    private static string OneLine(string text) => string.Join(' ', text.Split(['\n', '\r'], StringSplitOptions.RemoveEmptyEntries)).Trim();
-
-    private static IEnumerable<string> Wrap(string text, int width)
-    {
-        var line = new StringBuilder();
-        foreach (var word in text.Split(' ', StringSplitOptions.RemoveEmptyEntries))
-        {
-            if (line.Length > 0 && line.Length + word.Length + 1 > width) { yield return line.ToString(); line.Clear(); }
-            if (line.Length > 0) line.Append(' ');
-            line.Append(word);
-        }
-        if (line.Length > 0) yield return line.ToString();
-    }
+    /// <summary>The leading <c>#</c> header comments of a job, read verbatim without parsing.</summary>
+    public static string? ReadHeader(string yaml) => JobYaml.ReadComments(yaml, headerOnly: true).Header;
 
     private static string Indent(string text) =>
         string.Join('\n', text.Replace("\r\n", "\n").Split('\n').Select(l => "  " + l));
@@ -571,7 +561,4 @@ public sealed partial class DesignService(IBrickLookup bricks, IEndpointRules? e
 
     [GeneratedRegex("^[A-Za-z][A-Za-z0-9_-]*$")]
     private static partial Regex AliasPattern();
-
-    [GeneratedRegex("^[a-z][a-z0-9]*(-[a-z0-9]+)+:")]
-    private static partial Regex DirectivePattern();
 }

@@ -1,10 +1,7 @@
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
-using System.Text.Json.Nodes;
-using DtPipe.Cli.Expressions;
-using DtPipe.Cli.Node;
+using DtPipe.Cli.Agent;
 using DtPipe.Cli.Security;
 using DtPipe.Cli.Split;
 using DtPipe.Core.Security;
@@ -16,7 +13,6 @@ using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
-using YamlDotNet.RepresentationModel;
 
 namespace DtPipe.Cli.Studio;
 
@@ -32,13 +28,26 @@ public sealed record StudioComponent(string Name, string Category);
 /// <summary>
 /// What the studio's server works with: the engine, the designer's model (the coordinator's own, with
 /// dtpipe's components for endpoints), the components the palette lists, the keyring a variable may be
-/// launched from, and the coordinator the command line named, if any.
+/// launched from, and the coordinator the studio starts with, if any (<see cref="CoordinatorAtStart"/>: the page may replace it,
+/// so the server reads the link in place, never this one).
 /// <see cref="DesignWith"/> gives the same model over the coordinator's bricks; without it, <see cref="Design"/> alone.
+/// <see cref="Settings"/> keeps the remembered connections and recent lists; without it, the page opens a folder and remembers none.
 /// </summary>
 public sealed record StudioTools(
-    IStudioEngine Engine, DesignService Design, IReadOnlyList<StudioComponent> Readers, IReadOnlyList<StudioComponent> Writers,
-    ISecretsManager Secrets, CoordinatorLink? Coordinator = null, Func<IBrickLookup, DesignService>? DesignWith = null,
-    StudioImporter? Import = null, StudioAgentSetup? Agent = null);
+    IStudioEngine Engine,
+    DesignService Design,
+    IReadOnlyList<StudioComponent> Readers,
+    IReadOnlyList<StudioComponent> Writers,
+    ISecretsManager Secrets,
+    CoordinatorLink? CoordinatorAtStart = null,
+    Func<IBrickLookup, DesignService>? DesignWith = null,
+    StudioImporter? Import = null)
+{
+    public StudioSettings? Settings { get; init; }
+    public StudioAgentSetup? Agent { get; init; }
+    public StudioAgentLink? AgentLink { get; init; }
+    public CoordinatorConnection? CoordinatorStart { get; init; }
+}
 
 /// <summary>
 /// The engine as the studio asks it: a sample, a real run, and the cut a preview runs. Each call carries the
@@ -87,10 +96,12 @@ public delegate string StudioImporter(IReadOnlyList<string> args);
 /// </list>
 /// One engine action runs at a time: a sample, a run and a quit refuse each other (409).
 /// </summary>
-public sealed partial class StudioServer : IAsyncDisposable
+public sealed class StudioServer : IAsyncDisposable
 {
     public const string TokenHeader = "X-Dtpipe-Studio";
     public const int MaxRows = 1000;
+    public const int DebugMaxRows = 100_000;
+    public const int Stopped = 130;
 
     private const string Policy =
         "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; " +
@@ -109,35 +120,90 @@ public sealed partial class StudioServer : IAsyncDisposable
         ["/preview.js"] = ("studio/preview.js", "text/javascript; charset=utf-8"),
         ["/run.js"] = ("studio/run.js", "text/javascript; charset=utf-8"),
         ["/publish.js"] = ("studio/publish.js", "text/javascript; charset=utf-8"),
-        ["/dialogs.js"] = ("studio/dialogs.js", "text/javascript; charset=utf-8"),
+        ["/dialog.js"] = ("studio/dialog.js", "text/javascript; charset=utf-8"),
+        ["/recent-list.js"] = ("studio/recent-list.js", "text/javascript; charset=utf-8"),
+        ["/connect-dialogs.js"] = ("studio/connect-dialogs.js", "text/javascript; charset=utf-8"),
+        ["/job-dialogs.js"] = ("studio/job-dialogs.js", "text/javascript; charset=utf-8"),
         ["/variables.js"] = ("studio/variables.js", "text/javascript; charset=utf-8"),
         ["/agent.js"] = ("studio/agent.js", "text/javascript; charset=utf-8"),
         ["/studio.css"] = ("studio/studio.css", "text/css; charset=utf-8"),
+        ["/favicon.svg"] = ("studio/favicon.svg", "image/svg+xml"),
     };
 
-    private static readonly JsonSerializerOptions Json = JsonSerializerOptions.Web;
-
     private readonly WebApplication _app;
-    private readonly StudioFolder _folder;
-    private readonly StudioTools _tools;
-    private readonly StudioLocalFiles _local;
-    private readonly StudioVariables _variables;
+    private readonly WorkspaceSlot _workspace;
+    private readonly CoordinatorSlot _coordinator;
+    private readonly AgentSlot _agentSlot;
+    private readonly EngineSlot _engineSlot = new();
+    private readonly StudioRouteTable _routes = new();
+    private readonly CoordinatorRoutes _coordinatorRoutes;
+    private readonly RunRoutes _runRoutes;
     private readonly byte[] _token;
-    private readonly SemaphoreSlim _sampling = new(1, 1);
     private readonly TaskCompletionSource _quit = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private StudioServer(WebApplication app, StudioFolder folder, StudioTools tools, string token)
     {
         _app = app;
-        _folder = folder;
-        _tools = tools;
-        _local = new StudioLocalFiles(folder);
-        _variables = new StudioVariables(_local, tools.Secrets);
-        _local.PurgeSamples();
-        PurgeDrafts();
         Token = token;
         _token = Encoding.UTF8.GetBytes(token);
-        if (tools.Agent is { } agent) _agent = new StudioAgent(agent, new StudioAgentTools(agent.Tools, this));
+
+        _workspace = new WorkspaceSlot(new StudioWorkspace(folder, tools.Secrets), "argument");
+
+        _coordinator = new CoordinatorSlot(
+            tools.CoordinatorAtStart,
+            tools.CoordinatorStart ?? (tools.CoordinatorAtStart is { } given
+                ? new CoordinatorConnection(given.Origin.ToString().TrimEnd('/'), given.ByKey ? "key" : "browser", "flag", given.ByKey ? "flag" : "none")
+                : null));
+        if (tools.CoordinatorAtStart is { ByKey: true } remembered && _coordinator.Connection?.Source == "remembered")
+            _coordinator.StartSignIn(remembered);
+
+        _agentSlot = new AgentSlot(
+            null,
+            tools.AgentLink?.Start ?? (tools.Agent is { } started
+                ? new AgentConnection(started.Client.ProviderName, started.BaseUrl, started.Model,
+                    (int)AgentOptions.DefaultLlmTimeout.TotalSeconds, "flag", "none")
+                : null));
+
+        var design = new StudioDesignContext(_workspace, _coordinator, _engineSlot, tools);
+        var debug = new DebugRoutes(_workspace, _engineSlot, tools.Engine, design);
+        _runRoutes = new RunRoutes(_workspace, _coordinator, _engineSlot, _agentSlot, tools.Engine, design, debug, _token);
+        var jobs = new JobRoutes(_workspace, _coordinator, tools, design, debug, _runRoutes);
+        _coordinatorRoutes = new CoordinatorRoutes(_workspace, _coordinator, design, () => Port);
+        var coordinatorConnection = new CoordinatorConnectionRoutes(_coordinator, _engineSlot, tools.Settings);
+        var agent = new AgentRoutes(_workspace, _agentSlot, _engineSlot, design, () => _runRoutes.RunInProgress);
+        StudioAgent CreateAgent(StudioAgentSetup setup) => new(setup, new StudioAgentTools(setup.Tools, agent));
+        if (tools.Agent is { } initialAgent)
+            _agentSlot.SetInitial(CreateAgent(initialAgent));
+
+        var agentConnection = new AgentConnectionRoutes(_agentSlot, tools.AgentLink, tools.Settings, CreateAgent);
+        void Opened()
+        {
+            _workspace.Current.Local.PurgeSamples();
+            debug.PurgeDrafts();
+        }
+        var workspaceRoutes = new WorkspaceRoutes(
+            _workspace, _agentSlot, _engineSlot, tools.Settings, tools.Secrets, folder.Root,
+            () => _runRoutes.RunInProgress,
+            () => { _runRoutes.ClearRun(); Opened(); },
+            CreateAgent);
+
+        Opened();
+
+        jobs.Register(_routes);
+        debug.Register(_routes);
+        _runRoutes.Register(_routes);
+        _coordinatorRoutes.Register(_routes);
+        coordinatorConnection.Register(_routes);
+        agent.Register(_routes);
+        agentConnection.Register(_routes);
+        workspaceRoutes.Register(_routes);
+        _routes.Map("POST", "/api/quit", context =>
+        {
+            if (_runRoutes.RunInProgress) throw new StudioRefusal(409, "A run is in progress: stop it, or wait for it, before quitting.");
+            context.Response.StatusCode = StatusCodes.Status202Accepted;
+            _quit.TrySetResult();
+            return Task.CompletedTask;
+        }, RouteLocks.None);
     }
 
     public string Token { get; }
@@ -185,7 +251,7 @@ public sealed partial class StudioServer : IAsyncDisposable
             var path = request.Path.Value ?? "/";
             if (path == CoordinatorLink.Callback)
             {
-                await CallbackAsync(context);
+                await _coordinatorRoutes.CallbackAsync(context, AdmitHost);
                 return;
             }
             Admit(request);
@@ -197,164 +263,36 @@ public sealed partial class StudioServer : IAsyncDisposable
             if (!CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(request.Headers[TokenHeader].ToString()), _token))
                 throw new StudioRefusal(401, "This session's token is missing or wrong: open the address dtpipe studio printed.");
 
-            switch (request.Method, path)
-            {
-                case ("GET", "/api/jobs"):
-                    await JobsAsync(context);
-                    break;
-                case ("GET", "/api/job"):
-                    await OpenAsync(context, request.Query["path"].ToString());
-                    break;
-                case ("PUT", "/api/job"):
-                    await SaveAsync(context);
-                    break;
-                case ("POST", "/api/job/rename"):
-                    await RenameJobAsync(context);
-                    break;
-                case ("DELETE", "/api/job"):
-                    await DeleteJobAsync(context);
-                    break;
-                case ("GET", "/api/components"):
-                    await JsonAsync(context, new { readers = _tools.Readers, writers = _tools.Writers });
-                    break;
-                case ("GET", "/api/bricks"):
-                    await BricksAsync(context);
-                    break;
-                case ("POST", "/api/bricks/preview"):
-                    await BrickPreviewAsync(context);
-                    break;
-                case ("POST", "/api/design/compose"):
-                    await JsonAsync(context, WithRunHere(Design().Compose(await BodyAsync<DesignModel>(context))));
-                    break;
-                case ("POST", "/api/design/decompose"):
-                    var decompose = await BodyAsync<DecomposeRequest>(context);
-                    await JsonAsync(context, (await DesignForAsync(decompose.Yaml ?? "", context.RequestAborted)).Decompose(decompose.Yaml ?? "", decompose.Layout));
-                    break;
-                case ("POST", "/api/variables"):
-                    var asked = await BodyAsync<VariablesRequest>(context);
-                    // A brick's branch runs on its node, which resolves its variables: they are none of this machine's.
-                    var variables = _variables.Of(JobPath(asked.Path), WithoutBricks(asked.Yaml ?? "", asked.Bricks));
-                    // The keyring's aliases are listed only for a job with a variable to launch.
-                    var aliases = variables.Any(v => v.Kind == "env") ? _variables.Aliases() : [];
-                    await JsonAsync(context, new { variables, aliases });
-                    break;
-                case ("PUT", "/api/launch"):
-                    await LaunchAsync(context);
-                    break;
-                case ("GET", "/api/view"):
-                    var viewed = _local.ReadView();
-                    var viewedJob = JobPath(request.Query["path"].ToString());
-                    await JsonAsync(context, new { sizes = viewed["sizes"], side = viewed["side"], open = viewed["open"], job = viewedJob is null ? null : viewed["jobs"]?[viewedJob] });
-                    break;
-                case ("PUT", "/api/view"):
-                    await ViewAsync(context);
-                    break;
-                case ("POST", "/api/sample"):
-                    await SampleAsync(context);
-                    break;
-                case ("GET", "/api/coordinator"):
-                    await JsonAsync(context, (object?)_tools.Coordinator?.Status() ?? new { url = (string?)null });
-                    break;
-                case ("POST", "/api/coordinator/login"):
-                    var link = _tools.Coordinator ?? throw new StudioRefusal(404, "This studio was opened without --coordinator.");
-                    // With a key there is no tab to open: the studio signs in here, and the page reads the status again.
-                    try
-                    {
-                        if (link.ByKey)
-                        {
-                            await link.SignInWithKeyAsync(context.RequestAborted);
-                            await JsonAsync(context, new { url = (string?)null });
-                        }
-                        else await JsonAsync(context, new { url = await link.BeginSignInAsync(Port, context.RequestAborted) });
-                    }
-                    catch (CoordinatorLinkException ex) { throw new StudioRefusal(502, ex.Message); }
-                    break;
-                case ("POST", "/api/coordinator/logout"):
-                    _tools.Coordinator?.SignOutNow();
-                    context.Response.StatusCode = StatusCodes.Status204NoContent;
-                    break;
-                case ("GET", "/api/publish"):
-                    var published = JobPath(request.Query["path"].ToString()) is { } publishedJob ? _local.ReadPublication(publishedJob) : null;
-                    // An id the page proposes is judged by the rule a publication applies, before the person writes a message for it.
-                    var proposed = request.Query["id"].ToString();
-                    await JsonAsync(context, new
-                    {
-                        publication = published?.Coordinator == _tools.Coordinator?.Origin.ToString() ? published : null,
-                        idError = proposed.Length == 0 || CoordinatorApi.IsPipelineId(proposed) ? null : NotAPipelineId(proposed),
-                    });
-                    break;
-                case ("POST", "/api/publish"):
-                    await PublishAsync(context);
-                    break;
-                case ("POST", "/api/publish/check"):
-                    await PublicationCheckAsync(context);
-                    break;
-                case ("POST", "/api/publish/edges"):
-                    await PublicationEdgesAsync(context);
-                    break;
-                case ("POST", "/api/import"):
-                    await ImportAsync(context);
-                    break;
-                case ("GET", "/api/library"):
-                    await LibraryAsync(context);
-                    break;
-                case ("GET", "/api/library/job"):
-                    await LibraryJobAsync(context);
-                    break;
-                case ("POST", "/api/library/open"):
-                    await OpenFromLibraryAsync(context);
-                    break;
-                case ("POST", "/api/debug"):
-                    await DebugAsync(context);
-                    break;
-                case ("POST", "/api/debug/plan"):
-                    await DebugPlanAsync(context);
-                    break;
-                case ("POST", "/api/debug/state"):
-                    await DebugStateAsync(context);
-                    break;
-                case ("POST", "/api/debug/rows"):
-                    await DebugRowsAsync(context);
-                    break;
-                case ("POST", "/api/run/prepare"):
-                    await PrepareRunAsync(context);
-                    break;
-                case ("POST", "/api/run"):
-                    await StartRunAsync(context);
-                    break;
-                case ("GET", "/api/run"):
-                    await JsonAsync(context, RunStatus());
-                    break;
-                case ("POST", "/api/run/stop"):
-                    StopRun();
-                    context.Response.StatusCode = StatusCodes.Status202Accepted;
-                    break;
-                case ("POST", "/api/quit"):
-                    if (RunInProgress) throw new StudioRefusal(409, "A run is in progress: stop it, or wait for it, before quitting.");
-                    context.Response.StatusCode = StatusCodes.Status202Accepted;
-                    _quit.TrySetResult();
-                    break;
-                case var (method, _) when path == "/api/agent" || path.StartsWith("/api/agent/", StringComparison.Ordinal):
-                    await AgentRouteAsync(context, method, path);
-                    break;
-                default:
-                    throw new StudioRefusal(404, $"No {request.Method} {path}.");
-            }
+            if (!_routes.TryGet(request.Method, path, out var route))
+                throw new StudioRefusal(404, $"No {request.Method} {path}.");
+
+            using var workspace = route.Locks.HasFlag(RouteLocks.Workspace) ? _workspace.Hold() : null;
+            using var coordinator = route.Locks.HasFlag(RouteLocks.Coordinator) ? _coordinator.Hold() : null;
+            await route.Handle(context);
         }
         catch (StudioRefusal refusal)
         {
             context.Response.StatusCode = refusal.Status;
-            await JsonAsync(context, new { error = ConnectionStringSanitizer.Sanitize(refusal.Message) });
+            await StudioHttp.JsonAsync(context, new { error = ConnectionStringSanitizer.Sanitize(refusal.Message) });
         }
         catch (Exception ex) when (!context.RequestAborted.IsCancellationRequested)
         {
             context.Response.StatusCode = StatusCodes.Status500InternalServerError;
-            await JsonAsync(context, new { error = Shown(ex) });
+            await StudioHttp.JsonAsync(context, new { error = StudioHttp.Shown(ex) });
         }
     }
 
-    /// <summary>A failure as a person reads it: the cause alone (<see cref="ShownFailure"/>), without a secret.</summary>
-    internal static string Shown(Exception failure) => ConnectionStringSanitizer.Sanitize(ShownFailure.Of(failure));
+    internal static string Shown(Exception failure) => StudioHttp.Shown(failure);
+
+    internal static string ExpandHome(string path, string? home = null) => WorkspaceRoutes.ExpandHome(path, home);
+
+    internal static string ForRecognition(string yaml) => StudioDesignContext.ForRecognition(yaml);
+
+    internal static string? SecretsRefusal(string yaml) => StudioDesignContext.SecretsRefusal(yaml);
+
+    internal static void RefuseMisusedReferences(string yaml) => StudioDesignContext.RefuseMisusedReferences(yaml);
+
+    internal static void RefuseReferences(string yaml, BrickCatalogView? signedIn = null) => StudioDesignContext.RefuseReferences(yaml, signedIn);
 
     /// <summary>Refuses a request this session's page could not have sent.</summary>
     private void Admit(HttpRequest request)
@@ -377,685 +315,6 @@ public sealed partial class StudioServer : IAsyncDisposable
             throw new StudioRefusal(403, "dtpipe studio answers only at 127.0.0.1 or localhost, at its own port.");
     }
 
-    /// <summary>
-    /// The identity provider sends the browser back here with a code: a cross-site navigation, so no
-    /// token and no same-origin check, only the host's. What makes it this studio's is the single-use
-    /// <c>state</c> the link checks before exchanging the code. The answer is a line of text, and never
-    /// shows a token.
-    /// </summary>
-    private async Task CallbackAsync(HttpContext context)
-    {
-        AdmitHost(context.Request);
-        if (context.Request.Method != "GET") throw new StudioRefusal(405, "The sign-in comes back as a GET.");
-        string message;
-        if (_tools.Coordinator is not { } link)
-        {
-            context.Response.StatusCode = StatusCodes.Status404NotFound;
-            message = "This studio was opened without --coordinator.";
-        }
-        else
-        {
-            var query = context.Request.Query;
-            string? Value(string name) => query[name] is { Count: 1 } v ? v.ToString() : null;
-            try
-            {
-                var who = await link.CompleteSignInAsync(Value("code"), Value("state"), Value("iss"), Value("error"), context.RequestAborted);
-                message = $"Signed in to {link.Origin.ToString().TrimEnd('/')} as {who}. You can close this tab and go back to dtpipe studio.";
-            }
-            catch (CoordinatorLinkException ex)
-            {
-                context.Response.StatusCode = StatusCodes.Status400BadRequest;
-                message = ex.Message;
-            }
-        }
-        context.Response.ContentType = "text/plain; charset=utf-8";
-        await context.Response.WriteAsync(message + "\n", context.RequestAborted);
-    }
-
-    /// <summary>
-    /// Lists the jobs and subdirectories of the folder, along with each job's link to the active coordinator's library.
-    /// </summary>
-    private async Task JobsAsync(HttpContext context)
-    {
-        var jobs = _folder.Jobs();
-        var folders = _folder.Folders();
-        var publications = new Dictionary<string, object>(StringComparer.Ordinal);
-        if (_tools.Coordinator is { } link)
-        {
-            var origin = link.Origin.ToString();
-            foreach (var job in jobs)
-            {
-                StudioPublication? pub;
-                try { pub = _local.ReadPublication(job); }
-                catch (Exception ex) when (ex is StudioRefusal or IOException or UnauthorizedAccessException) { continue; }
-                if (pub is null || pub.Coordinator != origin) continue;
-                bool? localModified = null;
-                if (pub.LocalHash is not null)
-                {
-                    try { localModified = _folder.ReadJob(job).Hash != pub.LocalHash; }
-                    catch (Exception ex) when (ex is StudioRefusal or IOException or UnauthorizedAccessException) { }
-                }
-                publications[job] = new { id = pub.Id, commit = pub.Commit, localModified };
-            }
-        }
-        await JsonAsync(context, new { folder = Path.GetFileName(_folder.Root), jobs, folders, publications });
-    }
-
-    /// <summary>
-    /// Moves a job and its local studio metadata inside the folder, refusing collisions, active/suspended runs, and stale hashes.
-    /// </summary>
-    private async Task RenameJobAsync(HttpContext context)
-    {
-        var asked = await BodyAsync<RenameJobRequest>(context);
-        var from = JobPath(asked.From) ?? throw new StudioRefusal(400, "Name the job's current path as 'from'.");
-        var to = JobPath(asked.To) ?? throw new StudioRefusal(400, "Name the job's new path as 'to'.");
-        _local.CheckJobFiles(from);
-        _local.CheckJobFiles(to);
-        if (RunInProgressFor(from))
-            throw new StudioRefusal(409, $"A run is in progress on '{from}': stop it, or wait for it, before renaming.");
-        if (LoadDebug(from).Real)
-            throw new StudioRefusal(409, $"A real run is suspended on '{from}': write or abandon it before renaming.");
-        var hash = _folder.RenameJob(from, to, asked.Hash);
-        _local.MoveJobFiles(from, to);
-        await JsonAsync(context, new { path = to, hash });
-    }
-
-    /// <summary>
-    /// Deletes a job and its local studio metadata and checkpoints, refusing active/suspended runs and stale hashes.
-    /// </summary>
-    private Task DeleteJobAsync(HttpContext context)
-    {
-        var relative = JobPath(context.Request.Query["path"].ToString())
-            ?? throw new StudioRefusal(400, "Name the job's path to delete.");
-        var hashParam = context.Request.Query["hash"].ToString();
-        var expectedHash = string.IsNullOrEmpty(hashParam) ? null : hashParam;
-        _local.CheckJobFiles(relative);
-        if (RunInProgressFor(relative))
-            throw new StudioRefusal(409, $"A run is in progress on '{relative}': stop it, or wait for it, before deleting.");
-        if (LoadDebug(relative).Real)
-            throw new StudioRefusal(409, $"A real run is suspended on '{relative}': write or abandon it before deleting.");
-        _folder.DeleteJob(relative, expectedHash);
-        _local.DeleteJobFiles(relative, key => ForgetCheckpoint(DebugStore(), key));
-        context.Response.StatusCode = StatusCodes.Status204NoContent;
-        return Task.CompletedTask;
-    }
-
-    /// <summary>
-    /// A job, the hash a save must find again, its layout, and whether saving would change its text:
-    /// the server writes what it composes, so a file written by hand loses its comments and its order.
-    /// </summary>
-    private async Task OpenAsync(HttpContext context, string relative)
-    {
-        var job = _folder.ReadJob(relative);
-        var rewrites = (await DesignForAsync(job.Text, context.RequestAborted)).Decompose(job.Text).Yaml != job.Text.Replace("\r\n", "\n");
-        await JsonAsync(context, new { path = relative, yaml = job.Text, hash = job.Hash, layout = _local.ReadLayout(relative), rewrites });
-    }
-
-    /// <summary>
-    /// Writes the job the server composes from the page's cards, never a text the page sends, then
-    /// the cards' layout beside the folder's files. A job whose cards do not compose is written only
-    /// when the page says the person accepted it.
-    /// </summary>
-    private async Task SaveAsync(HttpContext context)
-    {
-        var save = await BodyAsync<SaveRequest>(context);
-        if (save.Model is null) throw new StudioRefusal(400, "A save carries the steps as 'model'.");
-        var composed = Design().Compose(save.Model);
-        if (!composed.Valid && !save.AcceptErrors)
-            throw new StudioRefusal(422, "The steps do not compose into a job: " + string.Join(" ", composed.Errors));
-        _folder.ResolveForWrite(save.Path ?? "");
-        if (save.Model.Layout is not null) _local.CheckLayout(save.Path!);
-        var hash = _folder.WriteJob(save.Path!, composed.Yaml, save.Hash);
-        if (save.Model.Layout is { } layout) _local.WriteLayout(save.Path!, layout);
-        await JsonAsync(context, new { path = save.Path, hash, yaml = composed.Yaml });
-    }
-
-    /// <summary>A job's path, confined to the folder, or null for none.</summary>
-    private string? JobPath(string? relative)
-    {
-        if (string.IsNullOrEmpty(relative)) return null;
-        _folder.ResolveForWrite(relative);
-        return relative;
-    }
-
-    /// <summary>
-    /// Keeps what each variable of a job is launched with: a keyring alias or a typed text. A value
-    /// from the keyring is never stored, only its alias.
-    /// </summary>
-    private async Task LaunchAsync(HttpContext context)
-    {
-        var launch = await BodyAsync<LaunchRequest>(context);
-        var job = JobPath(launch.Path) ?? throw new StudioRefusal(400, "Launch values belong to a job: name its path.");
-        var overrides = new Dictionary<string, StudioOverride>(StringComparer.Ordinal);
-        foreach (var (name, chosen) in launch.Overrides ?? [])
-        {
-            if (chosen is null || chosen.Keyring is null == chosen.Value is null)
-                throw new StudioRefusal(400, $"'{name}' is launched with either a keyring alias or a text.");
-            if (chosen.Value is { Length: > 65_536 })
-                throw new StudioRefusal(413, $"The text for '{name}' is too long.");
-            overrides[name] = chosen;
-        }
-        _local.WriteLaunch(job, overrides);
-        context.Response.StatusCode = StatusCodes.Status204NoContent;
-    }
-
-    private static readonly string[] PaneNames = ["pal", "insp", "drawer", "agent"];
-    private static readonly string[] ViewTabs = ["yaml", "preview", "variables"];
-    private static readonly string[] ViewSides = ["jobs", "library", "steps", "none"];
-
-    /// <summary>
-    /// Keeps how the page was left: the sizes of its panes, the side panel chosen, the job open and, for a job, its tab, the rows
-    /// asked and the selected card.
-    /// Each value is checked and rewritten, so the file holds nothing the page did not mean as a preference.
-    /// </summary>
-    private async Task ViewAsync(HttpContext context)
-    {
-        var view = await BodyAsync<ViewRequest>(context);
-        JsonObject? sizes = null;
-        if (view.Sizes is not null)
-        {
-            sizes = [];
-            foreach (var (pane, size) in view.Sizes)
-            {
-                if (!PaneNames.Contains(pane) || !(size is >= 0 and <= 5000)) throw new StudioRefusal(400, $"'{pane}' is no pane, or its size is out of range.");
-                sizes[pane] = (int)size;
-            }
-        }
-
-        if (view.Side is not null && !ViewSides.Contains(view.Side)) throw new StudioRefusal(400, $"'{view.Side}' is no side panel.");
-
-        JsonObject? jobView = null;
-        var job = JobPath(view.Path);
-        if (job is not null && view.Job is { } kept)
-        {
-            if (kept.Tab is not null && !ViewTabs.Contains(kept.Tab)) throw new StudioRefusal(400, $"'{kept.Tab}' is no tab to keep.");
-            if (kept.Rows is not null && !(kept.Rows is >= 1 and <= DebugMaxRows)) throw new StudioRefusal(400, "The rows asked are out of range.");
-            if (kept.Card is { Length: > 200 }) throw new StudioRefusal(400, "The step's name is too long.");
-            jobView = [];
-            if (kept.Tab is not null) jobView["tab"] = kept.Tab;
-            if (kept.Rows is not null) jobView["rows"] = kept.Rows;
-            if (kept.Card is not null) jobView["card"] = kept.Card;
-            if (kept.Review is not null) jobView["review"] = kept.Review;
-        }
-
-        // The job open is a path of the folder like any other the page names: the one the studio opens again at its start.
-        _local.UpdateView(sizes, job, jobView, JobPath(view.Open), view.Side);
-        context.Response.StatusCode = StatusCodes.Status204NoContent;
-    }
-
-    private async Task SampleAsync(HttpContext context)
-    {
-        if (!(context.Request.ContentType ?? "").StartsWith("application/json", StringComparison.OrdinalIgnoreCase))
-            throw new StudioRefusal(415, "A sample is asked as JSON.");
-
-        string yaml;
-        int rows;
-        string? path;
-        List<SampledBrick>? bricks;
-        try
-        {
-            using var body = await JsonDocument.ParseAsync(context.Request.Body, cancellationToken: context.RequestAborted);
-            yaml = body.RootElement.GetProperty("yaml").GetString() ?? "";
-            rows = body.RootElement.TryGetProperty("rows", out var r) && r.TryGetInt32(out var n) ? n : 10;
-            path = body.RootElement.TryGetProperty("path", out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null;
-            bricks = body.RootElement.TryGetProperty("bricks", out var b) && b.ValueKind == JsonValueKind.Array
-                ? b.Deserialize<List<SampledBrick>>(Json)
-                : null;
-        }
-        catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException)
-        {
-            throw new StudioRefusal(400, "A sample is asked as {\"yaml\": \"...\", \"rows\": n}.");
-        }
-        rows = Math.Clamp(rows, 1, MaxRows);
-        var json = await SampleCoreAsync(yaml, rows, path, bricks, _tools.Engine.SampleAsync, rewrite: null, context.RequestAborted);
-        context.Response.ContentType = "application/json; charset=utf-8";
-        await context.Response.WriteAsync(json, context.RequestAborted);
-    }
-
-    /// <summary>
-    /// The sample of <paramref name="yaml"/> through the studio's one sample path, with its bricks bound as a
-    /// sample binds them, its variables armed for this call alone and the engine slot held. <paramref name="rewrite"/>
-    /// gives the job to run from the one the bricks left: the debug run's cut.
-    /// </summary>
-    private async Task<string> SampleCoreAsync(string yaml, int rows, string? path, List<SampledBrick>? bricks,
-        Func<string, int, StudioBindings, CancellationToken, Task<string>> sampler,
-        Func<string, (string Yaml, IReadOnlySet<string> Dropped, IReadOnlySet<string> Unread)>? rewrite, CancellationToken ct)
-    {
-        // Each brick's branch is read or written on its node: here, its rows come from the coordinator.
-        var sampling = RunnableHere(yaml, bricks, "sample");
-
-        // Every variable resolves before anything runs, and is named when it would not.
-        var launch = _variables.LaunchEnvironment(JobPath(path), sampling.Yaml);
-
-        TakeSlot("A sample");
-        var files = new List<string>();
-        try
-        {
-            var inputs = new List<(string Alias, string Path)>();
-            foreach (var (alias, brick) in sampling.Sources)
-            {
-                byte[] arrow;
-                try { arrow = await _tools.Coordinator!.SampleAsync(brick.Node, brick.Id, Math.Min(rows, CoordinatorApi.MaxSampleRows), ct); }
-                catch (CoordinatorLinkException ex) { throw new StudioRefusal(502, $"'{alias}': {ex.Message}"); }
-                files.Add(_local.SampleFile(arrow));
-                inputs.Add((alias, Bindable(files[^1])));
-            }
-            var outputs = new List<(string Alias, string Path)>();
-            foreach (var alias in sampling.Sinks)
-            {
-                files.Add(_local.SampleFile(null));
-                outputs.Add((alias, Bindable(files[^1])));
-            }
-            // The job to run, and the bindings of the branches it still has.
-            var (yamlToRun, dropped, unread) = rewrite?.Invoke(sampling.Yaml) ?? (sampling.Yaml, new HashSet<string>(), new HashSet<string>());
-            // A branch read back from a checkpoint reads nothing: no input to bind.
-            string? Join(List<(string Alias, string Path)> pairs, IReadOnlySet<string> skipped) =>
-                pairs.Where(p => !dropped.Contains(p.Alias) && !skipped.Contains(p.Alias)).Select(p => $"{p.Alias}={p.Path}").ToList() is { Count: > 0 } kept ? string.Join(',', kept) : null;
-            var bindings = new StudioBindings(Join(inputs, unread), Join(outputs, new HashSet<string>()));
-
-            // The run reads ${{NAME}} through its own resolver, which asks the launch values first: each chosen
-            // value is this action's alone, and the process environment is never written.
-            using var armed = LaunchValues.Arm(launch);
-            // Nobody watches the terminal for a prompt: a run that would ask one fails instead.
-            using var _ = NonInteractiveGuard.Suppress();
-            return await sampler(yamlToRun, rows, bindings, ct);
-        }
-        finally
-        {
-            foreach (var file in files) File.Delete(file);
-            _sampling.Release();
-        }
-    }
-
-    private static string NotAPipelineId(string? id) => $"'{id}' is not a pipeline id: lowercase letters, digits and '-'.";
-
-    /// <summary>
-    /// Publishes the job as it is saved in the folder, never the page's cards: read again from disk and
-    /// refused when it is not the text the page saved (its hash). Its launch file and its layout stay on
-    /// this machine. A first publication creates only; a later one replaces only the commit published
-    /// last from here, or the one the person chose to replace after a 412. It sends no binding: a reference names its node and its
-    /// brick, and the coordinator keeps the mode and writes the pin.
-    /// </summary>
-    private async Task PublishAsync(HttpContext context)
-    {
-        var link = _tools.Coordinator ?? throw new StudioRefusal(404, "This studio was opened without --coordinator.");
-        var asked = await BodyAsync<PublishRequest>(context);
-        var path = JobPath(asked.Path) ?? throw new StudioRefusal(400, "Publish a job saved in the folder: name its path.");
-        if (!CoordinatorApi.IsPipelineId(asked.Id)) throw new StudioRefusal(400, NotAPipelineId(asked.Id));
-        var job = _folder.ReadJob(path);
-        if (asked.Hash is null || asked.Hash != job.Hash)
-            throw new StudioRefusal(409, $"{path} is not the job saved last: save it, then publish.");
-        if (SecretsRefusal(job.Text) is { } secrets)
-        {
-            context.Response.StatusCode = StatusCodes.Status422UnprocessableEntity;
-            await JsonAsync(context, new { error = "the job holds a credential as a value.", report = secrets });
-            return;
-        }
-
-        var origin = link.Origin.ToString();
-        var last = _local.ReadPublication(path) is { } p && p.Coordinator == origin && p.Id == asked.Id ? p : null;
-        (LibrarySaved? Saved, LibraryConflict? Conflict, LibraryRefused? Refused) outcome;
-        // Replace names the commit the person chose to replace; empty, it creates a pipeline gone since.
-        var expected = asked.Replace is { } chosen ? (chosen.Length == 0 ? null : chosen) : last?.Commit;
-        try { outcome = await link.PublishAsync(asked.Id!, job.Text, asked.Message, expected, context.RequestAborted); }
-        catch (CoordinatorLinkException ex) { throw new StudioRefusal(502, ex.Message); }
-        if (outcome.Conflict is { } conflict)
-        {
-            context.Response.StatusCode = StatusCodes.Status412PreconditionFailed;
-            await JsonAsync(context, new { error = conflict.Error, commit = conflict.Commit });
-            return;
-        }
-        if (outcome.Refused is { } refused)
-        {
-            context.Response.StatusCode = StatusCodes.Status422UnprocessableEntity;
-            await JsonAsync(context, new { error = refused.Error, report = refused.Report });
-            return;
-        }
-        var saved = outcome.Saved!;
-        _local.WritePublication(path, new StudioPublication(origin, saved.Id, saved.Commit, job.Hash));
-        await JsonAsync(context, saved);
-    }
-
-    /// <summary>
-    /// What a library keeps for good is no place for a credential: the places of the job that spell one out as a value, never the
-    /// value, and what to write instead. Judged by <see cref="JobSecrets"/>, best-effort in both directions, as a brick's own refusal
-    /// is. Null when the job holds none.
-    /// </summary>
-    internal static string? SecretsRefusal(string yaml)
-    {
-        var at = JobSecrets.Literals(yaml);
-        if (at.Count == 0) return null;
-        const int Named = 8;
-        var places = string.Join(", ", at.Take(Named)) + (at.Count > Named ? $" and {at.Count - Named} more" : "");
-        return $"{places}: a library is shared and its history is kept, so a credential published there cannot be taken back. {NodeBricks.UseAReference}";
-    }
-
-    /// <summary>
-    /// What a publication of a job would refuse, judged as the coordinator's runner judges it (<see cref="PublicationCheck"/>):
-    /// the job saved in the folder (<c>path</c> and the <c>hash</c> the page saved) or the cards' composition (<c>yaml</c>).
-    /// Each source brick is bound to the first row its node sends through the coordinator, as a publication's check samples it,
-    /// and each sink brick to a throwaway file. Only while a person is signed in: a brick's rows come through the coordinator,
-    /// and a verdict without them would be another check. Asked by the page, never at each edit: it starts a process.
-    /// </summary>
-    private async Task PublicationCheckAsync(HttpContext context)
-    {
-        var link = _tools.Coordinator ?? throw new StudioRefusal(404, "This studio was opened without --coordinator.");
-        if (link.Status().State != CoordinatorLink.SignedIn)
-            throw new StudioRefusal(409, "Sign in to the coordinator: what a publication would refuse is judged over its bricks' rows.");
-        var yaml = await JobToJudgeAsync(context);
-        await JsonAsync(context, await JudgeForPublicationAsync(link, yaml, context.RequestAborted));
-    }
-
-    /// <summary>The job a verdict of publication is asked of: the one saved in the folder (<c>path</c> and its <c>hash</c>) or the cards' composition (<c>yaml</c>).</summary>
-    private async Task<string> JobToJudgeAsync(HttpContext context)
-    {
-        var asked = await BodyAsync<PublicationCheckRequest>(context);
-        if (asked.Path is not { } asPath)
-            return asked.Yaml ?? throw new StudioRefusal(400, "A check is asked as {\"yaml\": \"...\"} or {\"path\": \"...\", \"hash\": \"...\"}.");
-        var path = JobPath(asPath) ?? throw new StudioRefusal(400, "Check a job saved in the folder: name its path.");
-        var job = _folder.ReadJob(path);
-        if (asked.Hash is null || asked.Hash != job.Hash)
-            throw new StudioRefusal(409, $"{path} is not the job saved last: save it, then check it.");
-        return job.Text;
-    }
-
-    /// <summary>
-    /// What the coordinator's nodes would do with the edges of a job, as the coordinator words it (<see cref="CoordinatorLink.EdgeProtectionsAsync"/>):
-    /// the job saved in the folder or the cards' composition, as a publication's check is asked. A read: no process starts, nothing is
-    /// kept, and the answer stops nothing, a publication included. The job goes to the coordinator as a publication would send it, so a
-    /// credential written as a value is refused here first, as <see cref="SecretsRefusal"/> words it, and the answer then says the job
-    /// cannot be judged. Only while a person is signed in.
-    /// </summary>
-    private async Task PublicationEdgesAsync(HttpContext context)
-    {
-        var link = _tools.Coordinator ?? throw new StudioRefusal(404, "This studio was opened without --coordinator.");
-        if (link.Status().State != CoordinatorLink.SignedIn)
-            throw new StudioRefusal(409, "Sign in to the coordinator: what its nodes would do with the job's edges is read from it.");
-        var yaml = await JobToJudgeAsync(context);
-        if (SecretsRefusal(yaml) is { } secrets)
-        {
-            await JsonAsync(context, new EdgeProtectionsResponse(false, $"The job was not sent: {secrets}", []));
-            return;
-        }
-        try { await JsonAsync(context, await link.EdgeProtectionsAsync(yaml, context.RequestAborted)); }
-        catch (CoordinatorLinkException ex) { throw new StudioRefusal(502, ex.Message); }
-    }
-
-    private async Task<PublicationVerdict> JudgeForPublicationAsync(CoordinatorLink link, string yaml, CancellationToken ct)
-    {
-        var catalog = link.Catalog ?? new BrickCatalogView([], []);
-        IReadOnlyDictionary<string, BrickReference> references;
-        try { references = BrickRef.In(JobYaml.Parse(yaml)); }
-        catch (Exception ex) when (ex is FormatException or YamlDotNet.Core.YamlException) { references = new Dictionary<string, BrickReference>(); }
-        // A reference is bound only to a brick of its own kind: a source's rows read as a sink's target would pass for a job the
-        // runner takes. Any other is left as written, for the dry run to refuse.
-        var bound = references.Values
-            .Where(r => catalog.Bricks.FirstOrDefault(b => b.Key == r.Key) is { } brick && (brick.Kind == StepKinds.Sink) == r.IsSink)
-            .Select(r => new SampledBrick(r.Alias, r.Key)).ToList();
-        if (references.Values.Any(r => catalog.Bricks.All(b => b.Key != r.Key)))
-        {
-            try { RefuseReferences(yaml, catalog); }
-            catch (StudioRefusal refusal) { return new PublicationVerdict(false, refusal.Message); }
-        }
-        var sampling = BrickSampling.Of(yaml, bound, catalog);
-
-        var directory = _local.CheckDirectory();
-        try
-        {
-            var sources = new List<(string Alias, byte[] Arrow)>();
-            foreach (var (alias, brick) in sampling.Sources)
-            {
-                // One row, as a publication's check asks each source brick's node.
-                try { sources.Add((alias, await link.SampleAsync(brick.Node, brick.Id, 1, ct))); }
-                catch (CoordinatorLinkException ex) { return new PublicationVerdict(false, $"'{alias}': {ex.Message}"); }
-            }
-            return await PublicationCheck.RunAsync(directory, sampling.Yaml, sources, sampling.Sinks, ct);
-        }
-        finally
-        {
-            try { Directory.Delete(directory, recursive: true); } catch (IOException) { }
-        }
-    }
-
-    /// <summary>
-    /// The job a command line stands for, as <c>--export-job</c> would write it: the arguments arrive as the
-    /// array the page split, never as one string to cut here. The result is not saved anywhere.
-    /// </summary>
-    private async Task ImportAsync(HttpContext context)
-    {
-        var import = _tools.Import ?? throw new StudioRefusal(404, "This studio imports no command line.");
-        var asked = await BodyAsync<ImportRequest>(context);
-        if (asked.Args is not { Count: > 0 } args || args.Any(a => a is null))
-            throw new StudioRefusal(400, "An import carries the arguments of a command as 'args'.");
-        if (args.Sum(a => a!.Length) > 65_536) throw new StudioRefusal(413, "The command is too long.");
-        string yaml;
-        try
-        {
-            using var _ = NonInteractiveGuard.Suppress();
-            yaml = import(args!);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            throw new StudioRefusal(422, $"This command does not make a job: {Shown(ex)}");
-        }
-        await JsonAsync(context, new { yaml });
-    }
-
-    /// <summary>The coordinator's link when a person is signed in to it; a refusal that names what is missing otherwise.</summary>
-    private CoordinatorLink SignedInLink() =>
-        _tools.Coordinator is not { } link ? throw new StudioRefusal(404, "This studio was opened without --coordinator.")
-        : link.Status().State != CoordinatorLink.SignedIn ? throw new StudioRefusal(409, "Sign in to the coordinator to read its library.")
-        : link;
-
-    private async Task LibraryAsync(HttpContext context)
-    {
-        var link = SignedInLink();
-        try { await JsonAsync(context, new { pipelines = await link.LibraryAsync(context.RequestAborted) }); }
-        catch (Exception ex) when (ex is CoordinatorLinkException or HttpRequestException) { throw new StudioRefusal(502, ex.Message); }
-    }
-
-    /// <summary>Reads a library pipeline's YAML and commit without writing anything to disk.</summary>
-    private async Task LibraryJobAsync(HttpContext context)
-    {
-        var link = SignedInLink();
-        var id = context.Request.Query["id"].ToString();
-        if (!CoordinatorApi.IsPipelineId(id))
-            throw new StudioRefusal(400, NotAPipelineId(id));
-        LibraryJob job;
-        try
-        {
-            job = await link.LibraryJobAsync(id, context.RequestAborted)
-                ?? throw new StudioRefusal(404, $"'{id}' is not in the library.");
-        }
-        catch (Exception ex) when (ex is CoordinatorLinkException or HttpRequestException)
-        {
-            throw new StudioRefusal(502, ex.Message);
-        }
-        await JsonAsync(context, new { id = job.Id, yaml = job.Yaml, commit = job.Commit });
-    }
-
-    /// <summary>
-    /// Opens a library pipeline in the folder (create-only by default, or overwriting the file matching
-    /// <c>overwriteHash</c>), keeping the commit and local file hash for sync and later publications.
-    /// </summary>
-    private async Task OpenFromLibraryAsync(HttpContext context)
-    {
-        var link = SignedInLink();
-        var asked = await BodyAsync<OpenLibraryRequest>(context);
-        if (!CoordinatorApi.IsPipelineId(asked.Id))
-            throw new StudioRefusal(400, $"'{asked.Id}' is not a pipeline id: lowercase letters, digits and '-'.");
-        var path = string.IsNullOrWhiteSpace(asked.Path)
-            ? asked.Id + ".yaml"
-            : JobPath(asked.Path)!;
-        LibraryJob job;
-        try { job = await link.LibraryJobAsync(asked.Id!, context.RequestAborted) ?? throw new StudioRefusal(404, $"'{asked.Id}' is not in the library."); }
-        catch (Exception ex) when (ex is CoordinatorLinkException or HttpRequestException) { throw new StudioRefusal(502, ex.Message); }
-        _local.CheckPublication(path);
-        var expectedHash = string.IsNullOrEmpty(asked.OverwriteHash) ? null : asked.OverwriteHash;
-        var hash = _folder.WriteJob(path, job.Yaml, expectedHash);
-        _local.WritePublication(path, new StudioPublication(link.Origin.ToString(), job.Id, job.Commit, hash));
-        await JsonAsync(context, new { path, hash, commit = job.Commit });
-    }
-
-    /// <summary>A location a binding can carry: its pairs are separated by commas.</summary>
-    private static string Bindable(string path) => path.Contains(',')
-        ? throw new StudioRefusal(400, "The folder's path holds a comma, which a binding cannot carry: open the studio on another folder to sample a brick.")
-        : path;
-
-    /// <summary>The designer's model over the catalog read last: what a card names is found, nothing is recognised.</summary>
-    private DesignService Design() =>
-        _tools.DesignWith is { } with && _tools.Coordinator is { } link ? with(new StudioBricks(link.Catalog)) : _tools.Design;
-
-    /// <summary>
-    /// The model for taking <paramref name="yaml"/> apart: the coordinator says what each branch is when a
-    /// person is signed in; otherwise no branch is a brick and each opens as a local card.
-    /// </summary>
-    private async Task<DesignService> DesignForAsync(string yaml, CancellationToken ct)
-    {
-        if (_tools.DesignWith is not { } with || _tools.Coordinator is not { } link) return _tools.Design;
-        string job;
-        try { job = ForRecognition(yaml); }
-        catch (Exception) { return Design(); }
-        // Nothing to ask for a job none of whose branches references a brick: it never leaves this machine.
-        var answers = job.Length == 0 ? null : await link.RecognizeAsync(job, ct);
-        return with(new StudioBricks(link.Catalog, job, answers));
-    }
-
-    /// <summary>
-    /// What the coordinator is asked to recognise: only the top-level branches that are a reference to a brick
-    /// (<see cref="BrickRef.Of"/>), so a branch of this machine, a connection string included, is never sent. A
-    /// reference it misses opens as a local card, which loses nothing. Empty when no branch qualifies.
-    /// </summary>
-    internal static string ForRecognition(string yaml)
-    {
-        var kept = new YamlMappingNode();
-        foreach (var (alias, branch) in JobYaml.Branches(JobYaml.Parse(yaml)))
-            if (BrickRef.Of(alias, branch) is not null) kept.Add(alias, JobYaml.CloneBranch(branch));
-        return kept.Children.Count == 0 ? "" : JobYaml.Serialize(kept);
-    }
-
-    /// <summary>
-    /// The job a sample or a run gives the engine here, each brick card bound, or the refusal that says why it cannot run here:
-    /// a source brick while nobody is signed in, a branch that uses the brick scheme as no reference does, a reference no card
-    /// binds. The engine has no <c>brick:</c>, and what is left of it fails there before the branch can give a reason. The
-    /// composition the page shows asks it too (<see cref="WithRunHere"/>), so Problems says it before a run does.
-    /// </summary>
-    private BrickSampling RunnableHere(string yaml, List<SampledBrick>? bricks, string gesture)
-    {
-        var sampling = BrickSampling.Of(yaml, bricks, _tools.Coordinator?.Catalog);
-        if (sampling.Sources.Count > 0 && _tools.Coordinator?.Status().State != CoordinatorLink.SignedIn)
-            throw new StudioRefusal(409, $"This job reads a node's brick: sign in to the coordinator to {gesture} it.");
-        RefuseMisusedReferences(sampling.Yaml);
-        RefuseReferences(sampling.Yaml, SignedInCatalog());
-        return sampling;
-    }
-
-    /// <summary>
-    /// The composition of the page's cards, with the refusal a sample or a run here would give among its warnings: the job
-    /// composes, and runs only on a node or once signed in. A composition with errors says those first.
-    /// </summary>
-    private DesignResult WithRunHere(DesignResult composed)
-    {
-        if (!composed.Valid) return composed;
-        var bricks = composed.Model.Steps.Where(s => s.Brick is not null && s.Alias is not null)
-            .Select(s => new SampledBrick(composed.Steps.FirstOrDefault(i => i.Alias == s.Alias)?.Branch ?? s.Alias!, s.Brick!))
-            .ToList();
-        try
-        {
-            RunnableHere(composed.Yaml, bricks, "run");
-            return composed;
-        }
-        catch (StudioRefusal refusal) { return composed with { Warnings = [.. composed.Warnings, refusal.Message] }; }
-        catch (Exception ex) when (ex is FormatException or YamlDotNet.Core.YamlException) { return composed; }
-    }
-
-    /// <summary>
-    /// Refuses a job in which a branch uses the brick scheme as no reference does (<see cref="BrickRef.Misuse"/>): one that
-    /// reads a brick and says more, a malformed reference. No card binds such a branch, here or on a node.
-    /// </summary>
-    internal static void RefuseMisusedReferences(string yaml)
-    {
-        List<string> misuses;
-        try { misuses = JobYaml.Branches(JobYaml.Parse(yaml)).Select(b => BrickRef.Misuse(b.Alias, b.Branch)).OfType<string>().ToList(); }
-        catch (Exception ex) when (ex is FormatException or YamlDotNet.Core.YamlException) { return; }
-        if (misuses.Count > 0) throw new StudioRefusal(409, string.Join(" ", misuses));
-    }
-
-    /// <summary>
-    /// Refuses a job in which a branch still references a brick: the engine has no <c>brick:</c>, so what a sample or a run
-    /// does not bind to a throwaway file or a node's rows must not reach it. A job that is not readable is the engine's to report.
-    /// With <paramref name="signedIn"/>, the catalog read last while a person is signed in: a reference it does not hold is
-    /// named as no node's brick, not as a sign-in to make. Without it, the refusal asks for a sign-in.
-    /// </summary>
-    internal static void RefuseReferences(string yaml, BrickCatalogView? signedIn = null)
-    {
-        IReadOnlyDictionary<string, BrickReference> left;
-        try { left = BrickRef.In(JobYaml.Parse(yaml)); }
-        catch (Exception ex) when (ex is FormatException or YamlDotNet.Core.YamlException) { return; }
-        if (left.Count == 0) return;
-        var unknown = signedIn is null ? new List<BrickReference>() : left.Values.Where(r => signedIn.Bricks.All(b => b.Key != r.Key)).ToList();
-        if (unknown.Count > 0)
-            throw new StudioRefusal(409, "No node offers the brick a branch references: "
-                + string.Join(", ", unknown.Select(r => $"'{r.Alias}' ({r.Key})"))
-                + ". Choose a brick of the palette, or write the branch's own endpoint.");
-        throw new StudioRefusal(409, "A branch references a brick, which only its node reads: "
-            + string.Join(", ", left.Values.Select(r => $"'{r.Alias}' ({r.Key})"))
-            + ". Sign in to the coordinator to sample it.");
-    }
-
-    /// <summary>The catalog read from the coordinator while a person is signed in to it, or null.</summary>
-    private BrickCatalogView? SignedInCatalog() =>
-        _tools.Coordinator is { } link && link.Status().State == CoordinatorLink.SignedIn ? link.Catalog : null;
-
-    /// <summary>The job with each brick's branch replaced as a sample replaces it; as it is when that cannot be done.</summary>
-    private string WithoutBricks(string yaml, List<SampledBrick>? bricks)
-    {
-        try { return BrickSampling.Of(yaml, bricks, _tools.Coordinator?.Catalog).Yaml; }
-        catch (Exception ex) when (ex is StudioRefusal or FormatException or YamlDotNet.Core.YamlException) { return yaml; }
-    }
-
-    /// <summary>
-    /// The coordinator's catalog, read again when a person is signed in, with this dtpipe's version: the
-    /// palette's bricks and the versions the page compares. The catalog read last when it cannot be read.
-    /// </summary>
-    private async Task BricksAsync(HttpContext context)
-    {
-        var link = _tools.Coordinator;
-        string? error = null;
-        BrickCatalogView? catalog = null;
-        if (link is not null)
-        {
-            try { catalog = await link.RefreshCatalogAsync(context.RequestAborted); }
-            catch (Exception ex) when (ex is CoordinatorLinkException or HttpRequestException)
-            {
-                error = ex.Message;
-                catalog = link.Catalog;
-            }
-        }
-        await JsonAsync(context, new
-        {
-            studioVersion = CoordinatorLink.StudioVersion,
-            nodes = catalog?.Nodes ?? [],
-            bricks = catalog?.Bricks ?? [],
-            error,
-        });
-    }
-
-    /// <summary>
-    /// A brick's first rows and their types, read by its node when a person looks at its card: the catalog carries no
-    /// schema, which depends on the rows. Read each time, kept nowhere, and outside the engine's slot since nothing runs here.
-    /// </summary>
-    private async Task BrickPreviewAsync(HttpContext context)
-    {
-        var link = _tools.Coordinator ?? throw new StudioRefusal(404, "This studio was opened without --coordinator.");
-        var asked = await BodyAsync<BrickPreviewRequest>(context);
-        var brick = link.Catalog?.Bricks.FirstOrDefault(b => b.Key == asked.Key)
-            ?? throw new StudioRefusal(409, $"'{asked.Key}' is no brick of the catalog read last: sign in to the coordinator.");
-        if (link.Status().State != CoordinatorLink.SignedIn) throw new StudioRefusal(409, "Sign in to the coordinator to read the rows of a brick.");
-        try { await JsonAsync(context, await link.PreviewAsync(brick.Node, brick.Id, context.RequestAborted)); }
-        catch (CoordinatorLinkException ex) { throw new StudioRefusal(502, ex.Message); }
-    }
-
     private static async Task ServeAssetAsync(HttpContext context, string path)
     {
         if (context.Request.Method != "GET" || !Assets.TryGetValue(path, out var asset))
@@ -1066,59 +325,16 @@ public sealed partial class StudioServer : IAsyncDisposable
         await stream.CopyToAsync(context.Response.Body, context.RequestAborted);
     }
 
-    private static Task JsonAsync(HttpContext context, object value)
-    {
-        context.Response.ContentType = "application/json; charset=utf-8";
-        return context.Response.WriteAsync(JsonSerializer.Serialize(value, Json), context.RequestAborted);
-    }
-
-    private static async Task<T> BodyAsync<T>(HttpContext context) where T : class
-    {
-        if (!(context.Request.ContentType ?? "").StartsWith("application/json", StringComparison.OrdinalIgnoreCase))
-            throw new StudioRefusal(415, "The body is JSON.");
-        try
-        {
-            return await JsonSerializer.DeserializeAsync<T>(context.Request.Body, Json, context.RequestAborted)
-                ?? throw new StudioRefusal(400, "The body is empty.");
-        }
-        catch (JsonException ex)
-        {
-            throw new StudioRefusal(400, $"The body is not what {context.Request.Path} reads: {ex.Message}");
-        }
-    }
-
-    private sealed record DecomposeRequest(string? Yaml, JsonObject? Layout);
-
-    private sealed record ViewJobRequest(string? Tab, int? Rows, string? Card, bool? Review = null);
-
-    private sealed record ViewRequest(Dictionary<string, double>? Sizes, string? Path, ViewJobRequest? Job, string? Open = null, string? Side = null);
-
-    private sealed record SaveRequest(string? Path, string? Hash, DesignModel? Model, bool AcceptErrors);
-
-    private sealed record RenameJobRequest(string? From, string? To, string? Hash);
-
-    private sealed record OpenLibraryRequest(string? Id, string? Path = null, string? OverwriteHash = null);
-
-    private sealed record BrickPreviewRequest(string? Key);
-
-    private sealed record ImportRequest(List<string?>? Args);
-
-    private sealed record PublishRequest(string? Path, string? Hash, string? Id, string? Message, string? Replace);
-
-    private sealed record PublicationCheckRequest(string? Path, string? Hash, string? Yaml);
-
-    private sealed record VariablesRequest(string? Path, string? Yaml, List<SampledBrick>? Bricks);
-
-    private sealed record LaunchRequest(string? Path, Dictionary<string, StudioOverride?>? Overrides);
-
     public async ValueTask DisposeAsync()
     {
         // The agent's waits end first, then the run it may have started; its turn is awaited last.
-        var agent = _agent?.DisposeAsync();
-        await StopRunAndWaitAsync();
+        var agent = _agentSlot.Current?.DisposeAsync();
+        await _runRoutes.StopRunAndWaitAsync();
         if (agent is { } stopping) await stopping;
         await _app.StopAsync();
         await _app.DisposeAsync();
-        _sampling.Dispose();
+        _agentSlot.Dispose();
+        _engineSlot.Dispose();
+        _coordinator.Dispose();
     }
 }

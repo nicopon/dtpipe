@@ -122,7 +122,7 @@ public sealed class ServerConformanceTests : IDisposable
         ("ora", "int64", "-5000000000", null),
         ("ora", "double", "1.5", null),
         ("ora", "decimal128(10,2)", "4.29", null),
-        ("ora", "decimal-undeclared-fraction", "1.23456", "L4"),
+        ("ora", "decimal-undeclared-fraction", "1.23456", null),
         ("ora", "date32", "2024-01-02T00:00:00.0000000", null),
         ("ora", "timestamp(us)", "2024-01-02T03:04:05.1234560", null),
         ("ora", "timestamp(us,UTC)", "2024-01-02T03:04:05.1234560+00:00", null),

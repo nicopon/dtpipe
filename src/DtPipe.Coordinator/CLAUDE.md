@@ -29,10 +29,10 @@ bytes between nodes.
   transient cut of a node's link, and nothing reports it. `[unchecked: mixed versions - a refresh against an older hub, the resume after a cut]`
 - **A reverse proxy in front of the hub must accept `Expect: 100-continue`.** The client sends it on
   every write stream, and a proxy that answers `417` fails all of them. `[unchecked]`
-- **A reverse proxy that filters by path must let `/api/client/*` through**, as it does
-  `/api/stream/*`: token renewal travels there, and every connection closes at its token's expiry
-  when it is blocked. The write-transport probe's `GET` and `POST` on `/api/stream/probe/send` are under the
-  second prefix; a proxy that blocks them leaves the probe unanswered, and nothing else. `[unchecked]`
+- **A reverse proxy that filters by path must let `DataPlaneRoutes.Prefix` through whole**, `/api` staying the
+  people's: token renewal travels under `<prefix>/api/client/*`, and every connection closes at its token's expiry
+  when it is blocked. The write-transport probe's `GET` and `POST` on `<prefix>/api/stream/probe/send` are under the
+  stream routes; a proxy that blocks them leaves the probe unanswered, and nothing else. `[unchecked]`
 
 ## Hosting
 

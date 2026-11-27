@@ -1,53 +1,9 @@
 // @ts-check
 // Modal dialogs for creating, importing, saving, renaming, deleting, inspecting and pulling jobs.
-// Built with DOM calls only: no HTML strings or inline styles are ever constructed here.
+// Built with DOM calls only: no markup strings or inline styling are ever constructed here.
 
-import { api, el, fill, targetOf } from "./dom.js";
-
-/** @type {{ dlg: HTMLDialogElement, opener: HTMLElement | null, onClose?: () => void } | null} */
-let active = null;
-
-export const shortCommit = (commit) => String(commit || "").slice(0, 8) || "none";
-
-/** Closes the active modal dialog if one is open, restoring focus when safe. */
-export function closeActiveDialog() {
-  if (!active) return;
-  const { dlg, opener, onClose } = active;
-  active = null;
-  if (dlg.open) dlg.close();
-  dlg.remove();
-  onClose?.();
-  if (opener?.isConnected && opener.offsetParent !== null) opener.focus();
-}
-
-/**
- * Opens a modal dialog over the page. Only one dialog is open at a time.
- * `build` receives `{ dialog, body, close }` and populates `body`.
- * @param {string} id
- * @param {string} title
- * @param {(ctx: { dialog: HTMLDialogElement, body: HTMLElement, close: () => void }) => void} build
- * @param {{ onClose?: () => void }} [options]
- */
-export function openDialog(id, title, build, options = {}) {
-  closeActiveDialog();
-  const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-  const dlg = /** @type {HTMLDialogElement} */ (el("dialog", { id, class: "studio-dialog", "aria-labelledby": `${id}-title` }));
-  const body = el("div", { class: "dialog-body" });
-  const close = () => {
-    if (active?.dlg === dlg) closeActiveDialog();
-  };
-  fill(dlg,
-    el("div", { class: "dialog-head" },
-      el("h3", { id: `${id}-title` }, title),
-      el("button", { type: "button", class: "small ghost", "aria-label": "Close dialog", title: "Close", onclick: close }, "×")),
-    body);
-  dlg.addEventListener("cancel", (e) => { e.preventDefault(); close(); });
-  document.body.append(dlg);
-  active = { dlg, opener, onClose: options.onClose };
-  dlg.showModal();
-  build({ dialog: dlg, body, close });
-  return { dialog: dlg, body, close };
-}
+import { api, el, fill } from "./dom.js";
+import { openDialog, shortCommit } from "./dialog.js";
 
 /**
  * Splits a command line into process arguments as a shell would: whitespace separates, quotes group,
@@ -256,16 +212,15 @@ export function renderDiff(beforeText, afterText, beforeLabel, afterLabel) {
 }
 
 /**
- * Dialog to create a blank job with path collision checking and optional title.
- * @param {{ folders: string[], existingPaths: string[], defaultTitle?: string, initialPath?: string, title?: string, hideTitle?: boolean, onCreate: (args: { path: string, title: string }) => Promise<void> | void, onCancel?: () => void }} opts
+ * Dialog to create a blank job with path collision checking.
+ * @param {{ folders: string[], existingPaths: string[], initialPath?: string, title?: string, onCreate: (args: { path: string }) => Promise<void> | void, onCancel?: () => void }} opts
  */
 export function openNewJobDialog(opts) {
-  const { folders, existingPaths, defaultTitle = "", initialPath, title = "New blank job", hideTitle = false, onCreate, onCancel } = opts;
+  const { folders, existingPaths, initialPath, title = "New blank job", onCreate, onCancel } = opts;
   const defaultName = initialPath || (existingPaths.includes("new-job.yaml") ? nextFreePath("new-job.yaml", existingPaths) : "new-job.yaml");
   let submitted = false;
   openDialog("d-new-dialog", title, ({ body, close }) => {
     const createBtn = /** @type {HTMLButtonElement} */ (el("button", { id: "d-new-submit", type: "submit", class: "primary" }, "Create"));
-    const titleInput = /** @type {HTMLInputElement} */ (el("input", { id: "d-new-title", type: "text", value: defaultTitle, placeholder: "Optional job title", "aria-label": "Job title" }));
     const errorBanner = el("p", { id: "d-new-error", class: "bad dialog-error", hidden: true });
     let busy = false;
 
@@ -290,7 +245,7 @@ export function openNewJobDialog(opts) {
         try {
           submitted = true;
           close();
-          await onCreate({ path: s.path, title: hideTitle ? "" : titleInput.value.trim() });
+          await onCreate({ path: s.path });
         } catch (err) {
           submitted = false;
           busy = false;
@@ -301,9 +256,6 @@ export function openNewJobDialog(opts) {
       },
     },
       picker.element,
-      hideTitle ? null : el("div", { class: "dialog-field" },
-        el("label", { for: "d-new-title" }, "Title (optional)"),
-        titleInput),
       errorBanner,
       el("div", { class: "row dialog-actions" },
         el("button", { type: "button", class: "ghost", onclick: close }, "Cancel"),
@@ -379,7 +331,7 @@ export function openFromCliDialog(opts) {
       el("div", { class: "dialog-field" },
         el("label", { for: "d-cli-command" }, "Command line"),
         cmdInput,
-        el("p", { class: "hint" }, "Multi-line commands with trailing \\ are supported. ${{…}} references stay as typed; --bind-input and --bind-output are refused.")),
+        el("p", { class: "hint" }, "Trailing \\ continues a line. ${{…}} stays as typed. --bind-input/--bind-output are refused.")),
       picker.element,
       errorBanner,
       el("div", { class: "row dialog-actions" },
@@ -638,7 +590,7 @@ export function openDeleteDialog(opts) {
     });
 
     fill(body,
-      el("p", {}, "Delete ", el("code", {}, path), " and its local studio metadata from this folder? This cannot be undone."),
+      el("p", {}, "Delete ", el("code", {}, path), " and its studio metadata? Cannot be undone."),
       isOpen && hasEdits ? el("p", { class: "warn" }, "Unsaved changes in the open editor will be lost.") : null,
       publicationId ? el("p", { class: "hint" }, "Only the local file is removed: pipeline ", el("code", {}, publicationId), " remains in the coordinator's library.") : null,
       errorBanner,
@@ -656,7 +608,7 @@ export function openDeleteDialog(opts) {
 export function openInspectLibraryDialog(opts) {
   const { pipeline, linkedPath, syncState, onPull, onOpenLocal } = opts;
   let closed = false;
-  openDialog("d-library-inspect-dialog", pipeline.title || pipeline.id, ({ body, close }) => {
+  openDialog("d-library-inspect-dialog", pipeline.id, ({ body, close }) => {
     const content = el("div", { class: "dialog-form" },
       el("p", { class: "hint" }, "Reading ", el("code", {}, pipeline.id), " from the coordinator…"));
     fill(body, content);
@@ -678,7 +630,6 @@ export function openInspectLibraryDialog(opts) {
 
         fill(content,
           el("p", { class: "hint mono" }, `${remote.id} · commit ${shortCommit(remote.commit)}`),
-          pipeline.description ? el("p", {}, pipeline.description) : null,
           linkedPath ? el("p", { class: "hint" }, "Linked in workspace: ", el("code", {}, linkedPath)) : null,
           el("pre", { class: "dialog-pre mono" }, remote.yaml),
           el("div", { class: "row dialog-actions" },
@@ -885,7 +836,7 @@ export function openPullDialog(opts) {
           }
         },
       },
-        el("p", { class: "hint" }, pipeline.title ? [el("b", {}, pipeline.title), " · "] : null,
+        el("p", { class: "hint" },
           el("code", {}, pipeline.id), " · commit ", el("code", {}, shortCommit(remote.commit))),
         el("details", { class: "dialog-details" },
           el("summary", {}, "Preview YAML"),

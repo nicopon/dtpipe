@@ -151,7 +151,7 @@ public sealed class StudioBrickTests : IAsyncLifetime
 
         var model = new
         {
-            title = "Bricks",
+            header = "Bricks",
             steps = new object[]
             {
                 new { alias = "src", kind = StepKinds.Source, brick = StudioFakes.SourceKey },

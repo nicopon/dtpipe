@@ -1,3 +1,4 @@
+using DtPipe.Coordinator.Contracts;
 using DtPipe.Coordinator.Tests.Infrastructure;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Hosting;
@@ -23,6 +24,9 @@ public sealed class NodeTestHost : IAsyncDisposable
 {
     public IHost Host { get; }
     public string Url { get; }
+
+    /// <summary>Where a TransportR client reaches the hub: the address and the data plane's prefix.</summary>
+    public string HubUrl => Url + DataPlaneRoutes.Prefix;
 
     private NodeTestHost(IHost host, string url)
     {
@@ -69,7 +73,7 @@ public sealed class NodeTestHost : IAsyncDisposable
                             app.UseAuthentication();
                             app.UseAuthorization();
                         }
-                        app.UseEndpoints(endpoints => endpoints.MapDataHub(requireAuth: jwt is not null));
+                        app.UseEndpoints(endpoints => endpoints.MapDataHub(DataPlaneRoutes.Prefix, requireAuth: jwt is not null));
                     });
             })
             .Build();

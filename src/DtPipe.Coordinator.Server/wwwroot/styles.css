@@ -56,6 +56,17 @@ body {
 h2 { font-size: 15px; margin: 0; }
 h3 { font-size: 13px; margin: 14px 0 6px; color: var(--muted); font-weight: 600; }
 .hint { color: var(--muted); font-size: 12.5px; margin: 6px 0; }
+.info { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; min-width: 24px; min-height: 24px; padding: 2px; margin: -4px 0 -4px 2px; cursor: help; color: var(--accent); font-size: 13px; line-height: 1; vertical-align: middle; border-radius: 4px; }
+.info:hover { color: var(--text); }
+.info:focus-visible, .info-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.info-chip { cursor: help; display: inline-flex; align-items: center; min-height: 24px; font-family: inherit; }
+.info-chip.chip { padding: 0 7px; border-color: transparent; background: var(--surface-2); }
+.info-chip.outcome-chip { padding: 0 7px; background: transparent; border-color: currentColor; }
+.info-text { position: fixed; left: 0; top: 0; z-index: 60; width: max-content; max-width: min(380px, 90vw); padding: 6px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); box-shadow: 0 4px 14px rgba(0, 0, 0, .18); font-size: 12.5px; font-weight: 400; line-height: 1.45; text-align: left; white-space: normal; visibility: hidden; opacity: 0; pointer-events: none; transition: opacity .12s; }
+.info-text b { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin-bottom: 2px; }
+.info-text .lib-header { display: block; white-space: pre-line; }
+.info[aria-expanded="true"] > .info-text, .info-chip[aria-expanded="true"] > .info-text { visibility: visible; opacity: 1; pointer-events: auto; }
+@media (prefers-reduced-motion: reduce) { .info-text { transition: none; } }
 button, select, input, textarea {
   font: inherit; color: var(--text); background: var(--surface);
   border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px;

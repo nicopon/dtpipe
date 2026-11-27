@@ -4,7 +4,7 @@
 // job's, shown and never chosen here; the runner is never named. Each brick's mode is chosen in its own box of the diagram; Deploy
 // saves the modes as bindings and arms the pipeline at the commit the library holds, and the pipeline is then run from here. This
 // page is the one place that deploys.
-import { $, ROWS_CROSSED_HINT, api, apiPage, causeKindChip, causeLine, deploymentOf, duration, esc, fmt, isActive, lastRunOf, rowsCrossed, runHref, runStateLabel, store, toast } from "./core.js";
+import { $, ROWS_CROSSED_HINT, api, apiPage, causeKindChip, causeLine, deploymentOf, duration, esc, fmt, info, isActive, lastRunOf, rowsCrossed, runHref, runStateLabel, store, toast } from "./core.js";
 import { crumbs } from "./crumbs.js";
 import { deploymentChip, statusChip } from "./pipeline-status.js";
 import { drawLanes, fragmentJobs, legendFor, planProblems } from "./placement.js";
@@ -130,10 +130,10 @@ async function loadPlan(pipeline, mine) {
 // change after it was checked, is chosen in the Deploy step and saved with it. A strict binding's brick is resolved by the server from
 // the job's text; one in another mode keeps its brick by id, sent back while the node is the same. A pin is the server's: a check writes it.
 const MODES = [
-  ["strict", "The branch must stay word for word the brick it was checked with"],
-  ["contract", "The brick may change while the schema it produces or accepts stays the same"],
-  ["compatible", "The brick may change while its consumers still work"],
-  ["tolerant", "The brick may change as it likes"],
+  ["strict", "Branch must match the checked brick exactly"],
+  ["contract", "Brick may change if its schema stays the same"],
+  ["compatible", "Brick may change if consumers still work"],
+  ["tolerant", "Brick may change freely"],
 ];
 const draftOf = (bindings) => Object.fromEntries(Object.entries(bindings || {}).map(([alias, b]) => [alias, { node: b.node, mode: b.mode || "strict" }]));
 
@@ -211,10 +211,13 @@ function render() {
     : "Deploys the version the library holds";
   const entry = { ...doc, id };
   const hasBricks = Object.keys(offers).length > 0;
+  const firstLine = (doc.yaml || "").split(/\r?\n/, 1)[0];
+  const title = firstLine.startsWith("#") ? firstLine.replace(/^#+\s*/, "").trim() : "";
+  const crumbHtml = title ? `${esc(title)} <span class="mono muted">${esc(id)}</span>` : `<span class="mono">${esc(id)}</span>`;
   host.innerHTML = `
     <div class="view-head">
-      ${crumbs([{ html: "Library", href: "#/library" }, { html: `${esc(doc.yaml.split("\n")[0].replace(/^#\s*/, ""))} <span class="mono muted">${esc(id)}</span>` }])}
-      <p class="hint">Planned at each launch: every brick on the node it is bound to, every other step on a runner chosen then. A source wired straight into an output crosses no runner. A launch of the version the library holds ${plan.deployable ? `would run${runner ? ` on ${esc(runner)}` : ""} now` : armable ? "would be refused until Deploy pins the bricks no check has pinned" : "would be refused now"}.</p>
+      ${crumbs([{ html: "Library", href: "#/library" }, { html: crumbHtml }])}
+      <p class="hint">Planned at each launch. ${plan.deployable ? `Would run${runner ? ` on ${esc(runner)}` : ""} now.` : armable ? "Refused until Deploy pins the bricks." : "Would be refused now."} ${info("Bricks run on their node, every other step on a runner chosen at launch. A source wired straight into an output crosses no runner.")}</p>
     </div>
     ${planProblems(plan).length ? `<section class="card"><ul class="msgs errors">${planProblems(plan).map((e) => `<li>${esc(e)}</li>`).join("")}</ul></section>` : ""}
     ${missingEdgesCard()}
@@ -227,13 +230,13 @@ function render() {
           <button data-needs="designer" id="x-deploy" class="${upToDate ? "" : "primary"}" ${canDeploy && !busy ? "" : "disabled"} title="${esc(deployTitle)}">Deploy</button>
           <button data-needs="designer" id="x-run" class="${upToDate ? "primary" : ""}" ${canRun && !busy ? "" : "disabled"}>Run</button>
         </span></div>
-      <div class="card-sub">${hasBricks ? `<span class="hint">A brick's mode says how it may change after it was checked; Deploy saves the modes.</span>` : "<span></span>"}${legendFor(plan, edgeProtections)}</div>
+      <div class="card-sub">${hasBricks ? `<span class="hint">Modes apply on Deploy.</span>` : "<span></span>"}${legendFor(plan, edgeProtections)}</div>
       <div class="lanes-scroll">
         <div class="lanes-head"><span>sources</span><span>runner</span><span>sinks</span></div>
         <div class="lanes" id="x-lanes"></div>
       </div>
       ${strayBindings()}
-      ${run?.result && !runMatches ? `<p class="hint">The last run's row counts are not drawn on the edges. It ran a plan with other edges than this one.</p>` : ""}
+      ${run?.result && !runMatches ? `<p class="hint">Row counts hidden: the last run used other edges.</p>` : ""}
     </section>
     ${recentRunsCard()}
     <section class="card"><h2>Fragment jobs</h2>${fragmentJobs(plan)}</section>
@@ -260,7 +263,7 @@ function missingEdgesCard() {
   return `<section class="card"><div class="card-head"><h2>Missing in the flow matrix</h2>
       ${admin ? `<span class="actions"><button id="x-allow-edges" class="primary" ${busy ? "disabled" : ""}>Allow ${edges.length > 1 ? "these edges" : "this edge"}</button></span>` : ""}</div>
     <ul class="msgs">${edges.map((e) => `<li><span class="mono">${esc(e.from)}</span> → <span class="mono">${esc(e.to)}</span></li>`).join("")}</ul>
-    <p class="hint">${admin ? "Allowing adds these edges to the matrix and revokes nothing; the change is audited in Access." : "An administrator allows them, here or in Access."}</p></section>`;
+    <p class="hint">${admin ? "Adds the edges to the matrix; revokes nothing; audited." : "An admin allows them here or in Access."}</p></section>`;
 }
 
 
@@ -329,7 +332,7 @@ function versionsCard() {
       ${shown ? `<div class="grid2"><div><h3>Change</h3><pre class="diff">${diffHtml(shown.diff)}</pre></div><div><h3>Job at ${esc(shown.commit.slice(0, 8))}</h3><pre>${esc(shown.yaml)}</pre></div></div>` : ""}</div>`;
   return `<section class="card"><div class="card-head"><h2>Versions</h2>
       <span class="actions"><button id="x-versions" class="small ghost">${versionsOpen ? "Hide versions" : "Show versions"}</button></span></div>
-    <p class="hint">Each save is a commit: show what it changed and the job it left, or restore it.</p>
+    <p class="hint">Each save is a commit: diff it or restore it.</p>
     ${panel}</section>`;
 }
 

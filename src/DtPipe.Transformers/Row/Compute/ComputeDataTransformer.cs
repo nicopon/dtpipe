@@ -20,7 +20,33 @@ namespace DtPipe.Transformers.Row.Compute;
 public sealed class ComputeDataTransformer : BaseColumnarTransformer, IRequiresOptions<DtPipe.Transformers.Row.Compute.ComputeOptions>
 {
     private static bool IsNullCell(IArrowArray column, int row)
-        => column is DictionaryArray ? ArrowTypeMap.GetValue(column, row) is null : column.IsNull(row);
+    {
+        if (column is DictionaryArray dict)
+        {
+            if (dict.IsNull(row) || dict.Indices.IsNull(row)) return true;
+            if (dict.Dictionary.NullCount == 0) return false;
+            int idx = DictionaryIndexAt(dict.Indices, row);
+            return (uint)idx >= (uint)dict.Dictionary.Length || IsNullCell(dict.Dictionary, idx);
+        }
+
+        return column.IsNull(row);
+    }
+
+    private static int DictionaryIndexAt(IArrowArray indices, int row) => indices switch
+    {
+        Int8Array a => a.Values[row] is var v && v >= 0 ? v : -1,
+        Int16Array a => a.Values[row] is var v && v >= 0 ? v : -1,
+        Int32Array a => a.Values[row] is var v && v >= 0 ? v : -1,
+        Int64Array a => a.Values[row] is var v and >= 0 and <= int.MaxValue ? (int)v : -1,
+        UInt8Array a => a.Values[row],
+        UInt16Array a => a.Values[row],
+        UInt32Array a => a.Values[row] <= int.MaxValue ? (int)a.Values[row] : -1,
+        UInt64Array a => a.Values[row] <= int.MaxValue ? (int)a.Values[row] : -1,
+        _ => ArrowTypeMap.GetValue(indices, row) is { } v
+            && Convert.ToInt64(v, System.Globalization.CultureInfo.InvariantCulture) is var l and >= 0 and <= int.MaxValue
+            ? (int)l
+            : -1,
+    };
 
     private const int ParallelBatchThreshold = 1024;
 
@@ -113,10 +139,10 @@ public sealed class ComputeDataTransformer : BaseColumnarTransformer, IRequiresO
             }
 
             writtenIndices.Add(colIndex);
-            var (function, wrappedScript) = CompileBody(engine, script);
+            var (function, compiledBody) = JsScriptCompiler.Compile(engine, "row", script);
             compiledInitialFunctions[procIdx] = function;
-            bool isPure = JsAstAnalyzer.IsPureForParallel(wrappedScript);
-            processors[procIdx] = new ScriptColumnProcessor(procIdx, colIndex, wrappedScript, isPure);
+            bool isPure = JsAstAnalyzer.IsPureForParallel(JsScriptCompiler.AsFunctionExpression("row", compiledBody));
+            processors[procIdx] = new ScriptColumnProcessor(procIdx, colIndex, compiledBody, isPure);
             procIdx++;
         }
 
@@ -188,7 +214,8 @@ public sealed class ComputeDataTransformer : BaseColumnarTransformer, IRequiresO
         IArrowArray[] outArrays,
         CancellationToken ct)
     {
-        bool parallel = _jsEngineProvider.EnginePerThread
+        bool parallel = Environment.ProcessorCount > 1
+            && _jsEngineProvider.EnginePerThread
             && batch.Length >= ParallelBatchThreshold
             && processors.All(p => p.IsPure);
 
@@ -268,7 +295,8 @@ public sealed class ComputeDataTransformer : BaseColumnarTransformer, IRequiresO
             {
                 var col = batch.Column(proc.ColumnIndex);
                 // A dictionary's entry may be null while its index is not: the array's own null count misses it.
-                if (col.NullCount > 0 || col is DictionaryArray) skipInputCols[p] = col;
+                if (col.NullCount > 0 || (col is DictionaryArray dict && (dict.Indices.NullCount > 0 || dict.Dictionary.NullCount > 0)))
+                    skipInputCols[p] = col;
             }
         }
 
@@ -300,9 +328,18 @@ public sealed class ComputeDataTransformer : BaseColumnarTransformer, IRequiresO
         }
 
         var columns = new IArrowArray[count];
-        for (int p = 0; p < count; p++)
-            columns[p] = ArrowTypeMapper.BuildArray(builders[p]);
-        return columns;
+        try
+        {
+            for (int p = 0; p < count; p++)
+                columns[p] = ArrowTypeMapper.BuildArray(builders[p]);
+            return columns;
+        }
+        catch
+        {
+            for (int p = 0; p < count; p++)
+                columns[p]?.Dispose();
+            throw;
+        }
     }
 
     public override object?[]? Transform(IReadOnlyList<object?> row)
@@ -378,40 +415,12 @@ public sealed class ComputeDataTransformer : BaseColumnarTransformer, IRequiresO
         }
     }
 
-    /// <summary>
-    /// Compiles a column's script as <c>function(row)</c>. A body that parses as one expression is
-    /// returned as such, so an expression containing the word "return" (an immediately invoked
-    /// function) still yields its value; anything else is taken as the statements of the function.
-    /// </summary>
-    private static (JsValue Function, string WrappedScript) CompileBody(Engine engine, string script)
-    {
-        var body = script.Trim();
-        var expression = body.TrimEnd(';').Trim();
-
-        if (expression.Length > 0)
-        {
-            var asExpression = $"function(row) {{ return ({expression}\n); }}";
-            try
-            {
-                return (engine.Evaluate($"({asExpression})"), asExpression);
-            }
-            catch (JavaScriptException)
-            {
-                // Defining a function runs nothing, so the only failure here is a syntax error: the
-                // body is not one expression. Fall through to the statement form below.
-            }
-        }
-
-        var asStatements = $"function(row) {{ {body} }}";
-        return (engine.Evaluate($"({asStatements})"), asStatements);
-    }
-
     private CompiledComputeState GetOrCreateState(Engine engine)
         => _engineCache.GetValue(engine, e =>
         {
             var functions = new JsValue[_processors!.Length];
             for (int i = 0; i < _processors.Length; i++)
-                functions[i] = e.Evaluate($"({_processors[i].WrappedScript})");
+                functions[i] = JsScriptCompiler.CompilePrepared(e, "row", _processors[i].CompiledBody);
             return CreateState(e, functions);
         });
 
@@ -436,6 +445,6 @@ public sealed class ComputeDataTransformer : BaseColumnarTransformer, IRequiresO
     private sealed record ScriptColumnProcessor(
         int Index,
         int ColumnIndex,
-        string WrappedScript,
+        string CompiledBody,
         bool IsPure);
 }

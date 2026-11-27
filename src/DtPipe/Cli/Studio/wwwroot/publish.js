@@ -2,9 +2,11 @@
 // Publishing the saved job to the coordinator's library: pre-checks (runner dry run and edge protections),
 // unified publish modal, 412 conflict diff & resolution, and the Publish tab view.
 
-import { api, el, fill, status } from "./dom.js";
+import { api, el, fill, info, status, tabOf } from "./dom.js";
 import { brickBranches, holdsEdits, showTab } from "./designer.js";
-import { openDialog, renderDiff, shortCommit } from "./dialogs.js";
+import { openDialog, shortCommit } from "./dialog.js";
+import { renderDiff } from "./job-dialogs.js";
+import { openCoordinatorConnect } from "./coordinator.js";
 import { invalidate } from "./render.js";
 import { sequence, state } from "./state.js";
 
@@ -112,60 +114,62 @@ const brokenNote = () => {
 const askPublication = (saved) => Promise.all([checkPublication(saved), judgeEdges(saved)]);
 
 const refusalView = (check) => [
-  el("p", { class: "warn" }, "The runner's dry run refuses this job, as a publication would:"),
+  el("p", { class: "warn" }, "The dry run refuses this job:"),
   el("pre", {}, check.report || ""),
   brickBranches().length ? null
-    : el("p", { class: "hint" }, "None of these steps is a coordinator's brick, and a published job reads and writes bricks."),
+    : el("p", { class: "hint" }, "No step is a coordinator brick: a published job reads and writes bricks."),
 ];
 
 export function publicationProblems() {
-  return [refusalProblems(), edgeProblems()];
+  const refusal = refusalProblems();
+  return tabOf([refusal.body, edgeProblems()], refusal.actions);
 }
 
+/** The first verdict of Problems: its words, and the button that asks for it, which sits in the drawer's action bar. */
 function refusalProblems() {
   const title = el("h3", {}, "Would be refused at publication");
   if (!state.coordinator) {
-    return [title, el("p", { class: "hint" }, "No verdict: this studio was opened without --coordinator, whose runner judges a publication.")];
+    return { body: [title, el("p", { class: "hint" }, "No coordinator connected.")], actions: [] };
   }
   if (!signedIn()) {
-    return [title, el("p", { class: "hint" }, "No verdict while signed out: the check reads each brick's rows through the coordinator. Sign in to ask for it.")];
+    return { body: [title, el("p", { class: "hint" }, "Signed out: sign in to check.")], actions: [] };
   }
   const check = publication.check;
   const current = currentCheck();
-  const ask = el("div", { class: "row" },
-    el("button", { class: "small", disabled: !!check?.pending, onclick: () => askPublication(false) },
-      check?.pending ? "Checking…" : current ? "Check again" : "Check publication"),
-    el("span", { class: "hint" }, "The runner's dry run over one row of each brick: it starts a process, so it runs when asked and before Publish, never as you edit."));
-  if (check?.pending) return [title, ask, el("p", { class: "hint" }, "The runner's dry run is running…")];
-  if (!current) return [title, ask, check ? el("p", { class: "hint" }, "The steps changed since the last check.") : null];
-  if (current.error) return [title, ask, el("p", { class: "warn" }, `The check did not run: ${current.error}`)];
+  const ask = el("button", { class: "small", disabled: !!check?.pending, onclick: () => askPublication(false) },
+    check?.pending ? "Checking…" : current ? "Check again" : "Check publication");
+  const why = el("p", { class: "hint" }, "Runner dry run, 1 row per brick. ", info("It starts a process: it runs when asked and before Publish, never as you edit."));
+  const said = (...parts) => ({ body: [title, why, ...parts], actions: [ask] });
+  if (check?.pending) return said(el("p", { class: "hint" }, "Dry run in progress…"));
+  if (!current) return said(check ? el("p", { class: "hint" }, "Steps changed since the last check.") : null);
+  if (current.error) return said(el("p", { class: "warn" }, `The check did not run: ${current.error}`));
   if (current.ok) {
-    return [title, ask, el("p", { class: "good" }, "Nothing: the runner's dry run takes this job."),
-      el("p", { class: "hint" }, "A publication also has each sink brick's node judge its output, which this check does not ask.")];
+    return said(el("p", { class: "good" }, "Accepted by the dry run."),
+      el("p", { class: "hint" }, "Sink nodes are not consulted here."));
   }
-  return [title, ask, refusalView(current)];
+  return said(refusalView(current));
 }
 
 function edgeProblems() {
   const title = el("h3", {}, "What the coordinator's nodes would do with the edges");
-  if (!state.coordinator) return [title, el("p", { class: "hint" }, "No verdict: this studio was opened without --coordinator, whose nodes judge the edges.")];
-  if (!signedIn()) return [title, el("p", { class: "hint" }, "No verdict while signed out: the coordinator's nodes judge the edges. Sign in to ask.")];
+  if (!state.coordinator) return [title, el("p", { class: "hint" }, "No coordinator connected.")];
+  if (!signedIn()) return [title, el("p", { class: "hint" }, "Signed out: sign in to check.")];
   const verdict = publication.edges;
   const current = currentEdges();
-  const asked = el("span", { class: "hint" }, "Asked with Check publication and before Publish, never as you edit: the nodes' state is live.");
-  if (verdict?.pending) return [title, el("p", { class: "hint" }, "The coordinator is judging the edges…")];
-  if (!current) return [title, asked, verdict ? el("p", { class: "hint" }, "The steps changed since the edges were last judged.") : null];
-  if (current.error) return [title, el("p", { class: "hint" }, `No verdict: the coordinator's judgment of the edges was not read (${current.error}).`)];
+  const asked = el("span", { class: "hint" }, "On demand: node state is live.");
+  if (verdict?.pending) return [title, el("p", { class: "hint" }, "Judging the edges…")];
+  if (!current) return [title, asked, verdict ? el("p", { class: "hint" }, "Steps changed since the last verdict.") : null];
+  if (current.error) return [title, el("p", { class: "hint" }, `Not read: ${current.error}`)];
   const broken = brokenEdges(current);
   if (broken.length) {
     return [title,
-      el("p", { class: "warn" }, "The coordinator would refuse to arm a job with these edges as its nodes stand now:"),
+      el("p", { class: "warn" }, "Would be refused as the nodes stand:"),
       el("ul", { class: "msgs warn" }, broken.map((edge) => el("li", {}, `${edgeName(edge)}: ${edge.refusal}`))),
-      el("p", { class: "hint" }, "Publishing goes on: the nodes may change before the job is armed.")];
+      el("p", { class: "hint" }, "Publishing is not blocked: node state may change before arming.")];
   }
   const edges = current.edges ?? [];
   if (!current.deployable || (edges.length > 0 && edges.every((edge) => edge.protection == null))) {
-    return [title, el("p", { class: "hint" }, `No verdict: ${current.refusal || "the coordinator cannot tell now how its nodes would hold these edges."}`), asked];
+    return [title, el("p", { class: "hint" }, `No verdict: ${current.refusal || "the coordinator cannot tell now."}`), asked];
   }
   return [title, el("p", { class: "good" }, "No edge of this job is broken."), asked];
 }
@@ -179,7 +183,7 @@ export async function publish(options = {}) {
   const job = state.job;
   if (!job) return;
   if (holdsEdits() || !job.hash) {
-    status("Save the job first: the coordinator receives the job saved in the folder.", "bad");
+    status("Save the job first.", "bad");
     return;
   }
   if (state.cards.result?.errors?.length) {
@@ -445,20 +449,22 @@ export async function publish(options = {}) {
 
 /** The Publish tab. */
 export function publicationView() {
-  if (!state.coordinator) return el("p", { class: "hint" }, "Open the studio with --coordinator to publish a job into a coordinator's library.");
+  if (!state.coordinator) {
+    return tabOf(el("p", { class: "hint" }, "Connect a coordinator to publish."),
+      [el("button", { id: "publish-connect", class: "small primary", onclick: openCoordinatorConnect }, "Connect a coordinator…")]);
+  }
   const check = currentCheck();
   return [check && check.ok === false ? refusalView(check) : null, outcomeView(publication.outcome)];
 }
 
 function outcomeView(outcome) {
   if (!outcome) {
-    return el("p", { class: "hint" }, "Publish sends the job as saved in this folder to the coordinator's library. Its layout and its launch values stay on this machine: "
-      + "the coordinator has no launch value to give a ${{NAME}} variable, so its check refuses a job that reads one.");
+    return el("p", { class: "hint" }, "Sends the saved job to the library. Layout and launch values stay here: a ${{NAME}} variable is refused.");
   }
   if (outcome.refused) {
     const { error, report } = outcome.refused;
     return [el("p", { class: "warn" }, `${outcome.id} was not published: ${error}`),
-      report ? el("pre", {}, report) : el("p", { class: "hint" }, "The check could not run: it needs a runner and the nodes of the bricks online.")];
+      report ? el("pre", {}, report) : el("p", { class: "hint" }, "Check not run: needs a runner and the bricks' nodes online.")];
   }
   if (outcome.conflict) {
     const { error, commit } = outcome.conflict;
@@ -467,7 +473,7 @@ function outcomeView(outcome) {
   }
   const saved = outcome.saved;
   return [
-    el("p", { class: "good" }, `${saved.id} is ${outcome.unchanged ? "already published, nothing changed, at" : "published at"} the commit `, el("code", {}, short(saved.commit)), "."),
-    saved.deployed ? el("p", { class: "warn" }, "The version in production stays the previous one until you press Deploy in the coordinator's console.") : null,
+    el("p", { class: "good" }, `${saved.id} ${outcome.unchanged ? "unchanged at" : "published at"} `, el("code", {}, short(saved.commit)), "."),
+    saved.deployed ? el("p", { class: "warn" }, "Not live until you Deploy in the coordinator.") : null,
   ];
 }

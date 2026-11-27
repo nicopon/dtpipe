@@ -21,7 +21,7 @@ public sealed class DesignServiceTests
         new(new JsonObject { ["type"] = "overwrite", ["mappings"] = new JsonObject { ["email"] = "hidden" } });
 
     private static DesignModel Masking() => new(
-        "Masked people", "Copies people without their email.", ["review-by: data-team"],
+        "Masked people\nCopies people without their email.\nreview-by: data-team",
         [
             new DesignStep("people", StepKinds.Source, "a/people"),
             new DesignStep("masked", StepKinds.Transform, From: ["people"], Transformers: Overwrite()),
@@ -74,9 +74,7 @@ public sealed class DesignServiceTests
         var back = WithBricks.Decompose(composed.Yaml);
 
         Assert.Empty(back.Errors);
-        Assert.Equal("Masked people", back.Model.Title);
-        Assert.Equal("Copies people without their email.", back.Model.Description);
-        Assert.Equal(["review-by: data-team"], back.Model.Directives);
+        Assert.Equal("Masked people\nCopies people without their email.\nreview-by: data-team", back.Model.Header);
         Assert.Equal(
             ["people:source:a/people", "masked:transform:", "archive:sink:b/archive"],
             back.Model.Steps.Select(s => $"{s.Alias}:{s.Kind}:{s.Brick}"));
@@ -91,7 +89,7 @@ public sealed class DesignServiceTests
             ["type"] = "overwrite",
             ["mappings"] = new JsonObject { ["email"] = "~", ["phone"] = null, ["age"] = 5 },
         });
-        var composed = WithBricks.Compose(new DesignModel("T", null, [],
+        var composed = WithBricks.Compose(new DesignModel("T",
         [
             new DesignStep("people", StepKinds.Source, "a/people"),
             new DesignStep("masked", StepKinds.Transform, From: ["people"], Transformers: transformers),
@@ -124,7 +122,8 @@ public sealed class DesignServiceTests
         Assert.Equal(
             ["says_more:branch", "not_offered:branch", "wrong_way:branch"],
             result.Model.Steps.Select(s => $"{s.Alias}:{s.Kind}"));
-        Assert.Equal(JobYaml.Serialize(JobYaml.Parse(job)), result.Yaml[result.Yaml.IndexOf('\n')..].TrimStart('\n'));
+        Assert.Null(result.Model.Header);
+        Assert.Equal(JobYaml.Serialize(JobYaml.Parse(job)), result.Yaml);
     }
 
     [Fact]
@@ -158,9 +157,8 @@ public sealed class DesignServiceTests
             ["a:branch", "b:branch", "both:merge", "q:sql", "out:branch"],
             result.Model.Steps.Select(s => $"{s.Alias}:{s.Kind}"));
         Assert.Equal("SELECT * FROM both", result.Model.Steps.Single(s => s.Alias == "q").Query);
-        Assert.Equal(
-            JobYaml.Serialize(JobYaml.Parse(job)),
-            result.Yaml[result.Yaml.IndexOf('\n')..].TrimStart('\n'));
+        Assert.Null(result.Model.Header);
+        Assert.Equal(JobYaml.Serialize(JobYaml.Parse(job)), result.Yaml);
     }
 
     [Fact]
@@ -190,20 +188,121 @@ public sealed class DesignServiceTests
             _ => [Raw("lonely", "input: csv:a.csv\n")],
         };
 
-        var result = NoBricks.Compose(new DesignModel("T", null, null, steps));
+        var result = NoBricks.Compose(new DesignModel("T", steps));
 
         Assert.Contains(result.Errors, e => e.Contains(expected));
     }
 
     [Fact]
-    public void The_Header_Separates_Directives_From_Prose()
+    public void The_Header_Keeps_Comments_Verbatim_Without_Parsing_Or_Wrapping()
     {
-        var (title, description, directives) = DesignService.ReadHeader(
-            "# Title\n# First line\n# lab-check: SELECT 1\n# second line: not a directive\nmain:\n  input: csv:a.csv\n");
+        const string job = """
+            # First line: kept as-is
+            #
+            #   indented line with more than ninety-six characters so we verify nothing wraps or collapses spaces across lines
+            # lab-check: SELECT count(*) FROM customers
+            main:
+              input: csv:a.csv
+              output: csv:b.csv
+            """;
 
-        Assert.Equal("Title", title);
-        Assert.Equal("First line second line: not a directive", description);
-        Assert.Equal(["lab-check: SELECT 1"], directives);
+        var decomposed = NoBricks.Decompose(job);
+
+        Assert.Equal(
+            "First line: kept as-is\n\n  indented line with more than ninety-six characters so we verify nothing wraps or collapses spaces across lines\nlab-check: SELECT count(*) FROM customers",
+            decomposed.Model.Header);
+        Assert.Equal(job.Replace("\r\n", "\n") + "\n", decomposed.Yaml);
+    }
+
+    [Fact]
+    public void Branch_Comments_Under_Alias_Round_Trip_And_Scalars_Are_Ignored()
+    {
+        const string job = """
+            # Job header
+            a:
+              # Source branch comment
+              # Second line
+              input: csv:a.csv
+            # Between-branch comment is not attached
+            q:
+              # DuckDB step
+              from: a
+              provider-options:
+                sql:
+                  query: |-
+                    # Not a YAML comment
+                    SELECT * FROM a
+            out:
+              from: q
+              # Mid-branch comment is not attached
+              output: csv:out.csv
+            """;
+
+        var decomposed = NoBricks.Decompose(job);
+
+        Assert.Equal("Job header", decomposed.Model.Header);
+        Assert.Equal("Source branch comment\nSecond line", decomposed.Model.Steps.Single(s => s.Alias == "a").Comment);
+        Assert.Equal("DuckDB step", decomposed.Model.Steps.Single(s => s.Alias == "q").Comment);
+        Assert.Null(decomposed.Model.Steps.Single(s => s.Alias == "out").Comment);
+
+        var recomposed = NoBricks.Decompose(decomposed.Yaml);
+        Assert.Equal("Source branch comment\nSecond line", recomposed.Model.Steps.Single(s => s.Alias == "a").Comment);
+        Assert.Equal("DuckDB step", recomposed.Model.Steps.Single(s => s.Alias == "q").Comment);
+        Assert.Contains("  # Source branch comment\n  # Second line\n  input: csv:a.csv", decomposed.Yaml);
+        Assert.Contains("  # DuckDB step\n  from: a", decomposed.Yaml);
+    }
+
+    [Theory]
+    [InlineData("\r")]
+    [InlineData("\u0085")]
+    [InlineData("\u2028")]
+    [InlineData("\u2029")]
+    public void Comments_With_Yaml_Line_Breaks_Never_Break_Out_Of_Comments(string lineBreak)
+    {
+        var model = new DesignModel(
+            $"header{lineBreak}injected:{lineBreak}  input: csv:secret.csv",
+            [
+                new DesignStep("a", StepKinds.Source, "a/people", Comment: $"step{lineBreak}output: csv:pwn.csv"),
+                new DesignStep("b", StepKinds.Sink, "b/archive", From: ["a"]),
+            ]);
+
+        var composed = WithBricks.Compose(model);
+        var back = WithBricks.Decompose(composed.Yaml);
+
+        Assert.Empty(composed.Errors);
+        Assert.Equal(["a", "b"], back.Model.Steps.Select(s => s.Alias));
+        Assert.DoesNotContain("\ninjected:", composed.Yaml);
+        Assert.DoesNotContain("\noutput: csv:pwn.csv", composed.Yaml);
+    }
+
+    [Fact]
+    public void ReadHeader_Stops_At_First_Root_Key_And_Ignores_Branch_Comments_Or_Later_Errors()
+    {
+        const string yaml = """
+            # Title
+            # Subtitle
+            first:
+              # Branch comment ignored in headerOnly mode
+              input: csv:a.csv
+            second: [unterminated
+            """;
+
+        var (header, branches) = JobYaml.ReadComments(yaml, headerOnly: true);
+
+        Assert.Equal("Title\nSubtitle", header);
+        Assert.Empty(branches);
+        Assert.Equal("Title\nSubtitle", DesignService.ReadHeader(yaml));
+    }
+
+    [Fact]
+    public void A_Branch_Comment_Is_Read_From_Its_Own_Line_Below_A_Scalar_Holding_A_Unicode_Line_Break()
+    {
+        // The scalar folds across the break, which the scanner counts as a line; a reader off by one line takes "Two" for "One".
+        var yaml = "first:\n  input: \"csv:a\u2028    b.csv\"\nsecond:\n  # One\n  # Two\n  input: csv:c.csv\n";
+
+        var (_, branches) = JobYaml.ReadComments(yaml);
+
+        Assert.Equal("One\nTwo", branches["second"]);
     }
 
     /// <summary>

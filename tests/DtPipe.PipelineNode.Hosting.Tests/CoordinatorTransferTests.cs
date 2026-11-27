@@ -1,3 +1,4 @@
+using DtPipe.Coordinator.Contracts;
 using DtPipe.Coordinator.Server.Access;
 using Microsoft.Extensions.DependencyInjection;
 using TransportR.Client;
@@ -42,8 +43,8 @@ public sealed class CoordinatorTransferTests
 
             var sendHandle = new TaskCompletionSource<ByteSend>(TaskCreationOptions.RunContinuationsAsynchronously);
             var receiveHandle = new TaskCompletionSource<ByteReceive>(TaskCreationOptions.RunContinuationsAsynchronously);
-            sender.OnSendRequested += send => { sendHandle.TrySetResult(send); return Task.CompletedTask; };
-            receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+            sender.OnSendRequested(send => { sendHandle.TrySetResult(send); return Task.CompletedTask; });
+            receiver.OnTransferStarted(receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; });
 
             await sender.ConnectAsync();
             await receiver.ConnectAsync();
@@ -80,7 +81,7 @@ public sealed class CoordinatorTransferTests
     }
 
     private static ByteStreamClient Client(string url, OidcTokenClient tokens) => new ByteStreamClientBuilder(batchBytes: 65536)
-        .WithUrl(url)
+        .WithUrl(url + DataPlaneRoutes.Prefix)
         .WithTokenProvider(() => tokens.GetAsync())
         .Build();
 }

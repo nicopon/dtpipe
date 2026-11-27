@@ -432,4 +432,20 @@ public class FilterDataTransformerTests : IDisposable
         transformer.Transform(new object?[] { -1, 50 }).Should().BeNull();
         transformer.Transform(new object?[] { 10, 200 }).Should().BeNull();
     }
+
+    [Fact]
+    public async Task Filter_Drains_Queued_Promise_Reactions_Even_When_Null_Read_Throws()
+    {
+        using var limitedJs = new LimitedJsEngineProvider();
+        var options = new FilterOptions { Filters = ["Promise.resolve().then(() => { while (true) { } }); return row.Name.length > 0;"] };
+        var spinning = new FilterDataTransformer(options, limitedJs);
+        await spinning.InitializeAsync(TextColumn("Name"));
+
+        var act = () => spinning.Transform([null]);
+        act.Should().Throw<InvalidOperationException>();
+
+        var next = new FilterDataTransformer(new FilterOptions { Filters = ["row.Name == 'Grace'"] }, limitedJs);
+        await next.InitializeAsync(TextColumn("Name"));
+        next.Transform(["Grace"]).Should().NotBeNull();
+    }
 }

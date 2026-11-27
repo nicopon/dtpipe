@@ -15,13 +15,13 @@ namespace DtPipe.Cli.Studio;
 internal sealed class StudioAgentTools : IAgentToolProvider
 {
     private readonly IAgentToolProvider _inner;
-    private readonly StudioServer _server;
+    private readonly AgentRoutes _host;
     private readonly List<ToolDefinition> _offered;
 
-    public StudioAgentTools(IAgentToolProvider inner, StudioServer server)
+    public StudioAgentTools(IAgentToolProvider inner, AgentRoutes host)
     {
         _inner = inner;
-        _server = server;
+        _host = host;
         _offered = [.. inner.GetToolDefinitions(), .. Definitions];
     }
 
@@ -49,18 +49,18 @@ internal sealed class StudioAgentTools : IAgentToolProvider
         switch (McpToolReflector.Normalise(toolName))
         {
             case "listjobs":
-                return ToolResult.FromJson(_server.AgentJobs());
+                return ToolResult.FromJson(_host.AgentJobs());
             case "readjob":
-                return ToolResult.FromJson(await _server.AgentReadJobAsync(Arg(args, "path"), ct));
+                return ToolResult.FromJson(await _host.AgentReadJobAsync(Arg(args, "path"), ct));
             case "savejob":
                 {
                     var yaml = Arg(args, "yamlContent") ?? Arg(args, "yaml");
                     if (await RefusalOfInvalidJobAsync(yaml, ct) is { } refusal) return ToolResult.FromJson(refusal);
-                    return ToolResult.FromJson(await _server.AgentSaveJobAsync(Arg(args, "path"), yaml, ct));
+                    return ToolResult.FromJson(await _host.AgentSaveJobAsync(Arg(args, "path"), yaml, ct));
                 }
         }
         if (!_inner.RunsPipeline(toolName)) return await _inner.InvokeToolAsync(toolName, args, ct);
-        using (await _server.TakeSlotAsync("The agent's dry-run", ct))
+        using (await _host.TakeSlotAsync("The agent's dry-run", ct))
             return await _inner.InvokeToolAsync(toolName, args, ct);
     }
 

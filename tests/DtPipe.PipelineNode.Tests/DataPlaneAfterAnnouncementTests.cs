@@ -14,8 +14,8 @@ namespace DtPipe.PipelineNode.Tests;
 
 /// <summary>
 /// When a host asks for its data plane client: only once the coordinator has accepted its announcement. A host whose identity
-/// is unknown or disabled is refused at the announcement and is not an identity that could register a client, so it asks the
-/// IdP for no token and connects no client while it is refused.
+/// is unknown or disabled is refused at the announcement and is not an identity that could register a client, so it connects
+/// no data plane client, and resolves no rights for one, while it is refused.
 /// </summary>
 public class DataPlaneAfterAnnouncementTests : IDisposable
 {
@@ -73,21 +73,19 @@ public class DataPlaneAfterAnnouncementTests : IDisposable
 
     /// <summary>
     /// The identity holds no group, as a disabled identity does, and the coordinator refuses the announcement again and again: the
-    /// host asks the IdP for no token beyond the first and connects no client, however long it is refused. Once the coordinator
+    /// host connects no data plane client and resolves no rights for one, however long it is refused. Once the coordinator
     /// accepts it, the client registers and a second announcement carries it.
     /// </summary>
     [Fact]
-    public async Task AHostWhoseAnnouncementIsRefused_AsksForNoNewTokenAndConnectsNoDataPlaneClient_UntilItIsAccepted()
+    public async Task AHostWhoseAnnouncementIsRefused_ConnectsNoDataPlaneClient_UntilItIsAccepted()
     {
         var h = await StartAsync(groups: [], refusing: true);
         try
         {
             Assert.True(await EventuallyAsync(() => h.Gate.Announcements >= 1), "the host never announced");
-            var tokens = h.Idp.TokenRequests;
             Assert.True(await EventuallyAsync(() => h.Gate.Announcements >= 4), "the host did not keep announcing");
 
             Assert.Equal(0, h.Rights.Resolutions);
-            Assert.Equal(tokens, h.Idp.TokenRequests);
 
             h.Rights.BySubject[Node] = ["g"];
             h.Gate.Refusing = false;

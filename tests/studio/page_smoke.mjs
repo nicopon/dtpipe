@@ -6,8 +6,10 @@
 // save refused then accepted, a run, a question, a plan put on the cards, a job holding a credential, Stop, a reload mid-turn, an
 // edit made while a save waits, the person's save over the file the agent saved, a turn that fails); Undo of a deleted card and of
 // a plan, and the cards a plan names; a preview stopped
+// a model connected from the page with no flag, and read back by a studio started again; another folder opened from the page,
+// refused while changes are unsaved, then discarded or saved first;
 // while its source is still answering; Tab to a card, a wire made and undone from the keyboard, every control named,
-// the text at 4.5:1 in both themes.
+// the text at 4.5:1 in both themes; the drawer's actions in view at its smallest and tallest and in a short window.
 //
 // Local only: it needs Node 22+ (native WebSocket, no dependency), Chrome, and a built dtpipe. CI never
 // runs it. The page is embedded in the DLL, so build before playing it.
@@ -79,7 +81,9 @@ function kill(child) {
 async function startStudio(folder, extra = []) {
   const [command, args] = BIN ? [BIN, ["studio", folder, ...extra]] : ["dotnet", [DLL, "studio", folder, ...extra]];
   // Started in the job's folder: a job that writes a relative path writes there, never into the directory the test was run from.
-  const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], cwd: folder });
+  // What the studio remembers is kept in the folder's own hidden directory, so a scenario never reads or writes the person's.
+  const env = { ...process.env, DTPIPE_STATE_HOME: path.join(folder, ".smoke-state") };
+  const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], cwd: folder, env });
   let out = "";
   let err = "";
   child.stderr.on("data", (d) => { err += d; });
@@ -227,6 +231,7 @@ function session(ws) {
   };
   s.tabKey = () => s.key("Tab", "Tab", 9);
   s.enterKey = () => s.key("Enter", "Enter", 13, "\r");
+  s.escapeKey = () => s.key("Escape", "Escape", 27);
   // A drag with the mouse from the centre of one element to the centre of another: the pointer's path, which the keyboard's must not replace.
   s.drag = async (from, to) => {
     const centre = (selector) => s.ev(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e) return null; const b = e.getBoundingClientRect(); return [b.x + b.width / 2, b.y + b.height / 2]; })()`);
@@ -491,8 +496,8 @@ const scenarios = {
     await send("overwrite it again");
     check("a second save waits on a card", await p.until(`/asks to save chain\\.yaml/.test(document.querySelector("#agent-now")?.textContent ?? "")`));
     const before = p.seen.length;
-    await p.type("#d-title", " kept");
-    check("the title is composed while the card waits", await p.waitSeen("/api/design/compose", before));
+    await p.type("#i-header", " kept");
+    check("the header comment is composed while the card waits", await p.waitSeen("/api/design/compose", before));
     await p.clickText("#agent-now button", "Save");
     check("the second save ends the turn", await idle());
     check("the notice says the saved file waits again", await p.until(`!document.querySelector("#agent-behind").hidden`));
@@ -616,7 +621,7 @@ const scenarios = {
       await p.pick(a);
       const text = await p.drawerText();
       const sink = a === aliases[aliases.length - 1];
-      check(`a click on ${a} shows its ${sink ? "absence of rows" : "rows"}`, sink ? /holds no rows/.test(text) : /rows delivered/.test(text), text.slice(0, 120));
+      check(`a click on ${a} shows its ${sink ? "absence of rows" : "rows"}`, sink ? /is an output/.test(text) : /rows delivered/.test(text), text.slice(0, 120));
     }
 
     const mid = aliases.includes("b") ? "b" : aliases[1];
@@ -659,7 +664,7 @@ const scenarios = {
     await p.click("#d-run");
     check("Run opens its confirmation", await p.until(`!!document.querySelector("#d-run-dialog[open]")`));
     const text = await p.dialogText();
-    check("Run is the plain real run", /This run is real: its outputs are written/.test(text) && !/stops at/.test(text), text.slice(0, 200));
+    check("Run is the plain real run", /REAL: outputs are written/.test(text) && !/stops at/.test(text), text.slice(0, 200));
     await p.click("#d-run-cancel");
 
     await p.click(`.dcard[data-alias="${mid}"] [data-card-tool="pin"]`);
@@ -696,7 +701,7 @@ const scenarios = {
     await p.click("#d-run");
     check("the confirmation opens", await p.until(`!!document.querySelector("#d-run-confirm")`));
     check("the case is not ticked", (await p.ev(`document.querySelector("#d-review")?.checked`)) === false);
-    check("the confirmation says the targets are written", /reaches the end|real: its outputs are written/.test(await p.dialogText()), (await p.dialogText()).slice(0, 200));
+    check("the confirmation says the targets are written", /last stage writes|REAL: outputs are written/.test(await p.dialogText()), (await p.dialogText()).slice(0, 200));
     check("nothing is written before the confirmation", !fs.existsSync(path.join(folder, "c.csv")) && !fs.existsSync(path.join(folder, "e.csv")));
     await p.click("#d-run-confirm");
     check("the run succeeds", await p.waitStatus(/run succeeded/, 30000), await p.status());
@@ -926,6 +931,143 @@ const scenarios = {
     check("the caret stays at the end", field.caret, JSON.stringify(field));
   },
 
+  // No action of the drawer leaves the screen: whatever tab is open, at the drawer's smallest and tallest and in a short window,
+  // each button of the action bar lies inside the drawer and the window, with no scrolling to reach it.
+  async "drawer-actions"({ page: p }) {
+    check("the job opens", await p.openJob("chain.yaml"));
+    await p.click("#d-preview");
+    check("Preview finishes", await p.waitStatus(/preview (done|failed)/, 30000));
+    await p.pick("b");
+    const tabs = await p.ev(`[...document.querySelectorAll("#d-drawer .tabs button")].map((b) => b.dataset.tab)`);
+    // The handle's own keys, as a person moves it: each press is 16 px, and the layout bounds the result.
+    const press = (key, times) => p.ev(`(() => { const h = document.querySelector('.split-row'); for (let i = 0; i < ${times}; i++) h.dispatchEvent(new KeyboardEvent("keydown", { key: ${JSON.stringify(key)}, bubbles: true, cancelable: true })); })()`);
+    const lost = () => p.ev(`(() => {
+      const drawer = document.querySelector("#d-drawer").getBoundingClientRect();
+      const bar = document.querySelector("#d-drawer .drawer-actions");
+      const out = [];
+      if (bar) for (const b of bar.querySelectorAll("button")) {
+        const r = b.getBoundingClientRect();
+        if (r.width === 0 || r.top < drawer.top - 0.5 || r.bottom > drawer.bottom + 0.5 || r.top < 0 || r.bottom > innerHeight) out.push(b.textContent);
+      }
+      const body = document.querySelector("#d-drawer .drawer-body");
+      const edit = document.querySelector("#d-edit");
+      if (edit && bar && edit.getBoundingClientRect().bottom > bar.getBoundingClientRect().top + 0.5) out.push("the editor overlaps the bar");
+      if (edit && edit.getBoundingClientRect().height < 40) out.push("the editor is " + Math.round(edit.getBoundingClientRect().height) + " px");
+      for (const t of document.querySelectorAll("#d-drawer .drawer-body.fill > .scroll")) if (t.getBoundingClientRect().bottom > body.getBoundingClientRect().bottom + 0.5) out.push("a table leaves the body");
+      if (document.querySelector("#d-drawer .tabs").getBoundingClientRect().height > 50) out.push("the tabs wrap");
+      return out.join(", ");
+    })()`);
+    const geometry = () => p.ev(`(() => { const r = (s) => Math.round(document.querySelector(s).getBoundingClientRect().height); return { drawer: r("#d-drawer"), canvas: r("#d-canvas") }; })()`);
+    const everyTab = async (when) => {
+      for (const tab of tabs) {
+        await p.click(`#d-drawer .tabs button[data-tab="${tab}"]`);
+        check(`${when}: no action leaves the ${tab} tab`, (await lost()) === "", `${await lost()} ${JSON.stringify(await geometry())}`);
+      }
+    };
+    const hasBar = async (tab) => { await p.click(`#d-drawer .tabs button[data-tab="${tab}"]`); return p.ev(`document.querySelectorAll("#d-drawer .drawer-actions button").length`); };
+    check("the YAML tab has Copy, Apply and Revert in its bar", (await hasBar("yaml")) === 3);
+    check("the Publish tab has its button in its bar", (await hasBar("publish")) === 1);
+
+    await everyTab("at the default size");
+    await press("ArrowDown", 40);
+    await p.frame();
+    const small = await geometry();
+    check("the drawer stops at its floor", small.drawer >= 210 && small.drawer <= 230, JSON.stringify(small));
+    await everyTab("at the drawer's smallest");
+
+    await press("ArrowUp", 60);
+    await p.frame();
+    const tall = await geometry();
+    check("the drawer leaves the canvas its floor", tall.canvas >= 120, JSON.stringify(tall));
+    await everyTab("at the drawer's tallest");
+
+    // A window too short for the size kept: the layout shrinks the drawer, and what was asked stays for a taller window.
+    await p.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 520, deviceScaleFactor: 1, mobile: false });
+    await p.frame();
+    const short = await geometry();
+    check("in a short window the canvas keeps its floor", short.canvas >= 120 && short.drawer >= 210, JSON.stringify(short));
+    await everyTab("in a short window");
+    await press("ArrowUp", 60);
+    await p.frame();
+    check("in a short window the drawer cannot be dragged over the canvas", (await geometry()).canvas >= 120, JSON.stringify(await geometry()));
+    await everyTab("in a short window, drawer asked tallest");
+    await p.send("Emulation.clearDeviceMetricsOverride");
+    await p.frame();
+  },
+
+  // No action of a dialog leaves the screen: its head and its body are apart, the body scrolls, and the buttons that end the body
+  // stay at its foot, whatever the window's height.
+  async "dialog-actions"({ page: p }) {
+    check("the job opens", await p.openJob("chain.yaml"));
+    const lost = () => p.ev(`(() => {
+      const d = document.querySelector(".studio-dialog[open], #d-run-dialog[open]");
+      if (!d) return "no dialog";
+      const box = d.getBoundingClientRect();
+      const out = [];
+      if (box.top < -0.5 || box.bottom > innerHeight + 0.5) out.push("the dialog leaves the window");
+      for (const b of d.querySelectorAll(".dialog-actions button, .run-actions button, [aria-label='Close dialog']")) {
+        if (!b.offsetParent) continue;
+        const r = b.getBoundingClientRect();
+        const limit = (b.closest(".dialog-body, .run-body") ?? d).getBoundingClientRect();
+        if (r.top < Math.max(0, limit.top) - 0.5 || r.bottom > Math.min(innerHeight, limit.bottom) + 0.5) out.push((b.textContent.trim() || b.getAttribute("aria-label")) + " " + Math.round(r.top) + ".." + Math.round(r.bottom) + " of " + Math.round(limit.top) + ".." + Math.round(limit.bottom));
+      }
+      return out.join(", ");
+    })()`);
+    const opened = (selector) => p.until(`!!document.querySelector(${JSON.stringify(selector)})`);
+    const dialogs = {
+      "Connect a model": async () => { await p.click("#agent-link"); return opened(".studio-dialog[open] #d-agent-submit"); },
+      "Connect a coordinator": async () => { await p.click('#d-drawer .tabs button[data-tab="publish"]'); await p.click("#publish-connect"); return opened("#d-coordinator-dialog[open]"); },
+      "Open a folder": async () => { await p.click("#folder"); return opened("#d-workspace-dialog[open]"); },
+      "New job from CLI": async () => { if (await p.ev(`document.querySelector("#side-jobs-view").hidden`)) await p.click("#side-jobs"); await p.click("#new-job-trigger"); await p.click("#new-from-cli"); return opened("#d-cli-dialog[open]"); },
+      "Run for real": async () => {
+        await p.click("#d-run");
+        if (!(await opened("#d-run-dialog[open]"))) return false;
+        await p.ev(`(() => { const r = document.querySelector("#d-review"); if (r) { r.checked = true; r.dispatchEvent(new Event("change")); } })()`);
+        return p.until(`/stops before every writer|holds every row/.test(document.querySelector("#d-run-dialog")?.innerText ?? "")`);
+      },
+    };
+    const closeAll = async () => {
+      await p.ev(`document.querySelector("#d-run-cancel")?.click(); document.querySelector(".studio-dialog[open] [aria-label='Close dialog']")?.click()`);
+      await p.until(`!document.querySelector("dialog[open]")`);
+    };
+    for (const height of [700, 520, 420, 360]) {
+      await p.send("Emulation.setDeviceMetricsOverride", { width: 1280, height, deviceScaleFactor: 1, mobile: false });
+      await p.frame();
+      for (const [name, open] of Object.entries(dialogs)) {
+        check(`${height} px: ${name} opens`, await open());
+        check(`${height} px: no action of ${name} leaves the screen`, (await lost()) === "", await lost());
+        await closeAll();
+      }
+    }
+    await p.send("Emulation.clearDeviceMetricsOverride");
+    await p.frame();
+  },
+
+  // The agent's panel keeps its input in view down to a short window, and what a card or a plan waits for stays at the foot of the
+  // log, however far the person has scrolled up.
+  async "agent-actions"({ page: p }) {
+    const idle = () => p.until(`document.querySelector("#agent-stop").hidden && !document.querySelector("#agent-now .agent-card button")`, 30000);
+    check("the job opens", await p.openJob("chain.yaml"));
+    await p.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 420, deviceScaleFactor: 1, mobile: false });
+    await p.frame();
+    const sendLost = () => p.ev(`(() => { const r = document.querySelector("#agent-send").getBoundingClientRect(); const pane = document.querySelector("#agent-pane").getBoundingClientRect();
+      return r.top < pane.top || r.bottom > Math.min(innerHeight, pane.bottom) + 0.5 ? "Send " + Math.round(r.top) + ".." + Math.round(r.bottom) + " of " + Math.round(pane.top) + ".." + Math.round(pane.bottom) : ""; })()`);
+    check("in a window of 420 px Send is in view", (await sendLost()) === "", await sendLost());
+    await p.ev(`(() => { const t = document.querySelector("#agent-prompt"); t.value = "overwrite it"; })()`);
+    await p.click("#agent-send");
+    check("a save over the open job waits on a card", await p.until(`/asks to save chain\\.yaml/.test(document.querySelector("#agent-now")?.textContent ?? "")`));
+    await p.ev(`document.querySelector("#agent-log").scrollTop = 0`);
+    await p.frame();
+    const choicesLost = () => p.ev(`(() => { const log = document.querySelector("#agent-log").getBoundingClientRect(); const out = [];
+      for (const b of document.querySelectorAll("#agent-now .agent-card .agent-actions button")) { const r = b.getBoundingClientRect(); if (r.top < log.top - 0.5 || r.bottom > Math.min(innerHeight, log.bottom) + 0.5) out.push(b.textContent); }
+      return out.join(","); })()`);
+    check("the card's choices are in view with the log scrolled to its top", (await choicesLost()) === "" && await p.ev(`document.querySelectorAll("#agent-now .agent-card .agent-actions button").length > 0`), await choicesLost());
+    await p.clickText("#agent-now button", "Save");
+    check("the save ends the turn", await idle());
+    await p.send("Emulation.clearDeviceMetricsOverride");
+    await p.frame();
+  },
+
   // What a pointer does, the keyboard does: Tab reaches every card, a card is chosen with Enter, and a wire is undone and
   // made again from its inspector; the drag of a wire still works. Every control has a name, and the text reads at 4.5:1
   // in both themes, across the screens a person opens.
@@ -1019,10 +1161,227 @@ const scenarios = {
     check("a drag still wires two cards", await wired("b", "c"), await wires());
   },
 
+  // A model connected from the page, with no flag: the empty panel offers it, Test lists the models, Connect opens the
+  // conversation, and a studio started again reads the remembered connection back, which holds no secret; the list leaves out the
+  // model in place, and a disconnected model is deleted by its ×.
+  async "agent-connect"({ page: p, folder, studio }) {
+    check("the empty panel offers to connect a model", await p.until(`!document.querySelector("#agent-pane").hidden && !!document.querySelector("#agent-connect") && document.querySelector("#agent-body").hidden`));
+    check("the header says there is no agent", await p.ev(`document.querySelector("#agent-link").textContent.includes("no agent")`));
+    await p.shot("connect-1-empty");
+    await p.click("#agent-connect");
+    check("the dialog opens on Ollama", await p.until(`document.querySelector("#d-agent-provider")?.value === "ollama" && document.querySelector("#d-agent-key").parentElement.hidden`));
+    check("the dialog offers Ollama and a compatible server only, and the context size at its default",
+      await p.ev(`[...document.querySelectorAll("#d-agent-provider option")].map((o) => o.value).join() === "ollama,compatible" && document.querySelector("#d-agent-numctx").value === "32768" && !document.querySelector("#d-agent-numctx").parentElement.hidden`));
+    await p.ev(`(() => { const u = document.querySelector("#d-agent-url"); u.value = ${JSON.stringify(fakeLlm.url)}; u.dispatchEvent(new Event("input")); document.querySelector("#d-agent-numctx").value = "16384"; })()`);
+    await p.click("#d-agent-test");
+    check("Test lists the models of the server", await p.until(`[...document.querySelectorAll("#d-agent-model option")].map((o) => o.value).join() === "fake:1,fake:2"`));
+    await p.shot("connect-2-dialog");
+    await p.click("#d-agent-submit");
+    check("Connect opens the conversation", await p.until(`!document.querySelector("#d-agent-dialog") && !document.querySelector("#agent-body").hidden && document.querySelector("#agent-model")?.value === "fake:1"`));
+    check("the header names the model and its provider", await p.until(`/fake:1 · ollama/.test(document.querySelector("#agent-link").textContent)`), await p.ev(`document.querySelector("#agent-link").textContent`));
+    await p.ev(`document.querySelector("#agent-prompt").value = "hello"`);
+    await p.click("#agent-send");
+    check("the agent answers", await p.until(`/ok: hello/.test(document.querySelector("#agent-log")?.textContent ?? "")`, 30000));
+    const file = path.join(folder, ".smoke-state", "studio.json");
+    const written = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
+    check("the settings are remembered, with the context size and no key", written.includes(fakeLlm.url) && /"numCtx": 16384/.test(written) && !/"key"/i.test(written), written || "no file");
+
+    studio.stop();
+    await sleep(500);
+    const again = await startStudio(folder);
+    try {
+      await p.send("Page.navigate", { url: again.url });
+      check("a studio started without a flag reads the connection back", await p.until(`!document.querySelector("#agent-body")?.hidden && document.querySelector("#agent-model")?.value === "fake:1"`, 30000));
+      check("the header says the model", await p.until(`/fake:1 · ollama/.test(document.querySelector("#agent-link").textContent)`));
+      await p.click("#agent-link");
+      check("the dialog reads the context size back and offers to disconnect, and no button forgets what is remembered",
+        await p.until(`document.querySelector("#d-agent-numctx")?.value === "16384" && !!document.querySelector("#d-agent-disconnect") && !document.querySelector("#d-agent-forget")`));
+      check("the list leaves out the model in place, says where forgetting is, and the file still holds it",
+        await p.until(`document.querySelectorAll("#d-agent-recents li").length === 0 && /No other model is remembered/.test(document.querySelector("#d-agent-recents").textContent) && /× forgets one/.test(document.querySelector("#d-agent-recents").textContent)`)
+        && JSON.parse(fs.readFileSync(file, "utf8")).agents?.length === 1);
+      await p.click("#d-agent-disconnect");
+      check("Disconnect closes the agent and keeps what is remembered",
+        await p.until(`!document.querySelector("#d-agent-dialog") && document.querySelector("#agent-body").hidden && document.querySelector("#agent-link").textContent.includes("no agent")`)
+        && !!JSON.parse(fs.readFileSync(file, "utf8")).agent);
+      await p.click("#agent-link");
+      check("the dialog lists the model once disconnected, and the file holds it with no key",
+        await p.until(`document.querySelectorAll("#d-agent-recents li").length === 1 && document.querySelector("#d-agent-recents .pick").title.includes(${JSON.stringify(new URL(fakeLlm.url).host)})`)
+        && JSON.parse(fs.readFileSync(file, "utf8")).agents?.length === 1 && !/"key"/i.test(fs.readFileSync(file, "utf8")));
+      await p.ev(`(() => { const u = document.querySelector("#d-agent-url"); u.value = "http://elsewhere.example.com"; u.dispatchEvent(new Event("input")); document.querySelector("#d-agent-numctx").value = "8192"; })()`);
+      await p.click("#d-agent-recents .pick");
+      check("a click on a recent model fills the form and connects nothing",
+        await p.ev(`document.querySelector("#d-agent-url").value.includes(${JSON.stringify(new URL(fakeLlm.url).host)}) && document.querySelector("#d-agent-numctx").value === "16384" && document.querySelector("#d-agent-model").value === "fake:1" && !!document.querySelector("#d-agent-dialog[open]") && document.querySelector("#agent-body").hidden && document.querySelector("#agent-link").textContent.includes("no agent")`));
+      await p.click("#d-agent-recents .forget");
+      check("deleting the entry of the disconnected model empties the list without closing the dialog, and the file forgets the agent and its entry",
+        await p.until(`!!document.querySelector("#d-agent-dialog[open]") && document.querySelectorAll("#d-agent-recents li").length === 0 && /No other model is remembered/.test(document.querySelector("#d-agent-recents").textContent)`)
+        && await p.ev(`document.activeElement?.id === "d-agent-url"`)
+        && JSON.parse(fs.readFileSync(file, "utf8")).agents?.length === 0 && !JSON.parse(fs.readFileSync(file, "utf8")).agent);
+    } finally {
+      again.stop();
+    }
+  },
+
+  // A folder opened from the page: the header names it, Test counts its jobs, unsaved changes refuse the change by name and the
+  // person chooses (discard there, save here), the page reads the new folder whole, and the folders opened join the recent ones.
+  async "workspace-switch"({ page: p, folder }) {
+    const other = fs.mkdtempSync(path.join(os.tmpdir(), "dtpipe-smoke-other-"));
+    try {
+      fs.copyFileSync(path.join(here, "fixtures", "chain.yaml"), path.join(other, "other.yaml"));
+      const file = path.join(folder, ".smoke-state", "studio.json");
+      const header = `(document.querySelector("#folder")?.textContent ?? "")`;
+      const jobs = `[...document.querySelectorAll("#jobs button.job")].map((b) => b.textContent).join()`;
+      const unsavedEdit = async (job) => {
+        check(`${job} opens`, await p.openJob(job));
+        await p.pick("b");
+        await p.clickText("#d-inspector button", "Delete step");
+        check(`${job} holds an unsaved change`, await p.until(`!document.querySelector("#d-dirty").hidden`));
+      };
+      const viewOf = (dir) => { const f = path.join(dir, ".dtpipe", "studio", "view.json"); return fs.existsSync(f) ? fs.readFileSync(f, "utf8") : ""; };
+      const refusedForChanges = () => p.until(`/not saved/.test(document.querySelector("#d-workspace-error")?.textContent ?? "") && !document.querySelector("#d-workspace-unsaved").hidden`);
+
+      check("the header names the folder, as a button", await p.until(`${header} === ${JSON.stringify(path.basename(folder))} && document.querySelector("#folder").tagName === "BUTTON"`), await p.ev(header));
+      check("the folder's full path is its tooltip", await p.ev(`document.querySelector("#folder").title === ${JSON.stringify(folder)}`), await p.ev(`document.querySelector("#folder").title`));
+      const beforeUnsaved = p.seen.length;
+      await unsavedEdit("chain.yaml");
+      await p.click("#folder");
+      check("the dialog opens on the folder in place", await p.until(`document.querySelector("#d-workspace-path")?.value === ${JSON.stringify(folder)}`));
+      await p.ev(`(() => { const i = document.querySelector("#d-workspace-path"); i.value = ${JSON.stringify(other)}; i.dispatchEvent(new Event("input")); })()`);
+      await p.click("#d-workspace-test");
+      check("Test counts the folder's jobs", await p.until(`/holds 1 job/.test(document.querySelector("#d-workspace-note")?.textContent ?? "")`), await p.ev(`document.querySelector("#d-workspace-note")?.textContent`));
+      await p.click("#d-workspace-submit");
+      check("unsaved changes refuse the change by name, and the dialog offers to save or discard them", await refusedForChanges());
+      await p.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 420, deviceScaleFactor: 1, mobile: false });
+      await p.frame();
+      const unsavedLayout = await p.ev(`(() => {
+        const body = document.querySelector("#d-workspace-dialog .dialog-body");
+        body.scrollTop = body.scrollHeight;
+        const unsaved = document.querySelector("#d-workspace-unsaved");
+        const actions = document.querySelector("#d-workspace-dialog .dialog-actions");
+        const ur = unsaved.getBoundingClientRect();
+        const ar = actions.getBoundingClientRect();
+        return {
+          hasActionsClass: unsaved.classList.contains("dialog-actions"),
+          sticky: getComputedStyle(unsaved).position === "sticky",
+          overlaps: ur.bottom > ar.top + 0.5,
+        };
+      })()`);
+      check("unsaved choices do not form a second sticky bar or overlap Cancel/Open",
+        !unsavedLayout.hasActionsClass && !unsavedLayout.sticky && !unsavedLayout.overlaps, JSON.stringify(unsavedLayout));
+      await p.send("Emulation.clearDeviceMetricsOverride");
+      await p.frame();
+      check("nothing changed meanwhile", await p.ev(`${header} === ${JSON.stringify(path.basename(folder))} && ${jobs} === "chain.yaml"`));
+      await p.waitSeen("/api/debug/state", beforeUnsaved);
+      // The page reloads at once: a click that waits for the next frame would find the page gone.
+      await p.ev(`document.querySelector("#d-workspace-discard").click()`);
+      check("discarding opens the new folder, read again whole", await p.until(`${header} === ${JSON.stringify(path.basename(other))} && ${jobs} === "other.yaml" && !document.querySelector("#d-workspace-dialog")`, 30000), await p.ev(`${jobs} + " | " + (document.querySelector("#d-workspace-error")?.textContent ?? "no dialog")`));
+      check("the folder opened keeps no view of the folder left", !viewOf(other).includes("chain.yaml"), viewOf(other));
+      check("the job left keeps its file as it was", fs.readFileSync(path.join(folder, "chain.yaml"), "utf8") === fs.readFileSync(path.join(here, "fixtures", "chain.yaml"), "utf8"));
+      check("the folder opened joins the recent ones, the start folder does not", JSON.stringify(JSON.parse(fs.readFileSync(file, "utf8")).folders) === JSON.stringify([other]), fs.readFileSync(file, "utf8"));
+      await p.shot("workspace-1-switched");
+
+      await unsavedEdit("other.yaml");
+      await p.click("#folder");
+      check("the folder the studio started on is offered", await p.until(`[...document.querySelectorAll("#d-workspace-recents button")].some((b) => b.title === ${JSON.stringify(folder)})`));
+      await p.ev(`[...document.querySelectorAll("#d-workspace-recents button")].find((b) => b.title === ${JSON.stringify(folder)}).click()`);
+      await p.click("#d-workspace-submit");
+      check("unsaved changes refuse again", await refusedForChanges());
+      await p.ev(`document.querySelector("#d-workspace-save").click()`);
+      check("Save, then open: the start folder is open again", await p.until(`${header} === ${JSON.stringify(path.basename(folder))} && ${jobs} === "chain.yaml"`, 30000), await p.ev(header));
+      check("the start folder keeps no view of the folder left", !viewOf(folder).includes("other.yaml"), viewOf(folder));
+      check("the job was saved first", fs.readFileSync(path.join(other, "other.yaml"), "utf8") !== fs.readFileSync(path.join(here, "fixtures", "chain.yaml"), "utf8"));
+      check("both folders are recent now, the last opened first", JSON.stringify(JSON.parse(fs.readFileSync(file, "utf8")).folders) === JSON.stringify([folder, other]), fs.readFileSync(file, "utf8"));
+      await p.click("#folder");
+      check("the dialog lists the other folder, with a way to delete it", await p.until(`document.querySelectorAll("#d-workspace-recents li").length === 1 && document.querySelector("#d-workspace-recents .pick").title === ${JSON.stringify(other)} && !!document.querySelector("#d-workspace-recents .forget")`));
+      await p.click("#d-workspace-recents .forget");
+      check("deleting it empties the list without closing the dialog, and the file keeps the other folder only",
+        await p.until(`!!document.querySelector("#d-workspace-dialog[open]") && document.querySelectorAll("#d-workspace-recents li").length === 0 && /No other folder is remembered/.test(document.querySelector("#d-workspace-recents").textContent)`)
+        && await p.ev(`document.activeElement?.id === "d-workspace-path"`)
+        && JSON.stringify(JSON.parse(fs.readFileSync(file, "utf8")).folders) === JSON.stringify([folder]), fs.readFileSync(file, "utf8"));
+      check("the remembered current folder can be removed from recents in place",
+        await p.until(`!document.querySelector("#d-workspace-current-recent")?.hidden && !!document.querySelector("#d-workspace-forget-current")`));
+      await p.click("#d-workspace-forget-current");
+      check("forgetting the current folder clears it from studio.json without leaving or reloading",
+        await p.until(`!!document.querySelector("#d-workspace-dialog[open]") && document.querySelector("#d-workspace-current-recent").hidden`)
+        && await p.ev(`${header} === ${JSON.stringify(path.basename(folder))}`)
+        && JSON.parse(fs.readFileSync(file, "utf8")).folders?.length === 0, fs.readFileSync(file, "utf8"));
+    } finally {
+      fs.rmSync(other, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    }
+  },
+
+  // A coordinator connected from the page, with no flag: the pill offers it, a key signs in for the session, another connection
+  // is remembered with no key, a studio started again reads it back, the list leaves out the one in place, and a disconnected
+  // coordinator is deleted by its ×. Nothing here writes the keyring: a key is typed without *Remember*, and deleting only asks it to delete.
+  async "coordinator-connect"({ page: p, folder, studio }) {
+    const file = path.join(folder, ".smoke-state", "studio.json");
+    const pill = `document.querySelector("#coordinator")?.textContent ?? ""`;
+    check("the zone says no coordinator is connected and is the button that connects one", await p.until(`/no coordinator/.test(${pill}) && !!document.querySelector("#coordinator-link")`), await p.ev(pill));
+    check("the library and the publication are not offered", await p.ev(`document.querySelector("#side-library").hidden`));
+    await p.click("#coordinator-link");
+    check("the dialog opens", await p.until(`!!document.querySelector("#d-coordinator-origin") && document.querySelector("#d-coordinator-key").parentElement.hidden`));
+    await p.ev(`(() => {
+      const set = (id, value) => { const n = document.querySelector(id); n.value = value; n.dispatchEvent(new Event("input")); n.dispatchEvent(new Event("change")); };
+      set("#d-coordinator-origin", ${JSON.stringify(fakeCoordinators.get(folder).url)});
+      set("#d-coordinator-auth", "key");
+      set("#d-coordinator-key", "dtp_alice_0123456789abcdefghijklmnopqrstuvwxyzABCDEFG");
+      document.querySelector("#d-coordinator-remember").checked = false;
+    })()`);
+    await p.click("#d-coordinator-test");
+    check("Test says the key signs in", await p.until(`/signs in as alice@test.local/.test(document.querySelector("#d-coordinator-note")?.textContent ?? "")`), await p.ev(`document.querySelector("#d-coordinator-note")?.textContent ?? ""`));
+    await p.click("#d-coordinator-submit");
+    check("Connect signs the person in with the key", await p.until(`!document.querySelector("#d-coordinator-dialog") && /alice@test.local/.test(${pill})`, 20000), await p.ev(pill));
+    check("the library is offered once a coordinator is connected", await p.until(`!document.querySelector("#side-library").hidden`));
+    check("nothing is remembered when the box is not ticked", !fs.existsSync(file));
+    await p.shot("coordinator-1-connected");
+
+    await p.click("#coordinator-link");
+    check("the dialog reads the connection back", await p.until(`document.querySelector("#d-coordinator-auth")?.value === "key" && !document.querySelector("#d-coordinator-forget")`));
+    await p.ev(`(() => { const a = document.querySelector("#d-coordinator-auth"); a.value = "browser"; a.dispatchEvent(new Event("change")); })()`);
+    await p.click("#d-coordinator-submit");
+    check("Connect replaces the link: signed out, to sign in through the browser", await p.until(`!document.querySelector("#d-coordinator-dialog") && /Sign in/.test(${pill}) && !/alice@test.local/.test(${pill})`), await p.ev(pill));
+    const written = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
+    check("the coordinator is remembered, with no key", written.includes(fakeCoordinators.get(folder).url) && !/dtp_/.test(written), written || "no file");
+
+    await p.click("#coordinator-link");
+    check("the dialog offers to disconnect", await p.until(`!!document.querySelector("#d-coordinator-disconnect")`));
+    await p.click("#d-coordinator-disconnect");
+    check("Disconnect closes the link and keeps what is remembered",
+      await p.until(`!document.querySelector("#d-coordinator-dialog") && /no coordinator/.test(${pill})`) && fs.readFileSync(file, "utf8").includes(fakeCoordinators.get(folder).url));
+
+    studio.stop();
+    await sleep(500);
+    const again = await startStudio(folder);
+    try {
+      await p.send("Page.navigate", { url: again.url });
+      check("a studio started without a flag connects the remembered coordinator", await p.until(`/127.0.0.1/.test(${pill}) && !!document.querySelector("#coordinator-link")`, 30000), await p.ev(pill));
+      await p.click("#coordinator-link");
+      check("the list leaves out the coordinator in place, says where forgetting is, and the file still holds it",
+        await p.until(`document.querySelectorAll("#d-coordinator-recents li").length === 0 && /No other coordinator is remembered/.test(document.querySelector("#d-coordinator-recents").textContent) && /× forgets one/.test(document.querySelector("#d-coordinator-recents").textContent)`)
+        && JSON.parse(fs.readFileSync(file, "utf8")).coordinators?.length === 1);
+      await p.click("#d-coordinator-disconnect");
+      check("Disconnect closes the link", await p.until(`!document.querySelector("#d-coordinator-dialog") && /no coordinator/.test(${pill})`));
+      await p.click("#coordinator-link");
+      check("the dialog lists the coordinator once disconnected, with how the person signs in",
+        await p.until(`document.querySelectorAll("#d-coordinator-recents li").length === 1 && /through the browser/.test(document.querySelector("#d-coordinator-recents li").textContent)`)
+        && JSON.parse(fs.readFileSync(file, "utf8")).coordinators?.length === 1);
+      await p.ev(`(() => { const o = document.querySelector("#d-coordinator-origin"); o.value = "http://elsewhere.example.com"; o.dispatchEvent(new Event("input")); const a = document.querySelector("#d-coordinator-auth"); a.value = "key"; a.dispatchEvent(new Event("change")); })()`);
+      await p.click("#d-coordinator-recents .pick");
+      check("a click on a recent coordinator fills the address and the sign-in and changes nothing",
+        await p.ev(`document.querySelector("#d-coordinator-origin").value.includes("127.0.0.1") && document.querySelector("#d-coordinator-auth").value === "browser" && !!document.querySelector("#d-coordinator-dialog[open]") && /no coordinator/.test(${pill})`));
+      await p.click("#d-coordinator-recents .forget");
+      check("deleting the entry of the disconnected coordinator empties the list without closing the dialog and removes it from the file",
+        await p.until(`!!document.querySelector("#d-coordinator-dialog[open]") && document.querySelectorAll("#d-coordinator-recents li").length === 0 && /No other coordinator is remembered/.test(document.querySelector("#d-coordinator-recents").textContent)`)
+        && await p.ev(`document.activeElement?.id === "d-coordinator-origin"`)
+        && /no coordinator/.test(await p.ev(pill)) && JSON.parse(fs.readFileSync(file, "utf8")).coordinators?.length === 0 && !JSON.parse(fs.readFileSync(file, "utf8")).coordinator);
+    } finally {
+      again.stop();
+    }
+  },
+
   // The header says each link and why: a studio that stops is never a problem of the cards, and a save is not offered anyway.
   async "link-studio"({ page: p, studio }) {
     check("the job opens", await p.openJob("chain.yaml"));
-    check("the header says the agent is off and the studio answers", await p.ev(`document.querySelector("#agent-link")?.textContent.includes("agent: off") && document.querySelector("#studio-link").hidden`));
+    check("the header says there is no agent and the studio answers", await p.ev(`document.querySelector("#agent-link")?.textContent.includes("no agent") && document.querySelector("#studio-link").hidden`));
     await p.ev(`(() => { window.__asked = []; window.confirm = (m) => { window.__asked.push(m); return true; }; })()`);
     studio.stop();
     await sleep(500);
@@ -1160,16 +1519,20 @@ const scenarios = {
     check("Pull writes orders-pipeline.yaml, opens it, and shows in sync", await p.until(`document.querySelector("#job-name")?.textContent === "orders-pipeline.yaml" && /in sync/.test(document.querySelector("#job-sync")?.innerText ?? "")`)
       && fs.existsSync(path.join(folder, "orders-pipeline.yaml")));
 
-    // Local edit -> modified
-    await p.type("#d-title", " edited", 15);
+    // Local edit -> modified (including header and step comments)
+    await p.type("#i-header", " edited", 15);
+    await p.click('.dcard[data-alias="orders"]');
+    await p.until(`!!document.querySelector("#i-comment")`);
+    await p.type("#i-comment", "branch note", 15);
     await p.click("#d-save");
-    check("Local save marks job as modified", await p.until(`/modified/.test(document.querySelector("#job-sync")?.innerText ?? "")`, 15000));
+    check("Local save marks job as modified and writes comments", await p.until(`/modified/.test(document.querySelector("#job-sync")?.innerText ?? "")`, 15000)
+      && /edited/.test(fs.readFileSync(path.join(folder, "orders-pipeline.yaml"), "utf8"))
+      && /# branch note/.test(fs.readFileSync(path.join(folder, "orders-pipeline.yaml"), "utf8")));
 
     // Remote advances -> diverged + update badge on Library icon
     coord.library.set("orders-pipeline", {
       id: "orders-pipeline",
-      title: "Orders export",
-      description: "Moves orders from shop to archive",
+      header: "Orders export\nMoves orders from shop to archive",
       yaml: "# Orders export v2\norders:\n  input: brick:n1/orders\narchive:\n  from: orders\n  output: brick:n1/archive\n",
       commit: "bbbb2222bbbb2222",
     });
@@ -1207,6 +1570,116 @@ const scenarios = {
     check("the header says the model is not listed", await p.until(`/model not listed/.test(document.querySelector("#agent-link")?.textContent ?? "")`, 20000), await p.ev(`document.querySelector("#agent-link")?.textContent ?? "none"`));
     check("the panel's warning names the model", await p.ev(`/absent:9/.test(document.querySelector("#agent-warning").textContent)`));
   },
+
+  // P1b UX & accessibility: CLI flag Remember default, settingsWarning + server warning visibility, and WCAG 1.4.13 tooltips.
+  async "p1b-ux"({ page: p, folder }) {
+    await p.until(`!document.querySelector("#agent-body")?.hidden && !!document.querySelector("#coordinator-link")`, 20000);
+
+    // 1. source === "flag": Remember is unchecked by default in Agent & Coordinator dialogs
+    await p.click("#agent-link");
+    check("Agent dialog unchecks Remember when source is flag and shows CLI note",
+      await p.until(`!!document.querySelector("#d-agent-dialog[open]")`)
+      && await p.ev(`!document.querySelector("#d-agent-remember").checked && /Set by the command line/.test(document.querySelector("#d-agent-note").textContent)`));
+    await p.clickText("#d-agent-dialog button", "Cancel");
+    await p.until(`!document.querySelector("#d-agent-dialog")`);
+
+    await p.click("#coordinator-link");
+    check("Coordinator dialog unchecks Remember when source is flag and shows CLI note",
+      await p.until(`!!document.querySelector("#d-coordinator-dialog[open]")`)
+      && await p.ev(`!document.querySelector("#d-coordinator-remember").checked && /Set by the command line/.test(document.querySelector("#d-coordinator-note").textContent)`));
+    await p.clickText("#d-coordinator-dialog button", "Cancel");
+    await p.until(`!document.querySelector("#d-coordinator-dialog")`);
+
+    // 2. settingsWarning shown alongside CLI flag note and preserved across Test
+    const stateDir = path.join(folder, ".smoke-state");
+    const stateFile = path.join(stateDir, "studio.json");
+    fs.mkdirSync(stateDir, { recursive: true });
+    fs.writeFileSync(stateFile, "{corrupt");
+    await p.click("#agent-link");
+    check("Agent dialog shows settingsWarning together with CLI flag note",
+      await p.until(`!!document.querySelector("#d-agent-dialog[open]")`)
+      && await p.ev(`/Set by the command line/.test(document.querySelector("#d-agent-note").textContent) && /ignored/.test(document.querySelector("#d-agent-note").textContent)`),
+      await p.ev(`document.querySelector("#d-agent-note")?.textContent`));
+    await p.click("#d-agent-test");
+    check("Test updates model count without overwriting connectionNote",
+      await p.until(`/models listed/.test(document.querySelector("#d-agent-note")?.textContent ?? "")`)
+      && await p.ev(`/Set by the command line/.test(document.querySelector("#d-agent-note").textContent) && /ignored/.test(document.querySelector("#d-agent-note").textContent)`),
+      await p.ev(`document.querySelector("#d-agent-note")?.textContent`));
+    await p.clickText("#d-agent-dialog button", "Cancel");
+    await p.until(`!document.querySelector("#d-agent-dialog")`);
+
+    // 3. Server warning from PUT /api/agent/connection is surfaced in #status as warn
+    fs.rmSync(stateFile, { force: true });
+    fs.mkdirSync(stateFile, { recursive: true });
+    await p.click("#agent-link");
+    await p.until(`!!document.querySelector("#d-agent-dialog[open]")`);
+    await p.ev(`(() => { const r = document.querySelector("#d-agent-remember"); r.checked = true; })()`);
+    await p.click("#d-agent-submit");
+    check("Server warning appears in #status with warn class",
+      await p.waitStatus(/cannot be written/, 15000)
+      && await p.ev(`document.querySelector("#status").classList.contains("warn")`),
+      `${await p.status()} | ${await p.ev(`document.querySelector("#status").className`)}`);
+
+    // 4. Keyboard navigation & WCAG 1.4.13 on .info / Escape / scroll
+    check("chain.yaml opens", await p.openJob("chain.yaml"));
+    if (await p.ev(`document.querySelector("#side-steps-view").hidden`)) await p.click("#side-steps");
+    const infoCheck = await p.ev(`(() => {
+      const btn = document.querySelector("#side-steps-view .info");
+      if (!btn) return null;
+      const tipId = btn.getAttribute("aria-describedby");
+      const tip = tipId ? document.getElementById(tipId) : null;
+      const r = btn.getBoundingClientRect();
+      return {
+        labelLen: (btn.getAttribute("aria-label") || "").length,
+        expanded: btn.getAttribute("aria-expanded"),
+        role: tip?.getAttribute("role"),
+        width: r.width,
+        height: r.height,
+      };
+    })()`);
+    check(".info has short aria-label, aria-describedby -> role=tooltip, and >= 24x24 target",
+      !!infoCheck && infoCheck.labelLen > 0 && infoCheck.labelLen < 40 && infoCheck.expanded === "false"
+      && infoCheck.role === "tooltip" && infoCheck.width >= 24 && infoCheck.height >= 24,
+      JSON.stringify(infoCheck));
+
+    await p.ev(`document.querySelector("#side-steps-view .info").focus()`);
+    await p.frame();
+    check("Focusing .info opens its tooltip",
+      await p.ev(`(() => {
+        const btn = document.querySelector("#side-steps-view .info");
+        const tip = document.getElementById(btn.getAttribute("aria-describedby"));
+        return btn.getAttribute("aria-expanded") === "true" && getComputedStyle(tip).visibility === "visible";
+      })()`));
+
+    await p.escapeKey();
+    check("Escape dismisses tooltip while keeping focus on .info",
+      await p.ev(`(() => {
+        const btn = document.querySelector("#side-steps-view .info");
+        const tip = document.getElementById(btn.getAttribute("aria-describedby"));
+        return btn.getAttribute("aria-expanded") === "false" && getComputedStyle(tip).visibility === "hidden" && document.activeElement === btn;
+      })()`));
+
+    await p.enterKey();
+    check("Enter toggles tooltip open",
+      await p.ev(`document.querySelector("#side-steps-view .info").getAttribute("aria-expanded") === "true"`));
+    await p.enterKey();
+    check("Enter again toggles tooltip closed",
+      await p.ev(`document.querySelector("#side-steps-view .info").getAttribute("aria-expanded") === "false"`));
+
+    await p.enterKey();
+    await p.ev(`document.querySelector("#side-steps-view").dispatchEvent(new Event("scroll"))`);
+    await p.frame();
+    check("Scroll closes open tooltip",
+      await p.ev(`document.querySelector("#side-steps-view .info").getAttribute("aria-expanded") === "false"`));
+
+    check("Controls have accessible names", (await p.unnamed()).length === 0, (await p.unnamed()).join(" | "));
+    for (const theme of ["light", "dark"]) {
+      await p.theme(theme);
+      const low = await p.contrast();
+      check(`Reads at 4.5:1 in ${theme} theme`, low.length === 0, low.join(" | "));
+    }
+    await p.theme("light");
+  },
 };
 
 // ---------------------------------------------------------------- the runner
@@ -1218,15 +1691,13 @@ function startFakeCoordinator(sampleArrow) {
   const library = new Map([
     ["orders-pipeline", {
       id: "orders-pipeline",
-      title: "Orders export",
-      description: "Moves orders from shop to archive",
+      header: "Orders export\nMoves orders from shop to archive",
       yaml: "# Orders export\norders:\n  input: brick:n1/orders\narchive:\n  from: orders\n  output: brick:n1/archive\n",
       commit: "aaaa1111aaaa1111",
     }],
     ["unlinked-pipeline", {
       id: "unlinked-pipeline",
-      title: "Unlinked report",
-      description: "Another pipeline in the library",
+      header: "Unlinked report\nAnother pipeline in the library",
       yaml: "# Unlinked\norders:\n  input: brick:n1/orders\narchive:\n  from: orders\n  output: brick:n1/archive\n",
       commit: "cccc3333cccc3333",
     }],
@@ -1240,9 +1711,9 @@ function startFakeCoordinator(sampleArrow) {
     req.on("end", () => {
       const json = (code, data) => { res.writeHead(code, { "Content-Type": "application/json" }); res.end(JSON.stringify(data)); };
       if (urlPath === "/.well-known/oauth-protected-resource") {
-        json(200, { resource: baseUrl, authorization_servers: [baseUrl], bearer_methods_supported: ["header"], dtpipe_contract: 12, dtpipe_studio_client_id: "studio", dtpipe_auth: ["key"] });
+        json(200, { resource: baseUrl, authorization_servers: [baseUrl], bearer_methods_supported: ["header"], dtpipe_contract: 13, dtpipe_studio_client_id: "studio", dtpipe_auth: ["idp", "key"] });
       } else if (urlPath === "/.well-known/openid-configuration") {
-        json(200, { issuer: baseUrl, token_endpoint: `${baseUrl}/connect/token` });
+        json(200, { issuer: baseUrl, authorization_endpoint: `${baseUrl}/authorize`, token_endpoint: `${baseUrl}/connect/token` });
       } else if (urlPath === "/connect/token") {
         json(200, { access_token: "fake-smoke-token", expires_in: 600, token_type: "Bearer" });
       } else if (urlPath === "/api/me") {
@@ -1263,7 +1734,7 @@ function startFakeCoordinator(sampleArrow) {
         res.writeHead(200, { "Content-Type": "application/vnd.apache.arrow.stream" });
         res.end(sampleArrow);
       } else if (urlPath === "/api/library") {
-        json(200, [...library.values()].map((p) => ({ id: p.id, title: p.title, description: p.description, commit: p.commit })));
+        json(200, [...library.values()].map((p) => ({ id: p.id, header: p.header, commit: p.commit })));
       } else if (urlPath.startsWith("/api/library/")) {
         const id = decodeURIComponent(urlPath.slice("/api/library/".length));
         if (req.method === "GET") {
@@ -1280,7 +1751,7 @@ function startFakeCoordinator(sampleArrow) {
           }
           const save = JSON.parse(body);
           const commit = `commit-${++seq}`.padEnd(16, "0");
-          library.set(id, { id, title: id, description: null, yaml: save.yaml, commit });
+          library.set(id, { id, header: null, yaml: save.yaml, commit });
           json(200, { id, commit, deployed: false });
         } else json(405, { error: "Method not allowed" });
       } else {
@@ -1295,7 +1766,10 @@ async function seed(name, folder) {
   if (name === "workspace-files") {
     fs.mkdirSync(path.join(folder, "sub"), { recursive: true });
   }
-  if (name === "library-sync") {
+  if (name === "p1b-ux") {
+    fakeCoordinators.set(folder, await startFakeCoordinator(Buffer.alloc(0)));
+  }
+  if (name === "library-sync" || name === "coordinator-connect") {
     const keyPath = path.join(folder, "studio.key");
     fs.writeFileSync(keyPath, "dtp_alice_0123456789abcdefghijklmnopqrstuvwxyzABCDEFG\n");
     const arrowPath = path.join(folder, "sample.arrows");
@@ -1332,6 +1806,9 @@ const argsOf = {
   "agent-edit": () => ["--llm-provider", "ollama", "--llm-url", fakeLlm.url],
   undo: () => ["--llm-provider", "ollama", "--llm-url", fakeLlm.url],
   keyboard: () => ["--llm-provider", "ollama", "--llm-url", fakeLlm.url],
+  "dialog-actions": () => ["--llm-provider", "ollama", "--llm-url", fakeLlm.url],
+  "agent-actions": () => ["--llm-provider", "ollama", "--llm-url", fakeLlm.url],
+  "p1b-ux": (folder) => ["--llm-provider", "ollama", "--llm-url", fakeLlm.url, "--coordinator", fakeCoordinators.get(folder).url],
 };
 
 const fixturesOf = {

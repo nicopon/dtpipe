@@ -129,7 +129,7 @@ public sealed class KeyTokenTests
     }
 
     [Fact]
-    public async Task A_connection_presents_a_fresh_token_each_time_so_one_from_a_gone_coordinator_is_not_kept()
+    public async Task The_control_hub_reuses_a_valid_token_until_invalidated_and_the_data_plane_asks_a_fresh_one_each_time()
     {
         await WithKeyedCoordinatorAsync(async (url, key) =>
         {
@@ -144,10 +144,31 @@ public sealed class KeyTokenTests
                 },
             }, "edge", url);
 
-            Assert.NotEmpty(await NodeAgent.FreshTokenAsync(tokens));
-            Assert.NotEmpty(await NodeAgent.FreshTokenAsync(tokens));
+            var first = await NodeAgent.TokenAsync(tokens);
+            var second = await NodeAgent.TokenAsync(tokens);
+            Assert.NotEmpty(first);
+            Assert.Equal(first, second);
+            Assert.Equal(1, asked);
+
+            tokens.Invalidate();
+            Assert.NotEmpty(await NodeAgent.TokenAsync(tokens));
             Assert.Equal(2, asked);
+
+            // TransportR asks again after a 401 and at a renewal: each ask reaches the provider.
+            await NodeAgent.DataPlaneTokenAsync(tokens);
+            await NodeAgent.DataPlaneTokenAsync(tokens);
+            Assert.Equal(4, asked);
         });
+    }
+
+    [Fact]
+    public async Task GetAsync_propagates_cancellation_token()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        using var tokens = new OidcTokenClient(new NodeOidcOptions { Authority = "http://127.0.0.1:1", ClientSecret = "s" }, "edge", "http://127.0.0.1:1");
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => tokens.GetAsync(ct: cts.Token));
     }
 
     [Fact]

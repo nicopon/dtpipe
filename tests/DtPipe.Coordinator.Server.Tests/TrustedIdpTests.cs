@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using DtPipe.Coordinator.Contracts;
 using DtPipe.Coordinator.Server.Access;
 using DtPipe.Coordinator.Server.Deployments;
 using DtPipe.Coordinator.Server.Nodes;
@@ -68,11 +69,11 @@ public sealed class TrustedIdpTests : IDisposable
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
-    /// <summary>A service is admitted to the node channel (200) and to TransportR's control plane (415: the route has no effect without a body).</summary>
+    /// <summary>A service is admitted to the node channel (200) and to TransportR's control plane (404: the hub admits the caller, then refuses a client it does not know).</summary>
     public static TheoryData<string, HttpStatusCode> DataPlane => new()
     {
         { "/node-channel/negotiate?negotiateVersion=1", HttpStatusCode.OK },
-        { WireRoutes.ClientBase + "/6f1c0d52-8d0b-4a39-9a5e-3f6d1d6a7b10/" + WireRoutes.TransfersSegment, HttpStatusCode.UnsupportedMediaType },
+        { DataPlaneRoutes.Prefix + WireRoutes.ClientBase + "/6f1c0d52-8d0b-4a39-9a5e-3f6d1d6a7b10/" + WireRoutes.TransfersSegment, HttpStatusCode.NotFound },
     };
 
     [Theory]
@@ -92,7 +93,7 @@ public sealed class TrustedIdpTests : IDisposable
     [Fact]
     public async Task A_Persons_Token_Never_Reaches_A_Stream()
     {
-        using var response = await _host.Bearer(CoordinatorHost.Person(CoordinatorHost.Designer)).GetAsync(WireRoutes.StreamBase + "/x/receive", Ct);
+        using var response = await _host.Bearer(CoordinatorHost.Person(CoordinatorHost.Designer)).GetAsync(DataPlaneRoutes.Prefix + WireRoutes.StreamBase + "/x/receive", Ct);
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 

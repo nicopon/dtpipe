@@ -13,6 +13,15 @@ namespace DtPipe.Cli.Agent;
 
 public class OllamaClient : ILlmClient, IStreamingLlmClient
 {
+    private static readonly SocketsHttpHandler SharedHandler = new()
+    {
+        AllowAutoRedirect = false,
+        UseCookies = false,
+        PooledConnectionLifetime = TimeSpan.FromMinutes(2),
+    };
+
+    private static readonly HttpClient SharedHttp = Unbounded(new HttpClient(SharedHandler, disposeHandler: false));
+
     private readonly HttpClient _http;
     private readonly TimeSpan _chatTimeout;
     private readonly int _maxOutputTokens;
@@ -21,7 +30,7 @@ public class OllamaClient : ILlmClient, IStreamingLlmClient
     {
         _chatTimeout = chatTimeout ?? AgentOptions.DefaultLlmTimeout;
         _maxOutputTokens = maxOutputTokens ?? TurnLimits.DefaultMaxOutputTokens;
-        _http = Unbounded(new HttpClient());
+        _http = SharedHttp;
     }
 
     /// <summary>Test seam: inject a handler to exercise the timeout / connection-failure paths.</summary>

@@ -22,11 +22,13 @@ across them and injected faults: [the lab](../distributed-lab/README.md).
 
 ## The studio
 
-`dtpipe studio ./jobs` opens a local page over the YAML jobs of a folder. Each job shows as steps
-that you edit and preview on the real engine, without writing to the target. It needs no
-coordinator; with `--coordinator`, it also offers the nodes' bricks and publishes jobs to the
-coordinator's library. With `--llm-provider`, a panel lets a model design the job with you: see
-[The agent](guides/agent.md). Details: [REFERENCE.md](../REFERENCE.md#studio-dtpipe-studio).
+`dtpipe studio ./jobs` opens a local page over the YAML jobs of a folder; the folder's name in the
+header (its full path shows on hover) opens another one. Each job shows as steps that you edit and
+preview on the real engine, without writing to the target. It needs no coordinator; once one is
+connected (`--coordinator`, or the coordinator zone of the page), it also offers the nodes' bricks
+and publishes jobs to the coordinator's library. With `--llm-provider`, a panel lets a model design
+the job with you: see [The agent](guides/agent.md). Details:
+[REFERENCE.md](../REFERENCE.md#studio-dtpipe-studio).
 
 ## Sealing the data plane
 
@@ -78,8 +80,8 @@ and shows it:
   The ends of orders@crm -> orders@runner-1 are set differently for end-to-end encryption, or its stream was altered on its way.
   ```
 
-- **The studio.** With `--coordinator`, its Problems tab lists the edges the coordinator would
-  refuse, and says so before **Publish**, which goes ahead.
+- **The studio.** With a coordinator connected, its Problems tab lists the edges the coordinator
+  would refuse, and says so before **Publish**, which goes ahead.
 
 What it cannot check:
 

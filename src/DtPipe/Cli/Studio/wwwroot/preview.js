@@ -5,10 +5,10 @@
 // rereading its source. The server holds the pins and the checkpoints beside the job and settles them against the job's
 // text; the page only shows what it answers, and never decides what is still true.
 
-import { api, el, status } from "./dom.js";
+import { api, el, status, tabOf } from "./dom.js";
 import { brickBranches, cardBranch, cardWatch, compose, editingText, focusCard, showTab, stageTable } from "./designer.js";
 import { invalidate } from "./render.js";
-import { freshPreview, sequence, state } from "./state.js";
+import { freshPreview, HELD, sequence, state } from "./state.js";
 
 const dbg = state.preview;
 // The preview that is under way, whose request Cancel abandons: the server reads the abandoned request as a stop.
@@ -246,7 +246,7 @@ async function runPreviewNow(place) {
     if (place?.card) focusCard(place.card); else showTab("preview");
     status(answer.report.success ? (place?.card ? `ran up to ${place.card}` : "preview done") : "preview failed", answer.report.success ? "good" : "bad");
   } catch (e) {
-    if (e.name === "AbortError") status("preview stopped: the engine stops at its next batch of rows, and a query that has not answered yet runs on until it does", "warn");
+    if (e.name === "AbortError") status("preview stopped (a pending query runs on until it answers)", "warn");
     else {
       if (e.status === 422 && state.vars.variables.some((v) => !v.ready)) showTab("variables");
       status(e.message, "bad");
@@ -309,8 +309,8 @@ export function cardBadge(alias) {
   const cardState_ = cardState(alias);
   const watcher = watcherOf(alias);
   const place = cardWatch(alias);
-  const title = cardState_.name === "held" ? "A real run is suspended before its outputs are written: Write writes the rows held for this output, Abandon forgets the rows still held."
-    : wholeBranch(place) && place.at === "read" ? "This step runs whole with its branch: its rows are those of its read, and it cannot be pinned inside." : cardState_.text;
+  const title = cardState_.name === "held" ? HELD
+    : wholeBranch(place) && place.at === "read" ? "Runs with its whole branch: cannot be pinned." : cardState_.text;
   return el("div", { class: `dcard-badge ${cardState_.name}`, "data-card-state": cardState_.name, title },
     `${cardState_.glyph} ${cardState_.text}${watcher ? " · 📌" : ""}`);
 }
@@ -323,8 +323,8 @@ export function cardTools(alias) {
     if (!queueOf(alias)) return null;
     const word = (name, label, title, extra = "") => el("button", { class: `ctool wide ${extra}`, "data-card-tool": name, title, "aria-label": title }, label);
     return el("div", { class: "dcard-tools queue" },
-      heldBranch(alias) ? word("write", "Write", "Write the rows held for this output: you confirm first, and the other held outputs stay held") : null,
-      word("abandon", "Abandon", "Forget the rows held for every output; what was already written stays written", "danger"));
+      heldBranch(alias) ? word("write", "Write", "Write this output's held rows (you confirm first)") : null,
+      word("abandon", "Abandon", "Forget the held rows of every output", "danger"));
   }
   const watcher = watcherOf(alias);
   const whole = place.at === "read" && wholeBranch(place);
@@ -333,8 +333,8 @@ export function cardTools(alias) {
   return el("div", { class: "dcard-tools" },
     tool("play", "▶", "Run the job up to this step"),
     tool("pin", "📌", whole ? "This step runs whole with its branch: it cannot be pinned" : watcher
-      ? "Pinned: it keeps its rows and a checkpoint of them. Click to unpin and forget them"
-      : "Pin: keep this step's rows and a checkpoint of them, so a later run reads them back instead of rereading the source",
+      ? "Pinned: click to unpin and forget its rows"
+      : "Pin: keep these rows and skip the re-read next time",
     { class: watcher ? "ctool pin on" : "ctool pin", "aria-pressed": String(!!watcher), "aria-disabled": whole ? "true" : null }));
 }
 
@@ -346,7 +346,7 @@ export async function cardTool(alias, name) {
   if (dbg.real) {
     // The rows of a real run belong to its text; a card can still be looked at, nothing else changes.
     focusCard(alias);
-    status("A real run is suspended: continue it, or abandon it to change what is pinned.", "warn");
+    status("Run held: write or abandon it before changing pins.", "warn");
     return;
   }
   const watcher = watcherOf(alias);
@@ -371,7 +371,7 @@ export async function forgetPins() {
 export function previewView(alias) {
   const place = alias ? cardWatch(alias) : null;
   const parts = [];
-  if (dbg.running) parts.push(el("p", { class: "warn" }, "Running… ", el("button", { class: "ghost small", onclick: cancelPreview }, "Stop")));
+  if (dbg.running) parts.push(el("p", { class: "warn" }, "Running…"));
   const waiting = alias && !place ? queueOf(alias) : null;
   if (waiting) {
     const held = dbg.held.get(waiting.branch);
@@ -379,21 +379,21 @@ export function previewView(alias) {
       const stage = held.stage;
       const total = waiting.rows ?? `${stage.rowsSeen}${stage.more ? "+" : ""}`;
       const cut = (stage.sample || []).length < (waiting.rows ?? stage.rowsSeen) ? " (the first 1000 shown)" : "";
-      parts.push(el("p", { class: "muted" }, `${alias}: ${total} rows queued for its output${cut}. Nothing is written until you write.`),
+      parts.push(el("p", { class: "muted" }, `${alias}: ${total} rows queued${cut}.`),
         el("div", { class: "scroll" }, stageTable(stage)));
     } else {
       parts.push(el("p", { class: "hint" }, waiting.key
         ? `${alias} waits on rows a real run holds: loading them…`
-        : `The suspended run holds none of the rows ${alias} waits on: abandon it, then review again.`));
+        : `No held rows for ${alias}: abandon, then review again.`));
     }
-    parts.push(el("p", { class: "hint" }, "Write writes the rows held for this output, after you confirm; Abandon forgets the rows held for every output."));
+    parts.push(el("p", { class: "hint" }, "Write: this output, after you confirm. Abandon: every output."));
   } else if (!place) {
     parts.push(el("p", { class: "hint" }, alias
-      ? `${alias} is an output and holds no rows of its own: select the step before it.`
-      : "Select a step to see the rows it delivers. Preview runs the whole job; ▶ on a step runs it up to that step. The outputs are neutralised: nothing is written."));
+      ? `${alias} is an output: select the step before it.`
+      : "Select a step to see its rows."));
   } else {
     if (place.at === "read" && wholeBranch(place)) {
-      parts.push(el("p", { class: "hint" }, `${alias} belongs to the branch ${place.branch}, which runs whole (a stream processor or a job the cut refuses): `
+      parts.push(el("p", { class: "hint" }, `${alias} runs whole with branch ${place.branch}: `
         + "it cannot be pinned inside, only at its end."));
     }
     const watcher = watcherOf(alias);
@@ -402,20 +402,20 @@ export function previewView(alias) {
       const stage = shown.stage;
       const total = rowsOf(stage);
       const cut = (stage.sample || []).length < stage.rowsSeen ? " (the first 1000 shown)"
-        : atCap(stage) ? ` (a preview reads at most ${dbg.rowCap} rows of a source: it may hold more)` : "";
-      parts.push(el("p", { class: "muted" }, `${alias}: ${total} rows${dbg.real ? " held" : " delivered"}${cut}. The output was not written.`),
+        : atCap(stage) ? ` (capped at ${dbg.rowCap} source rows)` : "";
+      parts.push(el("p", { class: "muted" }, `${alias}: ${total} rows${dbg.real ? " held" : " delivered"}${cut}.`),
         el("div", { class: "scroll" }, stageTable(stage)));
     } else if (dbg.edited.has(alias)) {
-      parts.push(el("p", { class: "hint" }, `${alias} was modified since its preview: run Preview to see its rows again.`));
+      parts.push(el("p", { class: "hint" }, `${alias} changed: run Preview again.`));
     } else if (dbg.real && watcher?.key) {
       parts.push(el("p", { class: "hint" }, `${alias} holds the rows of a real run: loading them…`));
     } else {
-      parts.push(el("p", { class: "hint" }, `No preview of ${alias} yet: Preview in the bar runs the whole job, ▶ on the step runs it up to there.`));
+      parts.push(el("p", { class: "hint" }, `No preview of ${alias} yet: Preview (bar) or ▶ (step).`));
     }
     if (watcher) {
       parts.push(el("p", { class: "hint" }, watcher.key
-        ? "📌 Pinned: its checkpoint is held, and a later run reads it back instead of rereading what precedes it."
-        : "📌 Pinned: its checkpoint is kept at the next run."));
+        ? "📌 Pinned: later runs read these rows back."
+        : "📌 Pinned: kept at the next run."));
     }
   }
   const errors = [dbg.report?.error, ...(dbg.report?.errors || [])].filter(Boolean);
@@ -423,10 +423,11 @@ export function previewView(alias) {
     // A failure that came back with no reason says so, never a bare "failed" a person reads as the whole story.
     parts.push(el("p", { class: "bad" }, `The last preview failed${dbg.report.stage ? ` (${dbg.report.stage})` : ""}.`),
       errors.length ? el("ul", { class: "msgs bad" }, errors.map((m) => el("li", {}, m)))
-        : el("p", { class: "hint" }, `The engine returned no reason. Check each endpoint's address and component; dtpipe --job on the saved file${state.job ? ` (${state.job.path}, in the folder ${state.jobs.folder})` : ""} prints the error.`));
+        : el("p", { class: "hint" }, `No reason given. Check each endpoint, or run dtpipe --job on ${state.job ? state.job.path : "the saved file"}.`));
   }
   if (dbg.notice) parts.push(el("p", { class: "hint warn" }, dbg.notice));
-  return parts;
+  // The rows take the height the drawer has, and scroll in both directions there: their scrollbars stay in view.
+  return tabOf(parts, dbg.running ? [el("button", { class: "ghost small", onclick: cancelPreview }, "Stop")] : [], { fill: true });
 }
 
 // ---------------------------------------------------------------- a real run left holding rows

@@ -37,19 +37,25 @@ public sealed class StudioFolder
         AttributesToSkip = FileAttributes.Hidden | FileAttributes.System | FileAttributes.ReparsePoint,
     };
 
-    private static readonly StringComparison PathComparison =
+    internal static readonly StringComparison PathComparison =
         OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+
+    /// <summary>A full path as the studio names a folder: absolute, without the separator that may end it.</summary>
+    internal static string Normalize(string path) => Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
 
     public string Root { get; }
 
     public StudioFolder(string path)
     {
-        Root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+        Root = Normalize(path);
         if (File.Exists(Root)) throw new DirectoryNotFoundException($"{Root} is a file, not a folder: give the folder that holds the jobs.");
         if (!Directory.Exists(Root)) throw new DirectoryNotFoundException($"No folder at {Root}.");
     }
 
-    /// <summary>The jobs under the folder, as relative paths with '/' separators, in order.</summary>
+    /// <summary>
+    /// The first jobs under the folder by name, as relative paths with '/' separators. Ordered before the cut: the walk's order is
+    /// the file system's, so a cut taken first would list a set that changes from one machine or one call to the next.
+    /// </summary>
     public IReadOnlyList<string> Jobs() =>
         Directory.EnumerateFiles(Root, "*", Walk)
             .Where(IsJob)
@@ -59,7 +65,7 @@ public sealed class StudioFolder
             .Take(MaxJobs)
             .ToList();
 
-    /// <summary>The folder and its subdirectories, as relative paths with '/' separators ("" for the root), in order.</summary>
+    /// <summary>The folder and its first subdirectories by name, as relative paths with '/' separators ("" for the root), ordered as <see cref="Jobs"/>.</summary>
     public IReadOnlyList<string> Folders() =>
         new[] { "" }
             .Concat(Directory.EnumerateDirectories(Root, "*", Walk)
@@ -170,7 +176,7 @@ public sealed class StudioFolder
         return full;
     }
 
-    private string Confine(string relative)
+    internal string Confine(string relative)
     {
         if (string.IsNullOrWhiteSpace(relative) || Path.IsPathRooted(relative))
             throw new StudioRefusal(400, "A job is named by its path relative to the folder.");
@@ -180,7 +186,8 @@ public sealed class StudioFolder
             throw new StudioRefusal(400, $"'{relative}' is not a .yaml or .yml file.");
 
         var full = Path.GetFullPath(Path.Combine(Root, relative));
-        if (!full.StartsWith(Root + Path.DirectorySeparatorChar, PathComparison))
+        var prefix = Root.EndsWith(Path.DirectorySeparatorChar) ? Root : Root + Path.DirectorySeparatorChar;
+        if (!full.StartsWith(prefix, PathComparison))
             throw new StudioRefusal(400, $"'{relative}' leaves the folder.");
         return full;
     }

@@ -2,11 +2,12 @@
 // The real run of the saved job: what it would write, confirmed first; then the run, polled until it ends. A run that
 // reviews first stops before every writer and is left suspended; the sink cards write it or abandon it.
 
-import { api, el, fill, plural, status, targetOf } from "./dom.js";
+import { api, el, fill, plural, status, tabOf, targetOf } from "./dom.js";
+import { captureFocus, restoreFocus } from "./dialog.js";
 import { brickBranches, holdsEdits, showTab } from "./designer.js";
 import { invalidate } from "./render.js";
 import { showHeld } from "./preview.js";
-import { sequence, state } from "./state.js";
+import { HELD, sequence, state } from "./state.js";
 
 let runTimer = null;
 
@@ -28,6 +29,8 @@ export function restoreReview(review) {
 
 /** The open confirmation's dialog; there is at most one. @type {HTMLDialogElement | null} */
 let dialog = null;
+/** @type {HTMLElement | null} */
+let opener = null;
 // One counter for the confirmations asked: the answer to an earlier choice never replaces the one to the latest.
 const preparing = sequence();
 
@@ -39,10 +42,13 @@ function listedOf(run) {
 
 function closeDialog() {
   const old = dialog;
+  const prevOpener = opener;
   dialog = null;
+  opener = null;
   if (!old) return;
   if (old.open) old.close();
   old.remove();
+  restoreFocus(prevOpener);
 }
 
 /** Escape and Cancel: the confirmation is dropped, nothing runs. */
@@ -62,11 +68,11 @@ function dropConfirmation() {
 export async function prepareRun(continuation = false, held = null, targets = null) {
   const job = state.job;
   if (!job) {
-    status("Open or save a job first: a run executes the job saved in the folder.", "bad");
+    status("Open and save a job first.", "bad");
     return;
   }
   if (holdsEdits() || !job.hash) {
-    status("Save the job first: a run executes the job saved in the folder.", "bad");
+    status("Save the job first.", "bad");
     return;
   }
   await ask({ continuation, review: continuation ? false : state.writing.review, targets, held });
@@ -110,6 +116,7 @@ function drawDialog() {
   const run = state.run;
   if (!run || run.phase !== "confirm") { closeDialog(); return; }
   if (!dialog) {
+    opener = captureFocus();
     dialog = /** @type {HTMLDialogElement} */ (el("dialog", { id: "d-run-dialog", class: "run-dialog", "aria-labelledby": "d-run-title" }));
     dialog.addEventListener("cancel", dropConfirmation);
     document.body.append(dialog);
@@ -151,28 +158,29 @@ function confirmView(run) {
   const count = listed.length ? chosen.size : 0;
   const review = asked.continuation ? null : el("label", { class: "review" },
     el("input", { id: "d-review", type: "checkbox", checked: asked.review, onchange: (e) => setReview(targetOf(e).checked) }),
-    " Review before writing ", el("span", { class: "hint" }, "(stop before every output and read the rows; the output steps then write or abandon)"));
+    " Review before writing ", el("span", { class: "hint" }, "(stop before the outputs, then write or abandon)"));
   const label = run.busy ? "Checking…" : asked.continuation ? `Write ${plural(count, "output")}`
     : sample ? "Run the sample" : !listed.length ? "Run" : asked.review ? `Hold ${plural(count, "output")} for review` : `Write ${plural(count, "output")}`;
   const staged = prepared?.staged;
   return [
-    el("h3", { id: "d-run-title" }, asked.continuation ? "Write the held rows" : sample ? "Run the sample" : "Run for real"),
-    el("p", { class: "hint" }, el("code", {}, run.path), asked.continuation
-      ? " holds the rows read earlier: choose the outputs that receive them now; the others stay held."
-      : " runs here, as dtpipe --job would."),
-    review,
-    run.refused ? el("p", { class: "warn" }, run.refused) : null,
-    prepared && !run.refused ? [
-      sample ? el("p", { class: "warn" }, `This run is a sample: its source bricks are read at ${prepared.sampleRows} rows through the coordinator, and nothing real is written. A sink brick is written to a throwaway file here, never to its node.`) : null,
-      staged ? stagedView(staged, sample) : sample ? null : el("p", { class: "warn" }, "This run is real: its outputs are written. A sink brick is written to a throwaway file here, never to its node."),
-    ] : null,
-    listed.length ? el("div", { class: "run-targets" }, listed.map((w) => el("div", { class: "run-write" },
-      el("label", {},
-        selectable ? el("input", { id: `d-target-${w.alias}`, type: "checkbox", checked: chosen.has(w.alias), onchange: (e) => choose(w.alias, targetOf(e).checked) }) : null,
-        selectable ? " " : null, el("b", {}, w.alias),
-        w.throwaway ? " → a throwaway file (the brick's node is not reached)" : [" → ", el("code", {}, w.output)]),
-      w.block ? el("details", {}, el("summary", {}, "output block"), el("pre", {}, w.block)) : null)))
-      : prepared ? el("p", { class: "hint" }, "No branch of this job writes anywhere.") : null,
+    el("div", { class: "run-body" },
+      el("h3", { id: "d-run-title" }, asked.continuation ? "Write the held rows" : sample ? "Run the sample" : "Run for real"),
+      el("p", { class: "hint" }, el("code", {}, run.path), asked.continuation
+        ? " holds rows read earlier: choose the outputs to write now."
+        : " runs here, like dtpipe --job."),
+      review,
+      run.refused ? el("p", { class: "warn" }, run.refused) : null,
+      prepared && !run.refused ? [
+        sample ? el("p", { class: "warn" }, `SAMPLE: bricks read ${prepared.sampleRows} rows, nothing real is written. Sink bricks write a temporary file here.`) : null,
+        staged ? stagedView(staged, sample) : sample ? null : el("p", { class: "warn" }, "REAL: outputs are written. Sink bricks write a temporary file here."),
+      ] : null,
+      listed.length ? el("div", { class: "run-targets" }, listed.map((w) => el("div", { class: "run-write" },
+        el("label", {},
+          selectable ? el("input", { id: `d-target-${w.alias}`, type: "checkbox", checked: chosen.has(w.alias), onchange: (e) => choose(w.alias, targetOf(e).checked) }) : null,
+          selectable ? " " : null, el("b", {}, w.alias),
+          w.throwaway ? " → a throwaway file (the brick's node is not reached)" : [" → ", el("code", {}, w.output)]),
+        w.block ? el("details", {}, el("summary", {}, "output block"), el("pre", {}, w.block)) : null)))
+        : prepared ? el("p", { class: "hint" }, "No branch of this job writes anywhere.") : null),
     el("div", { class: "row run-actions" },
       el("button", { id: "d-run-cancel", class: "ghost", onclick: dropConfirmation }, "Cancel"),
       el("button", { id: "d-run-confirm", class: "primary", disabled: run.busy || !!run.refused || !prepared, onclick: startRun }, label)),
@@ -229,35 +237,34 @@ function stagedView(staged, sample) {
   const size = (bytes) => bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} kB`;
   return [
     sample ? null : staged.writesNow
-      ? el("p", { class: "warn" }, "This run is real and reaches the end of the job: its last stage writes the outputs. A sink brick is written to a throwaway file here, never to its node.")
-      : el("p", { class: "warn" }, "This run is real but stops before every writer, so nothing is written. It holds every row it read, encrypted in this studio's session, "
-        + "until you write them or abandon them from the output steps. The rows of a sample are not used."),
+      ? el("p", { class: "warn" }, "REAL: the last stage writes the outputs. Sink bricks write a temporary file here.")
+      : el("p", { class: "warn" }, "REAL, held: stops before every writer, nothing is written. Rows are kept encrypted in this session until you write or abandon them."),
     el("ol", { class: "run-stages" }, staged.stages.map((st) => el("li", {},
       el("b", {}, st.branch), " reads ", el("code", {}, st.reads || "its source"),
       st.keeps ? ", keeps every row it delivers" : "",
       st.writes ? [", WRITES ", el("code", {}, st.writes)] : ", writes nothing"))),
     staged.held.length ? el("p", { class: "hint" }, "Held from before: ", staged.held.map((h) =>
       `${h.card || h.branch} (${size(h.bytes)}, read ${h.readAt ? new Date(h.readAt).toLocaleString() : "earlier"})`).join("; "),
-      ". Continuing writes these rows, not a new read of the source.") : null,
-    staged.discards ? el("p", { class: "warn" }, `${plural(staged.discards, "held checkpoint")} forgotten: no longer matching the job or the values it reads with, or coming from a sample.`) : null,
+      ". Continuing writes these rows, without re-reading.") : null,
+    staged.discards ? el("p", { class: "warn" }, `${plural(staged.discards, "held checkpoint")} forgotten: outdated or from a sample.`) : null,
   ];
 }
 
 /** The Run tab: the run under way and its verdict. What it would write is confirmed first, in a dialog (`drawDialog`). */
 export function runView() {
   const run = state.run;
-  if (!run || run.phase === "confirm") return el("p", { class: "hint" }, "Run for real… runs the job saved in this folder, as dtpipe --job would, on this machine. You confirm what it writes first.");
+  if (!run || run.phase === "confirm") return el("p", { class: "hint" }, "Run for real… runs the saved job here. You confirm what it writes.");
   const now = run.status;
   if (run.phase === "running" || !now) {
-    return [el("p", {}, "Running ", el("code", {}, run.path), "…"),
-      el("button", { id: "d-run-stop", class: "ghost danger", onclick: stopRun }, "Stop")];
+    return tabOf(el("p", {}, "Running ", el("code", {}, run.path), "…"),
+      [el("button", { id: "d-run-stop", class: "ghost danger", onclick: stopRun }, "Stop")]);
   }
   const failures = Object.entries(now.failures || {});
   return [
     el("p", { class: now.code === 0 ? "good" : "warn" }, `${run.path}: ${runLabel(now.code)}.`),
-    now.stopRequested && now.code === 130 ? el("p", { class: "hint" }, "You stopped it: what it had written before is not undone.") : null,
+    now.stopRequested && now.code === 130 ? el("p", { class: "hint" }, "Stopped: earlier writes are not undone.") : null,
     now.error ? el("p", { class: "warn" }, now.error) : null,
-    state.preview.real && run.path === state.job?.path ? el("p", { class: "warn" }, "⏸ This run is suspended before its outputs are written: write it or abandon it from the output steps.") : null,
+    state.preview.real && run.path === state.job?.path ? el("p", { class: "warn" }, HELD) : null,
     failures.map(([alias, why]) => el("p", { class: "warn" }, el("b", {}, alias), ": ", why)),
   ];
 }

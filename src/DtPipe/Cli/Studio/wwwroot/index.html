@@ -4,19 +4,21 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>dtpipe studio</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/studio.css">
 </head>
 <body>
   <header>
+    <img src="/favicon.svg" alt="" width="22" height="22">
     <b>dtpipe studio</b>
-    <span id="folder" class="muted"></span>
+    <button id="folder" type="button" class="small ghost folder-link"></button>
     <span id="job-name" class="mono"></span>
     <span id="job-sync" class="job-sync" hidden></span>
     <span id="status" class="pill" role="status"></span>
     <span class="links">
-<a id="help" class="help" href="https://github.com/nicopon/dtpipe/blob/main/docs/guides/distributed-first-pipeline.md" target="_blank" rel="noopener noreferrer" title="The guide: your first distributed pipeline, with the studio">Help</a>
+<a id="help" class="help" href="https://github.com/nicopon/dtpipe/blob/main/docs/guides/distributed-first-pipeline.md" target="_blank" rel="noopener noreferrer" title="Guide: your first distributed pipeline">Help</a>
 <span id="studio-link" hidden></span>
-<span id="agent-link"></span>
+<button id="agent-link" type="button" class="small ghost agent-link"></button>
 <span id="coordinator" class="coordinator" hidden></span>
 </span>
     <button id="quit" class="ghost">Quit</button>
@@ -56,13 +58,11 @@
         <input id="library-filter" type="search" class="side-filter" placeholder="Filter library…" aria-label="Filter library pipelines" hidden>
         <ul id="library" class="lib-list"></ul>
       </div>
-      <div id="side-steps-view" class="steps-pane" hidden><p class="hint">Open a job: its sources, steps and outputs are placed from here.</p></div>
+      <div id="side-steps-view" class="steps-pane" hidden><p class="hint">Open a job to place its steps here.</p></div>
       <div class="split split-col split-pal" data-split="pal" role="separator" aria-orientation="vertical" aria-label="Resize the side panel" tabindex="0"></div>
     </aside>
     <section id="designer" class="designer">
-      <p class="muted intro">Open a job from Workspace, on the left. It opens as steps, from its sources to its outputs. Preview
-        runs it through the real engine over the first source rows, with the outputs neutralised, and every step shows
-        the rows it delivers: nothing is written. Save writes the job the studio composes, and keeps where its steps are under .dtpipe/, outside git.</p>
+      <p class="muted intro">Open a job from Workspace (left). ▶ Preview runs it on the first rows, nothing written; Save keeps its layout in .dtpipe/, outside git.</p>
     </section>
     <aside id="agent-pane" class="agent-pane" hidden></aside>
   </main>

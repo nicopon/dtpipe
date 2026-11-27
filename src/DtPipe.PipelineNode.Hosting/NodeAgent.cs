@@ -1,3 +1,4 @@
+using System.Net;
 using System.Threading.Channels;
 using DtPipe.Coordinator.Contracts;
 using Microsoft.AspNetCore.SignalR.Client;
@@ -104,7 +105,11 @@ internal sealed class NodeAgent : BackgroundService
         else
             _logger.LogInformation("Node {Name} data plane protection: {Protection}", _options.Name, _endToEnd.Protection);
         var hub = _hub = new HubConnectionBuilder()
-            .WithUrl(_options.CoordinatorUrl.TrimEnd('/') + NodeChannel.Path, o => o.AccessTokenProvider = async () => await FreshTokenAsync(_tokens))
+            .WithUrl(_options.CoordinatorUrl.TrimEnd('/') + NodeChannel.Path, o =>
+            {
+                o.AccessTokenProvider = async () => await TokenAsync(_tokens);
+                o.HttpMessageHandlerFactory = inner => new InvalidateOnUnauthorizedHandler(inner, _tokens);
+            })
             .WithAutomaticReconnect(new KeepRetrying())
             .Build();
 
@@ -116,6 +121,7 @@ internal sealed class NodeAgent : BackgroundService
         hub.Reconnecting += _ =>
         {
             _announced = false;
+            _tokens.Invalidate();
             return Task.CompletedTask;
         };
         hub.Reconnected += async _ => await AnnounceAsync();
@@ -126,6 +132,7 @@ internal sealed class NodeAgent : BackgroundService
         hub.Closed += _ =>
         {
             _announced = false;
+            _tokens.Invalidate();
             _closed.Writer.TryWrite(true);
             return Task.CompletedTask;
         };
@@ -168,10 +175,18 @@ internal sealed class NodeAgent : BackgroundService
     }
 
     /// <summary>
-    /// The token a connection to the coordinator presents, asked for at each connection and each of its retries: a token kept from an
-    /// earlier try may have been issued by a coordinator that is gone, and one the coordinator refused would be presented again until it expired.
+    /// The control hub's token: the cached one, reused across negotiation and polling. The hub's callers call
+    /// <see cref="OidcTokenClient.Invalidate"/> on open, reconnect, close and 401 (<see cref="InvalidateOnUnauthorizedHandler"/>), so a
+    /// token the coordinator refused is not presented again.
     /// </summary>
-    internal static Task<string> FreshTokenAsync(OidcTokenClient tokens) => tokens.GetAsync(fresh: true);
+    internal static Task<string> TokenAsync(OidcTokenClient tokens) => tokens.GetAsync(fresh: false);
+
+    /// <summary>
+    /// The data plane's token, asked for at each of TransportR's calls: it asks at a connection, at the retry of a 401 and at a
+    /// renewal, none of which the control hub's invalidation sees, and a cached token would be the one the coordinator refused, or
+    /// the one a renewal is replacing.
+    /// </summary>
+    internal static Task<string> DataPlaneTokenAsync(OidcTokenClient tokens) => tokens.GetAsync(fresh: true);
 
     private static readonly TimeSpan ReconnectDelay = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan AnnounceTimeout = TimeSpan.FromSeconds(30);
@@ -207,7 +222,11 @@ internal sealed class NodeAgent : BackgroundService
             {
                 // Nothing is announced on a connection that has not been announced on yet.
                 _announced = false;
-                if (hub.State == HubConnectionState.Disconnected) await hub.StartAsync(ct);
+                if (hub.State == HubConnectionState.Disconnected)
+                {
+                    _tokens.Invalidate();
+                    await hub.StartAsync(ct);
+                }
                 var hadClient = _node is not null;
                 await AnnounceAsync();
                 if (!hadClient && await EnsureNodeAsync(ct)) await AnnounceAsync();
@@ -217,6 +236,8 @@ internal sealed class NodeAgent : BackgroundService
             // fails with an OperationCanceledException too.
             catch (Exception ex) when (!ct.IsCancellationRequested)
             {
+                if (ex is HttpRequestException { StatusCode: HttpStatusCode.Unauthorized })
+                    _tokens.Invalidate();
                 if (RefusalOf(ex) is { } refused)
                     _logger.LogWarning("The identity provider at {Provider} refused '{ClientId}' ({Reason}): it holds no enabled client '{ClientId}' with the secret this node reads. Where the coordinator issues the keys, add or enable an identity '{ClientId}' in Access and read its key here; retrying",
                         refused.Provider, refused.ClientId, refused.Reason, refused.ClientId, refused.ClientId);
@@ -257,14 +278,14 @@ internal sealed class NodeAgent : BackgroundService
     {
         // TransportR keeps the previous token when its provider throws, and a refused identity would then surface as a
         // bare 401 after its connection retries: ask once here so the provider's refusal is what gets reported.
-        await _tokens.GetAsync(fresh: true);
+        await _tokens.GetAsync(fresh: true, ct);
         PipelineNode node;
         try
         {
             node = await PipelineNode.ConnectAsync(new NodeClientOptions
             {
-                HubUrl = _options.CoordinatorUrl.TrimEnd('/'),
-                AccessTokenProvider = () => FreshTokenAsync(_tokens),
+                HubUrl = _options.CoordinatorUrl.TrimEnd('/') + DataPlaneRoutes.Prefix,
+                AccessTokenProvider = () => DataPlaneTokenAsync(_tokens),
                 BatchBytes = _options.BatchBytes,
                 MaxInFlightBatches = _options.MaxInFlightBatches,
                 EndToEndEncryption = _endToEnd.Enabled,
@@ -322,6 +343,7 @@ internal sealed class NodeAgent : BackgroundService
                         _logger.LogInformation("The hub does not know this replica's data plane: registering it again");
                         try
                         {
+                            _tokens.Invalidate();
                             await node.RefreshRegistrationAsync(ct);
                         }
                         catch (HubRequestFailedException ex)
@@ -450,5 +472,17 @@ internal sealed class NodeAgent : BackgroundService
     private sealed class KeepRetrying : IRetryPolicy
     {
         public TimeSpan? NextRetryDelay(RetryContext retryContext) => TimeSpan.FromSeconds(2);
+    }
+
+    private sealed class InvalidateOnUnauthorizedHandler(HttpMessageHandler innerHandler, OidcTokenClient tokens)
+        : DelegatingHandler(innerHandler)
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var response = await base.SendAsync(request, cancellationToken);
+            if (response.StatusCode == HttpStatusCode.Unauthorized)
+                tokens.Invalidate();
+            return response;
+        }
     }
 }

@@ -7,6 +7,8 @@ using Apache.Arrow.Types;
 using DtPipe.Adapters.Shared.Infrastructure.DuckDb;
 using DtPipe.Core.Infrastructure.Arrow;
 using DuckDB.NET.Native;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace DtPipe.Processors.DuckDB;
 
@@ -41,6 +43,7 @@ internal sealed unsafe class DuckDbArrowTableSource : IDisposable
     private readonly ulong _refTotalRows;
     private readonly ChannelReader<RecordBatch>? _channelReader;
     private readonly CancellationToken _ct;
+    private readonly ILogger _logger;
 
     private GCHandle _selfHandle;
     private volatile bool _inPrepare;
@@ -54,7 +57,8 @@ internal sealed unsafe class DuckDbArrowTableSource : IDisposable
         Schema sourceSchema,
         IReadOnlyList<RecordBatch>? refBatches,
         ChannelReader<RecordBatch>? channelReader,
-        CancellationToken ct)
+        CancellationToken ct,
+        ILogger? logger)
     {
         _connection = connection;
         _alias = alias;
@@ -62,6 +66,7 @@ internal sealed unsafe class DuckDbArrowTableSource : IDisposable
         _refBatches = refBatches;
         _channelReader = channelReader;
         _ct = ct;
+        _logger = logger ?? NullLogger.Instance;
 
         if (refBatches is not null)
         {
@@ -106,9 +111,10 @@ internal sealed unsafe class DuckDbArrowTableSource : IDisposable
         string functionName,
         string alias,
         Schema schema,
-        IReadOnlyList<RecordBatch> batches)
+        IReadOnlyList<RecordBatch> batches,
+        ILogger? logger = null)
     {
-        var source = new DuckDbArrowTableSource(connection, alias, schema, batches, channelReader: null, CancellationToken.None);
+        var source = new DuckDbArrowTableSource(connection, alias, schema, batches, channelReader: null, CancellationToken.None, logger);
         try
         {
             source.Register(functionName);
@@ -127,9 +133,10 @@ internal sealed unsafe class DuckDbArrowTableSource : IDisposable
         string alias,
         Schema schema,
         ChannelReader<RecordBatch> reader,
-        CancellationToken ct)
+        CancellationToken ct,
+        ILogger? logger = null)
     {
-        var source = new DuckDbArrowTableSource(connection, alias, schema, refBatches: null, reader, ct);
+        var source = new DuckDbArrowTableSource(connection, alias, schema, refBatches: null, reader, ct, logger);
         try
         {
             source.Register(functionName);
@@ -199,21 +206,19 @@ internal sealed unsafe class DuckDbArrowTableSource : IDisposable
         CArrowArray ffiArray = default;
         CArrowArrayExporter.ExportRecordBatch(emptyBatch, &ffiArray);
 
-        var err = DuckDbArrowNative.DuckDBDataChunkFromArrow(connection, &ffiArray, convertedSchema, out var chunk);
-        if (err != IntPtr.Zero)
-        {
-            CArrowArrayReleaseHook.ReleaseExportedIfUnclaimed(&ffiArray);
-            ThrowIfArrowError(err, "duckdb_data_chunk_from_arrow");
-        }
-
+        IntPtr chunk = IntPtr.Zero;
         try
         {
+            var err = DuckDbArrowNative.DuckDBDataChunkFromArrow(connection, &ffiArray, convertedSchema, out chunk);
+            ThrowIfArrowError(err, "duckdb_data_chunk_from_arrow");
             var vector = DuckDbArrowNative.DuckDBDataChunkGetVector(chunk, 0);
             return NativeMethods.Vectors.DuckDBVectorGetColumnType(vector);
         }
         finally
         {
-            DuckDbArrowNative.DuckDBDestroyDataChunk(ref chunk);
+            if (chunk != IntPtr.Zero)
+                DuckDbArrowNative.DuckDBDestroyDataChunk(ref chunk);
+            CArrowArrayReleaseHook.ReleaseExportedIfUnclaimed(&ffiArray);
         }
     }
 
@@ -396,6 +401,7 @@ internal sealed unsafe class DuckDbArrowTableSource : IDisposable
                             source._convertedColSchemas[colIdx],
                             output,
                             (ulong)k,
+                            source._logger,
                             out var errorMsg))
                     {
                         NativeMethods.TableFunction.DuckDBFunctionSetError(info, errorMsg!);
@@ -469,6 +475,7 @@ internal sealed unsafe class DuckDbArrowTableSource : IDisposable
         IntPtr convertedColSchema,
         IntPtr outputChunk,
         ulong outputColIndex,
+        ILogger logger,
         out string? errorMessage)
     {
         CArrowArray ffiArray = default;
@@ -482,7 +489,7 @@ internal sealed unsafe class DuckDbArrowTableSource : IDisposable
             throw;
         }
 
-        CArrowArrayReleaseHook.Chain(&ffiArray, colBatch);
+        CArrowArrayReleaseHook.Chain(&ffiArray, colBatch, logger);
 
         var errData = DuckDbArrowNative.DuckDBDataChunkFromArrow(connection, &ffiArray, convertedColSchema, out var tempChunk);
         if (errData != IntPtr.Zero)

@@ -92,6 +92,9 @@ public sealed class CoordinatorTestHost : IAsyncDisposable
     public IHost Host { get; }
     public string Url { get; }
 
+    /// <summary>Where a TransportR client reaches the hub: the address and the data plane's prefix.</summary>
+    public string HubUrl => Url + DataPlaneRoutes.Prefix;
+
     private CoordinatorTestHost(IHost host, string url)
     {
         Host = host;
@@ -149,7 +152,7 @@ public sealed class CoordinatorTestHost : IAsyncDisposable
                         }
                         app.UseEndpoints(endpoints =>
                         {
-                            endpoints.MapDataHub(requireAuth: jwt is not null);
+                            endpoints.MapDataHub(DataPlaneRoutes.Prefix, requireAuth: jwt is not null);
                             var node = endpoints.MapHub<TestNodeHub>(NodeChannel.Path);
                             if (jwt is not null) node.RequireAuthorization();
                         });
@@ -173,7 +176,7 @@ public sealed class CoordinatorTestHost : IAsyncDisposable
     public ByteStreamClient CreateClient(string? token = null)
     {
         var builder = new ByteStreamClientBuilder(batchBytes: 65536)
-            .WithUrl(Url);
+            .WithUrl(HubUrl);
         if (token is not null)
             builder.WithTokenProvider(() => Task.FromResult(token));
         return builder.Build();

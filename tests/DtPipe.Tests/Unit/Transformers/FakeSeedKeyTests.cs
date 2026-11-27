@@ -3,6 +3,7 @@ using System.Text;
 using Apache.Arrow;
 using Apache.Arrow.Arrays;
 using Apache.Arrow.Serialization.Mapping;
+using Apache.Arrow.Serialization.Reflection;
 using Apache.Arrow.Types;
 using AwesomeAssertions;
 using DtPipe.Transformers.Arrow.Fake;
@@ -531,6 +532,71 @@ public class FakeSeedKeyTests
             new RecordBatch(new Schema.Builder().Field(bool8).Build(), [values], 2), [0], keys, new bool[2]);
 
         keys.Should().Equal(KeysOf(bools).Keys);
+    }
+
+    [Fact]
+    public void DictionaryOfBool8AndUuid_MatchesDirectColumnKeys_AndOutOfRangeIndicesReadAsNull()
+    {
+        var bool8Type = new DictionaryType(Int32Type.Default, Int8Type.Default, false);
+        var bool8Field = new Field("seed", bool8Type, true, new Dictionary<string, string> { ["ARROW:extension:name"] = "arrow.bool8" });
+        var boolDict = new DictionaryArray(bool8Type, Integers(Int32Type.Default, [1, 0]), new Int8Array.Builder().Append(0).Append(2).Build());
+        var boolDirect = new BooleanArray.Builder().Append(true).Append(false).Build();
+
+        var boolKeys = new ulong[2];
+        ArrowSeedKeyExtractor.FillRowKeys(new RecordBatch(new Schema.Builder().Field(bool8Field).Build(), [boolDict], 2), [0], boolKeys, new bool[2]);
+        boolKeys.Should().Equal(KeysOf(boolDirect).Keys);
+
+        var guidA = Guid.Parse("6f9619ff-8b86-d011-b42d-00c04fc964ff");
+        var guidB = Guid.Parse("11111111-2222-3333-4444-555555555555");
+        var uuidDirectBuilder = new FixedSizeBinaryArrayBuilder(16);
+        uuidDirectBuilder.Append(Rfc4122Guid.ToBigEndianBytes(guidA));
+        uuidDirectBuilder.Append(Rfc4122Guid.ToBigEndianBytes(guidB));
+        var uuidDictValuesBuilder = new FixedSizeBinaryArrayBuilder(16);
+        uuidDictValuesBuilder.Append(Rfc4122Guid.ToBigEndianBytes(guidB));
+        uuidDictValuesBuilder.Append(Rfc4122Guid.ToBigEndianBytes(guidA));
+
+        var uuidType = new DictionaryType(Int32Type.Default, new FixedSizeBinaryType(16), false);
+        var uuidField = new Field("seed", uuidType, true, new Dictionary<string, string> { ["ARROW:extension:name"] = "arrow.uuid" });
+        var uuidDict = new DictionaryArray(uuidType, Integers(Int32Type.Default, [1, 0]), uuidDictValuesBuilder.Build());
+
+        var uuidDictKeys = new ulong[2];
+        var uuidDirectKeys = KeysOf(uuidDirectBuilder.Build()).Keys;
+        ArrowSeedKeyExtractor.FillRowKeys(new RecordBatch(new Schema.Builder().Field(uuidField).Build(), [uuidDict], 2), [0], uuidDictKeys, new bool[2]);
+        uuidDictKeys.Should().Equal(uuidDirectKeys);
+
+        // Guid inside a List<uuid> hashes as 16 RFC 4122 big-endian bytes, matching a List<FixedSizeBinary(16)>.
+        var listUuidField = new Field("seed", new ListType(new Field("item", new FixedSizeBinaryType(16), true,
+            new Dictionary<string, string> { ["ARROW:extension:name"] = "arrow.uuid" })), true);
+        var listRawField = new Field("seed", new ListType(new Field("item", new FixedSizeBinaryType(16), true)), true);
+        var itemUuid = new FixedSizeBinaryArrayBuilder(16);
+        itemUuid.Append(Rfc4122Guid.ToBigEndianBytes(guidA));
+        var itemRaw = new FixedSizeBinaryArrayBuilder(16);
+        itemRaw.Append(Rfc4122Guid.ToBigEndianBytes(guidA));
+        var offsets = new ArrowBuffer.Builder<int>().Append(0).Append(1).Build();
+        var listUuid = new ListArray((ListType)listUuidField.DataType, 1, offsets, itemUuid.Build(), ArrowBuffer.Empty);
+        var listRaw = new ListArray((ListType)listRawField.DataType, 1, offsets, itemRaw.Build(), ArrowBuffer.Empty);
+        var listUuidKeys = new ulong[1];
+        var listRawKeys = new ulong[1];
+        ArrowSeedKeyExtractor.FillRowKeys(new RecordBatch(new Schema.Builder().Field(listUuidField).Build(), [listUuid], 1), [0], listUuidKeys, new bool[1]);
+        ArrowSeedKeyExtractor.FillRowKeys(new RecordBatch(new Schema.Builder().Field(listRawField).Build(), [listRaw], 1), [0], listRawKeys, new bool[1]);
+        listUuidKeys.Should().Equal(listRawKeys);
+
+        // Out-of-range Int64/UInt64 dictionary indices yield the null sentinel without OverflowException.
+        var int64Idx = new Int64Array.Builder().Append(-1).Append((long)int.MaxValue + 10).Build();
+        var dictOor = new DictionaryArray(new DictionaryType(Int64Type.Default, StringType.Default, false), int64Idx, Text("only"));
+        var oorKeys = new ulong[2];
+        var oorHasKey = new bool[2];
+        ArrowSeedKeyExtractor.FillRowKeys(new RecordBatch(new Schema.Builder().Field(new Field("seed", dictOor.Data.DataType, true)).Build(), [dictOor], 2), [0], oorKeys, oorHasKey);
+        oorHasKey.Should().Equal([false, false]);
+        oorKeys.Should().Equal([ExpectedKey(null), ExpectedKey(null)]);
+
+        // MapArray (IDictionary) hashing differentiates entries.
+        var mapType = new MapType(StringType.Default, Int32Type.Default);
+        var kvStruct = new StructArray(new StructType([mapType.KeyField, mapType.ValueField]), 2,
+            [Text("a", "a"), Integers(Int32Type.Default, [1, 2])], ArrowBuffer.Empty);
+        var mapOffsets = new ArrowBuffer.Builder<int>().Append(0).Append(1).Append(2).Build();
+        var mapKeys = KeysOf(new MapArray(mapType, 2, mapOffsets, kvStruct, ArrowBuffer.Empty)).Keys;
+        mapKeys[0].Should().NotBe(mapKeys[1]);
     }
 
     private static T WithCulture<T>(string name, Func<T> action)

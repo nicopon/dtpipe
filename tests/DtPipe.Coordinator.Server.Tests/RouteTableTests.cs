@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.RegularExpressions;
+using DtPipe.Coordinator.Contracts;
 using DtPipe.Coordinator.Server.Access;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Routing;
@@ -39,13 +40,13 @@ public sealed class RouteTableTests
             .ToList();
     }
 
-    /// <summary>A control-plane route as the framework holds it: TransportR maps it without the leading slash of <see cref="WireRoutes.ClientBase"/>.</summary>
+    /// <summary>A control-plane route as the framework holds it: TransportR maps it under <see cref="WireRoutes.ClientBase"/>, itself under <see cref="DataPlaneRoutes.Prefix"/>, leading slash included.</summary>
     private static string ClientRoute(string method, string tail) =>
-        $"{method} {WireRoutes.ClientBase.TrimStart('/')}/{{clientId:guid}}/{tail} [default]";
+        $"{method} {DataPlaneRoutes.Prefix}{WireRoutes.ClientBase}/{{clientId:guid}}/{tail} [default]";
 
-    /// <summary>A data-plane route as the framework holds it, likewise without the leading slash of <see cref="WireRoutes.StreamBase"/>.</summary>
+    /// <summary>A data-plane route as the framework holds it, likewise under <see cref="WireRoutes.StreamBase"/>.</summary>
     private static string StreamRoute(string method, string tail) =>
-        $"{method} {WireRoutes.StreamBase.TrimStart('/')}/{{transferId}}/{tail} [default]";
+        $"{method} {DataPlaneRoutes.Prefix}{WireRoutes.StreamBase}/{{transferId}}/{tail} [default]";
 
     private static readonly string[] Expected = [
         "* /node-channel [default]",
@@ -124,13 +125,28 @@ public sealed class RouteTableTests
 
     /// <summary>The write-transport probe's route, which answers outside any transfer: <c>GET</c> opens its WebSocket, <c>POST</c> is the segment fallback.</summary>
     private static string ProbeRoute(string method) =>
-        $"{method} {WireRoutes.StreamBase.TrimStart('/')}/{WireRoutes.ProbeSegment}/{WireRoutes.SendSegment} [default]";
+        $"{method} {DataPlaneRoutes.Prefix}{WireRoutes.StreamBase}/{WireRoutes.ProbeSegment}/{WireRoutes.SendSegment} [default]";
 
     [Fact]
     public void The_Routes_Are_The_Ones_Listed_With_The_Authorization_Of_Each()
     {
         using var host = new CoordinatorHost();
-        Assert.Equal(Expected, TableOf(host));
+        Assert.Equal(Expected.Order(StringComparer.Ordinal), TableOf(host));
+    }
+
+    /// <summary>
+    /// <c>/api</c> is the people's alone: every route of TransportR's hub, control channel and streams, is mapped under the data
+    /// plane's prefix, so a proxy can keep <c>/api</c> internal and no route of the coordinator can collide with one of the hub.
+    /// </summary>
+    [Fact]
+    public void Every_Route_Of_TransportR_Is_Under_The_Data_Plane_Prefix_And_None_Under_Api()
+    {
+        using var host = new CoordinatorHost();
+        var hub = TableOf(host).Select(line => line.Split(' ')[1])
+            .Where(pattern => pattern.Contains(WireRoutes.ClientBase) || pattern.Contains(WireRoutes.StreamBase))
+            .ToList();
+        Assert.NotEmpty(hub);
+        Assert.All(hub, pattern => Assert.StartsWith(DataPlaneRoutes.Prefix + "/", pattern));
     }
 
     private static readonly string[] BenchRoutes = ["/api/pipelines", "/api/plan", "/api/deploy", "/api/fragments/{name}/kill"];
@@ -163,7 +179,7 @@ public sealed class RouteTableTests
 
     /// <summary>
     /// A request that changes something carries the CSRF header, whoever sends it: an admin's bearer with a body that binds
-    /// is still refused without it, on every such route of <c>/api</c> (TransportR's own client and stream routes are not ours).
+    /// is still refused without it, on every such route of <c>/api</c>.
     /// </summary>
     [Fact]
     public async Task Every_Route_That_Changes_Something_Refuses_A_Request_Without_The_Csrf_Header()
@@ -172,7 +188,6 @@ public sealed class RouteTableTests
         var routes = TableOf(host)
             .Select(line => Regex.Match(line, @"^(?<methods>\S+) (?<pattern>/api/\S*) "))
             .Where(m => m.Success && !m.Groups["methods"].Value.Split('+').All(x => x is "GET" or "HEAD"))
-            .Where(m => !m.Groups["pattern"].Value.StartsWith(WireRoutes.ClientBase) && !m.Groups["pattern"].Value.StartsWith(WireRoutes.StreamBase))
             .ToList();
         Assert.NotEmpty(routes);
         var client = host.Bearer(CoordinatorHost.Person(CoordinatorHost.Admin));

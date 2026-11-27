@@ -36,7 +36,7 @@ export function mount(el, _params, query) {
   nodeNames = "";
   host.innerHTML = `
     <div class="view-head"><h1>Events</h1>
-      <p class="hint">What this page remembers of the coordinator's stream, nothing more: the last ${LOG_CAPACITY} lines it received, the log lines among the server's last 400 events (150 at most) replayed when it connects, and nothing kept once the page is closed or reloaded.</p></div>
+      <p class="hint">Last ${LOG_CAPACITY} stream lines, plus up to 150 recent server log lines replayed on connect. Nothing survives a reload.</p></div>
     <section class="card events-card">
       <div class="card-head"><h2>Stream <span id="ev-count" class="hint"></span></h2>
         <div class="actions"><select id="ev-node" aria-label="Node"></select>

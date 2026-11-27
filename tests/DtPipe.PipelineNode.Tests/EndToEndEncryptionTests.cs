@@ -30,10 +30,10 @@ public class EndToEndEncryptionTests : IDisposable
 
     private static NodeClientOptions Ends(CoordinatorTestHost host, string ends) => ends switch
     {
-        "clear" => new() { HubUrl = host.Url },
-        "encrypted" => new() { HubUrl = host.Url, EndToEndEncryption = true },
-        "encrypted with the key" => new() { HubUrl = host.Url, EndToEndEncryption = true, EndToEndPreSharedKey = _ => DomainKey },
-        "encrypted with another key" => new() { HubUrl = host.Url, EndToEndEncryption = true, EndToEndPreSharedKey = _ => OtherKey },
+        "clear" => new() { HubUrl = host.HubUrl },
+        "encrypted" => new() { HubUrl = host.HubUrl, EndToEndEncryption = true },
+        "encrypted with the key" => new() { HubUrl = host.HubUrl, EndToEndEncryption = true, EndToEndPreSharedKey = _ => DomainKey },
+        "encrypted with another key" => new() { HubUrl = host.HubUrl, EndToEndEncryption = true, EndToEndPreSharedKey = _ => OtherKey },
         _ => throw new ArgumentOutOfRangeException(nameof(ends)),
     };
 

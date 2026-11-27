@@ -34,7 +34,7 @@ public sealed class StudioVariables(StudioLocalFiles local, ISecretsManager secr
     public IReadOnlyList<string> Aliases(bool refresh = false)
     {
         if (!refresh && _aliases is { } kept) return kept;
-        try { return _aliases = secrets.ListSecrets().Keys.Order(StringComparer.Ordinal).ToList(); }
+        try { return _aliases = ReservedAliases.Visible(secrets.ListSecrets()).Select(s => s.Key).Order(StringComparer.Ordinal).ToList(); }
         catch (Exception) { return []; }
     }
 

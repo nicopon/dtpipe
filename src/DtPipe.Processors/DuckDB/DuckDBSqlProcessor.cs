@@ -59,7 +59,6 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, ISqlBearing, IDi
         _refAliases = refAliases;
         _refChannelAliases = refChannelAliases;
         _logger = logger;
-        CArrowArrayReleaseHook.Logger = logger;
         _edgesOnly = edgesOnly;
     }
 
@@ -159,7 +158,7 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, ISqlBearing, IDi
             {
                 WarnUnhandledExtensions(schema);
                 var fnName = NextFunctionName();
-                var source = DuckDbArrowTableSource.RegisterRef(_conn!.NativeConnection, fnName, _refAliases[i], schema, batches);
+                var source = DuckDbArrowTableSource.RegisterRef(_conn!.NativeConnection, fnName, _refAliases[i], schema, batches, _logger);
                 _sources.Add(source);
                 taken = true;
                 await CreateSourceViewAsync(_refAliases[i], fnName, ct);
@@ -222,7 +221,7 @@ public sealed class DuckDBSqlProcessor : IColumnarStreamReader, ISqlBearing, IDi
         WarnUnhandledExtensions(schema);
         var fnName = NextFunctionName();
         var source = DuckDbArrowTableSource.RegisterStream(
-            _conn!.NativeConnection, fnName, alias, schema, channelTuple.Channel.Reader, ct);
+            _conn!.NativeConnection, fnName, alias, schema, channelTuple.Channel.Reader, ct, _logger);
         _sources.Add(source);
         await CreateSourceViewAsync(alias, fnName, ct);
         return source;

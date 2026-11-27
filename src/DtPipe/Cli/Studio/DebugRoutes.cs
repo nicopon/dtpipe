@@ -11,24 +11,16 @@ using Microsoft.AspNetCore.Http;
 namespace DtPipe.Cli.Studio;
 
 /// <summary>
-/// The preview: the real sample (<see cref="SampleCoreAsync"/>) of a copy of the job cut at the cards the
-/// person pins by <see cref="DebugCutter"/>, each watched level keeping a checkpoint in the studio's own
-/// session. It is not the run of the job: every cut passes through Arrow, batches differ and so does the
-/// concurrency. The cut is never saved or published. A run stops at the card it was asked for and starts, branch
-/// by branch, from the highest level it holds, if the text that produced that level is unchanged and its
-/// checkpoint is still in the session.
-///
-/// <para>
-/// The watchers and the levels held live beside the job, in <c>.dtpipe/studio/&lt;job&gt;-debug.json</c>; a job not
-/// saved yet keeps them under <c>drafts/&lt;id&gt;</c>, which moves to the job when it is first saved and is
-/// forgotten when the studio starts. Everything that changes a checkpoint holds the engine slot.
-/// </para>
+/// The preview and sample endpoints: the real sample (<see cref="StudioDesignContext.SampleCoreAsync"/>) of a copy of the job
+/// cut at the cards the person pins by <see cref="DebugCutter"/>, each watched level keeping a checkpoint in the studio's own
+/// session. Everything that changes a checkpoint holds the engine slot.
 /// </summary>
-public sealed partial class StudioServer
+internal sealed class DebugRoutes(
+    WorkspaceSlot workspace,
+    EngineSlot engineSlot,
+    IStudioEngine engine,
+    StudioDesignContext design)
 {
-    /// <summary>The most source rows a debug run reads from each source; the sample shows at most <see cref="MaxRows"/> per stage.</summary>
-    public const int DebugMaxRows = 100_000;
-
     private sealed record DebugAtRequest(string? Branch, string? At, string? Card = null);
 
     private sealed record DebugRequest(string? Yaml, int? Rows, string? Path, string? Draft, List<SampledBrick>? Bricks, DebugAtRequest? UpTo);
@@ -36,16 +28,33 @@ public sealed partial class StudioServer
     private sealed record DebugStateRequest(
         string? Yaml, int? Rows, string? Path, string? Draft, List<DebugAtRequest>? Watch, bool? ResetAll, List<DebugAtRequest>? Reset, string? Adopt);
 
-    /// <summary><see cref="Rows"/> is the count of a level a real run holds before its writer, read once when the run ended; null when unknown.</summary>
-    private sealed record HeldLevel(string Branch, int Level, string Digest, string Key, long? Rows = null);
+    private sealed record DebugPlanRequest(string? Yaml, int? Rows, string? Path);
 
-    private sealed class DebugState
+    private sealed record DebugRowsRequest(string? Path, string? Draft, string? Key);
+
+    /// <summary><see cref="Rows"/> is the count of a level a real run holds before its writer, read once when the run ended; null when unknown.</summary>
+    internal sealed record HeldLevel(string Branch, int Level, string Digest, string Key, long? Rows = null);
+
+    internal sealed class DebugState
     {
         public List<DebugWatch> Watch { get; set; } = [];
         public List<HeldLevel> Levels { get; set; } = [];
 
         /// <summary>The levels held are the rows of a real run that has not written its target yet.</summary>
         public bool Real { get; set; }
+    }
+
+    private byte[]? _levelKey;
+
+    private StudioWorkspace CurrentWorkspace => workspace.Current;
+
+    public void Register(StudioRouteTable routes)
+    {
+        routes.Map("POST", "/api/sample", SampleAsync);
+        routes.Map("POST", "/api/debug", DebugAsync);
+        routes.Map("POST", "/api/debug/plan", DebugPlanAsync);
+        routes.Map("POST", "/api/debug/state", DebugStateAsync);
+        routes.Map("POST", "/api/debug/rows", DebugRowsAsync);
     }
 
     private static DebugWatch WatchOf(DebugAtRequest? asked)
@@ -59,19 +68,19 @@ public sealed partial class StudioServer
         }, asked.Card is { Length: > 0 } card ? card : null);
     }
 
-    private static string AtName(DebugAt at) => at == DebugAt.Read ? "read" : "end";
+    public static string AtName(DebugAt at) => at == DebugAt.Read ? "read" : "end";
 
-    private static bool Same(string a, string b) => a.Equals(b, StringComparison.OrdinalIgnoreCase);
+    public static bool Same(string a, string b) => a.Equals(b, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>What the state of a job is kept under: its path, or the draft of a job not saved yet.</summary>
-    private string DebugKey(string? path, string? draft)
+    public string DebugKey(string? path, string? draft)
     {
-        if (JobPath(path) is { } job) return job;
+        if (design.JobPath(path) is { } job) return job;
         if (draft is { Length: >= 16 and <= 64 } && draft.All(Uri.IsHexDigit)) return "drafts/" + draft;
         throw new StudioRefusal(400, "A debug run belongs to a job: name its path, or the draft of a job not saved yet.");
     }
 
-    private DebugPlan PlanOf(DebugCutter cutter, string? yaml, int rows, string? salt = null)
+    public static DebugPlan PlanOf(DebugCutter cutter, string? yaml, int rows, string? salt = null)
     {
         if (string.IsNullOrWhiteSpace(yaml)) throw new StudioRefusal(400, "A debug request carries {\"yaml\": \"...\", \"rows\": n}.");
         try { return cutter.Plan(yaml, rows, salt); }
@@ -80,8 +89,6 @@ public sealed partial class StudioServer
             throw new StudioRefusal(422, ShownFailure.Of(ex));
         }
     }
-
-    private byte[]? _levelKey;
 
     /// <summary>
     /// The key a level's salt is hashed under, derived from the debug session's own key in user state: it survives a
@@ -94,24 +101,24 @@ public sealed partial class StudioServer
     /// What a sample's levels were read with besides the text: the launch values by name, hashed under <see cref="LevelKey"/>
     /// so a digest kept on disk gives none back. Null for a job with no variable, which keeps the digest of the text alone.
     /// </summary>
-    private string? SampleSalt(string? path, string? yaml)
+    public string? SampleSalt(string? path, string? yaml)
     {
         if (string.IsNullOrWhiteSpace(yaml)) return null;
-        var material = _variables.Fingerprint(JobPath(path), yaml);
+        var material = CurrentWorkspace.Variables.Fingerprint(design.JobPath(path), yaml);
         return material.Length == 0 ? null
             : Convert.ToHexStringLower(HMACSHA256.HashData(LevelKey(), Encoding.UTF8.GetBytes("sample\0" + material)));
     }
 
-    private CheckpointStore DebugStore() => new(SessionStore.Resolve(DebugCutter.SessionName, _folder.Root));
+    public CheckpointStore DebugStore() => new(SessionStore.Resolve(DebugCutter.SessionName, CurrentWorkspace.Folder.Root));
 
-    private void PurgeDrafts() => _local.PurgeDrafts(key => ForgetCheckpoint(DebugStore(), key));
+    public void PurgeDrafts() => CurrentWorkspace.Local.PurgeDrafts(key => ForgetCheckpoint(DebugStore(), key));
 
-    private DebugState LoadDebug(string key)
+    public DebugState LoadDebug(string key)
     {
         var state = new DebugState();
         try
         {
-            var node = _local.ReadDebug(key);
+            var node = CurrentWorkspace.Local.ReadDebug(key);
             foreach (var w in node?["watch"] as JsonArray ?? [])
                 if ((string?)w?["branch"] is { } branch && (string?)w["at"] is "read" or "end")
                     state.Watch.Add(new DebugWatch(branch, (string?)w["at"] == "read" ? DebugAt.Read : DebugAt.End, (string?)w["card"]));
@@ -124,10 +131,11 @@ public sealed partial class StudioServer
         return state;
     }
 
-    private void SaveDebug(string key, DebugState state)
+    public void SaveDebug(string key, DebugState state)
     {
-        if (state.Watch.Count == 0 && state.Levels.Count == 0) { _local.ClearDebug(key); return; }
-        _local.WriteDebug(key, new JsonObject
+        var local = CurrentWorkspace.Local;
+        if (state.Watch.Count == 0 && state.Levels.Count == 0) { local.ClearDebug(key); return; }
+        local.WriteDebug(key, new JsonObject
         {
             ["session"] = DebugCutter.SessionName,
             ["real"] = state.Real && state.Levels.Count > 0,
@@ -142,7 +150,7 @@ public sealed partial class StudioServer
     /// changed and whose checkpoint is in the session, and the keys that are not (with <paramref name="forgotten"/>).
     /// Pure: nothing leaves the session.
     /// </summary>
-    private (List<DebugWatch> Watch, List<HeldLevel> Keep, HashSet<string> Drop) Judge(DebugState state, DebugPlan plan, IEnumerable<string> forgotten)
+    public (List<DebugWatch> Watch, List<HeldLevel> Keep, HashSet<string> Drop) Judge(DebugState state, DebugPlan plan, IEnumerable<string> forgotten)
     {
         var store = DebugStore();
         var drop = new HashSet<string>(forgotten);
@@ -186,8 +194,8 @@ public sealed partial class StudioServer
     /// </summary>
     private DebugPlan SuspendedPlan(DebugCutter cutter, string? path, DebugPlan fallback)
     {
-        if (JobPath(path) is not { } job) return fallback;
-        try { return cutter.Plan(_folder.ReadJob(job).Text, 0); }
+        if (design.JobPath(path) is not { } job) return fallback;
+        try { return cutter.Plan(CurrentWorkspace.Folder.ReadJob(job).Text, 0); }
         catch (Exception ex) when (ex is StudioRefusal or InvalidOperationException or FormatException or YamlDotNet.Core.YamlException or IOException) { return fallback; }
     }
 
@@ -197,7 +205,7 @@ public sealed partial class StudioServer
             throw new StudioRefusal(409, "A real run is suspended before its output is written: continue it, or abandon it to forget its rows.");
     }
 
-    private static void ForgetCheckpoint(CheckpointStore store, string key)
+    public static void ForgetCheckpoint(CheckpointStore store, string key)
     {
         try { store.Delete(key); }
         catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException) { }
@@ -209,7 +217,7 @@ public sealed partial class StudioServer
     /// (its first stage for a read, its last for an end), or is null when this run did not produce it: its rows
     /// were read back, or its branch did not run.
     /// </summary>
-    private object DebugView(
+    public object DebugView(
         DebugPlan plan, DebugState state, IReadOnlyList<DebugPiece>? pieces, DebugCut? cut = null, IReadOnlySet<string>? ran = null, DebugPlan? suspended = null) => new
         {
             real = state.Real,
@@ -261,13 +269,42 @@ public sealed partial class StudioServer
     private static HashSet<string> RanOf(string reported) =>
         (JsonNode.Parse(reported)?["branches"] as JsonArray ?? []).Select(b => (string?)b?["branch"]).OfType<string>().ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+    private async Task SampleAsync(HttpContext context)
+    {
+        if (!(context.Request.ContentType ?? "").StartsWith("application/json", StringComparison.OrdinalIgnoreCase))
+            throw new StudioRefusal(415, "A sample is asked as JSON.");
+
+        string yaml;
+        int rows;
+        string? path;
+        List<SampledBrick>? bricks;
+        try
+        {
+            using var body = await JsonDocument.ParseAsync(context.Request.Body, cancellationToken: context.RequestAborted);
+            yaml = body.RootElement.GetProperty("yaml").GetString() ?? "";
+            rows = body.RootElement.TryGetProperty("rows", out var r) && r.TryGetInt32(out var n) ? n : 10;
+            path = body.RootElement.TryGetProperty("path", out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null;
+            bricks = body.RootElement.TryGetProperty("bricks", out var b) && b.ValueKind == JsonValueKind.Array
+                ? b.Deserialize<List<SampledBrick>>(StudioHttp.Json)
+                : null;
+        }
+        catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException)
+        {
+            throw new StudioRefusal(400, "A sample is asked as {\"yaml\": \"...\", \"rows\": n}.");
+        }
+        rows = Math.Clamp(rows, 1, StudioServer.MaxRows);
+        var json = await design.SampleCoreAsync(yaml, rows, path, bricks, engine.SampleAsync, rewrite: null, context.RequestAborted);
+        context.Response.ContentType = "application/json; charset=utf-8";
+        await context.Response.WriteAsync(json, context.RequestAborted);
+    }
+
     private async Task DebugAsync(HttpContext context)
     {
-        var cutter = _tools.Engine.Cutter;
-        var asked = await BodyAsync<DebugRequest>(context);
-        var rows = Math.Clamp(asked.Rows ?? 1000, 1, DebugMaxRows);
+        var cutter = engine.Cutter;
+        var asked = await StudioHttp.BodyAsync<DebugRequest>(context);
+        var rows = Math.Clamp(asked.Rows ?? 1000, 1, StudioServer.DebugMaxRows);
         var key = DebugKey(asked.Path, asked.Draft);
-        _local.CheckDebug(key);
+        CurrentWorkspace.Local.CheckDebug(key);
         var upTo = asked.UpTo is null ? null : WatchOf(asked.UpTo);
         var plan = PlanOf(cutter, asked.Yaml, rows, SampleSalt(asked.Path, asked.Yaml));
 
@@ -285,7 +322,7 @@ public sealed partial class StudioServer
             return (cut.Yaml, cut.Dropped, cut.Unread);
         }
 
-        var sampler = _tools.Engine.DebugSampleAsync;
+        var sampler = engine.DebugSampleAsync;
         string? reported = null;
         async Task<string> Run(string yaml, int n, StudioBindings bindings, CancellationToken ct)
         {
@@ -294,9 +331,9 @@ public sealed partial class StudioServer
             return reported;
         }
 
-        await SampleCoreAsync(asked.Yaml!, rows, asked.Path, asked.Bricks, Run, Rewrite, context.RequestAborted);
+        await design.SampleCoreAsync(asked.Yaml!, rows, asked.Path, asked.Bricks, Run, Rewrite, context.RequestAborted);
 
-        await JsonAsync(context, new
+        await StudioHttp.JsonAsync(context, new
         {
             report = JsonNode.Parse(reported!),
             rows,
@@ -318,7 +355,7 @@ public sealed partial class StudioServer
         Keep(key, state, plan, cut, keys);
     }
 
-    private void Keep(string key, DebugState state, DebugPlan plan, DebugCut cut, IReadOnlyDictionary<string, string> keys)
+    public void Keep(string key, DebugState state, DebugPlan plan, DebugCut cut, IReadOnlyDictionary<string, string> keys)
     {
         var store = DebugStore();
         foreach (var piece in cut.Pieces)
@@ -346,53 +383,48 @@ public sealed partial class StudioServer
     /// </summary>
     private async Task DebugStateAsync(HttpContext context)
     {
-        var cutter = _tools.Engine.Cutter;
-        var asked = await BodyAsync<DebugStateRequest>(context);
-        var rows = Math.Clamp(asked.Rows ?? 1000, 1, DebugMaxRows);
+        var cutter = engine.Cutter;
+        var asked = await StudioHttp.BodyAsync<DebugStateRequest>(context);
+        var rows = Math.Clamp(asked.Rows ?? 1000, 1, StudioServer.DebugMaxRows);
         var key = DebugKey(asked.Path, asked.Draft);
-        _local.CheckDebug(key);
+        var local = CurrentWorkspace.Local;
+        local.CheckDebug(key);
         var plan = PlanOf(cutter, asked.Yaml, rows, SampleSalt(asked.Path, asked.Yaml));
         var wanted = asked.Watch?.Select(WatchOf).ToList();
         var reset = (asked.Reset ?? []).Select(WatchOf).ToList();
         string? adopted = asked.Adopt is null || asked.Path is null ? null : DebugKey(null, asked.Adopt);
-        if (adopted is not null) _local.CheckDebug(adopted);
+        if (adopted is not null) local.CheckDebug(adopted);
 
-        TakeSlot("A preview");
-        try
+        using var lease = engineSlot.Take("A preview");
+        if (adopted is not null) local.AdoptDebug(adopted, key);
+        var state = LoadDebug(key);
+        // Abandoning a suspended real run is the one change it allows: its rows belong to the text and the values it started with.
+        // Asking what it holds changes nothing, and is answered as it is: a sample's plan would judge those rows by the wrong digest.
+        if (state.Real && asked.ResetAll != true)
         {
-            if (adopted is not null) _local.AdoptDebug(adopted, key);
-            var state = LoadDebug(key);
-            // Abandoning a suspended real run is the one change it allows: its rows belong to the text and the values it started with.
-            // Asking what it holds changes nothing, and is answered as it is: a sample's plan would judge those rows by the wrong digest.
-            if (state.Real && asked.ResetAll != true)
-            {
-                if (wanted is not null || reset.Count > 0) RefuseWhileSuspended(state);
-                await JsonAsync(context, new { rows, view = DebugView(plan, state, null, suspended: SuspendedPlan(cutter, asked.Path, plan)) });
-                return;
-            }
-            if (wanted is not null) state.Watch = wanted;
-            var forgotten = new List<string>();
-            if (asked.ResetAll == true)
-            {
-                forgotten.AddRange(state.Levels.Select(h => h.Key));
-                state.Levels.Clear();
-            }
-            foreach (var card in reset)
-            {
-                if (plan.Resolve(card) is not { } level) continue;
-                var downstream = plan.Downstream(card.Branch);
-                var gone = state.Levels.Where(h => Same(h.Branch, card.Branch) && h.Level >= level || downstream.Contains(h.Branch)).ToList();
-                forgotten.AddRange(gone.Select(h => h.Key));
-                state.Levels.RemoveAll(gone.Contains);
-            }
-            Settle(state, plan, forgotten);
-            SaveDebug(key, state);
-            await JsonAsync(context, new { rows, view = DebugView(plan, state, null) });
+            if (wanted is not null || reset.Count > 0) RefuseWhileSuspended(state);
+            await StudioHttp.JsonAsync(context, new { rows, view = DebugView(plan, state, null, suspended: SuspendedPlan(cutter, asked.Path, plan)) });
+            return;
         }
-        finally { _sampling.Release(); }
+        if (wanted is not null) state.Watch = wanted;
+        var forgotten = new List<string>();
+        if (asked.ResetAll == true)
+        {
+            forgotten.AddRange(state.Levels.Select(h => h.Key));
+            state.Levels.Clear();
+        }
+        foreach (var card in reset)
+        {
+            if (plan.Resolve(card) is not { } level) continue;
+            var downstream = plan.Downstream(card.Branch);
+            var gone = state.Levels.Where(h => Same(h.Branch, card.Branch) && h.Level >= level || downstream.Contains(h.Branch)).ToList();
+            forgotten.AddRange(gone.Select(h => h.Key));
+            state.Levels.RemoveAll(gone.Contains);
+        }
+        Settle(state, plan, forgotten);
+        SaveDebug(key, state);
+        await StudioHttp.JsonAsync(context, new { rows, view = DebugView(plan, state, null) });
     }
-
-    private sealed record DebugPlanRequest(string? Yaml, int? Rows, string? Path);
 
     /// <summary>
     /// The places of a job's cards and the digest of what each depends on. Pure: it reads nothing held, changes nothing and
@@ -400,13 +432,11 @@ public sealed partial class StudioServer
     /// </summary>
     private async Task DebugPlanAsync(HttpContext context)
     {
-        var cutter = _tools.Engine.Cutter;
-        var asked = await BodyAsync<DebugPlanRequest>(context);
-        var plan = PlanOf(cutter, asked.Yaml, Math.Clamp(asked.Rows ?? 1000, 1, DebugMaxRows), SampleSalt(asked.Path, asked.Yaml));
-        await JsonAsync(context, new { view = DebugView(plan, new DebugState(), null) });
+        var cutter = engine.Cutter;
+        var asked = await StudioHttp.BodyAsync<DebugPlanRequest>(context);
+        var plan = PlanOf(cutter, asked.Yaml, Math.Clamp(asked.Rows ?? 1000, 1, StudioServer.DebugMaxRows), SampleSalt(asked.Path, asked.Yaml));
+        await StudioHttp.JsonAsync(context, new { view = DebugView(plan, new DebugState(), null) });
     }
-
-    private sealed record DebugRowsRequest(string? Path, string? Draft, string? Key);
 
     /// <summary>
     /// The first rows of a checkpoint this job holds, shaped as a stage of a sample: how a real run, which reports no rows,
@@ -414,9 +444,9 @@ public sealed partial class StudioServer
     /// </summary>
     private async Task DebugRowsAsync(HttpContext context)
     {
-        var asked = await BodyAsync<DebugRowsRequest>(context);
+        var asked = await StudioHttp.BodyAsync<DebugRowsRequest>(context);
         var key = DebugKey(asked.Path, asked.Draft);
-        _local.CheckDebug(key);
+        CurrentWorkspace.Local.CheckDebug(key);
         if (asked.Key is not { Length: > 0 } held || !LoadDebug(key).Levels.Any(l => l.Key == held))
             throw new StudioRefusal(404, "This job holds no such checkpoint.");
 
@@ -434,7 +464,7 @@ public sealed partial class StudioServer
                         columns = batch.Schema.FieldsList.Select(f => (object)new { name = f.Name, type = f.DataType.Name, isNullable = f.IsNullable }).ToList();
                     for (var i = 0; i < batch.Length; i++)
                     {
-                        if (rows.Count >= MaxRows) { more = true; break; }
+                        if (rows.Count >= StudioServer.MaxRows) { more = true; break; }
                         rows.Add(Enumerable.Range(0, batch.Schema.FieldsList.Count)
                             .Select(c => ArrowTypeMapper.GetValueForField(batch.Column(c), batch.Schema.FieldsList[c], i)?.ToString()).ToList());
                     }
@@ -446,6 +476,6 @@ public sealed partial class StudioServer
         {
             throw new StudioRefusal(404, "This checkpoint can no longer be read.");
         }
-        await JsonAsync(context, new { stage = new { index = 0, name = "checkpoint", columns, rowsSeen = rows.Count, more, sample = rows } });
+        await StudioHttp.JsonAsync(context, new { stage = new { index = 0, name = "checkpoint", columns, rowsSeen = rows.Count, more, sample = rows } });
     }
 }

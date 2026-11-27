@@ -22,8 +22,8 @@ public sealed record CoordinatorStatus(
     string Url, string State, string? Reason, CoordinatorMe? Me, string StudioVersion, int Contract, bool ByKey = false, string? Unreachable = null);
 
 /// <summary>
-/// The studio's link to one coordinator, named on the command line: the page never chooses where a
-/// token goes. A person signs in the way an MCP client does: the coordinator's protected resource
+/// The studio's link to one coordinator, named on the command line or connected from the page by the person: a token
+/// goes to that origin only. A person signs in the way an MCP client does: the coordinator's protected resource
 /// metadata (RFC 9728) names its provider and its studio client, the provider's discovery document its
 /// endpoints, then authorization code with PKCE (S256) through the browser, back to this studio's
 /// loopback <c>/callback</c> (RFC 8252). Given a key the coordinator made for the person, the studio
@@ -87,6 +87,7 @@ public sealed class CoordinatorLink : IDisposable
     private CoordinatorMe? _me;
     private string? _reason;
     private string? _unreachable;
+    private bool _keySigningIn;
     private BrickCatalogView? _catalog;
 
     /// <param name="coordinator">The coordinator's address: its origin is the only one a token or the key is sent to.</param>
@@ -118,7 +119,8 @@ public sealed class CoordinatorLink : IDisposable
     {
         lock (_lock)
         {
-            var state = _tokens is not null ? SignedIn : _pending is not null && _time.GetUtcNow() < _pending.Expires ? SigningIn : SignedOut;
+            var state = _tokens is not null ? SignedIn
+                : _keySigningIn || _pending is not null && _time.GetUtcNow() < _pending.Expires ? SigningIn : SignedOut;
             return new CoordinatorStatus(Url, state, _reason, _tokens is null ? null : _me, StudioVersion, CoordinatorApi.Contract, ByKey, _unreachable);
         }
     }
@@ -187,18 +189,32 @@ public sealed class CoordinatorLink : IDisposable
     }
 
     /// <summary>
-    /// Signs in with the key the studio was started with: the key for a token at the coordinator's own issuer, then who that is.
+    /// Signs in with the key the link was made with (the state reads <c>signing-in</c> while it goes on): the key for a token at the coordinator's own issuer, then who that is.
     /// A refusal signs the person out with the coordinator's reason.
     /// </summary>
     public async Task<string> SignInWithKeyAsync(CancellationToken ct)
     {
         if (!ByKey) throw new CoordinatorLinkException("This studio was started with no key: sign in through the browser.");
-        await _renewal.WaitAsync(ct);
-        Tokens tokens;
-        try { tokens = await ExchangeKeyAsync(await DiscoverAsync(ct), ct); }
-        finally { _renewal.Release(); }
-        return await SignedInAsync(tokens, ct);
+        lock (_lock) _keySigningIn = true;
+        try
+        {
+            await _renewal.WaitAsync(ct);
+            Tokens tokens;
+            try { tokens = await ExchangeKeyAsync(await DiscoverAsync(ct), ct); }
+            finally { _renewal.Release(); }
+            return await SignedInAsync(tokens, ct);
+        }
+        finally
+        {
+            lock (_lock) _keySigningIn = false;
+        }
     }
+
+    /// <summary>
+    /// Reaches the coordinator as a sign-in would, through its metadata and its provider's discovery, with the checks a sign-in makes
+    /// (contract, address, the way people sign in), and signs nobody in.
+    /// </summary>
+    public async Task CheckAsync(CancellationToken ct) => await DiscoverAsync(ct);
 
     /// <summary>Keeps the tokens and asks the coordinator who they name: a coordinator that refuses the person signs them out.</summary>
     private async Task<string> SignedInAsync(Tokens tokens, CancellationToken ct)

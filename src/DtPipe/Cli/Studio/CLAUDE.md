@@ -27,6 +27,25 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   `dom.js`) and positions them through the CSSOM; `replaceChildren` takes nodes, never a list.
 - **The folder only.** `StudioFolder` reads `.yaml`/`.yml` files under it: no segment starting with
   a dot, no symbolic link below it. The empty builder reads no `appsettings.json` from the folder.
+- **The folder is in a slot, every request holds it, and the current directory moves with it.** `WorkspaceSlot` holds one
+  `StudioWorkspace` (`StudioFolder`, `StudioLocalFiles`, `StudioVariables`); the server reads it through the slot at each use, and every `/api` request holds a `OneShotLease` on it to its end unless its route in `StudioRouteTable` declares `RouteLocks.None` (the workspace's and connection routes, components/quit, and what the page polls), so a new route holds `RouteLocks.Workspace` by default. The page opens another folder through
+  `/api/workspace` (`GET`, `POST …/test`, `PUT`): a path that is no readable folder is refused (400, 404) and changes nothing.
+  A change is refused with 409 naming the cause when the page says its changes are unsaved, a run goes on, the engine slot is
+  held (`TakeSlotFor`, shared with the coordinator's change), or the agent's turn runs or a card waits (`TryClose`, run under the
+  slot's lock once no request holds it); it waits a few seconds for the requests in flight (`SlotHolds`, the coordinator's
+  slot's counting too), and refuses one that arrives meanwhile, sent for the folder left; the page writes no view from the
+  moment it asks (`holdView`), so nothing of the old folder lands in the new one. It then calls `Directory.SetCurrentDirectory`, which is
+  process-wide: a job's relative paths, `SessionResolver` and the agent's MCP tools (their confinement, `list-cursors`) read the
+  current directory, so a folder or a path kept from before a change (a field, a closure, a cache) reads the old folder. The agent is
+  replaced by a new one on its model (`AgentSlot.RenewAsync`: a plan or an answer of the old folder never reaches the new one),
+  a finished run is forgotten, and the new folder's samples and drafts are purged as at start (`Opened`); the page then reloads
+  whole. A suspended real run stays in the old folder's `.dtpipe/studio/` and is found again there. At start the folder is the
+  argument, else the current directory, and `StudioCommand` sets the current directory; `studio.json` keeps only the folders the
+  page opened with *Remember* ticked (`ReadFolders`, no bound, most recent first, the folder in place left out of what the view lists), and no folder is opened again at start. The
+  dialog deletes a recent folder (`DELETE /api/workspace/recents`, by its path, whether or not it is still on the disk).
+  The header's folder name shows the root `GET /api/workspace` gives as its tooltip.
+  `[CI: StudioWorkspaceTests, StudioSettingsTests]` `[local: page_smoke.mjs workspace-switch]`
+  `[unchecked: Windows and Linux paths, a folder through a link or on a network share, the card-waiting refusal]`
 - **The server writes, from cards.** `PUT /api/job` composes the page's cards and writes that text
   (`WriteJob`): whole and atomic, only where a job could be read, into a folder that exists, against
   the hash the page opened (409 otherwise), never over a file with a new job. The one replacement the
@@ -45,38 +64,55 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   launch file holds an alias or a typed text, never a keyring value; the page sees names and
   aliases only. The keyring is opened only for a job that needs it, and its alias list is kept for the session
   (read again once when a name is missing): opening it can ask the person and wait.
-- **The command line names the coordinator, never the page.** `--coordinator <url>` gives the studio
-  a `CoordinatorLink` to that origin: the coordinator's metadata (RFC 9728) and contract number
-  (`CoordinatorApi.Contract`, refused by name when it differs), its
+- **The person names the coordinator, by flag or from the page; a token and a key go to that origin only.** `--coordinator <url>`,
+  or a connection made in the page (`PUT /api/coordinator/connection`), gives the studio a `CoordinatorLink` to that origin: the
+  coordinator's metadata (RFC 9728) and contract number (`CoordinatorApi.Contract`, refused by name when it differs), its
   provider's discovery (issuer equal, no HTTPS downgrade), then authorization code with PKCE through
   a new tab, back to `/callback`, the one path reached without the session's token: a GET, the
   `Host` check kept, a single-use `state` that a wrong one leaves waiting, `iss` checked when sent.
   `--key` takes a reference (`${{NAME}}`, `keyring://`, `@file`) and refuses a value, as `--client-secret` does, and
-  is read once at start (`StudioCommand.ReadKeyAsync`): the studio then opens no tab. The metadata's `dtpipe_auth` must name
-  `key`, and the key is exchanged (client credentials) only at the token endpoint of the authorization server that is the
-  coordinator's own address, its discovery's issuer equal and the endpoint on that origin; it is presented again to renew.
-  The tokens and the key live in the process only, never in a response or the page; the access token is renewed
-  two minutes ahead, a 401 renews once and sends once, a refused renewal signs out with its reason.
+  is read once at start (`StudioCommand.ReadKeyAsync`): the studio then opens no tab. The page sends a key as a value, once.
+  The metadata's `dtpipe_auth` must name `key`, and the key is exchanged (client credentials) only at the token endpoint of the
+  authorization server that is the coordinator's own address, its discovery's issuer equal and the endpoint on that origin; it is
+  presented again to renew. The tokens and the key live in the process only, never in a response or the page; the access token is
+  renewed two minutes ahead, a 401 renews once and sends once, a refused renewal signs out with its reason.
   The link's client sends to the coordinator's origin only, follows no redirect, and always carries
   the CSRF header. `[CI: StudioCoordinatorTests, StudioKeyTests]`
+- **The link is in a slot, held by whoever uses it, and a key stays bound to its origin.** `CoordinatorSlot` holds the link
+  (`StudioTools.CoordinatorAtStart` is only what the studio starts with: read the slot, never that field). A request that
+  awaits the coordinator holds the link to its end (`RouteLocks.Coordinator` in `StudioRouteTable`, the callback and `DesignForAsync` where the link is awaited), an engine action holds the
+  engine slot, and a replacement, taken under the engine slot, is refused with 409 while either is held, so a publication, a
+  library read or a sample never finds its link closed. A replacement stops the sign-in the old link was making, makes the old
+  link forget its tokens and closes it. At start the coordinator is the one `--coordinator` names or, with no flag, the one
+  remembered in `studio.json` (`StudioSettings`, `UserStatePaths.Root()`: the active coordinator, an origin and `browser` or `key`,
+  never a key); a flag
+  never writes the file, and a connection of the page writes it only when *Remember* is ticked. A remembered key sign-in starts
+  in the background and reads `signing-in` meanwhile, and a coordinator that does not answer never stops the start. The key is the
+  keyring's, under `studio.coordinator:<normalized origin>`: another origin finds none and asks again, and a remembered key that
+  is missing builds no link, described as needing its key (`needsKey`). The page connects, tests, changes and disconnects
+  through `/api/coordinator/connection` (`GET`, `POST …/test`, `PUT`, `POST …/disconnect`), reads back whether a
+  key is kept and where (`none`, `stored`, `flag`, `session`), and names no alias; a disconnection closes the link for the
+  session under the replacement's refusals (409) and keeps the file and the keyring's key, and the header's coordinator zone
+  (`#coordinator-link`) is the button that opens the dialog in every state, the actions of a state sitting beside it; no answer, refusal or message of these routes holds the key (`Mask`, then the
+  sanitizer). `[CI: StudioCoordinatorConnectionTests, StudioSettingsTests]` `[local: page_smoke.mjs coordinator-connect]`
 - **A link that does not answer says so as a transport failure, never as an error of what was asked.** Each exchange of the
   `CoordinatorLink` goes through `ExchangeAsync`: an answer of any status clears `CoordinatorStatus.Unreachable`, none (refused,
   unresolved, timed out) keeps its words there and throws a `CoordinatorLinkException` naming who did not answer. A person who is not
   signed in has no exchange to fail, so `/api/bricks` probes the coordinator's metadata (`ProbeAsync`, `ProbeBound`, no token, no
   polling) and the header says "unreachable" from the opening. The page reads the status again after each exchange it makes with
-  the coordinator (`linkRead`, and a 502 through `onLinkDoubt`), never on a timer. A request that got no answer from the studio
+  the coordinator (`linkRead`, and a 502 through `onLinkDoubt`), never on a timer but while a key signs in by itself or a sign-in is awaited. A request that got no answer from the studio
   itself is `STUDIO_SILENT` in `api()` (`transport` on the error): every module shows that message, `compose` keeps the last
   verdict and returns it `unanswered` (a save or a preview then stops quietly, with no "Save anyway?"), and the header's
   `#studio-link` holds until an answer comes. The model's provider is the third link: `loadModels` reads its list at the opening
   (`ILlmClient.ListModelsAsync` throws when the server does not answer), and `#agent-link` and `#agent-warning` say that it does not,
   that the configured model is not in the list, or that the studio has no agent. `[CI: StudioCoordinatorTests]`
   `[local: page_smoke.mjs link-studio, link-coordinator, link-agent-down, link-agent-model]` `[unchecked: the page's header after a signed-in coordinator falls, which the status test covers server side only]`
-- **Without `--coordinator` the studio is whole, minus the bricks, the library and the publication.**
-  `StudioTools.Coordinator` is null: `/api/coordinator` has no address, `/api/bricks` an empty catalogue,
-  `GET /api/publish` no publication, and `/api/coordinator/login`, `/api/library`, `/api/library/job`, `/api/library/open`,
-  `POST /api/publish`, `POST /api/publish/check` and `POST /api/publish/edges` answer 404 "opened without --coordinator". Jobs, cards, variables and
-  samples never ask for the link; a route that needs it refuses the same way.
-  `[CI: StudioServerTests — jobs, cards, variables, samples and the eight refusals]`
+- **With no coordinator connected the studio is whole, minus the bricks, the library and the publication.**
+  `/api/coordinator` has no address, `/api/bricks` an empty catalogue, `GET /api/publish` no publication, and
+  `/api/coordinator/login`, `/api/library`, `/api/library/job`, `/api/library/open`, `POST /api/publish`,
+  `POST /api/publish/check` and `POST /api/publish/edges` answer 404 "No coordinator is connected", read at each request, so
+  they follow the connection. Jobs, cards, variables and samples never ask for the link; a route that needs it refuses the same
+  way. `[CI: StudioServerTests — jobs, cards, variables, samples and the eight refusals]`
   `[unchecked: import, debug and run without a coordinator; that a new route needing the link refuses]`
 - **The coordinator decides what a brick is; the studio reads its answer.** A card that is a brick is written as the reference to
   it (`input: brick:<node>/<id>` for a source, `output: brick:<node>/<id>` with `from` for a sink): `DesignService` writes it from the
@@ -264,7 +300,7 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   answer about a job is dropped once another job is open. The page keeps nothing in `localStorage`:
   how it was left (the job open, tab, rows, selected card, pane sizes, the side panel chosen — `jobs`, `library`, `steps` or `none`) goes through `PUT /api/view` to
   `.dtpipe/studio/view.json`, whose values the server checks and rewrites, and which is read only as a
-  preference. Modal dialogs (`dialogs.js`) handle creation, CLI/YAML import, save-as, rename, delete, and library inspection/pull. A new script needs its route in `StudioServer.Assets`.
+  preference. Modal dialogs (`dialog.js`, `recent-list.js`, `connect-dialogs.js`, `job-dialogs.js`) handle creation, CLI/YAML import, save-as, rename, delete, connection/workspace switching, and library inspection/pull. A new script needs its route in `StudioServer.Assets`.
   `[CI: StudioServerTests (every module is served, every import resolves; the view's bounds)]`
 - **What the pointer does, the keyboard does, through the same function.** A card is a stop of Tab and Enter or Space chooses
   it (`selectCard`, which a click calls too); a wire is made by the inspector's Connect and undone by the × of its Inputs list,
@@ -273,9 +309,19 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   status is a live region, and what holds the focus when its zone is drawn again gets it back. Text colours are tokens that reach
   4.5:1 on the panel, the page and the code background in both themes, and a solid fill (`--accent`, `--bad`, `--warn`) carries
   `--on-solid`, never a literal white. `[local: page_smoke.mjs keyboard — the tree's names and the contrast of what the screens draw]`
+- **A drawer tab's actions never scroll and never leave the screen.** A tab draws its content, which scrolls, and its actions,
+  which sit in a bar under it (`tabOf` in `dom.js`; a tab with no action gives its content alone), so a new tab inherits the rule
+  by using it. The drawer's floor (`SIZE_LIMITS.drawer`) holds the tabs, a few lines and the bar, and the canvas keeps its own
+  (`CANVAS_MIN`); both reach the layout as `--drawer-min` and `--canvas-min`, so a window too short for the size asked shrinks the
+  drawer and the size kept in `view.json` stays what the person chose. The handle's drag and keys are bounded by what is
+  laid out (`drawerRoom`, measured). **The rule holds for every panel that holds buttons.** A dialog is a head and a body that
+  scrolls (`.dialog-body`, `.run-body`), the dialog itself never: the `.dialog-actions` that end a body stick at its foot, so a
+  builder puts them last and nothing else does the work. The agent's input is `flex: none` under a log that keeps a small floor,
+  and what a card or a plan waits for (`.agent-actions`) sticks at the log's foot.
+  `[local: page_smoke.mjs drawer-actions, dialog-actions, agent-actions]`
 - **A YAML text not applied holds the cards, so the two never say different things.** The YAML tab edits the composed
   job; what the person types is `state.cards.text`, never read off the editor, so a redraw keeps it. While it differs from
-  the composed text (`editingText`), the canvas, inspector, palette, title and Undo are inert, Save, Preview and a message
+  the composed text (`editingText`), the canvas, inspector, palette and Undo are inert, Save, Preview and a message
   to the agent refuse, the agent's plan waits behind its notice (`moved`), and a run or a publication refuses and leaving the job asks, as with unsaved
   cards (`holdsEdits`); a text typed back to the composed one is none. *Apply* or
   *Revert* frees them. The tab's light is the composition's verdict on the cards and says only "not applied" while a text
@@ -290,7 +336,7 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   the server. `[local: page_smoke.mjs undo, agent-edit]`
   `[local: tests/studio/page_smoke.mjs - Node 22+, Chrome and a built dtpipe; types are checked by the
   editor alone (// @ts-check), no tool runs them]`
-- **The agent writes a job through the page's paths, after a card, and no output at all.** `--llm-provider` gives the
+- **The agent writes a job through the page's paths, after a card, and no output at all.** A connected model gives the
   studio a `StudioAgent` (one conversation, in memory, a turn in the background read by polling `GET /api/agent?after=N`)
   over `StudioAgentTools`: dtpipe's tools as `McpToolProvider` offers them (F1) and the studio's own. `save-job` first asks
   `validate-yaml-job` (the tool's own check, never a second validator) and answers its refusal, with no card and no write,
@@ -314,7 +360,7 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   Apply, which asks before it replaces an unsaved edit. A plan whose state the server gives as refused or failed never lands on
   the cards by itself (`follow` reads the server's `plan.state` and never revalidates the text): its buttons stay, the refused
   one disabled. `[unchecked: that guard, which no page_smoke scenario plays: its refused plan does not take apart into cards]`
-  A plan with no header comment keeps the title of the cards it replaces (`openJob`). A turn that ends without a result gives
+  A plan with no header comment keeps the header comments of the steps it replaces (`openJob`). A turn that ends without a result gives
   the person's text back to an empty prompt. A text that `JobSecrets.Literals` flags reaches the model, open job or `read-job`, only
   after a card that names `branch.path`, never the value; the answer holds for that text, by hash, for the session.
   **The panel shows what the trace holds, never more**: every text of the conversation the page reads (the person's message, the
@@ -322,10 +368,49 @@ The page runs dtpipe with the person's access, so the server is guarded like a s
   mask, while the model keeps the words as typed; a message that spells a credential out is told so by a notice and is never held
   back. A job (a plan, a save card) is shown as written: it is the text to save. A refusal's words go through the same mask in
   `HandleAsync`'s catch. `[CI: StudioAgentTests — the conversation]` `[unchecked: a refusal's mask]` The
-  key (`--llm-key`) is a reference read once at start, kept in the client; the page never sets the model's address. The
   panel's width is the `agent` pane, resized and kept as the designer's (`bindSplit`, `applySizes`).
   `[CI: StudioAgentTests]` `[local: page_smoke.mjs agent, agent-edit — a scripted endpoint that speaks Ollama's API]`
   `[unchecked: Quit and Ctrl+C during a turn]`
+- **The page connects the agent; a key stays bound to its address and no answer holds one.** At start the agent is the one
+  `--llm-provider` names (its key a reference, read once, kept in the client) or, with no flag, the connection remembered in
+  `studio.json` (`StudioSettings`, under `UserStatePaths.Root()`, never `~/.dtpipe`: a `.dtpipe/` is a project's store); a flag
+  never writes the file, and a file that cannot be read or is of another version is ignored with a warning. The page connects,
+  tests, replaces and disconnects the model through `/api/agent/connection` (`GET`, `POST …/test`, `PUT`,
+  `POST …/disconnect`), under the session's token. `AgentSlot` holds the agent: a replacement closes the old one in a
+  single step with the check that no turn runs and no card waits (`StudioAgent.TryClose`, 409 otherwise), so a turn that starts
+  after is refused, and opens a new conversation. **Disconnecting is not forgetting**: `AgentSlot.CloseAsync` closes the agent under
+  the same check and leaves none, keeping the connection's description, the file and the keyring's key, so a studio started again
+  connects it; only a key the client alone held (flag, typed) goes with it. The context window is a field of the connection (`AgentConnection.NumCtx`, `AgentSettings.NumCtx`,
+  `StudioAgentSetup.NumCtx`), read only from an Ollama connection, null for `AgentOptions.DefaultNumCtx`, bounded by
+  `StudioAgentClients.IsNumCtx` on the route and on the file (a value out of bounds ignores the remembered agent, with a warning). The file holds no secret: keyring operations live in `StudioSecretStore`, and a key is kept under `studio.llm:<normalized address>`, so another address
+  finds none and asks again. The page sends a value, never an alias or a `keyring://` reference, and reads back only whether a
+  key is kept and where (`none`, `stored`, `flag`, `session`); a typed key the keyring refuses lasts the session and the page
+  says so. No answer, refusal or message of these routes holds the key (`Mask`, then the sanitizer), and a provider that needs a
+  key it cannot find at start builds no agent: the panel offers to connect it again. `ReservedAliases` keeps `studio.` aliases
+  out of every list of aliases, `dtpipe secret list` included.
+  `[CI: StudioConnectionTests, StudioSettingsTests]` `[local: page_smoke.mjs agent-connect]` `[unchecked: the dialog's wording of a key's state]`
+- **The recent lists are histories the person edits, never the connection.** `studio.json` keeps three lists beside the agent and
+  the coordinator to connect at start: the agents, the coordinators and the folders (`ReadAgents`, `ReadCoordinators`,
+  `ReadFolders`), no bound, most recent first, each identity once (an agent: provider and normalized address, carrying
+  the model, delay and context last used for it; a coordinator: its normalized origin; a folder: its full path), through one
+  `Distinct` on read and one `Recent` on write, and never a secret. An entry is added where the use succeeded and *Remember* is
+  ticked, by the one function of its list (`WriteAgent`, `RememberCoordinator`, `RememberFolder`): an agent once the connection
+  is in place, a coordinator once `CheckAsync` answered (`RecognisedAsync`, bounded by `ProbeBound`, asked before the link goes
+  in place and only to be remembered), a folder once opened. With the box unticked nothing is written, list or key. A click on
+  a row of the page fills the form and does nothing else. **A list never shows the value in place**: an agent or a coordinator that is
+  connected, whatever its source, and the open folder are left out of `history` and `recents` by the identity of their list
+  (`SameAgent`, `SameCoordinator`, `SameFolder`), once the connection is closed they show again. It is a display rule: the file keeps
+  the entry first and the rule of addition is the same. **Forgetting is the list's alone**: the × of an entry, after *Disconnect* for
+  the value in place; no route clears the remembered connection otherwise, and a connection request carries no instruction to forget a key: a key typed in the form wins over the one kept, and nothing else sets it aside. The page draws what it is given, says where forgetting is
+  above the list and in an empty list, and scrolls a long one inside the dialog. `DELETE …/history` (`/api/agent/connection`,
+  `/api/coordinator/connection`) takes the identity the page shows, never an alias or a reference, removes the entries at that
+  address (`RemoveAgent`, `RemoveCoordinator`) and deletes the key of each by its alias: the keyring is asked to delete, never
+  to read. The remembered agent or coordinator is cleared when it is that entry, so the next start does not connect an address
+  the person erased; a connection in place is not closed, and its key, if the keyring held it, reads `session`. The views mark
+  the entries that have a key kept (`keyKept`) from one listing of the keyring's aliases (`KeptAliases`: names only, values never
+  leave it), made only when a list is not empty. `[CI: StudioSettingsTests, StudioConnectionTests, StudioCoordinatorConnectionTests,
+  StudioWorkspaceTests]` `[local: page_smoke.mjs agent-connect, coordinator-connect, workspace-switch]`
+  `[unchecked: the badge of a key kept, which the page bench plays without a keyring]`
 - Quit from the page exits 0, Ctrl+C 130. A quit is refused while a run goes on; Ctrl+C cancels
   the run and the studio then exits.
 

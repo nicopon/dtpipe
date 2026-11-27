@@ -23,7 +23,7 @@ public class AccessTokenTests
         await using var producer = await HandWiredNode.StartAsync(
             new NodeClientOptions
             {
-                HubUrl = host.Url,
+                HubUrl = host.HubUrl,
                 AccessTokenProvider = () =>
                 {
                     Interlocked.Increment(ref producerCalls);
@@ -39,7 +39,7 @@ public class AccessTokenTests
         await using var consumer = await HandWiredNode.StartAsync(
             new NodeClientOptions
             {
-                HubUrl = host.Url,
+                HubUrl = host.HubUrl,
                 AccessTokenProvider = () => Task.FromResult(jwt.Mint("consumer", "test", TimeSpan.FromHours(1))),
             },
             new FragmentLaunch
@@ -76,7 +76,7 @@ public class AccessTokenTests
         await Assert.ThrowsAnyAsync<Exception>(async () =>
         {
             await using var node = await HandWiredNode.StartAsync(
-                new NodeClientOptions { HubUrl = host.Url },
+                new NodeClientOptions { HubUrl = host.HubUrl },
                 new FragmentLaunch
                 {
                     DtPipeExecutable = DtPipeExecutableLocator.Path,
@@ -100,7 +100,7 @@ public class AccessTokenTests
             await using var node = await HandWiredNode.StartAsync(
                 new NodeClientOptions
                 {
-                    HubUrl = host.Url,
+                    HubUrl = host.HubUrl,
                     AccessTokenProvider = () => Task.FromResult(stranger.Mint("producer", "test", TimeSpan.FromHours(1))),
                 },
                 new FragmentLaunch

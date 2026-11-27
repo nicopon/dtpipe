@@ -316,7 +316,7 @@ public sealed class StudioServerTests : IAsyncLifetime
     {
         var cards = new
         {
-            title = "Copy",
+            header = "Copy",
             steps = new object[]
             {
                 new { alias = "a", kind = "branch", yaml = "input: csv:a.csv\n" },
@@ -392,7 +392,7 @@ public sealed class StudioServerTests : IAsyncLifetime
             needingOne.Select(c => $"{c.Item1} {c.Item2} 404"),
             await StatusesAsync(needingOne));
         var (_, refusal) = await SendAsync(Request(HttpMethod.Post, "/api/publish", body: new { path = "a.yaml", hash, id = "orders" }));
-        Assert.Equal("This studio was opened without --coordinator.", refusal.GetProperty("error").GetString());
+        Assert.Equal("No coordinator is connected to this studio: connect one from the page.", refusal.GetProperty("error").GetString());
     }
 
     [Fact]
@@ -413,7 +413,7 @@ public sealed class StudioServerTests : IAsyncLifetime
 
     private static object Cards(string output, object? layout = null) => new
     {
-        title = "Copy",
+        header = "Copy",
         steps = new object[] { new { alias = "main", kind = "branch", yaml = $"input: csv:a.csv\noutput: {output}\n" } },
         layout,
     };
@@ -519,7 +519,7 @@ public sealed class StudioServerTests : IAsyncLifetime
     [Fact]
     public async Task Cards_that_do_not_compose_are_written_only_when_the_person_accepts_it()
     {
-        var broken = new { title = "Broken", steps = new object[] { new { alias = "lonely", kind = "branch", yaml = "input: csv:a.csv\n" } } };
+        var broken = new { header = "Broken", steps = new object[] { new { alias = "lonely", kind = "branch", yaml = "input: csv:a.csv\n" } } };
 
         var (refused, body) = await SaveAsync("broken.yaml", null, broken);
         Assert.Equal(HttpStatusCode.UnprocessableEntity, refused);
@@ -534,8 +534,10 @@ public sealed class StudioServerTests : IAsyncLifetime
     [Fact]
     public async Task Opening_a_job_says_when_saving_would_rewrite_its_text()
     {
-        File.WriteAllText(Path.Combine(_dir, "hand.yaml"), "# Hand\nmain:\n  # read the file\n  input: csv:a.csv\n  output: csv:b.csv\n");
+        File.WriteAllText(Path.Combine(_dir, "branch-comment.yaml"), "# Hand\nmain:\n  # read the file\n  input: csv:a.csv\n  output: csv:b.csv\n");
+        Assert.False((await OpenAsync("branch-comment.yaml")).GetProperty("rewrites").GetBoolean());
 
+        File.WriteAllText(Path.Combine(_dir, "hand.yaml"), "# Hand\nmain:\n  input: csv:a.csv\n  # write the file\n  output: csv:b.csv\n");
         Assert.True((await OpenAsync("hand.yaml")).GetProperty("rewrites").GetBoolean());
     }
 

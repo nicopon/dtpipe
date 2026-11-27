@@ -16,7 +16,7 @@ namespace DtPipe.Coordinator.Server.Library;
 /// <see cref="BindingProblems"/>: why the pipeline's bindings do not hold now, empty when they do.
 /// </summary>
 public sealed record LibraryEntry(
-    string Id, string Title, string? Description, string? Commit, DateTimeOffset? UpdatedAt, string? Message,
+    string Id, string? Header, string? Commit, DateTimeOffset? UpdatedAt, string? Message,
     IReadOnlyList<BindingProblem> BindingProblems);
 
 /// <summary>
@@ -103,10 +103,10 @@ public sealed partial class PipelineLibrary : IJobSource, ILibraryHeads
             var yamlPath = Path.Combine(path, "pipeline.yaml");
             if (!File.Exists(yamlPath)) continue;
             var yaml = await File.ReadAllTextAsync(yamlPath, ct);
-            var (title, description, _) = DesignService.ReadHeader(yaml);
+            var header = DesignService.ReadHeader(yaml);
             var bindings = BrickReferences.Expand(yaml, ReadBindings(id));
             var last = (await HistoryCoreAsync(id, 1, ct)).FirstOrDefault();
-            entries.Add(new LibraryEntry(id, title, description, await JobCommitAsync(id, ct), last?.Date, last?.Message,
+            entries.Add(new LibraryEntry(id, header, await JobCommitAsync(id, ct), last?.Date, last?.Message,
                 _bindingProblems(yaml, bindings)));
         }
         return entries;

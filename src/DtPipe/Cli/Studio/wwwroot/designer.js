@@ -4,15 +4,17 @@
 // (POST /api/design/decompose); this page never writes YAML itself. Built with DOM calls only: the
 // page's policy forbids inline script and style, and every value is set as text.
 
-import { $, api, el, fill, plural, status, svg, tagOf, targetOf } from "./dom.js";
+import { $, api, el, fill, info, plural, status, svg, tabOf, tagOf, targetOf } from "./dom.js";
 import { KEPT_TABS } from "./prefs.js";
 import { flush, invalidate, onZone } from "./render.js";
 import { sequence, state } from "./state.js";
 
 const CARD_W = 210;
 const CARD_H = 114;
-const PORT_IN_Y = 34;
-const PORT_REF_Y = 66;
+// A wire ends on a port's centre. The ports are positioned from the card's padding box (below its
+// 4px top border) in studio.css: .port.in/.out top 27px and .port.ref top 59px, each 14px tall.
+const PORT_IN_Y = 4 + 27 + 7;
+const PORT_REF_Y = 4 + 59 + 7;
 
 // The transformer types the page offers, each with the shape its YAML takes (REFERENCE.md,
 // "Transformer YAML reference"). dtpipe validates the result: a sample runs it.
@@ -32,8 +34,11 @@ const TRANSFORMERS = {
 const KIND_LABEL = { source: "source", sink: "output", transform: "transform", sql: "sql", merge: "merge", branch: "branch" };
 
 // The panels' sizes, kept across visits.
-const SIZE_LIMITS = { pal: [160, 420], insp: [240, 640], drawer: [100, 640], agent: [260, 720] };
+const SIZE_LIMITS = { pal: [160, 420], insp: [240, 640], drawer: [210, 640], agent: [260, 720] };
 const SIZE_VARS = { pal: "--pal-w", insp: "--insp-w", drawer: "--drawer-h", agent: "--agent-w" };
+// The drawer's floor holds its tabs, a few lines and its action bar; the canvas keeps a floor of its own. The layout reads both
+// (`--drawer-min`, `--canvas-min`), so a window too short for the size asked shrinks the drawer, never its actions out of sight.
+const CANVAS_MIN = 120;
 
 const cards = state.cards;
 let host = null;
@@ -77,8 +82,8 @@ export async function openJob(yaml, layout, unsaved = false, kept = null, replac
   if (opening.stale(ticket)) return false;
   const show = () => {
     const model = normalize(answer.model);
-    // A text with no header comment says nothing of the job's title, description or directives: the cards it replaces keep theirs.
-    if (replacing && cards.model && !yaml.startsWith("#")) Object.assign(model, { title: cards.model.title, description: cards.model.description, directives: cards.model.directives });
+    // A text with no header comment says nothing of the job's header: the steps it replaces keep theirs.
+    if (replacing && cards.model && !model.header) model.header = cards.model.header;
     putCards(model, answer, kept);
   };
   if (replacing && cards.model) remember(replacing, show);
@@ -169,10 +174,10 @@ export function cardChanges(before, after) {
 }
 
 /** Starts from no step at all. */
-export async function openBlank(title) {
+export async function openBlank() {
   opening.cancel();
   cards.history = [];
-  cards.model = normalize({ title, steps: [], layout: {} });
+  cards.model = normalize({ header: null, steps: [], layout: {} });
   cards.result = null; cards.selected = null; cards.zoom = null; cards.dirty = true; cards.text = null; state.view.drawer = "yaml";
   renderShell();
   await compose();
@@ -243,8 +248,8 @@ export const holdsEdits = () => cards.dirty || editingText();
 
 function normalize(m) {
   return {
-    title: m.title || "Untitled job", description: m.description || "", directives: m.directives || [],
-    steps: (m.steps || []).map((s) => ({ ...s, from: s.from || [], ref: s.ref || [] })),
+    header: m.header || null,
+    steps: (m.steps || []).map((s) => ({ ...s, from: s.from || [], ref: s.ref || [], comment: s.comment || null })),
     layout: m.layout || {},
   };
 }
@@ -270,8 +275,9 @@ export async function compose() {
     if (!composing.stale(seq)) cards.result = { yaml: "", steps: [], errors: [e.message], warnings: [] };
   }
   invalidate("canvas", "drawer", "bar");
-  // With no wire and no card of the job selected the inspector shows the job's steps, and holds no field a redraw would take.
-  if (!cards.selected?.edge && !(cards.selected?.alias && cards.model && stepOf(cards.selected.alias))) invalidate("inspector");
+  // With no wire and no step selected the inspector shows the job's summary; skip redrawing while typing in its comments.
+  if (!cards.selected?.edge && !(cards.selected?.alias && cards.model && stepOf(cards.selected.alias)) && document.activeElement?.id !== "i-header")
+    invalidate("inspector");
   hooks.onComposed?.(cards.result);
   return cards.result;
 }
@@ -327,7 +333,7 @@ function removeStep(alias) {
 function renameStep(from, to) {
   to = to.trim();
   if (to === from) return;
-  if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(to)) { status(`'${to}' is not a usable alias: a letter first, then letters, digits, '_' or '-'.`, "bad"); invalidate("inspector"); return; }
+  if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(to)) { status(`'${to}' is not a valid alias: letter first, then letters, digits, _ or -.`, "bad"); invalidate("inspector"); return; }
   if (stepOf(to)) { status(`A step is already named '${to}'.`, "bad"); invalidate("inspector"); return; }
   stepOf(from).alias = to;
   for (const s of cards.model.steps) {
@@ -479,7 +485,7 @@ function renderChain() {
   ]);
   fill(view,
     el("nav", { class: "crumbs" },
-      el("a", { href: "#", "data-crumb": true, title: "Back to the job (Esc)" }, cards.model.title), el("span", { class: "sep" }, "›"), el("b", {}, step.alias)),
+      el("a", { href: "#", "data-crumb": true, title: "Back to the job (Esc)" }, state.job?.path || "Job"), el("span", { class: "sep" }, "›"), el("b", {}, step.alias)),
     el("div", { class: "chain" },
       el("div", { class: "chain-end" }, el("span", { class: "kind" }, "input"),
         step.from.length ? step.from.map((a) => el("code", {}, a)) : el("span", { class: "hint" }, "not wired")),
@@ -497,8 +503,6 @@ function renderShell() {
   const seg = (id, label, title) => el("button", { id, title }, label);
   fill(host,
     el("div", { class: "designer-bar" },
-      el("input", { id: "d-title", class: "title-input", value: cards.model.title, "aria-label": "Title" }),
-      el("input", { id: "d-description", class: "grow", value: cards.model.description, placeholder: "What this job does", "aria-label": "Description" }),
       el("span", { id: "d-dirty", class: "pill warn", hidden: true }, "unsaved"),
       el("span", { class: "actions" },
         seg("d-undo", "Undo", "Nothing to undo"),
@@ -517,8 +521,6 @@ function renderShell() {
   // The palette lives in the page's side panel (Steps), a new one for each job like the rest of the designer.
   fill($("side-steps-view"), el("div", { class: "palette", id: "d-palette" }));
 
-  $("d-title").addEventListener("input", (e) => { cards.model.title = targetOf(e).value; touch({ canvas: !!cards.zoom }); });
-  $("d-description").addEventListener("input", (e) => { cards.model.description = targetOf(e).value; touch({ canvas: false }); });
   $("d-layout").addEventListener("click", () => autoLayout());
   $("d-undo").addEventListener("click", () => { undo().catch((e) => status(e.message, "bad")); });
   applySizes();
@@ -538,9 +540,25 @@ export function applySizes() {
     state.view.sizes[name] = Math.min(hi, Math.max(lo, Math.round(+state.view.sizes[name] || lo)));
     (name === "agent" || name === "pal" ? document.querySelector("main") : host)?.style.setProperty(SIZE_VARS[name], `${state.view.sizes[name]}px`);
   }
+  host?.style.setProperty("--drawer-min", `${SIZE_LIMITS.drawer[0]}px`);
+  host?.style.setProperty("--canvas-min", `${CANVAS_MIN}px`);
 }
 
+/**
+ * The tallest the drawer can be now: what it and the canvas share, less the canvas's floor. Measured, so the gaps and the bar
+ * are never restated here. Null when the drawer is not laid out (a window narrow enough to stack the panels).
+ */
+function drawerRoom() {
+  const drawer = $("d-drawer");
+  const body = host?.querySelector(".designer-body");
+  return drawer && body && drawer.offsetHeight ? drawer.offsetHeight + body.offsetHeight - CANVAS_MIN : null;
+}
+
+/** The size a pane shows now: the drawer's is shrunk by the layout when the window is too short for what was asked. */
+const shownSize = (name) => (name === "drawer" ? $("d-drawer")?.offsetHeight || state.view.sizes.drawer : state.view.sizes[name]);
+
 function resize(name, value, persist) {
+  if (name === "drawer") value = Math.min(value, drawerRoom() ?? value);
   state.view.sizes[name] = value;
   applySizes();
   // The sizes are kept after a drawing (prefs.js): asking for one is how a finished move is noticed.
@@ -574,7 +592,7 @@ export function bindSplit(handle, name, target) {
   handle.addEventListener("keydown", (e) => {
     const [grow, shrink] = SPLIT_KEYS[name];
     if (e.key !== grow && e.key !== shrink) return;
-    resize(name, state.view.sizes[name] + (e.key === grow ? 16 : -16), true);
+    resize(name, shownSize(name) + (e.key === grow ? 16 : -16), true);
     e.preventDefault();
   });
 }
@@ -624,7 +642,7 @@ function renderPalette() {
     item("sql", "SQL", "A DuckDB query over one main input, joined to others as ref"),
     item("merge", "Merge", "UNION ALL of several inputs with the same schema"),
     el("h3", {}, "Outputs"), endpoints(state.components.writers, "sink"),
-    el("p", { class: "hint" }, "Drag a component or a step onto the canvas, then wire an output port (right) to an input port (left). Drag a wire's end off its input port to move it or, dropped in the void, to remove it."),
+    el("p", { class: "hint" }, "Wire output (right) → input (left). ", info("Drag a wire end to another input to move it, or off the ports to remove it.")),
     versions());
 }
 
@@ -639,7 +657,7 @@ function versions() {
       el("li", {}, "this studio: ", el("code", { title: state.catalog.studioVersion }, tagOf(state.catalog.studioVersion) || "unknown")),
       state.catalog.nodes.map((n) => el("li", { class: n.dtpipeVersion === state.catalog.studioVersion ? "" : "warn" },
         `${n.name}: `, el("code", { title: n.dtpipeVersion || "" }, tagOf(n.dtpipeVersion, state.catalog.studioVersion) || "unknown")))),
-    differ.length ? el("p", { class: "hint warn" }, `${plural(differ.length, "node")} ${differ.length === 1 ? "runs" : "run"} another dtpipe: a sample here may differ from a run there. The coordinator checks a pipeline again when it is published.`) : null,
+    differ.length ? el("p", { class: "hint warn" }, `⚠ ${plural(differ.length, "node")} on another dtpipe version: samples may differ.`) : null,
   ];
 }
 
@@ -956,7 +974,7 @@ function inputsList(step) {
   const item = (alias, port) => el("li", {}, el("code", {}, alias), port === "ref" ? [" ", el("span", { class: "chip" }, "ref")] : null, " ",
     el("button", { class: "small ghost", "data-unwire": alias, "data-port": port, "aria-label": `Disconnect ${alias} from ${step.alias}`, title: "Disconnect" }, "×"));
   const items = [...step.from.map((a) => item(a, "in")), ...step.ref.map((a) => item(a, "ref"))];
-  return [el("h3", {}, "Inputs"), items.length ? el("ul", { class: "inputs" }, items) : el("p", { class: "hint" }, "Not wired yet: drag from another step's output port, or connect one below."), connectControls(step)];
+  return [el("h3", {}, "Inputs"), items.length ? el("ul", { class: "inputs" }, items) : el("p", { class: "hint" }, "Not wired: drag from an output port, or connect below."), connectControls(step)];
 }
 
 // The keyboard's way to wire a card: the choice of an input and a button, which make the wire the drag makes.
@@ -1005,7 +1023,7 @@ function renderInspector() {
     fill(view, el("h2", {}, "Connection"),
       el("p", {}, el("code", {}, e.from), " → ", el("code", {}, e.to), e.port === "ref" ? " (ref)" : ""),
       el("button", { class: "danger", "data-unwire": e.from, "data-port": e.port, "data-to": e.to }, "Disconnect"),
-      el("p", { class: "hint" }, "Or press Delete, or click the × on the wire. To move it, drag its end off the input port and drop it on another input; dropped anywhere else, it is removed."));
+      el("p", { class: "hint" }, "Delete · × on the wire · drag its end to another input to move it."));
     return;
   }
   const step = cards.selected?.alias ? stepOf(cards.selected.alias) : null;
@@ -1013,8 +1031,17 @@ function renderInspector() {
     // The composition's verdict is the YAML tab's light, never repeated here.
     fill(view, el("h2", {}, "Job"),
       el("p", { class: "hint" }, `${plural(cards.model.steps.length, "step")}.`),
-      el("p", { class: "hint" }, "Select a step to edit it. A source and an output of their own carry their endpoint as YAML; the server joins a source, its transform and its output back into one branch when nothing else reads between them."),
-      cards.model.directives.length ? [el("h3", {}, "Header directives"), el("ul", { class: "inputs" }, cards.model.directives.map((d) => el("li", {}, el("code", {}, d))))] : null);
+      el("p", { class: "hint" }, "Select a step to edit it."),
+      el("h3", {}, "Comments"),
+      el("textarea", {
+        id: "i-header",
+        "aria-label": "Job header comments",
+        class: "mono",
+        rows: "5",
+        spellcheck: "true",
+        placeholder: "Optional # comments at the top of the YAML file",
+        value: cards.model.header || "",
+      }));
     return;
   }
   if (cards.zoom && step.alias === cards.zoom) {
@@ -1029,8 +1056,8 @@ function renderInspector() {
       el("h3", {}, step.kind === "source" ? "Its reader" : "Its output"),
       el("textarea", { id: "i-yaml", "aria-label": `${step.kind === "source" ? "Reader" : "Output"} of ${step.alias}, as YAML`, class: "mono", rows: "10", spellcheck: "false", value: step.yaml || "" }),
       el("p", { class: "hint" }, step.kind === "source"
-        ? "input, the keys that bound or sample what it reads (limit, cursor, sampling-rate…), and its reader's provider-options blocks."
-        : "output, the keys that govern what it writes (prefix, checkpoint, contract-save), and its provider-options blocks.")];
+        ? "Input keys: bounds and sampling (limit, cursor, sampling-rate…), reader options."
+        : "Output keys: prefix, checkpoint, contract-save…, writer options.")];
   } else if (isEndpoint(step)) {
     body = [step.kind === "sink" ? inputsList(step) : null, brickView(step)];
   } else if (step.kind === "transform") {
@@ -1041,7 +1068,7 @@ function renderInspector() {
     body = [inputsList(step), el("h3", {}, "Query ", el("span", { class: "hint" }, "DuckDB; each input is a table named by its alias")),
       el("textarea", { id: "i-query", "aria-label": `Query of ${step.alias}`, class: "mono", rows: "10", spellcheck: "false", value: step.query || "" })];
   } else if (step.kind === "merge") {
-    body = [inputsList(step), el("p", { class: "hint" }, "UNION ALL: every input must carry the same columns, with the same types. dtpipe converts nothing on the way.")];
+    body = [inputsList(step), el("p", { class: "hint" }, "UNION ALL: inputs need the same columns and types.")];
   } else {
     body = [inputsList(step), el("h3", {}, "Branch, as written"),
       el("textarea", { id: "i-yaml", "aria-label": `Branch ${step.alias}, as written`, class: "mono", rows: "12", spellcheck: "false", value: step.yaml || "" }),
@@ -1050,13 +1077,23 @@ function renderInspector() {
   fill(view,
     el("div", { class: "row" }, el("h2", {}, KIND_LABEL[step.kind] || step.kind), el("button", { class: "small ghost danger", "data-remove-step": true }, "Delete step")),
     el("label", { class: "field" }, "Alias ", el("input", { id: "i-alias", class: "mono", value: step.alias })),
-    body);
+    body,
+    el("h3", {}, "Comments"),
+    el("textarea", {
+      id: "i-comment",
+      "aria-label": `Comments for ${step.alias}`,
+      class: "mono",
+      rows: "3",
+      spellcheck: "true",
+      placeholder: "Optional # comments written under this branch",
+      value: step.comment || "",
+    }));
 }
 
 // A brick card: what the coordinator's catalog says of it. Its branch is its node's, never edited here.
 function brickView(step) {
   const brick = brickOf(step.brick);
-  if (!brick) return [el("p", {}, el("code", {}, step.brick)), el("p", { class: "hint warn" }, "Not in the catalog read last: sign in to the coordinator to read it.")];
+  if (!brick) return [el("p", {}, el("code", {}, step.brick)), el("p", { class: "hint warn" }, "Not in the last catalog: sign in to refresh.")];
   return [
     el("p", {}, el("b", {}, brick.title || brick.id), " ", el("span", { class: "hint" }, `${brick.kind} brick`)),
     brick.description ? el("p", { class: "hint" }, brick.description) : null,
@@ -1067,7 +1104,7 @@ function brickView(step) {
     brickRowsView(brick),
     el("p", { class: "hint" }, step.kind === "source"
       ? "A sample reads its rows from its node, through the coordinator."
-      : "A sample writes nothing to it: its rows end in a throwaway file."),
+      : "Samples write a temporary file."),
   ];
 }
 
@@ -1122,9 +1159,16 @@ function bindInspector() {
   });
 
   view.addEventListener("input", (e) => {
+    if (targetOf(e).id === "i-header") {
+      if (!cards.model) return;
+      cards.model.header = targetOf(e).value || null;
+      touch({ canvas: false });
+      return;
+    }
     const step = current();
     if (!step) return;
-    if (targetOf(e).id === "i-query") { step.query = targetOf(e).value; touch(); }
+    if (targetOf(e).id === "i-comment") { step.comment = targetOf(e).value || null; touch({ canvas: false }); }
+    else if (targetOf(e).id === "i-query") { step.query = targetOf(e).value; touch(); }
     else if (targetOf(e).id === "i-yaml") { step.yaml = targetOf(e).value; touch(); }
     else if (targetOf(e).dataset.kv) {
       const kv = targetOf(e).closest(".kv");
@@ -1197,42 +1241,46 @@ function renderDrawer() {
   // A redraw while the person types keeps the text (it is state) and gives the editor back its caret.
   const typing = document.activeElement?.id === "d-edit" ? /** @type {HTMLTextAreaElement} */ (document.activeElement) : null;
   const caret = typing ? { start: typing.selectionStart, end: typing.selectionEnd, top: typing.scrollTop } : null;
-  let body;
+  // A tab is its content, which scrolls, and its actions, which never do: both come from `tabOf`, or a tab with no action gives its content alone.
+  let drawn;
   if (state.view.drawer === "yaml") {
-    body = [el("div", { class: "row" }, el("span", { id: "d-verdict" })),
-      el("textarea", { id: "d-edit", "aria-label": "The job, as YAML", class: "mono yaml-edit", rows: "16", spellcheck: "false", value: cards.text ?? cards.result.yaml }),
-      el("div", { class: "row" },
-        el("button", { "data-copy": true, title: "Copy the text shown" }, "Copy"),
-        el("button", { id: "d-apply", "data-apply": true, title: "Take this text apart into steps again" }, "Apply"),
-        el("button", { id: "d-revert", "data-revert": true, title: "Show the job the steps compose again, and free the steps" }, "Revert"),
-        el("span", { class: "hint" }, "Apply takes the text apart into steps again: steps that keep their alias keep their place. Until then the steps are held."))];
+    drawn = tabOf([el("div", { class: "row" }, el("span", { id: "d-verdict" })),
+      el("textarea", { id: "d-edit", "aria-label": "The job, as YAML", class: "mono yaml-edit", spellcheck: "false", value: cards.text ?? cards.result.yaml })],
+    [el("button", { "data-copy": true, title: "Copy the text shown" }, "Copy"),
+      el("button", { id: "d-apply", "data-apply": true, title: "Rebuild the steps from this text (steps keep their place by alias)" }, "Apply"),
+      el("button", { id: "d-revert", "data-revert": true, title: "Show the job the steps compose again, and free the steps" }, "Revert")],
+    { fill: true });
   } else if (state.view.drawer === "problems") {
     // Two verdicts, never mixed: what the composition says of a run here, and what a publication would refuse (the host's).
-    body = [el("h3", {}, "Will not run here"),
+    const publication = hooks.publicationProblems?.() ?? tabOf(null, null);
+    drawn = tabOf([el("h3", {}, "Will not run here"),
       errors ? [el("h4", {}, `Errors (${errors})`), el("ul", { class: "msgs bad" }, cards.result.errors.map((m) => el("li", {}, m)))] : null,
       warnings ? [el("h4", {}, `Warnings (${warnings})`), el("ul", { class: "msgs warn" }, cards.result.warnings.map((m) => el("li", {}, m)))] : null,
       problems ? null : el("p", { class: "hint" }, "Nothing to report."),
-      hooks.publicationProblems?.() || null];
+      publication.body], publication.actions);
   } else if (state.view.drawer === "preview") {
-    body = hooks.previewView?.(cards.selected?.alias || null) || null;
+    drawn = hooks.previewView?.(cards.selected?.alias || null) || null;
   } else {
-    body = (hooks.extraTabs || []).find((t) => t.name === state.view.drawer)?.render() || null;
+    drawn = (hooks.extraTabs || []).find((t) => t.name === state.view.drawer)?.render() || null;
   }
-  fill(view, tabs, el("div", { class: "drawer-body" }, body));
+  const { body, actions, fill: fills } = drawn?.tab ? drawn : { body: drawn, actions: null, fill: false };
+  fill(view, tabs,
+    el("div", { class: fills ? "drawer-body fill" : "drawer-body" }, body),
+    actions?.length ? el("div", { class: "drawer-actions" }, actions) : null);
   drawHold();
   const editor = /** @type {HTMLTextAreaElement | null} */ ($("d-edit"));
   if (caret && editor) { editor.focus(); editor.setSelectionRange(caret.start, caret.end); editor.scrollTop = caret.top; }
 }
 
 // What the steps hold while the YAML tab has a text they do not: these are greyed and take no input.
-const HELD = ["d-canvas", "d-inspector", "d-palette", "d-title", "d-description", "d-undo", "d-layout"];
+const HELD = ["d-canvas", "d-inspector", "d-palette", "d-undo", "d-layout"];
 
 /**
  * The verdict the YAML tab's light gives: the composition's on the cards, unless the tab holds a text not applied, of which
  * the light says nothing more (a verdict on the cards would vouch for a text not on screen).
  */
 function verdict() {
-  if (editingText()) return { tone: "held", short: "not applied", words: "Not applied: the steps are held until you apply or revert this text." };
+  if (editingText()) return { tone: "held", short: "not applied", words: "Not applied: apply or revert the text." };
   const errors = cards.result?.errors?.length || 0;
   const warnings = cards.result?.warnings?.length || 0;
   if (errors) return { tone: "bad", short: plural(errors, "error"), words: `${plural(errors, "error")}: the steps do not compose into a job.` };

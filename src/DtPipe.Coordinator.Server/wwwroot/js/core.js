@@ -26,6 +26,138 @@ export const $ = (id) => document.getElementById(id);
 export const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 /** A count with its noun, in the plural unless the count is one. */
 export const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+let tipSeq = 0;
+let activeTip = null;
+let pinnedTip = null;
+let hideTimer = null;
+let pointerOpening = false;
+let ignoreFocusScrollUntil = 0;
+
+/** Puts a tip beside its anchor, kept in the window: the tip is fixed so no scrolling card clips it. */
+function placeTip(anchor, tip) {
+  const box = anchor.getBoundingClientRect();
+  const left = Math.max(8, Math.min(box.left - 12, window.innerWidth - tip.offsetWidth - 8));
+  const below = box.bottom + 6;
+  const top = below + tip.offsetHeight > window.innerHeight - 8 ? Math.max(8, box.top - tip.offsetHeight - 6) : below;
+  tip.style.left = `${left}px`;
+  tip.style.top = `${top}px`;
+}
+
+function openTip(trigger, pin = false) {
+  const tip = trigger.querySelector(".info-text");
+  if (!tip) return;
+  clearTimeout(hideTimer);
+  hideTimer = null;
+  if (activeTip && activeTip !== trigger) closeTip(activeTip);
+  activeTip = trigger;
+  if (pin) pinnedTip = trigger;
+  trigger.setAttribute("aria-expanded", "true");
+  placeTip(trigger, tip);
+}
+
+function closeTip(trigger = activeTip) {
+  clearTimeout(hideTimer);
+  hideTimer = null;
+  ignoreFocusScrollUntil = 0;
+  if (!trigger) return;
+  trigger.setAttribute("aria-expanded", "false");
+  if (activeTip === trigger) activeTip = null;
+  if (pinnedTip === trigger) pinnedTip = null;
+}
+
+function scheduleClose(trigger) {
+  clearTimeout(hideTimer);
+  hideTimer = setTimeout(() => {
+    if (activeTip === trigger && pinnedTip !== trigger && !trigger.matches(":focus-within")) closeTip(trigger);
+  }, 150);
+}
+
+const tipTriggerOf = (target) => (target instanceof Element ? target.closest(".info, .info-chip") : null);
+
+document.addEventListener("pointerover", (e) => {
+  if (e.pointerType === "touch") return;
+  const trigger = tipTriggerOf(e.target);
+  if (trigger) openTip(trigger, false);
+});
+
+document.addEventListener("pointerout", (e) => {
+  if (e.pointerType === "touch" || !activeTip) return;
+  const related = e.relatedTarget instanceof Node ? e.relatedTarget : null;
+  if (related && activeTip.contains(related)) return;
+  scheduleClose(activeTip);
+});
+
+document.addEventListener("pointerdown", (e) => {
+  const target = e.target instanceof Element ? e.target : null;
+  if (tipTriggerOf(target) && !target?.closest(".info-text")) {
+    pointerOpening = true;
+    setTimeout(() => { pointerOpening = false; }, 0);
+  }
+});
+
+document.addEventListener("focusin", (e) => {
+  if (pointerOpening) return;
+  const trigger = tipTriggerOf(e.target);
+  if (trigger) {
+    ignoreFocusScrollUntil = performance.now() + 80;
+    openTip(trigger, false);
+  }
+});
+
+document.addEventListener("focusout", (e) => {
+  if (!activeTip || pinnedTip === activeTip) return;
+  const related = e.relatedTarget instanceof Node ? e.relatedTarget : null;
+  if (related && activeTip.contains(related)) return;
+  closeTip(activeTip);
+});
+
+document.addEventListener("click", (e) => {
+  pointerOpening = false;
+  const target = e.target instanceof Element ? e.target : null;
+  if (target?.closest(".info-text")) return;
+  const trigger = tipTriggerOf(target);
+  if (trigger) {
+    if (pinnedTip === trigger || (e.detail === 0 && activeTip === trigger)) closeTip(trigger);
+    else openTip(trigger, true);
+  } else if (activeTip) {
+    closeTip(activeTip);
+  }
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && activeTip) {
+    e.preventDefault();
+    e.stopPropagation();
+    closeTip(activeTip);
+  }
+}, true);
+
+document.addEventListener("scroll", (e) => {
+  if (!activeTip) return;
+  const target = e.target instanceof Node ? e.target : null;
+  if (target instanceof Element && target.closest(".info-text")) return;
+  if (performance.now() < ignoreFocusScrollUntil && target?.contains(activeTip)) {
+    const tip = activeTip.querySelector(".info-text");
+    if (tip) placeTip(activeTip, tip);
+    return;
+  }
+  closeTip(activeTip);
+}, { capture: true, passive: true });
+
+window.addEventListener("resize", () => { if (activeTip) closeTip(activeTip); });
+
+/** A ⓘ right after the text it explains: opens on hover, focus, or click and dismisses on Escape or scroll. */
+export function info(text, { label = "More information", heading = "", preline = false } = {}) {
+  const tipId = `info-tip-${++tipSeq}`;
+  const body = preline ? `<span class="lib-header">${esc(text)}</span>` : esc(text);
+  return `<button type="button" class="info" aria-label="${esc(label)}" aria-expanded="false" aria-describedby="${tipId}"><span aria-hidden="true">ⓘ</span><span id="${tipId}" class="info-text" role="tooltip">${heading ? `<b>${esc(heading)}</b>` : ""}${body}</span></button>`;
+}
+
+/** A status chip button with a rich tooltip explaining why it has that state. */
+export function infoChip(label, cls, text, heading = "Why") {
+  const tipId = `info-tip-${++tipSeq}`;
+  return `<button type="button" class="info-chip ${cls}" aria-expanded="false" aria-describedby="${tipId}">${esc(label)}<span id="${tipId}" class="info-text" role="tooltip">${heading ? `<b>${esc(heading)}</b>` : ""}${esc(text)}</span></button>`;
+}
 // A version without its build metadata: "1.17.0+<commit>" reads "1.17.0".
 export const tagOf = (version) => (version ? String(version).split("+")[0] : "");
 export const fmt = (n) => (n ?? 0).toLocaleString("en-US");
@@ -62,7 +194,7 @@ export function protectionWord(level, keyId = null) {
 // What a run's cause names, by the `causeKind` word the server gives it. An edge and a receiver are said as such; any other kind,
 // a kind this table has no entry for and a result with none read as a fragment or a sentence.
 const CAUSE_KINDS = new Map([
-  ["edge", { word: "edge", hint: "The cause is an edge between two fragments, not a fragment: an end of it failed end-to-end encryption." }],
+  ["edge", { word: "edge", hint: "An edge between two fragments failed end-to-end encryption." }],
   ["mute-receiver", { word: "mute receiver", hint: "The cause is a receiver that stopped acknowledging what its sender sent." }],
 ]);
 
@@ -77,7 +209,7 @@ export const causeLine = (run) => run.reason ?? (run.result?.cause ? (run.result
 
 /** The rows a run's edges delivered, counted on every edge: a row that crosses two edges counts twice. */
 export const rowsCrossed = (run) => run?.result?.edgeCounts?.reduce((s, e) => s + (e.received ?? 0), 0) || 0;
-export const ROWS_CROSSED_HINT = "Counted on every edge of the run: a row that crosses two edges counts twice.";
+export const ROWS_CROSSED_HINT = "Counted per edge: a row crossing two edges counts twice.";
 
 /** What a run says of why it ended as it did, and of what it may have left behind: the same words wherever a run is shown. */
 export function endNotes(run) {
@@ -90,8 +222,8 @@ export function endNotes(run) {
     run.refusal && run.refusal !== run.reason ? `<p class="mismatch">${esc(run.refusal)}</p>` : "",
     cause ? `<p><b>Cause:</b> ${causeKindChip(run)}${esc(cause)}${where}</p>` : "",
     run.sinkMayBePartial
-      ? `<p class="mismatch">The coordinator restarted while this run was in progress: its outputs may hold part of what it wrote.</p>`
-      : started ? `<p class="hint">It stopped before its end: an output it was writing may hold part of the rows, or none.</p>` : "",
+      ? `<p class="mismatch">Interrupted by a coordinator restart: outputs may be partial.</p>`
+      : started ? `<p class="hint">Stopped early: outputs may be partial, or empty.</p>` : "",
   ].join("");
 }
 
@@ -115,7 +247,7 @@ export const can = (role) => !store.me || store.me.roles.includes(role);
 /** What a refusal for the person's role says, in the words of the pages: the role they have and who can do it instead. */
 export function forbidden() {
   const role = store.me?.roles?.[0];
-  return `Your role${role ? ` (${role})` : ""} does not allow this: ask ${role === "designer" ? "an administrator" : "a designer or an administrator"}.`;
+  return `Requires ${role === "designer" ? "admin" : "designer or admin"}${role ? ` (you are ${role})` : ""}.`;
 }
 
 /** Disables, inside `root`, what the person's role does not allow: an element marked `data-needs="<role>"`, with the reason as its title. */
@@ -346,7 +478,7 @@ async function resync() {
   held = null;
   if (patch) Object.assign(store, patch);
   for (const event of events) onEvent(event);
-  if (failure) toast(`The page could not read the coordinator's state again, and may show what it missed: ${failure.message}`);
+  if (failure) toast(`State may be stale: ${failure.message}`);
   for (const kind of RESYNC_KINDS) emit(kind);
   refreshHealth();
 }

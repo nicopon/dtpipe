@@ -16,6 +16,16 @@ let sizesKnown = false;
 let keptTab = "yaml";
 let last = "";
 let timer = null;
+let held = false;
+
+/**
+ * Stops keeping the view while another folder is being opened, or keeps it again when that is refused: a view written then would
+ * land in the new folder's view.json. @param {boolean} on
+ */
+export function holdView(on) {
+  held = on;
+  if (on) clearTimeout(timer);
+}
 
 /** What was kept for a job, with the panes' sizes, the side panel and the job that was open. @param {string} [path] @returns {Promise<{ sizes: Record<string, number> | null, side?: string | null, open?: string | null, job: { tab?: string, rows?: number, card?: string, review?: boolean } | null }>} */
 export async function readView(path) {
@@ -49,6 +59,7 @@ function snapshot() {
 
 /** Called after every drawing: sends the view if it changed, once the person has stopped for a moment. */
 export function rememberView() {
+  if (held) return;
   const body = snapshot();
   const text = JSON.stringify(body);
   if (text === last) return;

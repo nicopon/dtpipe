@@ -1,7 +1,7 @@
 // Library: the pipelines kept in the coordinator's git repository, their deployment state and their last run. A
 // pipeline is written with dtpipe studio and published into it. The list is searched and filtered here; a pipeline's
 // plan, runs and versions are on its own page, `library-detail.js`.
-import { $, ROWS_CROSSED_HINT, ago, api, deploymentOf, esc, healthOf, isActive, lastRunOf, plural, rowsCrossed, runHref, runStateLabel, toast } from "./core.js";
+import { $, ROWS_CROSSED_HINT, ago, api, deploymentOf, esc, healthOf, info, infoChip, isActive, lastRunOf, plural, rowsCrossed, runHref, runStateLabel, toast } from "./core.js";
 import { deploymentChip, statusChip } from "./pipeline-status.js";
 import * as detail from "./library-detail.js";
 
@@ -22,11 +22,11 @@ let filter = { q: "", show: "all" };
 let addressTimer = null;   // the pending write of the search into the address
 let page = null;           // the detail page, when #/library/{id} is open
 
-/** The pipelines `f` keeps: the search text in the title or the id, without case, and the show filter. */
+/** The pipelines `f` keeps: the search text in the id or the comments, without case, and the show filter. */
 export function visible(list, f) {
   const text = f.q.trim().toLowerCase();
   const keep = SHOWS[f.show][1];
-  return list.filter((e) => (!text || [e.title, e.id].some((v) => v && String(v).toLowerCase().includes(text))) && keep(e));
+  return list.filter((e) => (!text || [e.id, e.header].some((v) => v && String(v).toLowerCase().includes(text))) && keep(e));
 }
 
 /** What the count says: the pipelines the list shows of those the library holds. */
@@ -45,10 +45,10 @@ export function mount(el, params, query) {
   host.innerHTML = `
     <div class="view-head">
       <h1>Library</h1>
-      <p class="hint">Pipelines kept in the coordinator's own git repository. Each save is a commit; each one is a plain dtpipe job that also runs whole on one machine. Write one with <code>dtpipe studio --coordinator</code> and publish it here.</p>
+      <p class="hint">Pipelines in the coordinator's git repository. ${info("Each save is a commit. Each pipeline is a plain dtpipe job. Write one with dtpipe studio --coordinator and publish it here.")}</p>
     </div>
     <div class="lib-bar">
-      <input id="lib-q" type="search" placeholder="Search by title or id" aria-label="Search pipelines" value="${esc(filter.q)}">
+      <input id="lib-q" type="search" placeholder="Search by id or comments" aria-label="Search pipelines" value="${esc(filter.q)}">
       <select id="lib-show" aria-label="Show">${Object.entries(SHOWS).map(([key, [label]]) => `<option value="${key}" ${key === filter.show ? "selected" : ""}>${label}</option>`).join("")}</select>
       <span id="lib-count" class="hint"></span>
     </div>
@@ -116,10 +116,10 @@ function runCell(id) {
   const run = lastRunOf(id);
   if (!run) return `${label}<span class="hint">none</span>`;
   const rows = rowsCrossed(run);
-  const state = esc(runStateLabel(run.state));
+  const state = runStateLabel(run.state);
   const chip = run.reason
-    ? `<span class="tip"><span class="outcome-chip ${esc(run.state)} tip-t" tabindex="0">${state}</span><span class="tip-b"><b>Why</b>${esc(run.reason)}</span></span>`
-    : `<span class="outcome-chip ${esc(run.state)}">${state}</span>`;
+    ? infoChip(state, `outcome-chip ${esc(run.state)}`, run.reason)
+    : `<span class="outcome-chip ${esc(run.state)}">${esc(state)}</span>`;
   const link = `<a class="mono" href="${esc(runHref(run.runId))}" title="This run's page">${esc(run.runId)}</a>`;
   const when = [isActive(run) ? "" : ago(run.finishedAt), rows ? `${rows.toLocaleString("en-US")} rows moved` : ""].filter(Boolean).join(" · ");
   return `${label}${link}${chip}<span title="${esc(ROWS_CROSSED_HINT)}">${esc(when)}</span>`;
@@ -154,7 +154,7 @@ function savedCell(e) {
 function moreMenu(e) {
   const deployment = deploymentOf(e.id);
   const active = isActive(lastRunOf(e.id));
-  return `<details class="menu"><summary aria-label="More actions for ${esc(e.title)}" title="More actions">⋯</summary>
+  return `<details class="menu"><summary aria-label="More actions for ${esc(e.id)}" title="More actions">⋯</summary>
     <div class="menu-pop">
       ${deployment ? `<button class="small" data-needs="designer" data-undeploy="${esc(e.id)}" ${active ? "disabled" : ""}>Undeploy</button><div class="sep"></div>` : ""}
       <button class="small danger" data-needs="designer" data-delete="${esc(e.id)}">Delete…</button>
@@ -172,29 +172,29 @@ function severity(e) {
   return "";
 }
 
-// The description: a popover where a pointer hovers, a printed line where none does.
-function descriptionTip(e) {
-  if (!e.description) return "";
-  return `<span class="tip"><span class="info-dot tip-t" tabindex="0" role="note" aria-label="Description">i</span><span class="tip-b"><b>Description</b>${esc(e.description)}</span></span>`;
+// The header comments: a tooltip where a pointer hovers, a printed block where none does.
+function headerTip(e) {
+  if (!e.header) return "";
+  return info(e.header, { label: "Comments", heading: "Comments", preline: true });
 }
 
 // One pipeline. The reasons of a failed deployment and of the last run are also printed, for where no pointer hovers.
 function item(e) {
   const run = lastRunOf(e.id);
   const d = deploymentOf(e.id);
-  const printed = [e.description ? `<div class="lib-printed">${esc(e.description)}</div>` : "",
+  const printed = [e.header ? `<div class="lib-printed lib-header">${esc(e.header)}</div>` : "",
     d && d.state === "failed" && d.message ? `<div class="lib-printed bad">${esc(d.message)}</div>` : "",
     run && run.reason ? `<div class="lib-printed bad">${esc(run.reason)}</div>` : ""].join("");
   return `
     <article class="lib-item ${severity(e)}">
       <div class="lib-facts">
-        <div class="lib-title"><a href="#/library/${encodeURIComponent(e.id)}" title="${esc(e.title)}">${esc(e.title)}</a>${descriptionTip(e)}<span class="mono">${esc(e.id)}</span></div>
+        <div class="lib-title"><a class="mono" href="#/library/${encodeURIComponent(e.id)}" title="${esc(e.id)}">${esc(e.id)}</a>${headerTip(e)}</div>
         <div class="chips-wrap">${deploymentChip(e)} ${statusChip(e)}</div>
         <div class="lib-run">${runCell(e.id)}</div>
       </div>
       ${printed}
       <div class="lib-actions">
-        <a class="button small primary" href="#/library/${encodeURIComponent(e.id)}" title="The plan a launch would make, the bricks' modes, deploy, runs and versions">Open</a>
+        <a class="button small primary" href="#/library/${encodeURIComponent(e.id)}" title="Plan, brick modes, deploy, runs, versions">Open</a>
         ${runRowActions(e)}
         ${moreMenu(e)}
         ${savedCell(e)}

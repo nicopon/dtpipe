@@ -744,8 +744,8 @@ def rights_pass():
             # A person's session never reaches the data plane: only a service's token opens it.
             "admin session on the node channel": (raw_session("/node-channel/negotiate?negotiateVersion=1", b""), 401),
             "admin session on TransportR's control plane": (raw_session(sec.events_path(uuid.uuid4()), None, "GET", {"Accept": "text/event-stream"}), 401),
-            "admin session on a stream": (raw_session(f"/api/stream/{STREAM}/send", b""), 401),
-            "anonymous stream": (raw(f"/api/stream/{STREAM}/send", data=b"", method="POST"), 401),
+            "admin session on a stream": (raw_session(f"{sec.DATA_PLANE_PREFIX}/api/stream/{STREAM}/send", b""), 401),
+            "anonymous stream": (raw(f"{sec.DATA_PLANE_PREFIX}/api/stream/{STREAM}/send", data=b"", method="POST"), 401),
         }
         wrong = {k: v for k, v in expected.items() if v[0] != v[1]}
         if wrong:

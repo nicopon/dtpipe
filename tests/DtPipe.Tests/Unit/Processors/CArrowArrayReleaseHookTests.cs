@@ -192,25 +192,72 @@ public unsafe class CArrowArrayReleaseHookTests
     public void A_Fault_Of_The_Owners_Disposal_Is_Logged_And_Does_Not_Leave_The_Release()
     {
         var logger = new CapturingLogger();
-        var previous = CArrowArrayReleaseHook.Logger;
-        CArrowArrayReleaseHook.Logger = logger;
-        try
-        {
-            var pool = new TrackingMemoryPool();
-            var batch = ColumnBatch(pool, 4);
-            CArrowArray array = default;
-            CArrowArrayExporter.ExportRecordBatch(batch, &array);
-            CArrowArrayReleaseHook.Chain(&array, new ThrowingOwner(batch));
+        var pool = new TrackingMemoryPool();
+        var batch = ColumnBatch(pool, 4);
+        CArrowArray array = default;
+        CArrowArrayExporter.ExportRecordBatch(batch, &array);
+        CArrowArrayReleaseHook.Chain(&array, new ThrowingOwner(batch), logger);
 
-            ReleaseAsAConsumerDoes(&array);
+        ReleaseAsAConsumerDoes(&array);
 
-            logger.Errors.Should().ContainSingle().Which.Should().Contain("Disposing the owner");
-            ReadRelease(&array).Should().Be(IntPtr.Zero, "the exporter's release ran before the owner's fault");
-        }
-        finally
-        {
-            CArrowArrayReleaseHook.Logger = previous;
-        }
+        logger.Errors.Should().ContainSingle().Which.Should().Contain("Disposing the owner");
+        ReadRelease(&array).Should().Be(IntPtr.Zero, "the exporter's release ran before the owner's fault");
+    }
+
+    [Fact]
+    public void An_Already_Released_Or_Already_Chained_Array_Is_Refused_And_Disposes_Owner()
+    {
+        var pool = new TrackingMemoryPool();
+        var ownerNull = new CountingOwner(ColumnBatch(pool, 4));
+        CArrowArray nullArray = default;
+        CArrowArrayExporter.ExportRecordBatch(ownerNull.Batch, &nullArray);
+        ReleaseAsAConsumerDoes(&nullArray);
+
+        InvalidOperationException? nullRefusal = null;
+        try { CArrowArrayReleaseHook.Chain(&nullArray, ownerNull); }
+        catch (InvalidOperationException ex) { nullRefusal = ex; }
+        nullRefusal.Should().NotBeNull();
+        ownerNull.Disposals.Should().Be(1);
+
+        var firstOwner = new CountingOwner(ColumnBatch(pool, 4));
+        var secondOwner = new CountingOwner(ColumnBatch(pool, 4));
+        CArrowArray chained = default;
+        CArrowArrayExporter.ExportRecordBatch(firstOwner.Batch, &chained);
+        CArrowArrayReleaseHook.Chain(&chained, firstOwner);
+
+        InvalidOperationException? doubleRefusal = null;
+        try { CArrowArrayReleaseHook.Chain(&chained, secondOwner); }
+        catch (InvalidOperationException ex) { doubleRefusal = ex; }
+        doubleRefusal.Should().NotBeNull();
+        secondOwner.Disposals.Should().Be(1);
+        firstOwner.Disposals.Should().Be(0);
+
+        ReleaseAsAConsumerDoes(&chained);
+        firstOwner.Disposals.Should().Be(1);
+        pool.ActiveAllocations.Should().Be(0);
+    }
+
+    [Fact]
+    public void A_Throwing_Logger_During_Release_Does_Not_Crash()
+    {
+        var pool = new TrackingMemoryPool();
+        var batch = ColumnBatch(pool, 4);
+        CArrowArray array = default;
+        CArrowArrayExporter.ExportRecordBatch(batch, &array);
+        CArrowArrayReleaseHook.Chain(&array, new ThrowingOwner(batch), new ThrowingLogger());
+
+        ReleaseAsAConsumerDoes(&array);
+
+        ReadRelease(&array).Should().Be(IntPtr.Zero);
+        pool.ActiveAllocations.Should().Be(0);
+    }
+
+    private sealed class ThrowingLogger : Microsoft.Extensions.Logging.ILogger
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            => throw new ObjectDisposedException("logger disposed");
     }
 
     private sealed class ThrowingOwner(RecordBatch batch) : IDisposable

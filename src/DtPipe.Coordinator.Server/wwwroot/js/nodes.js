@@ -1,6 +1,6 @@
 // Nodes: every node and runner, the bricks each offers by the reference a job makes to them, a preview read by
 // the node itself when asked, the replicas that carry it, and the flow matrix.
-import { api, csvTable, esc, nodeColor, protectionOf, protectionWord, store, tagOf } from "./core.js";
+import { api, csvTable, esc, info, nodeColor, protectionOf, protectionWord, store, tagOf } from "./core.js";
 
 let host = null;
 const open = new Set();      // brick keys whose details are unfolded
@@ -32,7 +32,7 @@ function brickRow(b) {
         </span>
       </div>
       ${b.description ? `<div class="hint">${esc(b.description)}</div>` : ""}
-      ${unfolded ? `<div class="brick-details"><p class="hint">A job names this brick by the reference below; its node holds the rest.</p><pre>${esc(b.yaml)}</pre></div>` : ""}
+      ${unfolded ? `<div class="brick-details"><p class="hint">Jobs reference this brick as below.</p><pre>${esc(b.yaml)}</pre></div>` : ""}
       ${previews[b.key] ? `<div class="brick-preview">${previews[b.key]}</div>` : ""}
     </div>`;
 }
@@ -43,8 +43,8 @@ function brickRow(b) {
 function protectionChips(r, required) {
   const level = protectionOf(r.dataPlaneProtection);
   const title = level
-    ? `How this replica protects the transfers of the data plane.${level.keyed && r.keyId ? ` The fingerprint of its key: ${r.keyId}.` : ""}`
-    : "The coordinator holds no protection of the data plane for this replica.";
+    ? `Data-plane protection of this replica.${level.keyed && r.keyId ? ` Key fingerprint: ${r.keyId}.` : ""}`
+    : "No data-plane protection known for this replica.";
   const chip = `<span class="chip ${level?.sealed ? "ok" : ""}" title="${esc(title)}">${esc(level ? protectionWord(r.dataPlaneProtection, r.keyId) : "protection unknown")}</span>`;
   const below = r.belowRequiredProtection === true
     ? ` <span class="chip bad" title="${esc(`This replica protects the data plane less than this deployment requires${required ? ` (${required})` : ""}: it stays connected and listed, and runs no fragment.`)}">${esc(`below the minimum${required ? `, requires ${required}` : ""}`)}</span>`
@@ -61,15 +61,15 @@ function render() {
       <section class="card node-card ${n.online ? "" : "offline"}" style="--node-color:${nodeColor(n.name)}">
         <div class="node-head">
           <span class="node-name"><span class="dot ${n.online ? "on" : ""}"></span>${esc(n.name)}</span>
-          <span><a href="#/events?node=${esc(encodeURIComponent(n.name))}" title="The lines this node reported, in Events">events →</a> <span class="chip">${esc(n.role === "Runner" ? "runner" : "data")}</span> <span class="chip">${n.groups.length > 1 ? "groups" : "group"} ${esc(n.groups.join(" + "))}</span>${n.capabilities.includes("raw-fragments") && n.role !== "Runner" ? ` <span class="chip" title="This host accepts a fragment that is no brick of its own: its owner configured it so.">raw fragments</span>` : ""}</span>
+          <span><a href="#/events?node=${esc(encodeURIComponent(n.name))}" title="This node's log lines, in Events">events →</a> <span class="chip">${esc(n.role === "Runner" ? "runner" : "data")}</span> <span class="chip">${n.groups.length > 1 ? "groups" : "group"} ${esc(n.groups.join(" + "))}</span>${n.capabilities.includes("raw-fragments") && n.role !== "Runner" ? ` <span class="chip" title="Accepts fragments that are not its own bricks (set by its owner).">raw fragments</span>` : ""}</span>
         </div>
         <p class="hint">${esc(n.description)}</p>
         ${n.datasets.map((d) => `<div class="dataset"><code>\${{${esc(d.variable)}}}</code> ${esc(d.description)}</div>`).join("")}
         ${n.role === "Runner" ? `<p class="hint">Carries every step between the bricks: transformers, SQL, merges.</p>` : ""}
         ${bricks.length ? `<h3>Bricks</h3>${bricks.map(brickRow).join("")}` : n.role === "Runner" ? "" : `<p class="hint">No brick offered.</p>`}
-        ${replicas.length ? `<h3 title="A replica is one host carrying this node's identity: a run is placed on one of them that can run its fragment. Its chip says how it protects the data plane.">Replicas (${replicas.filter((r) => r.connected).length}/${replicas.length})</h3>
-        ${n.replicasDisagree ? `<p class="hint mismatch">The replicas do not offer the same bricks: usually a rolling update, or two hosts started under the same name. A run goes to a replica that composes its plan.</p>` : ""}
-        ${n.replicasDisagreeOnProtection ? `<p class="hint mismatch">The replicas do not protect their data plane alike: usually a rolling update, or two hosts started under the same name. A run goes to replicas whose protection matches across each edge.</p>` : ""}
+        ${replicas.length ? `<h3 title="A replica is one host with this node's identity. Runs go to one that can run the fragment; its chip shows data-plane protection.">Replicas (${replicas.filter((r) => r.connected).length}/${replicas.length})</h3>
+        ${n.replicasDisagree ? `<p class="hint mismatch">⚠ Replicas differ in bricks (rolling update?). Runs go to one that fits the plan.</p>` : ""}
+        ${n.replicasDisagreeOnProtection ? `<p class="hint mismatch">⚠ Replicas differ in protection (rolling update?). Runs go to matching ones.</p>` : ""}
         ${replicas.map((r) => `
           <div class="frag-line" title="${esc(r.origin ?? "")}"><span><code>${esc(r.id)}</code>${r.dtpipeVersion ? ` <span class="chip" title="${esc(r.dtpipeVersion)}">dtpipe ${esc(tagOf(r.dtpipeVersion))}</span>` : ""}${protectionChips(r, n.requiredProtection)} <span class="hint">${esc(r.origin ?? "")}</span></span>
           <span class="state ${r.connected ? "Registered" : "Failed"}">${r.connected ? "connected" : "away"}${r.runs ? ` · ${r.runs} run${r.runs > 1 ? "s" : ""}` : ""}</span></div>`).join("")}`
@@ -85,9 +85,9 @@ function render() {
     </table>`;
 
   host.innerHTML = `
-    <div class="view-head"><h1>Nodes</h1><p class="hint">What each node offers. A brick is a read or a write its owner preconfigured; dtpipe studio assembles pipelines from them.</p></div>
+    <div class="view-head"><h1>Nodes</h1><p class="hint">What each node offers. ${info("A brick is a read or a write its owner preconfigured. dtpipe studio assembles pipelines from bricks.")}</p></div>
     <div class="node-grid">${cards || `<p class="hint">No node connected yet.</p>`}</div>
-    <section class="card"><div class="card-head"><h2>Flow matrix</h2><a href="#/access">edit in Access →</a></div><p class="hint">Which node group may send to which: the hub checks it on every transfer, the planner on every plan. A node's group comes from its token.</p>${matrix}</section>`;
+    <section class="card"><div class="card-head"><h2>Flow matrix</h2><a href="#/access">edit in Access →</a></div><p class="hint">Which group may send to which. ${info("Checked by the hub on every transfer and by the planner on every plan. A node's group comes from its token.")}</p>${matrix}</section>`;
 }
 
 async function onClick(e) {

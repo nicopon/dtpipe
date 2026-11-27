@@ -109,11 +109,13 @@ none. One node per process, which is one replica of its node's identity; a secon
   database, so the coordinator never holds a path or a secret to open. Variables reach a child through `FragmentLaunch.ChildEnvironment`
   and `DtPipeCommand` (the node's own reads), never through this process's environment: the host
   is someone else's service. `[unchecked]`
-- **The token provider returns a fresh token.** The control hub and TransportR retry a connection
-  refused with 401 through their token provider, so `NodeAgent` binds both to
-  `FreshTokenAsync` (`OidcTokenClient.GetAsync(fresh: true)`): a cached token may come from a
-  coordinator that is gone and would be presented until it expires. It asks once before connecting because TransportR
-  swallows a provider that throws. The provider is `Oidc:Authority` or, left out, the first the coordinator's protected resource metadata names (never an HTTP provider for an HTTPS coordinator): its key issuer when it trusts no other; the client is `Oidc:ClientId` or the node's `Name`; the token endpoint comes from the provider's discovery document.
+- **TransportR's token provider returns a fresh token; the control hub's reuses one until a boundary invalidates it.**
+  TransportR asks its provider at a connection, at the retry of a 401 and at a renewal, none of which the control hub sees, so
+  `NodeAgent` binds it to `DataPlaneTokenAsync` (`OidcTokenClient.GetAsync(fresh: true)`): a cached token would be the one the
+  coordinator refused, presented again until it expired. The control hub binds `TokenAsync` (`GetAsync(fresh: false)`), so its
+  negotiation and polling requests do not each exchange a token, and `NodeAgent` calls `OidcTokenClient.Invalidate()` on open,
+  reconnect, close and every 401 of the hub (`InvalidateOnUnauthorizedHandler`). It asks once before `PipelineNode.ConnectAsync`
+  because TransportR swallows a provider that throws. The provider is `Oidc:Authority` or, left out, the first the coordinator's protected resource metadata names (never an HTTP provider for an HTTPS coordinator): its key issuer when it trusts no other; the client is `Oidc:ClientId` or the node's `Name`; the token endpoint comes from the provider's discovery document.
   A provider that answers and refuses the client is a `TokenRefusedException`: the connect loop logs it as a refusal that names the
   provider and the client to add or enable, and only a coordinator that does not answer reads as not reachable.
   `[CI: Hosting.Tests KeyTokenTests]` `[unchecked: the refusal's text]`
@@ -192,8 +194,10 @@ none. One node per process, which is one replica of its node's identity; a secon
   `NodeAgent` connects the channel and announces without `DataPlaneClientId`; when that announcement is
   accepted it connects the client and announces again with the client's id, and a replica announced without
   one is eligible to nothing. The coordinator accepts only an identity it knows and has enabled (any other
-  has its connection closed), so a host refused at the announcement asks the IdP for no new token and
-  connects no client, however often it is refused. `WatchDataPlaneAsync` acts only while an announcement
+  has its connection closed), so a host refused at the announcement connects no data plane client, takes
+  no token for one and resolves no rights for one, however often it is refused. Its control channel is
+  closed and connected again, and each connection presents a fresh token (the rule of the token provider
+  above), so a refused host still asks the IdP for tokens. `WatchDataPlaneAsync` acts only while an announcement
   stands: it connects the client as soon as it can and announces again, and registers again a client the hub
   has stopped knowing (a coordinator that lost it), which TransportR would otherwise do at its next presence
   heartbeat. One connection of the client at a time.

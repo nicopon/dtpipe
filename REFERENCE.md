@@ -1242,14 +1242,59 @@ dtpipe studio ./jobs --llm-provider ollama --llm-model qwen2.5-coder:7b  # with 
 | Option | Description |
 |---|---|
 | `--port` | Port on 127.0.0.1. Default: any free port |
-| `--coordinator` | A distributed pipeline's coordinator, by its address: its bricks and its library. Default: none |
+| `--coordinator` | A distributed pipeline's coordinator, by its address: its bricks and its library. Default: the coordinator remembered on this machine, else none |
 | `--key` | Sign in to the coordinator with a key it made for you, as a reference (`${{NAME}}`, `keyring://alias`, `@file`), never the key itself. Default: through the browser |
-| `--llm-provider` | Opens the agent's panel on `ollama` or `openai`. Default: no agent |
+| `--llm-provider` | Connects the agent to `ollama` or `openai` for this session. Default: the model remembered on this machine, else no agent |
 | `--llm-url` | The provider's address. Default: `http://localhost:11434` for ollama, `https://api.openai.com` for openai |
 | `--llm-model` | The model the agent starts with; the page may pick another the provider lists. Default: none |
 | `--llm-key` | The provider's API key, as a reference (`${{NAME}}`, `keyring://alias`, `@file`), never the key itself. Default: none, which a server that does not authenticate needs |
 | `--llm-timeout` | Seconds with no token before a model call fails. Default: 300 |
 | `--agent-trace` | Records the agent's session as JSON lines; a directory gets a timestamped file. Default: `$DTPIPE_AGENT_TRACE`, else none |
+
+The agent's connection is read from the command line first, then from what the studio remembers,
+then none: a studio started with no flag and nothing remembered has no agent, and the panel offers
+to connect one. A flag never writes what is remembered. The page connects a model (Ollama or an
+OpenAI-compatible server: address, key, model, `Test`, and under Advanced the delay, for Ollama the
+context size, and `Remember on this machine`), and disconnects it for the session (what is
+remembered stays, and the next start connects it again). The settings are `studio.json` under the
+user state folder (`DTPIPE_STATE_HOME` first; else macOS `~/Library/Application Support/dtpipe`,
+Windows `%LOCALAPPDATA%\dtpipe`, Linux `$XDG_STATE_HOME/dtpipe` or `~/.local/state/dtpipe`), written
+with the user's rights alone and holding no key. A key goes to the system keyring under the address
+it was given at; another address asks for it again. `dtpipe secret list` does not show it.
+
+The file also keeps three lists of what the page used with success and was asked to remember
+(`Remember on this machine`, or among the recent folders): the models, the coordinators and the
+folders, with no limit, the most recent first, each identity once. A model is its provider and
+address, with the model, delay and context size it was last used with; a coordinator is its origin
+and how the person signs in, added once it answered; a folder is its full path. Never a key. With
+the box unticked nothing is written, neither an entry nor a key. A dialog lists its entries, the
+value in place left out, in a list that scrolls: a click fills the form and connects nothing, and
+the cross deletes an entry after a confirmation, and the key kept for its address with it (deleted
+by its alias, never read). That is how a remembered value is forgotten: disconnect it, and it joins
+the list. A key typed in the form wins over the one kept for the address; to connect without the
+kept key, delete the entry and type again. Deleting the remembered model or coordinator means the
+next start no longer connects it.
+
+The coordinator is read the same way: `--coordinator` first, then what the studio remembers, then
+none, and a flag never writes what is remembered. The header always shows its state (connected,
+signing in, offline, signed out, or a remembered key to give again), and that zone is the button
+that opens a dialog (address, sign in through the browser or with a key, `Test`,
+`Remember on this machine`) which also changes the coordinator or disconnects it for the session
+(what is remembered stays). A remembered coordinator connects again at start;
+one that does not answer never stops the studio. A key goes to the system keyring under the
+address of its coordinator, so another address asks for it again.
+
+The folder is the one given on the command line, else the current directory. Its name in the header,
+whose full path shows on hover, opens a dialog to choose another: a full path typed (`~/` stands for
+your home) or a recent folder, `Test`, which counts its jobs, and
+`Remember among the recent folders`, ticked by default. The page then reads everything again from
+the new folder: its jobs, steps, variables and publication links. The agent starts a new
+conversation, and a job's relative paths resolve in the new folder. The change is refused, with the
+reason, while the open job holds unsaved changes (the dialog offers to save or discard them), while
+a run or a preview goes on, or while the agent's turn runs or waits for your answer. Only a folder
+opened from the page is remembered, in `studio.json`: starting on a folder writes nothing, and no
+folder is opened again at start. The recent folders leave out the folder in place, and a
+recent folder is deleted from the list with its cross, whether or not it is still on the disk.
 
 | Action | What it does |
 |:---|:---|
@@ -1272,10 +1317,10 @@ The studio keeps its own files under `.dtpipe/studio/` in the folder: the steps'
 
 ### The agent
 
-With `--llm-provider`, the panel on the right talks to a model that uses dtpipe's tools: it inspects
-sources, validates and previews jobs (`dry-run`), reads the jobs of the folder, and the job it gives
-lands on the open job's steps, unsaved, or opens as a new job when none is open. Guide:
-[The agent](./docs/guides/agent.md).
+Once a model is connected (`--llm-provider`, or from the page), the panel on the right talks to a
+model that uses dtpipe's tools: it inspects sources, validates and previews jobs (`dry-run`), reads
+the jobs of the folder, and the job it gives lands on the open job's steps, unsaved, or opens as a
+new job when none is open. Guide: [The agent](./docs/guides/agent.md).
 
 - **A save waits for you.** The agent's `save-job` shows a card (the text the studio composed) and
   writes nothing until you answer; a file changed since the card refuses the answer. A job that
@@ -1302,10 +1347,11 @@ lands on the open job's steps, unsaved, or opens as a new job when none is open.
 
 ### With a coordinator
 
-`--coordinator` names the one coordinator the studio talks to. **Sign in** goes through the
-coordinator's identity provider; with `--key`, the studio exchanges the key instead. Tokens stay in
-the studio's memory. The coordinator's administrator must list you, and
-`Coordinator:Studio:ClientId` names the studio's client.
+The studio talks to one coordinator, named with `--coordinator` or connected from the page. **Sign
+in** goes through the coordinator's identity provider; with a key (`--key`, or the dialog's key),
+the studio exchanges the key instead. Tokens stay in the studio's memory. Changing the coordinator
+is refused while a publication, a run or a preview is in progress. The coordinator's administrator
+must list you, and `Coordinator:Studio:ClientId` names the studio's client.
 
 | Action | What it does |
 |:---|:---|
