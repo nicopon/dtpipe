@@ -66,8 +66,10 @@ public sealed class PassiveCoordinatorTests : IDisposable
         using var token = await ExchangeAsync(http);
         Assert.Equal(HttpStatusCode.ServiceUnavailable, token.StatusCode);
         Assert.False(starting.IsCompleted);
-        // The standby's bootstrap ran nowhere: it read and wrote nothing before holding the database.
-        Assert.DoesNotContain("runner", (string)_bed.Read("SELECT doc FROM rights")!);
+        // The standby's bootstrap ran nowhere: it read and wrote nothing before holding the database. The identity it would add is
+        // looked for by its id: every identity carries a "runner" field, so the word alone is no sign of it.
+        using (var rights = JsonDocument.Parse((string)_bed.Read("SELECT doc FROM rights")!))
+            Assert.DoesNotContain(rights.RootElement.GetProperty("identities").EnumerateArray(), i => i.GetProperty("clientId").GetString() == "runner");
         // The responder listens before the wait for the database logs its warning: the log is read once it holds it.
         var logging = Stopwatch.StartNew();
         while (!log.Entries.Any(e => e.Contains("passive")) && logging.Elapsed < TimeSpan.FromSeconds(20)) await Task.Delay(50, Ct);
